@@ -1,0 +1,24 @@
+{
+  "name": "@idealer/admin",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "next build",
+    "dev": "next dev --port 3001",
+    "lint": "eslint src next.config.ts --max-warnings=0",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node -e \"console.log('@idealer/admin ok')\""
+  },
+  "dependencies": {
+    "@idealer/constants": "workspace:*",
+    "next": "16.2.7",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "@idealer/config": "workspace:*",
+    "@types/react": "19.2.16",
+    "@types/react-dom": "19.2.3"
+  }
+}

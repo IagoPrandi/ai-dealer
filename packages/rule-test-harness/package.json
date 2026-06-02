@@ -1,0 +1,22 @@
+{
+  "name": "@idealer/rule-test-harness",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint src --max-warnings=0",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node -e \"console.log('@idealer/rule-test-harness ok')\""
+  },
+  "dependencies": {
+    "@idealer/rule-runtime": "workspace:*",
+    "@idealer/rule-schema": "workspace:*"
+  },
+  "devDependencies": {
+    "@idealer/config": "workspace:*"
+  }
+}

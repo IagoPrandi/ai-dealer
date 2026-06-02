@@ -120,10 +120,10 @@ One turn equals one fixed time window.
 Turn duration is not constant. Idealer uses a repeating duration cycle:
 
 ```text
-1h → 1h → 2h → 4h → 8h → 16h → restart at 1h
+1h → 1h → 2h → 2h → 8h → 8h → restart at 1h
 ```
 
-After the 16-hour turn ends, the next turn restarts the cycle at 1 hour.
+After the second 8-hour turn ends, the next turn restarts the cycle at 1 hour.
 
 Each turn is independent:
 
@@ -168,7 +168,7 @@ If no alternative rule is active, only the original rule is evaluated and the al
 
 If no winner exists in either category, that category's share accumulates into the next turn's pool.
 
-When an alternative rule is active and produces winners, the creator of the active rule receives a creator reward equal to 2% of each individual alternative-rule winner payout. This creator reward is funded from the platform monetization share and must not reduce the winner payout.
+When an alternative rule is active and produces winners, the creator of the active rule receives a creator reward equal to 15% of each individual alternative-rule winner payout. This creator reward is funded from the creator reward reserve sourced from platform monetization and must not reduce the winner payout.
 
 ### 2.5 Prize Pool
 
@@ -681,18 +681,18 @@ This avoids a purely off-chain governance gate and prevents the backend from bec
 Idealer uses a repeating cycle of turn durations:
 
 ```text
-1h → 1h → 2h → 4h → 8h → 16h
+1h → 1h → 2h → 2h → 8h → 8h
 ```
 
-After the 16-hour turn ends, the next turn restarts at 1 hour.
+After the second 8-hour turn ends, the next turn restarts at 1 hour.
 
 ```text
 Turn 1: 1 hour
 Turn 2: 1 hour
 Turn 3: 2 hours
-Turn 4: 4 hours
+Turn 4: 2 hours
 Turn 5: 8 hours
-Turn 6: 16 hours
+Turn 6: 8 hours
 Turn 7: 1 hour
 Turn 8: 1 hour
 ...
@@ -703,9 +703,9 @@ Turn 8: 1 hour
 This cycle balances fast engagement with longer accumulation windows:
 
 - the two 1-hour turns create fast feedback loops and frequent return moments;
-- the 2-hour and 4-hour turns give rules more time to gather votes;
-- the 8-hour and 16-hour turns create larger prize pools, more anticipation, and stronger shareable events;
-- restarting after 16 hours prevents the game from becoming too slow or feeling inactive.
+- the 2-hour turns give rules more time to gather votes;
+- the 8-hour turns create larger prize pools, more anticipation, and stronger shareable events;
+- restarting after the second 8-hour turn prevents the game from becoming too slow or feeling inactive.
 
 #### Retention Impact
 
@@ -720,7 +720,7 @@ Expected positive effects:
 Potential negative effects:
 
 - some users may prefer a predictable fixed schedule;
-- 8-hour and 16-hour turns may feel slow if the activity feed is weak;
+- 8-hour turns may feel slow if the activity feed is weak;
 - players may miss the draw if reminders and countdowns are not clear.
 
 Mitigations:
@@ -1048,7 +1048,7 @@ Conditional operation rules:
 Initial recommendation:
 
 ```text
-MAX_REMOVABLE_NUMBERS = 2
+MAX_REMOVABLE_NUMBERS = 4
 ```
 
 #### 6.4.3 Prohibited References and Behaviors
@@ -2284,16 +2284,16 @@ If no alternative rule is active, if the alternative rule is invalidated, or if 
 
 ### 8.4 Active Rule Creator Reward
 
-When an alternative rule is active in a turn and that rule produces winners, the creator of the active rule receives a reward equal to **2% of each individual alternative-rule winner payout**.
+When an alternative rule is active in a turn and that rule produces winners, the creator of the active rule receives a reward equal to **15% of each individual alternative-rule winner payout**.
 
-This reward is calculated from the individual payout but funded from the platform monetization allocation. It must not reduce the winner's individual payout.
+This reward is calculated from the individual payout but funded from the creator reward reserve sourced from platform monetization. It must not reduce the winner's individual payout.
 
 Default assumption:
 
 ```text
 Winner individual payout remains unchanged.
-Creator reward is calculated as 2% of each individual alternative-rule winner payout.
-Creator reward is paid from platform monetization / creator reward reserve.
+Creator reward is calculated as 15% of each individual alternative-rule winner payout.
+Creator reward is paid from the creator reward reserve sourced from platform monetization.
 ```
 
 Example:
@@ -2302,9 +2302,9 @@ Example:
 Alternative-rule prize pool: 100
 Alternative-rule winners: 10
 Individual payout: 100 / 10 = 10
-Creator reward per individual payout: 2% × 10 = 0.2
+Creator reward per individual payout: 15% × 10 = 1.5
 Final payout per winner: 10
-Total creator reward funded by platform monetization: 0.2 × 10 = 2
+Total creator reward funded by creator reward reserve: 1.5 × 10 = 15
 ```
 
 ### 8.5 Creator Reward Reserve and Cap
@@ -2325,10 +2325,10 @@ Default MVP/testnet creator reward configuration:
 
 ```typescript
 const CREATOR_REWARD_CONFIG = {
-  rateBps: 200, // 2%
+  rateBps: 1_500, // 15%
   capPerTurnLamports: 250_000_000, // 0.25 SOL maximum creator reward per turn
   reserveSource: 'platform_monetization',
-  reserveShareOfPlatformMonetizationBps: 2_000, // 20% of platform monetization reserved for creator rewards
+  reserveShareOfPlatformMonetizationBps: 2_000, // 20% of platform monetization reserved for the creator reward reserve
   payOnlyWhenAlternativeRuleProducesWinners: true,
   unpaidShortfallCreatesDebt: false,
 };
@@ -2461,7 +2461,7 @@ A claim expires when either `claimWindowTurns` or `claimWindowMaxDays` is reache
 
 #### 8.7.8 Creator Reward Accounting
 
-Creator reward is calculated after individual alternative-rule winner payout is known, but paid from platform monetization/reserve.
+Creator reward is calculated after individual alternative-rule winner payout is known, but paid from the creator reward reserve sourced from platform monetization.
 
 Creator reward must be idempotent and must not be recalculated differently after finalization.
 
@@ -2790,7 +2790,7 @@ Responsibilities:
 
 Responsibilities:
 
-- maintain the repeating turn duration cycle: `1h → 1h → 2h → 4h → 8h → 16h`;
+- maintain the repeating turn duration cycle: `1h → 1h → 2h → 2h → 8h → 8h`;
 - assign the correct duration to each new turn;
 - store the current cycle index;
 - calculate proportional cutoff times for rule election and guess submission;
@@ -2801,7 +2801,7 @@ Responsibilities:
 - process election VRF fulfillment before guess close;
 - close guess submission at 96.7% of turn duration;
 - trigger Switchboard VRF draw at 100% of turn duration;
-- reset the cycle to 1 hour after the 16-hour turn completes.
+- reset the cycle to 1 hour after the second 8-hour turn completes.
 
 ### 10.4 Token Counter Service
 
@@ -3697,7 +3697,7 @@ Core dashboards:
 | Dashboard | Key questions answered |
 |---|---|
 | Retention Overview | Do users return after first play, first loss, first vote, or first near-miss? |
-| Turn Cycle Performance | Which turn durations retain users best: 1h, 2h, 4h, 8h, or 16h? |
+| Turn Cycle Performance | Which turn durations retain users best: 1h, 2h, or 8h? |
 | Rule Engagement | Are users proposing, voting, sharing, and following rules? |
 | Creator Retention | Do rule creators return after their rule is sampled, elected, or creates winners? |
 | Wallet Funnel | Where do mobile users drop: connect, sign, submit, vote, claim, or return from wallet? |
@@ -3927,7 +3927,7 @@ Requirements:
 - rules proposed per active user;
 - consecutive round participation;
 - return rate by turn duration;
-- return prompt conversion for 8-hour and 16-hour turns.
+- return prompt conversion for 8-hour turns.
 
 ### 14.4 Social Engagement
 
@@ -3951,9 +3951,9 @@ Requirements:
 - average rule token count;
 - percentage of rule proposals rejected for token limit;
 - average creator reward per active rule;
-- creator reward funding ratio from platform monetization;
+- creator reward reserve funding ratio from platform monetization;
 - turn activity by cycle position;
-- completion rate for 1h, 2h, 4h, 8h, and 16h turns.
+- completion rate for 1h, 2h, and 8h turns.
 
 ### 14.6 AI Health
 
@@ -4019,37 +4019,44 @@ Establish the product baseline, architecture baseline, monorepo structure, Docke
 
 **Checklist:**
 
-- [ ] Confirm Idealer as a **mobile-first DApp**.
-- [ ] Confirm desktop web as secondary surface.
-- [ ] Confirm rule creation is free-form, not template-based.
-- [ ] Confirm rule length is limited by AI-context token count.
-- [ ] Confirm `RULE_MAX_TOKENS` initial value.
-- [ ] Confirm turn duration cycle: `1h → 1h → 2h → 4h → 8h → 16h → repeat`.
-- [ ] Confirm two winning conditions: original rule and active alternative rule.
-- [ ] Confirm current-turn Game Token requirement for proposing, voting, removing, and reporting rules.
-- [ ] Confirm rule election policy: exactly 10 finalists, composed of 3 top-voted eligible + 7 VRF-random eligible, then one VRF-elected active rule.
-- [ ] Confirm Switchboard VRF is used for both draw and rule election.
-- [ ] Confirm no deterministic fallback finalist activation.
-- [ ] Confirm paid rule removal is included in MVP with fixed prize-pool fee destination.
-- [ ] Confirm active rule creator reward: 2% of each individual alternative-rule winner payout.
-- [ ] Confirm creator reward is funded from platform monetization, not deducted from the winner-visible payout.
-- [ ] Confirm admin console is separate from the public DApp.
-- [ ] Confirm admin console is for insights, not direct game manipulation.
-- [ ] Confirm monorepo and Docker Compose are required implementation constraints.
-- [ ] Resolve contradictions between economy, rule system, AI verification, smart contracts, and UX.
+- [x] Confirm Idealer as a **mobile-first DApp**.
+- [x] Confirm desktop web as secondary surface.
+- [x] Confirm rule creation is free-form, not template-based.
+- [x] Confirm rule length is limited by AI-context token count.
+- [x] Confirm `RULE_MAX_TOKENS` initial value.
+- [x] Confirm turn duration cycle: `1h → 1h → 2h → 2h → 8h → 8h → repeat`.
+- [x] Confirm two winning conditions: original rule and active alternative rule.
+- [x] Confirm current-turn Game Token requirement for proposing, voting, removing, and reporting rules.
+- [x] Confirm rule election policy: exactly 10 finalists, composed of 3 top-voted eligible + 7 VRF-random eligible, then one VRF-elected active rule.
+- [x] Confirm Switchboard VRF is used for both draw and rule election.
+- [x] Confirm no deterministic fallback finalist activation.
+- [x] Confirm paid rule removal is included in MVP with fixed prize-pool fee destination.
+- [x] Confirm active rule creator reward: 15% of each individual alternative-rule winner payout.
+- [x] Confirm creator reward is funded from the creator reward reserve sourced from platform monetization, not deducted from the winner-visible payout.
+- [x] Confirm admin console is separate from the public DApp.
+- [x] Confirm admin console is for insights, not direct game manipulation.
+- [x] Confirm monorepo and Docker Compose are required implementation constraints.
+- [x] Resolve contradictions between economy, rule system, AI verification, smart contracts, and UX.
 
 **Approval criteria:**
 
-- [ ] PRD has no conflicting product rules.
-- [ ] All core mechanics are described in enough detail for implementation.
-- [ ] The reward model, turn cycle, and free-form rule constraints are explicitly documented.
-- [ ] The team can explain the core loop in one paragraph without ambiguity.
+- [x] PRD has no conflicting product rules.
+- [x] All core mechanics are described in enough detail for implementation.
+- [x] The reward model, turn cycle, and free-form rule constraints are explicitly documented.
+- [x] The team can explain the core loop in one paragraph without ambiguity.
 
 **Required artifacts:**
 
-- [ ] Updated PRD.
-- [ ] Product rule summary.
-- [ ] MVP decision registry.
+- [x] Updated PRD.
+- [x] Product rule summary.
+- [x] MVP decision registry.
+
+**M0.1 artifact index:**
+
+- `PRD.md`
+- `docs/product-rule-summary.md`
+- `docs/mvp-decision-registry.md`
+- `PROGRESS_TRACKER.md`
 
 ---
 
@@ -4342,8 +4349,8 @@ Validate the user-facing mobile game loop without real blockchain payments or pr
 
 **Checklist:**
 
-- [ ] Implement turn duration sequence: `1h → 1h → 2h → 4h → 8h → 16h`.
-- [ ] Implement repeat after 16h.
+- [ ] Implement turn duration sequence: `1h → 1h → 2h → 2h → 8h → 8h`.
+- [ ] Implement repeat after the second 8h turn.
 - [ ] Add accelerated simulation mode for testing.
 - [ ] Show current cycle step in UI.
 - [ ] Show next turn duration.
@@ -4880,20 +4887,20 @@ Implement prize pool accounting, treasury/platform monetization, payouts, rollov
 - [ ] Identify creator of active rule in the turn.
 - [ ] Check whether active rule produced alternative-rule winners.
 - [ ] Calculate individual alternative-rule winner payout.
-- [ ] Calculate creator reward as `2% × individual alternative-rule winner payout` per winner.
-- [ ] Fund creator reward from platform monetization.
+- [ ] Calculate creator reward as `15% × individual alternative-rule winner payout` per winner.
+- [ ] Fund creator reward from the creator reward reserve sourced from platform monetization.
 - [ ] Do not reduce winner-visible payout for creator reward.
 - [ ] Store creator reward records.
 - [ ] Handle no alternative-rule winner case.
 - [ ] Handle multiple alternative-rule winner case.
-- [ ] Add example test: total prize 100, 10 winners, individual payout 10, creator reward basis 2% of 10 per winner.
-- [ ] Add accounting tests to ensure platform monetization covers creator reward.
+- [ ] Add example test: total prize 100, 10 winners, individual payout 10, creator reward basis 15% of 10 per winner.
+- [ ] Add accounting tests to ensure the creator reward reserve covers creator reward.
 
 **Approval criteria:**
 
 - [ ] Creator reward is computed from the individual winner payout basis.
 - [ ] Winner payout is not reduced by creator reward display/accounting.
-- [ ] Reward source is platform monetization.
+- [ ] Reward source is the creator reward reserve sourced from platform monetization.
 - [ ] Creator reward records are auditable.
 
 ---
@@ -5105,7 +5112,7 @@ Build a private admin console that is not directly associated with the public ap
 - [ ] Show creator rules elected.
 - [ ] Show creator rules producing winners.
 - [ ] Show creator reward events.
-- [ ] Show creator reward amount funded by platform monetization.
+- [ ] Show creator reward amount funded by the creator reward reserve.
 - [ ] Show creator return after reward.
 - [ ] Show top creators by votes.
 - [ ] Show top creators by elected rules.
@@ -5114,7 +5121,7 @@ Build a private admin console that is not directly associated with the public ap
 **Approval criteria:**
 
 - [ ] Admin can determine whether rewards increase repeat creation.
-- [ ] Admin can assess whether platform monetization supports creator rewards.
+- [ ] Admin can assess whether the creator reward reserve supports creator rewards.
 - [ ] Admin can identify creators driving engagement.
 
 ---
@@ -5335,7 +5342,7 @@ Deploy a controlled mainnet beta with real SOL payments, production monitoring, 
 - [ ] Enable prize vault funding.
 - [ ] Enable treasury/platform monetization accounting.
 - [ ] Enable winner claim flow.
-- [ ] Enable creator reward funding from platform monetization.
+- [ ] Enable creator reward funding from the creator reward reserve sourced from platform monetization.
 - [ ] Test winner claim on mainnet beta with limited values.
 - [ ] Test creator reward claim/payment with limited values.
 - [ ] Reconcile balances after test turns.
@@ -5808,16 +5815,16 @@ This section replaces the former open questions list. The following decisions ar
 4. Full sanitized original rule text is stored on-chain in the `RuleProposal` account. Off-chain copies may exist only for indexing, search, analytics, and UI performance.
 5. Rule votes are on-chain through `RuleVote` accounts or an equivalent on-chain account model. MVP does not use off-chain vote commitments as the primary voting record.
 6. The finalist set is exactly 10 rules whenever at least 10 eligible rules exist: 3 top-voted eligible rules plus 7 VRF-random eligible rules. If fewer than 10 eligible rules exist, all available eligible rules form the finalist set.
-7. Turn duration starts at 1 hour and follows the fixed repeating cycle `1h → 1h → 2h → 4h → 8h → 16h → repeat`.
+7. Turn duration starts at 1 hour and follows the fixed repeating cycle `1h → 1h → 2h → 2h → 8h → 8h → repeat`.
 8. The alternative rule pool remains 50% of the post-treasury playable prize pool. If no alternative rule is active or no alternative-rule winners exist, the alternative bucket follows the rollover rules.
-9. Creator rewards remain fixed at 2% of each individual alternative-rule winner payout, funded from platform monetization and subject to reserve and cap.
-10. MVP reserves 20% of platform monetization for active rule creator rewards. This is a configurable treasury policy, but winner-visible payouts must never be reduced to fund creator rewards.
+9. Creator rewards remain fixed at 15% of each individual alternative-rule winner payout, funded from the creator reward reserve sourced from platform monetization and subject to reserve and cap.
+10. MVP reserves 20% of platform monetization for the creator reward reserve. This is a configurable treasury policy, but winner-visible payouts must never be reduced to fund creator rewards.
 11. Normal users see simple rule explanations, status, difficulty labels, and audit links. Detailed AI/compiler reasoning appears only in expandable audit panels and admin/audit views.
 12. Proposed rules cannot be edited after on-chain submission. A user must submit a new paid proposal if they want a different rule text. Preflight and precompilation artifacts are therefore immutable per proposal.
 13. MVP supports Portuguese and English rule text. The compiler stores a normalized official interpretation suitable for deterministic DSL/AST compilation, and user-facing explanations may be localized.
 14. Rule difficulty shown in the frontend is generated from deterministic analysis where possible and bounded Monte Carlo simulation where needed, not from ungrounded LLM judgment alone.
 15. MVP DSL supports prebuilt rule nodes plus a limited bounded expression tree for allowed arithmetic, comparison, counting, intersection, difference, ordering, position access, and bounded removal operations.
-16. `MAX_REMOVABLE_NUMBERS` is fixed at `2` for MVP.
+16. `MAX_REMOVABLE_NUMBERS` is fixed at `4` for MVP.
 17. Production MCP tools are limited to the bounded MCP server groups listed in section 7.11. Shell execution, arbitrary filesystem access, arbitrary network access, and direct smart contract mutation remain forbidden.
 18. Long turns use in-app countdowns and return prompts in MVP. Push notifications remain push-notification-ready architecture only and are not required for MVP launch.
 19. Production deploys API and worker as separate services from the start.
@@ -5825,7 +5832,7 @@ This section replaces the former open questions list. The following decisions ar
 21. M9 Mainnet Readiness Gates are mandatory before M6 can process any real SOL payment, payout, claim, treasury transfer, or creator reward on mainnet.
 22. Launch-blocking metrics are the M9 approval gates plus the M6/M7 approval criteria for mobile reliability, turn automation, job completion, claims, abuse visibility, and payout/accounting reconciliation.
 23. Default MVP/testnet fees are: guess submission `0.01 SOL`, rule proposal `0.02 SOL`, paid rule removal `0.05 SOL`, vote `0 SOL`, and report `0 SOL`, with `treasuryFeeBps = 500`.
-24. The default creator reward cap is `0.25 SOL` per turn, with 20% of platform monetization reserved for active rule creator rewards.
+24. The default creator reward cap is `0.25 SOL` per turn, with 20% of platform monetization reserved for the creator reward reserve.
 25. The default minimum claim threshold is `0.005 SOL`; payouts below this threshold roll over to the same category bucket.
 26. The default claim window is `12` turns or `7` days, whichever happens first; expired unclaimed payouts roll over to the same category bucket.
 27. MVP rate limits are defined in `MVP_RATE_LIMIT_CONFIG` and must be enforced server-side, while on-chain uniqueness constraints remain the source of truth for guesses, votes, and paid removals.
@@ -5865,7 +5872,7 @@ This section replaces the former open questions list. The following decisions ar
 10. Rule may enter the finalist set as a top-voted or VRF-random finalist.
 11. Rule may be VRF-elected and frozen.
 12. Creator receives status if rule becomes active.
-13. If the active rule produced winners, creator receives 2% of each individual alternative-rule winner payout funded from platform monetization.
+13. If the active rule produced winners, creator receives 15% of each individual alternative-rule winner payout funded from the creator reward reserve sourced from platform monetization.
 14. Creator profile updates after round.
 
 ---
@@ -5885,7 +5892,7 @@ If the product answers that well, Idealer becomes more than a lottery. It become
 
 ### Creator Reward: Expected Impact
 
-Adding a 2% creator reward for the active rule creator is expected to have a positive effect on creator retention.
+Adding a 15% creator reward for the active rule creator is expected to have a positive effect on creator retention.
 
 Positive effects:
 
@@ -5903,15 +5910,15 @@ Potential negative effects:
 
 Mitigations:
 
-- fund the creator reward from platform monetization, not from winner payouts;
+- fund the creator reward from the creator reward reserve sourced from platform monetization, not from winner payouts;
 - avoid presenting the reward as a winner-side deduction;
 - show creator rewards primarily in creator-facing and aggregate distribution views;
 - track whether creator rewards increase repeat rule creation and sharing;
-- monitor whether the platform monetization allocation can sustainably cover creator rewards.
+- monitor whether the creator reward reserve can sustainably cover creator rewards.
 
 ### Variable Turn Duration Cycle: Expected Impact
 
-The repeating duration cycle `1h → 1h → 2h → 4h → 8h → 16h` is expected to have a mixed but mostly positive retention effect if the UI supports it well.
+The repeating duration cycle `1h → 1h → 2h → 2h → 8h → 8h` is expected to have a mixed but mostly positive retention effect if the UI supports it well.
 
 Positive effects:
 
@@ -5933,7 +5940,7 @@ Mitigations:
 - show current turn duration prominently;
 - show the next duration in the cycle;
 - use countdowns, reminders, and activity feed updates;
-- add share prompts during 8-hour and 16-hour turns;
+- add share prompts during 8-hour turns;
 - measure retention separately by turn duration.
 
 ### Overall Assessment
