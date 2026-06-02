@@ -52,6 +52,28 @@ pnpm test
 pnpm build
 ```
 
+## Docker Local Stack
+
+Start required services:
+
+```bash
+docker compose up --build
+```
+
+Stop services:
+
+```bash
+docker compose down
+```
+
+Reset local volumes:
+
+```bash
+docker compose down --volumes --remove-orphans
+```
+
+See [docs/local-development-runbook.md](docs/local-development-runbook.md) for profiles, health checks, and local URLs.
+
 Run the public DApp:
 
 ```bash

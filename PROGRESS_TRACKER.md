@@ -16,8 +16,8 @@ Opened before starting `M0.1`:
 | Milestone | Name | Status | User Confirmation | Notes |
 |---|---|---|---|---|
 | M0.1 | PRD Baseline | Completed | Confirmed 2026-06-02 | Required artifacts implemented, consistency-checked, and marked complete after user confirmation. |
-| M0.2 | Monorepo Skeleton | Implemented, awaiting confirmation | Pending | Skeleton, workspace configs, README, and verification commands completed. Approval checkboxes remain unticked until user confirmation. |
-| M0.3 | Docker Baseline | Not started | Pending | Depends on repository skeleton. |
+| M0.2 | Monorepo Skeleton | Completed | Confirmed 2026-06-02 | Skeleton, workspace configs, README, and verification commands completed. |
+| M0.3 | Docker Baseline | Implemented, awaiting confirmation | Pending | Required Docker stack implemented and verified. Approval checkboxes remain unticked until user confirmation. |
 | M0.4 | Technical Contracts | Not started | Pending | Depends on baseline decisions and initial structure. |
 | M0.5 | Mobile UX Flow Baseline | Not started | Pending | Depends on product baseline and frontend skeleton. |
 
@@ -100,7 +100,7 @@ Opened before starting `M0.1`:
 - Started local dev servers for the public DApp and admin console.
 - Verified `http://localhost:3000` and `http://localhost:3001` return HTTP 200.
 - Kept the project turn-duration source of truth as `1h -> 1h -> 2h -> 2h -> 8h -> 8h -> repeat`.
-- Did not tick M0.2 checklist or approval items because user confirmation is required.
+- Marked M0.2 checklist, approval criteria, and required artifacts complete after user confirmation.
 
 ## M0.2 Artifact Review
 
@@ -123,4 +123,51 @@ Opened before starting `M0.1`:
 
 ## M0.2 Confirmation Gate
 
-`M0.2` can be marked complete only after user confirmation that the implemented skeleton satisfies the milestone approval criteria.
+`M0.2` was marked complete after user confirmation on 2026-06-02.
+
+## M0.3 Work Log
+
+### 2026-06-02
+
+- Opened `PRD.md`, `AGENTS.md`, and `.claude/skills` before starting M0.3, as required.
+- Used `.claude/skills/best-practices/SKILL.md` with `references/agent-principles.md`, `references/architecture.md`, and `references/deploy-release.md`.
+- Added API and worker health endpoints that fail closed unless Postgres and Redis are reachable.
+- Added `docker-compose.yml` with explicit `name: idealer`, required services, optional profiles, network, volumes, and health checks.
+- Added `.env.example`.
+- Added `infra/docker/Dockerfile.node`.
+- Added `infra/docker/prometheus/prometheus.yml`.
+- Added `docs/local-development-runbook.md`.
+- Updated `README.md` with Docker startup, shutdown, and reset commands.
+- Ran `pnpm install`, `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build`.
+- Ran `docker compose config --quiet`.
+- Ran `docker compose up --build -d postgres redis api worker web`.
+- Verified required containers are healthy: `idealer-postgres`, `idealer-redis`, `idealer-api`, `idealer-worker`, and `idealer-web`.
+- Verified API health returns Postgres and Redis `ok`.
+- Verified worker health returns Postgres and Redis `ok`.
+- Verified web returns HTTP 200.
+- Verified the web container can reach the API through the internal Docker network.
+- Verified optional profiles with `docker compose --profile admin --profile observability --profile mail config --quiet`.
+- Did not tick M0.3 checklist or approval items because user confirmation is required.
+
+## M0.3 Artifact Review
+
+| Artifact | Status | Notes |
+|---|---|---|
+| `docker-compose.yml` | Implemented | Defines required and optional containers, network, volumes, and health checks. |
+| `.env.example` | Implemented | Defines `COMPOSE_PROJECT_NAME=idealer` and local-only example values. |
+| Local development runbook | Implemented | See `docs/local-development-runbook.md`. |
+
+## M0.3 Validation Results
+
+| Requirement | Result |
+|---|---|
+| `docker compose up` starts required services | Passed with `docker compose up --build -d postgres redis api worker web`. |
+| Container names follow `idealer-*` | Passed in `docker compose ps`. |
+| API can connect to Postgres and Redis | Passed via `http://localhost:3002/health`. |
+| Worker can connect to Redis and database | Passed via `http://localhost:3003/health`. |
+| Web can reach API locally | Passed from inside `idealer-web` to `http://api:3002/health`. |
+| Health checks report healthy services | Passed in `docker compose ps`. |
+
+## M0.3 Confirmation Gate
+
+`M0.3` can be marked complete only after user confirmation that the implemented Docker baseline satisfies the milestone approval criteria.

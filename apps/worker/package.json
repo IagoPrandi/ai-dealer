@@ -11,9 +11,12 @@
     "test": "node -e \"console.log('@idealer/worker ok')\""
   },
   "dependencies": {
-    "@idealer/game-engine": "workspace:*"
+    "@idealer/game-engine": "workspace:*",
+    "pg": "8.21.0",
+    "redis": "6.0.0"
   },
   "devDependencies": {
-    "@idealer/config": "workspace:*"
+    "@idealer/config": "workspace:*",
+    "@types/pg": "8.20.0"
   }
 }

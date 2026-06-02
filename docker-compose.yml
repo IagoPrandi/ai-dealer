@@ -1,0 +1,188 @@
+name: idealer
+
+services:
+  postgres:
+    image: postgres:18.1-alpine
+    container_name: idealer-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-idealer_dev}
+      POSTGRES_USER: ${POSTGRES_USER:-idealer}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-idealer_dev_password}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - idealer-internal
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - idealer-postgres-data:/var/lib/postgresql
+
+  redis:
+    image: redis:8.4.0-alpine
+    container_name: idealer-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - idealer-internal
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - idealer-redis-data:/data
+
+  api:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.node
+    container_name: idealer-api
+    command: ["pnpm", "--filter", "@idealer/api", "dev"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3002
+      DATABASE_URL: postgresql://${POSTGRES_USER:-idealer}:${POSTGRES_PASSWORD:-idealer_dev_password}@postgres:5432/${POSTGRES_DB:-idealer_dev}
+      REDIS_URL: redis://redis:6379
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3002/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - idealer-internal
+    ports:
+      - "${API_PORT:-3002}:3002"
+
+  worker:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.node
+    container_name: idealer-worker
+    command: ["pnpm", "--filter", "@idealer/worker", "dev"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3003
+      DATABASE_URL: postgresql://${POSTGRES_USER:-idealer}:${POSTGRES_PASSWORD:-idealer_dev_password}@postgres:5432/${POSTGRES_DB:-idealer_dev}
+      REDIS_URL: redis://redis:6379
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3003/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - idealer-internal
+    ports:
+      - "${WORKER_PORT:-3003}:3003"
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.node
+    container_name: idealer-web
+    command: ["pnpm", "--filter", "@idealer/web", "dev"]
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NEXT_PUBLIC_API_URL: http://api:3002
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - idealer-internal
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+
+  admin:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.node
+    container_name: idealer-admin
+    command: ["pnpm", "--filter", "@idealer/admin", "dev"]
+    profiles: ["admin"]
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NEXT_PUBLIC_API_URL: http://api:3002
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - idealer-internal
+    ports:
+      - "${ADMIN_PORT:-3001}:3001"
+
+  prometheus:
+    image: prom/prometheus:v3.8.1
+    container_name: idealer-prometheus
+    profiles: ["observability"]
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    networks:
+      - idealer-internal
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./infra/docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  grafana:
+    image: grafana/grafana:12.4.0
+    container_name: idealer-grafana
+    profiles: ["observability"]
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    networks:
+      - idealer-internal
+    ports:
+      - "${GRAFANA_PORT:-3004}:3000"
+    volumes:
+      - idealer-grafana-data:/var/lib/grafana
+
+  mailpit:
+    image: axllent/mailpit:v1.28.0
+    container_name: idealer-mailpit
+    profiles: ["mail"]
+    networks:
+      - idealer-internal
+    ports:
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+
+networks:
+  idealer-internal:
+    name: idealer-internal
+
+volumes:
+  idealer-postgres-data:
+    name: idealer-postgres-data
+  idealer-redis-data:
+    name: idealer-redis-data
+  idealer-grafana-data:
+    name: idealer-grafana-data

@@ -1,0 +1,13 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: "idealer-api"
+    metrics_path: "/health"
+    static_configs:
+      - targets: ["api:3002"]
+
+  - job_name: "idealer-worker"
+    metrics_path: "/health"
+    static_configs:
+      - targets: ["worker:3003"]

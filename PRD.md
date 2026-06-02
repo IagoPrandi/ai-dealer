@@ -4066,45 +4066,45 @@ Establish the product baseline, architecture baseline, monorepo structure, Docke
 
 **Checklist:**
 
-- [ ] Create monorepo root.
-- [ ] Create `apps/web` for the mobile-first public DApp.
-- [ ] Create `apps/api` for backend API.
-- [ ] Create `apps/worker` for background jobs and queues.
-- [ ] Create `apps/admin` for the restricted admin insights console.
-- [ ] Create `packages/config` for shared eslint, tsconfig, prettier, env schemas, and config loading.
-- [ ] Create `packages/types` for shared TypeScript types.
-- [ ] Create `packages/constants` for game constants, limits, and fee configs.
-- [ ] Create `packages/validation` for Zod schemas and shared validation rules.
-- [ ] Create `packages/sdk` for client SDK and API/on-chain interaction helpers.
-- [ ] Create `packages/rule-schema` for DSL/AST schema, allowed nodes, and validation functions.
-- [ ] Create `packages/rule-compiler` for natural-language-to-DSL/AST compiler orchestration.
-- [ ] Create `packages/rule-runtime` for deterministic sandboxed rule execution.
-- [ ] Create `packages/rule-test-harness` for standard/adversarial tests and difficulty checks.
-- [ ] Create `packages/game-engine` for turns, election, winners, payout, rollover, and rewards.
-- [ ] Create `packages/hooks` for typed lifecycle hook contracts and adapters.
-- [ ] Create `packages/mcp-tools` for bounded internal MCP server/tool definitions.
-- [ ] Create `packages/agent-core` for prompt contracts, skills, confidence scoring, and provider orchestration.
-- [ ] Create `contracts/solana` for Solana programs.
-- [ ] Create `infra/docker` for Docker support.
-- [ ] Create `infra/scripts` for local/dev scripts.
-- [ ] Create `docs` for architecture, runbooks, and API contracts.
-- [ ] Add root package manager configuration.
-- [ ] Add workspace configuration.
-- [ ] Add root lint, typecheck, test, and build commands.
-- [ ] Add initial README with local setup instructions.
+- [x] Create monorepo root.
+- [x] Create `apps/web` for the mobile-first public DApp.
+- [x] Create `apps/api` for backend API.
+- [x] Create `apps/worker` for background jobs and queues.
+- [x] Create `apps/admin` for the restricted admin insights console.
+- [x] Create `packages/config` for shared eslint, tsconfig, prettier, env schemas, and config loading.
+- [x] Create `packages/types` for shared TypeScript types.
+- [x] Create `packages/constants` for game constants, limits, and fee configs.
+- [x] Create `packages/validation` for Zod schemas and shared validation rules.
+- [x] Create `packages/sdk` for client SDK and API/on-chain interaction helpers.
+- [x] Create `packages/rule-schema` for DSL/AST schema, allowed nodes, and validation functions.
+- [x] Create `packages/rule-compiler` for natural-language-to-DSL/AST compiler orchestration.
+- [x] Create `packages/rule-runtime` for deterministic sandboxed rule execution.
+- [x] Create `packages/rule-test-harness` for standard/adversarial tests and difficulty checks.
+- [x] Create `packages/game-engine` for turns, election, winners, payout, rollover, and rewards.
+- [x] Create `packages/hooks` for typed lifecycle hook contracts and adapters.
+- [x] Create `packages/mcp-tools` for bounded internal MCP server/tool definitions.
+- [x] Create `packages/agent-core` for prompt contracts, skills, confidence scoring, and provider orchestration.
+- [x] Create `contracts/solana` for Solana programs.
+- [x] Create `infra/docker` for Docker support.
+- [x] Create `infra/scripts` for local/dev scripts.
+- [x] Create `docs` for architecture, runbooks, and API contracts.
+- [x] Add root package manager configuration.
+- [x] Add workspace configuration.
+- [x] Add root lint, typecheck, test, and build commands.
+- [x] Add initial README with local setup instructions.
 
 **Approval criteria:**
 
-- [ ] Repository can install dependencies from the root.
-- [ ] Workspace commands can target each app/package.
-- [ ] Empty or stub apps build without fatal errors.
-- [ ] Folder boundaries are clear and documented.
+- [x] Repository can install dependencies from the root.
+- [x] Workspace commands can target each app/package.
+- [x] Empty or stub apps build without fatal errors.
+- [x] Folder boundaries are clear and documented.
 
 **Required artifacts:**
 
-- [ ] Monorepo tree.
-- [ ] Root README.
-- [ ] Workspace/package manager config.
+- [x] Monorepo tree.
+- [x] Root README.
+- [x] Workspace/package manager config.
 
 ---
 
