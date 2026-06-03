@@ -1,0 +1,145 @@
+# Data Model Draft
+
+This is the M0.4 PostgreSQL model draft. On-chain accounts remain the source of truth for funds, uniqueness constraints, Game Token validity, votes, and critical authorization.
+
+## Conventions
+
+- Primary IDs are UUIDs unless they mirror on-chain PDA or transaction identifiers.
+- Lamports are stored as `numeric(20,0)` or text in APIs to avoid JavaScript precision loss.
+- Wallets are stored as base58 text with validation at API and contract boundaries.
+- Every mutable domain table has `created_at` and `updated_at`.
+- Event ingestion tables must be idempotent by transaction signature plus event index.
+
+## Core Tables
+
+| Table | Purpose | Key Constraints |
+|---|---|---|
+| `turns` | Turn projection and lifecycle state. | Unique `turn_number`; indexed `status`, `starts_at`, `ends_at`. |
+| `rules` | Proposed rules and public rule state. | Unique `rule_id`; indexed `turn_id`, `creator_wallet`, `state`. |
+| `rule_votes` | On-chain vote projection. | Unique `(turn_id, rule_id, wallet)`. |
+| `rule_removal_records` | Paid removal records. | Unique `(turn_id, rule_id, remover_wallet)`. |
+| `game_tokens_index` | Indexed Game Token PDA metadata. | Unique `(turn_id, wallet)`. |
+| `guesses` | Player guesses and submission metadata. | Unique `(turn_id, wallet)`. |
+| `gate_check_logs` | Preflight gate logs. | Indexed `turn_id`, `player_wallet`, `gate_type`, `result`. |
+| `rule_dedup_results` | Semantic and canonical dedup outputs. | One result per preflight attempt. |
+| `rule_preflight_tokens` | Short-lived token issuance audit. | Unique `token_hash`; expires quickly. |
+| `rule_precompilation_cache` | Background compilation cache. | Unique `(rule_id, original_text_hash)`. |
+| `agent_logs` | Compiler agent logs, separate from gate checks. | Indexed `rule_id`, `agent_name`, `result`. |
+| `verification_jobs` | Guess and payout verification orchestration. | Unique idempotency key. |
+| `compiled_rule_artifacts` | Hashable DSL/AST artifacts and version metadata. | Unique `artifact_hash`. |
+| `election_vrf_records` | Switchboard election request/fulfillment projection. | Unique `turn_id`. |
+| `rule_finalist_sets` | Locked finalist set and hashes. | Unique `turn_id`. |
+| `payout_records` | Winner payout projection and claim state. | Unique `(turn_id, wallet, category)`. |
+| `creator_reward_records` | Creator reward projection. | Unique `(turn_id, active_rule_id, creator_wallet)`. |
+| `idempotency_records` | API and worker idempotency. | Unique `idempotency_key`. |
+| `creator_profiles` | Creator aggregate profile projection. | Unique `wallet`. |
+| `activity_feed` | Public feed projection. | Indexed `turn_id`, `created_at`. |
+| `share_events` | Share-card analytics. | Indexed `turn_id`, `wallet`, `created_at`. |
+| `metrics_snapshots` | Admin/product metrics snapshots. | Indexed `snapshot_type`, `window_start`, `window_end`. |
+| `rule_registry_embeddings` | Rule text embeddings for dedup. | HNSW index on vector column. |
+
+## Important Columns
+
+### `turns`
+
+```sql
+turn_id text primary key,
+turn_number bigint unique not null,
+status text not null,
+cycle_index smallint not null,
+duration_hours smallint not null,
+starts_at timestamptz not null,
+ends_at timestamptz not null,
+election_closes_at timestamptz not null,
+guesses_close_at timestamptz not null,
+prize_pool_lamports numeric(20,0) not null default 0,
+draw_numbers smallint[],
+active_rule_id text,
+finalist_set_hash text,
+draw_vrf_fulfillment_ref text
+```
+
+### `rules`
+
+```sql
+rule_id text primary key,
+turn_id text not null references turns(turn_id),
+creator_wallet text not null,
+state text not null,
+original_text text not null,
+original_text_hash text not null,
+normalized_text_hash text,
+official_interpretation_hash text,
+compiled_artifact_hash text,
+token_count integer not null,
+vote_count integer not null default 0,
+report_count integer not null default 0,
+preflight_result_hash text,
+created_at timestamptz not null,
+updated_at timestamptz not null
+```
+
+### `jobs`
+
+Job records may be stored in `verification_jobs` initially or split into a generic `jobs` table during implementation.
+
+```sql
+job_id text primary key,
+job_type text not null,
+status text not null,
+idempotency_key text unique not null,
+payload jsonb not null,
+attempt_count integer not null default 0,
+max_attempts integer not null,
+run_after timestamptz not null,
+locked_at timestamptz,
+completed_at timestamptz,
+failed_at timestamptz,
+last_error_code text
+```
+
+## Creator Reward Accounting
+
+`creator_reward_records` store calculated rewards from alternative-rule winner payouts. Winner-visible payouts are never reduced.
+
+```sql
+turn_id text not null,
+active_rule_id text not null,
+creator_wallet text not null,
+winner_count integer not null,
+individual_alt_payout_lamports numeric(20,0) not null,
+reward_rate_bps integer not null,
+calculated_reward_lamports numeric(20,0) not null,
+available_reserve_lamports numeric(20,0) not null,
+cap_per_turn_lamports numeric(20,0) not null,
+final_reward_lamports numeric(20,0) not null,
+was_capped boolean not null,
+status text not null
+```
+
+## pgvector HNSW Migration
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE rule_registry_embeddings (
+  embedding_id uuid primary key,
+  rule_id text not null,
+  turn_id text not null,
+  embedding_model_version text not null,
+  canonical_signature text,
+  embedding_vector vector(1536) not null,
+  created_at timestamptz not null
+);
+
+CREATE INDEX rule_registry_embedding_hnsw_idx
+  ON rule_registry_embeddings
+  USING hnsw (embedding_vector vector_cosine_ops)
+  WITH (m = 16, ef_construction = 64);
+```
+
+Query sessions should set:
+
+```sql
+SET hnsw.ef_search = 40;
+```

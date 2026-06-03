@@ -17,8 +17,8 @@ Opened before starting `M0.1`:
 |---|---|---|---|---|
 | M0.1 | PRD Baseline | Completed | Confirmed 2026-06-02 | Required artifacts implemented, consistency-checked, and marked complete after user confirmation. |
 | M0.2 | Monorepo Skeleton | Completed | Confirmed 2026-06-02 | Skeleton, workspace configs, README, and verification commands completed. |
-| M0.3 | Docker Baseline | Implemented, awaiting confirmation | Pending | Required Docker stack implemented and verified. Approval checkboxes remain unticked until user confirmation. |
-| M0.4 | Technical Contracts | Not started | Pending | Depends on baseline decisions and initial structure. |
+| M0.3 | Docker Baseline | Completed | Confirmed 2026-06-02 | Required Docker stack implemented, verified, and marked complete. |
+| M0.4 | Technical Contracts | Implemented, awaiting confirmation | Pending | Required contract drafts implemented and validated. PRD checkboxes remain pending user confirmation. |
 | M0.5 | Mobile UX Flow Baseline | Not started | Pending | Depends on product baseline and frontend skeleton. |
 
 ## M0.1 Work Log
@@ -147,7 +147,8 @@ Opened before starting `M0.1`:
 - Verified web returns HTTP 200.
 - Verified the web container can reach the API through the internal Docker network.
 - Verified optional profiles with `docker compose --profile admin --profile observability --profile mail config --quiet`.
-- Did not tick M0.3 checklist or approval items because user confirmation is required.
+- Re-verified M0.3 services on 2026-06-02.
+- Marked M0.3 checklist, approval criteria, and required artifacts complete after user confirmation.
 
 ## M0.3 Artifact Review
 
@@ -170,4 +171,55 @@ Opened before starting `M0.1`:
 
 ## M0.3 Confirmation Gate
 
-`M0.3` can be marked complete only after user confirmation that the implemented Docker baseline satisfies the milestone approval criteria.
+`M0.3` was marked complete after user confirmation on 2026-06-02.
+
+## M0.4 Work Log
+
+### 2026-06-02
+
+- Opened `PRD.md`, `AGENTS.md`, and `.claude/skills` before starting M0.4, as required.
+- Used `.claude/skills/best-practices/SKILL.md` with `references/agent-principles.md`, `references/architecture.md`, `references/web2-backend.md`, `references/web3-contracts.md`, `references/observability.md`, and `references/deploy-release.md`.
+- Used `.claude/skills/solana-dev/SKILL.md` for Solana account and instruction draft boundaries.
+- Used `.claude/skills/develop-frontend/SKILL.md` and the Next.js guidance skill for frontend/API contract compatibility.
+- Added `docs/technical-contracts-index.md`.
+- Added `docs/api-contracts.md`.
+- Added `docs/data-model-draft.md`.
+- Added `docs/queue-job-contracts.md`.
+- Added `docs/agent-schema-draft.md`.
+- Added `docs/smart-contract-account-instruction-draft.md`.
+- Added `docs/admin-metrics-dictionary.md`.
+- Added `docs/shared-error-codes.md`.
+- Added shared error-code exports in `packages/constants/src/error-codes.ts` and `packages/constants/src/index.ts`.
+- Confirmed the turn-duration source of truth remains `1h -> 1h -> 2h -> 2h -> 8h -> 8h -> repeat`.
+- Left M0.4 PRD checklist, approval criteria, and required artifacts unchecked pending user confirmation.
+
+## M0.4 Artifact Review
+
+| Artifact | Status | Notes |
+|---|---|---|
+| API contract document | Implemented | See `docs/api-contracts.md`; includes response envelope, shared models, mocked frontend-ready endpoints, auth notes, and shared error behavior. |
+| Data model draft | Implemented | See `docs/data-model-draft.md`; includes turns, rules, votes, guesses, logs, jobs, creator rewards, admin metrics, and pgvector HNSW migration. |
+| Queue/job contract draft | Implemented | See `docs/queue-job-contracts.md`; includes job envelope, payloads, retries, idempotency, and terminal failure states. |
+| Agent schema draft | Implemented | See `docs/agent-schema-draft.md`; includes compiler IO, `RuleDedupResult`, `GateCheckLog`, `CompilerAgentLog`, confidence breakdown, and rule state machine. |
+| Smart contract account/instruction draft | Implemented | See `docs/smart-contract-account-instruction-draft.md`; includes account model, Game Token PDA validation contract, instruction list, and emitted events. |
+| Admin metrics dictionary | Implemented | See `docs/admin-metrics-dictionary.md`. |
+| Shared error codes | Implemented | See `docs/shared-error-codes.md` and `packages/constants/src/error-codes.ts`. |
+
+## M0.4 Validation Results
+
+| Requirement | Result |
+|---|---|
+| Frontend can be implemented against mocked API contracts | Passed; API contract defines stable `/api/v1` envelopes, endpoint paths, inputs, outputs, and error codes. |
+| Backend can be implemented against database and queue contracts | Passed; data model and queue contracts define persistence, idempotency, retries, and failure states. |
+| Worker jobs have clear inputs, outputs, retry behavior, and failure states | Passed; queue contract defines required job types and execution semantics. |
+| Smart contract state aligns with backend state assumptions | Passed; Solana account draft defines on-chain source-of-truth boundaries and backend projection assumptions. |
+| AI agent schemas include confidence breakdown and audit fields | Passed; agent schema includes composite confidence, audit fields, and compiler logs. |
+| Typecheck | Passed with `pnpm typecheck`. |
+| Lint | Passed with `pnpm lint`. |
+| Tests | Passed with `pnpm test`. |
+| Build | Passed with `pnpm build`. |
+| Whitespace check | Passed with `git diff --check`; Git reported CRLF normalization warnings only. |
+
+## M0.4 Confirmation Gate
+
+`M0.4` is implemented and awaiting user confirmation before PRD checklist items are marked complete.

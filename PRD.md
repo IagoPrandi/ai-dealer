@@ -4114,38 +4114,38 @@ Establish the product baseline, architecture baseline, monorepo structure, Docke
 
 **Checklist:**
 
-- [ ] Define `COMPOSE_PROJECT_NAME=idealer`.
-- [ ] Define required container `idealer-postgres`.
-- [ ] Define required container `idealer-redis`.
-- [ ] Define required container `idealer-api`.
-- [ ] Define required container `idealer-worker`.
-- [ ] Define required container `idealer-web`.
-- [ ] Define optional container `idealer-admin`.
-- [ ] Define optional container `idealer-prometheus`.
-- [ ] Define optional container `idealer-grafana`.
-- [ ] Define optional container `idealer-mailpit`.
-- [ ] Add Docker network for internal service communication.
-- [ ] Add named volume for PostgreSQL data.
-- [ ] Add named volume for Redis data if persistence is enabled.
-- [ ] Add health checks for Postgres, Redis, API, worker, and web.
-- [ ] Add `.env.example` with required variables.
-- [ ] Add local startup command documentation.
-- [ ] Add local shutdown/reset command documentation.
+- [x] Define `COMPOSE_PROJECT_NAME=idealer`.
+- [x] Define required container `idealer-postgres`.
+- [x] Define required container `idealer-redis`.
+- [x] Define required container `idealer-api`.
+- [x] Define required container `idealer-worker`.
+- [x] Define required container `idealer-web`.
+- [x] Define optional container `idealer-admin`.
+- [x] Define optional container `idealer-prometheus`.
+- [x] Define optional container `idealer-grafana`.
+- [x] Define optional container `idealer-mailpit`.
+- [x] Add Docker network for internal service communication.
+- [x] Add named volume for PostgreSQL data.
+- [x] Add named volume for Redis data if persistence is enabled.
+- [x] Add health checks for Postgres, Redis, API, worker, and web.
+- [x] Add `.env.example` with required variables.
+- [x] Add local startup command documentation.
+- [x] Add local shutdown/reset command documentation.
 
 **Approval criteria:**
 
-- [ ] `docker compose up` starts required services.
-- [ ] Container names follow the `idealer-*` convention.
-- [ ] API can connect to Postgres and Redis.
-- [ ] Worker can connect to Redis and database.
-- [ ] Web can reach API locally.
-- [ ] Health checks report healthy services.
+- [x] `docker compose up` starts required services.
+- [x] Container names follow the `idealer-*` convention.
+- [x] API can connect to Postgres and Redis.
+- [x] Worker can connect to Redis and database.
+- [x] Web can reach API locally.
+- [x] Health checks report healthy services.
 
 **Required artifacts:**
 
-- [ ] `docker-compose.yml`.
-- [ ] `.env.example`.
-- [ ] Local development runbook.
+- [x] `docker-compose.yml`.
+- [x] `.env.example`.
+- [x] Local development runbook.
 
 ---
 
