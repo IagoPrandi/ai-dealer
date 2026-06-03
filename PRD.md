@@ -4155,37 +4155,37 @@ Establish the product baseline, architecture baseline, monorepo structure, Docke
 
 **Checklist:**
 
-- [ ] Draft database schema for turns, rules, votes, guesses, logs, jobs, creator rewards, and admin metrics.
-- [ ] Draft API contracts for current round, rule proposal, token count, voting, result, history, and audit.
-- [ ] Draft event model for turn opened, rule proposed, vote cast, rule elected, draw completed, verification completed, payout available.
-- [ ] Draft queue job model for rule validation, guess verification, payout calculation, metric aggregation, and admin analytics snapshots.
-- [ ] Draft smart contract account model.
-- [ ] Draft smart contract instruction list.
-- [ ] Draft AI agent input and output schemas.
-- [ ] Draft `RuleDedupResult`, `GateCheckLog`, and `CompilerAgentLog` schemas.
-- [ ] Draft formal Rule State Machine.
-- [ ] Draft Game Token PDA account and validation contract.
-- [ ] Draft composite compiler confidence schema.
-- [ ] Draft creator reward accounting model.
-- [ ] Draft pgvector HNSW index migration for rule registry embeddings.
-- [ ] Draft admin metrics dictionary.
-- [ ] Define error codes shared across apps.
+- [x] Draft database schema for turns, rules, votes, guesses, logs, jobs, creator rewards, and admin metrics.
+- [x] Draft API contracts for current round, rule proposal, token count, voting, result, history, and audit.
+- [x] Draft event model for turn opened, rule proposed, vote cast, rule elected, draw completed, verification completed, payout available.
+- [x] Draft queue job model for rule validation, guess verification, payout calculation, metric aggregation, and admin analytics snapshots.
+- [x] Draft smart contract account model.
+- [x] Draft smart contract instruction list.
+- [x] Draft AI agent input and output schemas.
+- [x] Draft `RuleDedupResult`, `GateCheckLog`, and `CompilerAgentLog` schemas.
+- [x] Draft formal Rule State Machine.
+- [x] Draft Game Token PDA account and validation contract.
+- [x] Draft composite compiler confidence schema.
+- [x] Draft creator reward accounting model.
+- [x] Draft pgvector HNSW index migration for rule registry embeddings.
+- [x] Draft admin metrics dictionary.
+- [x] Define error codes shared across apps.
 
 **Approval criteria:**
 
-- [ ] Frontend can be implemented against mocked API contracts.
-- [ ] Backend can be implemented against database and queue contracts.
-- [ ] Worker jobs have clear inputs, outputs, retry behavior, and failure states.
-- [ ] Smart contract state aligns with backend state assumptions.
-- [ ] AI agent schemas include confidence breakdown and audit fields.
+- [x] Frontend can be implemented against mocked API contracts.
+- [x] Backend can be implemented against database and queue contracts.
+- [x] Worker jobs have clear inputs, outputs, retry behavior, and failure states.
+- [x] Smart contract state aligns with backend state assumptions.
+- [x] AI agent schemas include confidence breakdown and audit fields.
 
 **Required artifacts:**
 
-- [ ] API contract document.
-- [ ] Data model draft.
-- [ ] Queue/job contract draft.
-- [ ] Agent schema draft.
-- [ ] Smart contract account/instruction draft.
+- [x] API contract document.
+- [x] Data model draft.
+- [x] Queue/job contract draft.
+- [x] Agent schema draft.
+- [x] Smart contract account/instruction draft.
 
 ---
 

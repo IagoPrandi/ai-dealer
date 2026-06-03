@@ -18,8 +18,8 @@ Opened before starting `M0.1`:
 | M0.1 | PRD Baseline | Completed | Confirmed 2026-06-02 | Required artifacts implemented, consistency-checked, and marked complete after user confirmation. |
 | M0.2 | Monorepo Skeleton | Completed | Confirmed 2026-06-02 | Skeleton, workspace configs, README, and verification commands completed. |
 | M0.3 | Docker Baseline | Completed | Confirmed 2026-06-02 | Required Docker stack implemented, verified, and marked complete. |
-| M0.4 | Technical Contracts | Implemented, awaiting confirmation | Pending | Required contract drafts implemented and validated. PRD checkboxes remain pending user confirmation. |
-| M0.5 | Mobile UX Flow Baseline | Not started | Pending | Depends on product baseline and frontend skeleton. |
+| M0.4 | Technical Contracts | Completed | Confirmed 2026-06-03 | Required contract drafts implemented, validated, and marked complete after user confirmation. |
+| M0.5 | Mobile UX Flow Baseline | Implemented, awaiting confirmation | Pending | Required UX flow artifacts implemented. PRD checkboxes remain pending user confirmation. |
 
 ## M0.1 Work Log
 
@@ -193,6 +193,12 @@ Opened before starting `M0.1`:
 - Confirmed the turn-duration source of truth remains `1h -> 1h -> 2h -> 2h -> 8h -> 8h -> repeat`.
 - Left M0.4 PRD checklist, approval criteria, and required artifacts unchecked pending user confirmation.
 
+### 2026-06-03
+
+- Reopened `PRD.md`, `AGENTS.md`, and `.claude/skills` before verifying M0.4 and starting M0.5, as required.
+- Rechecked the M0.4 artifact set and validation log.
+- Marked M0.4 checklist, approval criteria, and required artifacts complete after user confirmation.
+
 ## M0.4 Artifact Review
 
 | Artifact | Status | Notes |
@@ -222,4 +228,42 @@ Opened before starting `M0.1`:
 
 ## M0.4 Confirmation Gate
 
-`M0.4` is implemented and awaiting user confirmation before PRD checklist items are marked complete.
+`M0.4` was marked complete after user confirmation on 2026-06-03.
+
+## M0.5 Work Log
+
+### 2026-06-03
+
+- Opened `PRD.md`, `AGENTS.md`, and `.claude/skills` before starting M0.5, as required.
+- Used `.claude/skills/best-practices/SKILL.md` with `references/agent-principles.md` and `references/architecture.md`.
+- Used `.claude/skills/develop-frontend/SKILL.md`, `checklists/checklist_pronto.md`, and `templates/prompt_de_revisao.md` for mobile-first UX, state, accessibility, and responsive constraints.
+- Used `.claude/skills/web2-wallet-auth/SKILL.md` for wallet connection, transaction approval, and return-to-DApp flow considerations.
+- Reviewed `docs/api-contracts.md` and `docs/product-rule-summary.md` to align M0.5 with current API and product rules.
+- Added `docs/mobile-user-flow-diagram.md`.
+- Added `docs/mobile-low-fidelity-wireframes.md`.
+- Added `docs/mobile-ux-state-map.md`.
+- Covered `/play` as the primary mobile entry point.
+- Covered first-time, returning, wallet connection, wallet transaction approval, number selection, free-form rule proposal, token-limit warning and rejection, voting, active Rule of the Hour, draw/result, near-miss, creator reward/status, share card, and empty/loading/failed/delayed states.
+- Confirmed no critical screen depends on desktop layout.
+- Left M0.5 PRD checklist, approval criteria, and required artifacts unchecked pending user confirmation.
+
+## M0.5 Artifact Review
+
+| Artifact | Status | Notes |
+|---|---|---|
+| Mobile user flow diagram | Implemented | See `docs/mobile-user-flow-diagram.md`; includes `/play`, first-time, returning, wallet, transaction return, number, rule, vote, result, reward, and share flows. |
+| Low-fidelity wireframes | Implemented | See `docs/mobile-low-fidelity-wireframes.md`; includes mobile shell, live hub, first-time, number picker, approval, rule proposal, voting, active rule, results, and state wireframes. |
+| UX state map | Implemented | See `docs/mobile-ux-state-map.md`; includes route, wallet, transaction, number, rule proposal, voting, active rule, draw/result/reward, and share states. |
+
+## M0.5 Validation Results
+
+| Requirement | Result |
+|---|---|
+| New user can understand intended game loop from flow diagrams | Passed; first-time flow and core game loop are documented. |
+| Mobile wallet interruption and return behavior are represented | Passed; sequence diagram and transaction states preserve originating action and return behavior. |
+| Core actions are reachable with mobile-first navigation | Passed; shared mobile shell and flows keep pick, rules, voting, results, and share reachable from `/play`. |
+| No critical screen depends on desktop layout | Passed; all wireframes are mobile-first and specify minimum 320px behavior. |
+
+## M0.5 Confirmation Gate
+
+`M0.5` is implemented and awaiting user confirmation before PRD checklist items are marked complete.
