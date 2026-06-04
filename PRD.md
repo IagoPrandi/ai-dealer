@@ -4195,34 +4195,34 @@ Establish the product baseline, architecture baseline, monorepo structure, Docke
 
 **Checklist:**
 
-- [ ] Define `/play` as primary mobile entry point.
-- [ ] Map first-time user flow.
-- [ ] Map returning user flow.
-- [ ] Map wallet connection flow.
-- [ ] Map transaction approval and return-to-DApp flow.
-- [ ] Map number selection flow.
-- [ ] Map free-form rule proposal flow.
-- [ ] Map token-limit warning and rejection states.
-- [ ] Map voting flow.
-- [ ] Map active Rule of the Hour state.
-- [ ] Map draw/result state.
-- [ ] Map near-miss feedback.
-- [ ] Map creator reward/status feedback.
-- [ ] Map share card flow.
-- [ ] Map empty, loading, failed, and delayed states.
+- [x] Define `/play` as primary mobile entry point.
+- [x] Map first-time user flow.
+- [x] Map returning user flow.
+- [x] Map wallet connection flow.
+- [x] Map transaction approval and return-to-DApp flow.
+- [x] Map number selection flow.
+- [x] Map free-form rule proposal flow.
+- [x] Map token-limit warning and rejection states.
+- [x] Map voting flow.
+- [x] Map active Rule of the Hour state.
+- [x] Map draw/result state.
+- [x] Map near-miss feedback.
+- [x] Map creator reward/status feedback.
+- [x] Map share card flow.
+- [x] Map empty, loading, failed, and delayed states.
 
 **Approval criteria:**
 
-- [ ] A new user can understand the intended game loop from the flow diagrams.
-- [ ] Mobile wallet interruption and return behavior are represented.
-- [ ] Core actions are reachable with mobile-first navigation.
-- [ ] No critical screen depends on desktop layout.
+- [x] A new user can understand the intended game loop from the flow diagrams.
+- [x] Mobile wallet interruption and return behavior are represented.
+- [x] Core actions are reachable with mobile-first navigation.
+- [x] No critical screen depends on desktop layout.
 
 **Required artifacts:**
 
-- [ ] Mobile user flow diagram.
-- [ ] Low-fidelity wireframes.
-- [ ] UX state map.
+- [x] Mobile user flow diagram.
+- [x] Low-fidelity wireframes.
+- [x] UX state map.
 
 ---
 
@@ -4240,26 +4240,26 @@ Validate the user-facing mobile game loop without real blockchain payments or pr
 
 **Checklist:**
 
-- [ ] Build `MobileLiveRoundHub`.
-- [ ] Show current turn identifier.
-- [ ] Show current turn duration and position in the cycle.
-- [ ] Show countdown timer.
-- [ ] Show current prize pool.
-- [ ] Show current or leading Rule of the Hour.
-- [ ] Show primary bottom CTA.
-- [ ] Show secondary actions: vote, propose rule, view rules, view result/history.
-- [ ] Show compact activity feed.
-- [ ] Show next milestone: voting closes, guesses close, draw begins.
-- [ ] Add mobile sticky header for prize/countdown.
-- [ ] Add loading state.
-- [ ] Add empty state.
-- [ ] Add delayed-turn state.
+- [x] Build `MobileLiveRoundHub`.
+- [x] Show current turn identifier.
+- [x] Show current turn duration and position in the cycle.
+- [x] Show countdown timer.
+- [x] Show current prize pool.
+- [x] Show current or leading Rule of the Hour.
+- [x] Show primary bottom CTA.
+- [x] Show secondary actions: vote, propose rule, view rules, view result/history.
+- [x] Show compact activity feed.
+- [x] Show next milestone: voting closes, guesses close, draw begins.
+- [x] Add mobile sticky header for prize/countdown.
+- [x] Add loading state.
+- [x] Add empty state.
+- [x] Add delayed-turn state.
 
 **Approval criteria:**
 
-- [ ] A user can identify prize, countdown, and next action in under 10 seconds.
-- [ ] Screen works on common mobile viewport sizes.
-- [ ] Bottom CTA remains reachable with one-handed use.
+- [x] A user can identify prize, countdown, and next action in under 10 seconds.
+- [x] Screen works on common mobile viewport sizes.
+- [x] Bottom CTA remains reachable with one-handed use.
 
 ---
 

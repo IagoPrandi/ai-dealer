@@ -3,6 +3,10 @@ node_modules/
 dist/
 .turbo/
 coverage/
+output/
+.next-dev-logs/
+test-results/
+apps/*/test-results/
 *.tsbuildinfo
 
 .env

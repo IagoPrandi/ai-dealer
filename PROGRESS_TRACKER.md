@@ -19,7 +19,10 @@ Opened before starting `M0.1`:
 | M0.2 | Monorepo Skeleton | Completed | Confirmed 2026-06-02 | Skeleton, workspace configs, README, and verification commands completed. |
 | M0.3 | Docker Baseline | Completed | Confirmed 2026-06-02 | Required Docker stack implemented, verified, and marked complete. |
 | M0.4 | Technical Contracts | Completed | Confirmed 2026-06-03 | Required contract drafts implemented, validated, and marked complete after user confirmation. |
-| M0.5 | Mobile UX Flow Baseline | Implemented, awaiting confirmation | Pending | Required UX flow artifacts implemented. PRD checkboxes remain pending user confirmation. |
+| M0.5 | Mobile UX Flow Baseline | Completed | Confirmed 2026-06-03 | Required UX flow artifacts implemented, validated, and marked complete after user confirmation. |
+| M0.6 | Not defined in PRD | Blocked | Pending | No M0.6 section exists in `PRD.md`; the next defined milestone is M1.1. |
+| M1.1 | Mobile Live Round Hub | Completed | Confirmed 2026-06-03 | Public `/play` hub implemented, validated, and marked complete after user confirmation. |
+| M1.2 | Mobile Number Picker | Implemented, awaiting confirmation | Pending | Number picker flow implemented and validated. PRD checkboxes remain pending user confirmation. |
 
 ## M0.1 Work Log
 
@@ -247,6 +250,14 @@ Opened before starting `M0.1`:
 - Confirmed no critical screen depends on desktop layout.
 - Left M0.5 PRD checklist, approval criteria, and required artifacts unchecked pending user confirmation.
 
+### 2026-06-03
+
+- Reopened `PRD.md`, `AGENTS.md`, and `.claude/skills` before verifying M0.5, as required.
+- Rechecked the M0.5 artifact set against the PRD checklist.
+- Marked M0.5 checklist, approval criteria, and required artifacts complete after user confirmation.
+- Searched for `M0.6` in `PRD.md`, `PROGRESS_TRACKER.md`, and `docs`; no M0.6 milestone is defined.
+- Confirmed the next defined PRD milestone after M0.5 is `M1.1 - Mobile Live Round Hub`.
+
 ## M0.5 Artifact Review
 
 | Artifact | Status | Notes |
@@ -266,4 +277,116 @@ Opened before starting `M0.1`:
 
 ## M0.5 Confirmation Gate
 
-`M0.5` is implemented and awaiting user confirmation before PRD checklist items are marked complete.
+`M0.5` was marked complete after user confirmation on 2026-06-03.
+
+## M0.6 Status
+
+`M0.6` is not defined in `PRD.md`. Work cannot be started under that milestone without adding a PRD section or confirming that the intended next milestone is `M1.1 - Mobile Live Round Hub`.
+
+## M1.1 Work Log
+
+### 2026-06-03
+
+- Opened `PRD.md`, `AGENTS.md`, and `.claude/skills` before starting M1.1, as required.
+- Used `.claude/skills/best-practices/SKILL.md` with `references/agent-principles.md`, `references/architecture.md`, and `references/code-quality.md`.
+- Used `.claude/skills/develop-frontend/SKILL.md` for mobile-first layout, state coverage, accessibility, and responsive constraints.
+- Used the Next.js App Router guidance skill for route/component structure.
+- Used `.claude/skills/playwright/SKILL.md`; `playwright-cli` wrapper was unavailable, so the official `npx playwright` CLI was used after installing the Chromium browser cache.
+- Added `/play` as the public mobile game route.
+- Redirected `/` to `/play`.
+- Added `MobileLiveRoundHub` with current turn id, turn duration and cycle position, countdown, prize pool, leading Rule of the Hour, primary bottom CTA, secondary actions, compact activity feed, and next milestones.
+- Added loading, empty, and delayed states switchable from the prototype state control.
+- Added mobile sticky header and bottom action area.
+- Updated global web styles for mobile-first layout, stable controls, focus states, and fixed navigation that does not cover scrollable content.
+- Added `.next-dev-logs/` and `output/` to `.gitignore` for local dev-server and screenshot artifacts.
+- Left M1.1 PRD checklist and approval criteria unchecked pending user confirmation.
+
+### 2026-06-03
+
+- Reopened `PRD.md`, `AGENTS.md`, and `.claude/skills` before verifying M1.1 and starting M1.2, as required.
+- Rechecked the M1.1 artifact set and validation results against the PRD checklist.
+- Marked M1.1 checklist and approval criteria complete after user confirmation.
+- Started M1.2.
+
+## M1.1 Artifact Review
+
+| Artifact | Status | Notes |
+|---|---|---|
+| `apps/web/src/features/live-round/MobileLiveRoundHub.tsx` | Implemented | Contains the interactive mobile hub, state control, live state, loading state, empty state, delayed state, header, CTA, activity feed, and milestone timeline. |
+| `apps/web/src/app/play/page.tsx` | Implemented | Exposes the `/play` route. |
+| `apps/web/src/app/page.tsx` | Implemented | Redirects `/` to `/play`. |
+| `apps/web/src/app/globals.css` | Implemented | Defines the mobile-first shell, responsive layout, sticky header, fixed bottom CTA, state panels, and accessible focus states. |
+
+## M1.1 Validation Results
+
+| Requirement | Result |
+|---|---|
+| User can identify prize, countdown, and next action in under 10 seconds | Passed; these appear in the sticky header and first viewport. |
+| Screen works on common mobile viewport sizes | Passed for `390x844` screenshot; layout reserves space above the bottom CTA and avoids overlap. |
+| Bottom CTA remains reachable with one-handed use | Passed; fixed bottom CTA remains visible on `/play`. |
+| Root route reaches primary play route | Passed; `/` returns `307` to `/play`. |
+| Play route loads | Passed; `/play` returns HTTP `200`. |
+| Typecheck | Passed with `pnpm typecheck`. |
+| Lint | Passed with `pnpm lint`. |
+| Tests | Passed with `pnpm test`. |
+| Build | Passed with `pnpm build`; `/play` is included in generated routes. |
+| Visual verification | Passed with Playwright screenshots at `390x844` and `1440x1000`; screenshots are local ignored artifacts under `output/playwright/`. |
+| Whitespace check | Passed with `git diff --check`; Git reported CRLF normalization warnings only. |
+
+## M1.1 Confirmation Gate
+
+`M1.1` was marked complete after user confirmation on 2026-06-03.
+
+## M1.2 Work Log
+
+### 2026-06-03
+
+- Opened `PRD.md`, `AGENTS.md`, and `.claude/skills` before starting M1.2, as required.
+- Used `.claude/skills/best-practices/SKILL.md` with `references/agent-principles.md`, `references/architecture.md`, and `references/code-quality.md`.
+- Used `.claude/skills/develop-frontend/SKILL.md` for mobile-first number selection, stable tile dimensions, accessible controls, state coverage, and responsive constraints.
+- Used the Next.js App Router guidance skill for route/component structure.
+- Added `NumberPicker` under `apps/web/src/features/number-picker/NumberPicker.tsx`.
+- Added `/play/pick` under `apps/web/src/app/play/pick/page.tsx`.
+- Connected the `MobileLiveRoundHub` primary CTA to `/play/pick`.
+- Implemented numbers 1 to 100 in a mobile-friendly grid.
+- Enforced exactly 6 selected numbers before review.
+- Prevented duplicate selections through toggle semantics and disabled unselected tiles when the selection is full.
+- Added sticky selected-number tray with remove/edit behavior.
+- Added randomize and clear actions.
+- Added incomplete-selection validation messaging.
+- Added review step before simulated submission.
+- Added success state after simulated submission.
+- Added Playwright e2e coverage for the complete simulated number submission flow.
+- Left M1.2 PRD checklist and approval criteria unchecked pending user confirmation.
+
+## M1.2 Artifact Review
+
+| Artifact | Status | Notes |
+|---|---|---|
+| `apps/web/src/features/number-picker/NumberPicker.tsx` | Implemented | Contains selection, remove/edit, randomize, clear, validation, review, and success states. |
+| `apps/web/src/app/play/pick/page.tsx` | Implemented | Exposes the mobile number picker route. |
+| `apps/web/src/features/live-round/MobileLiveRoundHub.tsx` | Updated | Primary bottom CTA now navigates to `/play/pick`. |
+| `apps/web/src/app/globals.css` | Updated | Adds stable number tiles, sticky tray, picker header, review state, and bottom action bar styles. |
+| `apps/web/e2e/number-picker.spec.ts` | Implemented | Verifies six-number selection, disabled review state, review step, and success state. |
+| `apps/web/playwright.config.ts` | Implemented | Runs the web e2e test against a local Next dev server on port 3005. |
+
+## M1.2 Validation Results
+
+| Requirement | Result |
+|---|---|
+| User can select 6 unique numbers without assistance | Passed; e2e selects `01` through `06` and reaches review. |
+| Invalid selections are blocked before submission | Passed; review CTA is disabled before 6 numbers are selected and extra unselected tiles disable at 6. |
+| Interaction is usable on mobile without precision tapping | Passed; mobile screenshot at `390x844` shows large stable tiles and thumb-zone bottom actions. |
+| Play route links to number picker | Passed; hub primary CTA navigates to `/play/pick`. |
+| Number picker route loads | Passed; `/play/pick` returns HTTP `200`. |
+| E2E | Passed with `pnpm --filter @idealer/web test:e2e`. |
+| Typecheck | Passed with `pnpm typecheck`. |
+| Lint | Passed with `pnpm lint`. |
+| Tests | Passed with `pnpm test`. |
+| Build | Passed with `pnpm build`; `/play/pick` is included in generated routes. |
+| Visual verification | Passed with Playwright screenshots at `390x844` and `1440x1000`; screenshots are local ignored artifacts under `output/playwright/`. |
+| Whitespace check | Passed with `git diff --check`; Git reported CRLF normalization warnings only. |
+
+## M1.2 Confirmation Gate
+
+`M1.2` is implemented and awaiting user confirmation before PRD checklist items are marked complete.
