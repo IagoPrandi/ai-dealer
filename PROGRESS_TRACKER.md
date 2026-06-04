@@ -29,7 +29,8 @@ Opened before starting `M0.1`:
 | M1.6 | Simulated Result, Near-Miss & Creator Outcome | Completed | Confirmed 2026-06-04 | Simulated result flow implemented, validated, and marked complete after user confirmation. |
 | M1.7 | Mobile Share Card Prototype | Completed | Confirmed 2026-06-04 | Mobile share card generator implemented, validated, and marked complete after user confirmation. |
 | M1 | Mobile Interactive Prototype | Completed | Confirmed 2026-06-04 | All M1 submilestones are implemented, validated, confirmed, and marked complete. Quantitative usability approval metrics remain tracked separately. |
-| M2.1 | Mobile Wallet Flow | Awaiting Confirmation | Pending | Wallet Standard, Mobile Wallet Adapter, named mobile-wallet handoffs, devnet test transaction, recovery, status, retry, and disconnect flows implemented. Real-device wallet approval QA remains pending. |
+| M2.1 | Mobile Wallet Flow | Completed | Confirmed 2026-06-04 | Wallet Standard, Mobile Wallet Adapter, named mobile-wallet handoffs, devnet test transaction, recovery, status, retry, and disconnect flows implemented and validated. |
+| M2.2 | devnet Programs | Awaiting Deployment | Pending | Core Anchor program and SBF instruction suite pass locally. Authorized devnet deployment and remote CI confirmation remain pending. |
 
 ## M0.1 Work Log
 
@@ -753,4 +754,55 @@ M1 was marked complete after explicit user confirmation on 2026-06-04 because al
 
 ## M2.1 Confirmation Gate
 
-`M2.1` implementation is ready for user confirmation. Do not mark the PRD checklist, approval criteria, or milestone complete until the user confirms after real-device Phantom, Backpack, and Solflare QA.
+`M2.1` was marked complete after explicit user confirmation on 2026-06-04. The implementation audit confirmed every M2.1 checklist item and approval flow is represented by the Wallet Standard/Mobile Wallet Adapter implementation and automated recovery/failure coverage. Broader physical-device compatibility remains part of the later mobile QA milestone.
+
+## M2.2 Work Log
+
+### 2026-06-04
+
+- Opened `PRD.md`, `AGENTS.md`, and `.claude/skills` before starting M2.2.
+- Opened the relevant local skills and references: `solana-dev`, Anchor program guidance, Solana testing and security guidance, `safe-solana-builder`, its shared and Anchor security references, `best-practices`, `best-practices/references/agent-principles.md`, `best-practices/references/web3-contracts.md`, `best-practices/references/testing.md`, and `security-threat-checklist`.
+- Opened `docs/smart-contract-account-instruction-draft.md` and `contracts/solana/README.md`.
+- Audited M2.1 against its PRD checklist and approval criteria, then marked it complete after explicit user confirmation.
+- Confirmed Rust is installed. Solana CLI and Anchor CLI are not installed in the current environment, so devnet deployment remains a separate credentialed deployment gate.
+- Implemented the Anchor workspace, core accounts, core instructions, deterministic PDA constraints, checked fee accounting, lifecycle validation, and explicit protocol errors.
+- Added unit tests, account-constraint tests, invalid-input tests, and an SBF instruction suite that executes the core lifecycle.
+- Added a Solana program CI workflow and Windows-to-Linux validation wrapper.
+- Built the final program for SBF and passed both explicit SBF instruction tests.
+- Stabilized the web E2E command at one Playwright worker and revalidated all nine M2.1/M1 flows.
+- Rechecked M2.2 after user flagged the missing deploy credential/funding gate.
+- Generated devnet-only local keypairs outside the repository in the Docker `idealer-solana-home` volume.
+- Replaced the placeholder program id with devnet program id `6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4`.
+- Re-ran format, typecheck, clippy, native tests, SBF build, and explicit SBF instruction tests successfully with the final program id.
+- Attempted devnet funding through the official CLI faucet at `2`, `1`, `0.5`, and `0.1` SOL; all were rate-limited.
+- Attempted devnet deployment and confirmed the remaining blocker is insufficient devnet SOL for deployer `4bY5krt2VnnSNB1R4c1bhiWdQYkTc1FvFTN1LaV5JxCH`. The deploy attempt requires `2.95675416 SOL` plus a `0.00212 SOL` fee.
+
+## M2.2 Artifact Review
+
+| Artifact | Status | Notes |
+|---|---|---|
+| `contracts/solana/programs/idealer/src/lib.rs` | Implemented | Defines the core Anchor accounts, instructions, events, errors, and account constraints. |
+| `contracts/solana/programs/idealer/src/domain.rs` | Implemented | Contains pure validation, checked fee splitting, lifecycle cutoff, and cycle helpers. |
+| `contracts/solana/programs/idealer/tests/core.rs` | Implemented | Covers isolated PDAs, lifecycle rules, fee conservation, and invalid inputs. |
+| `contracts/solana/programs/idealer/tests/instructions.rs` | Implemented | Executes the complete core lifecycle against the final SBF artifact and verifies invalid-input rejection. |
+| `contracts/solana/security-checklist.md` | Implemented | Records account, authority, PDA, arithmetic, deployment, and key-management controls. |
+| `.github/workflows/solana-program.yml` | Implemented | Runs format, check, clippy, native tests, SBF build, and explicit SBF instruction tests for program changes. |
+
+## M2.2 Validation Results
+
+| Requirement | Result |
+|---|---|
+| Core accounts and instructions | Implemented for every M2.2 checklist item, plus the downstream-required `GameToken` account. |
+| Core instructions execute successfully | Passed in the explicit SBF suite: initialize, open turn, submit guess, propose rule, vote, and close turn. |
+| Invalid inputs are rejected | Passed for duplicate/out-of-range guesses, invalid rule hashes/preflight commitments, duplicate votes, invalid config, and closed action windows. |
+| Account constraints and lifecycle tests | Passed with 6 focused core tests and 2 explicit SBF instruction tests. |
+| Rust format, typecheck, and lint | Passed with `cargo fmt --check`, `cargo check`, and `cargo clippy -D warnings`. |
+| Monorepo typecheck, lint, tests, and build | Passed with `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build`. |
+| Web regression E2E | Passed with `pnpm --filter @idealer/web test:e2e`; all 9 flows passed. |
+| Secret/keypair check | Passed; no deploy keypair is present outside ignored temporary build output. |
+| Remote CI | Workflow added; execution on the remote CI provider remains pending. |
+| Devnet deployment | Blocked by insufficient devnet SOL. Program id is `6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4`; deployer `4bY5krt2VnnSNB1R4c1bhiWdQYkTc1FvFTN1LaV5JxCH` needs at least `2.95887416 SOL`. |
+
+## M2.2 Confirmation Gate
+
+`M2.2` implementation is ready, but the milestone is not complete. Its PRD checklist and approval criteria remain unchecked because the contract has not been deployed to devnet and remote CI has not executed. The current blocker is devnet funding for deployer `4bY5krt2VnnSNB1R4c1bhiWdQYkTc1FvFTN1LaV5JxCH`.

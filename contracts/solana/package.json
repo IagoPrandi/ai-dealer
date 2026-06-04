@@ -1,0 +1,12 @@
+{
+  "name": "@idealer/solana-programs",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/run-cargo.mjs build --workspace --locked",
+    "lint": "node scripts/run-cargo.mjs clippy --workspace --all-targets --all-features --locked -- -D warnings",
+    "test": "node scripts/run-cargo.mjs test --workspace --all-targets --all-features --locked",
+    "test:sbf": "cargo test --workspace --test instructions --all-features --locked -- --ignored",
+    "typecheck": "node scripts/run-cargo.mjs check --workspace --all-targets --all-features --locked"
+  }
+}

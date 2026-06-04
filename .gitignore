@@ -4,6 +4,8 @@ dist/
 .turbo/
 coverage/
 output/
+target/
+**/*-keypair.json
 .next-dev-logs/
 test-results/
 apps/*/test-results/

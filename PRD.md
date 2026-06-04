@@ -4444,26 +4444,26 @@ Implement a working mobile DApp on Solana devnet with wallet flows, devnet trans
 
 **Checklist:**
 
-- [ ] Integrate Solana wallet adapter.
-- [ ] Add mobile wallet adapter support.
-- [ ] Support Phantom mobile.
-- [ ] Support Backpack mobile.
-- [ ] Support Solflare mobile.
-- [ ] Support in-wallet browser usage.
-- [ ] Support mobile browser deep links.
-- [ ] Persist pending action before wallet handoff.
-- [ ] Recover pending action after user returns to DApp.
-- [ ] Show transaction pending state.
-- [ ] Show transaction success state.
-- [ ] Show transaction failure state.
-- [ ] Add retry path for failed transaction.
-- [ ] Add disconnect wallet flow.
+- [x] Integrate Solana wallet adapter.
+- [x] Add mobile wallet adapter support.
+- [x] Support Phantom mobile.
+- [x] Support Backpack mobile.
+- [x] Support Solflare mobile.
+- [x] Support in-wallet browser usage.
+- [x] Support mobile browser deep links.
+- [x] Persist pending action before wallet handoff.
+- [x] Recover pending action after user returns to DApp.
+- [x] Show transaction pending state.
+- [x] Show transaction success state.
+- [x] Show transaction failure state.
+- [x] Add retry path for failed transaction.
+- [x] Add disconnect wallet flow.
 
 **Approval criteria:**
 
-- [ ] Mobile user can connect wallet.
-- [ ] Mobile user can approve a test transaction and return to the DApp.
-- [ ] Failed or rejected transactions do not break app state.
+- [x] Mobile user can connect wallet.
+- [x] Mobile user can approve a test transaction and return to the DApp.
+- [x] Failed or rejected transactions do not break app state.
 
 ---
 

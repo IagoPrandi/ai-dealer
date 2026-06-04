@@ -1,0 +1,48 @@
+name: Solana Program
+
+on:
+  pull_request:
+    paths:
+      - "contracts/solana/**"
+      - ".github/workflows/solana-program.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "contracts/solana/**"
+      - ".github/workflows/solana-program.yml"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts/solana
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.91.1"
+          components: rustfmt, clippy
+      - run: cargo fmt --all -- --check
+      - run: cargo check --workspace --all-targets --all-features --locked
+      - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - run: cargo test --workspace --all-targets --all-features --locked
+      - name: Install Solana CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sSfL https://release.anza.xyz/v4.0.0/install -o /tmp/anza-install
+          echo "4a0c065a31828e6343e43acc71a17d4083faf03549cb66755d62f88d23dd309a  /tmp/anza-install" | sha256sum --check
+          sh /tmp/anza-install
+          rm /tmp/anza-install
+      - name: Run SBF instruction suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+          mkdir -p /tmp/idealer-deploy
+          trap 'rm -f /tmp/idealer-deploy/*-keypair.json' EXIT
+          cargo build-sbf --sbf-out-dir /tmp/idealer-deploy --jobs 1
+          rm -f /tmp/idealer-deploy/*-keypair.json
+          SBF_OUT_DIR=/tmp/idealer-deploy cargo test --workspace --test instructions --all-features --locked --jobs 1 -- --ignored
