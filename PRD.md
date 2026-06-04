@@ -120,10 +120,10 @@ One turn equals one fixed time window.
 Turn duration is not constant. Idealer uses a repeating duration cycle:
 
 ```text
-1h → 1h → 2h → 2h → 8h → 8h → restart at 1h
+2h → 2h → 8h → 8h → restart at 2h
 ```
 
-After the second 8-hour turn ends, the next turn restarts the cycle at 1 hour.
+After the second 8-hour turn ends, the next turn restarts the cycle at 2 hours.
 
 Each turn is independent:
 
@@ -681,20 +681,20 @@ This avoids a purely off-chain governance gate and prevents the backend from bec
 Idealer uses a repeating cycle of turn durations:
 
 ```text
-1h → 1h → 2h → 2h → 8h → 8h
+2h → 2h → 8h → 8h
 ```
 
-After the second 8-hour turn ends, the next turn restarts at 1 hour.
+After the second 8-hour turn ends, the next turn restarts at 2 hours.
 
 ```text
-Turn 1: 1 hour
-Turn 2: 1 hour
-Turn 3: 2 hours
-Turn 4: 2 hours
-Turn 5: 8 hours
-Turn 6: 8 hours
-Turn 7: 1 hour
-Turn 8: 1 hour
+Turn 1: 2 hours
+Turn 2: 2 hours
+Turn 3: 8 hours
+Turn 4: 8 hours
+Turn 5: 2 hours
+Turn 6: 2 hours
+Turn 7: 8 hours
+Turn 8: 8 hours
 ...
 ```
 
@@ -702,8 +702,8 @@ Turn 8: 1 hour
 
 This cycle balances fast engagement with longer accumulation windows:
 
-- the two 1-hour turns create fast feedback loops and frequent return moments;
 - the 2-hour turns give rules more time to gather votes;
+- the 2-hour turns create faster feedback loops and frequent return moments;
 - the 8-hour turns create larger prize pools, more anticipation, and stronger shareable events;
 - restarting after the second 8-hour turn prevents the game from becoming too slow or feeling inactive.
 
@@ -2242,17 +2242,17 @@ Default fee model:
 
 Default MVP value-flow mode:
 
-- development, staging, and testnet use test SOL only;
+- development, staging, and devnet use test SOL only;
 - test SOL has no cash value and must not be marketed as a monetary prize;
 - production/mainnet real SOL flows are disabled by default;
 - any real SOL payment, payout, claim, treasury transfer, or creator reward requires all M9 gates to be approved before activation.
 
-Default MVP/testnet fee configuration:
+Default MVP/devnet fee configuration:
 
 ```typescript
 const MVP_FEE_CONFIG = {
   // 1 SOL = 1_000_000_000 lamports.
-  // These are MVP/testnet defaults and must be configurable per environment.
+  // These are MVP/devnet defaults and must be configurable per environment.
   guessSubmissionFeeLamports: 10_000_000, // 0.01 SOL
   ruleProposalFeeLamports: 20_000_000, // 0.02 SOL
   ruleRemovalFeeLamports: 50_000_000, // 0.05 SOL
@@ -2321,7 +2321,7 @@ creator_reward = min(
 )
 ```
 
-Default MVP/testnet creator reward configuration:
+Default MVP/devnet creator reward configuration:
 
 ```typescript
 const CREATOR_REWARD_CONFIG = {
@@ -2425,7 +2425,7 @@ If individual payout is below the MVP minimum claim threshold:
 payout below threshold → rollover bucket for the same prize category
 ```
 
-Default MVP/testnet payout configuration:
+Default MVP/devnet payout configuration:
 
 ```typescript
 const PAYOUT_CONFIG = {
@@ -2447,7 +2447,7 @@ If the claim window expires:
 unclaimed payout → rollover bucket for the same prize category
 ```
 
-Default MVP/testnet claim configuration:
+Default MVP/devnet claim configuration:
 
 ```typescript
 const CLAIM_CONFIG = {
@@ -2499,7 +2499,7 @@ In addition to this financial incentive, MVP should prioritize social recognitio
 
 Rate limits are required to reduce spam, protect the rule pool, and make abuse visible without turning the MVP into a heavy identity system.
 
-Default MVP/testnet rate-limit configuration:
+Default MVP/devnet rate-limit configuration:
 
 ```typescript
 const MVP_RATE_LIMIT_CONFIG = {
@@ -2790,7 +2790,7 @@ Responsibilities:
 
 Responsibilities:
 
-- maintain the repeating turn duration cycle: `1h → 1h → 2h → 2h → 8h → 8h`;
+- maintain the repeating turn duration cycle: `2h → 2h → 8h → 8h`;
 - assign the correct duration to each new turn;
 - store the current cycle index;
 - calculate proportional cutoff times for rule election and guess submission;
@@ -2801,7 +2801,7 @@ Responsibilities:
 - process election VRF fulfillment before guess close;
 - close guess submission at 96.7% of turn duration;
 - trigger Switchboard VRF draw at 100% of turn duration;
-- reset the cycle to 1 hour after the second 8-hour turn completes.
+- reset the cycle to 2 hours after the second 8-hour turn completes.
 
 ### 10.4 Token Counter Service
 
@@ -3214,7 +3214,7 @@ Suggested setup:
 
 The project should be structured as a **monorepo**.
 
-The monorepo is the source of truth for the mobile DApp, backend services, shared packages, smart contracts, infrastructure configuration, and documentation.
+The monorepo is the source of truth for the mobile DApp, backend services, shared packages, Programs, infrastructure configuration, and documentation.
 
 Recommended tooling:
 
@@ -3697,7 +3697,7 @@ Core dashboards:
 | Dashboard | Key questions answered |
 |---|---|
 | Retention Overview | Do users return after first play, first loss, first vote, or first near-miss? |
-| Turn Cycle Performance | Which turn durations retain users best: 1h, 2h, or 8h? |
+| Turn Cycle Performance | Which turn duration retains users best: 2h or 8h? |
 | Rule Engagement | Are users proposing, voting, sharing, and following rules? |
 | Creator Retention | Do rule creators return after their rule is sampled, elected, or creates winners? |
 | Wallet Funnel | Where do mobile users drop: connect, sign, submit, vote, claim, or return from wallet? |
@@ -4024,7 +4024,7 @@ Establish the product baseline, architecture baseline, monorepo structure, Docke
 - [x] Confirm rule creation is free-form, not template-based.
 - [x] Confirm rule length is limited by AI-context token count.
 - [x] Confirm `RULE_MAX_TOKENS` initial value.
-- [x] Confirm turn duration cycle: `1h → 1h → 2h → 2h → 8h → 8h → repeat`.
+- [x] Confirm turn duration cycle: `2h → 2h → 8h → 8h → repeat`.
 - [x] Confirm two winning conditions: original rule and active alternative rule.
 - [x] Confirm current-turn Game Token requirement for proposing, voting, removing, and reporting rules.
 - [x] Confirm rule election policy: exactly 10 finalists, composed of 3 top-voted eligible + 7 VRF-random eligible, then one VRF-elected active rule.
@@ -4036,7 +4036,7 @@ Establish the product baseline, architecture baseline, monorepo structure, Docke
 - [x] Confirm admin console is separate from the public DApp.
 - [x] Confirm admin console is for insights, not direct game manipulation.
 - [x] Confirm monorepo and Docker Compose are required implementation constraints.
-- [x] Resolve contradictions between economy, rule system, AI verification, smart contracts, and UX.
+- [x] Resolve contradictions between economy, rule system, AI verification, Programs, and UX.
 
 **Approval criteria:**
 
@@ -4151,7 +4151,7 @@ Establish the product baseline, architecture baseline, monorepo structure, Docke
 
 #### M0.4 — Technical Contracts
 
-**Objective:** define the contracts between frontend, backend, worker, AI agent, database, and smart contracts.
+**Objective:** define the contracts between frontend, backend, worker, AI agent, database, and Programs.
 
 **Checklist:**
 
@@ -4269,23 +4269,23 @@ Validate the user-facing mobile game loop without real blockchain payments or pr
 
 **Checklist:**
 
-- [ ] Build `NumberPicker` component.
-- [ ] Display numbers 1 to 100 in a mobile-friendly layout.
-- [ ] Enforce exactly 6 selected numbers.
-- [ ] Prevent duplicate numbers.
-- [ ] Display selected numbers in sticky tray.
-- [ ] Add remove/edit selected number behavior.
-- [ ] Add randomize option.
-- [ ] Add clear selection option.
-- [ ] Add validation message for incomplete selection.
-- [ ] Add confirmation step before simulated submission.
-- [ ] Add success state after simulated submission.
+- [x] Build `NumberPicker` component.
+- [x] Display numbers 1 to 100 in a mobile-friendly layout.
+- [x] Enforce exactly 6 selected numbers.
+- [x] Prevent duplicate numbers.
+- [x] Display selected numbers in sticky tray.
+- [x] Add remove/edit selected number behavior.
+- [x] Add randomize option.
+- [x] Add clear selection option.
+- [x] Add validation message for incomplete selection.
+- [x] Add confirmation step before simulated submission.
+- [x] Add success state after simulated submission.
 
 **Approval criteria:**
 
-- [ ] User can select 6 unique numbers without assistance.
-- [ ] Invalid selections are blocked before submission.
-- [ ] The interaction is usable on mobile without precision tapping.
+- [x] User can select 6 unique numbers without assistance.
+- [x] Invalid selections are blocked before submission.
+- [x] The interaction is usable on mobile without precision tapping.
 
 ---
 
@@ -4295,25 +4295,25 @@ Validate the user-facing mobile game loop without real blockchain payments or pr
 
 **Checklist:**
 
-- [ ] Build `RuleProposalComposer`.
-- [ ] Add free-form textarea.
-- [ ] Add approximate live token counter.
-- [ ] Show max token limit.
-- [ ] Add warning when approaching token limit.
-- [ ] Disable submit when over token limit.
-- [ ] Add sanitized preview.
-- [ ] Add AI-style preview placeholder or mock.
-- [ ] Add ambiguity warning placeholder or mock.
-- [ ] Add examples for inspiration only.
-- [ ] Ensure examples are not implemented as templates.
-- [ ] Add confirmation step before simulated proposal.
-- [ ] Add success state after proposal.
+- [x] Build `RuleProposalComposer`.
+- [x] Add free-form textarea.
+- [x] Add approximate live token counter.
+- [x] Show max token limit.
+- [x] Add warning when approaching token limit.
+- [x] Disable submit when over token limit.
+- [x] Add sanitized preview.
+- [x] Add AI-style preview placeholder or mock.
+- [x] Add ambiguity warning placeholder or mock.
+- [x] Add examples for inspiration only.
+- [x] Ensure examples are not implemented as templates.
+- [x] Add confirmation step before simulated proposal.
+- [x] Add success state after proposal.
 
 **Approval criteria:**
 
-- [ ] Users can write a rule freely.
-- [ ] Users understand why a rule is rejected for length.
-- [ ] UI does not force fixed categories or rule combinations.
+- [x] Users can write a rule freely.
+- [x] Users understand why a rule is rejected for length.
+- [x] UI does not force fixed categories or rule combinations.
 
 ---
 
@@ -4323,23 +4323,23 @@ Validate the user-facing mobile game loop without real blockchain payments or pr
 
 **Checklist:**
 
-- [ ] Build `RuleVotingPanel`.
-- [ ] Display proposed rules as cards.
-- [ ] Display vote counts.
-- [ ] Display current user vote state.
-- [ ] Allow user to vote on a rule.
-- [ ] Allow vote change if prototype rules allow it.
-- [ ] Show leading rule.
-- [ ] Show voting close countdown.
-- [ ] Add feedback after vote.
-- [ ] Add empty state when no rules exist.
-- [ ] Add activity feed event when vote is cast.
+- [x] Build `RuleVotingPanel`.
+- [x] Display proposed rules as cards.
+- [x] Display vote counts.
+- [x] Display current user vote state.
+- [x] Allow user to vote on a rule.
+- [x] Allow vote change if prototype rules allow it.
+- [x] Show leading rule.
+- [x] Show voting close countdown.
+- [x] Add feedback after vote.
+- [x] Add empty state when no rules exist.
+- [x] Add activity feed event when vote is cast.
 
 **Approval criteria:**
 
-- [ ] User can vote in one or two taps.
-- [ ] User understands that voting influences the Rule of the Hour.
-- [ ] Leading rule state updates visibly.
+- [x] User can vote in one or two taps.
+- [x] User understands that voting influences the Rule of the Hour.
+- [x] Leading rule state updates visibly.
 
 ---
 
@@ -4349,22 +4349,22 @@ Validate the user-facing mobile game loop without real blockchain payments or pr
 
 **Checklist:**
 
-- [ ] Implement turn duration sequence: `1h → 1h → 2h → 2h → 8h → 8h`.
-- [ ] Implement repeat after the second 8h turn.
-- [ ] Add accelerated simulation mode for testing.
-- [ ] Show current cycle step in UI.
-- [ ] Show next turn duration.
-- [ ] Simulate voting close timing.
-- [ ] Simulate guess close timing.
-- [ ] Simulate draw timing.
-- [ ] Simulate turn rollover.
-- [ ] Add edge state for late entry near draw.
+- [x] Implement turn duration sequence: `2h → 2h → 8h → 8h`.
+- [x] Implement repeat after the second 8h turn.
+- [x] Add accelerated simulation mode for testing.
+- [x] Show current cycle step in UI.
+- [x] Show next turn duration.
+- [x] Simulate voting close timing.
+- [x] Simulate guess close timing.
+- [x] Simulate draw timing.
+- [x] Simulate turn rollover.
+- [x] Add edge state for late entry near draw.
 
 **Approval criteria:**
 
-- [ ] Cycle order is correct.
-- [ ] UI communicates current and next duration clearly.
-- [ ] Accelerated mode allows testing all durations quickly.
+- [x] Cycle order is correct.
+- [x] UI communicates current and next duration clearly.
+- [x] Accelerated mode allows testing all durations quickly.
 
 ---
 
@@ -4374,24 +4374,24 @@ Validate the user-facing mobile game loop without real blockchain payments or pr
 
 **Checklist:**
 
-- [ ] Build `DrawResultPanel`.
-- [ ] Show drawn numbers.
-- [ ] Show submitted guess.
-- [ ] Show original rule result.
-- [ ] Show alternative rule result.
-- [ ] Show active rule text.
-- [ ] Show near-miss feedback.
-- [ ] Show winning/loss explanation.
-- [ ] Show rule creator attribution.
-- [ ] Show simulated creator reward/status outcome.
-- [ ] Show next round CTA.
-- [ ] Add share result CTA.
+- [x] Build `DrawResultPanel`.
+- [x] Show drawn numbers.
+- [x] Show submitted guess.
+- [x] Show original rule result.
+- [x] Show alternative rule result.
+- [x] Show active rule text.
+- [x] Show near-miss feedback.
+- [x] Show winning/loss explanation.
+- [x] Show rule creator attribution.
+- [x] Show simulated creator reward/status outcome.
+- [x] Show next round CTA.
+- [x] Add share result CTA.
 
 **Approval criteria:**
 
-- [ ] User understands why they won or lost.
-- [ ] User sees a reason to join the next round.
-- [ ] Creator outcome is visible without confusing winner payout.
+- [x] User understands why they won or lost.
+- [x] User sees a reason to join the next round.
+- [x] Creator outcome is visible without confusing winner payout.
 
 ---
 
@@ -4430,11 +4430,11 @@ M1 is approved only if all M1 submilestones are approved and:
 
 ---
 
-### 15.3 Milestone M2 — Testnet DApp Core
+### 15.3 Milestone M2 — Devnet DApp Core
 
 #### Objective
 
-Implement a working mobile DApp on Solana testnet with wallet flows, testnet transactions, core smart contract state, and public round pages.
+Implement a working mobile DApp on Solana devnet with wallet flows, devnet transactions, core smart contract state, and public round pages.
 
 ---
 
@@ -4467,9 +4467,9 @@ Implement a working mobile DApp on Solana testnet with wallet flows, testnet tra
 
 ---
 
-#### M2.2 — Testnet Smart Contracts
+#### M2.2 — devnet Programs
 
-**Objective:** implement the core on-chain state and instructions for testnet.
+**Objective:** implement the core on-chain state and instructions for devnet.
 
 **Checklist:**
 
@@ -4492,22 +4492,22 @@ Implement a working mobile DApp on Solana testnet with wallet flows, testnet tra
 
 **Approval criteria:**
 
-- [ ] Contracts deploy to testnet.
+- [ ] Contracts deploy to devnet.
 - [ ] Core instructions execute successfully.
 - [ ] Invalid guesses, invalid rule proposals, and invalid on-chain votes are rejected.
 - [ ] Tests pass locally and in CI.
 
 ---
 
-#### M2.3 — Testnet Guess Submission
+#### M2.3 — devnet Guess Submission
 
-**Objective:** allow users to submit guesses to testnet from mobile.
+**Objective:** allow users to submit guesses to devnet from mobile.
 
 **Checklist:**
 
 - [ ] Connect number picker to transaction creation.
 - [ ] Validate 6 unique numbers before transaction.
-- [ ] Submit guess to testnet contract.
+- [ ] Submit guess to devnet contract.
 - [ ] Prevent multiple guesses per wallet per turn.
 - [ ] Save guess state in backend indexer/API.
 - [ ] Show transaction status in UI.
@@ -4523,7 +4523,7 @@ Implement a working mobile DApp on Solana testnet with wallet flows, testnet tra
 
 ---
 
-#### M2.4 — Testnet Rule Proposal
+#### M2.4 — devnet Rule Proposal
 
 **Objective:** allow users to propose free-form rules with token enforcement and full sanitized original rule text stored on-chain in `RuleProposal`.
 
@@ -4551,7 +4551,7 @@ Implement a working mobile DApp on Solana testnet with wallet flows, testnet tra
 
 ---
 
-#### M2.5 — Testnet Voting
+#### M2.5 — devnet Voting
 
 **Objective:** allow voting on rules through on-chain `RuleVote` accounts with auditable state.
 
@@ -4593,7 +4593,7 @@ Implement a working mobile DApp on Solana testnet with wallet flows, testnet tra
 
 **Approval criteria:**
 
-- [ ] Public round page reflects accurate testnet state.
+- [ ] Public round page reflects accurate devnet state.
 - [ ] Completed round remains accessible after rollover.
 - [ ] Shared round link opens correctly on mobile.
 
@@ -4605,7 +4605,7 @@ M2 is approved only if all M2 submilestones are approved and:
 
 - [ ] Docker environment runs web, API, worker, Postgres, and Redis consistently.
 - [ ] Contract tests pass.
-- [ ] Testnet DApp core flow works on supported mobile wallets.
+- [ ] devnet DApp core flow works on supported mobile wallets.
 
 ---
 
@@ -4623,7 +4623,7 @@ Implement draw generation, rule election, AI rule validation, guess verification
 
 **Checklist:**
 
-- [ ] Integrate Switchboard VRF or selected VRF flow on testnet.
+- [ ] Integrate Switchboard VRF or selected VRF flow on devnet.
 - [ ] Trigger draw at correct turn time.
 - [ ] Generate 6 unique numbers between 1 and 100.
 - [ ] Store draw result in contract/backend state.
@@ -5154,7 +5154,7 @@ Build a private admin console that is not directly associated with the public ap
 
 M5 is approved only if all M5 submilestones are approved and:
 
-- [ ] At least three actionable retention or engagement insights can be derived from testnet usage.
+- [ ] At least three actionable retention or engagement insights can be derived from devnet usage.
 - [ ] Admin access restrictions pass review.
 - [ ] Admin does not compromise game integrity.
 
@@ -5815,7 +5815,7 @@ This section replaces the former open questions list. The following decisions ar
 4. Full sanitized original rule text is stored on-chain in the `RuleProposal` account. Off-chain copies may exist only for indexing, search, analytics, and UI performance.
 5. Rule votes are on-chain through `RuleVote` accounts or an equivalent on-chain account model. MVP does not use off-chain vote commitments as the primary voting record.
 6. The finalist set is exactly 10 rules whenever at least 10 eligible rules exist: 3 top-voted eligible rules plus 7 VRF-random eligible rules. If fewer than 10 eligible rules exist, all available eligible rules form the finalist set.
-7. Turn duration starts at 1 hour and follows the fixed repeating cycle `1h → 1h → 2h → 2h → 8h → 8h → repeat`.
+7. Turn duration starts at 2 hours and follows the fixed repeating cycle `2h → 2h → 8h → 8h → repeat`.
 8. The alternative rule pool remains 50% of the post-treasury playable prize pool. If no alternative rule is active or no alternative-rule winners exist, the alternative bucket follows the rollover rules.
 9. Creator rewards remain fixed at 15% of each individual alternative-rule winner payout, funded from the creator reward reserve sourced from platform monetization and subject to reserve and cap.
 10. MVP reserves 20% of platform monetization for the creator reward reserve. This is a configurable treasury policy, but winner-visible payouts must never be reduced to fund creator rewards.
@@ -5831,7 +5831,7 @@ This section replaces the former open questions list. The following decisions ar
 20. Optional local observability containers (`idealer-prometheus`, `idealer-grafana`) are included under a separate Docker Compose observability profile, not in the default required local stack.
 21. M9 Mainnet Readiness Gates are mandatory before M6 can process any real SOL payment, payout, claim, treasury transfer, or creator reward on mainnet.
 22. Launch-blocking metrics are the M9 approval gates plus the M6/M7 approval criteria for mobile reliability, turn automation, job completion, claims, abuse visibility, and payout/accounting reconciliation.
-23. Default MVP/testnet fees are: guess submission `0.01 SOL`, rule proposal `0.02 SOL`, paid rule removal `0.05 SOL`, vote `0 SOL`, and report `0 SOL`, with `treasuryFeeBps = 500`.
+23. Default MVP/devnet fees are: guess submission `0.01 SOL`, rule proposal `0.02 SOL`, paid rule removal `0.05 SOL`, vote `0 SOL`, and report `0 SOL`, with `treasuryFeeBps = 500`.
 24. The default creator reward cap is `0.25 SOL` per turn, with 20% of platform monetization reserved for the creator reward reserve.
 25. The default minimum claim threshold is `0.005 SOL`; payouts below this threshold roll over to the same category bucket.
 26. The default claim window is `12` turns or `7` days, whichever happens first; expired unclaimed payouts roll over to the same category bucket.
@@ -5918,7 +5918,7 @@ Mitigations:
 
 ### Variable Turn Duration Cycle: Expected Impact
 
-The repeating duration cycle `1h → 1h → 2h → 2h → 8h → 8h` is expected to have a mixed but mostly positive retention effect if the UI supports it well.
+The repeating duration cycle `2h → 2h → 8h → 8h` is expected to have a mixed but mostly positive retention effect if the UI supports it well.
 
 Positive effects:
 
@@ -5930,7 +5930,7 @@ Positive effects:
 
 Potential negative effects:
 
-- users may be confused if they expect every turn to last 1 hour;
+- users may be confused if they expect every turn to last 2 hours;
 - longer turns can reduce urgency;
 - inactive feeds during long turns can make the product feel slow;
 - users may miss draws without reminders.
@@ -5980,7 +5980,7 @@ Implementation priority:
 
 ```text
 M0/M1: specification cleanup, state machines, schemas, preflight contracts
-M2: Game Token PDA, preflight-gated proposal/voting, testnet account model
+M2: Game Token PDA, preflight-gated proposal/voting, devnet account model
 M3: Switchboard election VRF, precompilation cache, ranged finalist selection
 M4+: accounting and creator reward reconciliation against finalized active rule
 M9: mainnet gates for election randomness, compiler, runtime, accounting, mobile reliability and abuse resistance

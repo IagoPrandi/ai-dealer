@@ -15,7 +15,7 @@ Players pick six unique numbers, submit one guess for the current turn, vote on 
 ## Turn Rules
 
 - A turn is the atomic game window.
-- The turn duration cycle is fixed for MVP: `1h -> 1h -> 2h -> 2h -> 8h -> 8h -> repeat`.
+- The turn duration cycle is fixed for MVP: `2h -> 2h -> 8h -> 8h -> repeat`.
 - Each turn has a new draw, a new alternative rule election opportunity, a new prize pool, and independent winner evaluation.
 - Six unique numbers from 1 to 100 are drawn using Switchboard VRF.
 - Each wallet may submit one guess per turn.

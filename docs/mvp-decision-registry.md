@@ -10,7 +10,7 @@ This registry records binding MVP decisions from `PRD.md` version 1.3.4. Changes
 | 4 | Full sanitized original rule text is stored on-chain in the `RuleProposal` account. Off-chain copies may exist for indexing, search, analytics, and UI performance. | Locked | PRD section 16 |
 | 5 | Rule votes are on-chain through `RuleVote` accounts or an equivalent on-chain account model. MVP does not use off-chain vote commitments as the primary voting record. | Locked | PRD section 16 |
 | 6 | The finalist set is exactly 10 rules when at least 10 eligible rules exist: 3 top-voted eligible rules plus 7 VRF-random eligible rules. | Locked | PRD section 16 |
-| 7 | Turn duration starts at 1 hour and follows `1h -> 1h -> 2h -> 2h -> 8h -> 8h -> repeat`. | Locked | PRD section 16 |
+| 7 | Turn duration starts at 2 hours and follows `2h -> 2h -> 8h -> 8h -> repeat`. | Locked | PRD section 16 |
 | 8 | The alternative rule pool remains 50% of the post-treasury playable prize pool. If no alternative rule is active or no alternative-rule winners exist, the bucket follows rollover rules. | Locked | PRD section 16 |
 | 9 | Creator rewards remain fixed at 15% of each individual alternative-rule winner payout, funded from the creator reward reserve sourced from platform monetization and subject to reserve and cap. | Locked | PRD section 16 |
 | 10 | MVP reserves 20% of platform monetization for the creator reward reserve. Winner-visible payouts must never be reduced to fund creator rewards. | Locked | PRD section 16 |

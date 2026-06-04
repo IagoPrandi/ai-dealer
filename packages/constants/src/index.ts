@@ -1,7 +1,7 @@
 export const RULE_MAX_TOKENS = 80;
 export const MAX_REMOVABLE_NUMBERS = 4;
 
-export const TURN_DURATION_CYCLE_HOURS = [1, 1, 2, 2, 8, 8] as const;
+export const TURN_DURATION_CYCLE_HOURS = [2, 2, 8, 8] as const;
 
 export const MVP_FEES_SOL = {
   guessSubmission: 0.01,

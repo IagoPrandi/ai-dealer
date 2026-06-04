@@ -55,7 +55,12 @@ const activityFeed: readonly ActivityEvent[] = [
   }
 ];
 
-const secondaryActions = ["Vote", "Propose rule", "Rules", "Results"];
+const secondaryActions = [
+  { href: "/play/vote", label: "Vote" },
+  { href: "/play/propose", label: "Propose rule" },
+  { href: "/play/simulate", label: "Cycle" },
+  { href: "/play/results", label: "Results" }
+] as const;
 
 function formatCountdown(totalSeconds: number) {
   const hours = Math.floor(totalSeconds / 3600);
@@ -304,9 +309,9 @@ export function MobileLiveRoundHub() {
       <nav className="bottom-nav" aria-label="Round actions">
         <div className="secondary-actions">
           {secondaryActions.map((action) => (
-            <button className="secondary-action" key={action} type="button">
-              {action}
-            </button>
+            <Link className="secondary-action" href={action.href} key={action.label}>
+              {action.label}
+            </Link>
           ))}
         </div>
         <Link className="primary-action" href="/play/pick">

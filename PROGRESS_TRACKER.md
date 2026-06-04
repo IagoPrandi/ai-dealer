@@ -22,7 +22,12 @@ Opened before starting `M0.1`:
 | M0.5 | Mobile UX Flow Baseline | Completed | Confirmed 2026-06-03 | Required UX flow artifacts implemented, validated, and marked complete after user confirmation. |
 | M0.6 | Not defined in PRD | Blocked | Pending | No M0.6 section exists in `PRD.md`; the next defined milestone is M1.1. |
 | M1.1 | Mobile Live Round Hub | Completed | Confirmed 2026-06-03 | Public `/play` hub implemented, validated, and marked complete after user confirmation. |
-| M1.2 | Mobile Number Picker | Implemented, awaiting confirmation | Pending | Number picker flow implemented and validated. PRD checkboxes remain pending user confirmation. |
+| M1.2 | Mobile Number Picker | Completed | Confirmed 2026-06-04 | Number picker flow implemented, validated, and marked complete after user confirmation. |
+| M1.3 | Free-Form Rule Composer | Completed | Confirmed 2026-06-04 | Free-form rule proposal flow implemented, validated, and marked complete after user confirmation. |
+| M1.4 | Voting Flow | Completed | Confirmed 2026-06-04 | Mobile voting flow implemented, validated, and marked complete after user confirmation. |
+| M1.5 | Simulated Turn Cycle | Completed | Confirmed 2026-06-04 | Variable turn-cycle simulator implemented, validated, and marked complete after user confirmation. |
+| M1.6 | Simulated Result, Near-Miss & Creator Outcome | Completed | Confirmed 2026-06-04 | Simulated result flow implemented, validated, and marked complete after user confirmation. |
+| M1.7 | Mobile Share Card Prototype | Implemented, awaiting confirmation | Pending | Mobile share card generator implemented and validated. PRD checkboxes remain pending user confirmation. |
 
 ## M0.1 Work Log
 
@@ -30,7 +35,7 @@ Opened before starting `M0.1`:
 
 - Opened `PRD.md`, `AGENTS.md`, `.claude/skills/best-practices/SKILL.md`, and `.claude/skills/best-practices/references/agent-principles.md` again before implementing `M0.1`.
 - Ran a consistency pass across `PRD.md`, `docs/product-rule-summary.md`, `docs/mvp-decision-registry.md`, and `PROGRESS_TRACKER.md`.
-- Corrected the project turn-duration source of truth to `1h -> 1h -> 2h -> 2h -> 8h -> 8h -> repeat`.
+- Corrected the project turn-duration source of truth to `2h -> 2h -> 8h -> 8h -> repeat`.
 - Marked M0.1 checklist, approval criteria, and required artifacts complete after user confirmation.
 - Started M0.2.
 
@@ -70,7 +75,7 @@ Opened before starting `M0.1`:
 | Mobile-first DApp and desktop secondary surface | Confirmed in `PRD.md` and `docs/product-rule-summary.md`. |
 | Free-form rule creation and AI-context token limit | Confirmed in `PRD.md`, `docs/product-rule-summary.md`, and `docs/mvp-decision-registry.md`. |
 | `RULE_MAX_TOKENS` value | Confirmed as `80`. |
-| Turn duration cycle | Confirmed as `1h -> 1h -> 2h -> 2h -> 8h -> 8h -> repeat`. |
+| Turn duration cycle | Confirmed as `2h -> 2h -> 8h -> 8h -> repeat`. |
 | Winning conditions | Confirmed as original rule and active alternative rule. |
 | Game Token gating | Confirmed for proposing, voting, removing, and reporting rules. |
 | Rule election policy | Confirmed as 3 top-voted eligible rules plus 7 VRF-random eligible rules when at least 10 eligible rules exist. |
@@ -102,7 +107,7 @@ Opened before starting `M0.1`:
 - Verified root commands with `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build`.
 - Started local dev servers for the public DApp and admin console.
 - Verified `http://localhost:3000` and `http://localhost:3001` return HTTP 200.
-- Kept the project turn-duration source of truth as `1h -> 1h -> 2h -> 2h -> 8h -> 8h -> repeat`.
+- Kept the project turn-duration source of truth as `2h -> 2h -> 8h -> 8h -> repeat`.
 - Marked M0.2 checklist, approval criteria, and required artifacts complete after user confirmation.
 
 ## M0.2 Artifact Review
@@ -193,7 +198,7 @@ Opened before starting `M0.1`:
 - Added `docs/admin-metrics-dictionary.md`.
 - Added `docs/shared-error-codes.md`.
 - Added shared error-code exports in `packages/constants/src/error-codes.ts` and `packages/constants/src/index.ts`.
-- Confirmed the turn-duration source of truth remains `1h -> 1h -> 2h -> 2h -> 8h -> 8h -> repeat`.
+- Confirmed the turn-duration source of truth remains `2h -> 2h -> 8h -> 8h -> repeat`.
 - Left M0.4 PRD checklist, approval criteria, and required artifacts unchecked pending user confirmation.
 
 ### 2026-06-03
@@ -389,4 +394,255 @@ Opened before starting `M0.1`:
 
 ## M1.2 Confirmation Gate
 
-`M1.2` is implemented and awaiting user confirmation before PRD checklist items are marked complete.
+`M1.2` was marked complete after user confirmation on 2026-06-04.
+
+## M1.3 Work Log
+
+### 2026-06-04
+
+- Reopened `PRD.md`, `AGENTS.md`, and `.claude/skills` before verifying M1.2 and starting M1.3, as required.
+- Used `.claude/skills/best-practices/references/agent-principles.md`, `.claude/skills/best-practices/references/code-quality.md`, `.claude/skills/develop-frontend/SKILL.md`, and the Next.js App Router guidance skill.
+- Rechecked M1.2 artifacts and validation results against the PRD checklist.
+- Marked M1.2 checklist and approval criteria complete after user confirmation.
+- Corrected the project turn-duration source of truth and implementation to `2h -> 2h -> 8h -> 8h -> repeat`.
+- Added `RuleProposalComposer` with free-form input, approximate live token count, configured maximum, near-limit warning, over-limit rejection, sanitized preview, AI-style preview mock, ambiguity warning mock, inspiration examples, review step, and simulated success state.
+- Added `/play/propose` and connected the live-round hub proposal action to it.
+- Added Playwright E2E coverage for token-limit rejection and successful simulated proposal.
+- Left M1.3 PRD checklist and approval criteria unchecked pending user confirmation.
+- Reopened `PRD.md`, `AGENTS.md`, `.claude/skills`, frontend guidance, code-quality guidance, Next.js App Router guidance, and Playwright guidance before verifying M1.3 and starting M1.4.
+- Rechecked M1.3 against its checklist and validation evidence.
+- Marked M1.3 checklist and approval criteria complete after user confirmation.
+- Started M1.4.
+
+## M1.3 Artifact Review
+
+| Artifact | Status | Notes |
+|---|---|---|
+| `apps/web/src/features/rule-proposal/RuleProposalComposer.tsx` | Implemented | Contains free-form composition, token-limit behavior, sanitized and AI-style previews, ambiguity feedback, review, and success states. |
+| `apps/web/src/app/play/propose/page.tsx` | Implemented | Exposes the mobile rule proposal route. |
+| `apps/web/src/features/live-round/MobileLiveRoundHub.tsx` | Updated | Proposal action now navigates to `/play/propose`. |
+| `apps/web/src/app/globals.css` | Updated | Adds responsive composer, preview, warning, inspiration, review, and success-state styles. |
+| `apps/web/e2e/rule-proposal.spec.ts` | Implemented | Verifies token-limit rejection and the complete simulated proposal flow. |
+
+## M1.3 Validation Results
+
+| Requirement | Result |
+|---|---|
+| Users can write a rule freely | Passed; the composer uses an unrestricted natural-language textarea. |
+| Users understand why a rule is rejected for length | Passed; live token count, configured maximum, warning, and disabled review state are visible. |
+| UI does not force fixed categories or rule combinations | Passed; examples are inspiration-only text and do not populate the composer. |
+| Turn duration cycle | Passed; PRD, product summary, decision registry, tracker, and runtime constant use `2h -> 2h -> 8h -> 8h -> repeat`. |
+| Runtime cycle verification | Passed; `getTurnDurationHours` produced `[2, 2, 8, 8, 2, 2, 8, 8]` for cycle indexes 0 through 7. |
+| Rule proposal route loads | Passed; `/play/propose` is included in the production build. |
+| E2E | Passed with `pnpm --filter @idealer/web test:e2e`; both number picker and rule proposal tests passed. |
+| Typecheck | Passed with `pnpm typecheck`. |
+| Lint | Passed with `pnpm lint`. |
+| Tests | Passed with `pnpm test`. |
+| Build | Passed with `pnpm build`; `/play/propose` is included in generated routes. |
+| Visual verification | Passed at `390x844` and `1440x1000`; page has content, expected controls render, no framework overlay is present, and no console errors were detected. The unavailable `agent-browser` CLI was replaced explicitly with the installed Playwright browser runtime. |
+| Whitespace check | Passed with `git diff --check`; Git reported CRLF normalization warnings only. |
+
+## M1.3 Confirmation Gate
+
+`M1.3` was marked complete after user confirmation on 2026-06-04.
+
+## M1.4 Work Log
+
+### 2026-06-04
+
+- Added `RuleVotingPanel` as an interactive client component while keeping `/play/vote` as a server-rendered App Router page.
+- Added proposed-rule cards with original text, explanation, creator, clarity, difficulty, token count, and live vote totals.
+- Added current-user vote state, one-tap initial voting, vote changes, immediate feedback, and dynamically updated leading-rule state.
+- Added a visible voting-close countdown and plain-language explanation that votes influence the finalist set while VRF selects the Rule of the Hour.
+- Added an empty rule-pool prototype state.
+- Added live activity events after votes.
+- Connected the live-round hub Vote action to `/play/vote`.
+- Added Playwright E2E coverage for initial voting, vote changes, leader updates, feedback, activity events, and the empty state.
+- Left M1.4 PRD checklist and approval criteria unchecked pending user confirmation.
+- Reopened `PRD.md`, `AGENTS.md`, `.claude/skills`, frontend guidance, code-quality guidance, and Playwright guidance before verifying M1.4 and starting M1.5.
+- Rechecked M1.4 against its checklist, E2E evidence, and responsive visual evidence.
+- Marked M1.4 checklist and approval criteria complete after user confirmation.
+- Started M1.5.
+
+## M1.4 Artifact Review
+
+| Artifact | Status | Notes |
+|---|---|---|
+| `apps/web/src/features/rule-voting/RuleVotingPanel.tsx` | Implemented | Contains proposed-rule cards, live vote totals, user vote state, vote changes, dynamic leader, countdown, feedback, empty state, and activity feed. |
+| `apps/web/src/app/play/vote/page.tsx` | Implemented | Exposes the mobile voting route. |
+| `apps/web/src/features/live-round/MobileLiveRoundHub.tsx` | Updated | Vote action now navigates to `/play/vote`. |
+| `apps/web/src/app/globals.css` | Updated | Adds responsive voting summary, rule cards, metadata, actions, empty state, and activity styles. |
+| `apps/web/e2e/rule-voting.spec.ts` | Implemented | Verifies voting, vote change, visible leader update, feedback, activity event, and empty state. |
+
+## M1.4 Validation Results
+
+| Requirement | Result |
+|---|---|
+| User can vote in one or two taps | Passed; each rule card has a direct vote action and E2E completes an initial vote with one click. |
+| User understands that voting influences the Rule of the Hour | Passed; the leading summary explicitly explains finalist-set influence and VRF selection. |
+| Leading rule state updates visibly | Passed; E2E confirms `Balanced spread wins` becomes the visible leader immediately after voting. |
+| Current user vote and vote change | Passed; selected action and summary show the current vote, and E2E confirms vote changes. |
+| Feedback and activity event | Passed; an `aria-live` feedback message and a new activity event appear after each vote. |
+| Empty state | Passed; the prototype state control exposes a clear no-eligible-rules state. |
+| Live-round hub links to voting route | Passed; Vote navigates to `/play/vote`. |
+| Voting route loads | Passed; `/play/vote` returns HTTP `200`. |
+| E2E | Passed with `pnpm --filter @idealer/web test:e2e`; all 3 web flows passed. |
+| Typecheck | Passed with `pnpm typecheck`. |
+| Lint | Passed with `pnpm lint`. |
+| Tests | Passed with `pnpm test`. |
+| Build | Passed with `pnpm build`; `/play/vote` is included in generated routes. |
+| Visual verification | Passed at `320x700`, `390x844`, and `1440x1000`; no horizontal overflow, framework overlay, or console errors were detected. Fixed-header geometry leaves a 12px gap before content. |
+| Whitespace check | Passed with `git diff --check`; Git reported CRLF normalization warnings only. |
+
+## M1.4 Confirmation Gate
+
+`M1.4` was marked complete after user confirmation on 2026-06-04.
+
+## M1.5 Work Log
+
+### 2026-06-04
+
+- Added `TurnCycleSimulator` with the fixed `2h -> 2h -> 8h -> 8h -> repeat` sequence.
+- Added explicit current cycle step, current duration, next duration, turn number, phase, progress, and time-to-draw displays.
+- Added proportional lifecycle milestones for voting close at 75%, guess close at 96.7%, and draw/rollover at 100%.
+- Added manual phase advancement, direct late-entry testing, explicit next-turn rollover, and reset controls.
+- Added accelerated simulation mode that advances phases and rolls through turns every 900ms.
+- Added a late-entry edge state that blocks new guesses and voting near the draw.
+- Added fail-closed index validation for cycle durations, phases, and phase progress.
+- Connected the live-round hub Cycle action to `/play/simulate`.
+- Added Playwright E2E coverage for proportional timing, all four duration steps, repeat after the second 8h turn, voting close, late entry, draw, and accelerated execution.
+- Left M1.5 PRD checklist and approval criteria unchecked pending user confirmation.
+- Reopened `PRD.md`, `AGENTS.md`, `.claude/skills`, frontend guidance, code-quality guidance, and Playwright guidance before verifying M1.5 and starting M1.6.
+- Rechecked M1.5 against its checklist, E2E evidence, and responsive visual evidence.
+- Marked M1.5 checklist and approval criteria complete after user confirmation.
+- Started M1.6.
+
+## M1.5 Artifact Review
+
+| Artifact | Status | Notes |
+|---|---|---|
+| `apps/web/src/features/turn-cycle/TurnCycleSimulator.tsx` | Implemented | Contains deterministic cycle navigation, lifecycle phases, proportional timing, accelerated mode, rollover, late-entry state, and activity events. |
+| `apps/web/src/app/play/simulate/page.tsx` | Implemented | Exposes the simulated turn-cycle route. |
+| `apps/web/src/features/live-round/MobileLiveRoundHub.tsx` | Updated | Cycle action now navigates to `/play/simulate`. |
+| `apps/web/src/app/globals.css` | Updated | Adds responsive cycle summary, progress, duration strip, controls, late-entry state, timeline, and activity styles. |
+| `apps/web/e2e/turn-cycle.spec.ts` | Implemented | Verifies lifecycle timing, `2h -> 2h -> 8h -> 8h -> repeat`, late entry, draw, and accelerated simulation. |
+
+## M1.5 Validation Results
+
+| Requirement | Result |
+|---|---|
+| Cycle order is correct | Passed; E2E verifies `2h -> 2h -> 8h -> 8h -> 2h`, including repeat after the second 8h turn. |
+| UI communicates current and next duration clearly | Passed; summary and duration strip show current step, current duration, and next duration. |
+| Accelerated mode allows testing all durations quickly | Passed; accelerated mode advances every 900ms and E2E reaches draw within four seconds. |
+| Voting close timing | Passed; timeline shows 75% and E2E verifies the `Voting closed` phase. |
+| Guess close timing and late entry | Passed; timeline shows 96.7% and the late-entry edge state blocks voting and new guesses. |
+| Draw timing and rollover | Passed; draw occurs at 100%, then the next phase advancement rolls to the following turn. |
+| Invalid cycle or phase indexes | Passed; invalid indexes throw explicit errors instead of silently selecting a fallback. |
+| Live-round hub links to simulator | Passed; Cycle navigates to `/play/simulate`. |
+| Simulator route loads | Passed; `/play/simulate` returns HTTP `200`. |
+| E2E | Passed with `pnpm --filter @idealer/web test:e2e`; all 4 web flows passed. |
+| Typecheck | Passed with `pnpm typecheck`. |
+| Lint | Passed with `pnpm lint`. |
+| Tests | Passed with `pnpm test`. |
+| Build | Passed with `pnpm build`; `/play/simulate` is included in generated routes. |
+| Visual verification | Passed at `320x700`, `390x844`, and `1440x1000`; no horizontal overflow, framework overlay, or console errors were detected. Fixed-header geometry leaves a 12px gap before content, and mobile control targets are at least 44px high. |
+| Whitespace check | Passed with `git diff --check`; Git reported CRLF normalization warnings only. |
+
+## M1.5 Confirmation Gate
+
+`M1.5` was marked complete after user confirmation on 2026-06-04.
+
+## M1.6 Work Log
+
+### 2026-06-04
+
+- Added `DrawResultPanel` with near-miss, winner, and creator prototype result states.
+- Added drawn numbers, submitted guess, original-rule result, alternative-rule result, active-rule text, deterministic outcome explanations, and creator attribution.
+- Added a near-miss explanation that identifies the exact missed numbers and the remaining threshold.
+- Added a simulated creator reward outcome equal to 15% of the individual alternative-rule winner payout.
+- Made the creator reward source and accounting explicit: reserve-funded, full winner payout preserved, and zero deducted from the winner.
+- Added next-round and share-result actions with accessible share-intent feedback.
+- Added `/play/results` and connected the live-round hub Results action to it.
+- Added Playwright E2E coverage for near-miss, winner, creator, reserve-funded reward, next-round CTA, and share feedback.
+- Left M1.6 PRD checklist and approval criteria unchecked pending user confirmation.
+- Reopened `PRD.md`, `AGENTS.md`, `.claude/skills`, frontend guidance, code-quality guidance, and Playwright guidance before verifying M1.6 and starting M1.7.
+- Rechecked M1.6 against its checklist, E2E evidence, and responsive visual evidence.
+- Marked M1.6 checklist and approval criteria complete after user confirmation.
+- Started M1.7.
+
+## M1.6 Artifact Review
+
+| Artifact | Status | Notes |
+|---|---|---|
+| `apps/web/src/features/draw-result/DrawResultPanel.tsx` | Implemented | Contains result scenarios, number comparison, rule evaluations, near-miss feedback, creator attribution/reward, return CTA, and share feedback. |
+| `apps/web/src/app/play/results/page.tsx` | Implemented | Exposes the simulated result route. |
+| `apps/web/src/features/live-round/MobileLiveRoundHub.tsx` | Updated | Results action now navigates to `/play/results`. |
+| `apps/web/src/app/globals.css` | Updated | Adds responsive result layout, number comparison, evaluation, creator accounting, and action styles. |
+| `apps/web/e2e/draw-result.spec.ts` | Implemented | Verifies outcome explanations, creator accounting, next-round CTA, and share feedback. |
+
+## M1.6 Validation Results
+
+| Requirement | Result |
+|---|---|
+| User understands why they won or lost | Passed; original and alternative rule results explain each outcome and E2E verifies near-miss and winner states. |
+| User sees a reason to join the next round | Passed; next turn duration, changing-rule message, and `/play/pick` CTA are visible. |
+| Creator outcome is visible without confusing winner payout | Passed; creator reward, reserve source, full winner payout, and `0.00 SOL` winner deduction are displayed together. |
+| Result route loads | Passed; `/play/results` returns HTTP `200` and is included in the production build. |
+| E2E | Passed with `pnpm --filter @idealer/web test:e2e`; all 5 web flows passed. |
+| Typecheck | Passed with `pnpm typecheck`. |
+| Lint | Passed with `pnpm lint`. |
+| Tests | Passed with `pnpm test`. |
+| Build | Passed with `pnpm build`; `/play/results` is included in generated routes. |
+| Visual verification | Passed at `320x700`, `390x844`, and `1440x1000`; no horizontal overflow or console errors were detected, and result action targets are at least 52px high. |
+| Whitespace check | Passed with `git diff --check`; Git reported CRLF normalization warnings only. |
+
+## M1.6 Confirmation Gate
+
+`M1.6` was marked complete after user confirmation on 2026-06-04.
+
+## M1.7 Work Log
+
+### 2026-06-04
+
+- Added `ShareCardGenerator` with active-rule, near-miss, and creator-elected story variants.
+- Added a stable mobile social card with a `4:5` aspect ratio.
+- Included turn number, Rule of the Hour title, prize pool, and story-specific outcome on every card.
+- Added native Web Share API behavior.
+- Added automatic copy-link fallback when native sharing is unavailable.
+- Added an explicit Copy link action with visible success and failure feedback.
+- Added session-only prototype analytics for share-intent count, last intent type, and selected story.
+- Added `/play/share` and connected the result Share result CTA to it.
+- Added Playwright E2E coverage for story switching, native sharing, explicit copy, automatic fallback copy, and prototype analytics.
+- Left M1.7 PRD checklist and approval criteria unchecked pending user confirmation.
+
+## M1.7 Artifact Review
+
+| Artifact | Status | Notes |
+|---|---|---|
+| `apps/web/src/features/share-card/ShareCardGenerator.tsx` | Implemented | Contains three story variants, mobile card generation, share/copy behavior, fallback feedback, and share-intent analytics. |
+| `apps/web/src/app/play/share/page.tsx` | Implemented | Exposes the share-card generator route. |
+| `apps/web/src/features/draw-result/DrawResultPanel.tsx` | Updated | Share result CTA now navigates to `/play/share`. |
+| `apps/web/src/app/globals.css` | Updated | Adds stable mobile social-card, story selector, actions, and analytics styles. |
+| `apps/web/e2e/share-card.spec.ts` | Implemented | Verifies variants, required content, native sharing, copy link, fallback copy, and analytics. |
+
+## M1.7 Validation Results
+
+| Requirement | Result |
+|---|---|
+| Share card is readable on mobile | Passed; visual verification at `320x700` and `390x844` shows a stable `4:5` card without content overflow. |
+| Card communicates the interesting story of the round | Passed; active-rule, near-miss, and creator-elected variants visibly change the outcome narrative. |
+| User can share or copy without technical friction | Passed; native share, explicit Copy link, and automatic fallback copy are available with visible feedback. |
+| Required card content | Passed; every variant includes turn number, rule title, prize pool, and outcome. |
+| Prototype share analytics | Passed; share-intent count, last intent type, and selected story update visibly. |
+| Share route loads | Passed; `/play/share` returns HTTP `200` and is included in the production build. |
+| E2E | Passed with `pnpm --filter @idealer/web test:e2e`; all 7 web flows passed, including native-share fallback copy. |
+| Typecheck | Passed with `pnpm typecheck`. |
+| Lint | Passed with `pnpm lint`. |
+| Tests | Passed with `pnpm test`. |
+| Build | Passed with `pnpm build`; `/play/share` is included in generated routes. |
+| Visual verification | Passed at `320x700`, `390x844`, and `1440x1000`; no horizontal/card-content overflow or console errors were detected, and action targets are at least 44px high. |
+| Whitespace check | Passed with `git diff --check`; Git reported CRLF normalization warnings only. |
+
+## M1.7 Confirmation Gate
+
+`M1.7` is implemented and awaiting user confirmation before PRD checklist items are marked complete.
