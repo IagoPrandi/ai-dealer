@@ -676,3 +676,28 @@ M1 was marked complete after explicit user confirmation on 2026-06-04 because al
 ## M1 Completion Gate
 
 `M1` was marked complete after user confirmation on 2026-06-04. This records implementation completion and does not fabricate or waive the separate quantitative usability approval criteria.
+
+## Idealer Design Implementation Work Log
+
+### 2026-06-04
+
+- Opened `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/develop-frontend/SKILL.md`, and `.claude/skills/playwright/SKILL.md` before implementation.
+- Read `Idealer - Direcoes.html` from `Plataforma.zip` as the design README/direction document.
+- Read and rendered `Idealer.html`, then reviewed its supporting `idealer.css`, `app-home.jsx`, `app-play.jsx`, `app-profile.jsx`, `app-result.jsx`, `app.jsx`, and `shared.jsx` files.
+- Implemented the relevant premium dark, neon-accented Idealer design patterns in the existing `/play` live-round hub while preserving the existing M1 routes and prototype states.
+- Added jackpot-first hierarchy, latest-result banner, quick rule creation entry, rule ranking with vote bars and interactive details, brand/wallet header, and primary bottom navigation.
+- Kept all visible application UI copy in English.
+- Added `lucide-react` for consistent interface icons.
+- Added focused E2E coverage for the redesigned live-round hub.
+- Did not change any milestone status or checkbox.
+
+### 2026-06-04 - Fidelity Correction
+
+- Reopened `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/develop-frontend/SKILL.md`, and `.claude/skills/playwright/SKILL.md` before correcting the implementation.
+- Re-audited `Idealer.html`, `app.jsx`, `app-home.jsx`, and `app-result.jsx` from `Plataforma.zip`.
+- Replaced the earlier design interpretation with a direct structural port of the Plataforma prototype.
+- Matched the 402x868 phone shell, 96% viewport limits, 52px shell radius, dynamic island, status bar, home indicator, initial result screen, internal screen transitions, current-round home, account screen, rule detail sheet, vote bars, and bottom navigation.
+- Loaded the same `Outfit`, `Sora`, and `Space Grotesk` font families used by the design.
+- Preserved English UI copy as required by the repository instructions.
+- Removed the superseded live-round design CSS to avoid redundant or conflicting styles.
+- Did not change any milestone status or checkbox.

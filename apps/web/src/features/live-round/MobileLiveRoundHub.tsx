@@ -1,73 +1,89 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  CREATOR_REWARD_RATE_BPS,
-  MVP_FEES_SOL,
-  TURN_DURATION_CYCLE_HOURS
-} from "@idealer/constants";
+  ArrowDownToLine,
+  ArrowLeft,
+  ArrowRight,
+  ChevronDown,
+  Clock3,
+  Home,
+  Plus,
+  Send,
+  Sparkles,
+  Trophy,
+  UserRound,
+  Users,
+  Vote,
+  Wallet,
+  X,
+  Zap
+} from "lucide-react";
 
-type HubMode = "live" | "loading" | "empty" | "delayed";
+type AppScreen = "result" | "home" | "account";
 
-interface ActivityEvent {
+interface Rule {
   id: string;
-  label: string;
-  detail: string;
-  time: string;
+  title: string;
+  summary: string;
+  votes: number;
+  creator: string;
+  explanation: string;
 }
 
-const turn = {
-  id: "TURN-0008",
-  cycleIndex: 2,
-  prizePoolSol: 12.48,
-  startsAt: "14:00",
-  votingClosesAt: "14:45",
-  guessesCloseAt: "15:42",
-  drawBeginsAt: "15:46",
-  endsInSeconds: 2 * 60 * 60 + 18 * 60 + 42,
-  activeRule: {
-    title: "Closest even sum wins",
-    status: "Leading rule",
-    votes: 42,
-    creator: "4sF...9k2"
-  }
-} as const;
-
-const activityFeed: readonly ActivityEvent[] = [
+const rules: readonly Rule[] = [
   {
-    id: "evt-1",
-    label: "Rule proposed",
-    detail: "Highest odd number wins",
-    time: "2m ago"
+    id: "even-sum",
+    title: "Closest even sum",
+    summary: "The guess with the closest even total to the drawn total wins.",
+    votes: 240,
+    creator: "@luna.sol",
+    explanation:
+      "Every eligible guess is totaled. Only even totals qualify, and the closest total wins."
   },
   {
-    id: "evt-2",
-    label: "Vote cast",
-    detail: "Closest even sum wins",
-    time: "5m ago"
+    id: "highest-odd",
+    title: "Highest odd wins",
+    summary: "The guess containing the highest drawn odd number wins.",
+    votes: 198,
+    creator: "@oddball",
+    explanation: "The highest odd number in the draw decides which eligible guess wins."
   },
   {
-    id: "evt-3",
-    label: "Prize increased",
-    detail: "+0.21 SOL entered this turn",
-    time: "8m ago"
+    id: "perfect-mirror",
+    title: "Perfect mirror",
+    summary: "The most symmetrical number sequence wins.",
+    votes: 165,
+    creator: "@vrf.king",
+    explanation: "Each guess is compared forward and backward. The most symmetrical sequence wins."
+  },
+  {
+    id: "underdog",
+    title: "The underdog",
+    summary: "The guess matching the fewest drawn numbers wins.",
+    votes: 121,
+    creator: "@reverse",
+    explanation: "This rule reverses the usual objective: the fewest matching numbers wins."
+  },
+  {
+    id: "seven-club",
+    title: "Seven club",
+    summary: "The guess with the most multiples of seven wins.",
+    votes: 96,
+    creator: "@seven",
+    explanation: "Multiples of seven are counted in each eligible guess. The highest count wins."
   }
-];
-
-const secondaryActions = [
-  { href: "/play/vote", label: "Vote" },
-  { href: "/play/propose", label: "Propose rule" },
-  { href: "/play/simulate", label: "Cycle" },
-  { href: "/play/results", label: "Results" }
 ] as const;
+
+const drawnNumbers = [7, 18, 23, 41, 49, 56] as const;
 
 function formatCountdown(totalSeconds: number) {
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
 
-  return [hours, minutes, seconds].map((value) => value.toString().padStart(2, "0")).join(":");
+  return [hours, minutes, seconds].map((value) => value.toString().padStart(2, "0"));
 }
 
 function useCountdown(initialSeconds: number) {
@@ -84,240 +100,405 @@ function useCountdown(initialSeconds: number) {
   return formatCountdown(remainingSeconds);
 }
 
-function ModeButton({
-  activeMode,
-  children,
-  mode,
-  setMode
-}: {
-  activeMode: HubMode;
-  children: React.ReactNode;
-  mode: HubMode;
-  setMode: (mode: HubMode) => void;
-}) {
-  return (
-    <button
-      aria-pressed={activeMode === mode}
-      className="mode-button"
-      onClick={() => setMode(mode)}
-      type="button"
-    >
-      {children}
-    </button>
-  );
-}
-
-function StickyHeader({ countdown }: { countdown: string }) {
-  return (
-    <header className="live-header">
-      <div>
-        <p className="eyebrow">Prize pool</p>
-        <strong>{turn.prizePoolSol.toFixed(2)} SOL</strong>
-      </div>
-      <div className="header-divider" aria-hidden="true" />
-      <div>
-        <p className="eyebrow">Closes in</p>
-        <strong className="numeric">{countdown}</strong>
-      </div>
-      <div className="wallet-pill" aria-label="Connected wallet">
-        4sF...9k2
-      </div>
-    </header>
-  );
-}
-
-function LoadingState() {
-  return (
-    <section className="state-panel" aria-live="polite">
-      <div className="skeleton skeleton-title" />
-      <div className="skeleton skeleton-line" />
-      <div className="skeleton skeleton-line short" />
-      <div className="skeleton-grid">
-        <div className="skeleton skeleton-block" />
-        <div className="skeleton skeleton-block" />
-      </div>
-    </section>
-  );
-}
-
-function EmptyState() {
-  return (
-    <section className="state-panel">
-      <p className="eyebrow">No active turn</p>
-      <h1>New turn opens shortly.</h1>
-      <p>The latest result remains available while the next turn is prepared.</p>
-      <button className="primary-action inline-action" type="button">
-        View results
-      </button>
-    </section>
-  );
-}
-
-function DelayedState() {
-  return (
-    <section className="state-panel warning-panel">
-      <p className="eyebrow">Draw delayed</p>
-      <h1>VRF confirmation is pending.</h1>
-      <p>Your guess remains recorded. The audit trail will update when the draw is fulfilled.</p>
-      <button className="secondary-action inline-action" type="button">
-        View audit
-      </button>
-    </section>
-  );
-}
-
-function LiveState({ countdown }: { countdown: string }) {
-  const currentDuration = TURN_DURATION_CYCLE_HOURS[turn.cycleIndex];
-  const creatorRewardPercent = CREATOR_REWARD_RATE_BPS / 100;
-
+function PhoneChrome() {
   return (
     <>
-      <section className="hero-panel" aria-labelledby="round-title">
-        <div className="round-meta">
-          <span>{turn.id}</span>
-          <span>
-            {currentDuration}h turn, cycle {turn.cycleIndex + 1}/{TURN_DURATION_CYCLE_HOURS.length}
-          </span>
-        </div>
-        <h1 id="round-title">Pick six numbers before the draw.</h1>
-        <p>
-          Vote for the rule, follow the countdown, and keep the next action within reach.
-        </p>
-        <div className="hero-metrics" aria-label="Current turn metrics">
-          <div>
-            <span>Prize</span>
-            <strong>{turn.prizePoolSol.toFixed(2)} SOL</strong>
-          </div>
-          <div>
-            <span>Countdown</span>
-            <strong className="numeric">{countdown}</strong>
-          </div>
-        </div>
-      </section>
-
-      <section className="rule-panel" aria-labelledby="rule-title">
-        <div className="section-heading">
-          <p className="eyebrow">Rule of the Hour</p>
-          <span>{turn.activeRule.status}</span>
-        </div>
-        <h2 id="rule-title">{turn.activeRule.title}</h2>
-        <p>
-          {turn.activeRule.votes} votes. Creator reward is {creatorRewardPercent}% of each
-          alternative winner payout, funded from the creator reward reserve.
-        </p>
-        <div className="rule-footer">
-          <span>Creator {turn.activeRule.creator}</span>
-          <button className="link-action" type="button">
-            Audit
-          </button>
-        </div>
-      </section>
-
-      <section className="timeline-panel" aria-labelledby="timeline-title">
-        <div className="section-heading">
-          <p className="eyebrow">Next milestones</p>
-          <span>Started {turn.startsAt}</span>
-        </div>
-        <h2 id="timeline-title">This turn is moving toward the draw.</h2>
-        <ol className="timeline-list">
-          <li>
-            <span>Voting closes</span>
-            <strong>{turn.votingClosesAt}</strong>
-          </li>
-          <li>
-            <span>Guesses close</span>
-            <strong>{turn.guessesCloseAt}</strong>
-          </li>
-          <li>
-            <span>Draw begins</span>
-            <strong>{turn.drawBeginsAt}</strong>
-          </li>
-        </ol>
-      </section>
-
-      <section className="status-panel" aria-labelledby="status-title">
-        <div className="section-heading">
-          <p className="eyebrow">Your status</p>
-          <span>Entry fee {MVP_FEES_SOL.guessSubmission.toFixed(2)} SOL</span>
-        </div>
-        <h2 id="status-title">Guess not submitted.</h2>
-        <p>Submit one guess to mint the current-turn Game Token for voting and rule actions.</p>
-      </section>
-
-      <section className="activity-panel" aria-labelledby="activity-title">
-        <div className="section-heading">
-          <p className="eyebrow">Activity</p>
-          <span>Live feed</span>
-        </div>
-        <h2 id="activity-title">Recent turn events</h2>
-        <ul className="activity-list">
-          {activityFeed.map((event) => (
-            <li key={event.id}>
-              <div>
-                <strong>{event.label}</strong>
-                <span>{event.detail}</span>
-              </div>
-              <time>{event.time}</time>
-            </li>
-          ))}
-        </ul>
-      </section>
+      <div className="platform-dynamic-island" aria-hidden="true" />
+      <div className="platform-statusbar" aria-hidden="true">
+        <span>9:41</span>
+        <span className="platform-status-icons">
+          <i className="platform-cell-signal">
+            <b />
+            <b />
+            <b />
+            <b />
+          </i>
+          <i className="platform-wifi">⌁</i>
+          <i className="platform-battery" />
+        </span>
+      </div>
+      <div className="platform-home-indicator" aria-hidden="true" />
     </>
   );
 }
 
-export function MobileLiveRoundHub() {
-  const [mode, setMode] = useState<HubMode>("live");
-  const countdown = useCountdown(turn.endsInSeconds);
-  const mainContent = useMemo(() => {
-    if (mode === "loading") {
-      return <LoadingState />;
-    }
+function Dealer({ size = 38 }: { size?: number }) {
+  return (
+    <span className="platform-dealer" style={{ width: size, height: size }} aria-hidden="true">
+      <span className="platform-dealer-hat" />
+      <i />
+      <i />
+      <b />
+    </span>
+  );
+}
 
-    if (mode === "empty") {
-      return <EmptyState />;
-    }
+function ScreenHeader({ onBack, title }: { onBack: () => void; title: string }) {
+  return (
+    <div className="platform-screen-header">
+      <button aria-label="Back to current round" onClick={onBack} type="button">
+        <ArrowLeft aria-hidden="true" size={22} />
+      </button>
+      <h1>{title}</h1>
+    </div>
+  );
+}
 
-    if (mode === "delayed") {
-      return <DelayedState />;
-    }
+function Confetti() {
+  return (
+    <div className="platform-confetti" aria-hidden="true">
+      {Array.from({ length: 18 }, (_, index) => (
+        <i key={index} />
+      ))}
+    </div>
+  );
+}
 
-    return <LiveState countdown={countdown} />;
-  }, [countdown, mode]);
+function ResultScreen({ goHome }: { goHome: () => void }) {
+  const maxVotes = rules[0]?.votes ?? 1;
 
   return (
-    <main className="play-shell">
-      <StickyHeader countdown={countdown} />
+    <section className="platform-screen platform-result-screen">
+      <Confetti />
+      <div className="platform-scroll">
+        <ScreenHeader onBack={goHome} title="Result" />
 
-      <div className="mode-control" aria-label="Prototype state">
-        <ModeButton activeMode={mode} mode="live" setMode={setMode}>
-          Live
-        </ModeButton>
-        <ModeButton activeMode={mode} mode="loading" setMode={setMode}>
-          Loading
-        </ModeButton>
-        <ModeButton activeMode={mode} mode="empty" setMode={setMode}>
-          Empty
-        </ModeButton>
-        <ModeButton activeMode={mode} mode="delayed" setMode={setMode}>
-          Delayed
-        </ModeButton>
+        <article className="platform-win-card">
+          <span className="platform-trophy-emoji" aria-hidden="true">
+            🏆
+          </span>
+          <span>You won!</span>
+          <h2>
+            +0.92 <small>SOL</small>
+          </h2>
+          <p>Already credited · available to withdraw</p>
+          <button type="button">
+            <ArrowDownToLine aria-hidden="true" size={18} />
+            Withdraw funds
+          </button>
+        </article>
+
+        <div className="platform-result-meta">
+          <strong>TURN #0007</strong>
+          <span>
+            <Users aria-hidden="true" size={14} />
+            1,102 players
+          </span>
+        </div>
+
+        <article className="platform-reference-card">
+          <p className="platform-section-label">Drawn numbers</p>
+          <ol className="platform-drawn-numbers">
+            {drawnNumbers.map((number) => (
+              <li key={number}>{number}</li>
+            ))}
+          </ol>
+        </article>
+
+        <p className="platform-section-label platform-outside-label">Selected rule</p>
+        <article className="platform-winning-rule">
+          <div>
+            <span>
+              <Trophy aria-hidden="true" size={17} />
+            </span>
+            <h2>{rules[0]?.title}</h2>
+          </div>
+          <p>{rules[0]?.summary}</p>
+          <footer>
+            <strong>
+              <Vote aria-hidden="true" size={14} />
+              {rules[0]?.votes} votes
+            </strong>
+            <span>by {rules[0]?.creator}</span>
+          </footer>
+        </article>
+
+        <p className="platform-section-label platform-outside-label">Rules entered in the draw</p>
+        <div className="platform-result-rule-list">
+          {rules.map((rule, index) => {
+            const percent = Math.round((rule.votes / maxVotes) * 100);
+            return (
+              <article className={index === 0 ? "winner" : ""} key={rule.id}>
+                <i style={{ width: `${percent}%` }} />
+                <span>{index + 1}</span>
+                <strong>{rule.title}</strong>
+                {index === 0 ? <Trophy aria-hidden="true" size={14} /> : null}
+                <b>{rule.votes}</b>
+              </article>
+            );
+          })}
+        </div>
+
+        <button className="platform-ghost-button" onClick={goHome} type="button">
+          <Zap aria-hidden="true" size={17} />
+          Back to current round
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function RuleDetail({ onClose, rank, rule }: { onClose: () => void; rank: number; rule: Rule }) {
+  return (
+    <div className="platform-rule-backdrop" onClick={onClose} role="presentation">
+      <section
+        aria-labelledby="platform-rule-title"
+        aria-modal="true"
+        className="platform-rule-sheet"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+      >
+        <div className="platform-rule-handle" />
+        <header>
+          <strong>{rank}</strong>
+          <span>
+            <Vote aria-hidden="true" size={14} /> {rule.votes} votes
+          </span>
+          <button aria-label="Close rule details" onClick={onClose} type="button">
+            <X aria-hidden="true" size={18} />
+          </button>
+        </header>
+        <h2 id="platform-rule-title">{rule.title}</h2>
+        <p>{rule.summary}</p>
+        <h3>How it works</h3>
+        <p>{rule.explanation}</p>
+        <div className="platform-rule-detail-grid">
+          <span>
+            <small>Created by</small>
+            <strong>{rule.creator}</strong>
+          </span>
+          <span>
+            <small>Creator reward</small>
+            <strong>15% reserve-funded</strong>
+          </span>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function HomeScreen({
+  goAccount,
+  goResult
+}: {
+  goAccount: () => void;
+  goResult: () => void;
+}) {
+  const [hours, minutes, seconds] = useCountdown(1 * 3600 + 47 * 60 + 12);
+  const [expanded, setExpanded] = useState(false);
+  const [activeRule, setActiveRule] = useState<Rule | null>(null);
+  const visibleRules = expanded ? rules : rules.slice(0, 3);
+  const maxVotes = rules[0]?.votes ?? 1;
+
+  return (
+    <section className="platform-screen platform-home-screen">
+      <div className="platform-ambient" />
+      <div className="platform-scroll">
+        <header className="platform-topbar">
+          <span>
+            <Dealer size={34} />
+            <strong>Idealer</strong>
+          </span>
+          <button onClick={goAccount} type="button">
+            <Wallet aria-hidden="true" size={17} />
+            Connect
+          </button>
+        </header>
+
+        <button className="platform-last-result" onClick={goResult} type="button">
+          <span>Result · TURN #0007</span>
+          <ArrowRight aria-hidden="true" size={18} />
+          <i>
+            <Trophy aria-hidden="true" size={21} />
+          </i>
+          <b>
+            <strong>
+              You won <em>+0.92 SOL</em>
+            </strong>
+            <small>
+              Rule <b>Closest even sum</b> won · 1,102 players
+            </small>
+          </b>
+        </button>
+
+        <section className="platform-prize-hero" aria-labelledby="platform-prize-title">
+          <div className="platform-prize-glow" />
+          <span className="platform-pill">
+            <Clock3 aria-hidden="true" size={14} />
+            Ends in{" "}
+            <strong>
+              {hours}:{minutes}:{seconds}
+            </strong>
+          </span>
+          <p>Accumulated prize</p>
+          <h1 id="platform-prize-title">
+            <strong>24</strong>
+            <b>.86</b>
+            <small>SOL</small>
+          </h1>
+          <footer>
+            <span className="platform-pill">
+              <Users aria-hidden="true" size={14} /> 1,284 playing
+            </span>
+            <span className="platform-pill">
+              <Sparkles aria-hidden="true" size={14} /> 13 rules
+            </span>
+          </footer>
+        </section>
+
+        <Link className="platform-primary-button" href="/play/pick">
+          <Zap aria-hidden="true" size={18} />
+          Play now · 0.01 SOL
+        </Link>
+
+        <article className="platform-prompt-card">
+          <header>
+            <strong>Create your rule</strong>
+            <span>
+              <Sparkles aria-hidden="true" size={12} /> with AI
+            </span>
+            <small>cost 0.02 SOL</small>
+          </header>
+          <div>
+            <input aria-label="Rule idea" placeholder="Example: closest sum to 100 wins…" />
+            <Link aria-label="Create rule" href="/play/propose">
+              <Send aria-hidden="true" size={19} />
+            </Link>
+          </div>
+        </article>
+
+        <header className="platform-rules-heading">
+          <h2>The rules</h2>
+          <span>most voted</span>
+        </header>
+
+        <div className="platform-vote-bars">
+          {visibleRules.map((rule, index) => {
+            const percent = Math.round((rule.votes / maxVotes) * 100);
+            return (
+              <button key={rule.id} onClick={() => setActiveRule(rule)} type="button">
+                <i style={{ width: `${percent}%` }} />
+                <span>{index + 1}</span>
+                <b>
+                  <strong>{rule.title}</strong>
+                  <small>{rule.summary}</small>
+                </b>
+                <em>
+                  <strong>{rule.votes}</strong>
+                  <small>{percent}%</small>
+                </em>
+              </button>
+            );
+          })}
+        </div>
+
+        <button className="platform-ghost-button" onClick={() => setExpanded((value) => !value)} type="button">
+          {expanded ? "Collapse rules" : `View all ${rules.length} rules`}
+          <ChevronDown aria-hidden="true" className={expanded ? "up" : ""} size={18} />
+        </button>
       </div>
 
-      <div className="play-content">{mainContent}</div>
-
-      <nav className="bottom-nav" aria-label="Round actions">
-        <div className="secondary-actions">
-          {secondaryActions.map((action) => (
-            <Link className="secondary-action" href={action.href} key={action.label}>
-              {action.label}
-            </Link>
-          ))}
-        </div>
-        <Link className="primary-action" href="/play/pick">
-          Pick numbers
+      <nav className="platform-nav" aria-label="Primary navigation">
+        <button className="active" type="button">
+          <Home aria-hidden="true" size={21} />
+          Round
+        </button>
+        <Link aria-label="Create rule" href="/play/propose">
+          <Plus aria-hidden="true" size={25} />
         </Link>
+        <button onClick={goAccount} type="button">
+          <UserRound aria-hidden="true" size={21} />
+          Account
+        </button>
       </nav>
+
+      {activeRule ? (
+        <RuleDetail
+          onClose={() => setActiveRule(null)}
+          rank={rules.findIndex((rule) => rule.id === activeRule.id) + 1}
+          rule={activeRule}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+function AccountScreen({ goHome, goResult }: { goHome: () => void; goResult: () => void }) {
+  return (
+    <section className="platform-screen platform-account-screen">
+      <div className="platform-ambient" />
+      <div className="platform-scroll">
+        <ScreenHeader onBack={goHome} title="My account" />
+        <div className="platform-account-identity">
+          <span>V</span>
+          <div>
+            <strong>@you.sol</strong>
+            <small>4sF9k2…aQ7x</small>
+          </div>
+        </div>
+        <button className="platform-account-result" onClick={goResult} type="button">
+          <Trophy aria-hidden="true" size={22} />
+          <span>
+            <strong>You won TURN #0007</strong>
+            <small>+0.92 SOL · tap to see the result</small>
+          </span>
+          <ArrowRight aria-hidden="true" size={18} />
+        </button>
+        <article className="platform-balance-card">
+          <p>Available to withdraw</p>
+          <h2>
+            0.92 <small>SOL</small>
+          </h2>
+          <button type="button">
+            <ArrowDownToLine aria-hidden="true" size={18} />
+            Withdraw to wallet
+          </button>
+        </article>
+        <div className="platform-account-stats">
+          <article>
+            <Sparkles aria-hidden="true" size={18} />
+            <strong>3</strong>
+            <span>rules created</span>
+          </article>
+          <article>
+            <Trophy aria-hidden="true" size={18} />
+            <strong>6.21 SOL</strong>
+            <span>total received</span>
+          </article>
+        </div>
+      </div>
+      <nav className="platform-nav" aria-label="Primary navigation">
+        <button onClick={goHome} type="button">
+          <Home aria-hidden="true" size={21} />
+          Round
+        </button>
+        <Link aria-label="Create rule" href="/play/propose">
+          <Plus aria-hidden="true" size={25} />
+        </Link>
+        <button className="active" type="button">
+          <UserRound aria-hidden="true" size={21} />
+          Account
+        </button>
+      </nav>
+    </section>
+  );
+}
+
+export function MobileLiveRoundHub() {
+  const [screen, setScreen] = useState<AppScreen>("result");
+
+  return (
+    <main className="platform-stage">
+      <div className="platform-phone-shell">
+        <PhoneChrome />
+        {screen === "result" ? <ResultScreen goHome={() => setScreen("home")} /> : null}
+        {screen === "home" ? (
+          <HomeScreen goAccount={() => setScreen("account")} goResult={() => setScreen("result")} />
+        ) : null}
+        {screen === "account" ? (
+          <AccountScreen goHome={() => setScreen("home")} goResult={() => setScreen("result")} />
+        ) : null}
+      </div>
     </main>
   );
 }
