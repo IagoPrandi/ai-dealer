@@ -29,6 +29,7 @@ Opened before starting `M0.1`:
 | M1.6 | Simulated Result, Near-Miss & Creator Outcome | Completed | Confirmed 2026-06-04 | Simulated result flow implemented, validated, and marked complete after user confirmation. |
 | M1.7 | Mobile Share Card Prototype | Completed | Confirmed 2026-06-04 | Mobile share card generator implemented, validated, and marked complete after user confirmation. |
 | M1 | Mobile Interactive Prototype | Completed | Confirmed 2026-06-04 | All M1 submilestones are implemented, validated, confirmed, and marked complete. Quantitative usability approval metrics remain tracked separately. |
+| M2.1 | Mobile Wallet Flow | Awaiting Confirmation | Pending | Wallet Standard, Mobile Wallet Adapter, named mobile-wallet handoffs, devnet test transaction, recovery, status, retry, and disconnect flows implemented. Real-device wallet approval QA remains pending. |
 
 ## M0.1 Work Log
 
@@ -701,3 +702,55 @@ M1 was marked complete after explicit user confirmation on 2026-06-04 because al
 - Preserved English UI copy as required by the repository instructions.
 - Removed the superseded live-round design CSS to avoid redundant or conflicting styles.
 - Did not change any milestone status or checkbox.
+
+## M2.1 Work Log
+
+### 2026-06-04
+
+- Opened `PRD.md`, `AGENTS.md`, and `.claude/skills` before implementing M2.1.
+- Opened the relevant local skills and references: `solana-dev`, Solana frontend framework-kit, Kit interoperability, Mobile Wallet Adapter setup/connection/transaction guidance, `develop-frontend`, `playwright`, `best-practices`, and `best-practices/references/agent-principles.md`.
+- Opened the required product and technical markdown documents: `docs/mobile-user-flow-diagram.md`, `docs/mobile-ux-state-map.md`, `docs/mobile-low-fidelity-wireframes.md`, `docs/technical-contracts-index.md`, `docs/smart-contract-account-instruction-draft.md`, `docs/shared-error-codes.md`, `docs/data-model-draft.md`, and `contracts/solana/README.md`.
+- Added a single Solana devnet provider using Wallet Standard-first `@solana/client` and `@solana/react-hooks`.
+- Registered Solana Mobile Wallet Adapter for secure mobile-browser handoff and Wallet Standard discovery.
+- Added official in-wallet browser handoff links for Phantom, Backpack, and Solflare.
+- Added `/play/wallet` with connect, disconnect, transaction review, zero-SOL self-transfer approval, RPC preflight, pending, confirmed, failed, and retry states.
+- Persisted connection and transaction actions before wallet handoff and recovered interrupted actions from `localStorage` after return/reload.
+- Connected the live-round and account wallet actions to the real wallet flow.
+- Added shared wallet and transaction error codes.
+- Added E2E coverage for Mobile Wallet Adapter registration, named mobile handoff links, and interrupted-action recovery.
+- Left the M2.1 PRD checklist and approval criteria unchecked pending user confirmation and real-device QA.
+
+## M2.1 Artifact Review
+
+| Artifact | Status | Notes |
+|---|---|---|
+| `apps/web/src/solana/SolanaProviders.tsx` | Implemented | Configures devnet RPC/WebSocket, Wallet Standard discovery, Mobile Wallet Adapter registration, and wallet session persistence. |
+| `apps/web/src/features/wallet/WalletFlow.tsx` | Implemented | Implements connect/disconnect, named mobile handoff, transaction summary, approval, recovery, explicit status, failure, and retry states. |
+| `apps/web/src/app/play/wallet/page.tsx` | Implemented | Exposes the mobile wallet flow route. |
+| `apps/web/src/features/live-round/MobileLiveRoundHub.tsx` | Updated | Routes wallet actions into `/play/wallet`. |
+| `apps/web/e2e/wallet-flow.spec.ts` | Implemented | Verifies MWA registration, named mobile handoff links, and interrupted-action recovery. |
+| `.env.example` | Updated | Documents configurable devnet RPC and WebSocket endpoints. |
+| `docs/shared-error-codes.md` | Updated | Adds explicit wallet connection, transaction rejection, and transaction failure codes. |
+
+## M2.1 Validation Results
+
+| Requirement | Result |
+|---|---|
+| Solana wallet adapter integration | Passed; Wallet Standard-first provider and discovery are active application-wide. |
+| Mobile Wallet Adapter support | Passed in automated mobile-browser detection; MWA connector is visible in Playwright's Pixel 5 profile. |
+| Phantom, Backpack, and Solflare mobile handoff | Implemented through named in-wallet browser deep links; real-device QA remains pending. |
+| In-wallet browser usage | Implemented through injected Wallet Standard discovery. |
+| Persist and recover pending action | Passed; E2E verifies recovery after reload. |
+| Pending, success, failure, retry, and disconnect states | Implemented; real-wallet confirmation/rejection behavior remains pending real-device QA. |
+| Test transaction safety | Passed by design; explicit user action sends a zero-SOL self-transfer on devnet with RPC preflight enabled. |
+| Focused wallet E2E | Passed with `pnpm --filter @idealer/web test:e2e -- wallet-flow.spec.ts`. |
+| Full web E2E | Passed with `pnpm --filter @idealer/web test:e2e`; all 9 flows passed after the final hydration and transaction-state corrections. |
+| Typecheck | Passed with `pnpm typecheck`; all 23 workspace tasks passed. |
+| Lint | Passed with `pnpm lint`; all 23 workspace tasks passed. |
+| Tests | Passed with `pnpm test`; all 23 workspace tasks passed. |
+| Build | Passed with `pnpm build`; all 17 workspace builds passed and `/play/wallet` is included in generated routes. |
+| Whitespace check | Passed with `git diff --check`; Git reported CRLF normalization warnings only. |
+
+## M2.1 Confirmation Gate
+
+`M2.1` implementation is ready for user confirmation. Do not mark the PRD checklist, approval criteria, or milestone complete until the user confirms after real-device Phantom, Backpack, and Solflare QA.

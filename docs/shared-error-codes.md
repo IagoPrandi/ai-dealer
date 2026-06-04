@@ -14,6 +14,9 @@ These error codes are shared across frontend, API, worker, and admin surfaces. A
 | `GUESS_ALREADY_SUBMITTED` | 409 | Wallet already submitted a guess for this turn. |
 | `GAME_TOKEN_REQUIRED` | 403 | Current-turn Game Token PDA is required. |
 | `GAME_TOKEN_INVALID` | 403 | Game Token PDA does not match wallet, turn, or status. |
+| `WALLET_CONNECTION_FAILED` | 409 | Wallet connection or mobile wallet handoff failed. |
+| `TRANSACTION_REJECTED` | 409 | User rejected or cancelled the wallet transaction request. |
+| `TRANSACTION_FAILED` | 409 | Transaction simulation, submission, confirmation, or recovery failed. |
 | `RULE_TOKEN_LIMIT_EXCEEDED` | 400 | Rule text exceeds `RULE_MAX_TOKENS`. |
 | `RULE_PREFLIGHT_FAILED` | 422 | Rule preflight blocked submission. |
 | `RULE_PREFLIGHT_TOKEN_INVALID` | 403 | Preflight token is missing, expired, mismatched, or invalid. |

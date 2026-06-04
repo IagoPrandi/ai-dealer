@@ -299,10 +299,10 @@ function HomeScreen({
             <Dealer size={34} />
             <strong>Idealer</strong>
           </span>
-          <button onClick={goAccount} type="button">
+          <Link href="/play/wallet">
             <Wallet aria-hidden="true" size={17} />
             Connect
-          </button>
+          </Link>
         </header>
 
         <button className="platform-last-result" onClick={goResult} type="button">
@@ -466,6 +466,10 @@ function AccountScreen({ goHome, goResult }: { goHome: () => void; goResult: () 
             <span>total received</span>
           </article>
         </div>
+        <Link className="platform-ghost-button" href="/play/wallet">
+          <Wallet aria-hidden="true" size={17} />
+          Manage connected wallet
+        </Link>
       </div>
       <nav className="platform-nav" aria-label="Primary navigation">
         <button onClick={goHome} type="button">

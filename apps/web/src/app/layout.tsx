@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { SolanaProviders } from "../solana/SolanaProviders";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -17,7 +18,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           rel="stylesheet"
         />
       </head>
-      <body>{children}</body>
+      <body>
+        <SolanaProviders>{children}</SolanaProviders>
+      </body>
     </html>
   );
 }
