@@ -30,7 +30,8 @@ Opened before starting `M0.1`:
 | M1.7 | Mobile Share Card Prototype | Completed | Confirmed 2026-06-04 | Mobile share card generator implemented, validated, and marked complete after user confirmation. |
 | M1 | Mobile Interactive Prototype | Completed | Confirmed 2026-06-04 | All M1 submilestones are implemented, validated, confirmed, and marked complete. Quantitative usability approval metrics remain tracked separately. |
 | M2.1 | Mobile Wallet Flow | Completed | Confirmed 2026-06-04 | Wallet Standard, Mobile Wallet Adapter, named mobile-wallet handoffs, devnet test transaction, recovery, status, retry, and disconnect flows implemented and validated. |
-| M2.2 | devnet Programs | Awaiting Deployment | Pending | Core Anchor program and SBF instruction suite pass locally. Authorized devnet deployment and remote CI confirmation remain pending. |
+| M2.2 | devnet Programs | Completed | Confirmed 2026-06-04 | Core Anchor program implemented, SBF instruction suite passed, and program deployed to devnet as `6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4`. |
+| M2.3 | devnet Guess Submission | In Review | Pending | Number picker now builds and sends the deployed devnet `submit_guess` transaction, blocks known duplicates, records receipts through the API, and awaits user confirmation before milestone tick. |
 
 ## M0.1 Work Log
 
@@ -776,6 +777,10 @@ M1 was marked complete after explicit user confirmation on 2026-06-04 because al
 - Re-ran format, typecheck, clippy, native tests, SBF build, and explicit SBF instruction tests successfully with the final program id.
 - Attempted devnet funding through the official CLI faucet at `2`, `1`, `0.5`, and `0.1` SOL; all were rate-limited.
 - Attempted devnet deployment and confirmed the remaining blocker is insufficient devnet SOL for deployer `4bY5krt2VnnSNB1R4c1bhiWdQYkTc1FvFTN1LaV5JxCH`. The deploy attempt requires `2.95675416 SOL` plus a `0.00212 SOL` fee.
+- Confirmed the deployer was funded with `5 SOL`.
+- Deployed the program to devnet with signature `2bLT1XQWBJN94wSo1c4WhQkky7haVH9ws4HCE35X9aJJXEsatHnf8ZPjUGRxK7ztBVu22GMGvgRa6GYsUiuPtdsA`.
+- Verified the deployed program on devnet: ProgramData `BUo2vYwYvj2UWYFgryrMF7bBTrLQQFYVU6xHuoTJbJBD`, authority `4bY5krt2VnnSNB1R4c1bhiWdQYkTc1FvFTN1LaV5JxCH`, slot `467190056`, data length `424648` bytes.
+- Re-ran local Solana program lint, native tests, SBF build, and explicit SBF instruction tests after deployment.
 
 ## M2.2 Artifact Review
 
@@ -800,9 +805,52 @@ M1 was marked complete after explicit user confirmation on 2026-06-04 because al
 | Monorepo typecheck, lint, tests, and build | Passed with `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build`. |
 | Web regression E2E | Passed with `pnpm --filter @idealer/web test:e2e`; all 9 flows passed. |
 | Secret/keypair check | Passed; no deploy keypair is present outside ignored temporary build output. |
-| Remote CI | Workflow added; execution on the remote CI provider remains pending. |
-| Devnet deployment | Blocked by insufficient devnet SOL. Program id is `6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4`; deployer `4bY5krt2VnnSNB1R4c1bhiWdQYkTc1FvFTN1LaV5JxCH` needs at least `2.95887416 SOL`. |
+| Remote CI | Workflow added with SBF coverage. `gh` is not installed in this environment, so remote run status could not be queried for uncommitted local changes; workflow-equivalent commands passed locally. |
+| Devnet deployment | Passed. Program id `6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4` is deployed on devnet with ProgramData `BUo2vYwYvj2UWYFgryrMF7bBTrLQQFYVU6xHuoTJbJBD`. |
 
 ## M2.2 Confirmation Gate
 
-`M2.2` implementation is ready, but the milestone is not complete. Its PRD checklist and approval criteria remain unchecked because the contract has not been deployed to devnet and remote CI has not executed. The current blocker is devnet funding for deployer `4bY5krt2VnnSNB1R4c1bhiWdQYkTc1FvFTN1LaV5JxCH`.
+`M2.2` was marked complete after explicit user confirmation on 2026-06-04 and successful devnet deployment. Required markdown documents opened before work: `PRD.md`, `AGENTS.md`, `.claude/skills`, `solana-dev`, `security-threat-checklist`, `best-practices`, `best-practices/references/agent-principles.md`, `best-practices/references/deploy-release.md`, `best-practices/references/web3-contracts.md`, `web2-wallet-auth`, and `develop-frontend`.
+
+## M2.3 Work Log
+
+### 2026-06-04
+
+- Opened `PRD.md`, `AGENTS.md`, and `.claude/skills` before starting M2.3.
+- Opened the relevant local skills and references: `solana-dev` frontend framework-kit and Kit interoperability guidance, `web2-wallet-auth`, `develop-frontend`, `security-threat-checklist`, and deployment/security references used for M2.2.
+- Started wiring the mobile number picker to the deployed devnet program `6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4`.
+- Added `apps/web/src/solana/idealerProgram.ts` with the deployed program id, active devnet turn id, Anchor `submit_guess` discriminator, PDA derivation, account metas, and six-number validation.
+- Updated the mobile number picker to create the real `submit_guess` transaction, require a connected devnet wallet, block an existing `PlayerGuess` PDA before wallet approval, show transaction status, handle duplicate/closed-turn errors, persist pending guess state through wallet return/reload, and show a confirmed receipt.
+- Added `/guess-receipts` API persistence for confirmed guess receipts with payload validation and duplicate response handling.
+- Updated `.env.example` with `NEXT_PUBLIC_IDEALER_PROGRAM_ID`, `NEXT_PUBLIC_IDEALER_ACTIVE_TURN_ID`, and `NEXT_PUBLIC_IDEALER_API_URL`.
+- Updated the number picker E2E from simulated submission to the real pre-submit flow that routes unconnected users to wallet connection.
+
+## M2.3 Artifact Review
+
+| Artifact | Status | Notes |
+|---|---|---|
+| `apps/web/src/solana/idealerProgram.ts` | Implemented | Derives devnet PDAs and builds the Anchor `submit_guess` instruction for program `6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4`. |
+| `apps/web/src/features/number-picker/NumberPicker.tsx` | Implemented | Connects six-number review to wallet-backed devnet submission, duplicate precheck, pending/confirmed/failed states, and receipt display. |
+| `apps/api/src/index.ts` | Implemented | Adds `POST /guess-receipts` and `GET /guess-receipts` for backend/API receipt projection. |
+| `apps/web/e2e/number-picker.spec.ts` | Updated | Verifies six-number validation, review, and wallet-required devnet submission entry. |
+| `.env.example` | Updated | Documents the devnet program id, active turn id, and browser API URL. |
+
+## M2.3 Validation Results
+
+| Requirement | Result |
+|---|---|
+| Number picker creates a real transaction | Implemented through `client.transaction.prepareAndSend` with the deployed `submit_guess` instruction. |
+| Six unique numbers are validated before transaction | Implemented by `validateGuessNumbers` and existing UI selection constraints. |
+| Duplicate guess blocked | Implemented by checking the `PlayerGuess` PDA before wallet approval and by normalizing duplicate account errors. |
+| Expired/closed turn handled | Implemented by mapping turn-closed/no-active-turn/action-window program errors to `TURN_NOT_ACCEPTING_GUESSES`. |
+| Backend/API receipt projection | Implemented by `/guess-receipts` with strict shape validation and duplicate response handling. |
+| Web typecheck | Passed with `pnpm --filter @idealer/web typecheck`. |
+| API typecheck | Passed with `pnpm --filter @idealer/api typecheck`. |
+| Web lint | Passed with `pnpm --filter @idealer/web lint`. |
+| API lint | Passed with `pnpm --filter @idealer/api lint`. |
+| Web/API tests | Passed with `pnpm --filter @idealer/web test` and `pnpm --filter @idealer/api test`. |
+| Focused number-picker E2E | Passed with `pnpm --filter @idealer/web test:e2e -- e2e/number-picker.spec.ts`. |
+
+## M2.3 Confirmation Gate
+
+`M2.3` implementation is ready for user review but was not marked complete because repository instructions require explicit user confirmation before ticking the milestone. Required markdown documents opened before work: `PRD.md`, `AGENTS.md`, `.claude/skills`, `solana-dev` frontend references, `web2-wallet-auth`, `develop-frontend`, and deployment/security references used for the devnet program.

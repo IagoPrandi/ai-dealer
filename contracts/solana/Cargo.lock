@@ -2281,6 +2281,7 @@ version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "solana-account-info",
+ "solana-client",
  "solana-program-error",
  "solana-program-test",
  "solana-sdk",

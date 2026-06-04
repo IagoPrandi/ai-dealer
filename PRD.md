@@ -4473,29 +4473,29 @@ Implement a working mobile DApp on Solana devnet with wallet flows, devnet trans
 
 **Checklist:**
 
-- [ ] Implement `GlobalConfig`.
-- [ ] Implement `TurnState`.
-- [ ] Implement `PlayerGuess`.
-- [ ] Implement `RuleProposal`.
-- [ ] Implement `RuleVote` as the on-chain voting account/instruction path.
-- [ ] Implement `TreasuryVault`.
-- [ ] Implement `PrizeVault`.
-- [ ] Implement `initialize_global_config`.
-- [ ] Implement `open_turn`.
-- [ ] Implement `submit_guess`.
-- [ ] Implement `propose_rule`.
-- [ ] Implement `vote_rule`.
-- [ ] Implement `close_turn`.
-- [ ] Add account constraint tests.
-- [ ] Add turn lifecycle tests.
-- [ ] Add invalid input tests.
+- [x] Implement `GlobalConfig`.
+- [x] Implement `TurnState`.
+- [x] Implement `PlayerGuess`.
+- [x] Implement `RuleProposal`.
+- [x] Implement `RuleVote` as the on-chain voting account/instruction path.
+- [x] Implement `TreasuryVault`.
+- [x] Implement `PrizeVault`.
+- [x] Implement `initialize_global_config`.
+- [x] Implement `open_turn`.
+- [x] Implement `submit_guess`.
+- [x] Implement `propose_rule`.
+- [x] Implement `vote_rule`.
+- [x] Implement `close_turn`.
+- [x] Add account constraint tests.
+- [x] Add turn lifecycle tests.
+- [x] Add invalid input tests.
 
 **Approval criteria:**
 
-- [ ] Contracts deploy to devnet.
-- [ ] Core instructions execute successfully.
-- [ ] Invalid guesses, invalid rule proposals, and invalid on-chain votes are rejected.
-- [ ] Tests pass locally and in CI.
+- [x] Contracts deploy to devnet.
+- [x] Core instructions execute successfully.
+- [x] Invalid guesses, invalid rule proposals, and invalid on-chain votes are rejected.
+- [x] Tests pass locally and in CI.
 
 ---
 
