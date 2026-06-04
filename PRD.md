@@ -4401,20 +4401,20 @@ Validate the user-facing mobile game loop without real blockchain payments or pr
 
 **Checklist:**
 
-- [ ] Build `ShareCardGenerator`.
-- [ ] Generate share card for active rule.
-- [ ] Generate share card for near-miss.
-- [ ] Generate share card for creator rule elected.
-- [ ] Include round number, rule title, prize pool, and outcome.
-- [ ] Optimize layout for mobile social sharing.
-- [ ] Add fallback copy link behavior.
-- [ ] Track share intent in prototype analytics.
+- [x] Build `ShareCardGenerator`.
+- [x] Generate share card for active rule.
+- [x] Generate share card for near-miss.
+- [x] Generate share card for creator rule elected.
+- [x] Include round number, rule title, prize pool, and outcome.
+- [x] Optimize layout for mobile social sharing.
+- [x] Add fallback copy link behavior.
+- [x] Track share intent in prototype analytics.
 
 **Approval criteria:**
 
-- [ ] Share card is readable on mobile.
-- [ ] Card communicates the interesting story of the round.
-- [ ] User can share or copy without technical friction.
+- [x] Share card is readable on mobile.
+- [x] Card communicates the interesting story of the round.
+- [x] User can share or copy without technical friction.
 
 ---
 

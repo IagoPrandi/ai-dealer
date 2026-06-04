@@ -27,7 +27,8 @@ Opened before starting `M0.1`:
 | M1.4 | Voting Flow | Completed | Confirmed 2026-06-04 | Mobile voting flow implemented, validated, and marked complete after user confirmation. |
 | M1.5 | Simulated Turn Cycle | Completed | Confirmed 2026-06-04 | Variable turn-cycle simulator implemented, validated, and marked complete after user confirmation. |
 | M1.6 | Simulated Result, Near-Miss & Creator Outcome | Completed | Confirmed 2026-06-04 | Simulated result flow implemented, validated, and marked complete after user confirmation. |
-| M1.7 | Mobile Share Card Prototype | Implemented, awaiting confirmation | Pending | Mobile share card generator implemented and validated. PRD checkboxes remain pending user confirmation. |
+| M1.7 | Mobile Share Card Prototype | Completed | Confirmed 2026-06-04 | Mobile share card generator implemented, validated, and marked complete after user confirmation. |
+| M1 | Mobile Interactive Prototype | Completed | Confirmed 2026-06-04 | All M1 submilestones are implemented, validated, confirmed, and marked complete. Quantitative usability approval metrics remain tracked separately. |
 
 ## M0.1 Work Log
 
@@ -645,4 +646,33 @@ Opened before starting `M0.1`:
 
 ## M1.7 Confirmation Gate
 
-`M1.7` is implemented and awaiting user confirmation before PRD checklist items are marked complete.
+`M1.7` was marked complete after user confirmation on 2026-06-04.
+
+## M1 Approval Audit
+
+### 2026-06-04
+
+- Reopened `PRD.md`, `AGENTS.md`, `.claude/skills`, best-practices agent principles, frontend guidance, and Playwright guidance before verifying M1.7 and auditing M1.
+- Rechecked M1.7 against its checklist, E2E evidence, and responsive visual evidence.
+- Marked M1.7 checklist and approval criteria complete after user confirmation.
+- Confirmed every M1 submilestone from M1.1 through M1.7 is completed and confirmed.
+- Audited the five global M1 approval criteria.
+- Found no recorded human usability-test results that prove the required percentages.
+- Added `docs/m1-usability-validation-plan.md` to define the required unassisted test procedure, anonymous session fields, calculations, and approval rules.
+- Kept the global M1 approval checkboxes unchecked because automated tests cannot substitute for human-test metrics.
+
+## M1 Approval Status
+
+| Approval criterion | Required | Evidence | Status |
+|---|---:|---|---|
+| Testers understand the core loop after first session | 80%+ | No human-session results recorded | Pending |
+| Testers complete a simulated guess submission | 70%+ | No human-session results recorded | Pending |
+| Testers cast at least one vote | 50%+ | No human-session results recorded | Pending |
+| Testers propose at least one rule | 25%+ | No human-session results recorded | Pending |
+| Testers say they would join another round | 40%+ | No human-session results recorded | Pending |
+
+M1 was marked complete after explicit user confirmation on 2026-06-04 because all implementation submilestones are complete and validated. The quantitative usability approval criteria remain unchecked in `PRD.md` until real human-session results meet all five thresholds.
+
+## M1 Completion Gate
+
+`M1` was marked complete after user confirmation on 2026-06-04. This records implementation completion and does not fabricate or waive the separate quantitative usability approval criteria.
