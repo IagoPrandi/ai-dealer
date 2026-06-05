@@ -13,25 +13,26 @@ Opened before starting `M0.1`:
 
 ## Milestone Status
 
-| Milestone | Name | Status | User Confirmation | Notes |
-|---|---|---|---|---|
-| M0.1 | PRD Baseline | Completed | Confirmed 2026-06-02 | Required artifacts implemented, consistency-checked, and marked complete after user confirmation. |
-| M0.2 | Monorepo Skeleton | Completed | Confirmed 2026-06-02 | Skeleton, workspace configs, README, and verification commands completed. |
-| M0.3 | Docker Baseline | Completed | Confirmed 2026-06-02 | Required Docker stack implemented, verified, and marked complete. |
-| M0.4 | Technical Contracts | Completed | Confirmed 2026-06-03 | Required contract drafts implemented, validated, and marked complete after user confirmation. |
-| M0.5 | Mobile UX Flow Baseline | Completed | Confirmed 2026-06-03 | Required UX flow artifacts implemented, validated, and marked complete after user confirmation. |
-| M0.6 | Not defined in PRD | Blocked | Pending | No M0.6 section exists in `PRD.md`; the next defined milestone is M1.1. |
-| M1.1 | Mobile Live Round Hub | Completed | Confirmed 2026-06-03 | Public `/play` hub implemented, validated, and marked complete after user confirmation. |
-| M1.2 | Mobile Number Picker | Completed | Confirmed 2026-06-04 | Number picker flow implemented, validated, and marked complete after user confirmation. |
-| M1.3 | Free-Form Rule Composer | Completed | Confirmed 2026-06-04 | Free-form rule proposal flow implemented, validated, and marked complete after user confirmation. |
-| M1.4 | Voting Flow | Completed | Confirmed 2026-06-04 | Mobile voting flow implemented, validated, and marked complete after user confirmation. |
-| M1.5 | Simulated Turn Cycle | Completed | Confirmed 2026-06-04 | Variable turn-cycle simulator implemented, validated, and marked complete after user confirmation. |
-| M1.6 | Simulated Result, Near-Miss & Creator Outcome | Completed | Confirmed 2026-06-04 | Simulated result flow implemented, validated, and marked complete after user confirmation. |
-| M1.7 | Mobile Share Card Prototype | Completed | Confirmed 2026-06-04 | Mobile share card generator implemented, validated, and marked complete after user confirmation. |
-| M1 | Mobile Interactive Prototype | Completed | Confirmed 2026-06-04 | All M1 submilestones are implemented, validated, confirmed, and marked complete. Quantitative usability approval metrics remain tracked separately. |
-| M2.1 | Mobile Wallet Flow | Completed | Confirmed 2026-06-04 | Wallet Standard, Mobile Wallet Adapter, named mobile-wallet handoffs, devnet test transaction, recovery, status, retry, and disconnect flows implemented and validated. |
-| M2.2 | devnet Programs | Completed | Confirmed 2026-06-04 | Core Anchor program implemented, SBF instruction suite passed, and program deployed to devnet as `6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4`. |
-| M2.3 | devnet Guess Submission | In Review | Pending | Number picker now builds and sends the deployed devnet `submit_guess` transaction, blocks known duplicates, records receipts through the API, and awaits user confirmation before milestone tick. |
+| Milestone | Name                                          | Status    | User Confirmation    | Notes                                                                                                                                                                              |
+| --------- | --------------------------------------------- | --------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| M0.1      | PRD Baseline                                  | Completed | Confirmed 2026-06-02 | Required artifacts implemented, consistency-checked, and marked complete after user confirmation.                                                                                  |
+| M0.2      | Monorepo Skeleton                             | Completed | Confirmed 2026-06-02 | Skeleton, workspace configs, README, and verification commands completed.                                                                                                          |
+| M0.3      | Docker Baseline                               | Completed | Confirmed 2026-06-02 | Required Docker stack implemented, verified, and marked complete.                                                                                                                  |
+| M0.4      | Technical Contracts                           | Completed | Confirmed 2026-06-03 | Required contract drafts implemented, validated, and marked complete after user confirmation.                                                                                      |
+| M0.5      | Mobile UX Flow Baseline                       | Completed | Confirmed 2026-06-03 | Required UX flow artifacts implemented, validated, and marked complete after user confirmation.                                                                                    |
+| M0.6      | Not defined in PRD                            | Blocked   | Pending              | No M0.6 section exists in `PRD.md`; the next defined milestone is M1.1.                                                                                                            |
+| M1.1      | Mobile Live Round Hub                         | Completed | Confirmed 2026-06-03 | Public `/play` hub implemented, validated, and marked complete after user confirmation.                                                                                            |
+| M1.2      | Mobile Number Picker                          | Completed | Confirmed 2026-06-04 | Number picker flow implemented, validated, and marked complete after user confirmation.                                                                                            |
+| M1.3      | Free-Form Rule Composer                       | Completed | Confirmed 2026-06-04 | Free-form rule proposal flow implemented, validated, and marked complete after user confirmation.                                                                                  |
+| M1.4      | Voting Flow                                   | Completed | Confirmed 2026-06-04 | Mobile voting flow implemented, validated, and marked complete after user confirmation.                                                                                            |
+| M1.5      | Simulated Turn Cycle                          | Completed | Confirmed 2026-06-04 | Variable turn-cycle simulator implemented, validated, and marked complete after user confirmation.                                                                                 |
+| M1.6      | Simulated Result, Near-Miss & Creator Outcome | Completed | Confirmed 2026-06-04 | Simulated result flow implemented, validated, and marked complete after user confirmation.                                                                                         |
+| M1.7      | Mobile Share Card Prototype                   | Completed | Confirmed 2026-06-04 | Mobile share card generator implemented, validated, and marked complete after user confirmation.                                                                                   |
+| M1        | Mobile Interactive Prototype                  | Completed | Confirmed 2026-06-04 | All M1 submilestones are implemented, validated, confirmed, and marked complete. Quantitative usability approval metrics remain tracked separately.                                |
+| M2.1      | Mobile Wallet Flow                            | Completed | Confirmed 2026-06-04 | Wallet Standard, Mobile Wallet Adapter, named mobile-wallet handoffs, devnet test transaction, recovery, status, retry, and disconnect flows implemented and validated.            |
+| M2.2      | devnet Programs                               | Completed | Confirmed 2026-06-04 | Core Anchor program implemented, SBF instruction suite passed, and program deployed to devnet as `6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4`.                                   |
+| M2.3      | devnet Guess Submission                       | Completed | Confirmed 2026-06-04 | Number picker builds and sends the deployed devnet `submit_guess` transaction, blocks known duplicates, records receipts through the API, and has on-chain `PlayerGuess` evidence. |
+| M2.4      | devnet Rule Proposal                          | In Review | Pending              | Token preflight, sanitization, prompt-injection rejection, devnet `propose_rule` submission flow, and public rule projection are implemented pending user confirmation.            |
 
 ## M0.1 Work Log
 
@@ -65,30 +66,30 @@ Opened before starting `M0.1`:
 
 ## M0.1 Artifact Review
 
-| Artifact | Status | Notes |
-|---|---|---|
-| `PRD.md` | Present | Reviewed as the source of truth. No direct PRD checkbox changes were made. |
-| `docs/product-rule-summary.md` | Implemented | Summarizes core product, rule, economy, election, admin, and implementation constraints. |
-| `docs/mvp-decision-registry.md` | Implemented | Captures the 27 binding MVP decisions from PRD section 16. |
-| `PROGRESS_TRACKER.md` | Implemented | Tracks status, required document confirmation, and M0.1 validation notes. |
+| Artifact                        | Status      | Notes                                                                                    |
+| ------------------------------- | ----------- | ---------------------------------------------------------------------------------------- |
+| `PRD.md`                        | Present     | Reviewed as the source of truth. No direct PRD checkbox changes were made.               |
+| `docs/product-rule-summary.md`  | Implemented | Summarizes core product, rule, economy, election, admin, and implementation constraints. |
+| `docs/mvp-decision-registry.md` | Implemented | Captures the 27 binding MVP decisions from PRD section 16.                               |
+| `PROGRESS_TRACKER.md`           | Implemented | Tracks status, required document confirmation, and M0.1 validation notes.                |
 
 ## M0.1 Validation Results
 
-| Requirement | Result |
-|---|---|
-| Mobile-first DApp and desktop secondary surface | Confirmed in `PRD.md` and `docs/product-rule-summary.md`. |
-| Free-form rule creation and AI-context token limit | Confirmed in `PRD.md`, `docs/product-rule-summary.md`, and `docs/mvp-decision-registry.md`. |
-| `RULE_MAX_TOKENS` value | Confirmed as `80`. |
-| Turn duration cycle | Confirmed as `2h -> 2h -> 8h -> 8h -> repeat`. |
-| Winning conditions | Confirmed as original rule and active alternative rule. |
-| Game Token gating | Confirmed for proposing, voting, removing, and reporting rules. |
-| Rule election policy | Confirmed as 3 top-voted eligible rules plus 7 VRF-random eligible rules when at least 10 eligible rules exist. |
-| Randomness provider | Confirmed as Switchboard VRF for draw and rule election. |
-| Fallback behavior | Confirmed no deterministic fallback finalist activation. |
-| Paid rule removal | Confirmed as included in MVP with prize-pool fee destination. |
-| Creator reward | Confirmed as 15% of each individual alternative-rule winner payout, funded from the creator reward reserve sourced from platform monetization. |
-| Admin console scope | Confirmed separate from public DApp and limited to insights, not direct game manipulation. |
-| Implementation constraints | Confirmed monorepo and Docker Compose as required constraints. |
+| Requirement                                        | Result                                                                                                                                         |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Mobile-first DApp and desktop secondary surface    | Confirmed in `PRD.md` and `docs/product-rule-summary.md`.                                                                                      |
+| Free-form rule creation and AI-context token limit | Confirmed in `PRD.md`, `docs/product-rule-summary.md`, and `docs/mvp-decision-registry.md`.                                                    |
+| `RULE_MAX_TOKENS` value                            | Confirmed as `80`.                                                                                                                             |
+| Turn duration cycle                                | Confirmed as `2h -> 2h -> 8h -> 8h -> repeat`.                                                                                                 |
+| Winning conditions                                 | Confirmed as original rule and active alternative rule.                                                                                        |
+| Game Token gating                                  | Confirmed for proposing, voting, removing, and reporting rules.                                                                                |
+| Rule election policy                               | Confirmed as 3 top-voted eligible rules plus 7 VRF-random eligible rules when at least 10 eligible rules exist.                                |
+| Randomness provider                                | Confirmed as Switchboard VRF for draw and rule election.                                                                                       |
+| Fallback behavior                                  | Confirmed no deterministic fallback finalist activation.                                                                                       |
+| Paid rule removal                                  | Confirmed as included in MVP with prize-pool fee destination.                                                                                  |
+| Creator reward                                     | Confirmed as 15% of each individual alternative-rule winner payout, funded from the creator reward reserve sourced from platform monetization. |
+| Admin console scope                                | Confirmed separate from public DApp and limited to insights, not direct game manipulation.                                                     |
+| Implementation constraints                         | Confirmed monorepo and Docker Compose as required constraints.                                                                                 |
 
 ## Confirmation Gate
 
@@ -116,22 +117,22 @@ Opened before starting `M0.1`:
 
 ## M0.2 Artifact Review
 
-| Artifact | Status | Notes |
-|---|---|---|
-| Monorepo tree | Implemented | See `docs/monorepo-tree.md`. |
-| Root README | Implemented | Includes workspace layout, setup commands, and boundary rules. |
-| Workspace/package manager config | Implemented | Uses `pnpm-workspace.yaml`, `package.json`, and Turborepo. |
+| Artifact                         | Status      | Notes                                                          |
+| -------------------------------- | ----------- | -------------------------------------------------------------- |
+| Monorepo tree                    | Implemented | See `docs/monorepo-tree.md`.                                   |
+| Root README                      | Implemented | Includes workspace layout, setup commands, and boundary rules. |
+| Workspace/package manager config | Implemented | Uses `pnpm-workspace.yaml`, `package.json`, and Turborepo.     |
 
 ## M0.2 Validation Results
 
-| Requirement | Result |
-|---|---|
-| Repository can install dependencies from the root | Passed with `pnpm install`. |
-| Workspace commands can target each app/package | Passed with `pnpm workspace:list`. |
-| Empty or stub apps build without fatal errors | Passed with `pnpm build`. |
-| Folder boundaries are clear and documented | Documented in `README.md` and `docs/monorepo-tree.md`. |
-| Local public DApp dev server | Running at `http://localhost:3000`; HTTP 200 verified. |
-| Local admin dev server | Running at `http://localhost:3001`; HTTP 200 verified. |
+| Requirement                                       | Result                                                 |
+| ------------------------------------------------- | ------------------------------------------------------ |
+| Repository can install dependencies from the root | Passed with `pnpm install`.                            |
+| Workspace commands can target each app/package    | Passed with `pnpm workspace:list`.                     |
+| Empty or stub apps build without fatal errors     | Passed with `pnpm build`.                              |
+| Folder boundaries are clear and documented        | Documented in `README.md` and `docs/monorepo-tree.md`. |
+| Local public DApp dev server                      | Running at `http://localhost:3000`; HTTP 200 verified. |
+| Local admin dev server                            | Running at `http://localhost:3001`; HTTP 200 verified. |
 
 ## M0.2 Confirmation Gate
 
@@ -164,22 +165,22 @@ Opened before starting `M0.1`:
 
 ## M0.3 Artifact Review
 
-| Artifact | Status | Notes |
-|---|---|---|
-| `docker-compose.yml` | Implemented | Defines required and optional containers, network, volumes, and health checks. |
-| `.env.example` | Implemented | Defines `COMPOSE_PROJECT_NAME=idealer` and local-only example values. |
-| Local development runbook | Implemented | See `docs/local-development-runbook.md`. |
+| Artifact                  | Status      | Notes                                                                          |
+| ------------------------- | ----------- | ------------------------------------------------------------------------------ |
+| `docker-compose.yml`      | Implemented | Defines required and optional containers, network, volumes, and health checks. |
+| `.env.example`            | Implemented | Defines `COMPOSE_PROJECT_NAME=idealer` and local-only example values.          |
+| Local development runbook | Implemented | See `docs/local-development-runbook.md`.                                       |
 
 ## M0.3 Validation Results
 
-| Requirement | Result |
-|---|---|
+| Requirement                                  | Result                                                                    |
+| -------------------------------------------- | ------------------------------------------------------------------------- |
 | `docker compose up` starts required services | Passed with `docker compose up --build -d postgres redis api worker web`. |
-| Container names follow `idealer-*` | Passed in `docker compose ps`. |
-| API can connect to Postgres and Redis | Passed via `http://localhost:3002/health`. |
-| Worker can connect to Redis and database | Passed via `http://localhost:3003/health`. |
-| Web can reach API locally | Passed from inside `idealer-web` to `http://api:3002/health`. |
-| Health checks report healthy services | Passed in `docker compose ps`. |
+| Container names follow `idealer-*`           | Passed in `docker compose ps`.                                            |
+| API can connect to Postgres and Redis        | Passed via `http://localhost:3002/health`.                                |
+| Worker can connect to Redis and database     | Passed via `http://localhost:3003/health`.                                |
+| Web can reach API locally                    | Passed from inside `idealer-web` to `http://api:3002/health`.             |
+| Health checks report healthy services        | Passed in `docker compose ps`.                                            |
 
 ## M0.3 Confirmation Gate
 
@@ -213,30 +214,30 @@ Opened before starting `M0.1`:
 
 ## M0.4 Artifact Review
 
-| Artifact | Status | Notes |
-|---|---|---|
-| API contract document | Implemented | See `docs/api-contracts.md`; includes response envelope, shared models, mocked frontend-ready endpoints, auth notes, and shared error behavior. |
-| Data model draft | Implemented | See `docs/data-model-draft.md`; includes turns, rules, votes, guesses, logs, jobs, creator rewards, admin metrics, and pgvector HNSW migration. |
-| Queue/job contract draft | Implemented | See `docs/queue-job-contracts.md`; includes job envelope, payloads, retries, idempotency, and terminal failure states. |
-| Agent schema draft | Implemented | See `docs/agent-schema-draft.md`; includes compiler IO, `RuleDedupResult`, `GateCheckLog`, `CompilerAgentLog`, confidence breakdown, and rule state machine. |
-| Smart contract account/instruction draft | Implemented | See `docs/smart-contract-account-instruction-draft.md`; includes account model, Game Token PDA validation contract, instruction list, and emitted events. |
-| Admin metrics dictionary | Implemented | See `docs/admin-metrics-dictionary.md`. |
-| Shared error codes | Implemented | See `docs/shared-error-codes.md` and `packages/constants/src/error-codes.ts`. |
+| Artifact                                 | Status      | Notes                                                                                                                                                        |
+| ---------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| API contract document                    | Implemented | See `docs/api-contracts.md`; includes response envelope, shared models, mocked frontend-ready endpoints, auth notes, and shared error behavior.              |
+| Data model draft                         | Implemented | See `docs/data-model-draft.md`; includes turns, rules, votes, guesses, logs, jobs, creator rewards, admin metrics, and pgvector HNSW migration.              |
+| Queue/job contract draft                 | Implemented | See `docs/queue-job-contracts.md`; includes job envelope, payloads, retries, idempotency, and terminal failure states.                                       |
+| Agent schema draft                       | Implemented | See `docs/agent-schema-draft.md`; includes compiler IO, `RuleDedupResult`, `GateCheckLog`, `CompilerAgentLog`, confidence breakdown, and rule state machine. |
+| Smart contract account/instruction draft | Implemented | See `docs/smart-contract-account-instruction-draft.md`; includes account model, Game Token PDA validation contract, instruction list, and emitted events.    |
+| Admin metrics dictionary                 | Implemented | See `docs/admin-metrics-dictionary.md`.                                                                                                                      |
+| Shared error codes                       | Implemented | See `docs/shared-error-codes.md` and `packages/constants/src/error-codes.ts`.                                                                                |
 
 ## M0.4 Validation Results
 
-| Requirement | Result |
-|---|---|
-| Frontend can be implemented against mocked API contracts | Passed; API contract defines stable `/api/v1` envelopes, endpoint paths, inputs, outputs, and error codes. |
-| Backend can be implemented against database and queue contracts | Passed; data model and queue contracts define persistence, idempotency, retries, and failure states. |
-| Worker jobs have clear inputs, outputs, retry behavior, and failure states | Passed; queue contract defines required job types and execution semantics. |
-| Smart contract state aligns with backend state assumptions | Passed; Solana account draft defines on-chain source-of-truth boundaries and backend projection assumptions. |
-| AI agent schemas include confidence breakdown and audit fields | Passed; agent schema includes composite confidence, audit fields, and compiler logs. |
-| Typecheck | Passed with `pnpm typecheck`. |
-| Lint | Passed with `pnpm lint`. |
-| Tests | Passed with `pnpm test`. |
-| Build | Passed with `pnpm build`. |
-| Whitespace check | Passed with `git diff --check`; Git reported CRLF normalization warnings only. |
+| Requirement                                                                | Result                                                                                                       |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Frontend can be implemented against mocked API contracts                   | Passed; API contract defines stable `/api/v1` envelopes, endpoint paths, inputs, outputs, and error codes.   |
+| Backend can be implemented against database and queue contracts            | Passed; data model and queue contracts define persistence, idempotency, retries, and failure states.         |
+| Worker jobs have clear inputs, outputs, retry behavior, and failure states | Passed; queue contract defines required job types and execution semantics.                                   |
+| Smart contract state aligns with backend state assumptions                 | Passed; Solana account draft defines on-chain source-of-truth boundaries and backend projection assumptions. |
+| AI agent schemas include confidence breakdown and audit fields             | Passed; agent schema includes composite confidence, audit fields, and compiler logs.                         |
+| Typecheck                                                                  | Passed with `pnpm typecheck`.                                                                                |
+| Lint                                                                       | Passed with `pnpm lint`.                                                                                     |
+| Tests                                                                      | Passed with `pnpm test`.                                                                                     |
+| Build                                                                      | Passed with `pnpm build`.                                                                                    |
+| Whitespace check                                                           | Passed with `git diff --check`; Git reported CRLF normalization warnings only.                               |
 
 ## M0.4 Confirmation Gate
 
@@ -269,20 +270,20 @@ Opened before starting `M0.1`:
 
 ## M0.5 Artifact Review
 
-| Artifact | Status | Notes |
-|---|---|---|
-| Mobile user flow diagram | Implemented | See `docs/mobile-user-flow-diagram.md`; includes `/play`, first-time, returning, wallet, transaction return, number, rule, vote, result, reward, and share flows. |
-| Low-fidelity wireframes | Implemented | See `docs/mobile-low-fidelity-wireframes.md`; includes mobile shell, live hub, first-time, number picker, approval, rule proposal, voting, active rule, results, and state wireframes. |
-| UX state map | Implemented | See `docs/mobile-ux-state-map.md`; includes route, wallet, transaction, number, rule proposal, voting, active rule, draw/result/reward, and share states. |
+| Artifact                 | Status      | Notes                                                                                                                                                                                  |
+| ------------------------ | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Mobile user flow diagram | Implemented | See `docs/mobile-user-flow-diagram.md`; includes `/play`, first-time, returning, wallet, transaction return, number, rule, vote, result, reward, and share flows.                      |
+| Low-fidelity wireframes  | Implemented | See `docs/mobile-low-fidelity-wireframes.md`; includes mobile shell, live hub, first-time, number picker, approval, rule proposal, voting, active rule, results, and state wireframes. |
+| UX state map             | Implemented | See `docs/mobile-ux-state-map.md`; includes route, wallet, transaction, number, rule proposal, voting, active rule, draw/result/reward, and share states.                              |
 
 ## M0.5 Validation Results
 
-| Requirement | Result |
-|---|---|
-| New user can understand intended game loop from flow diagrams | Passed; first-time flow and core game loop are documented. |
-| Mobile wallet interruption and return behavior are represented | Passed; sequence diagram and transaction states preserve originating action and return behavior. |
-| Core actions are reachable with mobile-first navigation | Passed; shared mobile shell and flows keep pick, rules, voting, results, and share reachable from `/play`. |
-| No critical screen depends on desktop layout | Passed; all wireframes are mobile-first and specify minimum 320px behavior. |
+| Requirement                                                    | Result                                                                                                     |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| New user can understand intended game loop from flow diagrams  | Passed; first-time flow and core game loop are documented.                                                 |
+| Mobile wallet interruption and return behavior are represented | Passed; sequence diagram and transaction states preserve originating action and return behavior.           |
+| Core actions are reachable with mobile-first navigation        | Passed; shared mobile shell and flows keep pick, rules, voting, results, and share reachable from `/play`. |
+| No critical screen depends on desktop layout                   | Passed; all wireframes are mobile-first and specify minimum 320px behavior.                                |
 
 ## M0.5 Confirmation Gate
 
@@ -319,28 +320,28 @@ Opened before starting `M0.1`:
 
 ## M1.1 Artifact Review
 
-| Artifact | Status | Notes |
-|---|---|---|
+| Artifact                                                  | Status      | Notes                                                                                                                                                          |
+| --------------------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `apps/web/src/features/live-round/MobileLiveRoundHub.tsx` | Implemented | Contains the interactive mobile hub, state control, live state, loading state, empty state, delayed state, header, CTA, activity feed, and milestone timeline. |
-| `apps/web/src/app/play/page.tsx` | Implemented | Exposes the `/play` route. |
-| `apps/web/src/app/page.tsx` | Implemented | Redirects `/` to `/play`. |
-| `apps/web/src/app/globals.css` | Implemented | Defines the mobile-first shell, responsive layout, sticky header, fixed bottom CTA, state panels, and accessible focus states. |
+| `apps/web/src/app/play/page.tsx`                          | Implemented | Exposes the `/play` route.                                                                                                                                     |
+| `apps/web/src/app/page.tsx`                               | Implemented | Redirects `/` to `/play`.                                                                                                                                      |
+| `apps/web/src/app/globals.css`                            | Implemented | Defines the mobile-first shell, responsive layout, sticky header, fixed bottom CTA, state panels, and accessible focus states.                                 |
 
 ## M1.1 Validation Results
 
-| Requirement | Result |
-|---|---|
-| User can identify prize, countdown, and next action in under 10 seconds | Passed; these appear in the sticky header and first viewport. |
-| Screen works on common mobile viewport sizes | Passed for `390x844` screenshot; layout reserves space above the bottom CTA and avoids overlap. |
-| Bottom CTA remains reachable with one-handed use | Passed; fixed bottom CTA remains visible on `/play`. |
-| Root route reaches primary play route | Passed; `/` returns `307` to `/play`. |
-| Play route loads | Passed; `/play` returns HTTP `200`. |
-| Typecheck | Passed with `pnpm typecheck`. |
-| Lint | Passed with `pnpm lint`. |
-| Tests | Passed with `pnpm test`. |
-| Build | Passed with `pnpm build`; `/play` is included in generated routes. |
-| Visual verification | Passed with Playwright screenshots at `390x844` and `1440x1000`; screenshots are local ignored artifacts under `output/playwright/`. |
-| Whitespace check | Passed with `git diff --check`; Git reported CRLF normalization warnings only. |
+| Requirement                                                             | Result                                                                                                                               |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| User can identify prize, countdown, and next action in under 10 seconds | Passed; these appear in the sticky header and first viewport.                                                                        |
+| Screen works on common mobile viewport sizes                            | Passed for `390x844` screenshot; layout reserves space above the bottom CTA and avoids overlap.                                      |
+| Bottom CTA remains reachable with one-handed use                        | Passed; fixed bottom CTA remains visible on `/play`.                                                                                 |
+| Root route reaches primary play route                                   | Passed; `/` returns `307` to `/play`.                                                                                                |
+| Play route loads                                                        | Passed; `/play` returns HTTP `200`.                                                                                                  |
+| Typecheck                                                               | Passed with `pnpm typecheck`.                                                                                                        |
+| Lint                                                                    | Passed with `pnpm lint`.                                                                                                             |
+| Tests                                                                   | Passed with `pnpm test`.                                                                                                             |
+| Build                                                                   | Passed with `pnpm build`; `/play` is included in generated routes.                                                                   |
+| Visual verification                                                     | Passed with Playwright screenshots at `390x844` and `1440x1000`; screenshots are local ignored artifacts under `output/playwright/`. |
+| Whitespace check                                                        | Passed with `git diff --check`; Git reported CRLF normalization warnings only.                                                       |
 
 ## M1.1 Confirmation Gate
 
@@ -370,31 +371,31 @@ Opened before starting `M0.1`:
 
 ## M1.2 Artifact Review
 
-| Artifact | Status | Notes |
-|---|---|---|
-| `apps/web/src/features/number-picker/NumberPicker.tsx` | Implemented | Contains selection, remove/edit, randomize, clear, validation, review, and success states. |
-| `apps/web/src/app/play/pick/page.tsx` | Implemented | Exposes the mobile number picker route. |
-| `apps/web/src/features/live-round/MobileLiveRoundHub.tsx` | Updated | Primary bottom CTA now navigates to `/play/pick`. |
-| `apps/web/src/app/globals.css` | Updated | Adds stable number tiles, sticky tray, picker header, review state, and bottom action bar styles. |
-| `apps/web/e2e/number-picker.spec.ts` | Implemented | Verifies six-number selection, disabled review state, review step, and success state. |
-| `apps/web/playwright.config.ts` | Implemented | Runs the web e2e test against a local Next dev server on port 3005. |
+| Artifact                                                  | Status      | Notes                                                                                             |
+| --------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------- |
+| `apps/web/src/features/number-picker/NumberPicker.tsx`    | Implemented | Contains selection, remove/edit, randomize, clear, validation, review, and success states.        |
+| `apps/web/src/app/play/pick/page.tsx`                     | Implemented | Exposes the mobile number picker route.                                                           |
+| `apps/web/src/features/live-round/MobileLiveRoundHub.tsx` | Updated     | Primary bottom CTA now navigates to `/play/pick`.                                                 |
+| `apps/web/src/app/globals.css`                            | Updated     | Adds stable number tiles, sticky tray, picker header, review state, and bottom action bar styles. |
+| `apps/web/e2e/number-picker.spec.ts`                      | Implemented | Verifies six-number selection, disabled review state, review step, and success state.             |
+| `apps/web/playwright.config.ts`                           | Implemented | Runs the web e2e test against a local Next dev server on port 3005.                               |
 
 ## M1.2 Validation Results
 
-| Requirement | Result |
-|---|---|
-| User can select 6 unique numbers without assistance | Passed; e2e selects `01` through `06` and reaches review. |
-| Invalid selections are blocked before submission | Passed; review CTA is disabled before 6 numbers are selected and extra unselected tiles disable at 6. |
-| Interaction is usable on mobile without precision tapping | Passed; mobile screenshot at `390x844` shows large stable tiles and thumb-zone bottom actions. |
-| Play route links to number picker | Passed; hub primary CTA navigates to `/play/pick`. |
-| Number picker route loads | Passed; `/play/pick` returns HTTP `200`. |
-| E2E | Passed with `pnpm --filter @idealer/web test:e2e`. |
-| Typecheck | Passed with `pnpm typecheck`. |
-| Lint | Passed with `pnpm lint`. |
-| Tests | Passed with `pnpm test`. |
-| Build | Passed with `pnpm build`; `/play/pick` is included in generated routes. |
-| Visual verification | Passed with Playwright screenshots at `390x844` and `1440x1000`; screenshots are local ignored artifacts under `output/playwright/`. |
-| Whitespace check | Passed with `git diff --check`; Git reported CRLF normalization warnings only. |
+| Requirement                                               | Result                                                                                                                               |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| User can select 6 unique numbers without assistance       | Passed; e2e selects `01` through `06` and reaches review.                                                                            |
+| Invalid selections are blocked before submission          | Passed; review CTA is disabled before 6 numbers are selected and extra unselected tiles disable at 6.                                |
+| Interaction is usable on mobile without precision tapping | Passed; mobile screenshot at `390x844` shows large stable tiles and thumb-zone bottom actions.                                       |
+| Play route links to number picker                         | Passed; hub primary CTA navigates to `/play/pick`.                                                                                   |
+| Number picker route loads                                 | Passed; `/play/pick` returns HTTP `200`.                                                                                             |
+| E2E                                                       | Passed with `pnpm --filter @idealer/web test:e2e`.                                                                                   |
+| Typecheck                                                 | Passed with `pnpm typecheck`.                                                                                                        |
+| Lint                                                      | Passed with `pnpm lint`.                                                                                                             |
+| Tests                                                     | Passed with `pnpm test`.                                                                                                             |
+| Build                                                     | Passed with `pnpm build`; `/play/pick` is included in generated routes.                                                              |
+| Visual verification                                       | Passed with Playwright screenshots at `390x844` and `1440x1000`; screenshots are local ignored artifacts under `output/playwright/`. |
+| Whitespace check                                          | Passed with `git diff --check`; Git reported CRLF normalization warnings only.                                                       |
 
 ## M1.2 Confirmation Gate
 
@@ -420,31 +421,31 @@ Opened before starting `M0.1`:
 
 ## M1.3 Artifact Review
 
-| Artifact | Status | Notes |
-|---|---|---|
+| Artifact                                                       | Status      | Notes                                                                                                                                  |
+| -------------------------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | `apps/web/src/features/rule-proposal/RuleProposalComposer.tsx` | Implemented | Contains free-form composition, token-limit behavior, sanitized and AI-style previews, ambiguity feedback, review, and success states. |
-| `apps/web/src/app/play/propose/page.tsx` | Implemented | Exposes the mobile rule proposal route. |
-| `apps/web/src/features/live-round/MobileLiveRoundHub.tsx` | Updated | Proposal action now navigates to `/play/propose`. |
-| `apps/web/src/app/globals.css` | Updated | Adds responsive composer, preview, warning, inspiration, review, and success-state styles. |
-| `apps/web/e2e/rule-proposal.spec.ts` | Implemented | Verifies token-limit rejection and the complete simulated proposal flow. |
+| `apps/web/src/app/play/propose/page.tsx`                       | Implemented | Exposes the mobile rule proposal route.                                                                                                |
+| `apps/web/src/features/live-round/MobileLiveRoundHub.tsx`      | Updated     | Proposal action now navigates to `/play/propose`.                                                                                      |
+| `apps/web/src/app/globals.css`                                 | Updated     | Adds responsive composer, preview, warning, inspiration, review, and success-state styles.                                             |
+| `apps/web/e2e/rule-proposal.spec.ts`                           | Implemented | Verifies token-limit rejection and the complete simulated proposal flow.                                                               |
 
 ## M1.3 Validation Results
 
-| Requirement | Result |
-|---|---|
-| Users can write a rule freely | Passed; the composer uses an unrestricted natural-language textarea. |
-| Users understand why a rule is rejected for length | Passed; live token count, configured maximum, warning, and disabled review state are visible. |
-| UI does not force fixed categories or rule combinations | Passed; examples are inspiration-only text and do not populate the composer. |
-| Turn duration cycle | Passed; PRD, product summary, decision registry, tracker, and runtime constant use `2h -> 2h -> 8h -> 8h -> repeat`. |
-| Runtime cycle verification | Passed; `getTurnDurationHours` produced `[2, 2, 8, 8, 2, 2, 8, 8]` for cycle indexes 0 through 7. |
-| Rule proposal route loads | Passed; `/play/propose` is included in the production build. |
-| E2E | Passed with `pnpm --filter @idealer/web test:e2e`; both number picker and rule proposal tests passed. |
-| Typecheck | Passed with `pnpm typecheck`. |
-| Lint | Passed with `pnpm lint`. |
-| Tests | Passed with `pnpm test`. |
-| Build | Passed with `pnpm build`; `/play/propose` is included in generated routes. |
-| Visual verification | Passed at `390x844` and `1440x1000`; page has content, expected controls render, no framework overlay is present, and no console errors were detected. The unavailable `agent-browser` CLI was replaced explicitly with the installed Playwright browser runtime. |
-| Whitespace check | Passed with `git diff --check`; Git reported CRLF normalization warnings only. |
+| Requirement                                             | Result                                                                                                                                                                                                                                                            |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Users can write a rule freely                           | Passed; the composer uses an unrestricted natural-language textarea.                                                                                                                                                                                              |
+| Users understand why a rule is rejected for length      | Passed; live token count, configured maximum, warning, and disabled review state are visible.                                                                                                                                                                     |
+| UI does not force fixed categories or rule combinations | Passed; examples are inspiration-only text and do not populate the composer.                                                                                                                                                                                      |
+| Turn duration cycle                                     | Passed; PRD, product summary, decision registry, tracker, and runtime constant use `2h -> 2h -> 8h -> 8h -> repeat`.                                                                                                                                              |
+| Runtime cycle verification                              | Passed; `getTurnDurationHours` produced `[2, 2, 8, 8, 2, 2, 8, 8]` for cycle indexes 0 through 7.                                                                                                                                                                 |
+| Rule proposal route loads                               | Passed; `/play/propose` is included in the production build.                                                                                                                                                                                                      |
+| E2E                                                     | Passed with `pnpm --filter @idealer/web test:e2e`; both number picker and rule proposal tests passed.                                                                                                                                                             |
+| Typecheck                                               | Passed with `pnpm typecheck`.                                                                                                                                                                                                                                     |
+| Lint                                                    | Passed with `pnpm lint`.                                                                                                                                                                                                                                          |
+| Tests                                                   | Passed with `pnpm test`.                                                                                                                                                                                                                                          |
+| Build                                                   | Passed with `pnpm build`; `/play/propose` is included in generated routes.                                                                                                                                                                                        |
+| Visual verification                                     | Passed at `390x844` and `1440x1000`; page has content, expected controls render, no framework overlay is present, and no console errors were detected. The unavailable `agent-browser` CLI was replaced explicitly with the installed Playwright browser runtime. |
+| Whitespace check                                        | Passed with `git diff --check`; Git reported CRLF normalization warnings only.                                                                                                                                                                                    |
 
 ## M1.3 Confirmation Gate
 
@@ -470,33 +471,33 @@ Opened before starting `M0.1`:
 
 ## M1.4 Artifact Review
 
-| Artifact | Status | Notes |
-|---|---|---|
-| `apps/web/src/features/rule-voting/RuleVotingPanel.tsx` | Implemented | Contains proposed-rule cards, live vote totals, user vote state, vote changes, dynamic leader, countdown, feedback, empty state, and activity feed. |
-| `apps/web/src/app/play/vote/page.tsx` | Implemented | Exposes the mobile voting route. |
-| `apps/web/src/features/live-round/MobileLiveRoundHub.tsx` | Updated | Vote action now navigates to `/play/vote`. |
-| `apps/web/src/app/globals.css` | Updated | Adds responsive voting summary, rule cards, metadata, actions, empty state, and activity styles. |
-| `apps/web/e2e/rule-voting.spec.ts` | Implemented | Verifies voting, vote change, visible leader update, feedback, activity event, and empty state. |
+| Artifact                                                  | Status      | Notes                                                                                                                                               |
+| --------------------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/web/src/features/rule-voting/RuleVotingPanel.tsx`   | Implemented | Contains proposed-rule cards, live vote totals, user vote state, vote changes, dynamic leader, countdown, feedback, empty state, and activity feed. |
+| `apps/web/src/app/play/vote/page.tsx`                     | Implemented | Exposes the mobile voting route.                                                                                                                    |
+| `apps/web/src/features/live-round/MobileLiveRoundHub.tsx` | Updated     | Vote action now navigates to `/play/vote`.                                                                                                          |
+| `apps/web/src/app/globals.css`                            | Updated     | Adds responsive voting summary, rule cards, metadata, actions, empty state, and activity styles.                                                    |
+| `apps/web/e2e/rule-voting.spec.ts`                        | Implemented | Verifies voting, vote change, visible leader update, feedback, activity event, and empty state.                                                     |
 
 ## M1.4 Validation Results
 
-| Requirement | Result |
-|---|---|
-| User can vote in one or two taps | Passed; each rule card has a direct vote action and E2E completes an initial vote with one click. |
-| User understands that voting influences the Rule of the Hour | Passed; the leading summary explicitly explains finalist-set influence and VRF selection. |
-| Leading rule state updates visibly | Passed; E2E confirms `Balanced spread wins` becomes the visible leader immediately after voting. |
-| Current user vote and vote change | Passed; selected action and summary show the current vote, and E2E confirms vote changes. |
-| Feedback and activity event | Passed; an `aria-live` feedback message and a new activity event appear after each vote. |
-| Empty state | Passed; the prototype state control exposes a clear no-eligible-rules state. |
-| Live-round hub links to voting route | Passed; Vote navigates to `/play/vote`. |
-| Voting route loads | Passed; `/play/vote` returns HTTP `200`. |
-| E2E | Passed with `pnpm --filter @idealer/web test:e2e`; all 3 web flows passed. |
-| Typecheck | Passed with `pnpm typecheck`. |
-| Lint | Passed with `pnpm lint`. |
-| Tests | Passed with `pnpm test`. |
-| Build | Passed with `pnpm build`; `/play/vote` is included in generated routes. |
-| Visual verification | Passed at `320x700`, `390x844`, and `1440x1000`; no horizontal overflow, framework overlay, or console errors were detected. Fixed-header geometry leaves a 12px gap before content. |
-| Whitespace check | Passed with `git diff --check`; Git reported CRLF normalization warnings only. |
+| Requirement                                                  | Result                                                                                                                                                                               |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| User can vote in one or two taps                             | Passed; each rule card has a direct vote action and E2E completes an initial vote with one click.                                                                                    |
+| User understands that voting influences the Rule of the Hour | Passed; the leading summary explicitly explains finalist-set influence and VRF selection.                                                                                            |
+| Leading rule state updates visibly                           | Passed; E2E confirms `Balanced spread wins` becomes the visible leader immediately after voting.                                                                                     |
+| Current user vote and vote change                            | Passed; selected action and summary show the current vote, and E2E confirms vote changes.                                                                                            |
+| Feedback and activity event                                  | Passed; an `aria-live` feedback message and a new activity event appear after each vote.                                                                                             |
+| Empty state                                                  | Passed; the prototype state control exposes a clear no-eligible-rules state.                                                                                                         |
+| Live-round hub links to voting route                         | Passed; Vote navigates to `/play/vote`.                                                                                                                                              |
+| Voting route loads                                           | Passed; `/play/vote` returns HTTP `200`.                                                                                                                                             |
+| E2E                                                          | Passed with `pnpm --filter @idealer/web test:e2e`; all 3 web flows passed.                                                                                                           |
+| Typecheck                                                    | Passed with `pnpm typecheck`.                                                                                                                                                        |
+| Lint                                                         | Passed with `pnpm lint`.                                                                                                                                                             |
+| Tests                                                        | Passed with `pnpm test`.                                                                                                                                                             |
+| Build                                                        | Passed with `pnpm build`; `/play/vote` is included in generated routes.                                                                                                              |
+| Visual verification                                          | Passed at `320x700`, `390x844`, and `1440x1000`; no horizontal overflow, framework overlay, or console errors were detected. Fixed-header geometry leaves a 12px gap before content. |
+| Whitespace check                                             | Passed with `git diff --check`; Git reported CRLF normalization warnings only.                                                                                                       |
 
 ## M1.4 Confirmation Gate
 
@@ -523,34 +524,34 @@ Opened before starting `M0.1`:
 
 ## M1.5 Artifact Review
 
-| Artifact | Status | Notes |
-|---|---|---|
+| Artifact                                                  | Status      | Notes                                                                                                                                              |
+| --------------------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `apps/web/src/features/turn-cycle/TurnCycleSimulator.tsx` | Implemented | Contains deterministic cycle navigation, lifecycle phases, proportional timing, accelerated mode, rollover, late-entry state, and activity events. |
-| `apps/web/src/app/play/simulate/page.tsx` | Implemented | Exposes the simulated turn-cycle route. |
-| `apps/web/src/features/live-round/MobileLiveRoundHub.tsx` | Updated | Cycle action now navigates to `/play/simulate`. |
-| `apps/web/src/app/globals.css` | Updated | Adds responsive cycle summary, progress, duration strip, controls, late-entry state, timeline, and activity styles. |
-| `apps/web/e2e/turn-cycle.spec.ts` | Implemented | Verifies lifecycle timing, `2h -> 2h -> 8h -> 8h -> repeat`, late entry, draw, and accelerated simulation. |
+| `apps/web/src/app/play/simulate/page.tsx`                 | Implemented | Exposes the simulated turn-cycle route.                                                                                                            |
+| `apps/web/src/features/live-round/MobileLiveRoundHub.tsx` | Updated     | Cycle action now navigates to `/play/simulate`.                                                                                                    |
+| `apps/web/src/app/globals.css`                            | Updated     | Adds responsive cycle summary, progress, duration strip, controls, late-entry state, timeline, and activity styles.                                |
+| `apps/web/e2e/turn-cycle.spec.ts`                         | Implemented | Verifies lifecycle timing, `2h -> 2h -> 8h -> 8h -> repeat`, late entry, draw, and accelerated simulation.                                         |
 
 ## M1.5 Validation Results
 
-| Requirement | Result |
-|---|---|
-| Cycle order is correct | Passed; E2E verifies `2h -> 2h -> 8h -> 8h -> 2h`, including repeat after the second 8h turn. |
-| UI communicates current and next duration clearly | Passed; summary and duration strip show current step, current duration, and next duration. |
-| Accelerated mode allows testing all durations quickly | Passed; accelerated mode advances every 900ms and E2E reaches draw within four seconds. |
-| Voting close timing | Passed; timeline shows 75% and E2E verifies the `Voting closed` phase. |
-| Guess close timing and late entry | Passed; timeline shows 96.7% and the late-entry edge state blocks voting and new guesses. |
-| Draw timing and rollover | Passed; draw occurs at 100%, then the next phase advancement rolls to the following turn. |
-| Invalid cycle or phase indexes | Passed; invalid indexes throw explicit errors instead of silently selecting a fallback. |
-| Live-round hub links to simulator | Passed; Cycle navigates to `/play/simulate`. |
-| Simulator route loads | Passed; `/play/simulate` returns HTTP `200`. |
-| E2E | Passed with `pnpm --filter @idealer/web test:e2e`; all 4 web flows passed. |
-| Typecheck | Passed with `pnpm typecheck`. |
-| Lint | Passed with `pnpm lint`. |
-| Tests | Passed with `pnpm test`. |
-| Build | Passed with `pnpm build`; `/play/simulate` is included in generated routes. |
-| Visual verification | Passed at `320x700`, `390x844`, and `1440x1000`; no horizontal overflow, framework overlay, or console errors were detected. Fixed-header geometry leaves a 12px gap before content, and mobile control targets are at least 44px high. |
-| Whitespace check | Passed with `git diff --check`; Git reported CRLF normalization warnings only. |
+| Requirement                                           | Result                                                                                                                                                                                                                                  |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cycle order is correct                                | Passed; E2E verifies `2h -> 2h -> 8h -> 8h -> 2h`, including repeat after the second 8h turn.                                                                                                                                           |
+| UI communicates current and next duration clearly     | Passed; summary and duration strip show current step, current duration, and next duration.                                                                                                                                              |
+| Accelerated mode allows testing all durations quickly | Passed; accelerated mode advances every 900ms and E2E reaches draw within four seconds.                                                                                                                                                 |
+| Voting close timing                                   | Passed; timeline shows 75% and E2E verifies the `Voting closed` phase.                                                                                                                                                                  |
+| Guess close timing and late entry                     | Passed; timeline shows 96.7% and the late-entry edge state blocks voting and new guesses.                                                                                                                                               |
+| Draw timing and rollover                              | Passed; draw occurs at 100%, then the next phase advancement rolls to the following turn.                                                                                                                                               |
+| Invalid cycle or phase indexes                        | Passed; invalid indexes throw explicit errors instead of silently selecting a fallback.                                                                                                                                                 |
+| Live-round hub links to simulator                     | Passed; Cycle navigates to `/play/simulate`.                                                                                                                                                                                            |
+| Simulator route loads                                 | Passed; `/play/simulate` returns HTTP `200`.                                                                                                                                                                                            |
+| E2E                                                   | Passed with `pnpm --filter @idealer/web test:e2e`; all 4 web flows passed.                                                                                                                                                              |
+| Typecheck                                             | Passed with `pnpm typecheck`.                                                                                                                                                                                                           |
+| Lint                                                  | Passed with `pnpm lint`.                                                                                                                                                                                                                |
+| Tests                                                 | Passed with `pnpm test`.                                                                                                                                                                                                                |
+| Build                                                 | Passed with `pnpm build`; `/play/simulate` is included in generated routes.                                                                                                                                                             |
+| Visual verification                                   | Passed at `320x700`, `390x844`, and `1440x1000`; no horizontal overflow, framework overlay, or console errors were detected. Fixed-header geometry leaves a 12px gap before content, and mobile control targets are at least 44px high. |
+| Whitespace check                                      | Passed with `git diff --check`; Git reported CRLF normalization warnings only.                                                                                                                                                          |
 
 ## M1.5 Confirmation Gate
 
@@ -576,29 +577,29 @@ Opened before starting `M0.1`:
 
 ## M1.6 Artifact Review
 
-| Artifact | Status | Notes |
-|---|---|---|
-| `apps/web/src/features/draw-result/DrawResultPanel.tsx` | Implemented | Contains result scenarios, number comparison, rule evaluations, near-miss feedback, creator attribution/reward, return CTA, and share feedback. |
-| `apps/web/src/app/play/results/page.tsx` | Implemented | Exposes the simulated result route. |
-| `apps/web/src/features/live-round/MobileLiveRoundHub.tsx` | Updated | Results action now navigates to `/play/results`. |
-| `apps/web/src/app/globals.css` | Updated | Adds responsive result layout, number comparison, evaluation, creator accounting, and action styles. |
-| `apps/web/e2e/draw-result.spec.ts` | Implemented | Verifies outcome explanations, creator accounting, next-round CTA, and share feedback. |
+| Artifact                                                  | Status      | Notes                                                                                                                                           |
+| --------------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/web/src/features/draw-result/DrawResultPanel.tsx`   | Implemented | Contains result scenarios, number comparison, rule evaluations, near-miss feedback, creator attribution/reward, return CTA, and share feedback. |
+| `apps/web/src/app/play/results/page.tsx`                  | Implemented | Exposes the simulated result route.                                                                                                             |
+| `apps/web/src/features/live-round/MobileLiveRoundHub.tsx` | Updated     | Results action now navigates to `/play/results`.                                                                                                |
+| `apps/web/src/app/globals.css`                            | Updated     | Adds responsive result layout, number comparison, evaluation, creator accounting, and action styles.                                            |
+| `apps/web/e2e/draw-result.spec.ts`                        | Implemented | Verifies outcome explanations, creator accounting, next-round CTA, and share feedback.                                                          |
 
 ## M1.6 Validation Results
 
-| Requirement | Result |
-|---|---|
-| User understands why they won or lost | Passed; original and alternative rule results explain each outcome and E2E verifies near-miss and winner states. |
-| User sees a reason to join the next round | Passed; next turn duration, changing-rule message, and `/play/pick` CTA are visible. |
-| Creator outcome is visible without confusing winner payout | Passed; creator reward, reserve source, full winner payout, and `0.00 SOL` winner deduction are displayed together. |
-| Result route loads | Passed; `/play/results` returns HTTP `200` and is included in the production build. |
-| E2E | Passed with `pnpm --filter @idealer/web test:e2e`; all 5 web flows passed. |
-| Typecheck | Passed with `pnpm typecheck`. |
-| Lint | Passed with `pnpm lint`. |
-| Tests | Passed with `pnpm test`. |
-| Build | Passed with `pnpm build`; `/play/results` is included in generated routes. |
-| Visual verification | Passed at `320x700`, `390x844`, and `1440x1000`; no horizontal overflow or console errors were detected, and result action targets are at least 52px high. |
-| Whitespace check | Passed with `git diff --check`; Git reported CRLF normalization warnings only. |
+| Requirement                                                | Result                                                                                                                                                     |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| User understands why they won or lost                      | Passed; original and alternative rule results explain each outcome and E2E verifies near-miss and winner states.                                           |
+| User sees a reason to join the next round                  | Passed; next turn duration, changing-rule message, and `/play/pick` CTA are visible.                                                                       |
+| Creator outcome is visible without confusing winner payout | Passed; creator reward, reserve source, full winner payout, and `0.00 SOL` winner deduction are displayed together.                                        |
+| Result route loads                                         | Passed; `/play/results` returns HTTP `200` and is included in the production build.                                                                        |
+| E2E                                                        | Passed with `pnpm --filter @idealer/web test:e2e`; all 5 web flows passed.                                                                                 |
+| Typecheck                                                  | Passed with `pnpm typecheck`.                                                                                                                              |
+| Lint                                                       | Passed with `pnpm lint`.                                                                                                                                   |
+| Tests                                                      | Passed with `pnpm test`.                                                                                                                                   |
+| Build                                                      | Passed with `pnpm build`; `/play/results` is included in generated routes.                                                                                 |
+| Visual verification                                        | Passed at `320x700`, `390x844`, and `1440x1000`; no horizontal overflow or console errors were detected, and result action targets are at least 52px high. |
+| Whitespace check                                           | Passed with `git diff --check`; Git reported CRLF normalization warnings only.                                                                             |
 
 ## M1.6 Confirmation Gate
 
@@ -621,31 +622,31 @@ Opened before starting `M0.1`:
 
 ## M1.7 Artifact Review
 
-| Artifact | Status | Notes |
-|---|---|---|
+| Artifact                                                  | Status      | Notes                                                                                                                      |
+| --------------------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `apps/web/src/features/share-card/ShareCardGenerator.tsx` | Implemented | Contains three story variants, mobile card generation, share/copy behavior, fallback feedback, and share-intent analytics. |
-| `apps/web/src/app/play/share/page.tsx` | Implemented | Exposes the share-card generator route. |
-| `apps/web/src/features/draw-result/DrawResultPanel.tsx` | Updated | Share result CTA now navigates to `/play/share`. |
-| `apps/web/src/app/globals.css` | Updated | Adds stable mobile social-card, story selector, actions, and analytics styles. |
-| `apps/web/e2e/share-card.spec.ts` | Implemented | Verifies variants, required content, native sharing, copy link, fallback copy, and analytics. |
+| `apps/web/src/app/play/share/page.tsx`                    | Implemented | Exposes the share-card generator route.                                                                                    |
+| `apps/web/src/features/draw-result/DrawResultPanel.tsx`   | Updated     | Share result CTA now navigates to `/play/share`.                                                                           |
+| `apps/web/src/app/globals.css`                            | Updated     | Adds stable mobile social-card, story selector, actions, and analytics styles.                                             |
+| `apps/web/e2e/share-card.spec.ts`                         | Implemented | Verifies variants, required content, native sharing, copy link, fallback copy, and analytics.                              |
 
 ## M1.7 Validation Results
 
-| Requirement | Result |
-|---|---|
-| Share card is readable on mobile | Passed; visual verification at `320x700` and `390x844` shows a stable `4:5` card without content overflow. |
-| Card communicates the interesting story of the round | Passed; active-rule, near-miss, and creator-elected variants visibly change the outcome narrative. |
-| User can share or copy without technical friction | Passed; native share, explicit Copy link, and automatic fallback copy are available with visible feedback. |
-| Required card content | Passed; every variant includes turn number, rule title, prize pool, and outcome. |
-| Prototype share analytics | Passed; share-intent count, last intent type, and selected story update visibly. |
-| Share route loads | Passed; `/play/share` returns HTTP `200` and is included in the production build. |
-| E2E | Passed with `pnpm --filter @idealer/web test:e2e`; all 7 web flows passed, including native-share fallback copy. |
-| Typecheck | Passed with `pnpm typecheck`. |
-| Lint | Passed with `pnpm lint`. |
-| Tests | Passed with `pnpm test`. |
-| Build | Passed with `pnpm build`; `/play/share` is included in generated routes. |
-| Visual verification | Passed at `320x700`, `390x844`, and `1440x1000`; no horizontal/card-content overflow or console errors were detected, and action targets are at least 44px high. |
-| Whitespace check | Passed with `git diff --check`; Git reported CRLF normalization warnings only. |
+| Requirement                                          | Result                                                                                                                                                           |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Share card is readable on mobile                     | Passed; visual verification at `320x700` and `390x844` shows a stable `4:5` card without content overflow.                                                       |
+| Card communicates the interesting story of the round | Passed; active-rule, near-miss, and creator-elected variants visibly change the outcome narrative.                                                               |
+| User can share or copy without technical friction    | Passed; native share, explicit Copy link, and automatic fallback copy are available with visible feedback.                                                       |
+| Required card content                                | Passed; every variant includes turn number, rule title, prize pool, and outcome.                                                                                 |
+| Prototype share analytics                            | Passed; share-intent count, last intent type, and selected story update visibly.                                                                                 |
+| Share route loads                                    | Passed; `/play/share` returns HTTP `200` and is included in the production build.                                                                                |
+| E2E                                                  | Passed with `pnpm --filter @idealer/web test:e2e`; all 7 web flows passed, including native-share fallback copy.                                                 |
+| Typecheck                                            | Passed with `pnpm typecheck`.                                                                                                                                    |
+| Lint                                                 | Passed with `pnpm lint`.                                                                                                                                         |
+| Tests                                                | Passed with `pnpm test`.                                                                                                                                         |
+| Build                                                | Passed with `pnpm build`; `/play/share` is included in generated routes.                                                                                         |
+| Visual verification                                  | Passed at `320x700`, `390x844`, and `1440x1000`; no horizontal/card-content overflow or console errors were detected, and action targets are at least 44px high. |
+| Whitespace check                                     | Passed with `git diff --check`; Git reported CRLF normalization warnings only.                                                                                   |
 
 ## M1.7 Confirmation Gate
 
@@ -666,13 +667,13 @@ Opened before starting `M0.1`:
 
 ## M1 Approval Status
 
-| Approval criterion | Required | Evidence | Status |
-|---|---:|---|---|
-| Testers understand the core loop after first session | 80%+ | No human-session results recorded | Pending |
-| Testers complete a simulated guess submission | 70%+ | No human-session results recorded | Pending |
-| Testers cast at least one vote | 50%+ | No human-session results recorded | Pending |
-| Testers propose at least one rule | 25%+ | No human-session results recorded | Pending |
-| Testers say they would join another round | 40%+ | No human-session results recorded | Pending |
+| Approval criterion                                   | Required | Evidence                          | Status  |
+| ---------------------------------------------------- | -------: | --------------------------------- | ------- |
+| Testers understand the core loop after first session |     80%+ | No human-session results recorded | Pending |
+| Testers complete a simulated guess submission        |     70%+ | No human-session results recorded | Pending |
+| Testers cast at least one vote                       |     50%+ | No human-session results recorded | Pending |
+| Testers propose at least one rule                    |     25%+ | No human-session results recorded | Pending |
+| Testers say they would join another round            |     40%+ | No human-session results recorded | Pending |
 
 M1 was marked complete after explicit user confirmation on 2026-06-04 because all implementation submilestones are complete and validated. The quantitative usability approval criteria remain unchecked in `PRD.md` until real human-session results meet all five thresholds.
 
@@ -724,34 +725,34 @@ M1 was marked complete after explicit user confirmation on 2026-06-04 because al
 
 ## M2.1 Artifact Review
 
-| Artifact | Status | Notes |
-|---|---|---|
-| `apps/web/src/solana/SolanaProviders.tsx` | Implemented | Configures devnet RPC/WebSocket, Wallet Standard discovery, Mobile Wallet Adapter registration, and wallet session persistence. |
-| `apps/web/src/features/wallet/WalletFlow.tsx` | Implemented | Implements connect/disconnect, named mobile handoff, transaction summary, approval, recovery, explicit status, failure, and retry states. |
-| `apps/web/src/app/play/wallet/page.tsx` | Implemented | Exposes the mobile wallet flow route. |
-| `apps/web/src/features/live-round/MobileLiveRoundHub.tsx` | Updated | Routes wallet actions into `/play/wallet`. |
-| `apps/web/e2e/wallet-flow.spec.ts` | Implemented | Verifies MWA registration, named mobile handoff links, and interrupted-action recovery. |
-| `.env.example` | Updated | Documents configurable devnet RPC and WebSocket endpoints. |
-| `docs/shared-error-codes.md` | Updated | Adds explicit wallet connection, transaction rejection, and transaction failure codes. |
+| Artifact                                                  | Status      | Notes                                                                                                                                     |
+| --------------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/web/src/solana/SolanaProviders.tsx`                 | Implemented | Configures devnet RPC/WebSocket, Wallet Standard discovery, Mobile Wallet Adapter registration, and wallet session persistence.           |
+| `apps/web/src/features/wallet/WalletFlow.tsx`             | Implemented | Implements connect/disconnect, named mobile handoff, transaction summary, approval, recovery, explicit status, failure, and retry states. |
+| `apps/web/src/app/play/wallet/page.tsx`                   | Implemented | Exposes the mobile wallet flow route.                                                                                                     |
+| `apps/web/src/features/live-round/MobileLiveRoundHub.tsx` | Updated     | Routes wallet actions into `/play/wallet`.                                                                                                |
+| `apps/web/e2e/wallet-flow.spec.ts`                        | Implemented | Verifies MWA registration, named mobile handoff links, and interrupted-action recovery.                                                   |
+| `.env.example`                                            | Updated     | Documents configurable devnet RPC and WebSocket endpoints.                                                                                |
+| `docs/shared-error-codes.md`                              | Updated     | Adds explicit wallet connection, transaction rejection, and transaction failure codes.                                                    |
 
 ## M2.1 Validation Results
 
-| Requirement | Result |
-|---|---|
-| Solana wallet adapter integration | Passed; Wallet Standard-first provider and discovery are active application-wide. |
-| Mobile Wallet Adapter support | Passed in automated mobile-browser detection; MWA connector is visible in Playwright's Pixel 5 profile. |
-| Phantom, Backpack, and Solflare mobile handoff | Implemented through named in-wallet browser deep links; real-device QA remains pending. |
-| In-wallet browser usage | Implemented through injected Wallet Standard discovery. |
-| Persist and recover pending action | Passed; E2E verifies recovery after reload. |
-| Pending, success, failure, retry, and disconnect states | Implemented; real-wallet confirmation/rejection behavior remains pending real-device QA. |
-| Test transaction safety | Passed by design; explicit user action sends a zero-SOL self-transfer on devnet with RPC preflight enabled. |
-| Focused wallet E2E | Passed with `pnpm --filter @idealer/web test:e2e -- wallet-flow.spec.ts`. |
-| Full web E2E | Passed with `pnpm --filter @idealer/web test:e2e`; all 9 flows passed after the final hydration and transaction-state corrections. |
-| Typecheck | Passed with `pnpm typecheck`; all 23 workspace tasks passed. |
-| Lint | Passed with `pnpm lint`; all 23 workspace tasks passed. |
-| Tests | Passed with `pnpm test`; all 23 workspace tasks passed. |
-| Build | Passed with `pnpm build`; all 17 workspace builds passed and `/play/wallet` is included in generated routes. |
-| Whitespace check | Passed with `git diff --check`; Git reported CRLF normalization warnings only. |
+| Requirement                                             | Result                                                                                                                             |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Solana wallet adapter integration                       | Passed; Wallet Standard-first provider and discovery are active application-wide.                                                  |
+| Mobile Wallet Adapter support                           | Passed in automated mobile-browser detection; MWA connector is visible in Playwright's Pixel 5 profile.                            |
+| Phantom, Backpack, and Solflare mobile handoff          | Implemented through named in-wallet browser deep links; real-device QA remains pending.                                            |
+| In-wallet browser usage                                 | Implemented through injected Wallet Standard discovery.                                                                            |
+| Persist and recover pending action                      | Passed; E2E verifies recovery after reload.                                                                                        |
+| Pending, success, failure, retry, and disconnect states | Implemented; real-wallet confirmation/rejection behavior remains pending real-device QA.                                           |
+| Test transaction safety                                 | Passed by design; explicit user action sends a zero-SOL self-transfer on devnet with RPC preflight enabled.                        |
+| Focused wallet E2E                                      | Passed with `pnpm --filter @idealer/web test:e2e -- wallet-flow.spec.ts`.                                                          |
+| Full web E2E                                            | Passed with `pnpm --filter @idealer/web test:e2e`; all 9 flows passed after the final hydration and transaction-state corrections. |
+| Typecheck                                               | Passed with `pnpm typecheck`; all 23 workspace tasks passed.                                                                       |
+| Lint                                                    | Passed with `pnpm lint`; all 23 workspace tasks passed.                                                                            |
+| Tests                                                   | Passed with `pnpm test`; all 23 workspace tasks passed.                                                                            |
+| Build                                                   | Passed with `pnpm build`; all 17 workspace builds passed and `/play/wallet` is included in generated routes.                       |
+| Whitespace check                                        | Passed with `git diff --check`; Git reported CRLF normalization warnings only.                                                     |
 
 ## M2.1 Confirmation Gate
 
@@ -784,29 +785,29 @@ M1 was marked complete after explicit user confirmation on 2026-06-04 because al
 
 ## M2.2 Artifact Review
 
-| Artifact | Status | Notes |
-|---|---|---|
-| `contracts/solana/programs/idealer/src/lib.rs` | Implemented | Defines the core Anchor accounts, instructions, events, errors, and account constraints. |
-| `contracts/solana/programs/idealer/src/domain.rs` | Implemented | Contains pure validation, checked fee splitting, lifecycle cutoff, and cycle helpers. |
-| `contracts/solana/programs/idealer/tests/core.rs` | Implemented | Covers isolated PDAs, lifecycle rules, fee conservation, and invalid inputs. |
-| `contracts/solana/programs/idealer/tests/instructions.rs` | Implemented | Executes the complete core lifecycle against the final SBF artifact and verifies invalid-input rejection. |
-| `contracts/solana/security-checklist.md` | Implemented | Records account, authority, PDA, arithmetic, deployment, and key-management controls. |
-| `.github/workflows/solana-program.yml` | Implemented | Runs format, check, clippy, native tests, SBF build, and explicit SBF instruction tests for program changes. |
+| Artifact                                                  | Status      | Notes                                                                                                        |
+| --------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------ |
+| `contracts/solana/programs/idealer/src/lib.rs`            | Implemented | Defines the core Anchor accounts, instructions, events, errors, and account constraints.                     |
+| `contracts/solana/programs/idealer/src/domain.rs`         | Implemented | Contains pure validation, checked fee splitting, lifecycle cutoff, and cycle helpers.                        |
+| `contracts/solana/programs/idealer/tests/core.rs`         | Implemented | Covers isolated PDAs, lifecycle rules, fee conservation, and invalid inputs.                                 |
+| `contracts/solana/programs/idealer/tests/instructions.rs` | Implemented | Executes the complete core lifecycle against the final SBF artifact and verifies invalid-input rejection.    |
+| `contracts/solana/security-checklist.md`                  | Implemented | Records account, authority, PDA, arithmetic, deployment, and key-management controls.                        |
+| `.github/workflows/solana-program.yml`                    | Implemented | Runs format, check, clippy, native tests, SBF build, and explicit SBF instruction tests for program changes. |
 
 ## M2.2 Validation Results
 
-| Requirement | Result |
-|---|---|
-| Core accounts and instructions | Implemented for every M2.2 checklist item, plus the downstream-required `GameToken` account. |
-| Core instructions execute successfully | Passed in the explicit SBF suite: initialize, open turn, submit guess, propose rule, vote, and close turn. |
-| Invalid inputs are rejected | Passed for duplicate/out-of-range guesses, invalid rule hashes/preflight commitments, duplicate votes, invalid config, and closed action windows. |
-| Account constraints and lifecycle tests | Passed with 6 focused core tests and 2 explicit SBF instruction tests. |
-| Rust format, typecheck, and lint | Passed with `cargo fmt --check`, `cargo check`, and `cargo clippy -D warnings`. |
-| Monorepo typecheck, lint, tests, and build | Passed with `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build`. |
-| Web regression E2E | Passed with `pnpm --filter @idealer/web test:e2e`; all 9 flows passed. |
-| Secret/keypair check | Passed; no deploy keypair is present outside ignored temporary build output. |
-| Remote CI | Workflow added with SBF coverage. `gh` is not installed in this environment, so remote run status could not be queried for uncommitted local changes; workflow-equivalent commands passed locally. |
-| Devnet deployment | Passed. Program id `6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4` is deployed on devnet with ProgramData `BUo2vYwYvj2UWYFgryrMF7bBTrLQQFYVU6xHuoTJbJBD`. |
+| Requirement                                | Result                                                                                                                                                                                             |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Core accounts and instructions             | Implemented for every M2.2 checklist item, plus the downstream-required `GameToken` account.                                                                                                       |
+| Core instructions execute successfully     | Passed in the explicit SBF suite: initialize, open turn, submit guess, propose rule, vote, and close turn.                                                                                         |
+| Invalid inputs are rejected                | Passed for duplicate/out-of-range guesses, invalid rule hashes/preflight commitments, duplicate votes, invalid config, and closed action windows.                                                  |
+| Account constraints and lifecycle tests    | Passed with 6 focused core tests and 2 explicit SBF instruction tests.                                                                                                                             |
+| Rust format, typecheck, and lint           | Passed with `cargo fmt --check`, `cargo check`, and `cargo clippy -D warnings`.                                                                                                                    |
+| Monorepo typecheck, lint, tests, and build | Passed with `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build`.                                                                                                                          |
+| Web regression E2E                         | Passed with `pnpm --filter @idealer/web test:e2e`; all 9 flows passed.                                                                                                                             |
+| Secret/keypair check                       | Passed; no deploy keypair is present outside ignored temporary build output.                                                                                                                       |
+| Remote CI                                  | Workflow added with SBF coverage. `gh` is not installed in this environment, so remote run status could not be queried for uncommitted local changes; workflow-equivalent commands passed locally. |
+| Devnet deployment                          | Passed. Program id `6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4` is deployed on devnet with ProgramData `BUo2vYwYvj2UWYFgryrMF7bBTrLQQFYVU6xHuoTJbJBD`.                                           |
 
 ## M2.2 Confirmation Gate
 
@@ -824,33 +825,83 @@ M1 was marked complete after explicit user confirmation on 2026-06-04 because al
 - Added `/guess-receipts` API persistence for confirmed guess receipts with payload validation and duplicate response handling.
 - Updated `.env.example` with `NEXT_PUBLIC_IDEALER_PROGRAM_ID`, `NEXT_PUBLIC_IDEALER_ACTIVE_TURN_ID`, and `NEXT_PUBLIC_IDEALER_API_URL`.
 - Updated the number picker E2E from simulated submission to the real pre-submit flow that routes unconnected users to wallet connection.
+- Rechecked M2.3 after user requested completion verification.
+- Fixed the receipt API to support browser CORS preflight for `/guess-receipts` from the local web origin.
+- Fixed the compiled API entrypoint guard so `node apps/api/dist/index.js` starts the HTTP server correctly.
+- Verified a devnet `PlayerGuess` exists at `9HPaHP3NqQdVbE7ZQCZ71ti9vP14gGNTpQkgrqjLNvrV` and is owned by deployed program `6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4`.
 
 ## M2.3 Artifact Review
 
-| Artifact | Status | Notes |
-|---|---|---|
-| `apps/web/src/solana/idealerProgram.ts` | Implemented | Derives devnet PDAs and builds the Anchor `submit_guess` instruction for program `6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4`. |
+| Artifact                                               | Status      | Notes                                                                                                                                    |
+| ------------------------------------------------------ | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/web/src/solana/idealerProgram.ts`                | Implemented | Derives devnet PDAs and builds the Anchor `submit_guess` instruction for program `6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4`.         |
 | `apps/web/src/features/number-picker/NumberPicker.tsx` | Implemented | Connects six-number review to wallet-backed devnet submission, duplicate precheck, pending/confirmed/failed states, and receipt display. |
-| `apps/api/src/index.ts` | Implemented | Adds `POST /guess-receipts` and `GET /guess-receipts` for backend/API receipt projection. |
-| `apps/web/e2e/number-picker.spec.ts` | Updated | Verifies six-number validation, review, and wallet-required devnet submission entry. |
-| `.env.example` | Updated | Documents the devnet program id, active turn id, and browser API URL. |
+| `apps/api/src/index.ts`                                | Implemented | Adds `POST /guess-receipts` and `GET /guess-receipts` for backend/API receipt projection.                                                |
+| `apps/web/e2e/number-picker.spec.ts`                   | Updated     | Verifies six-number validation, review, and wallet-required devnet submission entry.                                                     |
+| `.env.example`                                         | Updated     | Documents the devnet program id, active turn id, and browser API URL.                                                                    |
 
 ## M2.3 Validation Results
 
-| Requirement | Result |
-|---|---|
-| Number picker creates a real transaction | Implemented through `client.transaction.prepareAndSend` with the deployed `submit_guess` instruction. |
-| Six unique numbers are validated before transaction | Implemented by `validateGuessNumbers` and existing UI selection constraints. |
-| Duplicate guess blocked | Implemented by checking the `PlayerGuess` PDA before wallet approval and by normalizing duplicate account errors. |
-| Expired/closed turn handled | Implemented by mapping turn-closed/no-active-turn/action-window program errors to `TURN_NOT_ACCEPTING_GUESSES`. |
-| Backend/API receipt projection | Implemented by `/guess-receipts` with strict shape validation and duplicate response handling. |
-| Web typecheck | Passed with `pnpm --filter @idealer/web typecheck`. |
-| API typecheck | Passed with `pnpm --filter @idealer/api typecheck`. |
-| Web lint | Passed with `pnpm --filter @idealer/web lint`. |
-| API lint | Passed with `pnpm --filter @idealer/api lint`. |
-| Web/API tests | Passed with `pnpm --filter @idealer/web test` and `pnpm --filter @idealer/api test`. |
-| Focused number-picker E2E | Passed with `pnpm --filter @idealer/web test:e2e -- e2e/number-picker.spec.ts`. |
+| Requirement                                         | Result                                                                                                                                                      |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Number picker creates a real transaction            | Implemented through `client.transaction.prepareAndSend` with the deployed `submit_guess` instruction.                                                       |
+| Six unique numbers are validated before transaction | Implemented by `validateGuessNumbers` and existing UI selection constraints.                                                                                |
+| Duplicate guess blocked                             | Implemented by checking the `PlayerGuess` PDA before wallet approval and by normalizing duplicate account errors.                                           |
+| Expired/closed turn handled                         | Implemented by mapping turn-closed/no-active-turn/action-window program errors to `TURN_NOT_ACCEPTING_GUESSES`.                                             |
+| Backend/API receipt projection                      | Implemented by `/guess-receipts` with strict shape validation, duplicate response handling, browser CORS preflight, and compiled-server startup validation. |
+| On-chain `PlayerGuess` evidence                     | Passed. Devnet account `9HPaHP3NqQdVbE7ZQCZ71ti9vP14gGNTpQkgrqjLNvrV` exists and is owned by the deployed program.                                          |
+| Web typecheck                                       | Passed with `pnpm --filter @idealer/web typecheck`.                                                                                                         |
+| API typecheck                                       | Passed with `pnpm --filter @idealer/api typecheck`.                                                                                                         |
+| Web lint                                            | Passed with `pnpm --filter @idealer/web lint`.                                                                                                              |
+| API lint                                            | Passed with `pnpm --filter @idealer/api lint`.                                                                                                              |
+| Web/API tests                                       | Passed with `pnpm --filter @idealer/web test` and `pnpm --filter @idealer/api test`.                                                                        |
+| Focused number-picker E2E                           | Passed with `pnpm --filter @idealer/web test:e2e -- e2e/number-picker.spec.ts`.                                                                             |
+| Receipt API HTTP smoke                              | Passed against compiled API server: `OPTIONS /guess-receipts`, `POST /guess-receipts`, and `GET /guess-receipts`.                                           |
 
 ## M2.3 Confirmation Gate
 
-`M2.3` implementation is ready for user review but was not marked complete because repository instructions require explicit user confirmation before ticking the milestone. Required markdown documents opened before work: `PRD.md`, `AGENTS.md`, `.claude/skills`, `solana-dev` frontend references, `web2-wallet-auth`, `develop-frontend`, and deployment/security references used for the devnet program.
+`M2.3` was marked complete after explicit user confirmation on 2026-06-04 and after resolving the receipt API CORS/compiled-entrypoint pendencies. Required markdown documents opened before work: `PRD.md`, `AGENTS.md`, `.claude/skills`, `solana-dev` frontend references, `web2-wallet-auth`, `develop-frontend`, and deployment/security references used for the devnet program.
+
+## M2.4 Work Log
+
+### 2026-06-04
+
+- Opened `PRD.md`, `AGENTS.md`, and `.claude/skills` before starting M2.4.
+- Opened the relevant local skills and references for Solana frontend transactions, wallet-gated flows, frontend quality, and backend API/indexer behavior.
+- Started M2.4 after M2.3 was marked complete with user confirmation.
+- Added server-side rule preflight at `POST /rule-preflight` with sanitization, authoritative token counting, prompt-injection pattern rejection, on-chain byte-limit enforcement, rule id assignment, and preflight/hash outputs.
+- Added `POST /rule-proposals` and `GET /rule-proposals` to mirror confirmed on-chain proposals for indexing/search/UI performance.
+- Extended the Solana frontend helper with `propose_rule` PDA derivation and Anchor/Borsh instruction serialization.
+- Replaced simulated rule submission with a devnet proposal flow that requires server preflight before wallet approval, checks for the required `GameToken`, checks rule PDA collisions, sends `propose_rule`, shows transaction status, and displays the confirmed receipt.
+- Updated the public live-round rule list to load confirmed devnet proposals from the API and display them above the default rules.
+- Updated focused E2E coverage for the rule proposal flow to validate token-limit blocking, server preflight, wallet requirement, and devnet submission entry.
+- Verified existing devnet `RuleProposal` account `B1KHQhbEzaXBTTMXSNVCWM6GhSAjFTEwdrY1N7DvBnZU` is owned by deployed program `6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4`.
+
+## M2.4 Artifact Review
+
+| Artifact                                                       | Status      | Notes                                                                                                                              |
+| -------------------------------------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/api/src/index.ts`                                        | Implemented | Adds rule preflight, prompt-injection rejection, rule proposal projection, CORS preflight, and compiled server entrypoint support. |
+| `apps/web/src/solana/idealerProgram.ts`                        | Implemented | Adds `propose_rule` instruction creation, rule PDA derivation, and dynamic Anchor argument serialization.                          |
+| `apps/web/src/features/rule-proposal/RuleProposalComposer.tsx` | Implemented | Replaces simulation with preflight-first devnet submission and receipt/status UI.                                                  |
+| `apps/web/src/features/live-round/MobileLiveRoundHub.tsx`      | Implemented | Loads API-projected devnet proposals into the public rule list.                                                                    |
+| `apps/web/e2e/rule-proposal.spec.ts`                           | Updated     | Verifies token-limit blocking, preflight-backed review, and wallet-required devnet submission.                                     |
+
+## M2.4 Validation Results
+
+| Requirement                      | Result                                                                                                             |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Backend token counter service    | Implemented by `POST /rule-preflight`.                                                                             |
+| Server-side token limit          | Passed; over-limit preflight returns HTTP 400 before transaction.                                                  |
+| Sanitized rule text              | Implemented by backend control-character removal, whitespace normalization, and on-chain byte-limit enforcement.   |
+| Prompt-injection rejection       | Passed; obvious injection text returns HTTP 400 before transaction.                                                |
+| Devnet transaction creation      | Implemented in the wallet-backed composer through `client.transaction.prepareAndSend`.                             |
+| On-chain `RuleProposal` evidence | Passed. Devnet account `B1KHQhbEzaXBTTMXSNVCWM6GhSAjFTEwdrY1N7DvBnZU` exists and is owned by the deployed program. |
+| Public rule projection           | Implemented through `GET /rule-proposals` and live-round list loading.                                             |
+| API typecheck/lint/build         | Passed with focused package commands.                                                                              |
+| Web typecheck/lint               | Passed with focused package commands.                                                                              |
+| Focused web E2E                  | Passed with `pnpm --filter @idealer/web test:e2e -- e2e/rule-proposal.spec.ts e2e/number-picker.spec.ts`.          |
+
+## M2.4 Confirmation Gate
+
+`M2.4` is implemented and ready for user review, but its PRD checklist and approval criteria remain unchecked because repository instructions require explicit user confirmation before ticking the milestone.

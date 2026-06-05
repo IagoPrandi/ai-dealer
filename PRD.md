@@ -159,10 +159,10 @@ Rules:
 
 There are always up to two winning conditions per turn:
 
-| Condition | Description | Pool Share |
-|---|---|---:|
-| Original rule | Exact ordered sequence match | 50% |
-| Alternative rule | Community-elected rule compiled by AI Rule Compiler and executed by deterministic runtime | 50% |
+| Condition        | Description                                                                               | Pool Share |
+| ---------------- | ----------------------------------------------------------------------------------------- | ---------: |
+| Original rule    | Exact ordered sequence match                                                              |        50% |
+| Alternative rule | Community-elected rule compiled by AI Rule Compiler and executed by deterministic runtime |        50% |
 
 If no alternative rule is active, only the original rule is evaluated and the alternative pool share rolls over according to the rollover policy.
 
@@ -433,8 +433,8 @@ Default configuration:
 ```typescript
 const RULE_TOKEN_LIMIT = {
   max_prompt_tokens: 80,
-  tokenizer: 'deployment_default_model_tokenizer',
-  enforcement: 'server_side',
+  tokenizer: "deployment_default_model_tokenizer",
+  enforcement: "server_side",
 };
 ```
 
@@ -628,13 +628,13 @@ Technical language should remain available in expandable audit panels for advanc
 
 Each player may perform the following actions per turn.
 
-| Action | Limit per Turn | Fee Required | Game Token Required |
-|---|---:|---:|---:|
-| Submit a guess | 1x | Yes | No; this action issues the token |
-| Propose a rule | 5x per wallet per turn by default | Yes, per proposal | Yes |
-| Vote on a rule | 1 vote per rule; max 100 votes per wallet per turn by default | No | Yes |
-| Remove a rule | 2x per wallet per turn by default; only before election lock | Yes, removal fee | Yes |
-| Report a rule | 20x per wallet per turn by default | No | Yes |
+| Action         |                                                Limit per Turn |      Fee Required |              Game Token Required |
+| -------------- | ------------------------------------------------------------: | ----------------: | -------------------------------: |
+| Submit a guess |                                                            1x |               Yes | No; this action issues the token |
+| Propose a rule |                             5x per wallet per turn by default | Yes, per proposal |                              Yes |
+| Vote on a rule | 1 vote per rule; max 100 votes per wallet per turn by default |                No |                              Yes |
+| Remove a rule  |  2x per wallet per turn by default; only before election lock |  Yes, removal fee |                              Yes |
+| Report a rule  |                            20x per wallet per turn by default |                No |                              Yes |
 
 ### 5.2 Submitting a Guess
 
@@ -646,7 +646,6 @@ Requirements:
 - only one guess per wallet per turn is accepted;
 - guess is recorded before the draw;
 - guesses cannot be changed after the submission window closes.
-
 
 ### 5.2.1 Turn Game Token
 
@@ -972,7 +971,6 @@ Normalization requirements:
 
 The product should present the normalized rule as the official rule interpretation before activation.
 
-
 ### 6.3 Token Limit Constraint
 
 The content-size constraint for user-created rules is a maximum number of AI-context tokens.
@@ -1252,7 +1250,7 @@ const MONTE_CARLO_DIFFICULTY_CONFIG = {
   timeout_ms: 5_000,
   convergence_threshold: 0.01,
   min_samples_before_convergence_check: 10_000,
-  seed_strategy: 'deterministic_test_seed',
+  seed_strategy: "deterministic_test_seed",
 };
 ```
 
@@ -1344,7 +1342,7 @@ Differentiated vote protection:
 
 ```typescript
 const RULE_REMOVAL_CONFIG = {
-  removalFeeDestination: 'prize_pool',
+  removalFeeDestination: "prize_pool",
   minVotesCreatorSelfRemove: 5,
   minVotesThirdPartyRemove: 15,
   requireGameToken: true,
@@ -1394,9 +1392,9 @@ const RULE_ELECTION_CONFIG = {
   topVotedFinalistCount: 3,
   randomFinalistCount: 7,
   defaultFinalistSetSize: 10,
-  randomnessProvider: 'switchboard_vrf',
+  randomnessProvider: "switchboard_vrf",
   deriveRandomFinalistsFromFulfillment: true,
-  selectionMethod: 'vrf_ranged_output',
+  selectionMethod: "vrf_ranged_output",
   requirePrecompiledEligibleFinalists: true,
   fallbackToNextFinalistOnInvalid: false,
 };
@@ -1515,7 +1513,7 @@ interface RulePreflightResult {
   player_wallet: string;
   token_count: number;
   max_tokens: number;
-  prohibited_reference_result: 'PASS' | 'BLOCK';
+  prohibited_reference_result: "PASS" | "BLOCK";
   dedup_result: RuleDedupResult;
   preflight_token?: string;
   preflight_token_expires_at?: string;
@@ -1529,7 +1527,7 @@ Dedup result:
 interface RuleDedupResult {
   rule_id?: string;
   turn_id: string;
-  verdict: 'PASS' | 'WARN' | 'BLOCK';
+  verdict: "PASS" | "WARN" | "BLOCK";
   score: number;
   similarity_threshold_used: number;
   similar_rule_ids: string[];
@@ -1625,7 +1623,7 @@ interface RulePrecompilationCacheEntry {
   original_text_hash: string;
   normalized_text_hash?: string;
   compiled_artifact_hash?: string;
-  status: 'PENDING' | 'VALID' | 'FAILED' | 'NEEDS_CLARIFICATION';
+  status: "PENDING" | "VALID" | "FAILED" | "NEEDS_CLARIFICATION";
   confidence_breakdown?: CompilerConfidenceBreakdown;
   difficulty_class?: RuleDifficultyClass;
   test_summary?: RuleTestSummary;
@@ -1648,6 +1646,7 @@ The AI system does **not** decide final `WIN`/`LOSE` outcomes.
 The validation question is:
 
 > “Can this rule be converted into a constrained formal artifact and executed deterministically using only the draw and the player guess?”
+
 ## 7. AI Rule Compiler, Runtime & Agent Harness
 
 ### 7.1 Role: AI Rule Compiler, Not Winner Judge
@@ -1672,14 +1671,14 @@ This design improves auditability, reduces disputes, and prevents post-draw rein
 
 The AI workflow is split into specialized agents.
 
-| Agent | Responsibility | Output |
-|---|---|---|
-| Rule Interpreter | Interpret the user rule and produce an objective restatement. | `official_interpretation` |
-| Rule Normalizer | Add explicit operational clauses needed for safe execution while preserving user intent. | `RuleNormalizationResult` |
-| Rule Compiler | Convert the normalized interpretation into DSL/AST. | `CompiledRuleArtifact` |
-| Rule Reviewer | Check whether the DSL/AST matches the original rule and interpretation. | review result + mismatch flags |
-| Adversarial Tester | Generate edge cases and abuse cases. | adversarial test suite |
-| Final Validator | Deterministic system step that accepts/rejects based on compiler output, tests, runtime constraints, and policy. | `VALID` or `INVALID` |
+| Agent              | Responsibility                                                                                                   | Output                         |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| Rule Interpreter   | Interpret the user rule and produce an objective restatement.                                                    | `official_interpretation`      |
+| Rule Normalizer    | Add explicit operational clauses needed for safe execution while preserving user intent.                         | `RuleNormalizationResult`      |
+| Rule Compiler      | Convert the normalized interpretation into DSL/AST.                                                              | `CompiledRuleArtifact`         |
+| Rule Reviewer      | Check whether the DSL/AST matches the original rule and interpretation.                                          | review result + mismatch flags |
+| Adversarial Tester | Generate edge cases and abuse cases.                                                                             | adversarial test suite         |
+| Final Validator    | Deterministic system step that accepts/rejects based on compiler output, tests, runtime constraints, and policy. | `VALID` or `INVALID`           |
 
 The Final Validator is not an LLM-only decision. It must combine deterministic checks with agent outputs.
 
@@ -1687,17 +1686,17 @@ The Final Validator is not an LLM-only decision. It must combine deterministic c
 
 Multiple LLM providers are supported as fallback, escalation, and review diversity.
 
-| Priority | Provider | Role |
-|---:|---|---|
-| 1 | Primary provider | First call for interpretation and compilation |
-| 2 | Secondary provider | Fallback on failure, timeout, low confidence, or reviewer disagreement |
-| 3 | Tertiary provider | Tiebreaker, adversarial review, or final escalation |
+| Priority | Provider           | Role                                                                   |
+| -------: | ------------------ | ---------------------------------------------------------------------- |
+|        1 | Primary provider   | First call for interpretation and compilation                          |
+|        2 | Secondary provider | Fallback on failure, timeout, low confidence, or reviewer disagreement |
+|        3 | Tertiary provider  | Tiebreaker, adversarial review, or final escalation                    |
 
 Provider configuration:
 
 ```typescript
 interface LLMProviderConfig {
-  provider: 'anthropic' | 'openai' | 'google' | string;
+  provider: "anthropic" | "openai" | "google" | string;
   model: string;
   apiKey: string;
   timeoutMs: number;
@@ -1832,8 +1831,13 @@ interface GateCheckLog {
   id: string;
   turn_id: string;
   player_wallet: string;
-  gate_type: 'game_token' | 'token_count' | 'prohibited_reference' | 'prompt_injection' | 'dedup';
-  result: 'PASS' | 'WARN' | 'BLOCK';
+  gate_type:
+    | "game_token"
+    | "token_count"
+    | "prohibited_reference"
+    | "prompt_injection"
+    | "dedup";
+  result: "PASS" | "WARN" | "BLOCK";
   reason: string;
   input_hash: string;
   output_hash: string;
@@ -1864,7 +1868,7 @@ Evaluation output:
 
 ```typescript
 interface EvaluateGuessResult {
-  result: 'WIN' | 'LOSE';
+  result: "WIN" | "LOSE";
   matched_rule_branch?: string;
   runtime_steps: number;
   runtime_ms: number;
@@ -1970,58 +1974,58 @@ Required hook groups:
 
 #### Rule Lifecycle Hooks
 
-| Hook | Class | Blocking scope |
-|---|---|---|
-| `beforeRuleSanitize` | CRITICAL | Current rule precompilation only |
-| `afterRuleSanitize` | ANALYTICS | None |
-| `beforeRuleInterpret` | CRITICAL | Current rule precompilation only |
-| `afterRuleInterpret` | ANALYTICS | None |
-| `beforeRuleNormalize` | CRITICAL | Current rule precompilation only |
-| `afterRuleNormalize` | ANALYTICS | None |
-| `beforeRuleCompile` | CRITICAL | Current rule precompilation only |
-| `afterRuleCompile` | ANALYTICS | None |
-| `beforeRuleReview` | CRITICAL | Current rule precompilation only |
-| `afterRuleReview` | ANALYTICS | None |
-| `beforeRuleTest` | CRITICAL | Current rule precompilation only |
-| `afterRuleTest` | ANALYTICS | None |
-| `beforeRuleFreeze` | CRITICAL | Current rule activation only |
-| `afterRuleFreeze` | ANALYTICS | None |
+| Hook                  | Class     | Blocking scope                   |
+| --------------------- | --------- | -------------------------------- |
+| `beforeRuleSanitize`  | CRITICAL  | Current rule precompilation only |
+| `afterRuleSanitize`   | ANALYTICS | None                             |
+| `beforeRuleInterpret` | CRITICAL  | Current rule precompilation only |
+| `afterRuleInterpret`  | ANALYTICS | None                             |
+| `beforeRuleNormalize` | CRITICAL  | Current rule precompilation only |
+| `afterRuleNormalize`  | ANALYTICS | None                             |
+| `beforeRuleCompile`   | CRITICAL  | Current rule precompilation only |
+| `afterRuleCompile`    | ANALYTICS | None                             |
+| `beforeRuleReview`    | CRITICAL  | Current rule precompilation only |
+| `afterRuleReview`     | ANALYTICS | None                             |
+| `beforeRuleTest`      | CRITICAL  | Current rule precompilation only |
+| `afterRuleTest`       | ANALYTICS | None                             |
+| `beforeRuleFreeze`    | CRITICAL  | Current rule activation only     |
+| `afterRuleFreeze`     | ANALYTICS | None                             |
 
 #### Player Action Hooks
 
-| Hook | Class | Blocking scope |
-|---|---|---|
-| `beforeRuleProposePreflight` | CRITICAL | Current proposal only |
-| `afterRulePropose` | ANALYTICS | None |
-| `beforeRuleVoteValidation` | CRITICAL_DETERMINISTIC_ONLY | Current vote only |
-| `afterRuleVote` | ANALYTICS | None |
-| `beforeRuleRemoveValidation` | CRITICAL_DETERMINISTIC_ONLY | Current removal only |
-| `afterRuleRemove` | ANALYTICS | None |
-| `beforeRuleReportValidation` | CRITICAL_DETERMINISTIC_ONLY | Current report only |
-| `afterRuleReport` | ANALYTICS | None |
+| Hook                         | Class                       | Blocking scope        |
+| ---------------------------- | --------------------------- | --------------------- |
+| `beforeRuleProposePreflight` | CRITICAL                    | Current proposal only |
+| `afterRulePropose`           | ANALYTICS                   | None                  |
+| `beforeRuleVoteValidation`   | CRITICAL_DETERMINISTIC_ONLY | Current vote only     |
+| `afterRuleVote`              | ANALYTICS                   | None                  |
+| `beforeRuleRemoveValidation` | CRITICAL_DETERMINISTIC_ONLY | Current removal only  |
+| `afterRuleRemove`            | ANALYTICS                   | None                  |
+| `beforeRuleReportValidation` | CRITICAL_DETERMINISTIC_ONLY | Current report only   |
+| `afterRuleReport`            | ANALYTICS                   | None                  |
 
 #### Turn Lifecycle Hooks
 
-| Hook | Class |
-|---|---|
-| `beforeTurnOpen` | CRITICAL |
-| `afterTurnOpen` | ANALYTICS |
-| `beforeVotingClose` | CRITICAL |
-| `afterVotingClose` | ANALYTICS |
-| `beforeEligiblePoolLock` | CRITICAL |
-| `afterEligiblePoolLock` | ANALYTICS |
-| `beforeElectionVrfRequest` | CRITICAL |
-| `afterElectionVrfRequest` | ANALYTICS |
-| `beforeElectionVrfFulfillment` | CRITICAL |
-| `afterElectionVrfFulfillment` | ANALYTICS |
-| `beforeDraw` | CRITICAL |
-| `afterDraw` | ANALYTICS |
-| `beforeVerification` | CRITICAL |
-| `afterVerification` | ANALYTICS |
-| `beforeFinalize` | CRITICAL |
-| `afterFinalize` | ANALYTICS |
-| `beforeClaimable` | CRITICAL |
-| `afterClaimable` | ANALYTICS |
+| Hook                           | Class     |
+| ------------------------------ | --------- |
+| `beforeTurnOpen`               | CRITICAL  |
+| `afterTurnOpen`                | ANALYTICS |
+| `beforeVotingClose`            | CRITICAL  |
+| `afterVotingClose`             | ANALYTICS |
+| `beforeEligiblePoolLock`       | CRITICAL  |
+| `afterEligiblePoolLock`        | ANALYTICS |
+| `beforeElectionVrfRequest`     | CRITICAL  |
+| `afterElectionVrfRequest`      | ANALYTICS |
+| `beforeElectionVrfFulfillment` | CRITICAL  |
+| `afterElectionVrfFulfillment`  | ANALYTICS |
+| `beforeDraw`                   | CRITICAL  |
+| `afterDraw`                    | ANALYTICS |
+| `beforeVerification`           | CRITICAL  |
+| `afterVerification`            | ANALYTICS |
+| `beforeFinalize`               | CRITICAL  |
+| `afterFinalize`                | ANALYTICS |
+| `beforeClaimable`              | CRITICAL  |
+| `afterClaimable`               | ANALYTICS |
 
 #### Economy Hooks
 
@@ -2071,16 +2075,16 @@ Agent skills define what the AI system is allowed to do.
 
 Required skills:
 
-| Skill | Purpose | Allowed tools |
-|---|---|---|
-| `interpret_rule` | Convert user text into objective interpretation. | tokenizer, schema validator |
-| `normalize_rule` | Add explicit operational clauses required for safe execution while preserving intent. | rule schema, guard policy, normalization rules |
-| `compile_rule_to_ast` | Produce DSL/AST from normalized confirmed interpretation. | rule schema, compiler library |
-| `review_rule_ast` | Check text-to-AST adherence. | rule schema, diff tools |
-| `generate_rule_tests` | Generate standard and adversarial test cases. | test harness only |
-| `classify_rule_difficulty` | Detect impossible, always true, too easy, balanced, hard, extreme. | simulation harness, bounded analysis |
-| `explain_rule` | Produce user-facing explanation. | frozen artifact only |
-| `summarize_failure` | Explain why a rule was rejected. | validation logs |
+| Skill                      | Purpose                                                                               | Allowed tools                                  |
+| -------------------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `interpret_rule`           | Convert user text into objective interpretation.                                      | tokenizer, schema validator                    |
+| `normalize_rule`           | Add explicit operational clauses required for safe execution while preserving intent. | rule schema, guard policy, normalization rules |
+| `compile_rule_to_ast`      | Produce DSL/AST from normalized confirmed interpretation.                             | rule schema, compiler library                  |
+| `review_rule_ast`          | Check text-to-AST adherence.                                                          | rule schema, diff tools                        |
+| `generate_rule_tests`      | Generate standard and adversarial test cases.                                         | test harness only                              |
+| `classify_rule_difficulty` | Detect impossible, always true, too easy, balanced, hard, extreme.                    | simulation harness, bounded analysis           |
+| `explain_rule`             | Produce user-facing explanation.                                                      | frozen artifact only                           |
+| `summarize_failure`        | Explain why a rule was rejected.                                                      | validation logs                                |
 
 Forbidden skills:
 
@@ -2102,15 +2106,15 @@ The AI Rule Compiler may use MCP servers only for bounded, auditable internal to
 
 Required MCP server groups:
 
-| MCP server | Purpose | Access level |
-|---|---|---|
-| `rule-schema-mcp` | Expose DSL schema, allowed nodes, validation functions. | read-only schema + validate calls |
-| `rule-normalizer-mcp` | Apply bounded operational guard policies and return normalization metadata. | bounded normalize action |
-| `rule-compiler-mcp` | Compile constrained normalized rule plans into AST artifacts. | bounded compile action |
-| `rule-runtime-mcp` | Execute AST against test cases in sandbox. | sandboxed execution only |
-| `rule-test-harness-mcp` | Generate/run standard and adversarial tests. | bounded test execution |
-| `game-engine-mcp` | Read deterministic game constants and state machine definitions. | read-only during compilation |
-| `audit-log-mcp` | Write append-only compiler and validation logs. | append-only |
+| MCP server              | Purpose                                                                     | Access level                      |
+| ----------------------- | --------------------------------------------------------------------------- | --------------------------------- |
+| `rule-schema-mcp`       | Expose DSL schema, allowed nodes, validation functions.                     | read-only schema + validate calls |
+| `rule-normalizer-mcp`   | Apply bounded operational guard policies and return normalization metadata. | bounded normalize action          |
+| `rule-compiler-mcp`     | Compile constrained normalized rule plans into AST artifacts.               | bounded compile action            |
+| `rule-runtime-mcp`      | Execute AST against test cases in sandbox.                                  | sandboxed execution only          |
+| `rule-test-harness-mcp` | Generate/run standard and adversarial tests.                                | bounded test execution            |
+| `game-engine-mcp`       | Read deterministic game constants and state machine definitions.            | read-only during compilation      |
+| `audit-log-mcp`         | Write append-only compiler and validation logs.                             | append-only                       |
 
 MCP restrictions:
 
@@ -2179,14 +2183,20 @@ interface AgentLog {
   id: string;
   turn_id: string;
   rule_id: string;
-  log_type: 'interpretation' | 'normalization' | 'compilation' | 'review' | 'adversarial_test' | 'final_validation'; // gate checks are stored in GateCheckLog
+  log_type:
+    | "interpretation"
+    | "normalization"
+    | "compilation"
+    | "review"
+    | "adversarial_test"
+    | "final_validation"; // gate checks are stored in GateCheckLog
   original_text: string;
   official_interpretation?: string;
   normalized_text?: string;
   added_operational_clauses?: string[];
   normalization_hash?: string;
   compiled_artifact_hash?: string;
-  result: 'VALID' | 'INVALID' | 'NEEDS_CLARIFICATION';
+  result: "VALID" | "INVALID" | "NEEDS_CLARIFICATION";
   reason: string;
   confidence_breakdown?: CompilerConfidenceBreakdown;
   model_used?: string;
@@ -2327,7 +2337,7 @@ Default MVP/devnet creator reward configuration:
 const CREATOR_REWARD_CONFIG = {
   rateBps: 1_500, // 15%
   capPerTurnLamports: 250_000_000, // 0.25 SOL maximum creator reward per turn
-  reserveSource: 'platform_monetization',
+  reserveSource: "platform_monetization",
   reserveShareOfPlatformMonetizationBps: 2_000, // 20% of platform monetization reserved for the creator reward reserve
   payOnlyWhenAlternativeRuleProducesWinners: true,
   unpaidShortfallCreatesDebt: false,
@@ -2430,8 +2440,8 @@ Default MVP/devnet payout configuration:
 ```typescript
 const PAYOUT_CONFIG = {
   minimumClaimLamports: 5_000_000, // 0.005 SOL
-  belowMinimumPayoutBehavior: 'same_category_rollover_bucket',
-  roundingRemainderDestination: 'same_category_rollover_bucket',
+  belowMinimumPayoutBehavior: "same_category_rollover_bucket",
+  roundingRemainderDestination: "same_category_rollover_bucket",
 };
 ```
 
@@ -2453,7 +2463,7 @@ Default MVP/devnet claim configuration:
 const CLAIM_CONFIG = {
   claimWindowTurns: 12,
   claimWindowMaxDays: 7,
-  unclaimedPayoutDestination: 'same_category_rollover_bucket',
+  unclaimedPayoutDestination: "same_category_rollover_bucket",
 };
 ```
 
@@ -3005,7 +3015,6 @@ GET /api/v1/rules/{rule_id}/preflight
 GET /api/v1/players/{wallet}/history
 ```
 
-
 ### 10.13 Job Idempotency and Dedupe
 
 All critical jobs and state transitions must be idempotent.
@@ -3019,7 +3028,7 @@ interface IdempotentJobMetadata {
   input_hash: string;
   output_hash?: string;
   attempt_count: number;
-  status: 'pending' | 'processing' | 'completed' | 'failed' | 'dead_lettered';
+  status: "pending" | "processing" | "completed" | "failed" | "dead_lettered";
   locked_at?: string;
   completed_at?: string;
 }
@@ -3161,7 +3170,6 @@ Requirements:
 - share cards optimized for social apps;
 - PWA install prompt after early engagement;
 - push-notification-ready architecture for future return prompts.
-
 
 ### 11.7 Mobile Wallet State Machine
 
@@ -3330,23 +3338,23 @@ Benefits:
 
 Minimum Docker Compose services:
 
-| Service | Container name | Purpose | Default port |
-|---|---|---|---:|
-| `postgres` | `idealer-postgres` | Primary relational database for turns, rules, votes, guesses, logs, profiles, metrics snapshots | `5432` |
-| `redis` | `idealer-redis` | Queue backend, cache, rate-limit state, live event coordination | `6379` |
-| `api` | `idealer-api` | Backend API for mobile DApp, rule preflight, round state, audit endpoints | `4000` |
-| `worker` | `idealer-worker` | Background processor for rule compilation, runtime evaluation, attestation, scheduled jobs | internal |
-| `web` | `idealer-web` | Mobile-first Next.js DApp / PWA | `3000` |
+| Service    | Container name     | Purpose                                                                                         | Default port |
+| ---------- | ------------------ | ----------------------------------------------------------------------------------------------- | -----------: |
+| `postgres` | `idealer-postgres` | Primary relational database for turns, rules, votes, guesses, logs, profiles, metrics snapshots |       `5432` |
+| `redis`    | `idealer-redis`    | Queue backend, cache, rate-limit state, live event coordination                                 |       `6379` |
+| `api`      | `idealer-api`      | Backend API for mobile DApp, rule preflight, round state, audit endpoints                       |       `4000` |
+| `worker`   | `idealer-worker`   | Background processor for rule compilation, runtime evaluation, attestation, scheduled jobs      |     internal |
+| `web`      | `idealer-web`      | Mobile-first Next.js DApp / PWA                                                                 |       `3000` |
 
 Optional local containers:
 
-| Service | Container name | Purpose | Default port |
-|---|---|---|---:|
-| `admin` | `idealer-admin` | Separate restricted admin console for retention, engagement, operations, compiler health, abuse, and accounting dashboards. Not linked from the public DApp. | `3001` |
-| `mcp` | `idealer-mcp` | Local bounded MCP tools for rule schema, compiler, runtime, test harness, game engine and audit logging. | internal |
-| `prometheus` | `idealer-prometheus` | Local metrics collection | `9090` |
-| `grafana` | `idealer-grafana` | Local metrics dashboards | `3002` |
-| `mailpit` | `idealer-mailpit` | Local email testing, if email notifications are introduced | `8025` |
+| Service      | Container name       | Purpose                                                                                                                                                      | Default port |
+| ------------ | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -----------: |
+| `admin`      | `idealer-admin`      | Separate restricted admin console for retention, engagement, operations, compiler health, abuse, and accounting dashboards. Not linked from the public DApp. |       `3001` |
+| `mcp`        | `idealer-mcp`        | Local bounded MCP tools for rule schema, compiler, runtime, test harness, game engine and audit logging.                                                     |     internal |
+| `prometheus` | `idealer-prometheus` | Local metrics collection                                                                                                                                     |       `9090` |
+| `grafana`    | `idealer-grafana`    | Local metrics dashboards                                                                                                                                     |       `3002` |
+| `mailpit`    | `idealer-mailpit`    | Local email testing, if email notifications are introduced                                                                                                   |       `8025` |
 
 #### 12.3.3 Required Docker Compose Definition
 
@@ -3545,18 +3553,17 @@ Each long-running container should expose or define health checks.
 
 Recommended checks:
 
-| Container | Health check |
-|---|---|
-| `idealer-postgres` | `pg_isready -U idealer` |
-| `idealer-redis` | `redis-cli ping` |
-| `idealer-api` | `GET /health` |
-| `idealer-worker` | Queue heartbeat or `GET /health` if worker exposes a lightweight HTTP health server |
-| `idealer-web` | `GET /` or `GET /play` |
+| Container          | Health check                                                                        |
+| ------------------ | ----------------------------------------------------------------------------------- |
+| `idealer-postgres` | `pg_isready -U idealer`                                                             |
+| `idealer-redis`    | `redis-cli ping`                                                                    |
+| `idealer-api`      | `GET /health`                                                                       |
+| `idealer-worker`   | Queue heartbeat or `GET /health` if worker exposes a lightweight HTTP health server |
+| `idealer-web`      | `GET /` or `GET /play`                                                              |
 
 The API should not accept traffic as healthy unless PostgreSQL and Redis are reachable.
 
 The worker should not be considered healthy unless it can reach PostgreSQL, Redis, and the configured LLM provider layer.
-
 
 Recommended local commands:
 
@@ -3694,16 +3701,16 @@ The admin console should provide insight into retention and engagement across th
 
 Core dashboards:
 
-| Dashboard | Key questions answered |
-|---|---|
-| Retention Overview | Do users return after first play, first loss, first vote, or first near-miss? |
-| Turn Cycle Performance | Which turn duration retains users best: 2h or 8h? |
-| Rule Engagement | Are users proposing, voting, sharing, and following rules? |
-| Creator Retention | Do rule creators return after their rule is sampled, elected, or creates winners? |
-| Wallet Funnel | Where do mobile users drop: connect, sign, submit, vote, claim, or return from wallet? |
-| Prize & Reward Health | How do prize size, creator rewards, and rollovers affect participation? |
-| Near-Miss Impact | Do near-miss messages increase next-turn participation? |
-| Sharing & Acquisition | Which share moments generate return visits or new wallet connections? |
+| Dashboard              | Key questions answered                                                                 |
+| ---------------------- | -------------------------------------------------------------------------------------- |
+| Retention Overview     | Do users return after first play, first loss, first vote, or first near-miss?          |
+| Turn Cycle Performance | Which turn duration retains users best: 2h or 8h?                                      |
+| Rule Engagement        | Are users proposing, voting, sharing, and following rules?                             |
+| Creator Retention      | Do rule creators return after their rule is sampled, elected, or creates winners?      |
+| Wallet Funnel          | Where do mobile users drop: connect, sign, submit, vote, claim, or return from wallet? |
+| Prize & Reward Health  | How do prize size, creator rewards, and rollovers affect participation?                |
+| Near-Miss Impact       | Do near-miss messages increase next-turn participation?                                |
+| Sharing & Acquisition  | Which share moments generate return visits or new wallet connections?                  |
 
 #### 12.6.2 Required Admin Metrics
 
@@ -3790,7 +3797,6 @@ Allowed admin functions for MVP:
 - export anonymized aggregated metrics;
 - view operational alerts.
 
-
 ---
 
 ## 13. Security
@@ -3834,7 +3840,6 @@ Requirements:
 - replay protection;
 - claim protection.
 
-
 ### 13.3.1 Election Randomness Security
 
 Rule election randomness must satisfy the following requirements:
@@ -3868,15 +3873,15 @@ Requirements:
 
 The project must not launch with real payouts or any real SOL flows until the M9 gates pass:
 
-| Gate | Required proof |
-|---|---|
-| Rule Compiler Gate | Natural-language rules compile into valid DSL/AST or are rejected with clear reasons. |
-| Election Randomness Gate | Switchboard election VRF, fulfilled-randomness finalist derivation, ranged output, and no deterministic fallback verified. |
-| Runtime Security Gate | Sandbox limits verified; network/filesystem/imports/randomness blocked. |
-| Accounting Gate | Payout, rollover, rounding, minimum payout, unclaimed claims, and creator reward cases tested. |
-| Mobile Reliability Gate | Wallet deep-link, pending, rejected, duplicate, delayed, and turn-changed flows tested. |
-| Abuse Resistance Gate | Vote concentration, rate limits, reports, and suspicious wallet clusters visible in admin. |
-| Observability & Incident Gate | Alerts, dashboards, logs, rollback/runbooks and pause procedures validated. |
+| Gate                          | Required proof                                                                                                             |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Rule Compiler Gate            | Natural-language rules compile into valid DSL/AST or are rejected with clear reasons.                                      |
+| Election Randomness Gate      | Switchboard election VRF, fulfilled-randomness finalist derivation, ranged output, and no deterministic fallback verified. |
+| Runtime Security Gate         | Sandbox limits verified; network/filesystem/imports/randomness blocked.                                                    |
+| Accounting Gate               | Payout, rollover, rounding, minimum payout, unclaimed claims, and creator reward cases tested.                             |
+| Mobile Reliability Gate       | Wallet deep-link, pending, rejected, duplicate, delayed, and turn-changed flows tested.                                    |
+| Abuse Resistance Gate         | Vote concentration, rate limits, reports, and suspicious wallet clusters visible in admin.                                 |
+| Observability & Incident Gate | Alerts, dashboards, logs, rollback/runbooks and pause procedures validated.                                                |
 
 ### 13.6 Operational Security
 
@@ -3966,7 +3971,6 @@ Requirements:
 - guess verification latency;
 - malformed output rate;
 - fallback rate by provider.
-
 
 ### 14.7 Compiler, Runtime and Abuse Health
 
@@ -4505,21 +4509,21 @@ Implement a working mobile DApp on Solana devnet with wallet flows, devnet trans
 
 **Checklist:**
 
-- [ ] Connect number picker to transaction creation.
-- [ ] Validate 6 unique numbers before transaction.
-- [ ] Submit guess to devnet contract.
-- [ ] Prevent multiple guesses per wallet per turn.
-- [ ] Save guess state in backend indexer/API.
-- [ ] Show transaction status in UI.
-- [ ] Show submitted guess receipt.
-- [ ] Handle duplicate attempt gracefully.
-- [ ] Handle expired turn gracefully.
+- [x] Connect number picker to transaction creation.
+- [x] Validate 6 unique numbers before transaction.
+- [x] Submit guess to devnet contract.
+- [x] Prevent multiple guesses per wallet per turn.
+- [x] Save guess state in backend indexer/API.
+- [x] Show transaction status in UI.
+- [x] Show submitted guess receipt.
+- [x] Handle duplicate attempt gracefully.
+- [x] Handle expired turn gracefully.
 
 **Approval criteria:**
 
-- [ ] Guess is visible on-chain through the `PlayerGuess` account or equivalent on-chain committed account state.
-- [ ] UI reflects submitted guess accurately.
-- [ ] Duplicate guess submission is blocked.
+- [x] Guess is visible on-chain through the `PlayerGuess` account or equivalent on-chain committed account state.
+- [x] UI reflects submitted guess accurately.
+- [x] Duplicate guess submission is blocked.
 
 ---
 
@@ -5162,7 +5166,6 @@ M5 is approved only if all M5 submilestones are approved and:
 
 ### 15.7 Milestone M9 — Mainnet Readiness Gates
 
-
 #### M9.0 — Election Randomness Gate
 
 ##### Checklist
@@ -5804,7 +5807,6 @@ Public release is approved only if:
 - [ ] mobile wallet flow is reliable;
 - [ ] payout and verification systems are auditable.
 
-
 ## 16. Resolved MVP Decisions
 
 This section replaces the former open questions list. The following decisions are binding for MVP implementation unless a future PRD version explicitly changes them.
@@ -5885,7 +5887,6 @@ The UI should constantly answer one question:
 
 If the product answers that well, Idealer becomes more than a lottery. It becomes a mobile social game where every round creates a new story.
 
-
 ---
 
 ## Appendix C — Retention Impact of Creator Rewards and Variable Turn Duration
@@ -5951,30 +5952,29 @@ Creator rewards make rule creation more valuable, while longer turns give creato
 
 The expected product effect is positive for retention among creators and engaged users, but the UI must clearly explain both mechanics to avoid confusion or perceived unfairness.
 
-
 ---
 
 ## Appendix D — Review Resolution Matrix
 
 This PRD revision integrates the technical review findings into the product and implementation specification.
 
-| # | Review issue | PRD v1.3.4 resolution |
-|---:|---|---|
-| 1 | Chainlink VRF is not native to Solana | Switchboard VRF is the only MVP randomness provider for both number draw and rule election. |
-| 2 | Random finalists used request entropy before fulfillment | Random finalists are derived only from fulfilled Switchboard VRF randomness. |
-| 3 | Fallback finalist invalidates VRF guarantee | Finalists must be precompiled before election; deterministic fallback to the next finalist is disallowed. |
-| 4 | Removal protection conflict | Paid removal is included in MVP with differentiated vote protection: creator self-removal threshold and higher third-party removal threshold. |
-| 5 | Dedup after payment creates UX/compliance issue | Dedup is moved to `/api/v1/rules/preflight` before payment, with short-lived `preflight_token`. |
-| 6 | Game Token security unresolved | Game Token is defined as an on-chain PDA issued by `submit_guess`. |
-| 7 | Re-proposal vs historical dedup conflict | Re-proposals are allowed after `REPROPOSAL_COOLDOWN_TURNS = 5`. |
-| 8 | 13-minute 1h window is too tight for VRF + compilation | Rules are precompiled incrementally during the turn and cached before election. |
-| 9 | Modulo bias in VRF index selection | Election uses ranged VRF output or rejection sampling, not raw modulo. |
-| 10 | Rule state machine missing | Formal Rule State Machine added. |
-| 11 | Monte Carlo unbounded | Monte Carlo difficulty config now has max samples, timeout, and convergence threshold. |
-| 12 | pgvector index unspecified | HNSW index and query settings specified for `rule_registry_embeddings`. |
-| 13 | Critical hooks can DoS player actions | Hooks are classified as CRITICAL/ANALYTICS/OPERATIONAL and circuit breaker config is defined. |
-| 14 | Removal fee copy/config inconsistency | Removal fee destination is fixed to `prize_pool` in MVP, allowing accurate UI copy and avoiding configurable mismatch. |
-| 15 | `dedup_score` belongs to wrong layer | `RuleDedupResult` and `GateCheckLog` are separated from `RuleCompilationResult` and compiler logs. |
+|   # | Review issue                                             | PRD v1.3.4 resolution                                                                                                                         |
+| --: | -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+|   1 | Chainlink VRF is not native to Solana                    | Switchboard VRF is the only MVP randomness provider for both number draw and rule election.                                                   |
+|   2 | Random finalists used request entropy before fulfillment | Random finalists are derived only from fulfilled Switchboard VRF randomness.                                                                  |
+|   3 | Fallback finalist invalidates VRF guarantee              | Finalists must be precompiled before election; deterministic fallback to the next finalist is disallowed.                                     |
+|   4 | Removal protection conflict                              | Paid removal is included in MVP with differentiated vote protection: creator self-removal threshold and higher third-party removal threshold. |
+|   5 | Dedup after payment creates UX/compliance issue          | Dedup is moved to `/api/v1/rules/preflight` before payment, with short-lived `preflight_token`.                                               |
+|   6 | Game Token security unresolved                           | Game Token is defined as an on-chain PDA issued by `submit_guess`.                                                                            |
+|   7 | Re-proposal vs historical dedup conflict                 | Re-proposals are allowed after `REPROPOSAL_COOLDOWN_TURNS = 5`.                                                                               |
+|   8 | 13-minute 1h window is too tight for VRF + compilation   | Rules are precompiled incrementally during the turn and cached before election.                                                               |
+|   9 | Modulo bias in VRF index selection                       | Election uses ranged VRF output or rejection sampling, not raw modulo.                                                                        |
+|  10 | Rule state machine missing                               | Formal Rule State Machine added.                                                                                                              |
+|  11 | Monte Carlo unbounded                                    | Monte Carlo difficulty config now has max samples, timeout, and convergence threshold.                                                        |
+|  12 | pgvector index unspecified                               | HNSW index and query settings specified for `rule_registry_embeddings`.                                                                       |
+|  13 | Critical hooks can DoS player actions                    | Hooks are classified as CRITICAL/ANALYTICS/OPERATIONAL and circuit breaker config is defined.                                                 |
+|  14 | Removal fee copy/config inconsistency                    | Removal fee destination is fixed to `prize_pool` in MVP, allowing accurate UI copy and avoiding configurable mismatch.                        |
+|  15 | `dedup_score` belongs to wrong layer                     | `RuleDedupResult` and `GateCheckLog` are separated from `RuleCompilationResult` and compiler logs.                                            |
 
 Implementation priority:
 

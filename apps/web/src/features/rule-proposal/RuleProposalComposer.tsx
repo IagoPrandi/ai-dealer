@@ -1,18 +1,49 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { MVP_FEES_SOL, RULE_MAX_TOKENS } from "@idealer/constants";
+import { address } from "@solana/kit";
+import {
+  useSolanaClient,
+  useWaitForSignature,
+  useWalletConnection,
+} from "@solana/react-hooks";
+import {
+  createProposeRuleInstruction,
+  deriveRuleProposalAddress,
+  deriveSubmitGuessAccounts,
+  IDEALER_ACTIVE_TURN_ID,
+  type RulePreflightResult,
+  type RuleProposalReceipt,
+} from "../../solana/idealerProgram";
 
 const RULE_WARNING_THRESHOLD = 64;
-const RULE_MAX_CHARACTERS = 1_200;
+const RULE_MAX_CHARACTERS = 320;
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_IDEALER_API_URL ?? "http://localhost:3002";
 const INSPIRATION_EXAMPLES = [
   "The guess with the closest even total wins.",
   "The guess containing the most drawn numbers wins.",
-  "The guess with the smallest distance between its highest and lowest numbers wins."
+  "The guess with the smallest distance between its highest and lowest numbers wins.",
 ] as const;
 
 type ComposerStep = "compose" | "review" | "success";
+type ProposalStatus =
+  | "idle"
+  | "preflighting"
+  | "awaiting_approval"
+  | "pending"
+  | "confirmed"
+  | "failed";
+
+interface ProposalFeedback {
+  code?: string;
+  message: string;
+  receipt?: RuleProposalReceipt;
+  signature?: string;
+  status: ProposalStatus;
+}
 
 function countApproximateTokens(value: string) {
   return value.match(/\p{L}+|\p{N}+|[^\s\p{L}\p{N}]/gu)?.length ?? 0;
@@ -34,55 +65,354 @@ function sanitizePreview(value: string) {
   return removeControlCharacters(value).replace(/\s+/g, " ").trim();
 }
 
+function truncateAddress(value: string) {
+  return `${value.slice(0, 5)}...${value.slice(-5)}`;
+}
+
 function getAmbiguityMessage(value: string, tokenCount: number) {
   if (tokenCount < 8) {
-    return "Mock ambiguity check: add more detail about how guesses are compared.";
+    return "Add more detail about how guesses are compared.";
   }
 
   if (/\b(any|anything|something|whatever|somehow)\b/i.test(value)) {
-    return "Mock ambiguity check: replace vague words with measurable conditions.";
+    return "Replace vague words with measurable conditions.";
   }
 
-  return "Mock ambiguity check: no obvious ambiguity detected.";
+  return "No obvious ambiguity detected.";
+}
+
+function normalizeProposalError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalizedMessage = message.toLowerCase();
+
+  if (
+    normalizedMessage.includes("reject") ||
+    normalizedMessage.includes("declin") ||
+    normalizedMessage.includes("cancel")
+  ) {
+    return {
+      code: "TRANSACTION_REJECTED",
+      message: "The wallet request was rejected. Your rule was not submitted.",
+    };
+  }
+
+  if (
+    normalizedMessage.includes("action window") ||
+    normalizedMessage.includes("turn is not open") ||
+    normalizedMessage.includes("no active turn")
+  ) {
+    return {
+      code: "TURN_NOT_ACCEPTING_RULES",
+      message:
+        "This turn is no longer accepting rule proposals. Return to the live round.",
+    };
+  }
+
+  return {
+    code: "RULE_PROPOSAL_FAILED",
+    message,
+  };
+}
+
+async function requestRulePreflight(text: string) {
+  const response = await fetch(`${API_BASE_URL}/rule-preflight`, {
+    body: JSON.stringify({ text }),
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+  const body = (await response.json()) as {
+    error?: string;
+    message?: string;
+    preflight?: RulePreflightResult;
+  };
+
+  if (!response.ok || !body.preflight) {
+    throw new Error(body.message ?? body.error ?? "Rule preflight failed.");
+  }
+
+  return body.preflight;
+}
+
+async function persistRuleProposal(receipt: RuleProposalReceipt) {
+  const response = await fetch(`${API_BASE_URL}/rule-proposals`, {
+    body: JSON.stringify(receipt),
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+
+  if (!response.ok && response.status !== 409) {
+    throw new Error(`Rule proposal API returned HTTP ${response.status}.`);
+  }
 }
 
 export function RuleProposalComposer() {
+  const client = useSolanaClient();
+  const { connected, wallet } = useWalletConnection();
   const [ruleText, setRuleText] = useState("");
   const [step, setStep] = useState<ComposerStep>("compose");
-  const tokenCount = useMemo(() => countApproximateTokens(ruleText), [ruleText]);
+  const [preflight, setPreflight] = useState<RulePreflightResult | null>(null);
+  const [feedback, setFeedback] = useState<ProposalFeedback>({
+    message: "",
+    status: "idle",
+  });
+  const tokenCount = useMemo(
+    () => countApproximateTokens(ruleText),
+    [ruleText],
+  );
   const sanitizedPreview = useMemo(() => sanitizePreview(ruleText), [ruleText]);
   const ambiguityMessage = useMemo(
     () => getAmbiguityMessage(sanitizedPreview, tokenCount),
-    [sanitizedPreview, tokenCount]
+    [sanitizedPreview, tokenCount],
   );
+  const walletAddress = wallet?.account.address.toString();
   const isEmpty = sanitizedPreview.length === 0;
   const isOverLimit = tokenCount > RULE_MAX_TOKENS;
   const isNearLimit = tokenCount >= RULE_WARNING_THRESHOLD && !isOverLimit;
-  const canReview = !isEmpty && !isOverLimit;
+  const isSubmitting =
+    feedback.status === "preflighting" ||
+    feedback.status === "awaiting_approval" ||
+    feedback.status === "pending";
+  const canReview = !isEmpty && !isOverLimit && !isSubmitting;
+  const signatureStatus = useWaitForSignature(feedback.signature, {
+    commitment: "confirmed",
+    disabled: !feedback.signature,
+    subscribe: true,
+  });
+
+  useEffect(() => {
+    if (!feedback.signature || !feedback.receipt) {
+      return;
+    }
+
+    const receipt = feedback.receipt;
+    const signature = feedback.signature;
+
+    if (signatureStatus.isSuccess) {
+      void persistRuleProposal(receipt)
+        .then(() => {
+          setFeedback({
+            message: "Your rule proposal was confirmed on Solana devnet.",
+            receipt,
+            signature,
+            status: "confirmed",
+          });
+          setStep("success");
+        })
+        .catch((error: unknown) => {
+          setFeedback({
+            code: "RULE_PROPOSAL_API_FAILED",
+            message: error instanceof Error ? error.message : String(error),
+            receipt,
+            signature,
+            status: "failed",
+          });
+        });
+    } else if (signatureStatus.isError) {
+      const normalized = normalizeProposalError(signatureStatus.waitError);
+      setFeedback({
+        code: normalized.code,
+        message: normalized.message,
+        receipt,
+        signature,
+        status: "failed",
+      });
+    }
+  }, [
+    feedback.receipt,
+    feedback.signature,
+    signatureStatus.isError,
+    signatureStatus.isSuccess,
+    signatureStatus.waitError,
+  ]);
 
   function resetComposer() {
     setRuleText("");
     setStep("compose");
+    setPreflight(null);
+    setFeedback({ message: "", status: "idle" });
+  }
+
+  function updateRuleText(value: string) {
+    setRuleText(value);
+    setPreflight(null);
+    setFeedback({ message: "", status: "idle" });
+  }
+
+  async function reviewProposal() {
+    if (!canReview) {
+      return;
+    }
+
+    setFeedback({
+      message: "Running server-side token and safety preflight.",
+      status: "preflighting",
+    });
+
+    try {
+      const result = await requestRulePreflight(ruleText);
+      setPreflight(result);
+      setFeedback({ message: "", status: "idle" });
+      setStep("review");
+    } catch (error) {
+      setFeedback({
+        code: "RULE_PREFLIGHT_FAILED",
+        message: error instanceof Error ? error.message : String(error),
+        status: "failed",
+      });
+    }
+  }
+
+  async function submitProposal() {
+    if (!preflight) {
+      await reviewProposal();
+      return;
+    }
+
+    if (!connected || !wallet || !walletAddress) {
+      setFeedback({
+        code: "WALLET_NOT_CONNECTED",
+        message: "Connect a Solana devnet wallet before submitting your rule.",
+        status: "failed",
+      });
+      return;
+    }
+
+    let receipt: RuleProposalReceipt | undefined;
+
+    try {
+      const player = address(walletAddress);
+      const accounts = await deriveSubmitGuessAccounts({
+        player,
+        turnId: IDEALER_ACTIVE_TURN_ID,
+      });
+      const gameToken = await client.runtime.rpc
+        .getAccountInfo(accounts.gameToken, {
+          commitment: "confirmed",
+          encoding: "base64",
+        })
+        .send();
+
+      if (!gameToken.value) {
+        setFeedback({
+          code: "GAME_TOKEN_REQUIRED",
+          message: "Submit a guess for this turn before proposing a rule.",
+          status: "failed",
+        });
+        return;
+      }
+
+      const ruleProposal = await deriveRuleProposalAddress({
+        ruleId: preflight.ruleId,
+        turnId: IDEALER_ACTIVE_TURN_ID,
+      });
+      const existingRule = await client.runtime.rpc
+        .getAccountInfo(ruleProposal, {
+          commitment: "confirmed",
+          encoding: "base64",
+        })
+        .send();
+
+      if (existingRule.value) {
+        setFeedback({
+          code: "RULE_ID_COLLISION",
+          message: "This rule id already exists. Edit the rule and try again.",
+          status: "failed",
+        });
+        return;
+      }
+
+      receipt = {
+        ...preflight,
+        proposer: walletAddress,
+        ruleProposal: ruleProposal.toString(),
+        signature: "",
+        submittedAt: new Date().toISOString(),
+        turnId: IDEALER_ACTIVE_TURN_ID,
+      };
+      setFeedback({
+        message: "Approve the rule proposal transaction in your wallet.",
+        receipt,
+        status: "awaiting_approval",
+      });
+
+      const instruction = await createProposeRuleInstruction({
+        player,
+        preflight,
+        turnId: IDEALER_ACTIVE_TURN_ID,
+      });
+      const signature = (
+        await client.transaction.prepareAndSend(
+          {
+            authority: wallet,
+            commitment: "confirmed",
+            feePayer: player,
+            instructions: [instruction],
+            version: 0,
+          },
+          { commitment: "confirmed", maxRetries: 3, skipPreflight: false },
+        )
+      ).toString();
+      const pendingReceipt = { ...receipt, signature };
+      setFeedback({
+        message: "Wallet approval returned. Waiting for devnet confirmation.",
+        receipt: pendingReceipt,
+        signature,
+        status: "pending",
+      });
+    } catch (error) {
+      const normalized = normalizeProposalError(error);
+      setFeedback({
+        code: normalized.code,
+        message: normalized.message,
+        status: "failed",
+        ...(receipt ? { receipt } : {}),
+      });
+    }
   }
 
   if (step === "success") {
     return (
       <main className="composer-shell success-shell">
-        <section className="composer-panel success-panel" aria-labelledby="proposal-success-title">
+        <section
+          className="composer-panel success-panel"
+          aria-labelledby="proposal-success-title"
+        >
           <p className="eyebrow">Proposal submitted</p>
-          <h1 id="proposal-success-title">Your simulated rule is queued.</h1>
-          <p>
-            The production flow will submit the proposal after preflight and wallet approval.
-          </p>
+          <h1 id="proposal-success-title">Your devnet rule is queued.</h1>
+          <p>{feedback.message}</p>
           <div className="sanitized-preview">
             <span>Submitted rule</span>
-            <p>{sanitizedPreview}</p>
+            <p>{preflight?.sanitizedText ?? sanitizedPreview}</p>
           </div>
+          {feedback.receipt ? (
+            <dl className="review-costs">
+              <div>
+                <dt>RuleProposal PDA</dt>
+                <dd>{truncateAddress(feedback.receipt.ruleProposal)}</dd>
+              </div>
+              <div>
+                <dt>Signature</dt>
+                <dd>
+                  <a
+                    href={`https://explorer.solana.com/tx/${feedback.receipt.signature}?cluster=devnet`}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    View receipt
+                  </a>
+                </dd>
+              </div>
+            </dl>
+          ) : null}
           <div className="picker-actions">
             <Link className="secondary-link-action" href="/play">
               Back to live round
             </Link>
-            <button className="primary-action" onClick={resetComposer} type="button">
+            <button
+              className="primary-action"
+              onClick={resetComposer}
+              type="button"
+            >
               Propose another
             </button>
           </div>
@@ -98,7 +428,9 @@ export function RuleProposalComposer() {
           Live round
         </Link>
         <div>
-          <p className="eyebrow">Turn TURN-0008</p>
+          <p className="eyebrow">
+            Turn TURN-{IDEALER_ACTIVE_TURN_ID.toString().padStart(4, "0")}
+          </p>
           <strong>Propose a rule</strong>
         </div>
       </header>
@@ -110,30 +442,43 @@ export function RuleProposalComposer() {
             <h1 id="rule-composer-title">Describe a new way to win.</h1>
           </div>
           <span
-            className={isOverLimit ? "token-count over" : isNearLimit ? "token-count warning" : "token-count"}
+            className={
+              isOverLimit
+                ? "token-count over"
+                : isNearLimit
+                  ? "token-count warning"
+                  : "token-count"
+            }
           >
-            {tokenCount}/{RULE_MAX_TOKENS}
+            {preflight?.tokenCount ?? tokenCount}/{RULE_MAX_TOKENS}
           </span>
         </div>
 
         {step === "review" ? (
-          <section className="review-panel" aria-labelledby="proposal-review-title">
+          <section
+            className="review-panel"
+            aria-labelledby="proposal-review-title"
+          >
             <p className="eyebrow">Review proposal</p>
-            <h2 id="proposal-review-title">Confirm this rule before simulated submission.</h2>
+            <h2 id="proposal-review-title">
+              Confirm this rule before devnet submission.
+            </h2>
             <div className="sanitized-preview">
-              <span>Sanitized preview</span>
-              <p>{sanitizedPreview}</p>
+              <span>Sanitized rule text</span>
+              <p>{preflight?.sanitizedText ?? sanitizedPreview}</p>
             </div>
             <div className="mock-check">
-              <span>Prototype AI preview</span>
+              <span>Official interpretation preview</span>
               <p>
-                Mock interpretation: compare every eligible guess using the measurable condition
-                expressed in this rule.
+                Compare every eligible guess using this measurable rule:{" "}
+                {preflight?.sanitizedText ?? sanitizedPreview}
               </p>
             </div>
             <div className="mock-check">
-              <span>Ambiguity check</span>
-              <p>{ambiguityMessage}</p>
+              <span>Preflight commitment</span>
+              <p>
+                Server token count and hashes are locked before wallet approval.
+              </p>
             </div>
             <dl className="review-costs">
               <div>
@@ -142,16 +487,73 @@ export function RuleProposalComposer() {
               </div>
               <div>
                 <dt>Token count</dt>
-                <dd>{tokenCount}/{RULE_MAX_TOKENS}</dd>
+                <dd>
+                  {preflight?.tokenCount ?? tokenCount}/{RULE_MAX_TOKENS}
+                </dd>
+              </div>
+              <div>
+                <dt>Wallet</dt>
+                <dd>
+                  {walletAddress
+                    ? truncateAddress(walletAddress)
+                    : "Not connected"}
+                </dd>
               </div>
             </dl>
+            {feedback.status !== "idle" ? (
+              <article
+                aria-live="polite"
+                className={`guess-status-card ${feedback.status}`}
+                role={feedback.status === "failed" ? "alert" : undefined}
+              >
+                <strong>
+                  {feedback.status === "preflighting"
+                    ? "Running preflight"
+                    : null}
+                  {feedback.status === "awaiting_approval"
+                    ? "Awaiting wallet approval"
+                    : null}
+                  {feedback.status === "pending" ? "Transaction pending" : null}
+                  {feedback.status === "confirmed"
+                    ? "Proposal confirmed"
+                    : null}
+                  {feedback.status === "failed" ? "Proposal failed" : null}
+                </strong>
+                <p>{feedback.message}</p>
+                {feedback.code ? <code>{feedback.code}</code> : null}
+                {feedback.signature ? (
+                  <a
+                    href={`https://explorer.solana.com/tx/${feedback.signature}?cluster=devnet`}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    View devnet transaction
+                  </a>
+                ) : null}
+              </article>
+            ) : null}
             <div className="picker-actions">
-              <button className="secondary-action" onClick={() => setStep("compose")} type="button">
+              <button
+                className="secondary-action"
+                onClick={() => setStep("compose")}
+                type="button"
+              >
                 Edit rule
               </button>
-              <button className="primary-action" onClick={() => setStep("success")} type="button">
-                Submit simulation
-              </button>
+              {connected ? (
+                <button
+                  className="primary-action"
+                  disabled={isSubmitting}
+                  onClick={submitProposal}
+                  type="button"
+                >
+                  {isSubmitting ? "Submitting..." : "Submit to devnet"}
+                </button>
+              ) : (
+                <Link className="primary-action" href="/play/wallet">
+                  Connect wallet
+                </Link>
+              )}
             </div>
           </section>
         ) : (
@@ -162,7 +564,7 @@ export function RuleProposalComposer() {
                 aria-describedby="rule-token-guidance"
                 id="rule-text"
                 maxLength={RULE_MAX_CHARACTERS}
-                onChange={(event) => setRuleText(event.target.value)}
+                onChange={(event) => updateRuleText(event.target.value)}
                 placeholder="Example: The guess with the closest even total wins."
                 rows={6}
                 value={ruleText}
@@ -183,30 +585,48 @@ export function RuleProposalComposer() {
                     } over the limit. Shorten it before review.`
                   : isNearLimit
                     ? "Approaching the token limit. Keep the condition concise and measurable."
-                    : "Write freely. The counter is approximate and the production preflight is authoritative."}
+                    : "Write freely. The server preflight is authoritative before wallet approval."}
               </p>
             </div>
 
+            {feedback.status === "failed" ? (
+              <article className="guess-status-card failed" role="alert">
+                <strong>Preflight failed</strong>
+                <p>{feedback.message}</p>
+                {feedback.code ? <code>{feedback.code}</code> : null}
+              </article>
+            ) : null}
+
             <div className="sanitized-preview">
               <span>Sanitized preview</span>
-              <p>{sanitizedPreview || "Your normalized rule preview will appear here."}</p>
+              <p>
+                {sanitizedPreview ||
+                  "Your normalized rule preview will appear here."}
+              </p>
             </div>
 
             <div className="mock-check">
-              <span>Prototype AI preview</span>
+              <span>Preflight preview</span>
               <p>
                 {isEmpty
-                  ? "Write a rule to generate a mock interpretation."
-                  : "Mock interpretation ready. Production AI compilation is not running in this prototype."}
+                  ? "Write a rule to run server-side preflight."
+                  : "Ready for server-side token, safety, and hash preflight."}
               </p>
             </div>
 
             <div className="mock-check">
               <span>Ambiguity check</span>
-              <p>{isEmpty ? "Write a rule to run the mock ambiguity check." : ambiguityMessage}</p>
+              <p>
+                {isEmpty
+                  ? "Write a rule to run the ambiguity check."
+                  : ambiguityMessage}
+              </p>
             </div>
 
-            <section className="inspiration-panel" aria-labelledby="inspiration-title">
+            <section
+              className="inspiration-panel"
+              aria-labelledby="inspiration-title"
+            >
               <p className="eyebrow">Inspiration only</p>
               <h2 id="inspiration-title">Examples are not templates.</h2>
               <ul>
@@ -221,16 +641,22 @@ export function RuleProposalComposer() {
 
       {step === "compose" ? (
         <nav className="composer-bottom-bar" aria-label="Rule proposal actions">
-          <button className="secondary-action" onClick={() => setRuleText("")} type="button">
+          <button
+            className="secondary-action"
+            onClick={() => updateRuleText("")}
+            type="button"
+          >
             Clear
           </button>
           <button
             className="primary-action"
             disabled={!canReview}
-            onClick={() => setStep("review")}
+            onClick={reviewProposal}
             type="button"
           >
-            Review proposal
+            {feedback.status === "preflighting"
+              ? "Checking..."
+              : "Review proposal"}
           </button>
         </nav>
       ) : null}

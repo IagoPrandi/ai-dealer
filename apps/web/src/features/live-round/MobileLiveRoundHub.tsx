@@ -18,10 +18,13 @@ import {
   Vote,
   Wallet,
   X,
-  Zap
+  Zap,
 } from "lucide-react";
+import { IDEALER_ACTIVE_TURN_ID } from "../../solana/idealerProgram";
 
 type AppScreen = "result" | "home" | "account";
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_IDEALER_API_URL ?? "http://localhost:3002";
 
 interface Rule {
   id: string;
@@ -32,7 +35,14 @@ interface Rule {
   explanation: string;
 }
 
-const rules: readonly Rule[] = [
+interface ApiRuleProposal {
+  proposer: string;
+  ruleId: number;
+  sanitizedText: string;
+  title?: string;
+}
+
+const defaultRules: readonly Rule[] = [
   {
     id: "even-sum",
     title: "Closest even sum",
@@ -40,7 +50,7 @@ const rules: readonly Rule[] = [
     votes: 240,
     creator: "@luna.sol",
     explanation:
-      "Every eligible guess is totaled. Only even totals qualify, and the closest total wins."
+      "Every eligible guess is totaled. Only even totals qualify, and the closest total wins.",
   },
   {
     id: "highest-odd",
@@ -48,7 +58,8 @@ const rules: readonly Rule[] = [
     summary: "The guess containing the highest drawn odd number wins.",
     votes: 198,
     creator: "@oddball",
-    explanation: "The highest odd number in the draw decides which eligible guess wins."
+    explanation:
+      "The highest odd number in the draw decides which eligible guess wins.",
   },
   {
     id: "perfect-mirror",
@@ -56,7 +67,8 @@ const rules: readonly Rule[] = [
     summary: "The most symmetrical number sequence wins.",
     votes: 165,
     creator: "@vrf.king",
-    explanation: "Each guess is compared forward and backward. The most symmetrical sequence wins."
+    explanation:
+      "Each guess is compared forward and backward. The most symmetrical sequence wins.",
   },
   {
     id: "underdog",
@@ -64,7 +76,8 @@ const rules: readonly Rule[] = [
     summary: "The guess matching the fewest drawn numbers wins.",
     votes: 121,
     creator: "@reverse",
-    explanation: "This rule reverses the usual objective: the fewest matching numbers wins."
+    explanation:
+      "This rule reverses the usual objective: the fewest matching numbers wins.",
   },
   {
     id: "seven-club",
@@ -72,8 +85,9 @@ const rules: readonly Rule[] = [
     summary: "The guess with the most multiples of seven wins.",
     votes: 96,
     creator: "@seven",
-    explanation: "Multiples of seven are counted in each eligible guess. The highest count wins."
-  }
+    explanation:
+      "Multiples of seven are counted in each eligible guess. The highest count wins.",
+  },
 ] as const;
 
 const drawnNumbers = [7, 18, 23, 41, 49, 56] as const;
@@ -83,7 +97,9 @@ function formatCountdown(totalSeconds: number) {
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
 
-  return [hours, minutes, seconds].map((value) => value.toString().padStart(2, "0"));
+  return [hours, minutes, seconds].map((value) =>
+    value.toString().padStart(2, "0"),
+  );
 }
 
 function useCountdown(initialSeconds: number) {
@@ -124,7 +140,11 @@ function PhoneChrome() {
 
 function Dealer({ size = 38 }: { size?: number }) {
   return (
-    <span className="platform-dealer" style={{ width: size, height: size }} aria-hidden="true">
+    <span
+      className="platform-dealer"
+      style={{ width: size, height: size }}
+      aria-hidden="true"
+    >
       <span className="platform-dealer-hat" />
       <i />
       <i />
@@ -133,7 +153,13 @@ function Dealer({ size = 38 }: { size?: number }) {
   );
 }
 
-function ScreenHeader({ onBack, title }: { onBack: () => void; title: string }) {
+function ScreenHeader({
+  onBack,
+  title,
+}: {
+  onBack: () => void;
+  title: string;
+}) {
   return (
     <div className="platform-screen-header">
       <button aria-label="Back to current round" onClick={onBack} type="button">
@@ -155,7 +181,7 @@ function Confetti() {
 }
 
 function ResultScreen({ goHome }: { goHome: () => void }) {
-  const maxVotes = rules[0]?.votes ?? 1;
+  const maxVotes = defaultRules[0]?.votes ?? 1;
 
   return (
     <section className="platform-screen platform-result-screen">
@@ -195,27 +221,31 @@ function ResultScreen({ goHome }: { goHome: () => void }) {
           </ol>
         </article>
 
-        <p className="platform-section-label platform-outside-label">Selected rule</p>
+        <p className="platform-section-label platform-outside-label">
+          Selected rule
+        </p>
         <article className="platform-winning-rule">
           <div>
             <span>
               <Trophy aria-hidden="true" size={17} />
             </span>
-            <h2>{rules[0]?.title}</h2>
+            <h2>{defaultRules[0]?.title}</h2>
           </div>
-          <p>{rules[0]?.summary}</p>
+          <p>{defaultRules[0]?.summary}</p>
           <footer>
             <strong>
               <Vote aria-hidden="true" size={14} />
-              {rules[0]?.votes} votes
+              {defaultRules[0]?.votes} votes
             </strong>
-            <span>by {rules[0]?.creator}</span>
+            <span>by {defaultRules[0]?.creator}</span>
           </footer>
         </article>
 
-        <p className="platform-section-label platform-outside-label">Rules entered in the draw</p>
+        <p className="platform-section-label platform-outside-label">
+          Rules entered in the draw
+        </p>
         <div className="platform-result-rule-list">
-          {rules.map((rule, index) => {
+          {defaultRules.map((rule, index) => {
             const percent = Math.round((rule.votes / maxVotes) * 100);
             return (
               <article className={index === 0 ? "winner" : ""} key={rule.id}>
@@ -229,7 +259,11 @@ function ResultScreen({ goHome }: { goHome: () => void }) {
           })}
         </div>
 
-        <button className="platform-ghost-button" onClick={goHome} type="button">
+        <button
+          className="platform-ghost-button"
+          onClick={goHome}
+          type="button"
+        >
           <Zap aria-hidden="true" size={17} />
           Back to current round
         </button>
@@ -238,9 +272,21 @@ function ResultScreen({ goHome }: { goHome: () => void }) {
   );
 }
 
-function RuleDetail({ onClose, rank, rule }: { onClose: () => void; rank: number; rule: Rule }) {
+function RuleDetail({
+  onClose,
+  rank,
+  rule,
+}: {
+  onClose: () => void;
+  rank: number;
+  rule: Rule;
+}) {
   return (
-    <div className="platform-rule-backdrop" onClick={onClose} role="presentation">
+    <div
+      className="platform-rule-backdrop"
+      onClick={onClose}
+      role="presentation"
+    >
       <section
         aria-labelledby="platform-rule-title"
         aria-modal="true"
@@ -254,7 +300,11 @@ function RuleDetail({ onClose, rank, rule }: { onClose: () => void; rank: number
           <span>
             <Vote aria-hidden="true" size={14} /> {rule.votes} votes
           </span>
-          <button aria-label="Close rule details" onClick={onClose} type="button">
+          <button
+            aria-label="Close rule details"
+            onClick={onClose}
+            type="button"
+          >
             <X aria-hidden="true" size={18} />
           </button>
         </header>
@@ -279,7 +329,7 @@ function RuleDetail({ onClose, rank, rule }: { onClose: () => void; rank: number
 
 function HomeScreen({
   goAccount,
-  goResult
+  goResult,
 }: {
   goAccount: () => void;
   goResult: () => void;
@@ -287,8 +337,47 @@ function HomeScreen({
   const [hours, minutes, seconds] = useCountdown(1 * 3600 + 47 * 60 + 12);
   const [expanded, setExpanded] = useState(false);
   const [activeRule, setActiveRule] = useState<Rule | null>(null);
+  const [rules, setRules] = useState<Rule[]>(() => [...defaultRules]);
   const visibleRules = expanded ? rules : rules.slice(0, 3);
   const maxVotes = rules[0]?.votes ?? 1;
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    void fetch(
+      `${API_BASE_URL}/rule-proposals?turnId=${IDEALER_ACTIVE_TURN_ID}`,
+      { signal: controller.signal },
+    )
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Rule feed returned HTTP ${response.status}.`);
+        }
+        return response.json() as Promise<{ proposals?: ApiRuleProposal[] }>;
+      })
+      .then((body) => {
+        const apiRules = (body.proposals ?? []).map((proposal, index) => ({
+          creator: `${proposal.proposer.slice(0, 5)}...${proposal.proposer.slice(-5)}`,
+          explanation:
+            "This devnet proposal passed server preflight and was committed on-chain.",
+          id: `devnet-${proposal.ruleId}`,
+          summary: proposal.sanitizedText,
+          title: proposal.title ?? `Rule #${proposal.ruleId}`,
+          votes: Math.max(1, 80 - index * 3),
+        }));
+
+        if (apiRules.length > 0) {
+          setRules([...apiRules, ...defaultRules]);
+        }
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+        console.error("Failed to load devnet rule proposals.", error);
+      });
+
+    return () => controller.abort();
+  }, []);
 
   return (
     <section className="platform-screen platform-home-screen">
@@ -305,7 +394,11 @@ function HomeScreen({
           </Link>
         </header>
 
-        <button className="platform-last-result" onClick={goResult} type="button">
+        <button
+          className="platform-last-result"
+          onClick={goResult}
+          type="button"
+        >
           <span>Result · TURN #0007</span>
           <ArrowRight aria-hidden="true" size={18} />
           <i>
@@ -321,7 +414,10 @@ function HomeScreen({
           </b>
         </button>
 
-        <section className="platform-prize-hero" aria-labelledby="platform-prize-title">
+        <section
+          className="platform-prize-hero"
+          aria-labelledby="platform-prize-title"
+        >
           <div className="platform-prize-glow" />
           <span className="platform-pill">
             <Clock3 aria-hidden="true" size={14} />
@@ -360,7 +456,10 @@ function HomeScreen({
             <small>cost 0.02 SOL</small>
           </header>
           <div>
-            <input aria-label="Rule idea" placeholder="Example: closest sum to 100 wins…" />
+            <input
+              aria-label="Rule idea"
+              placeholder="Example: closest sum to 100 wins…"
+            />
             <Link aria-label="Create rule" href="/play/propose">
               <Send aria-hidden="true" size={19} />
             </Link>
@@ -376,7 +475,11 @@ function HomeScreen({
           {visibleRules.map((rule, index) => {
             const percent = Math.round((rule.votes / maxVotes) * 100);
             return (
-              <button key={rule.id} onClick={() => setActiveRule(rule)} type="button">
+              <button
+                key={rule.id}
+                onClick={() => setActiveRule(rule)}
+                type="button"
+              >
                 <i style={{ width: `${percent}%` }} />
                 <span>{index + 1}</span>
                 <b>
@@ -392,9 +495,17 @@ function HomeScreen({
           })}
         </div>
 
-        <button className="platform-ghost-button" onClick={() => setExpanded((value) => !value)} type="button">
+        <button
+          className="platform-ghost-button"
+          onClick={() => setExpanded((value) => !value)}
+          type="button"
+        >
           {expanded ? "Collapse rules" : `View all ${rules.length} rules`}
-          <ChevronDown aria-hidden="true" className={expanded ? "up" : ""} size={18} />
+          <ChevronDown
+            aria-hidden="true"
+            className={expanded ? "up" : ""}
+            size={18}
+          />
         </button>
       </div>
 
@@ -423,7 +534,13 @@ function HomeScreen({
   );
 }
 
-function AccountScreen({ goHome, goResult }: { goHome: () => void; goResult: () => void }) {
+function AccountScreen({
+  goHome,
+  goResult,
+}: {
+  goHome: () => void;
+  goResult: () => void;
+}) {
   return (
     <section className="platform-screen platform-account-screen">
       <div className="platform-ambient" />
@@ -436,7 +553,11 @@ function AccountScreen({ goHome, goResult }: { goHome: () => void; goResult: () 
             <small>4sF9k2…aQ7x</small>
           </div>
         </div>
-        <button className="platform-account-result" onClick={goResult} type="button">
+        <button
+          className="platform-account-result"
+          onClick={goResult}
+          type="button"
+        >
           <Trophy aria-hidden="true" size={22} />
           <span>
             <strong>You won TURN #0007</strong>
@@ -495,12 +616,20 @@ export function MobileLiveRoundHub() {
     <main className="platform-stage">
       <div className="platform-phone-shell">
         <PhoneChrome />
-        {screen === "result" ? <ResultScreen goHome={() => setScreen("home")} /> : null}
+        {screen === "result" ? (
+          <ResultScreen goHome={() => setScreen("home")} />
+        ) : null}
         {screen === "home" ? (
-          <HomeScreen goAccount={() => setScreen("account")} goResult={() => setScreen("result")} />
+          <HomeScreen
+            goAccount={() => setScreen("account")}
+            goResult={() => setScreen("result")}
+          />
         ) : null}
         {screen === "account" ? (
-          <AccountScreen goHome={() => setScreen("home")} goResult={() => setScreen("result")} />
+          <AccountScreen
+            goHome={() => setScreen("home")}
+            goResult={() => setScreen("result")}
+          />
         ) : null}
       </div>
     </main>
