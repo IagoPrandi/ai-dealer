@@ -32,7 +32,8 @@ Opened before starting `M0.1`:
 | M2.1      | Mobile Wallet Flow                            | Completed | Confirmed 2026-06-04 | Wallet Standard, Mobile Wallet Adapter, named mobile-wallet handoffs, devnet test transaction, recovery, status, retry, and disconnect flows implemented and validated.            |
 | M2.2      | devnet Programs                               | Completed | Confirmed 2026-06-04 | Core Anchor program implemented, SBF instruction suite passed, and program deployed to devnet as `6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4`.                                   |
 | M2.3      | devnet Guess Submission                       | Completed | Confirmed 2026-06-04 | Number picker builds and sends the deployed devnet `submit_guess` transaction, blocks known duplicates, records receipts through the API, and has on-chain `PlayerGuess` evidence. |
-| M2.4      | devnet Rule Proposal                          | In Review | Pending              | Token preflight, sanitization, prompt-injection rejection, devnet `propose_rule` submission flow, and public rule projection are implemented pending user confirmation.            |
+| M2.4      | devnet Rule Proposal                          | Completed | Confirmed 2026-06-04 | Token preflight, sanitization, prompt-injection rejection, devnet `propose_rule` submission flow, public rule projection, and on-chain text/hash proof are complete.               |
+| M2.5      | devnet Voting                                 | In Review | Pending              | On-chain `RuleVote` submission flow, duplicate blocking, indexed vote projection, and voting UI state are implemented pending user confirmation.                                   |
 
 ## M0.1 Work Log
 
@@ -889,19 +890,64 @@ M1 was marked complete after explicit user confirmation on 2026-06-04 because al
 
 ## M2.4 Validation Results
 
-| Requirement                      | Result                                                                                                             |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| Backend token counter service    | Implemented by `POST /rule-preflight`.                                                                             |
-| Server-side token limit          | Passed; over-limit preflight returns HTTP 400 before transaction.                                                  |
-| Sanitized rule text              | Implemented by backend control-character removal, whitespace normalization, and on-chain byte-limit enforcement.   |
-| Prompt-injection rejection       | Passed; obvious injection text returns HTTP 400 before transaction.                                                |
-| Devnet transaction creation      | Implemented in the wallet-backed composer through `client.transaction.prepareAndSend`.                             |
-| On-chain `RuleProposal` evidence | Passed. Devnet account `B1KHQhbEzaXBTTMXSNVCWM6GhSAjFTEwdrY1N7DvBnZU` exists and is owned by the deployed program. |
-| Public rule projection           | Implemented through `GET /rule-proposals` and live-round list loading.                                             |
-| API typecheck/lint/build         | Passed with focused package commands.                                                                              |
-| Web typecheck/lint               | Passed with focused package commands.                                                                              |
-| Focused web E2E                  | Passed with `pnpm --filter @idealer/web test:e2e -- e2e/rule-proposal.spec.ts e2e/number-picker.spec.ts`.          |
+| Requirement                      | Result                                                                                                                                  |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend token counter service    | Implemented by `POST /rule-preflight`.                                                                                                  |
+| Server-side token limit          | Passed; over-limit preflight returns HTTP 400 before transaction.                                                                       |
+| Sanitized rule text              | Implemented by backend control-character removal, whitespace normalization, and on-chain byte-limit enforcement.                        |
+| Prompt-injection rejection       | Passed; obvious injection text returns HTTP 400 before transaction.                                                                     |
+| Devnet transaction creation      | Implemented in the wallet-backed composer through `client.transaction.prepareAndSend`.                                                  |
+| On-chain `RuleProposal` evidence | Passed. Devnet account `B1KHQhbEzaXBTTMXSNVCWM6GhSAjFTEwdrY1N7DvBnZU` exists and is owned by the deployed program.                      |
+| On-chain text/hash consistency   | Passed. Decoded sanitized text `Win if the submitted guess contains all six drawn numbers.` hashes to the stored `sanitized_text_hash`. |
+| Public rule projection           | Implemented through `GET /rule-proposals` and live-round list loading.                                                                  |
+| API typecheck/lint/build         | Passed with focused package commands.                                                                                                   |
+| Web typecheck/lint               | Passed with focused package commands.                                                                                                   |
+| Focused web E2E                  | Passed with `pnpm --filter @idealer/web test:e2e -- e2e/rule-proposal.spec.ts e2e/number-picker.spec.ts`.                               |
 
 ## M2.4 Confirmation Gate
 
-`M2.4` is implemented and ready for user review, but its PRD checklist and approval criteria remain unchecked because repository instructions require explicit user confirmation before ticking the milestone.
+`M2.4` was marked complete after explicit user confirmation on 2026-06-04 and after verifying on-chain `RuleProposal` text/hash consistency. Required markdown documents opened before work: `PRD.md`, `AGENTS.md`, `.claude/skills`, `solana-dev`, `develop-frontend`, and `security-threat-checklist`.
+
+## M2.5 Work Log
+
+### 2026-06-04
+
+- Opened `PRD.md`, `AGENTS.md`, and `.claude/skills` before starting M2.5.
+- Opened the relevant Solana, frontend, and security skills before touching voting flow code.
+- Started M2.5 after M2.4 was marked complete with user confirmation.
+- Extended the Solana frontend helper with `vote_rule`, `RuleVote` PDA derivation, and Anchor instruction serialization.
+- Added `POST /rule-votes` and `GET /rule-votes` to project confirmed on-chain votes and aggregate vote counts by rule id.
+- Replaced simulated vote switching with a devnet voting flow that requires a connected wallet, checks for the turn `GameToken`, blocks an existing `RuleVote` PDA before wallet approval, sends `vote_rule`, shows status, persists confirmed votes, and updates the activity feed.
+- Updated the voting UI to read indexed rule proposals/vote counts and keep the existing devnet bootstrap rule available as a committed on-chain rule.
+- Updated focused E2E coverage for the wallet-required devnet vote entry.
+- Verified existing devnet `RuleVote` account `Hp1nK5JhWRFjH1aHXfhnXsKuFM479JoeGUeNv7Po6dYC` is owned by deployed program `6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4` and decodes to `turnId=1`, `ruleId=1`.
+
+## M2.5 Artifact Review
+
+| Artifact                                                | Status      | Notes                                                                                              |
+| ------------------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------- |
+| `apps/web/src/solana/idealerProgram.ts`                 | Implemented | Adds `vote_rule` instruction creation and `RuleVote` PDA derivation.                               |
+| `apps/api/src/index.ts`                                 | Implemented | Adds vote receipt persistence and indexed vote count aggregation.                                  |
+| `apps/web/src/features/rule-voting/RuleVotingPanel.tsx` | Implemented | Replaces vote simulation with wallet-backed devnet voting, duplicate checks, status, and activity. |
+| `apps/web/e2e/rule-voting.spec.ts`                      | Updated     | Verifies indexed devnet rule display and wallet-required vote entry.                               |
+
+## M2.5 Validation Results
+
+| Requirement                   | Result                                                                                                                                                 |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| On-chain `RuleVote` path      | Implemented by `createVoteRuleInstruction` and wallet-backed `vote_rule` submission.                                                                   |
+| One vote per wallet per rule  | Implemented by deterministic `RuleVote` PDA precheck and duplicate error mapping.                                                                      |
+| Backend/API vote counts       | Implemented by `GET /rule-votes` aggregate counts.                                                                                                     |
+| UI vote state                 | Implemented with pending/confirmed/duplicate/closed/failed states and current-vote display.                                                            |
+| Leading rules                 | Implemented from indexed vote counts and displayed in `/play/vote`.                                                                                    |
+| Voting cutoff handling        | Implemented with countdown-disabled submission and closed-state error mapping.                                                                         |
+| Activity feed                 | Implemented for indexed baseline vote and confirmed user vote.                                                                                         |
+| On-chain `RuleVote` evidence  | Passed. Devnet account `Hp1nK5JhWRFjH1aHXfhnXsKuFM479JoeGUeNv7Po6dYC` exists, is owned by the deployed program, and decodes to `turnId=1`, `ruleId=1`. |
+| API vote smoke                | Passed against compiled API server: `OPTIONS /rule-votes`, `POST /rule-votes`, and `GET /rule-votes`.                                                  |
+| API typecheck/lint/build/test | Passed with focused package commands.                                                                                                                  |
+| Web typecheck/lint/build/test | Passed with focused package commands.                                                                                                                  |
+| Focused web E2E               | Passed with `pnpm --filter @idealer/web test:e2e -- e2e/rule-voting.spec.ts e2e/rule-proposal.spec.ts`.                                                |
+
+## M2.5 Confirmation Gate
+
+`M2.5` is implemented and ready for user review, but its PRD checklist and approval criteria remain unchecked because repository instructions require explicit user confirmation before ticking the milestone.

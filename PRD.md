@@ -4533,25 +4533,25 @@ Implement a working mobile DApp on Solana devnet with wallet flows, devnet trans
 
 **Checklist:**
 
-- [ ] Implement backend token counter service.
-- [ ] Enforce token limit server-side.
-- [ ] Sanitize rule text.
-- [ ] Reject over-limit rules before transaction.
-- [ ] Reject obvious prompt-injection patterns.
-- [ ] Submit rule proposal transaction that creates the on-chain `RuleProposal` account.
-- [ ] Store full sanitized original rule text on-chain in `RuleProposal`.
-- [ ] Store sanitized rule text hash on-chain in `RuleProposal`.
-- [ ] Mirror on-chain rule text off-chain only for indexing, search, analytics, and UI performance.
-- [ ] Show proposal status in UI.
-- [ ] Show rule in public rule list.
+- [x] Implement backend token counter service.
+- [x] Enforce token limit server-side.
+- [x] Sanitize rule text.
+- [x] Reject over-limit rules before transaction.
+- [x] Reject obvious prompt-injection patterns.
+- [x] Submit rule proposal transaction that creates the on-chain `RuleProposal` account.
+- [x] Store full sanitized original rule text on-chain in `RuleProposal`.
+- [x] Store sanitized rule text hash on-chain in `RuleProposal`.
+- [x] Mirror on-chain rule text off-chain only for indexing, search, analytics, and UI performance.
+- [x] Show proposal status in UI.
+- [x] Show rule in public rule list.
 
 **Approval criteria:**
 
-- [ ] Valid free-form rule can be proposed.
-- [ ] Over-limit rule is blocked with clear message.
-- [ ] On-chain `RuleProposal` text and hash are consistent.
-- [ ] Off-chain rule text copies are never treated as the source of truth.
-- [ ] No forced templates or category builder exists.
+- [x] Valid free-form rule can be proposed.
+- [x] Over-limit rule is blocked with clear message.
+- [x] On-chain `RuleProposal` text and hash are consistent.
+- [x] Off-chain rule text copies are never treated as the source of truth.
+- [x] No forced templates or category builder exists.
 
 ---
 

@@ -22,6 +22,9 @@ const SUBMIT_GUESS_DISCRIMINATOR = new Uint8Array([
 const PROPOSE_RULE_DISCRIMINATOR = new Uint8Array([
   14, 35, 67, 184, 137, 188, 125, 233,
 ]);
+const VOTE_RULE_DISCRIMINATOR = new Uint8Array([
+  40, 87, 133, 249, 114, 164, 242, 183,
+]);
 const addressEncoder = getAddressEncoder();
 const textEncoder = new TextEncoder();
 
@@ -62,6 +65,16 @@ export interface RuleProposalReceipt extends RulePreflightResult {
   signature: string;
   submittedAt: string;
   turnId: number;
+}
+
+export interface RuleVoteReceipt {
+  ruleId: number;
+  ruleProposal: string;
+  ruleVote: string;
+  signature: string;
+  submittedAt: string;
+  turnId: number;
+  voter: string;
 }
 
 function u64Le(value: number) {
@@ -153,6 +166,23 @@ export async function deriveRuleProposalAddress({
   return derivePda(["rule", u64Le(turnId), u64Le(ruleId)]);
 }
 
+export async function deriveRuleVoteAddress({
+  player,
+  ruleId,
+  turnId,
+}: {
+  player: ReturnType<typeof address>;
+  ruleId: number;
+  turnId: number;
+}) {
+  return derivePda([
+    "vote",
+    u64Le(turnId),
+    u64Le(ruleId),
+    addressEncoder.encode(player),
+  ]);
+}
+
 export async function createSubmitGuessInstruction({
   numbers,
   player,
@@ -229,6 +259,34 @@ export async function createProposeRuleInstruction({
       { address: SYSTEM_PROGRAM_ID, role: AccountRole.READONLY },
     ],
     data: new Uint8Array(data),
+    programAddress: IDEALER_PROGRAM_ID,
+  };
+}
+
+export async function createVoteRuleInstruction({
+  player,
+  ruleId,
+  turnId,
+}: {
+  player: ReturnType<typeof address>;
+  ruleId: number;
+  turnId: number;
+}) {
+  const accounts = await deriveSubmitGuessAccounts({ player, turnId });
+  const ruleProposal = await deriveRuleProposalAddress({ ruleId, turnId });
+  const ruleVote = await deriveRuleVoteAddress({ player, ruleId, turnId });
+
+  return {
+    accounts: [
+      { address: player, role: AccountRole.WRITABLE_SIGNER },
+      { address: accounts.globalConfig, role: AccountRole.READONLY },
+      { address: accounts.turnState, role: AccountRole.READONLY },
+      { address: accounts.gameToken, role: AccountRole.WRITABLE },
+      { address: ruleProposal, role: AccountRole.WRITABLE },
+      { address: ruleVote, role: AccountRole.WRITABLE },
+      { address: SYSTEM_PROGRAM_ID, role: AccountRole.READONLY },
+    ],
+    data: VOTE_RULE_DISCRIMINATOR,
     programAddress: IDEALER_PROGRAM_ID,
   };
 }

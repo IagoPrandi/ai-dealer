@@ -55,14 +55,26 @@ export interface RuleProposalRecord extends RulePreflightResult {
   turnId: number;
 }
 
+export interface RuleVoteRecord {
+  ruleId: number;
+  ruleProposal: string;
+  ruleVote: string;
+  signature: string;
+  submittedAt: string;
+  turnId: number;
+  voter: string;
+}
+
 const guessReceipts = new Map<string, GuessReceiptRecord>();
 const ruleProposals = new Map<string, RuleProposalRecord>();
+const ruleVotes = new Map<string, RuleVoteRecord>();
 const LOCAL_WEB_ORIGIN_PATTERN =
   /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 const CORS_PATHS = new Set([
   "/guess-receipts",
   "/rule-preflight",
   "/rule-proposals",
+  "/rule-votes",
 ]);
 
 function getGuessReceiptKey(turnId: number, player: string) {
@@ -71,6 +83,10 @@ function getGuessReceiptKey(turnId: number, player: string) {
 
 function getRuleProposalKey(turnId: number, ruleId: number) {
   return `${turnId}:${ruleId}`;
+}
+
+function getRuleVoteKey(turnId: number, ruleId: number, voter: string) {
+  return `${turnId}:${ruleId}:${voter}`;
 }
 
 function isBase58Like(value: unknown) {
@@ -228,6 +244,27 @@ function isValidRuleProposal(value: unknown): value is RuleProposalRecord {
   );
 }
 
+function isValidRuleVote(value: unknown): value is RuleVoteRecord {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const vote = value as Partial<RuleVoteRecord>;
+
+  return (
+    Number.isInteger(vote.turnId) &&
+    Number(vote.turnId) > 0 &&
+    Number.isInteger(vote.ruleId) &&
+    Number(vote.ruleId) > 0 &&
+    isBase58Like(vote.voter) &&
+    isBase58Like(vote.ruleProposal) &&
+    isBase58Like(vote.ruleVote) &&
+    isBase58Like(vote.signature) &&
+    typeof vote.submittedAt === "string" &&
+    !Number.isNaN(Date.parse(vote.submittedAt))
+  );
+}
+
 async function readJsonBody(request: import("node:http").IncomingMessage) {
   const chunks: Buffer[] = [];
 
@@ -324,6 +361,23 @@ export function listRuleProposals(turnId: number) {
   return [...ruleProposals.values()]
     .filter((proposal) => proposal.turnId === turnId)
     .sort((left, right) => right.ruleId - left.ruleId);
+}
+
+export function saveRuleVote(vote: RuleVoteRecord) {
+  ruleVotes.set(getRuleVoteKey(vote.turnId, vote.ruleId, vote.voter), vote);
+  return vote;
+}
+
+export function listRuleVotes(turnId: number) {
+  const votes = [...ruleVotes.values()].filter(
+    (vote) => vote.turnId === turnId,
+  );
+  const counts = votes.reduce<Record<string, number>>((current, vote) => {
+    current[String(vote.ruleId)] = (current[String(vote.ruleId)] ?? 0) + 1;
+    return current;
+  }, {});
+
+  return { counts, votes };
 }
 
 async function checkPostgres(databaseUrl: string): Promise<"ok" | "error"> {
@@ -526,6 +580,48 @@ if (isMainModule()) {
       sendJson(request, response, 200, {
         proposals: listRuleProposals(turnId),
       });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/rule-votes") {
+      void readJsonBody(request)
+        .then((body) => {
+          if (!isValidRuleVote(body)) {
+            sendJson(request, response, 400, { error: "invalid_rule_vote" });
+            return;
+          }
+
+          const existing = ruleVotes.get(
+            getRuleVoteKey(body.turnId, body.ruleId, body.voter),
+          );
+          if (existing && existing.signature !== body.signature) {
+            sendJson(request, response, 409, {
+              error: "duplicate_rule_vote",
+              vote: existing,
+            });
+            return;
+          }
+
+          sendJson(request, response, 201, { vote: saveRuleVote(body) });
+        })
+        .catch((error: unknown) => {
+          sendJson(request, response, 400, {
+            error: "invalid_json",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/rule-votes") {
+      const turnId = Number(url.searchParams.get("turnId"));
+
+      if (!Number.isInteger(turnId) || turnId <= 0) {
+        sendJson(request, response, 400, { error: "invalid_query" });
+        return;
+      }
+
+      sendJson(request, response, 200, listRuleVotes(turnId));
       return;
     }
 

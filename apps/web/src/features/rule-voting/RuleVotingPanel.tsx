@@ -2,89 +2,193 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { address } from "@solana/kit";
+import {
+  useSolanaClient,
+  useWaitForSignature,
+  useWalletConnection,
+} from "@solana/react-hooks";
+import {
+  createVoteRuleInstruction,
+  deriveRuleProposalAddress,
+  deriveRuleVoteAddress,
+  deriveSubmitGuessAccounts,
+  IDEALER_ACTIVE_TURN_ID,
+  type RuleVoteReceipt,
+} from "../../solana/idealerProgram";
 
 type VotingMode = "rules" | "empty";
+type VoteStatus =
+  | "idle"
+  | "awaiting_approval"
+  | "pending"
+  | "confirmed"
+  | "duplicate"
+  | "closed"
+  | "failed";
 
 interface ProposedRule {
-  id: string;
-  title: string;
-  text: string;
-  explanation: string;
-  creator: string;
-  initialVotes: number;
   clarity: "High" | "Medium";
+  creator: string;
   difficulty: "Medium" | "Hard";
+  explanation: string;
+  initialVotes: number;
+  ruleId: number;
+  ruleProposal?: string;
+  text: string;
+  title: string;
   tokenCount: number;
 }
 
 interface VoteActivity {
-  id: string;
   detail: string;
+  id: string;
   time: string;
 }
 
+interface VoteFeedback {
+  code?: string;
+  message: string;
+  receipt?: RuleVoteReceipt;
+  signature?: string;
+  status: VoteStatus;
+}
+
+interface ApiRuleProposal {
+  proposer: string;
+  ruleId: number;
+  ruleProposal?: string;
+  sanitizedText: string;
+  title?: string;
+  tokenCount: number;
+}
+
 const VOTING_CLOSE_SECONDS = 37 * 60 + 12;
-
-const PROPOSED_RULES: readonly ProposedRule[] = [
-  {
-    id: "closest-even-sum",
-    title: "Closest even sum wins",
-    text: "The guess with the closest even total to the drawn total wins.",
-    explanation: "Compares the even-number totals in each eligible guess.",
-    creator: "4sF...9k2",
-    initialVotes: 42,
-    clarity: "High",
-    difficulty: "Hard",
-    tokenCount: 12
-  },
-  {
-    id: "balanced-spread",
-    title: "Balanced spread wins",
-    text: "The guess with the smallest distance between its highest and lowest numbers wins.",
-    explanation: "Rewards the tightest range between the lowest and highest number.",
-    creator: "8xP...K2m",
-    initialVotes: 42,
-    clarity: "High",
-    difficulty: "Medium",
-    tokenCount: 14
-  },
-  {
-    id: "highest-odd-number",
-    title: "Highest odd number wins",
-    text: "The guess containing the highest odd number drawn wins.",
-    explanation: "Looks for the highest odd drawn number in each eligible guess.",
-    creator: "2vR...Q7a",
-    initialVotes: 38,
-    clarity: "Medium",
-    difficulty: "Medium",
-    tokenCount: 10
-  }
-] as const;
-
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_IDEALER_API_URL ?? "http://localhost:3002";
+const DEVNET_BOOTSTRAP_RULE: ProposedRule = {
+  clarity: "High",
+  creator: "4bY...xCH",
+  difficulty: "Medium",
+  explanation:
+    "This rule is already committed on devnet and can receive on-chain votes.",
+  initialVotes: 1,
+  ruleId: 1,
+  ruleProposal: "B1KHQhbEzaXBTTMXSNVCWM6GhSAjFTEwdrY1N7DvBnZU",
+  text: "Win if the submitted guess contains all six drawn numbers.",
+  title: "All six drawn numbers",
+  tokenCount: 11,
+};
 const INITIAL_ACTIVITY: readonly VoteActivity[] = [
-  { id: "activity-1", detail: "Balanced spread wins reached 40 votes.", time: "3m ago" },
-  { id: "activity-2", detail: "Closest even sum wins took the lead.", time: "7m ago" }
+  {
+    detail: "All six drawn numbers has one indexed devnet vote.",
+    id: "activity-1",
+    time: "Indexed",
+  },
 ] as const;
 
 function formatCountdown(totalSeconds: number) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
 
-  return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+  return `${minutes.toString().padStart(2, "0")}:${seconds
+    .toString()
+    .padStart(2, "0")}`;
 }
 
-function createInitialVoteCounts() {
-  return Object.fromEntries(PROPOSED_RULES.map((rule) => [rule.id, rule.initialVotes]));
+function truncateAddress(value: string) {
+  return `${value.slice(0, 5)}...${value.slice(-5)}`;
+}
+
+function normalizeVoteError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalizedMessage = message.toLowerCase();
+
+  if (
+    normalizedMessage.includes("reject") ||
+    normalizedMessage.includes("declin") ||
+    normalizedMessage.includes("cancel")
+  ) {
+    return {
+      code: "TRANSACTION_REJECTED",
+      message: "The wallet request was rejected. Your vote was not submitted.",
+      status: "failed" as const,
+    };
+  }
+
+  if (
+    normalizedMessage.includes("already in use") ||
+    normalizedMessage.includes("accountalreadyinitialized") ||
+    normalizedMessage.includes("custom program error: 0x0")
+  ) {
+    return {
+      code: "DUPLICATE_RULE_VOTE",
+      message: "This wallet already voted for this rule in the active turn.",
+      status: "duplicate" as const,
+    };
+  }
+
+  if (
+    normalizedMessage.includes("action window") ||
+    normalizedMessage.includes("turn is not open") ||
+    normalizedMessage.includes("no active turn")
+  ) {
+    return {
+      code: "VOTING_CLOSED",
+      message: "Voting is closed for this turn.",
+      status: "closed" as const,
+    };
+  }
+
+  return {
+    code: "RULE_VOTE_FAILED",
+    message,
+    status: "failed" as const,
+  };
+}
+
+async function persistRuleVote(receipt: RuleVoteReceipt) {
+  const response = await fetch(`${API_BASE_URL}/rule-votes`, {
+    body: JSON.stringify(receipt),
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+
+  if (!response.ok && response.status !== 409) {
+    throw new Error(`Rule vote API returned HTTP ${response.status}.`);
+  }
 }
 
 export function RuleVotingPanel() {
+  const client = useSolanaClient();
+  const { connected, wallet } = useWalletConnection();
   const [mode, setMode] = useState<VotingMode>("rules");
-  const [remainingSeconds, setRemainingSeconds] = useState(VOTING_CLOSE_SECONDS);
-  const [voteCounts, setVoteCounts] = useState<Record<string, number>>(createInitialVoteCounts);
-  const [currentVoteId, setCurrentVoteId] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState("Choose one rule. You can change your vote in this prototype.");
-  const [activity, setActivity] = useState<readonly VoteActivity[]>(INITIAL_ACTIVITY);
+  const [remainingSeconds, setRemainingSeconds] =
+    useState(VOTING_CLOSE_SECONDS);
+  const [rules, setRules] = useState<ProposedRule[]>([DEVNET_BOOTSTRAP_RULE]);
+  const [voteCounts, setVoteCounts] = useState<Record<number, number>>({
+    [DEVNET_BOOTSTRAP_RULE.ruleId]: DEVNET_BOOTSTRAP_RULE.initialVotes,
+  });
+  const [currentVoteRuleId, setCurrentVoteRuleId] = useState<number | null>(
+    null,
+  );
+  const [feedback, setFeedback] = useState<VoteFeedback>({
+    message:
+      "Choose one committed devnet rule. Each wallet can create one RuleVote account per rule.",
+    status: "idle",
+  });
+  const [activity, setActivity] =
+    useState<readonly VoteActivity[]>(INITIAL_ACTIVITY);
   const activitySequence = useRef(0);
+  const walletAddress = wallet?.account.address.toString();
+  const isVotingClosed = remainingSeconds === 0;
+  const isSubmitting =
+    feedback.status === "awaiting_approval" || feedback.status === "pending";
+  const signatureStatus = useWaitForSignature(feedback.signature, {
+    commitment: "confirmed",
+    disabled: !feedback.signature,
+    subscribe: true,
+  });
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -94,42 +198,271 @@ export function RuleVotingPanel() {
     return () => window.clearInterval(interval);
   }, []);
 
-  const leadingRule = useMemo(
-    () =>
-      PROPOSED_RULES.reduce((leader, rule) =>
-        (voteCounts[rule.id] ?? 0) > (voteCounts[leader.id] ?? 0) ? rule : leader
-      ),
-    [voteCounts]
-  );
+  useEffect(() => {
+    const controller = new AbortController();
 
-  function castVote(rule: ProposedRule) {
-    if (currentVoteId === rule.id) {
-      setFeedback(`Your vote remains on ${rule.title}.`);
+    void Promise.all([
+      fetch(`${API_BASE_URL}/rule-proposals?turnId=${IDEALER_ACTIVE_TURN_ID}`, {
+        signal: controller.signal,
+      }),
+      fetch(`${API_BASE_URL}/rule-votes?turnId=${IDEALER_ACTIVE_TURN_ID}`, {
+        signal: controller.signal,
+      }),
+    ])
+      .then(async ([proposalResponse, voteResponse]) => {
+        const proposalBody = proposalResponse.ok
+          ? ((await proposalResponse.json()) as {
+              proposals?: ApiRuleProposal[];
+            })
+          : { proposals: [] };
+        const voteBody = voteResponse.ok
+          ? ((await voteResponse.json()) as { counts?: Record<string, number> })
+          : { counts: {} };
+        const apiRules = await Promise.all(
+          (proposalBody.proposals ?? []).map(async (proposal) => ({
+            clarity: "High" as const,
+            creator: truncateAddress(proposal.proposer),
+            difficulty: "Medium" as const,
+            explanation:
+              "This proposal passed server preflight and was committed on-chain.",
+            initialVotes: voteBody.counts?.[String(proposal.ruleId)] ?? 0,
+            ruleId: proposal.ruleId,
+            ruleProposal:
+              proposal.ruleProposal ??
+              (
+                await deriveRuleProposalAddress({
+                  ruleId: proposal.ruleId,
+                  turnId: IDEALER_ACTIVE_TURN_ID,
+                })
+              ).toString(),
+            text: proposal.sanitizedText,
+            title: proposal.title ?? `Rule #${proposal.ruleId}`,
+            tokenCount: proposal.tokenCount,
+          })),
+        );
+        const nextRules = [
+          ...apiRules.filter(
+            (rule) => rule.ruleId !== DEVNET_BOOTSTRAP_RULE.ruleId,
+          ),
+          DEVNET_BOOTSTRAP_RULE,
+        ];
+        const nextCounts = Object.fromEntries(
+          nextRules.map((rule) => [
+            rule.ruleId,
+            (voteBody.counts?.[String(rule.ruleId)] ?? 0) +
+              (rule.ruleId === DEVNET_BOOTSTRAP_RULE.ruleId ? 1 : 0),
+          ]),
+        );
+
+        setRules(nextRules);
+        setVoteCounts(nextCounts);
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+        setFeedback({
+          code: "RULE_VOTE_FEED_FAILED",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Could not load indexed vote state.",
+          status: "failed",
+        });
+      });
+
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    if (!feedback.signature || !feedback.receipt) {
       return;
     }
 
-    const previousVoteId = currentVoteId;
+    const receipt = feedback.receipt;
+    const signature = feedback.signature;
+    const votedRule = rules.find((rule) => rule.ruleId === receipt.ruleId);
 
-    setVoteCounts((current) => {
-      const next = { ...current, [rule.id]: (current[rule.id] ?? 0) + 1 };
+    if (signatureStatus.isSuccess) {
+      void persistRuleVote(receipt)
+        .then(() => {
+          setCurrentVoteRuleId(receipt.ruleId);
+          setVoteCounts((current) => ({
+            ...current,
+            [receipt.ruleId]: (current[receipt.ruleId] ?? 0) + 1,
+          }));
+          setFeedback({
+            message: `Vote confirmed for ${votedRule?.title ?? "the selected rule"}.`,
+            receipt,
+            signature,
+            status: "confirmed",
+          });
+          activitySequence.current += 1;
+          setActivity((current) => [
+            {
+              detail: `You voted for ${votedRule?.title ?? "the selected rule"}.`,
+              id: `vote-${activitySequence.current}`,
+              time: "Now",
+            },
+            ...current,
+          ]);
+        })
+        .catch((error: unknown) => {
+          setFeedback({
+            code: "RULE_VOTE_API_FAILED",
+            message: error instanceof Error ? error.message : String(error),
+            receipt,
+            signature,
+            status: "failed",
+          });
+        });
+    } else if (signatureStatus.isError) {
+      const normalized = normalizeVoteError(signatureStatus.waitError);
+      setFeedback({
+        code: normalized.code,
+        message: normalized.message,
+        receipt,
+        signature,
+        status: normalized.status,
+      });
+    }
+  }, [
+    feedback.receipt,
+    feedback.signature,
+    rules,
+    signatureStatus.isError,
+    signatureStatus.isSuccess,
+    signatureStatus.waitError,
+  ]);
 
-      if (previousVoteId) {
-        next[previousVoteId] = Math.max(0, (current[previousVoteId] ?? 0) - 1);
+  const leadingRule = useMemo(
+    () =>
+      rules.reduce((leader, rule) =>
+        (voteCounts[rule.ruleId] ?? 0) > (voteCounts[leader.ruleId] ?? 0)
+          ? rule
+          : leader,
+      ),
+    [rules, voteCounts],
+  );
+
+  async function castVote(rule: ProposedRule) {
+    if (isVotingClosed) {
+      setFeedback({
+        code: "VOTING_CLOSED",
+        message: "Voting is closed for this turn.",
+        status: "closed",
+      });
+      return;
+    }
+
+    if (!connected || !wallet || !walletAddress) {
+      setFeedback({
+        code: "WALLET_NOT_CONNECTED",
+        message: "Connect a Solana devnet wallet before voting.",
+        status: "failed",
+      });
+      return;
+    }
+
+    let receipt: RuleVoteReceipt | undefined;
+
+    try {
+      const player = address(walletAddress);
+      const accounts = await deriveSubmitGuessAccounts({
+        player,
+        turnId: IDEALER_ACTIVE_TURN_ID,
+      });
+      const gameToken = await client.runtime.rpc
+        .getAccountInfo(accounts.gameToken, {
+          commitment: "confirmed",
+          encoding: "base64",
+        })
+        .send();
+
+      if (!gameToken.value) {
+        setFeedback({
+          code: "GAME_TOKEN_REQUIRED",
+          message: "Submit a guess for this turn before voting.",
+          status: "failed",
+        });
+        return;
       }
 
-      return next;
-    });
-    setCurrentVoteId(rule.id);
-    setFeedback(previousVoteId ? `Vote changed to ${rule.title}.` : `Vote cast for ${rule.title}.`);
-    activitySequence.current += 1;
-    setActivity((current) => [
-      {
-        id: `vote-${activitySequence.current}`,
-        detail: `You voted for ${rule.title}.`,
-        time: "Now"
-      },
-      ...current
-    ]);
+      const ruleProposal = await deriveRuleProposalAddress({
+        ruleId: rule.ruleId,
+        turnId: IDEALER_ACTIVE_TURN_ID,
+      });
+      const ruleVote = await deriveRuleVoteAddress({
+        player,
+        ruleId: rule.ruleId,
+        turnId: IDEALER_ACTIVE_TURN_ID,
+      });
+      const existingVote = await client.runtime.rpc
+        .getAccountInfo(ruleVote, {
+          commitment: "confirmed",
+          encoding: "base64",
+        })
+        .send();
+
+      if (existingVote.value) {
+        setCurrentVoteRuleId(rule.ruleId);
+        setFeedback({
+          code: "DUPLICATE_RULE_VOTE",
+          message:
+            "This wallet already voted for this rule in the active turn.",
+          status: "duplicate",
+        });
+        return;
+      }
+
+      receipt = {
+        ruleId: rule.ruleId,
+        ruleProposal: ruleProposal.toString(),
+        ruleVote: ruleVote.toString(),
+        signature: "",
+        submittedAt: new Date().toISOString(),
+        turnId: IDEALER_ACTIVE_TURN_ID,
+        voter: walletAddress,
+      };
+      setFeedback({
+        message: "Approve the rule vote transaction in your wallet.",
+        receipt,
+        status: "awaiting_approval",
+      });
+
+      const instruction = await createVoteRuleInstruction({
+        player,
+        ruleId: rule.ruleId,
+        turnId: IDEALER_ACTIVE_TURN_ID,
+      });
+      const signature = (
+        await client.transaction.prepareAndSend(
+          {
+            authority: wallet,
+            commitment: "confirmed",
+            feePayer: player,
+            instructions: [instruction],
+            version: 0,
+          },
+          { commitment: "confirmed", maxRetries: 3, skipPreflight: false },
+        )
+      ).toString();
+      const pendingReceipt = { ...receipt, signature };
+      setFeedback({
+        message: "Wallet approval returned. Waiting for devnet confirmation.",
+        receipt: pendingReceipt,
+        signature,
+        status: "pending",
+      });
+    } catch (error) {
+      const normalized = normalizeVoteError(error);
+      setFeedback({
+        code: normalized.code,
+        message: normalized.message,
+        status: normalized.status,
+        ...(receipt ? { receipt } : {}),
+      });
+    }
   }
 
   return (
@@ -140,17 +473,21 @@ export function RuleVotingPanel() {
         </Link>
         <div className="voting-header-copy">
           <div>
-            <p className="eyebrow">Turn TURN-0008</p>
+            <p className="eyebrow">
+              Turn TURN-{IDEALER_ACTIVE_TURN_ID.toString().padStart(4, "0")}
+            </p>
             <strong>Vote for a rule</strong>
           </div>
           <div className="voting-countdown">
             <span>Voting closes</span>
-            <strong className="numeric">{formatCountdown(remainingSeconds)}</strong>
+            <strong className="numeric">
+              {formatCountdown(remainingSeconds)}
+            </strong>
           </div>
         </div>
       </header>
 
-      <div className="voting-mode-control" aria-label="Voting prototype state">
+      <div className="voting-mode-control" aria-label="Voting state">
         <button
           aria-pressed={mode === "rules"}
           className="mode-button"
@@ -170,12 +507,21 @@ export function RuleVotingPanel() {
       </div>
 
       {mode === "empty" ? (
-        <section className="voting-empty-state" aria-labelledby="empty-rules-title">
+        <section
+          className="voting-empty-state"
+          aria-labelledby="empty-rules-title"
+        >
           <p className="eyebrow">Rule pool</p>
           <h1 id="empty-rules-title">No eligible rules yet.</h1>
-          <p>New proposals will appear here after they pass prototype preflight.</p>
-          <button className="primary-action inline-action" onClick={() => setMode("rules")} type="button">
-            View prototype rules
+          <p>
+            New proposals will appear here after they pass devnet preflight.
+          </p>
+          <button
+            className="primary-action inline-action"
+            onClick={() => setMode("rules")}
+            type="button"
+          >
+            View eligible rules
           </button>
         </section>
       ) : (
@@ -185,44 +531,77 @@ export function RuleVotingPanel() {
               <p className="eyebrow">Leading rule</p>
               <h1 id="voting-title">{leadingRule.title}</h1>
               <p>
-                {voteCounts[leadingRule.id]} votes. Voting influences the finalist set; VRF still
-                selects the Rule of the Hour.
+                {voteCounts[leadingRule.ruleId] ?? 0} indexed votes. Voting
+                influences the finalist set; VRF still selects the Rule of the
+                Hour.
               </p>
             </div>
             <div className="your-vote-summary">
               <span>Your vote</span>
               <strong>
-                {currentVoteId
-                  ? PROPOSED_RULES.find((rule) => rule.id === currentVoteId)?.title
+                {currentVoteRuleId
+                  ? rules.find((rule) => rule.ruleId === currentVoteRuleId)
+                      ?.title
                   : "Not cast"}
               </strong>
             </div>
           </section>
 
-          <p className="vote-feedback" aria-live="polite">
-            {feedback}
-          </p>
+          <article
+            aria-live="polite"
+            className={`guess-status-card ${feedback.status}`}
+            role={feedback.status === "failed" ? "alert" : undefined}
+          >
+            <strong>
+              {feedback.status === "awaiting_approval"
+                ? "Awaiting wallet approval"
+                : null}
+              {feedback.status === "pending" ? "Transaction pending" : null}
+              {feedback.status === "confirmed" ? "Vote confirmed" : null}
+              {feedback.status === "duplicate" ? "Duplicate blocked" : null}
+              {feedback.status === "closed" ? "Voting closed" : null}
+              {feedback.status === "failed" ? "Vote failed" : null}
+              {feedback.status === "idle" ? "Voting status" : null}
+            </strong>
+            <p>{feedback.message}</p>
+            {feedback.code ? <code>{feedback.code}</code> : null}
+            {feedback.signature ? (
+              <a
+                href={`https://explorer.solana.com/tx/${feedback.signature}?cluster=devnet`}
+                rel="noreferrer"
+                target="_blank"
+              >
+                View devnet transaction
+              </a>
+            ) : null}
+          </article>
 
           <section className="rule-voting-list" aria-label="Proposed rules">
-            {PROPOSED_RULES.map((rule) => {
-              const isLeading = leadingRule.id === rule.id;
-              const isCurrentVote = currentVoteId === rule.id;
+            {rules.map((rule) => {
+              const isLeading = leadingRule.ruleId === rule.ruleId;
+              const isCurrentVote = currentVoteRuleId === rule.ruleId;
 
               return (
                 <article
-                  className={isLeading ? "voting-rule-card leading" : "voting-rule-card"}
-                  key={rule.id}
-                  aria-labelledby={`${rule.id}-title`}
+                  aria-labelledby={`rule-${rule.ruleId}-title`}
+                  className={
+                    isLeading ? "voting-rule-card leading" : "voting-rule-card"
+                  }
+                  key={rule.ruleId}
                 >
                   <div className="voting-card-heading">
                     <div>
-                      <p className="eyebrow">{isLeading ? "Leading rule" : "Eligible rule"}</p>
-                      <h2 id={`${rule.id}-title`}>{rule.title}</h2>
+                      <p className="eyebrow">
+                        {isLeading ? "Leading rule" : "Eligible rule"}
+                      </p>
+                      <h2 id={`rule-${rule.ruleId}-title`}>{rule.title}</h2>
                     </div>
-                    <strong className="vote-total">{voteCounts[rule.id]} votes</strong>
+                    <strong className="vote-total">
+                      {voteCounts[rule.ruleId] ?? 0} votes
+                    </strong>
                   </div>
 
-                  <p className="rule-original-text">“{rule.text}”</p>
+                  <p className="rule-original-text">"{rule.text}"</p>
                   <p className="rule-explanation">{rule.explanation}</p>
 
                   <dl className="rule-metadata">
@@ -244,27 +623,39 @@ export function RuleVotingPanel() {
                     </div>
                   </dl>
 
-                  <button
-                    aria-pressed={isCurrentVote}
-                    className={isCurrentVote ? "vote-action selected" : "vote-action"}
-                    onClick={() => castVote(rule)}
-                    type="button"
-                  >
-                    {isCurrentVote
-                      ? "Your vote"
-                      : currentVoteId
-                        ? `Change vote to ${rule.title}`
-                        : `Vote for ${rule.title}`}
-                  </button>
+                  {connected ? (
+                    <button
+                      aria-pressed={isCurrentVote}
+                      className={
+                        isCurrentVote ? "vote-action selected" : "vote-action"
+                      }
+                      disabled={isSubmitting || isVotingClosed}
+                      onClick={() => castVote(rule)}
+                      type="button"
+                    >
+                      {isCurrentVote
+                        ? "Your vote"
+                        : isSubmitting
+                          ? "Submitting..."
+                          : `Vote for ${rule.title}`}
+                    </button>
+                  ) : (
+                    <Link className="vote-action" href="/play/wallet">
+                      Connect wallet to vote
+                    </Link>
+                  )}
                 </article>
               );
             })}
           </section>
 
-          <section className="vote-activity-panel" aria-labelledby="vote-activity-title">
+          <section
+            className="vote-activity-panel"
+            aria-labelledby="vote-activity-title"
+          >
             <div className="section-heading">
               <p className="eyebrow">Activity</p>
-              <span>Live prototype feed</span>
+              <span>Indexed devnet feed</span>
             </div>
             <h2 id="vote-activity-title">Recent voting events</h2>
             <ul className="activity-list">
