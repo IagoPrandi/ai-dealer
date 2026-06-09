@@ -1,7 +1,7 @@
 use anchor_lang::prelude::Pubkey;
 use idealer::domain::{
-    next_cycle_index, split_fee, validate_action_window, validate_config, validate_guess,
-    validate_rule, ConfigValidation,
+    derive_draw_numbers, next_cycle_index, split_fee, validate_action_window, validate_config,
+    validate_guess, validate_rule, ConfigValidation,
 };
 use solana_sha256_hasher::hash;
 
@@ -104,6 +104,46 @@ fn invalid_rule_proposals_are_rejected() {
     assert!(validate_rule(text, &[9; 32], &[1; 32], 8, 80).is_err());
     assert!(validate_rule(text, &text_hash, &[0; 32], 8, 80).is_err());
     assert!(validate_rule(text, &text_hash, &[1; 32], 81, 80).is_err());
+}
+
+#[test]
+fn draw_derivation_produces_valid_unique_numbers() {
+    let randomness = [7u8; 32];
+    let numbers = derive_draw_numbers(&randomness, 1);
+
+    // 6 numbers, all within range, all unique, deterministically reproducible.
+    assert_eq!(numbers.len(), 6);
+    assert!(numbers.iter().all(|number| (1..=100).contains(number)));
+    validate_guess(&numbers).unwrap();
+    assert_eq!(numbers, derive_draw_numbers(&randomness, 1));
+}
+
+#[test]
+fn draw_derivation_matches_cross_language_vectors() {
+    // These vectors are asserted identically in the worker's TypeScript mirror
+    // (`apps/worker/src/draw.test.ts`) so the off-chain worker always publishes
+    // exactly what the on-chain program derives.
+    assert_eq!(
+        derive_draw_numbers(&[7u8; 32], 1),
+        [20, 18, 99, 69, 90, 37]
+    );
+    assert_eq!(derive_draw_numbers(&[3u8; 32], 5), [65, 11, 13, 10, 69, 17]);
+}
+
+#[test]
+fn draw_derivation_varies_with_seed_and_turn() {
+    let base = derive_draw_numbers(&[1u8; 32], 1);
+    let different_seed = derive_draw_numbers(&[2u8; 32], 1);
+    let different_turn = derive_draw_numbers(&[1u8; 32], 2);
+
+    // Distinct verifiable inputs must not collapse to the same published draw.
+    assert_ne!(base, different_seed);
+    assert_ne!(base, different_turn);
+
+    // Every derived draw remains a valid 6-unique-number result.
+    for numbers in [base, different_seed, different_turn] {
+        validate_guess(&numbers).unwrap();
+    }
 }
 
 #[test]

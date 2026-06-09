@@ -2,7 +2,11 @@ import { createHash, randomInt } from "node:crypto";
 import { createServer } from "node:http";
 import { resolve } from "node:path";
 import { fileURLToPath, URL } from "node:url";
-import { RULE_MAX_TOKENS, TURN_DURATION_CYCLE_HOURS } from "@idealer/constants";
+import {
+  MVP_FEES_SOL,
+  RULE_MAX_TOKENS,
+  TURN_DURATION_CYCLE_HOURS,
+} from "@idealer/constants";
 import pg from "pg";
 import { createClient } from "redis";
 
@@ -65,12 +69,32 @@ export interface RuleVoteRecord {
   voter: string;
 }
 
+export type DrawStatus = "failed" | "fulfilled" | "requested";
+
+export interface DrawRecord {
+  drawResult: number[] | null;
+  drawnAt: string | null;
+  failureCode: number | null;
+  randomnessAccount: string;
+  randomnessSource: string | null;
+  randomnessValue: string | null;
+  requestedAt: string;
+  settleSignature: string | null;
+  status: DrawStatus;
+  turnId: number;
+}
+
+const IDEALER_ACTIVE_TURN_ID = Number(
+  process.env.IDEALER_ACTIVE_TURN_ID ?? "1",
+);
 const guessReceipts = new Map<string, GuessReceiptRecord>();
 const ruleProposals = new Map<string, RuleProposalRecord>();
 const ruleVotes = new Map<string, RuleVoteRecord>();
+const draws = new Map<number, DrawRecord>();
 const LOCAL_WEB_ORIGIN_PATTERN =
   /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 const CORS_PATHS = new Set([
+  "/draws",
   "/guess-receipts",
   "/rule-preflight",
   "/rule-proposals",
@@ -380,6 +404,178 @@ export function listRuleVotes(turnId: number) {
   return { counts, votes };
 }
 
+function isUniqueDrawResult(value: unknown): value is number[] {
+  return (
+    Array.isArray(value) &&
+    value.length === 6 &&
+    new Set(value).size === 6 &&
+    value.every(
+      (number) => Number.isInteger(number) && number >= 1 && number <= 100,
+    )
+  );
+}
+
+function isValidDrawRecord(value: unknown): value is DrawRecord {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const draw = value as Partial<DrawRecord>;
+
+  if (
+    !Number.isInteger(draw.turnId) ||
+    Number(draw.turnId) <= 0 ||
+    !isBase58Like(draw.randomnessAccount) ||
+    typeof draw.requestedAt !== "string" ||
+    Number.isNaN(Date.parse(draw.requestedAt))
+  ) {
+    return false;
+  }
+
+  if (draw.status === "requested") {
+    return (
+      draw.drawResult == null &&
+      draw.randomnessSource == null &&
+      draw.randomnessValue == null
+    );
+  }
+
+  if (draw.status === "failed") {
+    return Number.isInteger(draw.failureCode) && Number(draw.failureCode) > 0;
+  }
+
+  if (draw.status === "fulfilled") {
+    return (
+      isUniqueDrawResult(draw.drawResult) &&
+      isBase58Like(draw.randomnessSource) &&
+      typeof draw.randomnessValue === "string" &&
+      /^[0-9a-f]{64}$/i.test(draw.randomnessValue) &&
+      typeof draw.drawnAt === "string" &&
+      !Number.isNaN(Date.parse(draw.drawnAt)) &&
+      (draw.settleSignature == null || isBase58Like(draw.settleSignature))
+    );
+  }
+
+  return false;
+}
+
+export function saveDraw(draw: DrawRecord) {
+  const normalized: DrawRecord = {
+    drawResult: draw.drawResult ?? null,
+    drawnAt: draw.drawnAt ?? null,
+    failureCode: draw.failureCode ?? null,
+    randomnessAccount: draw.randomnessAccount,
+    randomnessSource: draw.randomnessSource ?? null,
+    randomnessValue: draw.randomnessValue ?? null,
+    requestedAt: draw.requestedAt,
+    settleSignature: draw.settleSignature ?? null,
+    status: draw.status,
+    turnId: draw.turnId,
+  };
+  draws.set(draw.turnId, normalized);
+  return normalized;
+}
+
+export function getDraw(turnId: number) {
+  return draws.get(turnId) ?? null;
+}
+
+export interface RoundRuleSummary {
+  proposer: string;
+  ruleId: number;
+  ruleProposal: string;
+  sanitizedText: string;
+  title: string;
+  tokenCount: number;
+  votes: number;
+}
+
+export interface RoundSummary {
+  cycle: {
+    durationHours: number;
+    nextDurationHours: number;
+    pattern: readonly number[];
+    stepIndex: number;
+  };
+  draw: DrawRecord | null;
+  pool: {
+    guessSol: number;
+    guesses: number;
+    indicativeSol: number;
+    proposalSol: number;
+    proposals: number;
+  };
+  rules: RoundRuleSummary[];
+  status: "completed" | "current" | "upcoming";
+  totalVotes: number;
+  turnId: number;
+}
+
+function cycleDurationHours(stepIndex: number): number {
+  const value = TURN_DURATION_CYCLE_HOURS[stepIndex];
+  if (value === undefined) {
+    throw new Error(`Invalid turn-cycle step index ${stepIndex}.`);
+  }
+  return value;
+}
+
+function roundSol(value: number) {
+  return Number(value.toFixed(4));
+}
+
+export function getRoundSummary(
+  turnId: number,
+  activeTurnId: number = IDEALER_ACTIVE_TURN_ID,
+): RoundSummary {
+  const proposals = listRuleProposals(turnId);
+  const { counts, votes } = listRuleVotes(turnId);
+  const guesses = [...guessReceipts.values()].filter(
+    (receipt) => receipt.turnId === turnId,
+  ).length;
+
+  const cycleLength = TURN_DURATION_CYCLE_HOURS.length;
+  const stepIndex = (turnId - 1) % cycleLength;
+  const nextStepIndex = turnId % cycleLength;
+  const guessSol = guesses * MVP_FEES_SOL.guessSubmission;
+  const proposalSol = proposals.length * MVP_FEES_SOL.ruleProposal;
+
+  const status =
+    turnId < activeTurnId
+      ? "completed"
+      : turnId > activeTurnId
+        ? "upcoming"
+        : "current";
+
+  return {
+    cycle: {
+      durationHours: cycleDurationHours(stepIndex),
+      nextDurationHours: cycleDurationHours(nextStepIndex),
+      pattern: TURN_DURATION_CYCLE_HOURS,
+      stepIndex,
+    },
+    draw: getDraw(turnId),
+    pool: {
+      guessSol: roundSol(guessSol),
+      guesses,
+      indicativeSol: roundSol(guessSol + proposalSol),
+      proposalSol: roundSol(proposalSol),
+      proposals: proposals.length,
+    },
+    rules: proposals.map((proposal) => ({
+      proposer: proposal.proposer,
+      ruleId: proposal.ruleId,
+      ruleProposal: proposal.ruleProposal,
+      sanitizedText: proposal.sanitizedText,
+      title: proposal.title,
+      tokenCount: proposal.tokenCount,
+      votes: counts[String(proposal.ruleId)] ?? 0,
+    })),
+    status,
+    totalVotes: votes.length,
+    turnId,
+  };
+}
+
 async function checkPostgres(databaseUrl: string): Promise<"ok" | "error"> {
   const pool = new Pool({ connectionString: databaseUrl });
   try {
@@ -622,6 +818,63 @@ if (isMainModule()) {
       }
 
       sendJson(request, response, 200, listRuleVotes(turnId));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/draws") {
+      void readJsonBody(request)
+        .then((body) => {
+          if (!isValidDrawRecord(body)) {
+            sendJson(request, response, 400, { error: "invalid_draw_record" });
+            return;
+          }
+
+          sendJson(request, response, 201, { draw: saveDraw(body) });
+        })
+        .catch((error: unknown) => {
+          sendJson(request, response, 400, {
+            error: "invalid_json",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname.startsWith("/draws/")) {
+      const turnId = Number(url.pathname.slice("/draws/".length));
+
+      if (!Number.isInteger(turnId) || turnId <= 0) {
+        sendJson(request, response, 400, { error: "invalid_turn_id" });
+        return;
+      }
+
+      const draw = getDraw(turnId);
+      sendJson(
+        request,
+        response,
+        draw ? 200 : 404,
+        draw ? { draw } : { error: "not_found" },
+      );
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname.startsWith("/rounds/")) {
+      const turnId = Number(url.pathname.slice("/rounds/".length));
+
+      if (!Number.isInteger(turnId) || turnId <= 0) {
+        sendJson(request, response, 400, { error: "invalid_turn_id" });
+        return;
+      }
+
+      sendJson(request, response, 200, { round: getRoundSummary(turnId) });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/rounds") {
+      sendJson(request, response, 200, {
+        activeTurnId: IDEALER_ACTIVE_TURN_ID,
+        round: getRoundSummary(IDEALER_ACTIVE_TURN_ID),
+      });
       return;
     }
 

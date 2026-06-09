@@ -8,7 +8,7 @@
     "dev": "tsx src/index.ts",
     "lint": "eslint src --max-warnings=0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node -e \"console.log('@idealer/worker ok')\""
+    "test": "node --test --import tsx \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@idealer/game-engine": "workspace:*",

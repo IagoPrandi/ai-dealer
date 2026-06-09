@@ -137,3 +137,53 @@ pub fn next_cycle_index(current: u8) -> Result<u8> {
         .ok_or(IdealerError::ArithmeticOverflow)?;
     Ok(next % TURN_DURATION_CYCLE_LEN as u8)
 }
+
+/// Deterministically derive the 6 unique draw numbers (1..=100) from a
+/// verifiable randomness value and the turn id.
+///
+/// The randomness is sourced off-chain from a verifiable randomness provider
+/// (Switchboard On-Demand) and consumed on-chain through `settle_draw`. The
+/// derivation is fully deterministic so any auditor holding the stored
+/// `draw_randomness` and `turn_id` can reproduce the published `draw_result`.
+///
+/// Numbers are sampled with rejection sampling (bytes `>= 200` are skipped) so
+/// every value in `1..=100` is equally likely, avoiding modulo bias.
+pub fn derive_draw_numbers(randomness: &[u8; 32], turn_id: u64) -> [u8; 6] {
+    const DRAW_COUNT: usize = 6;
+    const UPPER_BOUND: u8 = 100;
+    // Largest multiple of UPPER_BOUND that fits in a u8 byte domain (0..=255).
+    const REJECTION_LIMIT: u8 = (256 / UPPER_BOUND as u16 * UPPER_BOUND as u16) as u8; // 200
+
+    let mut numbers = [0u8; DRAW_COUNT];
+    let mut seen = [false; (UPPER_BOUND as usize) + 1];
+    let mut filled = 0usize;
+    let mut counter: u64 = 0;
+
+    while filled < DRAW_COUNT {
+        let mut input = [0u8; 48];
+        input[..32].copy_from_slice(randomness);
+        input[32..40].copy_from_slice(&turn_id.to_le_bytes());
+        input[40..48].copy_from_slice(&counter.to_le_bytes());
+        let digest = hash(&input).to_bytes();
+
+        for byte in digest.iter() {
+            if *byte >= REJECTION_LIMIT {
+                continue;
+            }
+            let candidate = (*byte % UPPER_BOUND) + 1; // 1..=100
+            let index = usize::from(candidate);
+            if !seen[index] {
+                seen[index] = true;
+                numbers[filled] = candidate;
+                filled += 1;
+                if filled == DRAW_COUNT {
+                    break;
+                }
+            }
+        }
+
+        counter = counter.wrapping_add(1);
+    }
+
+    numbers
+}

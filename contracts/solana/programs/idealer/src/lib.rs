@@ -12,8 +12,8 @@ use anchor_lang::system_program::{self, Transfer};
 pub mod domain;
 
 use domain::{
-    next_cycle_index, split_fee, validate_action_window, validate_config, validate_guess,
-    validate_rule, ConfigValidation,
+    derive_draw_numbers, next_cycle_index, split_fee, validate_action_window, validate_config,
+    validate_guess, validate_rule, ConfigValidation,
 };
 
 declare_id!("6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4");
@@ -127,7 +127,13 @@ pub mod idealer {
         turn.election_vrf_request = Pubkey::default();
         turn.election_vrf_fulfillment = Pubkey::default();
         turn.elected_finalist_index = 0;
+        turn.draw_status = DrawStatus::NotRequested;
         turn.draw_vrf_request = Pubkey::default();
+        turn.draw_vrf_fulfillment = Pubkey::default();
+        turn.draw_randomness = [0; 32];
+        turn.draw_requested_at = 0;
+        turn.drawn_at = 0;
+        turn.draw_failure_code = 0;
         turn.original_pool_rollover_lamports = 0;
         turn.alternative_pool_rollover_lamports = 0;
         turn.bump = ctx.bumps.turn_state;
@@ -405,6 +411,105 @@ pub mod idealer {
         });
         Ok(())
     }
+
+    /// Request a draw for a turn once it has ended. Records the verifiable
+    /// randomness account that will fulfill the draw. Idempotent retries are
+    /// allowed only from `NotRequested` or `Failed`.
+    pub fn request_draw(ctx: Context<RequestDraw>, randomness_account: Pubkey) -> Result<()> {
+        let config = &ctx.accounts.global_config;
+        require!(!config.paused, IdealerError::ProtocolPaused);
+        require!(
+            randomness_account != Pubkey::default(),
+            IdealerError::InvalidRandomnessAccount
+        );
+
+        let clock = Clock::get()?;
+        let turn = &mut ctx.accounts.turn_state;
+        require!(
+            clock.unix_timestamp >= turn.end_timestamp,
+            IdealerError::TurnNotEnded
+        );
+        require!(
+            matches!(turn.draw_status, DrawStatus::NotRequested | DrawStatus::Failed),
+            IdealerError::DrawNotRequestable
+        );
+
+        turn.draw_status = DrawStatus::Requested;
+        turn.draw_vrf_request = randomness_account;
+        turn.draw_requested_at = clock.unix_timestamp;
+        turn.draw_failure_code = 0;
+
+        emit!(DrawRequested {
+            turn_id: turn.turn_id,
+            randomness_account,
+            requested_at: turn.draw_requested_at,
+        });
+        Ok(())
+    }
+
+    /// Settle a requested draw by consuming the revealed verifiable randomness
+    /// and deterministically deriving the 6 unique drawn numbers (1..=100).
+    pub fn settle_draw(ctx: Context<SettleDraw>, args: SettleDrawArgs) -> Result<()> {
+        let config = &ctx.accounts.global_config;
+        require!(!config.paused, IdealerError::ProtocolPaused);
+
+        let clock = Clock::get()?;
+        let turn = &mut ctx.accounts.turn_state;
+        require!(
+            turn.draw_status == DrawStatus::Requested,
+            IdealerError::DrawNotSettleable
+        );
+        require!(
+            args.randomness != [0; 32],
+            IdealerError::InvalidRandomnessValue
+        );
+        require!(
+            args.randomness_source == turn.draw_vrf_request,
+            IdealerError::RandomnessSourceMismatch
+        );
+
+        let numbers = derive_draw_numbers(&args.randomness, turn.turn_id);
+        validate_guess(&numbers)?;
+
+        turn.draw_result = numbers;
+        turn.draw_randomness = args.randomness;
+        turn.draw_vrf_fulfillment = args.randomness_source;
+        turn.drawn_at = clock.unix_timestamp;
+        turn.draw_status = DrawStatus::Fulfilled;
+
+        emit!(DrawSettled {
+            turn_id: turn.turn_id,
+            draw_result: numbers,
+            randomness_source: args.randomness_source,
+            drawn_at: turn.drawn_at,
+        });
+        Ok(())
+    }
+
+    /// Mark a requested draw as failed without corrupting turn state, so it can
+    /// be retried with a fresh randomness account through `request_draw`.
+    pub fn fail_draw(ctx: Context<FailDraw>, failure_code: u8) -> Result<()> {
+        let config = &ctx.accounts.global_config;
+        require!(!config.paused, IdealerError::ProtocolPaused);
+        require!(failure_code != 0, IdealerError::InvalidDrawFailureCode);
+
+        let clock = Clock::get()?;
+        let turn = &mut ctx.accounts.turn_state;
+        require!(
+            turn.draw_status == DrawStatus::Requested,
+            IdealerError::DrawNotSettleable
+        );
+
+        turn.draw_status = DrawStatus::Failed;
+        turn.draw_failure_code = failure_code;
+
+        emit!(DrawFailed {
+            turn_id: turn.turn_id,
+            failure_code,
+            failed_at: clock.unix_timestamp,
+        });
+        Ok(())
+    }
 }
 
 fn validate_live_turn(config: &GlobalConfig, turn: &TurnState) -> Result<()> {
@@ -499,6 +604,16 @@ pub struct ProposeRuleArgs {
     pub official_interpretation_hash: [u8; 32],
     pub preflight_result_hash: [u8; 32],
     pub token_count: u16,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct SettleDrawArgs {
+    /// The revealed verifiable randomness value (e.g. a Switchboard On-Demand
+    /// randomness reveal). Stored on-chain for public reproducibility.
+    pub randomness: [u8; 32],
+    /// The randomness account that produced the value. Must match the account
+    /// recorded by `request_draw`.
+    pub randomness_source: Pubkey,
 }
 
 #[derive(Accounts)]
@@ -731,6 +846,57 @@ pub struct CloseTurn<'info> {
     pub turn_state: Box<Account<'info, TurnState>>,
 }
 
+#[derive(Accounts)]
+pub struct RequestDraw<'info> {
+    pub authority: Signer<'info>,
+    #[account(
+        seeds = [b"global_config"],
+        bump = global_config.bump,
+        has_one = authority @ IdealerError::Unauthorized
+    )]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        mut,
+        seeds = [b"turn".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
+        bump = turn_state.bump
+    )]
+    pub turn_state: Box<Account<'info, TurnState>>,
+}
+
+#[derive(Accounts)]
+pub struct SettleDraw<'info> {
+    pub authority: Signer<'info>,
+    #[account(
+        seeds = [b"global_config"],
+        bump = global_config.bump,
+        has_one = authority @ IdealerError::Unauthorized
+    )]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        mut,
+        seeds = [b"turn".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
+        bump = turn_state.bump
+    )]
+    pub turn_state: Box<Account<'info, TurnState>>,
+}
+
+#[derive(Accounts)]
+pub struct FailDraw<'info> {
+    pub authority: Signer<'info>,
+    #[account(
+        seeds = [b"global_config"],
+        bump = global_config.bump,
+        has_one = authority @ IdealerError::Unauthorized
+    )]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        mut,
+        seeds = [b"turn".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
+        bump = turn_state.bump
+    )]
+    pub turn_state: Box<Account<'info, TurnState>>,
+}
+
 #[account]
 #[derive(InitSpace)]
 pub struct GlobalConfig {
@@ -786,7 +952,13 @@ pub struct TurnState {
     pub election_vrf_request: Pubkey,
     pub election_vrf_fulfillment: Pubkey,
     pub elected_finalist_index: u8,
+    pub draw_status: DrawStatus,
     pub draw_vrf_request: Pubkey,
+    pub draw_vrf_fulfillment: Pubkey,
+    pub draw_randomness: [u8; 32],
+    pub draw_requested_at: i64,
+    pub drawn_at: i64,
+    pub draw_failure_code: u8,
     pub original_pool_rollover_lamports: u64,
     pub alternative_pool_rollover_lamports: u64,
     pub bump: u8,
@@ -895,6 +1067,14 @@ pub enum ClaimStatus {
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, InitSpace, PartialEq, Eq)]
+pub enum DrawStatus {
+    NotRequested,
+    Requested,
+    Fulfilled,
+    Failed,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, InitSpace, PartialEq, Eq)]
 pub enum RuleState {
     Proposed,
     Eligible,
@@ -951,6 +1131,28 @@ pub struct RuleVoteCast {
 pub struct TurnClosed {
     pub turn_id: u64,
     pub prize_pool_amount_lamports: u64,
+}
+
+#[event]
+pub struct DrawRequested {
+    pub turn_id: u64,
+    pub randomness_account: Pubkey,
+    pub requested_at: i64,
+}
+
+#[event]
+pub struct DrawSettled {
+    pub turn_id: u64,
+    pub draw_result: [u8; 6],
+    pub randomness_source: Pubkey,
+    pub drawn_at: i64,
+}
+
+#[event]
+pub struct DrawFailed {
+    pub turn_id: u64,
+    pub failure_code: u8,
+    pub failed_at: i64,
 }
 
 #[error_code]
@@ -1013,4 +1215,16 @@ pub enum IdealerError {
     VoteLimitReached,
     #[msg("Arithmetic overflow or underflow.")]
     ArithmeticOverflow,
+    #[msg("The randomness account address is empty.")]
+    InvalidRandomnessAccount,
+    #[msg("The draw cannot be requested in its current state.")]
+    DrawNotRequestable,
+    #[msg("The draw cannot be settled or failed in its current state.")]
+    DrawNotSettleable,
+    #[msg("The revealed randomness value is empty.")]
+    InvalidRandomnessValue,
+    #[msg("The randomness source does not match the requested account.")]
+    RandomnessSourceMismatch,
+    #[msg("The draw failure code must be non-zero.")]
+    InvalidDrawFailureCode,
 }

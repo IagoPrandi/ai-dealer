@@ -3,8 +3,8 @@ use anchor_lang::{
     AccountDeserialize, InstructionData, ToAccountMetas,
 };
 use idealer::{
-    accounts, instruction, InitializeGlobalConfigArgs, PlayerGuess, ProposeRuleArgs, RuleProposal,
-    RuleVote, TurnState, TurnStatus,
+    accounts, instruction, DrawStatus, InitializeGlobalConfigArgs, PlayerGuess, ProposeRuleArgs,
+    RuleProposal, RuleVote, SettleDrawArgs, TurnState, TurnStatus,
 };
 use solana_account_info::AccountInfo;
 use solana_program_error::ProgramResult;
@@ -308,6 +308,154 @@ async fn core_instructions_execute_and_persist_state() {
     .unwrap();
     let turn: TurnState = read_anchor_account(&mut context, turn_address).await;
     assert_eq!(turn.status, TurnStatus::Closed);
+}
+
+async fn advance_clock_to_turn_end(context: &mut ProgramTestContext, turn_id: u64) {
+    let turn_address = pda(&[b"turn", &turn_id.to_le_bytes()]);
+    let turn: TurnState = read_anchor_account(context, turn_address).await;
+    let mut clock: Clock = context.banks_client.get_sysvar().await.unwrap();
+    clock.unix_timestamp = turn.end_timestamp;
+    context.set_sysvar(&clock);
+}
+
+fn request_draw_instruction(turn_id: u64, authority: Pubkey, randomness_account: Pubkey) -> Instruction {
+    Instruction {
+        program_id: idealer::ID,
+        accounts: accounts::RequestDraw {
+            authority,
+            global_config: pda(&[b"global_config"]),
+            turn_state: pda(&[b"turn", &turn_id.to_le_bytes()]),
+        }
+        .to_account_metas(None),
+        data: instruction::RequestDraw { randomness_account }.data(),
+    }
+}
+
+fn settle_draw_instruction(
+    turn_id: u64,
+    authority: Pubkey,
+    randomness: [u8; 32],
+    randomness_source: Pubkey,
+) -> Instruction {
+    Instruction {
+        program_id: idealer::ID,
+        accounts: accounts::SettleDraw {
+            authority,
+            global_config: pda(&[b"global_config"]),
+            turn_state: pda(&[b"turn", &turn_id.to_le_bytes()]),
+        }
+        .to_account_metas(None),
+        data: instruction::SettleDraw {
+            args: SettleDrawArgs {
+                randomness,
+                randomness_source,
+            },
+        }
+        .data(),
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires an SBF build and SBF_OUT_DIR; run the explicit SBF integration suite"]
+async fn draw_request_settle_and_failure_flow_persist_state() {
+    let mut context = ProgramTest::new(
+        "idealer",
+        idealer::ID,
+        processor!(process_idealer_instruction),
+    )
+    .start_with_context()
+    .await;
+    let turn_id = 1_u64;
+    initialize_and_open_turn(&mut context, turn_id).await;
+    let authority = context.payer.pubkey();
+    let turn_address = pda(&[b"turn", &turn_id.to_le_bytes()]);
+    let randomness_account = Pubkey::new_unique();
+
+    advance_clock_to_turn_end(&mut context, turn_id).await;
+
+    // Request the draw; it stays in `Requested` (delayed VRF) until settled.
+    process(
+        &mut context,
+        request_draw_instruction(turn_id, authority, randomness_account),
+        &[],
+    )
+    .await
+    .unwrap();
+    let turn: TurnState = read_anchor_account(&mut context, turn_address).await;
+    assert_eq!(turn.draw_status, DrawStatus::Requested);
+    assert_eq!(turn.draw_vrf_request, randomness_account);
+    assert_eq!(turn.draw_result, [0; 6]);
+
+    // Failure path: a requested draw can fail without corrupting turn state,
+    // then be retried with a fresh randomness account.
+    process(
+        &mut context,
+        Instruction {
+            program_id: idealer::ID,
+            accounts: accounts::FailDraw {
+                authority,
+                global_config: pda(&[b"global_config"]),
+                turn_state: turn_address,
+            }
+            .to_account_metas(None),
+            data: instruction::FailDraw { failure_code: 1 }.data(),
+        },
+        &[],
+    )
+    .await
+    .unwrap();
+    let turn: TurnState = read_anchor_account(&mut context, turn_address).await;
+    assert_eq!(turn.draw_status, DrawStatus::Failed);
+    assert_eq!(turn.draw_failure_code, 1);
+
+    // Retry the draw with a new randomness account.
+    let retry_account = Pubkey::new_unique();
+    process(
+        &mut context,
+        request_draw_instruction(turn_id, authority, retry_account),
+        &[],
+    )
+    .await
+    .unwrap();
+    let turn: TurnState = read_anchor_account(&mut context, turn_address).await;
+    assert_eq!(turn.draw_status, DrawStatus::Requested);
+    assert_eq!(turn.draw_vrf_request, retry_account);
+
+    // A source mismatch is rejected.
+    assert!(process(
+        &mut context,
+        settle_draw_instruction(turn_id, authority, [3u8; 32], Pubkey::new_unique()),
+        &[],
+    )
+    .await
+    .is_err());
+
+    // Settle with the matching source and a revealed randomness value.
+    process(
+        &mut context,
+        settle_draw_instruction(turn_id, authority, [3u8; 32], retry_account),
+        &[],
+    )
+    .await
+    .unwrap();
+    let turn: TurnState = read_anchor_account(&mut context, turn_address).await;
+    assert_eq!(turn.draw_status, DrawStatus::Fulfilled);
+    assert_eq!(turn.draw_randomness, [3u8; 32]);
+    assert_eq!(turn.draw_vrf_fulfillment, retry_account);
+    let mut seen = std::collections::HashSet::new();
+    for number in turn.draw_result {
+        assert!((1..=100).contains(&number));
+        assert!(seen.insert(number));
+    }
+
+    // Re-settling an already fulfilled draw is rejected.
+    assert!(process(
+        &mut context,
+        settle_draw_instruction(turn_id, authority, [4u8; 32], retry_account),
+        &[],
+    )
+    .await
+    .is_err());
 }
 
 #[tokio::test]

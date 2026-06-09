@@ -4561,20 +4561,20 @@ Implement a working mobile DApp on Solana devnet with wallet flows, devnet trans
 
 **Checklist:**
 
-- [ ] Implement `RuleVote` account/instruction submission flow.
-- [ ] Enforce one `RuleVote` per wallet per rule per turn.
-- [ ] Update vote count in backend/API from indexed on-chain `RuleVote` state.
-- [ ] Update vote state in UI.
-- [ ] Show leading rules.
-- [ ] Handle voting after cutoff.
-- [ ] Handle duplicate vote.
-- [ ] Add vote event to activity feed.
+- [x] Implement `RuleVote` account/instruction submission flow.
+- [x] Enforce one `RuleVote` per wallet per rule per turn.
+- [x] Update vote count in backend/API from indexed on-chain `RuleVote` state.
+- [x] Update vote state in UI.
+- [x] Show leading rules.
+- [x] Handle voting after cutoff.
+- [x] Handle duplicate vote.
+- [x] Add vote event to activity feed.
 
 **Approval criteria:**
 
-- [ ] Vote is recorded through the on-chain `RuleVote` account/instruction path.
-- [ ] UI vote counts match backend/indexed state.
-- [ ] Voting closes correctly at cutoff.
+- [x] Vote is recorded through the on-chain `RuleVote` account/instruction path.
+- [x] UI vote counts match backend/indexed state.
+- [x] Voting closes correctly at cutoff.
 
 ---
 
@@ -4584,22 +4584,22 @@ Implement a working mobile DApp on Solana devnet with wallet flows, devnet trans
 
 **Checklist:**
 
-- [ ] Build current round page.
-- [ ] Build completed round page.
-- [ ] Show turn ID.
-- [ ] Show turn duration and cycle step.
-- [ ] Show prize pool.
-- [ ] Show rules and vote counts.
-- [ ] Show submitted guess state for connected user.
-- [ ] Show draw/result state when available.
-- [ ] Show audit links/placeholders.
-- [ ] Add shareable URL per round.
+- [x] Build current round page.
+- [x] Build completed round page.
+- [x] Show turn ID.
+- [x] Show turn duration and cycle step.
+- [x] Show prize pool.
+- [x] Show rules and vote counts.
+- [x] Show submitted guess state for connected user.
+- [x] Show draw/result state when available.
+- [x] Show audit links/placeholders.
+- [x] Add shareable URL per round.
 
 **Approval criteria:**
 
-- [ ] Public round page reflects accurate devnet state.
-- [ ] Completed round remains accessible after rollover.
-- [ ] Shared round link opens correctly on mobile.
+- [x] Public round page reflects accurate devnet state.
+- [x] Completed round remains accessible after rollover.
+- [x] Shared round link opens correctly on mobile.
 
 ---
 
@@ -4627,21 +4627,21 @@ Implement draw generation, rule election, AI rule validation, guess verification
 
 **Checklist:**
 
-- [ ] Integrate Switchboard VRF or selected VRF flow on devnet.
-- [ ] Trigger draw at correct turn time.
-- [ ] Generate 6 unique numbers between 1 and 100.
-- [ ] Store draw result in contract/backend state.
-- [ ] Store VRF proof/reference.
-- [ ] Display draw result in UI.
-- [ ] Handle delayed VRF response.
-- [ ] Handle VRF failure state.
-- [ ] Add draw integrity tests.
+- [x] Integrate Switchboard VRF or selected VRF flow on devnet.
+- [x] Trigger draw at correct turn time.
+- [x] Generate 6 unique numbers between 1 and 100.
+- [x] Store draw result in contract/backend state.
+- [x] Store VRF proof/reference.
+- [x] Display draw result in UI.
+- [x] Handle delayed VRF response.
+- [x] Handle VRF failure state.
+- [x] Add draw integrity tests.
 
 **Approval criteria:**
 
-- [ ] Draws produce valid 6-number results.
-- [ ] Draw result is publicly visible and traceable.
-- [ ] Delayed/failure draw states are handled without corrupting turn state.
+- [x] Draws produce valid 6-number results.
+- [x] Draw result is publicly visible and traceable.
+- [x] Delayed/failure draw states are handled without corrupting turn state.
 
 ---
 

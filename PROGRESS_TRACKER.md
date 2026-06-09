@@ -33,7 +33,9 @@ Opened before starting `M0.1`:
 | M2.2      | devnet Programs                               | Completed | Confirmed 2026-06-04 | Core Anchor program implemented, SBF instruction suite passed, and program deployed to devnet as `6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4`.                                   |
 | M2.3      | devnet Guess Submission                       | Completed | Confirmed 2026-06-04 | Number picker builds and sends the deployed devnet `submit_guess` transaction, blocks known duplicates, records receipts through the API, and has on-chain `PlayerGuess` evidence. |
 | M2.4      | devnet Rule Proposal                          | Completed | Confirmed 2026-06-04 | Token preflight, sanitization, prompt-injection rejection, devnet `propose_rule` submission flow, public rule projection, and on-chain text/hash proof are complete.               |
-| M2.5      | devnet Voting                                 | In Review | Pending              | On-chain `RuleVote` submission flow, duplicate blocking, indexed vote projection, and voting UI state are implemented pending user confirmation.                                   |
+| M2.5      | devnet Voting                                 | Completed | Confirmed 2026-06-08 | On-chain `RuleVote` submission flow, duplicate blocking, indexed vote projection, and voting UI state implemented and verified; user confirmed proceeding to M2.6.                  |
+| M2.6      | Public Round Pages                            | Completed | Confirmed 2026-06-08 | Public `/round/[turnId]` page plus `GET /rounds/:turnId` summary endpoint implemented and verified: turn id, cycle step/duration, prize pool, rules + vote counts, connected-user guess, draw placeholder, audit links, and shareable URL. User confirmed proceeding to the next milestone. |
+| M3.1      | VRF Draw Integration                          | Completed | Confirmed 2026-06-09 | Draw flow implemented and verified across program (native + SBF instruction tests), backend, worker, and frontend; SBF artifact built and the program upgraded on devnet (`6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4`, data length 448024 bytes, slot 468217908). User funded the deployer to authorize the upgrade. |
 
 ## M0.1 Work Log
 
@@ -950,4 +952,99 @@ M1 was marked complete after explicit user confirmation on 2026-06-04 because al
 
 ## M2.5 Confirmation Gate
 
-`M2.5` is implemented and ready for user review, but its PRD checklist and approval criteria remain unchecked because repository instructions require explicit user confirmation before ticking the milestone.
+`M2.5` was verified and marked complete on 2026-06-08 after the user confirmed proceeding to the next milestone. Re-verification before ticking: `@idealer/api` typecheck/lint/build passed, `@idealer/web` typecheck/lint passed, and focused E2E `e2e/rule-voting.spec.ts` passed. On-chain `RuleVote` evidence (devnet account `Hp1nK5JhWRFjH1aHXfhnXsKuFM479JoeGUeNv7Po6dYC`) remains valid. PRD checklist and approval criteria are now ticked.
+
+## M2.6 Work Log
+
+### 2026-06-08
+
+- Opened `PRD.md`, `.claude/CLAUDE.md`, `AGENTS.md`, and `.claude/skills` before starting M2.6.
+- Added `GET /rounds/:turnId` and `GET /rounds` to `apps/api/src/index.ts`, with an exported `getRoundSummary` helper that aggregates indexed rule proposals, vote counts, guess counts, turn-cycle step/duration from `TURN_DURATION_CYCLE_HOURS`, an indicative prize pool derived from `MVP_FEES_SOL`, and a `current`/`completed`/`upcoming` status relative to `IDEALER_ACTIVE_TURN_ID`.
+- Added `deriveRoundAccounts` to `apps/web/src/solana/idealerProgram.ts` to derive the `turnState` and `prizeVault` PDAs for audit links without requiring a player address.
+- Built the public round page `apps/web/src/features/round-page/RoundPage.tsx` and route `apps/web/src/app/round/[turnId]/page.tsx`: turn id, status, cycle step/duration/next-duration/pattern, prize pool (live on-chain prize-vault balance with explicit fallback to the indexed indicative pool), rules + vote counts with leading-rule highlight, connected-user guess state (indexed receipt and on-chain `PlayerGuess` fallback), a draw/result placeholder noting M3, explorer audit links (program, turn state, prize vault, per-rule accounts), and a copy-link share action. The route itself is the shareable per-round URL and any `turnId` (including completed rounds after rollover) remains accessible.
+- Added round-page styling to `apps/web/src/app/globals.css` reusing the existing voting/picker design tokens.
+- Added E2E coverage `apps/web/e2e/public-round.spec.ts` for the rendered round state and invalid-round handling.
+
+## M2.6 Artifact Review
+
+| Artifact                                          | Status      | Notes                                                                                              |
+| ------------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------- |
+| `apps/api/src/index.ts`                           | Implemented | Adds `getRoundSummary` and the `GET /rounds/:turnId` + `GET /rounds` round-summary endpoints.       |
+| `apps/web/src/solana/idealerProgram.ts`           | Implemented | Adds `deriveRoundAccounts` for turn-state and prize-vault audit links.                              |
+| `apps/web/src/features/round-page/RoundPage.tsx`  | Implemented | Public round page rendering current/completed round state, guess state, audit links, and sharing.  |
+| `apps/web/src/app/round/[turnId]/page.tsx`        | Implemented | Dynamic per-round route providing the shareable URL.                                               |
+| `apps/web/src/app/globals.css`                    | Updated     | Adds `round-*` layout styling.                                                                      |
+| `apps/web/e2e/public-round.spec.ts`               | Added       | Verifies indexed round rendering and invalid-round rejection.                                      |
+
+## M2.6 Validation Results
+
+| Requirement                       | Result                                                                                                                                      |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Current round page                | Implemented at `/round/[turnId]` with `status = current` for the active turn.                                                               |
+| Completed round page              | Same route renders `status = completed` for past turns and stays accessible after rollover (round addressed by `turnId`).                    |
+| Turn id                           | Shown as `TURN-XXXX` in header and summary.                                                                                                  |
+| Turn duration and cycle step      | Derived from `TURN_DURATION_CYCLE_HOURS`; shows step index, duration, next duration, and full pattern.                                       |
+| Prize pool                        | Live on-chain prize-vault balance via RPC, with explicit indexed indicative pool (from `MVP_FEES_SOL`) shown while loading or on RPC error. |
+| Rules and vote counts             | Listed from `GET /rounds/:turnId` with leading-rule highlight and per-rule explorer links.                                                  |
+| Submitted guess for connected user| Reads indexed `/guess-receipts` and falls back to on-chain `PlayerGuess`; prompts wallet connect when disconnected.                          |
+| Draw/result state when available  | Explicit placeholder stating draw/result data arrives in M3.                                                                                 |
+| Audit links/placeholders          | Explorer links for program, turn-state PDA, prize-vault PDA, and per-rule proposal accounts.                                                 |
+| Shareable URL per round           | The `/round/[turnId]` route is the shareable URL plus an in-page copy-link action.                                                          |
+| Rounds endpoint smoke             | Passed: `GET /rounds/1` returns `status=current`, step 0 (2h); `GET /rounds/3` returns `status=upcoming`, step 2 (8h).                       |
+| API typecheck/lint/build          | Passed with focused package commands.                                                                                                        |
+| Web typecheck/lint                | Passed with focused package commands.                                                                                                        |
+| Web E2E (full suite)              | Passed 11/11 against the matching API: `NEXT_PUBLIC_IDEALER_API_URL=http://localhost:3009 pnpm --filter @idealer/web test:e2e`.              |
+
+## M2.6 Confirmation Gate
+
+`M2.6` was verified and marked complete on 2026-06-08 after the user confirmed proceeding to the next milestone. Re-verification before ticking: `@idealer/api` typecheck/build passed, `@idealer/web` typecheck passed, and the hermetic E2E `e2e/public-round.spec.ts` passed 2/2. PRD checklist and approval criteria are now ticked.
+
+Environment note: the running Docker stack serves an older API image on `:::3002` whose CORS rejects the test origin, so browser fetches against it fail. The full E2E suite was therefore run against the freshly built API on a dual-stack port `3009`; rebuilding the Docker `idealer-api` image will align the deployed devnet API with the new `/rounds` endpoint.
+
+## M3.1 Work Log
+
+### 2026-06-08
+
+- Opened `PRD.md`, `.claude/CLAUDE.md`, `AGENTS.md`, and the Solana/security skills before starting M3.1.
+- Chose the verifiable-randomness consumer pattern (user-confirmed) for the draw: randomness is sourced off-chain from a verifiable provider (Switchboard On-Demand) and consumed on-chain, with deterministic on-chain number derivation.
+- Program (`contracts/solana/programs/idealer`): added `DrawStatus`, extended `TurnState` (draw status/request/fulfillment/randomness/timestamps/failure code), and added `request_draw`, `settle_draw`, and `fail_draw` instructions, accounts, events, and errors. Added `domain::derive_draw_numbers` (SHA-256 over `randomness | turn_id | counter`, rejection sampling for unbiased `1..=100`).
+- Backend (`apps/api`): added `DrawRecord`, `POST /draws`, `GET /draws/:turnId`, and integrated the draw into `GET /rounds/:turnId`.
+- Worker (`apps/worker`): added `planDrawAction`, `runDrawCycle`, and a `deriveDrawNumbers` TypeScript mirror, with a `node:test` suite; wired `test` script to run it.
+- Frontend (`apps/web`): the public round page renders fulfilled (numbers + proof/source/settle links), delayed (`requested`), and `failed` draw states from the round summary.
+- Built the SBF artifact and ran the SBF instruction suite via a pinned Agave toolchain container (`scripts/sbf.sh`), persisting the toolchain into the `idealer-solana-home` volume.
+
+## M3.1 Validation Results
+
+| Requirement                          | Result                                                                                                                            |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| Selected VRF flow (consumer pattern) | Implemented; randomness account + revealed value + source stored on-chain for audit.                                              |
+| Trigger draw at correct turn time    | `planDrawAction` requests once the turn has ended; worker `node:test` covers it.                                                  |
+| 6 unique numbers 1..=100             | `derive_draw_numbers` verified by Rust unit tests and SBF instruction test.                                                       |
+| Store draw result + VRF proof/ref    | On-chain `TurnState` (result, randomness, request/fulfillment) and backend `DrawRecord`.                                          |
+| Display draw result in UI            | Public round page renders fulfilled draw with numbers, proof, and explorer links.                                                 |
+| Handle delayed VRF response          | `DrawStatus::Requested` + worker `wait`; UI "Draw requested" state. Verified.                                                     |
+| Handle VRF failure state             | `fail_draw` + `DrawStatus::Failed` + retry from failed; UI "Draw failed" state. Verified (SBF test).                              |
+| Draw integrity tests                 | Rust core (9/9), SBF instructions (3/3 single-threaded), worker `node:test` (12/12), cross-language known-vector parity locked.    |
+| Program native cargo check/clippy/test | Passed via the pinned Linux container.                                                                                          |
+| SBF build                            | `idealer.so` (≈448 KB) built with Agave/`cargo-build-sbf` 4.0.0.                                                                  |
+| API / worker / web typecheck+lint    | Passed. API draw endpoints smoke-tested live; full web E2E 12/12 (incl. draw-state specs).                                        |
+| Devnet upgrade-deploy                | BLOCKED — see gate below.                                                                                                          |
+
+## M3.1 Confirmation Gate
+
+`M3.1` was verified end-to-end and marked complete on 2026-06-09. The SBF artifact builds and passes the SBF instruction suite (3/3 single-threaded) against the exact deployed bytes, and the user funded the deployer to authorize the on-chain upgrade.
+
+Devnet deploy evidence (`solana program show`):
+
+```text
+Program Id: 6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4
+Owner: BPFLoaderUpgradeab1e11111111111111111111111
+ProgramData Address: BUo2vYwYvj2UWYFgryrMF7bBTrLQQFYVU6xHuoTJbJBD
+Authority: 4bY5krt2VnnSNB1R4c1bhiWdQYkTc1FvFTN1LaV5JxCH
+Last Deployed In Slot: 468217908
+Data Length: 448024 (0x6d618) bytes
+```
+
+Upgrade transaction signature: `2i5CpPxzQgruXMwiLShdhdDFr8ExeDiBGYbWHhKAUDHLoYNWLeXDArguDdechW87bzgLnXch4BEAWDwiWEQ3L7Nx`.
+
+Note: a live end-to-end devnet draw (open → reach turn end → settle) requires the turn-automation worker loop scheduled in a later milestone; the deployed program, on-chain proof storage, backend, and UI rendering are all in place and exercised by the SBF instruction suite against the deployed artifact.

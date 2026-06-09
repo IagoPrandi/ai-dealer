@@ -156,6 +156,16 @@ export async function deriveSubmitGuessAccounts({
   };
 }
 
+export async function deriveRoundAccounts({ turnId }: { turnId: number }) {
+  const turnSeed = u64Le(turnId);
+  const [turnState, prizeVault] = await Promise.all([
+    derivePda(["turn", turnSeed]),
+    derivePda(["prize_vault", turnSeed]),
+  ]);
+
+  return { prizeVault, turnState };
+}
+
 export async function deriveRuleProposalAddress({
   ruleId,
   turnId,

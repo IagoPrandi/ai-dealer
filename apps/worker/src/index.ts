@@ -3,6 +3,8 @@ import { getTurnDurationHours } from "@idealer/game-engine";
 import pg from "pg";
 import { createClient } from "redis";
 
+export * from "./draw.js";
+
 const { Pool } = pg;
 
 export interface WorkerStatus {

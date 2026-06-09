@@ -6,7 +6,7 @@
     "build": "node scripts/run-cargo.mjs build --workspace --locked",
     "lint": "node scripts/run-cargo.mjs clippy --workspace --all-targets --all-features --locked -- -D warnings",
     "test": "node scripts/run-cargo.mjs test --workspace --all-targets --all-features --locked",
-    "test:sbf": "cargo test --workspace --test instructions --all-features --locked -- --ignored",
+    "test:sbf": "cargo test --workspace --test instructions --all-features --locked -- --ignored --test-threads=1",
     "typecheck": "node scripts/run-cargo.mjs check --workspace --all-targets --all-features --locked"
   }
 }
