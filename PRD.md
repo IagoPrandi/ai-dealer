@@ -1,8 +1,8 @@
 # Idealer — Product Requirements Document
 
-> **Version:** 1.3.4  
-> **Status:** Implementation Baseline — MVP defaults integrated  
-> **Last Updated:** 2026-06-01  
+> **Version:** 1.4.0  
+> **Status:** Implementation Baseline — MVP defaults integrated; local/self-hosted LLM support added  
+> **Last Updated:** 2026-06-10  
 > **Primary Product Surface:** Mobile-first DApp  
 > **Language:** Portuguese / English technical terms where useful
 
@@ -99,6 +99,7 @@ The main product experience is designed for users opening the app from a mobile 
 - **Wallet Support:** Phantom, Backpack, Solflare, and mobile wallet adapters
 - **Randomness:** Switchboard VRF for both number draw and rule-election randomness
 - **AI Rule Compilation:** Multi-agent AI Rule Compiler harness
+- **Local AI Inference (optional):** Local/self-hosted open models (Phi, Llama, Gemma, Qwen) served through an OpenAI-compatible endpoint (Ollama / vLLM / llama.cpp); cloud providers remain available for fallback and escalation
 - **Rule Execution:** Deterministic DSL/AST runtime with sandbox limits
 
 ### 1.6 Non-Goals
@@ -433,7 +434,12 @@ Default configuration:
 ```typescript
 const RULE_TOKEN_LIMIT = {
   max_prompt_tokens: 80,
-  tokenizer: "deployment_default_model_tokenizer",
+  // Canonical, backend-independent tokenizer. The 80-token limit MUST mean the
+  // same thing regardless of which inference provider/model (cloud or local:
+  // Phi, Llama, Gemma, Qwen, Claude, ...) is active. Never derive the limit
+  // tokenizer from the currently selected model, because tokenizers diverge
+  // 10-30% across model families.
+  tokenizer: "idealer_canonical_tokenizer_v1",
   enforcement: "server_side",
 };
 ```
@@ -992,6 +998,7 @@ This value is configurable by deployment.
 Token limit requirements:
 
 - tokenization must run server-side;
+- tokenization must use the fixed canonical tokenizer (`idealer_canonical_tokenizer_v1`), independent of the active inference provider/model, so the limit is stable across cloud and local backends;
 - frontend may display an approximate live counter;
 - backend is the source of truth;
 - rules exceeding the token limit are rejected before payment or on-chain submission;
@@ -1137,6 +1144,13 @@ interface CompiledRuleArtifact {
   compiler_version: string;
   runtime_version: string;
   test_harness_version: string;
+  // Model identity for reproducible auditing (cloud or local provider).
+  model_provider: string; // "anthropic" | "openai" | "ollama" | "vllm" | ...
+  model_name: string; // e.g. "phi4", "qwen2.5:14b-instruct-q4_K_M"
+  model_digest?: string; // sha256 of the weights for local/self-hosted models
+  model_quantization?: string; // "Q4_K_M" | "Q8_0" | "FP16" | ...
+  serving_engine?: string; // "ollama@x.y" | "vllm@x.y" | "llamacpp"
+  constrained_decoding_used: boolean; // grammar/schema-constrained decoding applied
   complexity_score: number;
   difficulty_class: RuleDifficultyClass;
   created_at: string;
@@ -1303,6 +1317,8 @@ compiler version
 runtime version
 test harness version
 agent versions
+model identity (provider, model name, weights digest, quantization, serving engine)
+constrained-decoding flag
 MCP server/tool versions
 timestamp
 creator wallet
@@ -1667,6 +1683,17 @@ Game engine determines winners.
 
 This design improves auditability, reduces disputes, and prevents post-draw reinterpretation of rules.
 
+#### Determinism Boundary
+
+LLM generation is non-deterministic by nature. Even with `temperature = 0` and a fixed `seed`, identical inputs may produce different outputs across runs, hardware, batch sizes, and provider/engine versions; reproducibility is best-effort only and must never be assumed.
+
+Game integrity does **not** depend on reproducible generation. It derives from:
+
+- freezing the compiled artifact before the draw (Section 6.10);
+- executing only that frozen DSL/AST in the deterministic sandbox (Section 7.7).
+
+The same `guess`, `draw`, and frozen artifact always produce the same winner result, regardless of which model compiled the rule. This is precisely why **local/self-hosted models (Phi, Llama, Gemma, Qwen) are fully compatible**: the model compiles intent, but never executes or re-decides outcomes.
+
 ### 7.2 Multi-Agent Compiler Pipeline
 
 The AI workflow is split into specialized agents.
@@ -1692,16 +1719,43 @@ Multiple LLM providers are supported as fallback, escalation, and review diversi
 |        2 | Secondary provider | Fallback on failure, timeout, low confidence, or reviewer disagreement |
 |        3 | Tertiary provider  | Tiebreaker, adversarial review, or final escalation                    |
 
+Providers may be cloud-hosted or local/self-hosted. Local providers (Phi, Llama, Gemma, Qwen) are reached through an OpenAI-compatible endpoint and require a `baseUrl` instead of a real API key (see Section 7.3.1).
+
 Provider configuration:
 
 ```typescript
 interface LLMProviderConfig {
-  provider: "anthropic" | "openai" | "google" | string;
-  model: string;
-  apiKey: string;
+  provider:
+    | "anthropic"
+    | "openai"
+    | "google"
+    | "ollama"
+    | "vllm"
+    | "llamacpp"
+    | "lmstudio"
+    | "openai-compatible"
+    | string;
+  mode: "cloud" | "local";
+  model: string; // e.g. "phi4", "llama3.2", "qwen2.5:14b-instruct-q4_K_M"
+  baseUrl?: string; // required for local; e.g. "http://idealer-llm:11434/v1"
+  apiKey?: string; // optional; local endpoints may use a dummy value or none
   timeoutMs: number;
   maxRetries: number;
   confidenceThreshold: number;
+  // Capability flags — the harness adapts the request shape per provider,
+  // because "OpenAI-compatible" support varies (e.g. Ollama uses `format`
+  // instead of OpenAI `response_format: json_schema`).
+  capabilities: {
+    jsonSchema: boolean; // schema-constrained response_format / format=<schema>
+    grammarConstrained: boolean; // GBNF / vLLM guided_json / Ollama format=<schema>
+    toolCalling: boolean;
+    maxContextTokens: number;
+    seedSupported: boolean;
+  };
+  // Model identity captured into the frozen artifact for auditing.
+  modelDigest?: string; // sha256 of the weights for local models
+  quantization?: string; // "Q4_K_M" | "Q8_0" | "FP16" | ...
+  servingEngine?: string; // "ollama@x.y" | "vllm@x.y" | "llamacpp"
 }
 ```
 
@@ -1710,6 +1764,46 @@ Default confidence threshold:
 ```text
 0.85
 ```
+
+### 7.3.1 Local / Self-Hosted Model Support
+
+The compiler harness must support local/self-hosted open models in addition to cloud providers, without changing the deterministic game logic.
+
+#### Integration seam: OpenAI-compatible API
+
+All supported local engines expose an OpenAI-compatible `/v1/chat/completions` surface, so a single code path — an OpenAI-style client with a configurable `baseUrl` and `model` — targets both cloud and local backends. Switching backends is configuration, not code.
+
+```text
+Ollama     → http://<host>:11434/v1
+vLLM       → http://<host>:8000/v1
+llama.cpp  → http://<host>:8080/v1
+LM Studio  → http://<host>:1234/v1
+```
+
+Compatibility is a spectrum. The harness must not assume full OpenAI feature parity: structured-output syntax, tool calling, `seed`, and logprobs differ across engines (notably, Ollama does not honor OpenAI `response_format: json_schema` and uses its own `format` field). The `capabilities` flags in `LLMProviderConfig` exist to paper over these seams.
+
+#### Engine selection
+
+| Engine | Sweet spot | Notes |
+| --- | --- | --- |
+| Ollama | Local development, model switching, prototyping | Lowest setup; ~1 request/model by default — not production throughput |
+| vLLM | Production GPU serving, multi-user | Most complete OpenAI surface (`guided_json`); continuous batching |
+| llama.cpp (`llama-server`) | CPU / edge / Apple Silicon | Minimal dependencies |
+
+Recommended quantization for local models is `Q4_K_M` (≈97–99% of FP16 quality). Indicative VRAM: 7B `Q4_K_M` ≈ 4.5–8 GB; 12–14B `Q4_K_M` ≈ 10–12 GB. Models ≤4B (e.g. `phi4-mini`, `gemma2:2b`) can run CPU-only for development.
+
+#### Constrained decoding is mandatory for artifact emission
+
+Any provider used for a step that emits the DSL/AST (compile step) must use grammar/schema-constrained decoding (GBNF, vLLM `guided_json`, or Ollama `format=<schema>`). "Valid JSON" is not the same as "schema-compliant"; constrained decoding guarantees the syntactic form and is the key capability that lets small local models perform structured compilation reliably. It does **not** guarantee semantic correctness — that is handled by review, tests, and escalation (Section 7.4, M3.6).
+
+#### Per-role model routing
+
+Models may be routed per agent role:
+
+- a small local model may serve `interpret_rule`, `explain_rule`, and `normalize_rule`;
+- `compile_rule_to_ast` and `review_rule_ast` must either use a model that passes the confidence threshold or escalate to a stronger (cloud) provider on schema-validation failure or low confidence.
+
+This routing reuses the existing composite confidence score (Section 7.4) and provider fallback chain (M3.6); a local provider simply takes a slot in the priority chain.
 
 ### 7.4 Composite Confidence Score
 
@@ -1749,6 +1843,13 @@ final_confidence >= 0.85 → accept compiled rule
 0.70 <= final_confidence < 0.85 → escalate to another provider/reviewer
 final_confidence < 0.70 → reject or require user clarification
 ```
+
+Escalation policy with local providers:
+
+- constrained decoding (Section 7.3.1) removes syntactic failures, so escalation focuses on semantic failures;
+- escalate to the next provider in the chain when DSL/AST schema validation fails, on malformed/empty output, on timeout, or when `final_confidence` is below threshold;
+- a local provider may be primary; the escalation target may be a stronger local model or a cloud provider;
+- multi-sample self-consistency (sample N, majority-vote) is an optional reinforcement for critical roles (`compile_rule_to_ast`, `review_rule_ast`).
 
 Required log fields:
 
@@ -2118,7 +2219,7 @@ Required MCP server groups:
 
 MCP restrictions:
 
-- no network tool for the agent;
+- no network tool for the agent; the only permitted, network-isolated egress is the configured LLM inference endpoint (cloud provider or the local `idealer-llm` service);
 - no filesystem browsing tool;
 - no shell execution;
 - no arbitrary code execution;
@@ -2199,7 +2300,14 @@ interface AgentLog {
   result: "VALID" | "INVALID" | "NEEDS_CLARIFICATION";
   reason: string;
   confidence_breakdown?: CompilerConfidenceBreakdown;
-  model_used?: string;
+  model_identity?: {
+    provider: string;
+    model_name: string;
+    model_digest?: string;
+    quantization?: string;
+    serving_engine?: string;
+    constrained_decoding_used: boolean;
+  };
   mcp_tools_used?: string[];
   latency_ms: number;
   input_hash: string;
@@ -2219,6 +2327,7 @@ The repository must include `AGENTS.md` defining:
 - agent roles;
 - allowed skills;
 - forbidden behaviors;
+- provider/model routing (cloud vs local, per-role models, escalation/fallback chain) and local model configuration;
 - hook contracts;
 - MCP server permissions;
 - rule interpretation and normalization process;
@@ -3352,6 +3461,7 @@ Optional local containers:
 | ------------ | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -----------: |
 | `admin`      | `idealer-admin`      | Separate restricted admin console for retention, engagement, operations, compiler health, abuse, and accounting dashboards. Not linked from the public DApp. |       `3001` |
 | `mcp`        | `idealer-mcp`        | Local bounded MCP tools for rule schema, compiler, runtime, test harness, game engine and audit logging.                                                     |     internal |
+| `llm`        | `idealer-llm`        | Optional local/self-hosted LLM inference (Ollama/vLLM) exposing an OpenAI-compatible endpoint for the rule compiler. GPU recommended; CPU viable for models ≤4B. Not in the default required stack. |      `11434` |
 | `prometheus` | `idealer-prometheus` | Local metrics collection                                                                                                                                     |       `9090` |
 | `grafana`    | `idealer-grafana`    | Local metrics dashboards                                                                                                                                     |       `3002` |
 | `mailpit`    | `idealer-mailpit`    | Local email testing, if email notifications are introduced                                                                                                   |       `8025` |
@@ -3563,7 +3673,7 @@ Recommended checks:
 
 The API should not accept traffic as healthy unless PostgreSQL and Redis are reachable.
 
-The worker should not be considered healthy unless it can reach PostgreSQL, Redis, and the configured LLM provider layer.
+The worker should not be considered healthy unless it can reach PostgreSQL, Redis, and the configured LLM provider layer. The LLM provider layer may be a cloud provider endpoint or the local `idealer-llm` OpenAI-compatible endpoint; the health check targets whichever is configured.
 
 Recommended local commands:
 
@@ -3611,7 +3721,15 @@ REDIS_URL
 SOLANA_RPC_URL
 SWITCHBOARD_CONFIG
 TREASURY_WALLET
-LLM_PROVIDER_KEYS
+LLM_MODE                # local | cloud
+LLM_BASE_URL            # OpenAI-compatible endpoint (empty for pure cloud)
+LLM_MODEL
+LLM_API_KEY             # optional; dummy/none for local endpoints
+LLM_MODEL_COMPILE       # optional per-role override
+LLM_MODEL_INTERPRET     # optional per-role override
+LLM_PROVIDER_KEYS       # cloud provider keys for fallback/escalation
+EMBEDDINGS_MODEL        # semantic dedup (Section 6.15)
+EMBEDDINGS_BASE_URL
 RULE_MAX_TOKENS
 CONFIDENCE_THRESHOLD
 NEXT_PUBLIC_APP_URL
@@ -3889,6 +4007,7 @@ Requirements:
 
 - secret rotation;
 - provider API key isolation;
+- local inference hardening when the `idealer-llm` service is used: keep raw rule text on-prem (no data egress), verify model weights by signature/digest before deploy (supply chain), mount model weights read-only, run the inference container non-root, and network-segment the endpoint (not publicly exposed; mTLS between services);
 - rate limits;
 - admin access controls;
 - audit logs;
@@ -4765,26 +4884,33 @@ Implement draw generation, rule election, AI rule validation, guess verification
 
 #### M3.6 — Agent Fallback & Provider Dispute Handling
 
-**Objective:** use multiple LLM providers only when needed for fallback, escalation, or disagreement.
+**Objective:** use multiple LLM providers (cloud and/or local) only when needed for fallback, escalation, or disagreement.
 
 **Checklist:**
 
-- [ ] Configure primary provider.
+- [ ] Configure primary provider (may be a local provider).
 - [ ] Configure secondary provider.
 - [ ] Configure tertiary provider.
+- [ ] Support local/self-hosted provider via OpenAI-compatible endpoint (`baseUrl`, optional `apiKey`).
+- [ ] Implement capability flags per provider and adapt request shape (e.g. Ollama `format` vs OpenAI `response_format`).
+- [ ] Enforce grammar/schema-constrained decoding for the DSL/AST compile step.
 - [ ] Escalate on timeout.
 - [ ] Escalate on malformed response.
+- [ ] Escalate on DSL/AST schema-validation failure.
 - [ ] Escalate on low final confidence.
 - [ ] Escalate on provider disagreement.
 - [ ] Use tertiary provider as tiebreaker.
+- [ ] Support per-role model routing (small/local for interpret/explain/normalize; escalate compile/review).
+- [ ] Record model identity (provider, model, digest, quantization, serving engine) in logs and frozen artifact.
 - [ ] Store provider path in logs.
 - [ ] Track fallback rate.
 - [ ] Track provider disagreement rate.
 
 **Approval criteria:**
 
-- [ ] Normal cases use primary provider only.
+- [ ] Normal cases use the primary provider only.
 - [ ] Edge cases escalate correctly.
+- [ ] A local-only configuration can compile valid rules end-to-end, escalating to a stronger model on schema failure or low confidence.
 - [ ] Disagreements are logged and resolved according to policy.
 
 ---
