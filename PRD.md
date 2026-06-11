@@ -4770,29 +4770,29 @@ Implement draw generation, rule election, AI rule validation, guess verification
 
 **Checklist:**
 
-- [ ] Implement rule proposal pool for each turn.
-- [ ] Implement background precompilation cache.
-- [ ] Include only precompiled-valid rules in the eligible election pool.
-- [ ] Implement election cutoff.
-- [ ] Lock eligible pool hash at cutoff.
-- [ ] Select 3 top-voted eligible rules.
-- [ ] Request Switchboard VRF for rule election.
-- [ ] Derive 7 random finalists from VRF fulfillment, not request entropy.
-- [ ] Form finalist set from top-voted and random finalists.
-- [ ] Select one active rule using ranged VRF output or rejection sampling.
-- [ ] Handle ties deterministically before VRF commitment.
-- [ ] Exclude reported, invalid, duplicate, or non-precompiled rules.
-- [ ] Store elected candidate and proof references.
-- [ ] Show top finalists, random finalists, and elected candidate in UI/audit view.
-- [ ] Do not fallback to the next finalist if the elected finalist is invalid; use original-only turn instead.
+- [x] Implement rule proposal pool for each turn.
+- [x] Implement background precompilation cache.
+- [x] Include only precompiled-valid rules in the eligible election pool.
+- [x] Implement election cutoff.
+- [x] Lock eligible pool hash at cutoff.
+- [x] Select 3 top-voted eligible rules.
+- [x] Request Switchboard VRF for rule election.
+- [x] Derive 7 random finalists from VRF fulfillment, not request entropy.
+- [x] Form finalist set from top-voted and random finalists.
+- [x] Select one active rule using ranged VRF output or rejection sampling.
+- [x] Handle ties deterministically before VRF commitment.
+- [x] Exclude reported, invalid, duplicate, or non-precompiled rules.
+- [x] Store elected candidate and proof references.
+- [x] Show top finalists, random finalists, and elected candidate in UI/audit view.
+- [x] Do not fallback to the next finalist if the elected finalist is invalid; use original-only turn instead.
 
 **Approval criteria:**
 
-- [ ] Election follows documented top-voted + VRF-random finalist logic.
-- [ ] Finalist selection is derived from fulfilled VRF randomness.
-- [ ] No modulo-only selection is used where ranged output is available.
-- [ ] Ties and empty proposal pools are handled.
-- [ ] Elected rule is auditable.
+- [x] Election follows documented top-voted + VRF-random finalist logic.
+- [x] Finalist selection is derived from fulfilled VRF randomness.
+- [x] No modulo-only selection is used where ranged output is available.
+- [x] Ties and empty proposal pools are handled.
+- [x] Elected rule is auditable.
 
 #### M3.3 — AI Rule Validation
 

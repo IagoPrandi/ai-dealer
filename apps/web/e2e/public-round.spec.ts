@@ -20,6 +20,34 @@ const completedRound = {
     status: "fulfilled",
     turnId: 2,
   },
+  election: {
+    activeRuleArtifactHash:
+      "0808080808080808080808080808080808080808080808080808080808080808",
+    activeRuleHash:
+      "0101010101010101010101010101010101010101010101010101010101010101",
+    activeRuleId: 1,
+    electedFinalistIndex: 0,
+    eligibleRuleIds: [1],
+    eligibleRulePoolHash:
+      "1111111111111111111111111111111111111111111111111111111111111111",
+    finalistRuleIds: [1],
+    finalistSetHash:
+      "2222222222222222222222222222222222222222222222222222222222222222",
+    randomFinalistHash:
+      "3333333333333333333333333333333333333333333333333333333333333333",
+    randomRuleIds: [],
+    randomnessAccount: "Rnd1nK5JhWRFjH1aHXfhnXsKuFM479JoeGUeNv7Po6dYC",
+    randomnessSource: "Rnd1nK5JhWRFjH1aHXfhnXsKuFM479JoeGUeNv7Po6dYC",
+    randomnessValue:
+      "0909090909090909090909090909090909090909090909090909090909090909",
+    requestedAt: "2026-06-08T00:00:00.000Z",
+    settledAt: "2026-06-08T00:02:00.000Z",
+    status: "settled",
+    topVotedFinalistHash:
+      "4444444444444444444444444444444444444444444444444444444444444444",
+    topVotedRuleIds: [1],
+    turnId: 2,
+  },
   pool: {
     guessSol: 0.02,
     guesses: 2,
@@ -29,10 +57,14 @@ const completedRound = {
   },
   rules: [
     {
+      compiledArtifactHash:
+        "0808080808080808080808080808080808080808080808080808080808080808",
+      precompilationStatus: "passed",
       proposer: "4bYqf3rJ7m2nQh9sV1xCH8kLpWtD6eZaUg5oNbMcXyTH",
       ruleId: 1,
       ruleProposal: "B1KHQhbEzaXBTTMXSNVCWM6GhSAjFTEwdrY1N7DvBnZU",
       sanitizedText: "Win if the submitted guess contains all six drawn numbers.",
+      state: "eligible",
       title: "All six drawn numbers",
       tokenCount: 11,
       votes: 5,
@@ -64,6 +96,10 @@ test("public round page shows indexed devnet round state and audit links", async
   await expect(
     page.getByRole("heading", { name: "Drawn numbers", exact: true }),
   ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Rule of the Hour settled" }),
+  ).toBeVisible();
+  await expect(page.getByText("Active alternative rule: #1.")).toBeVisible();
   await expect(page.locator(".round-draw-numbers li").first()).toHaveText("20");
   await expect(page.locator(".round-draw-numbers li")).toHaveCount(6);
   await expect(

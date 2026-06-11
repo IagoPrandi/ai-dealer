@@ -3,14 +3,15 @@ use anchor_lang::{
     AccountDeserialize, InstructionData, ToAccountMetas,
 };
 use idealer::{
-    accounts, instruction, DrawStatus, InitializeGlobalConfigArgs, PlayerGuess, ProposeRuleArgs,
-    RuleProposal, RuleVote, SettleDrawArgs, TurnState, TurnStatus,
+    accounts, instruction, DrawStatus, InitializeGlobalConfigArgs, PlayerGuess,
+    PrecompilationStatus, PrecompileRuleArgs, ProposeRuleArgs, RuleProposal, RuleState, RuleVote,
+    SettleDrawArgs, SettleRuleElectionArgs, TurnState, TurnStatus,
 };
 use solana_account_info::AccountInfo;
 use solana_program_error::ProgramResult;
 use solana_program_test::{processor, BanksClientError, ProgramTest, ProgramTestContext};
 use solana_sdk::{
-    instruction::Instruction,
+    instruction::{AccountMeta, Instruction},
     signature::{Keypair, Signer},
     transaction::Transaction,
 };
@@ -318,7 +319,20 @@ async fn advance_clock_to_turn_end(context: &mut ProgramTestContext, turn_id: u6
     context.set_sysvar(&clock);
 }
 
-fn request_draw_instruction(turn_id: u64, authority: Pubkey, randomness_account: Pubkey) -> Instruction {
+async fn advance_clock_to_election_cutoff(context: &mut ProgramTestContext, turn_id: u64) {
+    let turn_address = pda(&[b"turn", &turn_id.to_le_bytes()]);
+    let turn: TurnState = read_anchor_account(context, turn_address).await;
+    let cutoff_elapsed = (turn.end_timestamp - turn.start_timestamp) * 7_500 / 10_000;
+    let mut clock: Clock = context.banks_client.get_sysvar().await.unwrap();
+    clock.unix_timestamp = turn.start_timestamp + cutoff_elapsed;
+    context.set_sysvar(&clock);
+}
+
+fn request_draw_instruction(
+    turn_id: u64,
+    authority: Pubkey,
+    randomness_account: Pubkey,
+) -> Instruction {
     Instruction {
         program_id: idealer::ID,
         accounts: accounts::RequestDraw {
@@ -329,6 +343,176 @@ fn request_draw_instruction(turn_id: u64, authority: Pubkey, randomness_account:
         .to_account_metas(None),
         data: instruction::RequestDraw { randomness_account }.data(),
     }
+}
+
+#[tokio::test]
+#[ignore = "requires an SBF build and SBF_OUT_DIR; run the explicit SBF integration suite"]
+async fn rule_election_locks_requests_and_settles_active_rule() {
+    let mut context = ProgramTest::new(
+        "idealer",
+        idealer::ID,
+        processor!(process_idealer_instruction),
+    )
+    .start_with_context()
+    .await;
+    let turn_id = 1_u64;
+    initialize_and_open_turn(&mut context, turn_id).await;
+
+    let player = Keypair::new();
+    fund(&mut context, &player.pubkey()).await;
+    submit_guess(&mut context, &player, turn_id, [1, 2, 3, 4, 5, 6])
+        .await
+        .unwrap();
+
+    let rule_id = 70_u64;
+    let text = "Win if at least four numbers match.".to_string();
+    let rule_address = pda(&[b"rule", &turn_id.to_le_bytes(), &rule_id.to_le_bytes()]);
+    process(
+        &mut context,
+        Instruction {
+            program_id: idealer::ID,
+            accounts: accounts::ProposeRule {
+                proposer: player.pubkey(),
+                global_config: pda(&[b"global_config"]),
+                turn_state: pda(&[b"turn", &turn_id.to_le_bytes()]),
+                game_token: pda(&[
+                    b"game_token",
+                    &turn_id.to_le_bytes(),
+                    player.pubkey().as_ref(),
+                ]),
+                rule_proposal: rule_address,
+                treasury_vault: pda(&[b"treasury_vault"]),
+                prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(None),
+            data: instruction::ProposeRule {
+                args: ProposeRuleArgs {
+                    rule_id,
+                    sanitized_text_hash: hash(text.as_bytes()).to_bytes(),
+                    sanitized_text: text,
+                    normalized_text_hash: [2; 32],
+                    official_interpretation_hash: [3; 32],
+                    preflight_result_hash: [4; 32],
+                    token_count: 8,
+                },
+            }
+            .data(),
+        },
+        &[&player],
+    )
+    .await
+    .unwrap();
+
+    let compiled_artifact_hash = [8; 32];
+    process(
+        &mut context,
+        Instruction {
+            program_id: idealer::ID,
+            accounts: accounts::PrecompileRule {
+                authority: context.payer.pubkey(),
+                global_config: pda(&[b"global_config"]),
+                turn_state: pda(&[b"turn", &turn_id.to_le_bytes()]),
+                rule_proposal: rule_address,
+            }
+            .to_account_metas(None),
+            data: instruction::PrecompileRule {
+                args: PrecompileRuleArgs {
+                    compiled_artifact_hash,
+                    passed: true,
+                },
+            }
+            .data(),
+        },
+        &[],
+    )
+    .await
+    .unwrap();
+    let proposal: RuleProposal = read_anchor_account(&mut context, rule_address).await;
+    assert_eq!(proposal.state, RuleState::Eligible);
+    assert_eq!(proposal.precompilation_status, PrecompilationStatus::Passed);
+
+    advance_clock_to_election_cutoff(&mut context, turn_id).await;
+    let authority = context.payer.pubkey();
+    let turn_address = pda(&[b"turn", &turn_id.to_le_bytes()]);
+
+    let mut lock_accounts = accounts::LockRuleElectionPool {
+        authority,
+        global_config: pda(&[b"global_config"]),
+        turn_state: turn_address,
+    }
+    .to_account_metas(None);
+    lock_accounts.push(AccountMeta::new_readonly(rule_address, false));
+    process(
+        &mut context,
+        Instruction {
+            program_id: idealer::ID,
+            accounts: lock_accounts,
+            data: instruction::LockRuleElectionPool {}.data(),
+        },
+        &[],
+    )
+    .await
+    .unwrap();
+    let turn: TurnState = read_anchor_account(&mut context, turn_address).await;
+    assert_ne!(turn.eligible_rule_pool_hash, [0; 32]);
+
+    let election_randomness_account = Pubkey::new_unique();
+    process(
+        &mut context,
+        Instruction {
+            program_id: idealer::ID,
+            accounts: accounts::RequestRuleElectionVrf {
+                authority,
+                global_config: pda(&[b"global_config"]),
+                turn_state: turn_address,
+            }
+            .to_account_metas(None),
+            data: instruction::RequestRuleElectionVrf {
+                randomness_account: election_randomness_account,
+            }
+            .data(),
+        },
+        &[],
+    )
+    .await
+    .unwrap();
+
+    let mut settle_accounts = accounts::SettleRuleElection {
+        authority,
+        global_config: pda(&[b"global_config"]),
+        turn_state: turn_address,
+    }
+    .to_account_metas(None);
+    settle_accounts.push(AccountMeta::new_readonly(rule_address, false));
+    process(
+        &mut context,
+        Instruction {
+            program_id: idealer::ID,
+            accounts: settle_accounts,
+            data: instruction::SettleRuleElection {
+                args: SettleRuleElectionArgs {
+                    randomness: [9; 32],
+                    randomness_source: election_randomness_account,
+                },
+            }
+            .data(),
+        },
+        &[],
+    )
+    .await
+    .unwrap();
+
+    let turn: TurnState = read_anchor_account(&mut context, turn_address).await;
+    assert_eq!(turn.election_vrf_request, election_randomness_account);
+    assert_eq!(turn.election_vrf_fulfillment, election_randomness_account);
+    assert_eq!(turn.active_rule_id, rule_id);
+    assert_eq!(
+        turn.active_rule_hash,
+        hash(b"Win if at least four numbers match.").to_bytes()
+    );
+    assert_eq!(turn.frozen_rule_artifact_hash, compiled_artifact_hash);
+    assert_ne!(turn.finalist_set_hash, [0; 32]);
 }
 
 fn settle_draw_instruction(

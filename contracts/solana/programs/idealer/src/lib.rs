@@ -12,8 +12,8 @@ use anchor_lang::system_program::{self, Transfer};
 pub mod domain;
 
 use domain::{
-    derive_draw_numbers, next_cycle_index, split_fee, validate_action_window, validate_config,
-    validate_guess, validate_rule, ConfigValidation,
+    derive_draw_numbers, next_cycle_index, run_rule_election, split_fee, validate_action_window,
+    validate_config, validate_guess, validate_rule, ConfigValidation, ElectionCandidate,
 };
 
 declare_id!("6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4");
@@ -377,6 +377,154 @@ pub mod idealer {
         Ok(())
     }
 
+    pub fn precompile_rule(ctx: Context<PrecompileRule>, args: PrecompileRuleArgs) -> Result<()> {
+        let clock = Clock::get()?;
+        let config = &ctx.accounts.global_config;
+        validate_live_turn(config, &ctx.accounts.turn_state)?;
+        validate_action_window(
+            clock.unix_timestamp,
+            ctx.accounts.turn_state.start_timestamp,
+            ctx.accounts.turn_state.end_timestamp,
+            config.rule_election_cutoff_bps,
+        )?;
+
+        let proposal = &mut ctx.accounts.rule_proposal;
+        if args.passed {
+            require!(
+                args.compiled_artifact_hash != [0; 32],
+                IdealerError::InvalidCompiledArtifact
+            );
+            proposal.compiled_artifact_hash = args.compiled_artifact_hash;
+            proposal.precompilation_status = PrecompilationStatus::Passed;
+            proposal.state = RuleState::Eligible;
+        } else {
+            proposal.compiled_artifact_hash = [0; 32];
+            proposal.precompilation_status = PrecompilationStatus::Failed;
+            proposal.state = RuleState::Invalidated;
+        }
+
+        emit!(RulePrecompiled {
+            turn_id: proposal.turn_id,
+            rule_id: proposal.rule_id,
+            passed: args.passed,
+            compiled_artifact_hash: proposal.compiled_artifact_hash,
+        });
+        Ok(())
+    }
+
+    pub fn lock_rule_election_pool(ctx: Context<LockRuleElectionPool>) -> Result<()> {
+        let config = &ctx.accounts.global_config;
+        require!(!config.paused, IdealerError::ProtocolPaused);
+        require_election_cutoff_reached(config, &ctx.accounts.turn_state)?;
+
+        let candidates =
+            read_election_candidates(ctx.remaining_accounts, ctx.accounts.turn_state.turn_id)?;
+        let result = run_rule_election(
+            &candidates,
+            &[1; 32],
+            ctx.accounts.turn_state.turn_id,
+            config.top_voted_finalist_count,
+            config.random_finalist_count,
+        )?;
+        ctx.accounts.turn_state.eligible_rule_pool_hash = result.eligible_rule_pool_hash;
+
+        emit!(RuleElectionPoolLocked {
+            turn_id: ctx.accounts.turn_state.turn_id,
+            eligible_rule_count: result.eligible_rule_ids.len() as u16,
+            eligible_rule_pool_hash: result.eligible_rule_pool_hash,
+        });
+        Ok(())
+    }
+
+    pub fn request_rule_election_vrf(
+        ctx: Context<RequestRuleElectionVrf>,
+        randomness_account: Pubkey,
+    ) -> Result<()> {
+        let config = &ctx.accounts.global_config;
+        require!(!config.paused, IdealerError::ProtocolPaused);
+        require_election_cutoff_reached(config, &ctx.accounts.turn_state)?;
+        require!(
+            randomness_account != Pubkey::default(),
+            IdealerError::InvalidRandomnessAccount
+        );
+        require!(
+            ctx.accounts.turn_state.eligible_rule_pool_hash != [0; 32],
+            IdealerError::ElectionPoolNotLocked
+        );
+        require!(
+            ctx.accounts.turn_state.election_vrf_request == Pubkey::default(),
+            IdealerError::ElectionVrfAlreadyRequested
+        );
+
+        ctx.accounts.turn_state.election_vrf_request = randomness_account;
+
+        emit!(RuleElectionVrfRequested {
+            turn_id: ctx.accounts.turn_state.turn_id,
+            randomness_account,
+        });
+        Ok(())
+    }
+
+    pub fn settle_rule_election(
+        ctx: Context<SettleRuleElection>,
+        args: SettleRuleElectionArgs,
+    ) -> Result<()> {
+        let config = &ctx.accounts.global_config;
+        require!(!config.paused, IdealerError::ProtocolPaused);
+        require_election_cutoff_reached(config, &ctx.accounts.turn_state)?;
+        require!(
+            ctx.accounts.turn_state.election_vrf_request != Pubkey::default(),
+            IdealerError::ElectionVrfNotRequested
+        );
+        require!(
+            args.randomness_source == ctx.accounts.turn_state.election_vrf_request,
+            IdealerError::RandomnessSourceMismatch
+        );
+
+        let candidates =
+            read_election_candidates(ctx.remaining_accounts, ctx.accounts.turn_state.turn_id)?;
+        let result = run_rule_election(
+            &candidates,
+            &args.randomness,
+            ctx.accounts.turn_state.turn_id,
+            config.top_voted_finalist_count,
+            config.random_finalist_count,
+        )?;
+        require!(
+            result.eligible_rule_pool_hash == ctx.accounts.turn_state.eligible_rule_pool_hash,
+            IdealerError::ElectionPoolHashMismatch
+        );
+
+        let turn = &mut ctx.accounts.turn_state;
+        turn.top_voted_finalist_hash = result.top_voted_finalist_hash;
+        turn.random_finalist_hash = result.random_finalist_hash;
+        turn.finalist_set_hash = result.finalist_set_hash;
+        turn.election_vrf_fulfillment = args.randomness_source;
+        turn.elected_finalist_index = result.elected_finalist_index;
+
+        if let Some(active_rule_id) = result.active_rule_id {
+            turn.active_rule_id = active_rule_id;
+            turn.active_rule_hash = result.active_rule_hash;
+            turn.frozen_rule_artifact_hash = result.active_rule_artifact_hash;
+        } else {
+            turn.active_rule_id = 0;
+            turn.active_rule_hash = [0; 32];
+            turn.frozen_rule_artifact_hash = [0; 32];
+            turn.elected_finalist_index = 0;
+        }
+
+        emit!(RuleElectionSettled {
+            turn_id: turn.turn_id,
+            active_rule_id: turn.active_rule_id,
+            elected_finalist_index: turn.elected_finalist_index,
+            top_voted_finalist_hash: turn.top_voted_finalist_hash,
+            random_finalist_hash: turn.random_finalist_hash,
+            finalist_set_hash: turn.finalist_set_hash,
+            randomness_source: args.randomness_source,
+        });
+        Ok(())
+    }
+
     pub fn close_turn(ctx: Context<CloseTurn>) -> Result<()> {
         let clock = Clock::get()?;
         let config = &mut ctx.accounts.global_config;
@@ -430,7 +578,10 @@ pub mod idealer {
             IdealerError::TurnNotEnded
         );
         require!(
-            matches!(turn.draw_status, DrawStatus::NotRequested | DrawStatus::Failed),
+            matches!(
+                turn.draw_status,
+                DrawStatus::NotRequested | DrawStatus::Failed
+            ),
             IdealerError::DrawNotRequestable
         );
 
@@ -534,6 +685,52 @@ fn validate_game_token(game_token: &GameToken, turn_id: u64, player: Pubkey) -> 
     Ok(())
 }
 
+fn require_election_cutoff_reached(config: &GlobalConfig, turn: &TurnState) -> Result<()> {
+    validate_live_turn(config, turn)?;
+    let clock = Clock::get()?;
+    let duration = turn
+        .end_timestamp
+        .checked_sub(turn.start_timestamp)
+        .ok_or(IdealerError::ArithmeticOverflow)?;
+    let cutoff_elapsed = i128::from(duration)
+        .checked_mul(i128::from(config.rule_election_cutoff_bps))
+        .ok_or(IdealerError::ArithmeticOverflow)?
+        .checked_div(i128::from(BASIS_POINTS_DENOMINATOR))
+        .ok_or(IdealerError::ArithmeticOverflow)?;
+    let cutoff_timestamp = i128::from(turn.start_timestamp)
+        .checked_add(cutoff_elapsed)
+        .ok_or(IdealerError::ArithmeticOverflow)?;
+    require!(
+        i128::from(clock.unix_timestamp) >= cutoff_timestamp,
+        IdealerError::ElectionCutoffNotReached
+    );
+    Ok(())
+}
+
+fn read_election_candidates<'info>(
+    accounts: &[AccountInfo<'info>],
+    turn_id: u64,
+) -> Result<Vec<ElectionCandidate>> {
+    accounts
+        .iter()
+        .map(|account_info| {
+            let proposal = Account::<RuleProposal>::try_from(account_info)?;
+            require_eq!(proposal.turn_id, turn_id, IdealerError::InvalidTurnId);
+            Ok(ElectionCandidate {
+                rule_id: proposal.rule_id,
+                sanitized_text_hash: proposal.sanitized_text_hash,
+                compiled_artifact_hash: proposal.compiled_artifact_hash,
+                vote_count: proposal.vote_count,
+                report_count: proposal.report_count,
+                created_at: proposal.created_at,
+                is_eligible_state: proposal.state == RuleState::Eligible,
+                is_precompiled_valid: proposal.precompilation_status
+                    == PrecompilationStatus::Passed,
+            })
+        })
+        .collect()
+}
+
 fn collect_fee<'info>(
     payer: &Signer<'info>,
     treasury_vault: &Account<'info, TreasuryVault>,
@@ -607,12 +804,28 @@ pub struct ProposeRuleArgs {
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct PrecompileRuleArgs {
+    pub compiled_artifact_hash: [u8; 32],
+    pub passed: bool,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct SettleDrawArgs {
     /// The revealed verifiable randomness value (e.g. a Switchboard On-Demand
     /// randomness reveal). Stored on-chain for public reproducibility.
     pub randomness: [u8; 32],
     /// The randomness account that produced the value. Must match the account
     /// recorded by `request_draw`.
+    pub randomness_source: Pubkey,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct SettleRuleElectionArgs {
+    /// The fulfilled Switchboard election randomness. This value is used for
+    /// both the random finalists and final active-rule selection.
+    pub randomness: [u8; 32],
+    /// The randomness account that produced the value. Must match the account
+    /// recorded by `request_rule_election_vrf`.
     pub randomness_source: Pubkey,
 }
 
@@ -826,6 +1039,84 @@ pub struct VoteRule<'info> {
     )]
     pub rule_vote: Account<'info, RuleVote>,
     pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct PrecompileRule<'info> {
+    pub authority: Signer<'info>,
+    #[account(
+        seeds = [b"global_config"],
+        bump = global_config.bump,
+        has_one = authority @ IdealerError::Unauthorized
+    )]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        seeds = [b"turn".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
+        bump = turn_state.bump
+    )]
+    pub turn_state: Box<Account<'info, TurnState>>,
+    #[account(
+        mut,
+        seeds = [
+            b"rule".as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref(),
+            rule_proposal.rule_id.to_le_bytes().as_ref()
+        ],
+        bump = rule_proposal.bump,
+        constraint = rule_proposal.turn_id == turn_state.turn_id @ IdealerError::InvalidTurnId
+    )]
+    pub rule_proposal: Box<Account<'info, RuleProposal>>,
+}
+
+#[derive(Accounts)]
+pub struct LockRuleElectionPool<'info> {
+    pub authority: Signer<'info>,
+    #[account(
+        seeds = [b"global_config"],
+        bump = global_config.bump,
+        has_one = authority @ IdealerError::Unauthorized
+    )]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        mut,
+        seeds = [b"turn".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
+        bump = turn_state.bump
+    )]
+    pub turn_state: Box<Account<'info, TurnState>>,
+}
+
+#[derive(Accounts)]
+pub struct RequestRuleElectionVrf<'info> {
+    pub authority: Signer<'info>,
+    #[account(
+        seeds = [b"global_config"],
+        bump = global_config.bump,
+        has_one = authority @ IdealerError::Unauthorized
+    )]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        mut,
+        seeds = [b"turn".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
+        bump = turn_state.bump
+    )]
+    pub turn_state: Box<Account<'info, TurnState>>,
+}
+
+#[derive(Accounts)]
+pub struct SettleRuleElection<'info> {
+    pub authority: Signer<'info>,
+    #[account(
+        seeds = [b"global_config"],
+        bump = global_config.bump,
+        has_one = authority @ IdealerError::Unauthorized
+    )]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        mut,
+        seeds = [b"turn".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
+        bump = turn_state.bump
+    )]
+    pub turn_state: Box<Account<'info, TurnState>>,
 }
 
 #[derive(Accounts)]
@@ -1128,6 +1419,38 @@ pub struct RuleVoteCast {
 }
 
 #[event]
+pub struct RulePrecompiled {
+    pub turn_id: u64,
+    pub rule_id: u64,
+    pub passed: bool,
+    pub compiled_artifact_hash: [u8; 32],
+}
+
+#[event]
+pub struct RuleElectionPoolLocked {
+    pub turn_id: u64,
+    pub eligible_rule_count: u16,
+    pub eligible_rule_pool_hash: [u8; 32],
+}
+
+#[event]
+pub struct RuleElectionVrfRequested {
+    pub turn_id: u64,
+    pub randomness_account: Pubkey,
+}
+
+#[event]
+pub struct RuleElectionSettled {
+    pub turn_id: u64,
+    pub active_rule_id: u64,
+    pub elected_finalist_index: u8,
+    pub top_voted_finalist_hash: [u8; 32],
+    pub random_finalist_hash: [u8; 32],
+    pub finalist_set_hash: [u8; 32],
+    pub randomness_source: Pubkey,
+}
+
+#[event]
 pub struct TurnClosed {
     pub turn_id: u64,
     pub prize_pool_amount_lamports: u64,
@@ -1227,4 +1550,18 @@ pub enum IdealerError {
     RandomnessSourceMismatch,
     #[msg("The draw failure code must be non-zero.")]
     InvalidDrawFailureCode,
+    #[msg("The compiled rule artifact hash is invalid.")]
+    InvalidCompiledArtifact,
+    #[msg("The rule election cutoff has not been reached.")]
+    ElectionCutoffNotReached,
+    #[msg("The eligible election pool has not been locked.")]
+    ElectionPoolNotLocked,
+    #[msg("The rule election VRF has already been requested.")]
+    ElectionVrfAlreadyRequested,
+    #[msg("The rule election VRF has not been requested.")]
+    ElectionVrfNotRequested,
+    #[msg("The recomputed eligible pool hash does not match the locked hash.")]
+    ElectionPoolHashMismatch,
+    #[msg("The election candidate list includes a duplicate rule.")]
+    DuplicateElectionCandidate,
 }

@@ -1,7 +1,7 @@
 use anchor_lang::prelude::Pubkey;
 use idealer::domain::{
-    derive_draw_numbers, next_cycle_index, split_fee, validate_action_window, validate_config,
-    validate_guess, validate_rule, ConfigValidation,
+    derive_draw_numbers, next_cycle_index, run_rule_election, split_fee, validate_action_window,
+    validate_config, validate_guess, validate_rule, ConfigValidation, ElectionCandidate,
 };
 use solana_sha256_hasher::hash;
 
@@ -123,10 +123,7 @@ fn draw_derivation_matches_cross_language_vectors() {
     // These vectors are asserted identically in the worker's TypeScript mirror
     // (`apps/worker/src/draw.test.ts`) so the off-chain worker always publishes
     // exactly what the on-chain program derives.
-    assert_eq!(
-        derive_draw_numbers(&[7u8; 32], 1),
-        [20, 18, 99, 69, 90, 37]
-    );
+    assert_eq!(derive_draw_numbers(&[7u8; 32], 1), [20, 18, 99, 69, 90, 37]);
     assert_eq!(derive_draw_numbers(&[3u8; 32], 5), [65, 11, 13, 10, 69, 17]);
 }
 
@@ -165,4 +162,82 @@ fn invalid_config_and_vote_windows_are_rejected() {
     invalid_rate_limit.max_rule_proposals_per_wallet_per_turn = 0;
     assert!(validate_config(&invalid_rate_limit).is_err());
     assert!(validate_action_window(7_500, 0, 10_000, 7_500).is_err());
+}
+
+fn candidate(rule_id: u64, vote_count: u32, created_at: i64) -> ElectionCandidate {
+    ElectionCandidate {
+        rule_id,
+        sanitized_text_hash: [rule_id as u8; 32],
+        compiled_artifact_hash: [200_u8.saturating_sub(rule_id as u8); 32],
+        vote_count,
+        report_count: 0,
+        created_at,
+        is_eligible_state: true,
+        is_precompiled_valid: true,
+    }
+}
+
+#[test]
+fn rule_election_uses_top_votes_random_finalists_and_active_vrf_selection() {
+    let candidates = vec![
+        candidate(1, 20, 30),
+        candidate(2, 21, 10),
+        candidate(3, 21, 9),
+        candidate(4, 12, 4),
+        candidate(5, 11, 5),
+        candidate(6, 10, 6),
+        candidate(7, 9, 7),
+        candidate(8, 8, 8),
+        candidate(9, 7, 9),
+        candidate(10, 6, 10),
+        candidate(11, 5, 11),
+        candidate(12, 4, 12),
+    ];
+
+    let result = run_rule_election(&candidates, &[9; 32], 1, 3, 7).unwrap();
+
+    assert_eq!(result.top_voted_rule_ids, vec![3, 2, 1]);
+    assert_eq!(result.finalist_rule_ids.len(), 10);
+    assert_eq!(result.random_rule_ids.len(), 7);
+    assert!(result
+        .random_rule_ids
+        .iter()
+        .all(|rule_id| ![1, 2, 3].contains(rule_id)));
+    assert!(result.active_rule_id.is_some());
+    assert!(usize::from(result.elected_finalist_index) < result.finalist_rule_ids.len());
+    assert_ne!(result.eligible_rule_pool_hash, [0; 32]);
+    assert_ne!(result.finalist_set_hash, [0; 32]);
+}
+
+#[test]
+fn rule_election_uses_all_eligible_rules_when_pool_is_smaller_than_finalist_target() {
+    let candidates = vec![
+        candidate(1, 2, 1),
+        candidate(2, 1, 2),
+        ElectionCandidate {
+            report_count: 1,
+            ..candidate(3, 99, 3)
+        },
+        ElectionCandidate {
+            is_precompiled_valid: false,
+            ..candidate(4, 98, 4)
+        },
+    ];
+
+    let result = run_rule_election(&candidates, &[4; 32], 7, 3, 7).unwrap();
+
+    assert_eq!(result.eligible_rule_ids, vec![1, 2]);
+    assert_eq!(result.finalist_rule_ids, vec![1, 2]);
+    assert!(matches!(result.active_rule_id, Some(1 | 2)));
+}
+
+#[test]
+fn rule_election_handles_empty_and_duplicate_pools_fail_closed() {
+    let empty = run_rule_election(&[], &[5; 32], 1, 3, 7).unwrap();
+    assert!(empty.active_rule_id.is_none());
+    assert_eq!(empty.finalist_rule_ids, Vec::<u64>::new());
+
+    let duplicate = vec![candidate(1, 1, 1), candidate(1, 2, 2)];
+    assert!(run_rule_election(&duplicate, &[5; 32], 1, 3, 7).is_err());
+    assert!(run_rule_election(&[candidate(1, 1, 1)], &[0; 32], 1, 3, 7).is_err());
 }

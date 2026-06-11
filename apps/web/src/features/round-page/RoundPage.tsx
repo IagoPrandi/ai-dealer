@@ -11,10 +11,13 @@ import {
 } from "../../solana/idealerProgram";
 
 interface RoundRuleSummary {
+  compiledArtifactHash: string | null;
+  precompilationStatus: "failed" | "passed" | "pending";
   proposer: string;
   ruleId: number;
   ruleProposal: string;
   sanitizedText: string;
+  state: "eligible" | "invalidated" | "proposed";
   title: string;
   tokenCount: number;
   votes: number;
@@ -41,6 +44,26 @@ interface RoundSummary {
     stepIndex: number;
   };
   draw: DrawSummary | null;
+  election: {
+    activeRuleArtifactHash: string | null;
+    activeRuleHash: string | null;
+    activeRuleId: number | null;
+    electedFinalistIndex: number;
+    eligibleRuleIds: number[];
+    eligibleRulePoolHash: string;
+    finalistRuleIds: number[];
+    finalistSetHash: string;
+    randomFinalistHash: string;
+    randomRuleIds: number[];
+    randomnessAccount: string | null;
+    randomnessSource: string | null;
+    randomnessValue: string | null;
+    requestedAt: string | null;
+    settledAt: string | null;
+    status: "locked" | "original_only" | "requested" | "settled";
+    topVotedFinalistHash: string;
+    topVotedRuleIds: number[];
+  } | null;
   pool: {
     guessSol: number;
     guesses: number;
@@ -91,6 +114,10 @@ function formatTurnLabel(turnId: number) {
 
 function truncateAddress(value: string) {
   return `${value.slice(0, 5)}...${value.slice(-5)}`;
+}
+
+function truncateHash(value: string) {
+  return `${value.slice(0, 8)}...${value.slice(-8)}`;
 }
 
 function explorerLink(value: string) {
@@ -521,6 +548,101 @@ export function RoundPage({ turnId: rawTurnId }: { turnId: string }) {
             ) : null}
           </section>
 
+          <section className="voting-summary round-election">
+            <p className="eyebrow">Rule election</p>
+            {round.election === null ? (
+              <>
+                <h2>Election not locked yet</h2>
+                <p>
+                  Eligible rules are locked at the election cutoff after
+                  precompilation. The audit record appears here once the worker
+                  publishes it.
+                </p>
+              </>
+            ) : (
+              <>
+                <h2>
+                  {round.election.status === "settled"
+                    ? "Rule of the Hour settled"
+                    : round.election.status === "original_only"
+                      ? "Original-only turn"
+                      : round.election.status === "requested"
+                        ? "Election randomness requested"
+                        : "Eligible pool locked"}
+                </h2>
+                <p>
+                  {round.election.activeRuleId
+                    ? `Active alternative rule: #${round.election.activeRuleId}.`
+                    : "No active alternative rule was elected for this turn."}
+                </p>
+                <dl className="round-stat-grid">
+                  <div>
+                    <dt>Top finalists</dt>
+                    <dd>
+                      {round.election.topVotedRuleIds.length > 0
+                        ? round.election.topVotedRuleIds
+                            .map((ruleId) => `#${ruleId}`)
+                            .join(", ")
+                        : "None"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Random finalists</dt>
+                    <dd>
+                      {round.election.randomRuleIds.length > 0
+                        ? round.election.randomRuleIds
+                            .map((ruleId) => `#${ruleId}`)
+                            .join(", ")
+                        : "None"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Finalist set hash</dt>
+                    <dd>
+                      <code>{truncateHash(round.election.finalistSetHash)}</code>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Eligible pool hash</dt>
+                    <dd>
+                      <code>
+                        {truncateHash(round.election.eligibleRulePoolHash)}
+                      </code>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Randomness source</dt>
+                    <dd>
+                      {round.election.randomnessSource ? (
+                        <a
+                          href={explorerLink(round.election.randomnessSource)}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          {truncateAddress(round.election.randomnessSource)}
+                        </a>
+                      ) : round.election.randomnessAccount ? (
+                        <a
+                          href={explorerLink(round.election.randomnessAccount)}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          {truncateAddress(round.election.randomnessAccount)}
+                        </a>
+                      ) : (
+                        "Pending"
+                      )}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Elected finalist index</dt>
+                    <dd>{round.election.electedFinalistIndex}</dd>
+                  </div>
+                </dl>
+              </>
+            )}
+          </section>
+
           <section className="rule-voting-list" aria-label="Round rules">
             {round.rules.length === 0 ? (
               <article className="voting-rule-card">
@@ -550,6 +672,14 @@ export function RoundPage({ turnId: rawTurnId }: { turnId: string }) {
                     </div>
                     <p className="rule-original-text">"{rule.sanitizedText}"</p>
                     <dl className="rule-metadata">
+                      <div>
+                        <dt>Status</dt>
+                        <dd>{rule.state}</dd>
+                      </div>
+                      <div>
+                        <dt>Precompile</dt>
+                        <dd>{rule.precompilationStatus}</dd>
+                      </div>
                       <div>
                         <dt>Creator</dt>
                         <dd>{truncateAddress(rule.proposer)}</dd>

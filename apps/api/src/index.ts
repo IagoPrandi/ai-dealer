@@ -51,9 +51,12 @@ export interface RulePreflightResult {
 }
 
 export interface RuleProposalRecord extends RulePreflightResult {
+  compiledArtifactHash?: string | null;
   proposer: string;
+  precompilationStatus?: "failed" | "passed" | "pending";
   ruleProposal: string;
   signature: string;
+  state?: "eligible" | "invalidated" | "proposed";
   submittedAt: string;
   title: string;
   turnId: number;
@@ -84,6 +87,36 @@ export interface DrawRecord {
   turnId: number;
 }
 
+export interface RulePrecompilationRecord {
+  compiledArtifactHash: string | null;
+  ruleId: number;
+  status: "failed" | "passed";
+  turnId: number;
+  updatedAt: string;
+}
+
+export interface RuleElectionRecord {
+  activeRuleArtifactHash: string | null;
+  activeRuleHash: string | null;
+  activeRuleId: number | null;
+  electedFinalistIndex: number;
+  eligibleRuleIds: number[];
+  eligibleRulePoolHash: string;
+  finalistRuleIds: number[];
+  finalistSetHash: string;
+  randomFinalistHash: string;
+  randomRuleIds: number[];
+  randomnessAccount: string | null;
+  randomnessSource: string | null;
+  randomnessValue: string | null;
+  requestedAt: string | null;
+  settledAt: string | null;
+  status: "locked" | "original_only" | "requested" | "settled";
+  topVotedFinalistHash: string;
+  topVotedRuleIds: number[];
+  turnId: number;
+}
+
 const IDEALER_ACTIVE_TURN_ID = Number(
   process.env.IDEALER_ACTIVE_TURN_ID ?? "1",
 );
@@ -91,11 +124,14 @@ const guessReceipts = new Map<string, GuessReceiptRecord>();
 const ruleProposals = new Map<string, RuleProposalRecord>();
 const ruleVotes = new Map<string, RuleVoteRecord>();
 const draws = new Map<number, DrawRecord>();
+const elections = new Map<number, RuleElectionRecord>();
 const LOCAL_WEB_ORIGIN_PATTERN =
   /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 const CORS_PATHS = new Set([
   "/draws",
+  "/elections",
   "/guess-receipts",
+  "/rule-precompilations",
   "/rule-preflight",
   "/rule-proposals",
   "/rule-votes",
@@ -238,6 +274,17 @@ function isHashArray(value: unknown) {
   );
 }
 
+function isHexHash(value: unknown) {
+  return typeof value === "string" && /^[0-9a-f]{64}$/i.test(value);
+}
+
+function isPositiveIntegerArray(value: unknown) {
+  return (
+    Array.isArray(value) &&
+    value.every((item) => Number.isInteger(item) && Number(item) > 0)
+  );
+}
+
 function isValidRuleProposal(value: unknown): value is RuleProposalRecord {
   if (!value || typeof value !== "object") {
     return false;
@@ -286,6 +333,72 @@ function isValidRuleVote(value: unknown): value is RuleVoteRecord {
     isBase58Like(vote.signature) &&
     typeof vote.submittedAt === "string" &&
     !Number.isNaN(Date.parse(vote.submittedAt))
+  );
+}
+
+function isValidRulePrecompilation(
+  value: unknown,
+): value is RulePrecompilationRecord {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const record = value as Partial<RulePrecompilationRecord>;
+
+  return (
+    Number.isInteger(record.turnId) &&
+    Number(record.turnId) > 0 &&
+    Number.isInteger(record.ruleId) &&
+    Number(record.ruleId) > 0 &&
+    (record.status === "passed" || record.status === "failed") &&
+    (record.status === "passed"
+      ? isHexHash(record.compiledArtifactHash)
+      : record.compiledArtifactHash == null) &&
+    typeof record.updatedAt === "string" &&
+    !Number.isNaN(Date.parse(record.updatedAt))
+  );
+}
+
+function isValidRuleElection(value: unknown): value is RuleElectionRecord {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const record = value as Partial<RuleElectionRecord>;
+  const statusIsValid =
+    record.status === "locked" ||
+    record.status === "original_only" ||
+    record.status === "requested" ||
+    record.status === "settled";
+
+  return (
+    Number.isInteger(record.turnId) &&
+    Number(record.turnId) > 0 &&
+    statusIsValid &&
+    (record.activeRuleId === null ||
+      (Number.isInteger(record.activeRuleId) && Number(record.activeRuleId) > 0)) &&
+    Number.isInteger(record.electedFinalistIndex) &&
+    Number(record.electedFinalistIndex) >= 0 &&
+    isPositiveIntegerArray(record.eligibleRuleIds) &&
+    isPositiveIntegerArray(record.topVotedRuleIds) &&
+    isPositiveIntegerArray(record.randomRuleIds) &&
+    isPositiveIntegerArray(record.finalistRuleIds) &&
+    isHexHash(record.eligibleRulePoolHash) &&
+    isHexHash(record.topVotedFinalistHash) &&
+    isHexHash(record.randomFinalistHash) &&
+    isHexHash(record.finalistSetHash) &&
+    (record.activeRuleHash === null || isHexHash(record.activeRuleHash)) &&
+    (record.activeRuleArtifactHash === null ||
+      isHexHash(record.activeRuleArtifactHash)) &&
+    (record.randomnessAccount === null || isBase58Like(record.randomnessAccount)) &&
+    (record.randomnessSource === null || isBase58Like(record.randomnessSource)) &&
+    (record.randomnessValue === null || isHexHash(record.randomnessValue)) &&
+    (record.requestedAt === null ||
+      (typeof record.requestedAt === "string" &&
+        !Number.isNaN(Date.parse(record.requestedAt)))) &&
+    (record.settledAt === null ||
+      (typeof record.settledAt === "string" &&
+        !Number.isNaN(Date.parse(record.settledAt))))
   );
 }
 
@@ -372,6 +485,9 @@ export function getGuessReceipt(turnId: number, player: string) {
 export function saveRuleProposal(proposal: RuleProposalRecord) {
   const normalizedProposal = {
     ...proposal,
+    compiledArtifactHash: proposal.compiledArtifactHash ?? null,
+    precompilationStatus: proposal.precompilationStatus ?? "pending",
+    state: proposal.state ?? "proposed",
     title: getRuleTitle(proposal.sanitizedText),
   };
   ruleProposals.set(
@@ -402,6 +518,33 @@ export function listRuleVotes(turnId: number) {
   }, {});
 
   return { counts, votes };
+}
+
+export function saveRulePrecompilation(record: RulePrecompilationRecord) {
+  const proposal = ruleProposals.get(
+    getRuleProposalKey(record.turnId, record.ruleId),
+  );
+  if (!proposal) {
+    throw new Error("RULE_PROPOSAL_NOT_FOUND");
+  }
+
+  const updated: RuleProposalRecord = {
+    ...proposal,
+    compiledArtifactHash: record.compiledArtifactHash,
+    precompilationStatus: record.status,
+    state: record.status === "passed" ? "eligible" : "invalidated",
+  };
+  ruleProposals.set(getRuleProposalKey(record.turnId, record.ruleId), updated);
+  return updated;
+}
+
+export function saveRuleElection(election: RuleElectionRecord) {
+  elections.set(election.turnId, election);
+  return election;
+}
+
+export function getRuleElection(turnId: number) {
+  return elections.get(turnId) ?? null;
 }
 
 function isUniqueDrawResult(value: unknown): value is number[] {
@@ -481,10 +624,13 @@ export function getDraw(turnId: number) {
 }
 
 export interface RoundRuleSummary {
+  compiledArtifactHash: string | null;
+  precompilationStatus: "failed" | "passed" | "pending";
   proposer: string;
   ruleId: number;
   ruleProposal: string;
   sanitizedText: string;
+  state: "eligible" | "invalidated" | "proposed";
   title: string;
   tokenCount: number;
   votes: number;
@@ -498,6 +644,7 @@ export interface RoundSummary {
     stepIndex: number;
   };
   draw: DrawRecord | null;
+  election: RuleElectionRecord | null;
   pool: {
     guessSol: number;
     guesses: number;
@@ -554,6 +701,7 @@ export function getRoundSummary(
       stepIndex,
     },
     draw: getDraw(turnId),
+    election: getRuleElection(turnId),
     pool: {
       guessSol: roundSol(guessSol),
       guesses,
@@ -562,10 +710,13 @@ export function getRoundSummary(
       proposals: proposals.length,
     },
     rules: proposals.map((proposal) => ({
+      compiledArtifactHash: proposal.compiledArtifactHash ?? null,
+      precompilationStatus: proposal.precompilationStatus ?? "pending",
       proposer: proposal.proposer,
       ruleId: proposal.ruleId,
       ruleProposal: proposal.ruleProposal,
       sanitizedText: proposal.sanitizedText,
+      state: proposal.state ?? "proposed",
       title: proposal.title,
       tokenCount: proposal.tokenCount,
       votes: counts[String(proposal.ruleId)] ?? 0,
@@ -779,6 +930,38 @@ if (isMainModule()) {
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/rule-precompilations") {
+      void readJsonBody(request)
+        .then((body) => {
+          if (!isValidRulePrecompilation(body)) {
+            sendJson(request, response, 400, {
+              error: "invalid_rule_precompilation",
+            });
+            return;
+          }
+
+          try {
+            sendJson(request, response, 201, {
+              proposal: saveRulePrecompilation(body),
+            });
+          } catch (error) {
+            const code =
+              error instanceof Error ? error.message : "PRECOMPILATION_FAILED";
+            sendJson(request, response, 404, {
+              error: code,
+              message: "Rule proposal not found for precompilation update.",
+            });
+          }
+        })
+        .catch((error: unknown) => {
+          sendJson(request, response, 400, {
+            error: "invalid_json",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/rule-votes") {
       void readJsonBody(request)
         .then((body) => {
@@ -854,6 +1037,47 @@ if (isMainModule()) {
         response,
         draw ? 200 : 404,
         draw ? { draw } : { error: "not_found" },
+      );
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/elections") {
+      void readJsonBody(request)
+        .then((body) => {
+          if (!isValidRuleElection(body)) {
+            sendJson(request, response, 400, {
+              error: "invalid_rule_election",
+            });
+            return;
+          }
+
+          sendJson(request, response, 201, {
+            election: saveRuleElection(body),
+          });
+        })
+        .catch((error: unknown) => {
+          sendJson(request, response, 400, {
+            error: "invalid_json",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname.startsWith("/elections/")) {
+      const turnId = Number(url.pathname.slice("/elections/".length));
+
+      if (!Number.isInteger(turnId) || turnId <= 0) {
+        sendJson(request, response, 400, { error: "invalid_turn_id" });
+        return;
+      }
+
+      const election = getRuleElection(turnId);
+      sendJson(
+        request,
+        response,
+        election ? 200 : 404,
+        election ? { election } : { error: "not_found" },
       );
       return;
     }

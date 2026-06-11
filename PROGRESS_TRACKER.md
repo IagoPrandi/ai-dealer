@@ -36,6 +36,7 @@ Opened before starting `M0.1`:
 | M2.5      | devnet Voting                                 | Completed | Confirmed 2026-06-08 | On-chain `RuleVote` submission flow, duplicate blocking, indexed vote projection, and voting UI state implemented and verified; user confirmed proceeding to M2.6.                  |
 | M2.6      | Public Round Pages                            | Completed | Confirmed 2026-06-08 | Public `/round/[turnId]` page plus `GET /rounds/:turnId` summary endpoint implemented and verified: turn id, cycle step/duration, prize pool, rules + vote counts, connected-user guess, draw placeholder, audit links, and shareable URL. User confirmed proceeding to the next milestone. |
 | M3.1      | VRF Draw Integration                          | Completed | Confirmed 2026-06-09 | Draw flow implemented and verified across program (native + SBF instruction tests), backend, worker, and frontend; SBF artifact built and the program upgraded on devnet (`6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4`, data length 448024 bytes, slot 468217908). User funded the deployer to authorize the upgrade. |
+| M3.2      | Rule Election                                 | Completed | Confirmed 2026-06-11 | Deterministic top-voted + fulfilled-VRF-random rule election implemented across program/domain, worker, API projection, and public round audit UI. PRD checklist and approval criteria ticked after the user's explicit instruction to verify/do M3.2 and mark it done. |
 
 ## M0.1 Work Log
 
@@ -1048,3 +1049,57 @@ Data Length: 448024 (0x6d618) bytes
 Upgrade transaction signature: `2i5CpPxzQgruXMwiLShdhdDFr8ExeDiBGYbWHhKAUDHLoYNWLeXDArguDdechW87bzgLnXch4BEAWDwiWEQ3L7Nx`.
 
 Note: a live end-to-end devnet draw (open → reach turn end → settle) requires the turn-automation worker loop scheduled in a later milestone; the deployed program, on-chain proof storage, backend, and UI rendering are all in place and exercised by the SBF instruction suite against the deployed artifact.
+## M3.2 Work Log
+
+### 2026-06-11
+
+- Reopened `PRD.md`, `AGENTS.md`, and `.claude/skills` before verifying and implementing `M3.2`, as required.
+- Opened the relevant local skills before code changes: `.claude/skills/solana-dev/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/SKILL.md`, `.claude/skills/solana-dev/ext/sendai/skills/switchboard/SKILL.md`, `.claude/skills/security-threat-checklist/SKILL.md`, `.claude/skills/best-practices/SKILL.md`, `.claude/skills/best-practices/references/agent-principles.md`, `.claude/skills/best-practices/references/code-quality.md`, `.claude/skills/best-practices/references/web3-contracts.md`, and `.claude/skills/best-practices/references/testing.md`.
+- Verified `M3.2` was not already complete: `PRD.md` had all M3.2 checklist and approval items unticked, `PROGRESS_TRACKER.md` had no M3.2 status row, and code search found only election config/state placeholders plus proposal/vote basics.
+- Program/domain (`contracts/solana/programs/idealer`): added deterministic election logic with eligible filtering, duplicate-candidate rejection, deterministic vote tie-breaking, eligible-pool/top/random/finalist hashes, rejection-sampled random finalist selection, and rejection-sampled active finalist selection. Added `precompile_rule`, `lock_rule_election_pool`, `request_rule_election_vrf`, and `settle_rule_election` instructions plus events/errors.
+- Worker (`apps/worker`): added `election.ts` with the matching deterministic planner/cycle runner and tests for cutoff state transitions, top-voted finalists, fulfilled-randomness random finalists, duplicate rejection, and settlement publishing.
+- API (`apps/api`): added precompilation projection support, election audit records, `/rule-precompilations`, `/elections`, `GET /elections/:turnId`, and included `election` plus rule precompilation state in `GET /rounds/:turnId`.
+- Frontend (`apps/web`): added public round election audit rendering for top finalists, random finalists, active rule, finalist hashes, eligible pool hash, elected finalist index, and VRF source/reference.
+- Updated `PRD.md` M3.2 checklist and approval criteria after the user's explicit instruction to verify/do M3.2 and mark it done.
+
+## M3.2 Validation Results
+
+| Requirement | Result |
+| --- | --- |
+| Rule proposal pool per turn | Existing per-turn `RuleProposal` PDA/API projection retained and surfaced in round summaries. |
+| Background precompilation cache | Added program/API precompilation state (`pending`, `passed`, `failed`) and compiled artifact hash projection. |
+| Eligible pool | Election filters to eligible state, passed precompilation, non-zero artifact hash, zero reports, and unique rule ids. |
+| Election cutoff | Program and worker enforce cutoff before pool lock/request/settlement. |
+| Eligible pool hash | Program locks `eligible_rule_pool_hash`; settlement recomputes and rejects mismatches. |
+| Top + random finalists | Deterministic 3 top-voted tie-break order plus 7 fulfilled-randomness random finalists when the eligible pool exceeds 10. |
+| Fulfilled VRF randomness only | Worker/program settlement derive random finalists and active rule from the fulfillment randomness value, not request entropy. |
+| No modulo-only selection | Random finalists and active finalist use rejection sampling over u64 chunks. |
+| Ties, empty pools, invalid pools | Tests cover deterministic ties, empty original-only elections, invalid filtered candidates, and duplicate candidate rejection. |
+| Audit visibility | API stores election records and public round UI renders finalist ids, hashes, active rule, elected index, and randomness references. |
+
+## M3.2 Verification Commands
+
+Passed:
+
+- `pnpm --filter @idealer/worker test` (17/17)
+- `pnpm --filter @idealer/worker typecheck`
+- `pnpm --filter @idealer/worker lint`
+- `pnpm --filter @idealer/worker build`
+- `pnpm --filter @idealer/api typecheck`
+- `pnpm --filter @idealer/api lint`
+- `pnpm --filter @idealer/api build`
+- `pnpm --filter @idealer/web typecheck`
+- `pnpm --filter @idealer/web lint`
+- `pnpm --filter @idealer/web build`
+- `pnpm --filter @idealer/web test:e2e -- e2e/public-round.spec.ts` (3/3)
+- `cargo fmt --manifest-path contracts/solana/Cargo.toml --check`
+
+Rust/Solana environment blocker:
+
+- Raw `cargo test --manifest-path contracts/solana/programs/idealer/Cargo.toml --test core` could not compile on this Windows shell because MSVC `link.exe` is not installed.
+- The documented Windows-safe `pnpm --filter @idealer/solana-programs typecheck` could not start because Docker Desktop is not running (`failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine`).
+- The new ignored SBF instruction test for the election flow is present in `contracts/solana/programs/idealer/tests/instructions.rs` and should be run with the documented container/SBF path once Docker is available.
+
+## M3.2 Confirmation Gate
+
+`M3.2` was implemented and marked complete on 2026-06-11 after the user's explicit instruction to verify it, complete it if necessary, and mark it as done. The remaining Rust/SBF verification is environment-blocked on this machine, not skipped as a fallback.

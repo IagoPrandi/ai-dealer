@@ -3,6 +3,34 @@ use solana_sha256_hasher::hash;
 
 use crate::{IdealerError, MAX_RULE_TEXT_BYTES, TURN_DURATION_CYCLE_LEN};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ElectionCandidate {
+    pub rule_id: u64,
+    pub sanitized_text_hash: [u8; 32],
+    pub compiled_artifact_hash: [u8; 32],
+    pub vote_count: u32,
+    pub report_count: u32,
+    pub created_at: i64,
+    pub is_eligible_state: bool,
+    pub is_precompiled_valid: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ElectionResult {
+    pub eligible_rule_ids: Vec<u64>,
+    pub top_voted_rule_ids: Vec<u64>,
+    pub random_rule_ids: Vec<u64>,
+    pub finalist_rule_ids: Vec<u64>,
+    pub active_rule_id: Option<u64>,
+    pub active_rule_hash: [u8; 32],
+    pub active_rule_artifact_hash: [u8; 32],
+    pub elected_finalist_index: u8,
+    pub eligible_rule_pool_hash: [u8; 32],
+    pub top_voted_finalist_hash: [u8; 32],
+    pub random_finalist_hash: [u8; 32],
+    pub finalist_set_hash: [u8; 32],
+}
+
 pub struct ConfigValidation<'a> {
     pub treasury_fee_bps: u16,
     pub turn_duration_cycle: &'a [u32; TURN_DURATION_CYCLE_LEN],
@@ -136,6 +164,226 @@ pub fn next_cycle_index(current: u8) -> Result<u8> {
         .checked_add(1)
         .ok_or(IdealerError::ArithmeticOverflow)?;
     Ok(next % TURN_DURATION_CYCLE_LEN as u8)
+}
+
+pub fn run_rule_election(
+    candidates: &[ElectionCandidate],
+    randomness: &[u8; 32],
+    turn_id: u64,
+    top_voted_count: u8,
+    random_count: u8,
+) -> Result<ElectionResult> {
+    require!(*randomness != [0; 32], IdealerError::InvalidRandomnessValue);
+
+    let mut eligible: Vec<ElectionCandidate> = candidates
+        .iter()
+        .copied()
+        .filter(is_election_candidate_eligible)
+        .collect();
+    for left in 0..eligible.len() {
+        for right in (left + 1)..eligible.len() {
+            require!(
+                eligible[left].rule_id != eligible[right].rule_id,
+                IdealerError::DuplicateElectionCandidate
+            );
+        }
+    }
+
+    eligible.sort_by(|left, right| {
+        right
+            .vote_count
+            .cmp(&left.vote_count)
+            .then_with(|| left.created_at.cmp(&right.created_at))
+            .then_with(|| left.rule_id.cmp(&right.rule_id))
+    });
+
+    let eligible_rule_ids = eligible.iter().map(|candidate| candidate.rule_id).collect();
+    let eligible_rule_pool_hash = hash_candidates(b"eligible_pool_v1", &eligible);
+
+    let finalist_target = usize::from(
+        top_voted_count
+            .checked_add(random_count)
+            .ok_or(IdealerError::ArithmeticOverflow)?,
+    );
+    require!(finalist_target > 0, IdealerError::InvalidFinalistCounts);
+
+    if eligible.is_empty() {
+        return Ok(ElectionResult {
+            eligible_rule_ids,
+            top_voted_rule_ids: Vec::new(),
+            random_rule_ids: Vec::new(),
+            finalist_rule_ids: Vec::new(),
+            active_rule_id: None,
+            active_rule_hash: [0; 32],
+            active_rule_artifact_hash: [0; 32],
+            elected_finalist_index: 0,
+            eligible_rule_pool_hash,
+            top_voted_finalist_hash: hash_rule_ids(b"top_finalists_v1", &[]),
+            random_finalist_hash: hash_rule_ids(b"random_finalists_v1", &[]),
+            finalist_set_hash: hash_rule_ids(b"finalist_set_v1", &[]),
+        });
+    }
+
+    let top_count = usize::from(top_voted_count).min(eligible.len());
+    let mut finalists = eligible[..top_count].to_vec();
+    let top_voted_rule_ids: Vec<u64> = finalists
+        .iter()
+        .map(|candidate| candidate.rule_id)
+        .collect();
+
+    let mut random_rule_ids = Vec::new();
+    if eligible.len() > finalist_target {
+        let needed_random =
+            usize::from(random_count).min(finalist_target.saturating_sub(top_count));
+        let random_indices = derive_unique_indices(
+            randomness,
+            turn_id,
+            b"random_finalists_v1",
+            top_count,
+            eligible.len(),
+            needed_random,
+        )?;
+        for index in random_indices {
+            finalists.push(eligible[index]);
+            random_rule_ids.push(eligible[index].rule_id);
+        }
+    } else {
+        for candidate in eligible.iter().skip(top_count) {
+            finalists.push(*candidate);
+            random_rule_ids.push(candidate.rule_id);
+        }
+    }
+
+    let finalist_rule_ids: Vec<u64> = finalists
+        .iter()
+        .map(|candidate| candidate.rule_id)
+        .collect();
+    let top_voted_finalist_hash = hash_rule_ids(b"top_finalists_v1", &top_voted_rule_ids);
+    let random_finalist_hash = hash_rule_ids(b"random_finalists_v1", &random_rule_ids);
+    let finalist_set_hash = hash_rule_ids(b"finalist_set_v1", &finalist_rule_ids);
+
+    let elected_index = derive_index(randomness, turn_id, b"active_finalist_v1", finalists.len())?;
+    let active = finalists[elected_index];
+
+    Ok(ElectionResult {
+        eligible_rule_ids,
+        top_voted_rule_ids,
+        random_rule_ids,
+        finalist_rule_ids,
+        active_rule_id: Some(active.rule_id),
+        active_rule_hash: active.sanitized_text_hash,
+        active_rule_artifact_hash: active.compiled_artifact_hash,
+        elected_finalist_index: elected_index as u8,
+        eligible_rule_pool_hash,
+        top_voted_finalist_hash,
+        random_finalist_hash,
+        finalist_set_hash,
+    })
+}
+
+fn is_election_candidate_eligible(candidate: &ElectionCandidate) -> bool {
+    candidate.is_eligible_state
+        && candidate.is_precompiled_valid
+        && candidate.compiled_artifact_hash != [0; 32]
+        && candidate.report_count == 0
+}
+
+fn hash_candidates(domain: &[u8], candidates: &[ElectionCandidate]) -> [u8; 32] {
+    let mut input = Vec::with_capacity(domain.len() + candidates.len() * 84);
+    input.extend_from_slice(domain);
+    input.extend_from_slice(&(candidates.len() as u64).to_le_bytes());
+    for candidate in candidates {
+        input.extend_from_slice(&candidate.rule_id.to_le_bytes());
+        input.extend_from_slice(&candidate.vote_count.to_le_bytes());
+        input.extend_from_slice(&candidate.created_at.to_le_bytes());
+        input.extend_from_slice(&candidate.sanitized_text_hash);
+        input.extend_from_slice(&candidate.compiled_artifact_hash);
+    }
+    hash(&input).to_bytes()
+}
+
+fn hash_rule_ids(domain: &[u8], rule_ids: &[u64]) -> [u8; 32] {
+    let mut input = Vec::with_capacity(domain.len() + 8 + rule_ids.len() * 8);
+    input.extend_from_slice(domain);
+    input.extend_from_slice(&(rule_ids.len() as u64).to_le_bytes());
+    for rule_id in rule_ids {
+        input.extend_from_slice(&rule_id.to_le_bytes());
+    }
+    hash(&input).to_bytes()
+}
+
+fn derive_unique_indices(
+    randomness: &[u8; 32],
+    turn_id: u64,
+    domain: &[u8],
+    start_index: usize,
+    upper_bound: usize,
+    count: usize,
+) -> Result<Vec<usize>> {
+    let mut selected = Vec::with_capacity(count);
+    let mut seen = vec![false; upper_bound];
+    for index in 0..start_index.min(upper_bound) {
+        seen[index] = true;
+    }
+
+    let mut counter = 0u64;
+    while selected.len() < count {
+        let index = derive_index_with_counter(randomness, turn_id, domain, upper_bound, counter)?;
+        if !seen[index] {
+            seen[index] = true;
+            selected.push(index);
+        }
+        counter = counter
+            .checked_add(1)
+            .ok_or(IdealerError::ArithmeticOverflow)?;
+    }
+
+    Ok(selected)
+}
+
+fn derive_index(
+    randomness: &[u8; 32],
+    turn_id: u64,
+    domain: &[u8],
+    upper_bound: usize,
+) -> Result<usize> {
+    derive_index_with_counter(randomness, turn_id, domain, upper_bound, 0)
+}
+
+fn derive_index_with_counter(
+    randomness: &[u8; 32],
+    turn_id: u64,
+    domain: &[u8],
+    upper_bound: usize,
+    mut counter: u64,
+) -> Result<usize> {
+    require!(upper_bound > 0, IdealerError::InvalidFinalistCounts);
+    let upper_bound_u64 =
+        u64::try_from(upper_bound).map_err(|_| IdealerError::ArithmeticOverflow)?;
+    let rejection_limit = u64::MAX - (u64::MAX % upper_bound_u64);
+
+    loop {
+        let mut input = Vec::with_capacity(32 + 8 + 8 + domain.len());
+        input.extend_from_slice(randomness);
+        input.extend_from_slice(&turn_id.to_le_bytes());
+        input.extend_from_slice(&counter.to_le_bytes());
+        input.extend_from_slice(domain);
+        let digest = hash(&input).to_bytes();
+
+        for chunk in digest.chunks_exact(8) {
+            let mut bytes = [0u8; 8];
+            bytes.copy_from_slice(chunk);
+            let value = u64::from_le_bytes(bytes);
+            if value < rejection_limit {
+                return usize::try_from(value % upper_bound_u64)
+                    .map_err(|_| IdealerError::ArithmeticOverflow);
+            }
+        }
+
+        counter = counter
+            .checked_add(1)
+            .ok_or(IdealerError::ArithmeticOverflow)?;
+    }
 }
 
 /// Deterministically derive the 6 unique draw numbers (1..=100) from a
