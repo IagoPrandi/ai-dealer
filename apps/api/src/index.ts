@@ -7,6 +7,14 @@ import {
   RULE_MAX_TOKENS,
   TURN_DURATION_CYCLE_HOURS,
 } from "@idealer/constants";
+import {
+  validateAndPrecompileRule,
+  type CompilerConfidenceBreakdown,
+  type RuleConfidenceAction,
+  type RuleValidationDecision,
+  type RuleValidationReasonCode,
+  type RuleValidationTestResult,
+} from "@idealer/rule-compiler";
 import pg from "pg";
 import { createClient } from "redis";
 
@@ -54,6 +62,7 @@ export interface RuleProposalRecord extends RulePreflightResult {
   compiledArtifactHash?: string | null;
   proposer: string;
   precompilationStatus?: "failed" | "passed" | "pending";
+  validation?: RuleValidationSummary | null;
   ruleProposal: string;
   signature: string;
   state?: "eligible" | "invalidated" | "proposed";
@@ -95,6 +104,27 @@ export interface RulePrecompilationRecord {
   updatedAt: string;
 }
 
+export interface RuleValidationSummary {
+  confidenceAction: RuleConfidenceAction;
+  decision: RuleValidationDecision;
+  finalConfidence: number;
+  model: string;
+  reasonCodes: RuleValidationReasonCode[];
+  reasonSummary: string;
+  validatedAt: string;
+  validationLogId: string;
+}
+
+export interface RuleValidationRecord extends RuleValidationSummary {
+  compiledArtifactHash: string | null;
+  confidence: CompilerConfidenceBreakdown;
+  evaluatedTestCases: RuleValidationTestResult[];
+  normalizedText: string;
+  provider: string;
+  ruleId: number;
+  turnId: number;
+}
+
 export interface RuleElectionRecord {
   activeRuleArtifactHash: string | null;
   activeRuleHash: string | null;
@@ -125,6 +155,7 @@ const ruleProposals = new Map<string, RuleProposalRecord>();
 const ruleVotes = new Map<string, RuleVoteRecord>();
 const draws = new Map<number, DrawRecord>();
 const elections = new Map<number, RuleElectionRecord>();
+const ruleValidations = new Map<string, RuleValidationRecord>();
 const LOCAL_WEB_ORIGIN_PATTERN =
   /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 const CORS_PATHS = new Set([
@@ -134,6 +165,8 @@ const CORS_PATHS = new Set([
   "/rule-precompilations",
   "/rule-preflight",
   "/rule-proposals",
+  "/rule-validations",
+  "/rule-validations/run",
   "/rule-votes",
 ]);
 
@@ -359,6 +392,86 @@ function isValidRulePrecompilation(
   );
 }
 
+function isValidConfidenceBreakdown(value: unknown): value is CompilerConfidenceBreakdown {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const confidence = value as Partial<Record<keyof CompilerConfidenceBreakdown, unknown>>;
+  return [
+    confidence.compiler_confidence,
+    confidence.final_confidence,
+    confidence.model_confidence,
+    confidence.reviewer_agreement_score,
+    confidence.rule_clarity_score,
+    confidence.runtime_safety_score,
+    confidence.schema_score,
+    confidence.test_coverage_score,
+  ].every((score) => typeof score === "number" && score >= 0 && score <= 1);
+}
+
+function isValidConfidenceAction(value: unknown): value is RuleConfidenceAction {
+  return value === "ACCEPT" || value === "ESCALATE" || value === "REJECT";
+}
+
+function isValidRuleValidation(value: unknown): value is RuleValidationRecord {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const record = value as Partial<RuleValidationRecord>;
+  const validDecision = record.decision === "VALID" || record.decision === "INVALID";
+
+  return (
+    Number.isInteger(record.turnId) &&
+    Number(record.turnId) > 0 &&
+    Number.isInteger(record.ruleId) &&
+    Number(record.ruleId) > 0 &&
+    validDecision &&
+    isValidConfidenceAction(record.confidenceAction) &&
+    typeof record.validationLogId === "string" &&
+    isHexHash(record.validationLogId) &&
+    typeof record.normalizedText === "string" &&
+    typeof record.reasonSummary === "string" &&
+    Array.isArray(record.reasonCodes) &&
+    record.reasonCodes.every((reason) => typeof reason === "string") &&
+    typeof record.provider === "string" &&
+    typeof record.model === "string" &&
+    typeof record.validatedAt === "string" &&
+    !Number.isNaN(Date.parse(record.validatedAt)) &&
+    typeof record.finalConfidence === "number" &&
+    record.finalConfidence >= 0 &&
+    record.finalConfidence <= 1 &&
+    isValidConfidenceBreakdown(record.confidence) &&
+    (record.compiledArtifactHash === null || isHexHash(record.compiledArtifactHash)) &&
+    Array.isArray(record.evaluatedTestCases)
+  );
+}
+
+function isValidRuleValidationRunRequest(
+  value: unknown,
+): value is { model?: string; provider?: string; ruleId: number; turnId: number } {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const request = value as {
+    model?: unknown;
+    provider?: unknown;
+    ruleId?: unknown;
+    turnId?: unknown;
+  };
+
+  return (
+    Number.isInteger(request.turnId) &&
+    Number(request.turnId) > 0 &&
+    Number.isInteger(request.ruleId) &&
+    Number(request.ruleId) > 0 &&
+    (request.provider === undefined || typeof request.provider === "string") &&
+    (request.model === undefined || typeof request.model === "string")
+  );
+}
+
 function isValidRuleElection(value: unknown): value is RuleElectionRecord {
   if (!value || typeof value !== "object") {
     return false;
@@ -538,6 +651,88 @@ export function saveRulePrecompilation(record: RulePrecompilationRecord) {
   return updated;
 }
 
+function getRuleValidationKey(turnId: number, ruleId: number) {
+  return `${turnId}:${ruleId}`;
+}
+
+export function saveRuleValidation(record: RuleValidationRecord) {
+  const proposal = ruleProposals.get(
+    getRuleProposalKey(record.turnId, record.ruleId),
+  );
+  if (!proposal) {
+    throw new Error("RULE_PROPOSAL_NOT_FOUND");
+  }
+
+  const validationSummary: RuleValidationSummary = {
+    confidenceAction: record.confidenceAction,
+    decision: record.decision,
+    finalConfidence: record.finalConfidence,
+    model: record.model,
+    reasonCodes: record.reasonCodes,
+    reasonSummary: record.reasonSummary,
+    validatedAt: record.validatedAt,
+    validationLogId: record.validationLogId,
+  };
+  const updated: RuleProposalRecord = {
+    ...proposal,
+    compiledArtifactHash: record.compiledArtifactHash,
+    precompilationStatus: record.decision === "VALID" ? "passed" : "failed",
+    state: record.decision === "VALID" ? "eligible" : "invalidated",
+    validation: validationSummary,
+  };
+
+  ruleValidations.set(getRuleValidationKey(record.turnId, record.ruleId), record);
+  ruleProposals.set(getRuleProposalKey(record.turnId, record.ruleId), updated);
+  return record;
+}
+
+export function getRuleValidation(turnId: number, ruleId: number) {
+  return ruleValidations.get(getRuleValidationKey(turnId, ruleId)) ?? null;
+}
+
+export function runRuleValidationForProposal(args: {
+  model?: string;
+  provider?: string;
+  ruleId: number;
+  turnId: number;
+}) {
+  const proposal = ruleProposals.get(getRuleProposalKey(args.turnId, args.ruleId));
+  if (!proposal) {
+    throw new Error("RULE_PROPOSAL_NOT_FOUND");
+  }
+
+  const request = {
+    prompt: proposal.sanitizedText,
+    ruleId: proposal.ruleId,
+    tokenCount: proposal.tokenCount,
+  };
+  const result = validateAndPrecompileRule({
+    ...request,
+    ...(args.model ? { model: args.model } : {}),
+    ...(args.provider ? { provider: args.provider } : {}),
+  });
+  const record: RuleValidationRecord = {
+    compiledArtifactHash: result.artifactHash,
+    confidence: result.log.confidence,
+    confidenceAction: result.log.confidenceAction,
+    decision: result.decision,
+    evaluatedTestCases: result.log.evaluatedTestCases,
+    finalConfidence: result.log.confidence.final_confidence,
+    model: result.log.model,
+    normalizedText: result.log.normalizedText,
+    provider: result.log.provider,
+    reasonCodes: result.log.reasonCodes,
+    reasonSummary: result.log.reasonSummary,
+    ruleId: proposal.ruleId,
+    turnId: proposal.turnId,
+    validatedAt: result.log.timestamp,
+    validationLogId: result.log.validationLogId,
+  };
+
+  saveRuleValidation(record);
+  return record;
+}
+
 export function saveRuleElection(election: RuleElectionRecord) {
   elections.set(election.turnId, election);
   return election;
@@ -633,6 +828,7 @@ export interface RoundRuleSummary {
   state: "eligible" | "invalidated" | "proposed";
   title: string;
   tokenCount: number;
+  validation: RuleValidationSummary | null;
   votes: number;
 }
 
@@ -719,6 +915,7 @@ export function getRoundSummary(
       state: proposal.state ?? "proposed",
       title: proposal.title,
       tokenCount: proposal.tokenCount,
+      validation: proposal.validation ?? null,
       votes: counts[String(proposal.ruleId)] ?? 0,
     })),
     status,
@@ -959,6 +1156,89 @@ if (isMainModule()) {
             message: error instanceof Error ? error.message : String(error),
           });
         });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/rule-validations/run") {
+      void readJsonBody(request)
+        .then((body) => {
+          if (!isValidRuleValidationRunRequest(body)) {
+            sendJson(request, response, 400, {
+              error: "invalid_rule_validation_request",
+            });
+            return;
+          }
+
+          try {
+            const validation = runRuleValidationForProposal(body);
+            sendJson(request, response, 201, { validation });
+          } catch (error) {
+            const code =
+              error instanceof Error ? error.message : "RULE_VALIDATION_FAILED";
+            sendJson(request, response, 404, {
+              error: code,
+              message: "Rule proposal not found for validation.",
+            });
+          }
+        })
+        .catch((error: unknown) => {
+          sendJson(request, response, 400, {
+            error: "invalid_json",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/rule-validations") {
+      void readJsonBody(request)
+        .then((body) => {
+          if (!isValidRuleValidation(body)) {
+            sendJson(request, response, 400, {
+              error: "invalid_rule_validation",
+            });
+            return;
+          }
+
+          try {
+            sendJson(request, response, 201, {
+              validation: saveRuleValidation(body),
+            });
+          } catch (error) {
+            const code =
+              error instanceof Error ? error.message : "RULE_VALIDATION_FAILED";
+            sendJson(request, response, 404, {
+              error: code,
+              message: "Rule proposal not found for validation.",
+            });
+          }
+        })
+        .catch((error: unknown) => {
+          sendJson(request, response, 400, {
+            error: "invalid_json",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname.startsWith("/rule-validations/")) {
+      const parts = url.pathname.slice("/rule-validations/".length).split("/");
+      const turnId = Number(parts[0]);
+      const ruleId = Number(parts[1]);
+
+      if (!Number.isInteger(turnId) || turnId <= 0 || !Number.isInteger(ruleId) || ruleId <= 0) {
+        sendJson(request, response, 400, { error: "invalid_rule_validation_id" });
+        return;
+      }
+
+      const validation = getRuleValidation(turnId, ruleId);
+      sendJson(
+        request,
+        response,
+        validation ? 200 : 404,
+        validation ? { validation } : { error: "not_found" },
+      );
       return;
     }
 

@@ -63,6 +63,9 @@ importers:
       '@idealer/constants':
         specifier: workspace:*
         version: link:../../packages/constants
+      '@idealer/rule-compiler':
+        specifier: workspace:*
+        version: link:../../packages/rule-compiler
       pg:
         specifier: 8.21.0
         version: 8.21.0
@@ -125,6 +128,9 @@ importers:
       '@idealer/game-engine':
         specifier: workspace:*
         version: link:../../packages/game-engine
+      '@idealer/rule-compiler':
+        specifier: workspace:*
+        version: link:../../packages/rule-compiler
       pg:
         specifier: 8.21.0
         version: 8.21.0
@@ -179,6 +185,12 @@ importers:
 
   packages/rule-compiler:
     dependencies:
+      '@idealer/agent-core':
+        specifier: workspace:*
+        version: link:../agent-core
+      '@idealer/rule-runtime':
+        specifier: workspace:*
+        version: link:../rule-runtime
       '@idealer/rule-schema':
         specifier: workspace:*
         version: link:../rule-schema

@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@idealer/game-engine": "workspace:*",
+    "@idealer/rule-compiler": "workspace:*",
     "pg": "8.21.0",
     "redis": "6.0.0"
   },

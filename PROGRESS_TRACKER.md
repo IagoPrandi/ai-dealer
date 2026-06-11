@@ -37,6 +37,8 @@ Opened before starting `M0.1`:
 | M2.6      | Public Round Pages                            | Completed | Confirmed 2026-06-08 | Public `/round/[turnId]` page plus `GET /rounds/:turnId` summary endpoint implemented and verified: turn id, cycle step/duration, prize pool, rules + vote counts, connected-user guess, draw placeholder, audit links, and shareable URL. User confirmed proceeding to the next milestone. |
 | M3.1      | VRF Draw Integration                          | Completed | Confirmed 2026-06-09 | Draw flow implemented and verified across program (native + SBF instruction tests), backend, worker, and frontend; SBF artifact built and the program upgraded on devnet (`6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4`, data length 448024 bytes, slot 468217908). User funded the deployer to authorize the upgrade. |
 | M3.2      | Rule Election                                 | Completed | Confirmed 2026-06-11 | Deterministic top-voted + fulfilled-VRF-random rule election implemented across program/domain, worker, API projection, and public round audit UI. PRD checklist and approval criteria ticked after the user's explicit instruction to verify/do M3.2 and mark it done. |
+| M3.3      | AI Rule Validation                            | Completed | Confirmed 2026-06-11 | Deterministic rule validation and precompilation implemented across compiler, API, worker, and public round UI. PRD checklist and approval criteria ticked after the user's explicit instruction to verify/do M3.3 and mark it done. |
+| M3.4      | Composite Confidence                          | Completed | Confirmed 2026-06-11 | Canonical composite compiler confidence schema, configured PRD weights, accept/escalate/reject threshold action, API/worker propagation, and confidence policy tests implemented. |
 
 ## M0.1 Work Log
 
@@ -1103,3 +1105,138 @@ Rust/Solana environment blocker:
 ## M3.2 Confirmation Gate
 
 `M3.2` was implemented and marked complete on 2026-06-11 after the user's explicit instruction to verify it, complete it if necessary, and mark it as done. The remaining Rust/SBF verification is environment-blocked on this machine, not skipped as a fallback.
+
+## M3.3 Work Log
+
+### 2026-06-11
+
+- Reopened `PRD.md`, `AGENTS.md`, and `.claude/skills` before verifying and implementing `M3.3`, as required.
+- Opened the relevant local skills before code changes: `.claude/skills/best-practices/SKILL.md`, `.claude/skills/best-practices/references/agent-principles.md`, `.claude/skills/best-practices/references/code-quality.md`, `.claude/skills/best-practices/references/web2-backend.md`, `.claude/skills/security-threat-checklist/SKILL.md`, and `.claude/skills/develop-frontend/SKILL.md`.
+- Verified `M3.3` was not already complete: `PRD.md` had all M3.3 checklist and approval items unticked, `PROGRESS_TRACKER.md` had no M3.3 status row, and code search found no persisted validation log flow, no prompt contract, and only placeholder compiler behavior.
+- Compiler (`packages/rule-compiler`): replaced placeholder compilation with deterministic validation/precompilation, prompt contract metadata, draw/guess-only checks, ambiguity/external-dependency detection, deterministic test-case generation/evaluation, schema/runtime safety checks, confidence breakdown scoring, validation logs, and artifact hashes for valid rules.
+- API (`apps/api`): added rule-validation records, validation run/storage endpoints, persisted validation summaries on rule proposals, precompilation status updates, artifact-hash storage for valid rules, invalidation for failed rules, and validation data in public round summaries.
+- Worker (`apps/worker`): added a background validation cycle that fetches pending rules, runs compiler validation, and publishes valid/invalid validation logs without fallback behavior.
+- Frontend (`apps/web`): displayed validation/precompilation status, decision confidence, and reason summary on public round rule cards.
+- Updated `PRD.md` M3.3 checklist and approval criteria after the user's explicit instruction to verify/do M3.3 and mark it done.
+
+## M3.3 Validation Results
+
+| Requirement | Result |
+| --- | --- |
+| Agent Service validation flow | `validateAndPrecompileRule` provides the deterministic validation/precompilation contract used by API and worker flows. |
+| Background precompilation worker | `runRuleValidationCycle` validates pending proposals and publishes validation logs for valid and invalid outcomes. |
+| Prompt contract | Versioned prompt contract metadata is exported and covered by tests. |
+| Draw/guess-only validation | Rules referencing wallet, votes, time, balances, APIs, or other external state are rejected. |
+| Ambiguity detection | Ambiguous phrasing such as close/closest/near/lucky/about is rejected with explicit reason codes. |
+| Test generation and evaluation | Compiler-generated deterministic test cases are evaluated through `@idealer/rule-runtime`. |
+| Confidence breakdown | `model_confidence`, `rule_clarity_score`, `compiler_confidence`, `reviewer_agreement_score`, `test_coverage_score`, `runtime_safety_score`, `schema_score`, and `final_confidence` are computed and stored. |
+| VALID/INVALID thresholding | Rules require deterministic checks plus `final_confidence >= 0.75`; failures return `INVALID` without an artifact. |
+| Validation logs | Logs include reason, scores, model, prompt contract version, timestamp, test cases, and artifact hash when valid. |
+| UI status | Public round rule cards show validation status, confidence, and reason summary. |
+| Invalid elected artifact handling | Invalid records mark proposals `invalidated` and `failed`, keeping them out of eligible precompiled election pools with no fallback finalist activation. |
+
+## M3.3 Verification Commands
+
+Passed:
+
+- `pnpm --filter @idealer/rule-compiler test` (6/6)
+- `pnpm --filter @idealer/rule-compiler typecheck`
+- `pnpm --filter @idealer/rule-compiler lint`
+- `pnpm --filter @idealer/rule-compiler build`
+- `pnpm --filter @idealer/worker test` (18/18)
+- `pnpm --filter @idealer/worker typecheck`
+- `pnpm --filter @idealer/worker lint`
+- `pnpm --filter @idealer/worker build`
+- `pnpm --filter @idealer/api typecheck`
+- `pnpm --filter @idealer/api lint`
+- `pnpm --filter @idealer/api build`
+- `pnpm --filter @idealer/web typecheck`
+- `pnpm --filter @idealer/web lint`
+- `pnpm --filter @idealer/web build`
+- `pnpm --filter @idealer/web test:e2e -- e2e/public-round.spec.ts` (3/3)
+
+Docker runtime:
+
+- `docker compose build api worker web`
+- `docker compose up -d --force-recreate api worker web`
+- `docker compose ps` showed `api`, `worker`, `web`, `postgres`, and `redis` healthy.
+- `GET http://127.0.0.1:3002/health` returned API `ok` with Postgres and Redis `ok`.
+- `GET http://127.0.0.1:3003/health` returned worker `ok` with Postgres and Redis `ok`.
+- `GET http://127.0.0.1:3000/play` returned HTTP 200.
+- Containerized API smoke test passed: `rule-preflight -> rule-proposals -> rule-validations/run` returned `VALID`, `finalConfidence: 0.947`, stored compiled artifact hash `7889390d2d6394ec2a71375ff6841bb42f011d071dd07fe0ad888eedaac41d80`, and moved the proposal to `eligible`/`passed`.
+
+## M3.3 Confirmation Gate
+
+`M3.3` was implemented and marked complete on 2026-06-11 after the user's explicit instruction to verify it, complete it if necessary, and mark it as done.
+
+## M3.4 Work Log
+
+### 2026-06-11
+
+- Reopened `PRD.md`, `AGENTS.md`, and `.claude/skills` before verifying `M3.3` and proceeding to `M3.4`, as required.
+- Opened the relevant local skills before code changes: `.claude/skills/best-practices/SKILL.md`, `.claude/skills/best-practices/references/agent-principles.md`, `.claude/skills/best-practices/references/code-quality.md`, `.claude/skills/best-practices/references/testing.md`, and `.claude/skills/security-threat-checklist/SKILL.md`.
+- Verified `M3.3` was already complete in `PRD.md` and `PROGRESS_TRACKER.md`, so proceeded to the next defined milestone, `M3.4`.
+- Verified `M3.4` was not already complete: `PRD.md` had all M3.4 checklist and approval items unticked, and the current compiler confidence implementation used camelCase fields plus a single VALID/INVALID decision without the PRD accept/escalate/reject threshold action.
+- Agent core (`packages/agent-core`): added the canonical `CompilerConfidenceBreakdown` schema with snake_case fields, configured PRD weights, configured PRD thresholds, final confidence calculation, clamping, and accept/escalate/reject action selection.
+- Rule compiler (`packages/rule-compiler`): switched validation logs to the canonical confidence schema, imported the shared configured policy, stored confidence weights and thresholds in logs, and made final acceptance depend on `final_confidence` plus deterministic checks.
+- API and worker: propagated the `confidenceAction` field and updated validation record checks/publication to store canonical `confidence` records while preserving the UI summary `finalConfidence` field.
+- Added tests for high-confidence accept, low-confidence reject, malformed empty rule reject, disagreement-band escalation, canonical confidence keys, configured weights, and configured thresholds.
+- Updated `PRD.md` M3.4 checklist and approval criteria after the user's explicit instruction to follow to the next milestone when M3.3 was already complete.
+
+## M3.4 Validation Results
+
+| Requirement | Result |
+| --- | --- |
+| `model_confidence` | Captured in the canonical `CompilerConfidenceBreakdown`. |
+| `rule_clarity_score` | Calculated from ambiguity and length signals. |
+| `compiler_confidence` | Calculated from supported compiler coverage. |
+| `reviewer_agreement_score` | Calculated and lowered for disagreement/escalation cases. |
+| `test_coverage_score` | Calculated from deterministic runtime test pass rate. |
+| `runtime_safety_score` | Calculated from bounded AST/runtime safety checks. |
+| `schema_score` | Calculated from canonical AST schema validation. |
+| `final_confidence` | Calculated using configured PRD weights: 0.20/0.20/0.20/0.15/0.15/0.05/0.05. |
+| Canonical schema | Stored as snake_case `CompilerConfidenceBreakdown` fields in validation logs and records. |
+| Threshold logic | `>= 0.85` accepts, `0.70..0.85` escalates, `< 0.70` rejects conservatively. |
+| Tests | Covered high-confidence, low-confidence, malformed, and disagreement/escalation cases. |
+
+## M3.4 Verification Commands
+
+Passed:
+
+- `pnpm --filter @idealer/agent-core typecheck`
+- `pnpm --filter @idealer/agent-core build`
+- `pnpm --filter @idealer/agent-core lint`
+- `pnpm --filter @idealer/agent-core test`
+- `pnpm --filter @idealer/rule-compiler test` (9/9)
+- `pnpm --filter @idealer/rule-compiler typecheck`
+- `pnpm --filter @idealer/rule-compiler lint`
+- `pnpm --filter @idealer/rule-compiler build`
+- `pnpm --filter @idealer/worker test` (18/18)
+- `pnpm --filter @idealer/worker typecheck`
+- `pnpm --filter @idealer/worker lint`
+- `pnpm --filter @idealer/worker build`
+- `pnpm --filter @idealer/api typecheck`
+- `pnpm --filter @idealer/api lint`
+- `pnpm --filter @idealer/api build`
+- `pnpm --filter @idealer/web typecheck`
+- `pnpm --filter @idealer/web lint`
+- `pnpm --filter @idealer/web build`
+- `pnpm --filter @idealer/web test:e2e -- e2e/public-round.spec.ts` (3/3)
+
+Known non-blocking test output:
+
+- The Playwright run emitted expected devnet warmup warnings from aborted/blocked `https://api.devnet.solana.com` fetches; all E2E assertions passed.
+
+Docker runtime:
+
+- `docker compose build api worker web`
+- `docker compose up -d --force-recreate api worker web`
+- `docker compose ps` showed `api`, `worker`, `web`, `postgres`, and `redis` healthy.
+- `GET http://127.0.0.1:3002/health` returned API `ok` with Postgres and Redis `ok`.
+- `GET http://127.0.0.1:3003/health` returned worker `ok` with Postgres and Redis `ok`.
+- `GET http://127.0.0.1:3000/play` returned HTTP 200.
+- Containerized API smoke test passed: `rule-preflight -> rule-proposals -> rule-validations/run` returned `VALID`, `confidenceAction: ACCEPT`, canonical `confidence.final_confidence: 0.936`, `confidence.model_confidence: 0.86`, and compiled artifact hash `7889390d2d6394ec2a71375ff6841bb42f011d071dd07fe0ad888eedaac41d80`.
+
+## M3.4 Confirmation Gate
+
+`M3.4` was implemented and marked complete on 2026-06-11 after the user's explicit instruction to verify M3.3, mark it done if complete, and follow to the next milestone.

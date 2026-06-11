@@ -4800,32 +4800,32 @@ Implement draw generation, rule election, AI rule validation, guess verification
 
 **Checklist:**
 
-- [ ] Build `Agent Service` rule validation flow.
-- [ ] Build background precompilation worker flow.
-- [ ] Build prompt contract for validation.
-- [ ] Check whether rule uses only draw and guess.
-- [ ] Detect ambiguity.
-- [ ] Generate test cases.
-- [ ] Evaluate test cases.
-- [ ] Compute `model_confidence`.
-- [ ] Compute `rule_clarity_score`.
-- [ ] Compute `compiler_confidence`.
-- [ ] Compute `reviewer_agreement_score`.
-- [ ] Compute `test_coverage_score`.
-- [ ] Compute `runtime_safety_score`.
-- [ ] Compute `schema_score`.
-- [ ] Compute `final_confidence` using `CompilerConfidenceBreakdown`.
-- [ ] Return `VALID` or `INVALID` based on `final_confidence` thresholds and deterministic validation checks.
-- [ ] Store validation log.
-- [ ] Store precompiled artifact hash when valid.
-- [ ] Display validation/precompilation status in UI.
-- [ ] Handle invalid elected artifact as original-only turn without fallback finalist activation.
+- [x] Build `Agent Service` rule validation flow.
+- [x] Build background precompilation worker flow.
+- [x] Build prompt contract for validation.
+- [x] Check whether rule uses only draw and guess.
+- [x] Detect ambiguity.
+- [x] Generate test cases.
+- [x] Evaluate test cases.
+- [x] Compute `model_confidence`.
+- [x] Compute `rule_clarity_score`.
+- [x] Compute `compiler_confidence`.
+- [x] Compute `reviewer_agreement_score`.
+- [x] Compute `test_coverage_score`.
+- [x] Compute `runtime_safety_score`.
+- [x] Compute `schema_score`.
+- [x] Compute `final_confidence` using `CompilerConfidenceBreakdown`.
+- [x] Return `VALID` or `INVALID` based on `final_confidence` thresholds and deterministic validation checks.
+- [x] Store validation log.
+- [x] Store precompiled artifact hash when valid.
+- [x] Display validation/precompilation status in UI.
+- [x] Handle invalid elected artifact as original-only turn without fallback finalist activation.
 
 **Approval criteria:**
 
-- [ ] Clear valid rules pass.
-- [ ] Ambiguous rules fail or escalate.
-- [ ] Validation logs include reason, scores, model, and timestamp.
+- [x] Clear valid rules pass.
+- [x] Ambiguous rules fail or escalate.
+- [x] Validation logs include reason, scores, model, and timestamp.
 
 ---
 
@@ -4835,23 +4835,23 @@ Implement draw generation, rule election, AI rule validation, guess verification
 
 **Checklist:**
 
-- [ ] Capture `model_confidence`.
-- [ ] Calculate `rule_clarity_score`.
-- [ ] Calculate `compiler_confidence`.
-- [ ] Calculate `reviewer_agreement_score` when escalation or review occurs.
-- [ ] Calculate `test_coverage_score`.
-- [ ] Calculate `runtime_safety_score`.
-- [ ] Calculate `schema_score`.
-- [ ] Calculate `final_confidence` using configured weights.
-- [ ] Store `confidence_breakdown` using the canonical `CompilerConfidenceBreakdown` schema.
-- [ ] Apply threshold logic: accept, escalate, reject/conservative result.
-- [ ] Add tests for high-confidence, low-confidence, malformed, and disagreement cases.
+- [x] Capture `model_confidence`.
+- [x] Calculate `rule_clarity_score`.
+- [x] Calculate `compiler_confidence`.
+- [x] Calculate `reviewer_agreement_score` when escalation or review occurs.
+- [x] Calculate `test_coverage_score`.
+- [x] Calculate `runtime_safety_score`.
+- [x] Calculate `schema_score`.
+- [x] Calculate `final_confidence` using configured weights.
+- [x] Store `confidence_breakdown` using the canonical `CompilerConfidenceBreakdown` schema.
+- [x] Apply threshold logic: accept, escalate, reject/conservative result.
+- [x] Add tests for high-confidence, low-confidence, malformed, and disagreement cases.
 
 **Approval criteria:**
 
-- [ ] `final_confidence`, not raw model confidence, determines acceptance/escalation.
-- [ ] Confidence breakdown is stored and auditable.
-- [ ] Threshold behavior matches PRD.
+- [x] `final_confidence`, not raw model confidence, determines acceptance/escalation.
+- [x] Confidence breakdown is stored and auditable.
+- [x] Threshold behavior matches PRD.
 
 ---
 

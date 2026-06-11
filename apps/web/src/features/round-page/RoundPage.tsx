@@ -20,6 +20,15 @@ interface RoundRuleSummary {
   state: "eligible" | "invalidated" | "proposed";
   title: string;
   tokenCount: number;
+  validation: {
+    decision: "INVALID" | "VALID";
+    finalConfidence: number;
+    model: string;
+    reasonCodes: string[];
+    reasonSummary: string;
+    validatedAt: string;
+    validationLogId: string;
+  } | null;
   votes: number;
 }
 
@@ -681,6 +690,16 @@ export function RoundPage({ turnId: rawTurnId }: { turnId: string }) {
                         <dd>{rule.precompilationStatus}</dd>
                       </div>
                       <div>
+                        <dt>Validation</dt>
+                        <dd>
+                          {rule.validation
+                            ? `${rule.validation.decision} (${Math.round(
+                                rule.validation.finalConfidence * 100,
+                              )}%)`
+                            : "Pending"}
+                        </dd>
+                      </div>
+                      <div>
                         <dt>Creator</dt>
                         <dd>{truncateAddress(rule.proposer)}</dd>
                       </div>
@@ -701,6 +720,11 @@ export function RoundPage({ turnId: rawTurnId }: { turnId: string }) {
                         </dd>
                       </div>
                     </dl>
+                    {rule.validation ? (
+                      <p className="rule-explanation">
+                        {rule.validation.reasonSummary}
+                      </p>
+                    ) : null}
                   </article>
                 );
               })

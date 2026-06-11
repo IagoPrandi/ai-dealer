@@ -4,6 +4,7 @@ import pg from "pg";
 import { createClient } from "redis";
 
 export * from "./draw.js";
+export * from "./rule-validation.js";
 
 const { Pool } = pg;
 

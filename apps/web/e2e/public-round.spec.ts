@@ -67,6 +67,16 @@ const completedRound = {
       state: "eligible",
       title: "All six drawn numbers",
       tokenCount: 11,
+      validation: {
+        decision: "VALID",
+        finalConfidence: 0.9125,
+        model: "idealer-rule-validator-v1",
+        reasonCodes: ["SUPPORTED_RULE"],
+        reasonSummary: "Rule accepted with final confidence 0.9125.",
+        validatedAt: "2026-06-08T00:01:00.000Z",
+        validationLogId:
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      },
       votes: 5,
     },
   ],
@@ -100,6 +110,7 @@ test("public round page shows indexed devnet round state and audit links", async
     page.getByRole("heading", { name: "Rule of the Hour settled" }),
   ).toBeVisible();
   await expect(page.getByText("Active alternative rule: #1.")).toBeVisible();
+  await expect(page.getByText("VALID (91%)")).toBeVisible();
   await expect(page.locator(".round-draw-numbers li").first()).toHaveText("20");
   await expect(page.locator(".round-draw-numbers li")).toHaveCount(6);
   await expect(
