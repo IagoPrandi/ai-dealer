@@ -4861,24 +4861,24 @@ Implement draw generation, rule election, AI rule validation, guess verification
 
 **Checklist:**
 
-- [ ] Create verification job per submitted guess.
-- [ ] Add job payload schema.
-- [ ] Add worker processor.
-- [ ] Apply original rule verification.
-- [ ] Apply alternative rule verification when active.
-- [ ] Use only the frozen DSL/AST artifact and deterministic `packages/rule-runtime` for alternative rule verification.
-- [ ] Prohibit LLM/AI calls during post-draw winner verification.
-- [ ] Add retry policy.
-- [ ] Add dead-letter queue.
-- [ ] Add rate limiting for verification/runtime workers.
-- [ ] Track job status.
-- [ ] Update result state when completed.
+- [x] Create verification job per submitted guess.
+- [x] Add job payload schema.
+- [x] Add worker processor.
+- [x] Apply original rule verification.
+- [x] Apply alternative rule verification when active.
+- [x] Use only the frozen DSL/AST artifact and deterministic `packages/rule-runtime` for alternative rule verification.
+- [x] Prohibit LLM/AI calls during post-draw winner verification.
+- [x] Add retry policy.
+- [x] Add dead-letter queue.
+- [x] Add rate limiting for verification/runtime workers.
+- [x] Track job status.
+- [x] Update result state when completed.
 
 **Approval criteria:**
 
-- [ ] All submitted guesses are processed.
-- [ ] Failed jobs are retried or captured in dead-letter queue.
-- [ ] Verification state is visible to backend/admin.
+- [x] All submitted guesses are processed.
+- [x] Failed jobs are retried or captured in dead-letter queue.
+- [x] Verification state is visible to backend/admin.
 
 ---
 

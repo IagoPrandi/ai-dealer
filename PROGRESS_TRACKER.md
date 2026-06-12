@@ -39,6 +39,7 @@ Opened before starting `M0.1`:
 | M3.2      | Rule Election                                 | Completed | Confirmed 2026-06-11 | Deterministic top-voted + fulfilled-VRF-random rule election implemented across program/domain, worker, API projection, and public round audit UI. PRD checklist and approval criteria ticked after the user's explicit instruction to verify/do M3.2 and mark it done. |
 | M3.3      | AI Rule Validation                            | Completed | Confirmed 2026-06-11 | Deterministic rule validation and precompilation implemented across compiler, API, worker, and public round UI. PRD checklist and approval criteria ticked after the user's explicit instruction to verify/do M3.3 and mark it done. |
 | M3.4      | Composite Confidence                          | Completed | Confirmed 2026-06-11 | Canonical composite compiler confidence schema, configured PRD weights, accept/escalate/reject threshold action, API/worker propagation, and confidence policy tests implemented. |
+| M3.5      | Guess Verification Queue                      | Completed | Confirmed 2026-06-11 | Queue job creation per submitted guess, deterministic original/alternative verification worker, retry/dead-letter/rate-limit handling, API job/result status, and Docker smoke verification implemented. |
 
 ## M0.1 Work Log
 
@@ -1249,3 +1250,72 @@ Docker runtime:
 ## M3.4 Confirmation Gate
 
 `M3.4` was implemented and marked complete on 2026-06-11 after the user's explicit instruction to verify M3.3, mark it done if complete, and follow to the next milestone.
+
+## M3.5 Work Log
+
+### 2026-06-11
+
+- Reopened `PRD.md`, `AGENTS.md`, and `.claude/skills` before verifying `M3.4` and proceeding to `M3.5`, as required.
+- Opened the relevant local skills before code changes: `.claude/skills/best-practices/SKILL.md`, `.claude/skills/best-practices/references/agent-principles.md`, `.claude/skills/best-practices/references/web2-backend.md`, `.claude/skills/best-practices/references/testing.md`, and `.claude/skills/security-threat-checklist/SKILL.md`.
+- Verified `M3.4` was already complete in `PRD.md` and `PROGRESS_TRACKER.md`, so proceeded to the next defined milestone, `M3.5`.
+- Verified `M3.5` was not already complete: `PRD.md` had all M3.5 checklist and approval items unticked, and code search found no guess verification job queue, retry/dead-letter handling, or verification result state.
+- Worker (`apps/worker`): added `guess-verification.ts` with the canonical `guess.verification` payload shape, original-rule verification, frozen active alternative artifact verification through `@idealer/rule-runtime`, no LLM/compiler dependency, retry policy, dead-letter handling, and per-cycle rate limiting.
+- Worker tests: added coverage for original plus active alternative verification, original-only turns, max jobs per cycle, retry scheduling, and dead-letter capture.
+- API (`apps/api`): added in-memory verification job and result projections, job creation for every submitted guess after a fulfilled draw, fail-closed active-artifact hash validation, job/result listing endpoints, result completion updates, and verification summary in round summaries.
+- Validation records now retain the valid compiled artifact alongside its hash so post-draw verification can evaluate the frozen DSL/AST artifact.
+- Updated `PRD.md` M3.5 checklist and approval criteria after the user's explicit instruction to follow to the next milestone when M3.4 was already complete.
+
+## M3.5 Validation Results
+
+| Requirement | Result |
+| --- | --- |
+| Create verification job per submitted guess | `POST /verification-jobs/create-turn` creates one idempotent job per stored guess receipt for a fulfilled draw. |
+| Job payload schema | Jobs include `turn_id`, `wallet`, `guess_hash`, `draw_hash`, optional `active_rule_id`, and optional `compiled_artifact_hash`. |
+| Worker processor | `runGuessVerificationCycle` fetches pending jobs, verifies them, completes successful jobs, retries failed jobs, and dead-letters exhausted jobs. |
+| Original rule verification | Worker evaluates the MVP original rule deterministically as six drawn-number matches. |
+| Alternative rule verification | Worker evaluates the active rule only when a frozen compiled artifact is present and its hash matches the job payload. |
+| Runtime-only execution | Alternative verification imports `@idealer/rule-runtime` and `@idealer/rule-schema`; it does not call LLMs or the rule compiler. |
+| Retry policy | Failed jobs retry with exponential backoff until `maxAttempts`. |
+| Dead-letter queue | Exhausted jobs are routed through `deadLetterJob` and counted as `deadLettered`. |
+| Rate limiting | `maxJobsPerCycle` bounds verification/runtime work per cycle. |
+| Job status | API tracks `pending`, `processing`, `retry_scheduled`, `completed`, and `dead_letter` statuses. |
+| Result state | `POST /verification-results` stores completed results and marks the source job completed. |
+| Backend/admin visibility | `GET /verification-jobs`, `GET /verification-results`, and round summaries expose verification state. |
+
+## M3.5 Verification Commands
+
+Passed:
+
+- `pnpm --filter @idealer/worker test` (22/22)
+- `pnpm --filter @idealer/worker typecheck`
+- `pnpm --filter @idealer/worker lint`
+- `pnpm --filter @idealer/worker build`
+- `pnpm --filter @idealer/api typecheck`
+- `pnpm --filter @idealer/api lint`
+- `pnpm --filter @idealer/api build`
+- `pnpm --filter @idealer/rule-runtime typecheck`
+- `pnpm --filter @idealer/rule-runtime build`
+- `pnpm --filter @idealer/rule-schema typecheck`
+- `pnpm --filter @idealer/rule-schema build`
+- `pnpm --filter @idealer/web typecheck`
+- `pnpm --filter @idealer/web lint`
+- `pnpm --filter @idealer/web build`
+- `pnpm --filter @idealer/web test:e2e -- e2e/public-round.spec.ts` (3/3)
+
+Known non-blocking test output:
+
+- The Playwright run emitted expected devnet warmup warnings from aborted/blocked `https://api.devnet.solana.com` fetches; all E2E assertions passed.
+
+Docker runtime:
+
+- `docker compose build api worker web`
+- `docker compose up -d --force-recreate api worker web`
+- `docker compose ps` showed `api`, `worker`, `web`, `postgres`, and `redis` healthy.
+- `GET http://127.0.0.1:3002/health` returned API `ok` with Postgres and Redis `ok`.
+- `GET http://127.0.0.1:3003/health` returned worker `ok` with Postgres and Redis `ok`.
+- `GET http://127.0.0.1:3000/play` returned HTTP 200.
+- Containerized API smoke test passed: created one guess receipt and fulfilled draw, `POST /verification-jobs/create-turn` created one pending job, `POST /verification-results` completed it, and `GET /verification-jobs?turnId=935` listed the job as `completed`.
+
+## M3.5 Confirmation Gate
+
+`M3.5` was implemented and marked complete on 2026-06-11 after the user's explicit instruction to verify M3.4, mark it done if complete, and follow to the next milestone.

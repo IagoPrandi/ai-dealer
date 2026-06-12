@@ -10,6 +10,7 @@ import {
 import {
   validateAndPrecompileRule,
   type CompilerConfidenceBreakdown,
+  type RuleCompiledArtifact,
   type RuleConfidenceAction,
   type RuleValidationDecision,
   type RuleValidationReasonCode,
@@ -117,11 +118,71 @@ export interface RuleValidationSummary {
 
 export interface RuleValidationRecord extends RuleValidationSummary {
   compiledArtifactHash: string | null;
+  compiledArtifact: RuleCompiledArtifact | null;
   confidence: CompilerConfidenceBreakdown;
   evaluatedTestCases: RuleValidationTestResult[];
   normalizedText: string;
   provider: string;
   ruleId: number;
+  turnId: number;
+}
+
+export type GuessVerificationJobStatus =
+  | "completed"
+  | "dead_letter"
+  | "pending"
+  | "processing"
+  | "retry_scheduled";
+export type VerificationOutcome = "LOSE" | "WIN";
+
+export interface GuessVerificationJobPayload {
+  active_rule_id?: string;
+  compiled_artifact_hash?: string;
+  draw_hash: string;
+  guess_hash: string;
+  turn_id: string;
+  wallet: string;
+}
+
+export interface GuessVerificationJobRecord {
+  activeRuleArtifact: RuleCompiledArtifact | null;
+  activeRuleId: number | null;
+  attempts: number;
+  completedAt: string | null;
+  createdAt: string;
+  deadLetteredAt: string | null;
+  draw: readonly number[];
+  error: string | null;
+  id: string;
+  idempotencyKey: string;
+  maxAttempts: number;
+  payload: GuessVerificationJobPayload;
+  playerGuess: readonly number[];
+  resultId: string | null;
+  runAfter: string;
+  status: GuessVerificationJobStatus;
+  turnId: number;
+  updatedAt: string;
+}
+
+export interface RuleVerificationResultRecord {
+  inputHash: string;
+  matchedRuleBranch: string;
+  outputHash: string;
+  result: VerificationOutcome;
+  runtimeMs: number;
+  runtimeSteps: number;
+}
+
+export interface GuessVerificationResultRecord {
+  activeRuleId: number | null;
+  alternative: RuleVerificationResultRecord | null;
+  completedAt: string;
+  jobId: string;
+  original: RuleVerificationResultRecord;
+  player: string;
+  resultId: string;
+  status: "completed";
   turnId: number;
 }
 
@@ -156,6 +217,8 @@ const ruleVotes = new Map<string, RuleVoteRecord>();
 const draws = new Map<number, DrawRecord>();
 const elections = new Map<number, RuleElectionRecord>();
 const ruleValidations = new Map<string, RuleValidationRecord>();
+const verificationJobs = new Map<string, GuessVerificationJobRecord>();
+const verificationResults = new Map<string, GuessVerificationResultRecord>();
 const LOCAL_WEB_ORIGIN_PATTERN =
   /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 const CORS_PATHS = new Set([
@@ -168,6 +231,9 @@ const CORS_PATHS = new Set([
   "/rule-validations",
   "/rule-validations/run",
   "/rule-votes",
+  "/verification-jobs",
+  "/verification-jobs/create-turn",
+  "/verification-results",
 ]);
 
 function getGuessReceiptKey(turnId: number, player: string) {
@@ -210,6 +276,10 @@ function sanitizeRuleText(value: string) {
 
 function hashBytes(value: string) {
   return Array.from(createHash("sha256").update(value, "utf8").digest());
+}
+
+function hashJson(value: unknown) {
+  return createHash("sha256").update(JSON.stringify(value), "utf8").digest("hex");
 }
 
 function getRuleTitle(sanitizedText: string) {
@@ -414,6 +484,45 @@ function isValidConfidenceAction(value: unknown): value is RuleConfidenceAction 
   return value === "ACCEPT" || value === "ESCALATE" || value === "REJECT";
 }
 
+function isValidRuleAst(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const ast = value as {
+    node?: { kind?: unknown; value?: unknown };
+    schemaVersion?: unknown;
+  };
+
+  return (
+    ast.schemaVersion === 1 &&
+    ast.node !== undefined &&
+    (ast.node.kind === "ordered_exact" ||
+      ast.node.kind === "sum_equals" ||
+      (ast.node.kind === "match_count_at_least" &&
+        Number.isInteger(ast.node.value) &&
+        Number(ast.node.value) >= 1 &&
+        Number(ast.node.value) <= 6))
+  );
+}
+
+function isValidCompiledArtifact(value: unknown): value is RuleCompiledArtifact {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const artifact = value as Partial<RuleCompiledArtifact>;
+
+  return (
+    artifact.schemaVersion === 1 &&
+    isValidRuleAst(artifact.ast) &&
+    typeof artifact.normalizedText === "string" &&
+    artifact.normalizedText.length > 0 &&
+    typeof artifact.promptContractVersion === "string" &&
+    artifact.promptContractVersion.length > 0
+  );
+}
+
 function isValidRuleValidation(value: unknown): value is RuleValidationRecord {
   if (!value || typeof value !== "object") {
     return false;
@@ -444,7 +553,73 @@ function isValidRuleValidation(value: unknown): value is RuleValidationRecord {
     record.finalConfidence <= 1 &&
     isValidConfidenceBreakdown(record.confidence) &&
     (record.compiledArtifactHash === null || isHexHash(record.compiledArtifactHash)) &&
+    (record.compiledArtifact == null || isValidCompiledArtifact(record.compiledArtifact)) &&
+    (record.decision === "VALID" ? record.compiledArtifact != null : true) &&
     Array.isArray(record.evaluatedTestCases)
+  );
+}
+
+function isValidGuessVerificationCreateRequest(
+  value: unknown,
+): value is { turnId: number } {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const request = value as { turnId?: unknown };
+  return Number.isInteger(request.turnId) && Number(request.turnId) > 0;
+}
+
+function isValidVerificationOutcome(value: unknown): value is VerificationOutcome {
+  return value === "LOSE" || value === "WIN";
+}
+
+function isValidRuleVerificationResult(
+  value: unknown,
+): value is RuleVerificationResultRecord {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const result = value as Partial<RuleVerificationResultRecord>;
+  return (
+    typeof result.inputHash === "string" &&
+    isHexHash(result.inputHash) &&
+    typeof result.outputHash === "string" &&
+    isHexHash(result.outputHash) &&
+    typeof result.matchedRuleBranch === "string" &&
+    result.matchedRuleBranch.length > 0 &&
+    isValidVerificationOutcome(result.result) &&
+    Number.isInteger(result.runtimeSteps) &&
+    Number(result.runtimeSteps) >= 0 &&
+    typeof result.runtimeMs === "number" &&
+    result.runtimeMs >= 0
+  );
+}
+
+function isValidGuessVerificationResult(
+  value: unknown,
+): value is GuessVerificationResultRecord {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const result = value as Partial<GuessVerificationResultRecord>;
+  return (
+    result.status === "completed" &&
+    Number.isInteger(result.turnId) &&
+    Number(result.turnId) > 0 &&
+    isBase58Like(result.player) &&
+    typeof result.jobId === "string" &&
+    result.jobId.length > 0 &&
+    typeof result.resultId === "string" &&
+    isHexHash(result.resultId) &&
+    (result.activeRuleId === null ||
+      (Number.isInteger(result.activeRuleId) && Number(result.activeRuleId) > 0)) &&
+    isValidRuleVerificationResult(result.original) &&
+    (result.alternative === null || isValidRuleVerificationResult(result.alternative)) &&
+    typeof result.completedAt === "string" &&
+    !Number.isNaN(Date.parse(result.completedAt))
   );
 }
 
@@ -673,6 +848,10 @@ export function saveRuleValidation(record: RuleValidationRecord) {
     validatedAt: record.validatedAt,
     validationLogId: record.validationLogId,
   };
+  const normalizedRecord: RuleValidationRecord = {
+    ...record,
+    compiledArtifact: record.compiledArtifact ?? null,
+  };
   const updated: RuleProposalRecord = {
     ...proposal,
     compiledArtifactHash: record.compiledArtifactHash,
@@ -681,13 +860,211 @@ export function saveRuleValidation(record: RuleValidationRecord) {
     validation: validationSummary,
   };
 
-  ruleValidations.set(getRuleValidationKey(record.turnId, record.ruleId), record);
+  ruleValidations.set(
+    getRuleValidationKey(record.turnId, record.ruleId),
+    normalizedRecord,
+  );
   ruleProposals.set(getRuleProposalKey(record.turnId, record.ruleId), updated);
-  return record;
+  return normalizedRecord;
 }
 
 export function getRuleValidation(turnId: number, ruleId: number) {
   return ruleValidations.get(getRuleValidationKey(turnId, ruleId)) ?? null;
+}
+
+function getVerificationResultKey(turnId: number, player: string) {
+  return `${turnId}:${player}`;
+}
+
+function listGuessReceipts(turnId: number) {
+  return [...guessReceipts.values()].filter((receipt) => receipt.turnId === turnId);
+}
+
+function listVerificationJobs(turnId: number) {
+  return [...verificationJobs.values()].filter((job) => job.turnId === turnId);
+}
+
+function listVerificationResults(turnId: number) {
+  return [...verificationResults.values()].filter((result) => result.turnId === turnId);
+}
+
+function getActiveRuleArtifact(turnId: number): {
+  activeRuleArtifact: RuleCompiledArtifact;
+  activeRuleId: number;
+  compiledArtifactHash: string;
+} | null {
+  const election = elections.get(turnId);
+
+  if (!election || election.activeRuleId === null) {
+    return null;
+  }
+
+  const validation = getRuleValidation(turnId, election.activeRuleId);
+  if (
+    !validation ||
+    validation.decision !== "VALID" ||
+    !validation.compiledArtifact ||
+    !validation.compiledArtifactHash
+  ) {
+    throw new Error("ACTIVE_RULE_ARTIFACT_NOT_FOUND");
+  }
+
+  const calculatedHash = hashJson(validation.compiledArtifact);
+  if (
+    calculatedHash !== validation.compiledArtifactHash ||
+    (election.activeRuleArtifactHash !== null &&
+      election.activeRuleArtifactHash !== validation.compiledArtifactHash)
+  ) {
+    throw new Error("ACTIVE_RULE_ARTIFACT_HASH_MISMATCH");
+  }
+
+  return {
+    activeRuleArtifact: validation.compiledArtifact,
+    activeRuleId: election.activeRuleId,
+    compiledArtifactHash: validation.compiledArtifactHash,
+  };
+}
+
+function createVerificationJobForReceipt(args: {
+  activeRule: ReturnType<typeof getActiveRuleArtifact>;
+  draw: DrawRecord;
+  nowIso: string;
+  receipt: GuessReceiptRecord;
+}): GuessVerificationJobRecord {
+  if (args.draw.status !== "fulfilled" || !args.draw.drawResult) {
+    throw new Error("DRAW_NOT_FULFILLED");
+  }
+
+  const guessHash = hashJson({
+    numbers: args.receipt.numbers,
+    player: args.receipt.player,
+    turnId: args.receipt.turnId,
+  });
+  const drawHash = hashJson({
+    drawResult: args.draw.drawResult,
+    turnId: args.draw.turnId,
+  });
+  const idempotencyKey = [
+    "guess.verification",
+    args.receipt.turnId,
+    args.receipt.player,
+    drawHash,
+    args.activeRule?.compiledArtifactHash ?? "original",
+  ].join(":");
+  const existing = verificationJobs.get(idempotencyKey);
+
+  if (existing) {
+    return existing;
+  }
+
+  const payload: GuessVerificationJobPayload = {
+    ...(args.activeRule
+      ? {
+          active_rule_id: String(args.activeRule.activeRuleId),
+          compiled_artifact_hash: args.activeRule.compiledArtifactHash,
+        }
+      : {}),
+    draw_hash: drawHash,
+    guess_hash: guessHash,
+    turn_id: String(args.receipt.turnId),
+    wallet: args.receipt.player,
+  };
+  const job: GuessVerificationJobRecord = {
+    activeRuleArtifact: args.activeRule?.activeRuleArtifact ?? null,
+    activeRuleId: args.activeRule?.activeRuleId ?? null,
+    attempts: 0,
+    completedAt: null,
+    createdAt: args.nowIso,
+    deadLetteredAt: null,
+    draw: args.draw.drawResult,
+    error: null,
+    id: hashJson({ idempotencyKey }),
+    idempotencyKey,
+    maxAttempts: 5,
+    payload,
+    playerGuess: args.receipt.numbers,
+    resultId: null,
+    runAfter: args.nowIso,
+    status: "pending",
+    turnId: args.receipt.turnId,
+    updatedAt: args.nowIso,
+  };
+
+  verificationJobs.set(idempotencyKey, job);
+  return job;
+}
+
+export function createGuessVerificationJobsForTurn(
+  turnId: number,
+  nowIso: string = new Date().toISOString(),
+) {
+  const draw = getDraw(turnId);
+  if (!draw || draw.status !== "fulfilled" || !draw.drawResult) {
+    throw new Error("DRAW_NOT_FULFILLED");
+  }
+
+  const activeRule = getActiveRuleArtifact(turnId);
+  const receipts = listGuessReceipts(turnId);
+  const jobs = receipts.map((receipt) =>
+    createVerificationJobForReceipt({ activeRule, draw, nowIso, receipt }),
+  );
+
+  return {
+    jobs,
+    summary: getVerificationSummary(turnId),
+  };
+}
+
+export function saveGuessVerificationResult(result: GuessVerificationResultRecord) {
+  const job = [...verificationJobs.values()].find((candidate) => candidate.id === result.jobId);
+  if (!job) {
+    throw new Error("VERIFICATION_JOB_NOT_FOUND");
+  }
+
+  if (job.turnId !== result.turnId || job.payload.wallet !== result.player) {
+    throw new Error("VERIFICATION_RESULT_JOB_MISMATCH");
+  }
+
+  const updatedJob: GuessVerificationJobRecord = {
+    ...job,
+    attempts: job.attempts + 1,
+    completedAt: result.completedAt,
+    error: null,
+    resultId: result.resultId,
+    status: "completed",
+    updatedAt: result.completedAt,
+  };
+
+  verificationJobs.set(job.idempotencyKey, updatedJob);
+  verificationResults.set(getVerificationResultKey(result.turnId, result.player), result);
+  return result;
+}
+
+export function getVerificationSummary(turnId: number) {
+  const jobs = listVerificationJobs(turnId);
+  const byStatus = jobs.reduce<Record<GuessVerificationJobStatus, number>>(
+    (counts, job) => {
+      counts[job.status] += 1;
+      return counts;
+    },
+    {
+      completed: 0,
+      dead_letter: 0,
+      pending: 0,
+      processing: 0,
+      retry_scheduled: 0,
+    },
+  );
+
+  return {
+    completed: byStatus.completed,
+    deadLettered: byStatus.dead_letter,
+    jobs: jobs.length,
+    pending: byStatus.pending,
+    processing: byStatus.processing,
+    results: listVerificationResults(turnId).length,
+    retryScheduled: byStatus.retry_scheduled,
+  };
 }
 
 export function runRuleValidationForProposal(args: {
@@ -712,6 +1089,7 @@ export function runRuleValidationForProposal(args: {
     ...(args.provider ? { provider: args.provider } : {}),
   });
   const record: RuleValidationRecord = {
+    compiledArtifact: result.artifact,
     compiledArtifactHash: result.artifactHash,
     confidence: result.log.confidence,
     confidenceAction: result.log.confidenceAction,
@@ -852,6 +1230,7 @@ export interface RoundSummary {
   status: "completed" | "current" | "upcoming";
   totalVotes: number;
   turnId: number;
+  verification: ReturnType<typeof getVerificationSummary>;
 }
 
 function cycleDurationHours(stepIndex: number): number {
@@ -921,6 +1300,7 @@ export function getRoundSummary(
     status,
     totalVotes: votes.length,
     turnId,
+    verification: getVerificationSummary(turnId),
   };
 }
 
@@ -1359,6 +1739,100 @@ if (isMainModule()) {
         election ? 200 : 404,
         election ? { election } : { error: "not_found" },
       );
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/verification-jobs/create-turn") {
+      void readJsonBody(request)
+        .then((body) => {
+          if (!isValidGuessVerificationCreateRequest(body)) {
+            sendJson(request, response, 400, {
+              error: "invalid_verification_job_request",
+            });
+            return;
+          }
+
+          try {
+            const result = createGuessVerificationJobsForTurn(body.turnId);
+            sendJson(request, response, 201, result);
+          } catch (error) {
+            const code =
+              error instanceof Error ? error.message : "VERIFICATION_JOB_FAILED";
+            sendJson(request, response, 409, {
+              error: code,
+              message: "Verification jobs could not be created for this turn.",
+            });
+          }
+        })
+        .catch((error: unknown) => {
+          sendJson(request, response, 400, {
+            error: "invalid_json",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/verification-jobs") {
+      const turnId = Number(url.searchParams.get("turnId"));
+
+      if (!Number.isInteger(turnId) || turnId <= 0) {
+        sendJson(request, response, 400, { error: "invalid_query" });
+        return;
+      }
+
+      sendJson(request, response, 200, {
+        jobs: listVerificationJobs(turnId),
+        summary: getVerificationSummary(turnId),
+      });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/verification-results") {
+      void readJsonBody(request)
+        .then((body) => {
+          if (!isValidGuessVerificationResult(body)) {
+            sendJson(request, response, 400, {
+              error: "invalid_verification_result",
+            });
+            return;
+          }
+
+          try {
+            sendJson(request, response, 201, {
+              result: saveGuessVerificationResult(body),
+              summary: getVerificationSummary(body.turnId),
+            });
+          } catch (error) {
+            const code =
+              error instanceof Error ? error.message : "VERIFICATION_RESULT_FAILED";
+            sendJson(request, response, 404, {
+              error: code,
+              message: "Verification job not found for result update.",
+            });
+          }
+        })
+        .catch((error: unknown) => {
+          sendJson(request, response, 400, {
+            error: "invalid_json",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/verification-results") {
+      const turnId = Number(url.searchParams.get("turnId"));
+
+      if (!Number.isInteger(turnId) || turnId <= 0) {
+        sendJson(request, response, 400, { error: "invalid_query" });
+        return;
+      }
+
+      sendJson(request, response, 200, {
+        results: listVerificationResults(turnId),
+        summary: getVerificationSummary(turnId),
+      });
       return;
     }
 

@@ -131,6 +131,12 @@ importers:
       '@idealer/rule-compiler':
         specifier: workspace:*
         version: link:../../packages/rule-compiler
+      '@idealer/rule-runtime':
+        specifier: workspace:*
+        version: link:../../packages/rule-runtime
+      '@idealer/rule-schema':
+        specifier: workspace:*
+        version: link:../../packages/rule-schema
       pg:
         specifier: 8.21.0
         version: 8.21.0
