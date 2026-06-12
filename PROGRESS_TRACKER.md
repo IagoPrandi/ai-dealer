@@ -43,6 +43,28 @@ Opened before starting `M0.1`:
 | M3.6      | Agent Fallback & Provider Dispute Handling    | Completed | Confirmed 2026-06-12 | Primary/secondary/tertiary provider routing, local OpenAI-compatible request-shape metadata, grammar/schema capability checks, timeout/malformed/schema fallback, provider path logging, model identity freezing, fallback/disagreement metrics, and tertiary dispute handling implemented. |
 | M3.7      | Verification Logs & Attestation               | Completed | Confirmed 2026-06-12 | Compiler validation and guess verification now append hash-chained audit records, expose public audit endpoints, map logs to public state, provide a PostgreSQL `audit_logs` schema/adapter, and verify tamper detection with API tests. |
 
+## Maintenance Work Log
+
+### 2026-06-12
+
+- Opened `PRD.md`, `AGENTS.md`, and `.claude/skills` before working on the chat and wallet configuration UI alignment, as required.
+- Used `.claude/skills/develop-frontend/SKILL.md` for frontend consistency, responsive layout, state, and accessibility checks.
+- Aligned the wallet configuration page with the previously developed `platform-*` mobile phone shell and visual tokens.
+- Aligned the rule chat prompt on the live round hub with the same platform card, avatar, pill, input, and CTA treatment.
+- Ran `pnpm --filter @idealer/web typecheck`, `pnpm --filter @idealer/web lint`, `pnpm --filter @idealer/web test:e2e -- e2e/wallet-flow.spec.ts`, and `pnpm --filter @idealer/web test:e2e -- e2e/live-round-design.spec.ts`.
+- Started the updated web dev server at `http://127.0.0.1:3005` and visually checked the hub chat and wallet configuration screens with mobile screenshots.
+- No milestone checkbox was ticked; milestone approval still requires explicit user confirmation.
+
+### 2026-06-12
+
+- Reopened `PRD.md`, `AGENTS.md`, and `.claude/skills` before correcting the rule proposal chat UI, as required.
+- Used `.claude/skills/develop-frontend/SKILL.md` and `.claude/skills/idealer-design-system/SKILL.md`; also opened the relevant design references for tokens, components, and screen/state conventions.
+- Reworked `/play/propose` from a desktop-style form into the app's mobile phone-shell Dealer chat flow, with chat intro, AI guidance bubble, user rule bubble, compact preflight cards, fixed chat composer, token pill, and mobile review actions.
+- Preserved the existing proposal logic: token counting, server preflight, sanitized preview, ambiguity check, review step, wallet gate, devnet submission, receipt display, and error states.
+- Ran `pnpm --filter @idealer/web typecheck`, `pnpm --filter @idealer/web lint`, `pnpm --filter @idealer/web test:e2e -- e2e/rule-proposal.spec.ts`, `pnpm --filter @idealer/web test:e2e -- e2e/wallet-flow.spec.ts`, and `pnpm --filter @idealer/web test:e2e -- e2e/live-round-design.spec.ts`.
+- Captured and visually checked `/play/propose` compose and review states on a 390x844 mobile viewport through the updated dev server at `http://127.0.0.1:3005`.
+- No milestone checkbox was ticked; milestone approval still requires explicit user confirmation.
+
 ## M0.1 Work Log
 
 ### 2026-06-02

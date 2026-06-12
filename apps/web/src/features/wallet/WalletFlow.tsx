@@ -135,6 +135,28 @@ function getWalletBrowseUrl(baseUrl: string) {
   return `${baseUrl}${encodeURIComponent(destination)}?ref=${encodeURIComponent(window.location.origin)}`;
 }
 
+function WalletPhoneChrome() {
+  return (
+    <>
+      <div className="platform-dynamic-island" aria-hidden="true" />
+      <div className="platform-statusbar" aria-hidden="true">
+        <span>9:41</span>
+        <span className="platform-status-icons">
+          <i className="platform-cell-signal">
+            <b />
+            <b />
+            <b />
+            <b />
+          </i>
+          <i className="platform-wifi">⌁</i>
+          <i className="platform-battery" />
+        </span>
+      </div>
+      <div className="platform-home-indicator" aria-hidden="true" />
+    </>
+  );
+}
+
 function TransactionStatusCard({
   feedback,
   onRetry,
@@ -442,185 +464,205 @@ export function WalletFlow() {
     : null;
 
   return (
-    <main className="wallet-flow-shell">
-      <section
-        className="wallet-flow-panel"
-        aria-labelledby="wallet-flow-title"
-      >
-        <header className="wallet-flow-header">
-          <Link aria-label="Back to live round" href="/play">
-            <ArrowLeft aria-hidden="true" size={20} />
-          </Link>
-          <div>
-            <p className="eyebrow">Solana devnet</p>
-            <h1 id="wallet-flow-title">Connect your mobile wallet.</h1>
-          </div>
-        </header>
-
-        <article className="wallet-security-note">
-          <ShieldCheck aria-hidden="true" size={21} />
-          <p>
-            Idealer never asks for your seed phrase or private key. Wallet
-            approval happens inside your selected wallet.
-          </p>
-        </article>
-
-        {connected && walletAddress ? (
-          <>
-            <article className="wallet-connected-card">
-              <span>
-                <Wallet aria-hidden="true" size={21} />
-              </span>
+    <main className="platform-stage">
+      <div className="platform-phone-shell">
+        <WalletPhoneChrome />
+        <section
+          className="platform-screen platform-wallet-screen"
+          aria-labelledby="wallet-flow-title"
+        >
+          <div className="platform-ambient" />
+          <div className="platform-scroll platform-wallet-scroll">
+            <header className="platform-screen-header">
+              <Link aria-label="Back to live round" href="/play">
+                <ArrowLeft aria-hidden="true" size={20} />
+              </Link>
               <div>
-                <small>
-                  Connected with {currentConnector?.name ?? "Wallet Standard"}
-                </small>
-                <strong>{truncateAddress(walletAddress)}</strong>
-                <p>Solana devnet</p>
+                <p className="platform-section-label">Solana devnet</p>
+                <h1 id="wallet-flow-title">Connect your mobile wallet.</h1>
               </div>
-              <button
-                aria-label="Disconnect wallet"
-                onClick={handleDisconnect}
-                type="button"
-              >
-                <LogOut aria-hidden="true" size={18} />
-              </button>
-            </article>
+            </header>
 
-            <article className="wallet-transaction-card">
-              <p className="eyebrow">Test transaction</p>
-              <h2>Approve and return safely.</h2>
+            <article className="wallet-security-note">
+              <ShieldCheck aria-hidden="true" size={21} />
               <p>
-                This sends <strong>0 SOL</strong> from your wallet back to
-                itself on devnet. No value moves, but the wallet may charge a
-                devnet network fee.
+                Idealer never asks for your seed phrase or private key. Wallet
+                approval happens inside your selected wallet.
               </p>
-              <dl>
-                <div>
-                  <dt>Cluster</dt>
-                  <dd>Devnet</dd>
-                </div>
-                <div>
-                  <dt>Recipient</dt>
-                  <dd>{truncateAddress(walletAddress)}</dd>
-                </div>
-                <div>
-                  <dt>Amount</dt>
-                  <dd>0 SOL</dd>
-                </div>
-                <div>
-                  <dt>RPC preflight</dt>
-                  <dd>Required</dd>
-                </div>
-              </dl>
-              <button
-                className="wallet-primary-action"
-                disabled={
-                  feedback.status === "awaiting_approval" ||
-                  feedback.status === "pending"
-                }
-                onClick={sendTestTransaction}
-                type="button"
-              >
-                {feedback.status === "awaiting_approval" ||
-                feedback.status === "pending" ? (
-                  <LoaderCircle
-                    aria-hidden="true"
-                    className="wallet-spinner"
-                    size={18}
-                  />
-                ) : (
-                  <ShieldCheck aria-hidden="true" size={18} />
-                )}
-                Approve test transaction
-              </button>
             </article>
-          </>
-        ) : (
-          <>
-            <section
-              className="wallet-connectors"
-              aria-labelledby="available-wallets-title"
-            >
-              <div>
-                <p className="eyebrow">Wallet Standard</p>
-                <h2 id="available-wallets-title">Available wallets</h2>
-              </div>
-              {!isReady ? <p>Detecting compatible wallets...</p> : null}
-              {isReady && connectors.length === 0 ? (
-                <p>
-                  No compatible wallet was detected in this browser. Open
-                  Idealer inside a mobile wallet below or install a Wallet
-                  Standard wallet.
-                </p>
-              ) : null}
-              <div className="wallet-connector-list">
-                {connectors.map((connector) => (
+
+            {connected && walletAddress ? (
+              <>
+                <article className="wallet-connected-card">
+                  <span>
+                    <Wallet aria-hidden="true" size={21} />
+                  </span>
+                  <div>
+                    <small>
+                      Connected with{" "}
+                      {currentConnector?.name ?? "Wallet Standard"}
+                    </small>
+                    <strong>{truncateAddress(walletAddress)}</strong>
+                    <p>Solana devnet</p>
+                  </div>
                   <button
-                    disabled={connecting}
-                    key={connector.id}
-                    onClick={() => handleConnect(connector.id, connector.name)}
+                    aria-label="Disconnect wallet"
+                    onClick={handleDisconnect}
                     type="button"
                   >
-                    {connector.icon ? (
-                      // Wallet Standard icons are trusted connector metadata and remain isolated here.
-                      <img alt="" height="34" src={connector.icon} width="34" />
-                    ) : (
-                      <Wallet aria-hidden="true" size={22} />
-                    )}
-                    <span>
-                      <strong>{connector.name}</strong>
-                      <small>
-                        {connecting
-                          ? "Waiting for wallet..."
-                          : "Connect on devnet"}
-                      </small>
-                    </span>
+                    <LogOut aria-hidden="true" size={18} />
                   </button>
-                ))}
-              </div>
-            </section>
+                </article>
 
-            <section
-              className="wallet-mobile-links"
-              aria-labelledby="mobile-wallets-title"
-            >
-              <div>
-                <Smartphone aria-hidden="true" size={20} />
-                <div>
-                  <p className="eyebrow">Mobile browser handoff</p>
-                  <h2 id="mobile-wallets-title">Open inside your wallet</h2>
-                </div>
-              </div>
-              <p>
-                These official browse links open this exact step inside the
-                wallet's in-app browser.
+                <article className="wallet-transaction-card">
+                  <p className="platform-section-label">Test transaction</p>
+                  <h2>Approve and return safely.</h2>
+                  <p>
+                    This sends <strong>0 SOL</strong> from your wallet back to
+                    itself on devnet. No value moves, but the wallet may charge
+                    a devnet network fee.
+                  </p>
+                  <dl>
+                    <div>
+                      <dt>Cluster</dt>
+                      <dd>Devnet</dd>
+                    </div>
+                    <div>
+                      <dt>Recipient</dt>
+                      <dd>{truncateAddress(walletAddress)}</dd>
+                    </div>
+                    <div>
+                      <dt>Amount</dt>
+                      <dd>0 SOL</dd>
+                    </div>
+                    <div>
+                      <dt>RPC preflight</dt>
+                      <dd>Required</dd>
+                    </div>
+                  </dl>
+                  <button
+                    className="wallet-primary-action"
+                    disabled={
+                      feedback.status === "awaiting_approval" ||
+                      feedback.status === "pending"
+                    }
+                    onClick={sendTestTransaction}
+                    type="button"
+                  >
+                    {feedback.status === "awaiting_approval" ||
+                    feedback.status === "pending" ? (
+                      <LoaderCircle
+                        aria-hidden="true"
+                        className="wallet-spinner"
+                        size={18}
+                      />
+                    ) : (
+                      <ShieldCheck aria-hidden="true" size={18} />
+                    )}
+                    Approve test transaction
+                  </button>
+                </article>
+              </>
+            ) : (
+              <>
+                <section
+                  className="wallet-connectors"
+                  aria-labelledby="available-wallets-title"
+                >
+                  <div>
+                    <p className="platform-section-label">Wallet Standard</p>
+                    <h2 id="available-wallets-title">Available wallets</h2>
+                  </div>
+                  {!isReady ? <p>Detecting compatible wallets...</p> : null}
+                  {isReady && connectors.length === 0 ? (
+                    <p>
+                      No compatible wallet was detected in this browser. Open
+                      Idealer inside a mobile wallet below or install a Wallet
+                      Standard wallet.
+                    </p>
+                  ) : null}
+                  <div className="wallet-connector-list">
+                    {connectors.map((connector) => (
+                      <button
+                        disabled={connecting}
+                        key={connector.id}
+                        onClick={() =>
+                          handleConnect(connector.id, connector.name)
+                        }
+                        type="button"
+                      >
+                        {connector.icon ? (
+                          // Wallet Standard icons are trusted connector metadata and remain isolated here.
+                          <img
+                            alt=""
+                            height="34"
+                            src={connector.icon}
+                            width="34"
+                          />
+                        ) : (
+                          <Wallet aria-hidden="true" size={22} />
+                        )}
+                        <span>
+                          <strong>{connector.name}</strong>
+                          <small>
+                            {connecting
+                              ? "Waiting for wallet..."
+                              : "Connect on devnet"}
+                          </small>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+
+                <section
+                  className="wallet-mobile-links"
+                  aria-labelledby="mobile-wallets-title"
+                >
+                  <div>
+                    <Smartphone aria-hidden="true" size={20} />
+                    <div>
+                      <p className="platform-section-label">
+                        Mobile browser handoff
+                      </p>
+                      <h2 id="mobile-wallets-title">Open inside your wallet</h2>
+                    </div>
+                  </div>
+                  <p>
+                    These official browse links open this exact step inside the
+                    wallet's in-app browser.
+                  </p>
+                  <div>
+                    {preferredWalletLinks.map((preferredWallet) => (
+                      <a
+                        href={preferredWallet.href}
+                        key={preferredWallet.name}
+                      >
+                        {preferredWallet.name}
+                        <ExternalLink aria-hidden="true" size={15} />
+                      </a>
+                    ))}
+                  </div>
+                </section>
+              </>
+            )}
+
+            {connectionMessage ? (
+              <p className="wallet-connection-message">{connectionMessage}</p>
+            ) : null}
+            {effectiveConnectionError ? (
+              <p className="wallet-error-message" role="alert">
+                {effectiveConnectionError.code}:{" "}
+                {effectiveConnectionError.message}
               </p>
-              <div>
-                {preferredWalletLinks.map((preferredWallet) => (
-                  <a href={preferredWallet.href} key={preferredWallet.name}>
-                    {preferredWallet.name}
-                    <ExternalLink aria-hidden="true" size={15} />
-                  </a>
-                ))}
-              </div>
-            </section>
-          </>
-        )}
-
-        {connectionMessage ? (
-          <p className="wallet-connection-message">{connectionMessage}</p>
-        ) : null}
-        {effectiveConnectionError ? (
-          <p className="wallet-error-message" role="alert">
-            {effectiveConnectionError.code}: {effectiveConnectionError.message}
-          </p>
-        ) : null}
-        <TransactionStatusCard
-          feedback={feedback}
-          onRetry={sendTestTransaction}
-        />
-      </section>
+            ) : null}
+            <TransactionStatusCard
+              feedback={feedback}
+              onRetry={sendTestTransaction}
+            />
+          </div>
+        </section>
+      </div>
     </main>
   );
 }

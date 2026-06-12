@@ -449,16 +449,21 @@ function HomeScreen({
 
         <article className="platform-prompt-card">
           <header>
-            <strong>Create your rule</strong>
-            <span>
-              <Sparkles aria-hidden="true" size={12} /> with AI
+            <span className="platform-chat-avatar" aria-hidden="true">
+              <Dealer size={30} />
             </span>
-            <small>cost 0.02 SOL</small>
+            <div>
+              <strong>Dealer chat</strong>
+              <small>Cost 0.02 SOL</small>
+            </div>
+            <em>
+              <Sparkles aria-hidden="true" size={12} /> AI rule
+            </em>
           </header>
           <div>
             <input
               aria-label="Rule idea"
-              placeholder="Example: closest sum to 100 wins…"
+              placeholder="Write a free-form rule idea..."
             />
             <Link aria-label="Create rule" href="/play/propose">
               <Send aria-hidden="true" size={19} />

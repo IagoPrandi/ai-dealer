@@ -955,6 +955,365 @@ p {
   }
 }
 
+.platform-propose-screen {
+  background: var(--platform-bg);
+}
+
+.platform-propose-scroll {
+  padding-bottom: 186px;
+}
+
+.proposal-chat-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.proposal-chat-header > div {
+  min-width: 0;
+}
+
+.proposal-token-pill {
+  display: inline-grid;
+  min-width: 64px;
+  min-height: 38px;
+  place-items: center;
+  padding: 8px 10px;
+  border: 1px solid rgb(20 241 149 / 36%);
+  border-radius: 14px;
+  background: rgb(20 241 149 / 7%);
+  color: var(--platform-green);
+  font-family: "Space Grotesk", Consolas, monospace;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.proposal-token-pill.warning {
+  border-color: rgb(255 210 63 / 48%);
+  background: rgb(255 210 63 / 8%);
+  color: var(--platform-yellow);
+}
+
+.proposal-token-pill.over {
+  border-color: rgb(255 122 122 / 52%);
+  background: rgb(255 122 122 / 8%);
+  color: #ff7a7a;
+}
+
+.proposal-chat-intro {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 14px;
+  margin-bottom: 12px;
+  border: 1px solid var(--platform-line-2);
+  border-radius: 20px;
+  background: linear-gradient(
+    145deg,
+    rgb(153 69 255 / 14%),
+    var(--platform-surface)
+  );
+}
+
+.proposal-chat-intro > span {
+  margin-top: 2px;
+}
+
+.proposal-chat-intro h2 {
+  margin: 4px 0 6px;
+  color: var(--platform-text);
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.proposal-chat-intro p:not(.platform-section-label) {
+  color: var(--platform-muted);
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+.proposal-chat-thread {
+  display: grid;
+  gap: 10px;
+}
+
+.proposal-bubble-ai,
+.proposal-chat-card {
+  border: 1px solid var(--platform-line);
+  border-radius: 18px;
+  background: var(--platform-surface);
+}
+
+.proposal-bubble-ai {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  max-width: 92%;
+  padding: 12px 13px;
+}
+
+.proposal-bubble-ai > svg {
+  margin-top: 2px;
+  color: var(--platform-green);
+}
+
+.proposal-bubble-ai strong,
+.proposal-bubble-ai h2 {
+  margin: 0;
+  color: var(--platform-text);
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.proposal-bubble-ai p:not(.platform-section-label) {
+  margin-top: 4px;
+  color: var(--platform-muted);
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+.proposal-bubble-user {
+  justify-self: end;
+  max-width: 92%;
+  border: 0;
+  border-radius: 18px 18px 4px;
+  background: linear-gradient(
+    120deg,
+    var(--platform-purple),
+    var(--platform-green)
+  );
+  color: #08110c;
+}
+
+.proposal-bubble-user span,
+.proposal-bubble-user p {
+  color: #08110c;
+}
+
+.proposal-chat-card {
+  padding: 12px 13px;
+}
+
+.proposal-chat-card h2 {
+  margin: 5px 0 8px;
+  color: var(--platform-text);
+  font-size: 16px;
+}
+
+.proposal-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.proposal-meta-grid div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--platform-line);
+  border-radius: 14px;
+  background: var(--platform-surface);
+}
+
+.proposal-meta-grid dt {
+  color: var(--platform-dim);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.proposal-meta-grid dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--platform-text);
+  font-family: "Space Grotesk", Consolas, monospace;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.proposal-meta-grid a {
+  color: var(--platform-green);
+}
+
+.proposal-status-card {
+  border-color: var(--platform-line-2);
+  background: var(--platform-surface);
+  box-shadow: none;
+}
+
+.proposal-chat-composer,
+.proposal-chat-actions {
+  position: absolute;
+  z-index: 40;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  border-top: 1px solid var(--platform-line);
+  background: linear-gradient(180deg, rgb(11 9 16 / 76%), var(--platform-bg) 30%);
+  backdrop-filter: blur(18px) saturate(150%);
+}
+
+.proposal-chat-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 52px;
+  gap: 8px;
+  padding: 16px 18px 38px;
+}
+
+.proposal-input-field {
+  grid-column: 1;
+  grid-row: 2;
+  gap: 6px;
+}
+
+.proposal-input-field label {
+  color: var(--platform-dim);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.proposal-input-field textarea {
+  min-height: 54px;
+  max-height: 104px;
+  resize: none;
+  padding: 13px 14px;
+  border-color: var(--platform-line-2);
+  border-radius: 16px;
+  background: var(--platform-bg);
+  color: var(--platform-text);
+  font-size: 14.5px;
+}
+
+.proposal-input-field textarea::placeholder {
+  color: var(--platform-dim);
+}
+
+.proposal-send-button {
+  grid-column: 2;
+  grid-row: 2;
+  display: grid;
+  width: 52px;
+  height: 52px;
+  place-items: center;
+  align-self: end;
+  border: 0;
+  border-radius: 16px;
+  background: linear-gradient(
+    120deg,
+    var(--platform-purple),
+    var(--platform-green)
+  );
+  color: #08110c;
+  cursor: pointer;
+}
+
+.proposal-send-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.proposal-send-button span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.proposal-clear-button {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  min-height: 34px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--platform-muted);
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 800;
+  text-align: left;
+}
+
+.proposal-chat-composer .token-guidance {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  min-height: 18px;
+  margin: 0 0 2px;
+  color: var(--platform-muted);
+  font-size: 12px;
+}
+
+.proposal-chat-composer .token-guidance.warning {
+  color: var(--platform-yellow);
+}
+
+.proposal-chat-composer .token-guidance.error {
+  color: #ff7a7a;
+}
+
+.proposal-chat-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 10px;
+  padding: 18px 18px 24px;
+}
+
+.proposal-chat-actions .platform-ghost-button,
+.proposal-chat-actions .platform-primary-button {
+  min-height: 52px;
+  margin: 0;
+}
+
+.proposal-primary-button {
+  margin-bottom: 0;
+  border: 0;
+  cursor: pointer;
+}
+
+.proposal-primary-button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.proposal-success-card {
+  display: grid;
+  justify-items: center;
+  padding: 22px 18px;
+  margin: 34px 0 12px;
+  border: 1px solid rgb(20 241 149 / 38%);
+  border-radius: 22px;
+  background: linear-gradient(
+    150deg,
+    rgb(20 241 149 / 13%),
+    var(--platform-surface)
+  );
+  text-align: center;
+}
+
+.proposal-success-card > svg {
+  margin-bottom: 10px;
+  color: var(--platform-green);
+}
+
+.proposal-success-card h1 {
+  max-width: none;
+  margin: 5px 0 8px;
+  color: var(--platform-text);
+  font-size: 25px;
+}
+
+.proposal-success-card p:not(.platform-section-label) {
+  color: var(--platform-muted);
+  font-size: 14px;
+}
+
 .voting-shell {
   min-height: 100dvh;
   padding: 76px 12px 32px;
@@ -2078,7 +2437,8 @@ p {
   margin-bottom: 16px;
 }
 
-.platform-screen-header button {
+.platform-screen-header button,
+.platform-screen-header a {
   display: grid;
   width: 40px;
   height: 40px;
@@ -2089,6 +2449,7 @@ p {
   background: var(--platform-surface-2);
   color: var(--platform-text);
   cursor: pointer;
+  text-decoration: none;
 }
 
 .platform-screen-header h1 {
@@ -2558,44 +2919,15 @@ p {
   text-decoration: none;
 }
 
-.wallet-flow-shell {
-  min-height: 100dvh;
-  padding: 18px 12px 32px;
-  background:
-    radial-gradient(circle at 50% 0%, rgb(153 69 255 / 18%), transparent 320px),
-    var(--background);
+.platform-wallet-screen {
+  background: var(--platform-bg);
 }
 
-.wallet-flow-panel {
+.platform-wallet-scroll {
   display: grid;
-  width: min(100%, 640px);
-  gap: 14px;
-  margin: 0 auto;
-}
-
-.wallet-flow-header {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  align-content: start;
   gap: 12px;
-  align-items: center;
-  padding: 12px 0;
-}
-
-.wallet-flow-header > a {
-  display: grid;
-  width: 44px;
-  height: 44px;
-  place-items: center;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: var(--surface);
-  text-decoration: none;
-}
-
-.wallet-flow-header h1 {
-  max-width: none;
-  margin-top: 5px;
-  font-size: 30px;
+  padding-bottom: 52px;
 }
 
 .wallet-security-note,
@@ -2604,10 +2936,14 @@ p {
 .wallet-connectors,
 .wallet-mobile-links,
 .wallet-status-card {
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  background: var(--surface);
-  box-shadow: var(--shadow);
+  border: 1px solid var(--platform-line-2);
+  border-radius: 20px;
+  background: linear-gradient(
+    180deg,
+    var(--platform-surface-2),
+    var(--platform-surface)
+  );
+  box-shadow: none;
 }
 
 .wallet-security-note {
@@ -2615,11 +2951,11 @@ p {
   grid-template-columns: auto minmax(0, 1fr);
   gap: 10px;
   padding: 13px 14px;
-  color: var(--muted);
+  color: var(--platform-muted);
 }
 
 .wallet-security-note svg {
-  color: var(--accent);
+  color: var(--platform-green);
 }
 
 .wallet-connected-card {
@@ -2636,7 +2972,11 @@ p {
   height: 44px;
   place-items: center;
   border-radius: 14px;
-  background: linear-gradient(120deg, var(--purple), var(--accent));
+  background: linear-gradient(
+    120deg,
+    var(--platform-purple),
+    var(--platform-green)
+  );
   color: #07120e;
 }
 
@@ -2652,7 +2992,7 @@ p {
 .wallet-mobile-links > p,
 .wallet-transaction-card > p,
 .wallet-status-card p {
-  color: var(--muted);
+  color: var(--platform-muted);
 }
 
 .wallet-connected-card strong {
@@ -2667,10 +3007,10 @@ p {
   justify-content: center;
   min-height: 42px;
   gap: 7px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--platform-line);
   border-radius: 12px;
-  background: var(--surface-raised);
-  color: var(--foreground);
+  background: var(--platform-surface-3);
+  color: var(--platform-text);
   cursor: pointer;
 }
 
@@ -2703,13 +3043,13 @@ p {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
   padding: 10px 11px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--platform-line);
   border-radius: 12px;
-  background: var(--surface-raised);
+  background: var(--platform-surface);
 }
 
 .wallet-transaction-card dt {
-  color: var(--muted);
+  color: var(--platform-dim);
 }
 
 .wallet-transaction-card dd {
@@ -2724,9 +3064,14 @@ p {
   min-height: 52px;
   gap: 8px;
   border: 0;
-  border-radius: 14px;
-  background: linear-gradient(120deg, var(--purple), var(--accent));
-  color: #07120e;
+  border-radius: 16px;
+  background: linear-gradient(
+    120deg,
+    var(--platform-purple),
+    var(--platform-green)
+  );
+  box-shadow: 0 8px 24px -8px rgb(20 241 149 / 50%);
+  color: #08110c;
   cursor: pointer;
   font-weight: 800;
 }
@@ -2748,10 +3093,10 @@ p {
   align-items: center;
   min-height: 62px;
   padding: 11px 12px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--platform-line);
   border-radius: 14px;
-  background: var(--surface-raised);
-  color: var(--foreground);
+  background: var(--platform-surface);
+  color: var(--platform-text);
   cursor: pointer;
   text-align: left;
 }
@@ -2772,7 +3117,7 @@ p {
 }
 
 .wallet-connector-list small {
-  color: var(--muted);
+  color: var(--platform-muted);
 }
 
 .wallet-mobile-links > div:first-child {
@@ -2783,7 +3128,7 @@ p {
 }
 
 .wallet-mobile-links > div:first-child > svg {
-  color: var(--purple-soft);
+  color: var(--platform-purple-soft);
 }
 
 .wallet-mobile-links > div:last-child {
@@ -2799,9 +3144,9 @@ p {
   min-height: 44px;
   gap: 5px;
   padding: 8px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--platform-line);
   border-radius: 12px;
-  background: var(--surface-raised);
+  background: var(--platform-surface);
   font-size: 13px;
   font-weight: 800;
   text-decoration: none;
@@ -2810,17 +3155,17 @@ p {
 .wallet-connection-message,
 .wallet-error-message {
   padding: 11px 13px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--platform-line-2);
   border-radius: 12px;
-  background: var(--surface-raised);
+  background: var(--platform-surface);
 }
 
 .wallet-connection-message {
-  color: var(--accent-strong);
+  color: var(--platform-green);
 }
 
 .wallet-error-message {
-  color: var(--danger);
+  color: #ff7a7a;
 }
 
 .wallet-status-card {
@@ -2841,15 +3186,15 @@ p {
 }
 
 .wallet-status-card > svg {
-  color: var(--gold);
+  color: var(--platform-yellow);
 }
 
 .wallet-status-card.success > svg {
-  color: var(--accent);
+  color: var(--platform-green);
 }
 
 .wallet-status-card.failure > svg {
-  color: var(--danger);
+  color: #ff7a7a;
 }
 
 .wallet-status-card div {
@@ -2860,7 +3205,7 @@ p {
 
 .wallet-status-card code {
   width: fit-content;
-  color: var(--danger);
+  color: #ff7a7a;
   font-size: 12px;
 }
 
@@ -2869,7 +3214,7 @@ p {
   width: fit-content;
   gap: 5px;
   align-items: center;
-  color: var(--accent-strong);
+  color: var(--platform-green);
   font-size: 13px;
   font-weight: 800;
 }
@@ -2884,9 +3229,9 @@ p {
   animation: wallet-spin 900ms linear infinite;
 }
 
-.wallet-flow-shell button:focus-visible,
-.wallet-flow-shell a:focus-visible {
-  outline: 2px solid var(--accent);
+.platform-wallet-screen button:focus-visible,
+.platform-wallet-screen a:focus-visible {
+  outline: 2px solid var(--platform-green);
   outline-offset: 2px;
 }
 
@@ -3162,18 +3507,36 @@ p {
 }
 
 .platform-prompt-card header {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
   align-items: center;
   margin-bottom: 10px;
 }
 
-.platform-prompt-card header strong {
-  font-size: 13.5px;
+.platform-chat-avatar {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid var(--platform-line-2);
+  border-radius: 14px;
+  background: var(--platform-surface);
 }
 
-.platform-prompt-card header span {
+.platform-prompt-card header div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.platform-prompt-card header strong {
+  color: var(--platform-text);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.platform-prompt-card header em {
   display: inline-flex;
   gap: 4px;
   align-items: center;
@@ -3183,15 +3546,16 @@ p {
   background: var(--platform-surface-2);
   color: var(--platform-muted);
   font-size: 11px;
+  font-style: normal;
   font-weight: 600;
+  white-space: nowrap;
 }
 
-.platform-prompt-card header span svg {
+.platform-prompt-card header em svg {
   color: var(--platform-purple-soft);
 }
 
 .platform-prompt-card header small {
-  margin-left: auto;
   color: var(--platform-dim);
   font-size: 12px;
 }
@@ -3212,6 +3576,10 @@ p {
   background: var(--platform-bg);
   color: var(--platform-text);
   font-size: 14.5px;
+}
+
+.platform-prompt-card input::placeholder {
+  color: var(--platform-dim);
 }
 
 .platform-prompt-card a {

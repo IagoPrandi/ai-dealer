@@ -2,6 +2,15 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import {
+  ArrowLeft,
+  CheckCircle2,
+  LoaderCircle,
+  Send,
+  ShieldCheck,
+  Sparkles,
+  Wallet,
+} from "lucide-react";
 import { MVP_FEES_SOL, RULE_MAX_TOKENS } from "@idealer/constants";
 import { address } from "@solana/kit";
 import {
@@ -67,6 +76,43 @@ function sanitizePreview(value: string) {
 
 function truncateAddress(value: string) {
   return `${value.slice(0, 5)}...${value.slice(-5)}`;
+}
+
+function ProposalPhoneChrome() {
+  return (
+    <>
+      <div className="platform-dynamic-island" aria-hidden="true" />
+      <div className="platform-statusbar" aria-hidden="true">
+        <span>9:41</span>
+        <span className="platform-status-icons">
+          <i className="platform-cell-signal">
+            <b />
+            <b />
+            <b />
+            <b />
+          </i>
+          <i className="platform-wifi">⌁</i>
+          <i className="platform-battery" />
+        </span>
+      </div>
+      <div className="platform-home-indicator" aria-hidden="true" />
+    </>
+  );
+}
+
+function ProposalDealer({ size = 42 }: { size?: number }) {
+  return (
+    <span
+      className="platform-dealer"
+      style={{ width: size, height: size }}
+      aria-hidden="true"
+    >
+      <span className="platform-dealer-hat" />
+      <i />
+      <i />
+      <b />
+    </span>
+  );
 }
 
 function getAmbiguityMessage(value: string, tokenCount: number) {
@@ -372,203 +418,313 @@ export function RuleProposalComposer() {
 
   if (step === "success") {
     return (
-      <main className="composer-shell success-shell">
-        <section
-          className="composer-panel success-panel"
-          aria-labelledby="proposal-success-title"
-        >
-          <p className="eyebrow">Proposal submitted</p>
-          <h1 id="proposal-success-title">Your devnet rule is queued.</h1>
-          <p>{feedback.message}</p>
-          <div className="sanitized-preview">
-            <span>Submitted rule</span>
-            <p>{preflight?.sanitizedText ?? sanitizedPreview}</p>
-          </div>
-          {feedback.receipt ? (
-            <dl className="review-costs">
-              <div>
-                <dt>RuleProposal PDA</dt>
-                <dd>{truncateAddress(feedback.receipt.ruleProposal)}</dd>
+      <main className="platform-stage">
+        <div className="platform-phone-shell">
+          <ProposalPhoneChrome />
+          <section
+            className="platform-screen platform-propose-screen"
+            aria-labelledby="proposal-success-title"
+          >
+            <div className="platform-ambient" />
+            <div className="platform-scroll platform-propose-scroll">
+              <div className="proposal-success-card">
+                <CheckCircle2 aria-hidden="true" size={34} />
+                <p className="platform-section-label">Proposal submitted</p>
+                <h1 id="proposal-success-title">
+                  Your devnet rule is queued.
+                </h1>
+                <p>{feedback.message}</p>
               </div>
-              <div>
-                <dt>Signature</dt>
-                <dd>
-                  <a
-                    href={`https://explorer.solana.com/tx/${feedback.receipt.signature}?cluster=devnet`}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    View receipt
-                  </a>
-                </dd>
+              <div className="sanitized-preview proposal-chat-card">
+                <span>Submitted rule</span>
+                <p>{preflight?.sanitizedText ?? sanitizedPreview}</p>
               </div>
-            </dl>
-          ) : null}
-          <div className="picker-actions">
-            <Link className="secondary-link-action" href="/play">
-              Back to live round
-            </Link>
-            <button
-              className="primary-action"
-              onClick={resetComposer}
-              type="button"
+              {feedback.receipt ? (
+                <dl className="review-costs proposal-meta-grid">
+                  <div>
+                    <dt>RuleProposal PDA</dt>
+                    <dd>{truncateAddress(feedback.receipt.ruleProposal)}</dd>
+                  </div>
+                  <div>
+                    <dt>Signature</dt>
+                    <dd>
+                      <a
+                        href={`https://explorer.solana.com/tx/${feedback.receipt.signature}?cluster=devnet`}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        View receipt
+                      </a>
+                    </dd>
+                  </div>
+                </dl>
+              ) : null}
+            </div>
+            <nav
+              className="proposal-chat-actions"
+              aria-label="Proposal success actions"
             >
-              Propose another
-            </button>
-          </div>
-        </section>
+              <Link className="platform-ghost-button" href="/play">
+                Back to live round
+              </Link>
+              <button
+                className="platform-primary-button proposal-primary-button"
+                onClick={resetComposer}
+                type="button"
+              >
+                Propose another
+              </button>
+            </nav>
+          </section>
+        </div>
       </main>
     );
   }
 
   return (
-    <main className="composer-shell">
-      <header className="picker-header">
-        <Link className="back-link" href="/play">
-          Live round
-        </Link>
-        <div>
-          <p className="eyebrow">
-            Turn TURN-{IDEALER_ACTIVE_TURN_ID.toString().padStart(4, "0")}
-          </p>
-          <strong>Propose a rule</strong>
-        </div>
-      </header>
-
-      <section className="composer-panel" aria-labelledby="rule-composer-title">
-        <div className="composer-title-row">
-          <div>
-            <p className="eyebrow">Free-form rule</p>
-            <h1 id="rule-composer-title">Describe a new way to win.</h1>
-          </div>
-          <span
-            className={
-              isOverLimit
-                ? "token-count over"
-                : isNearLimit
-                  ? "token-count warning"
-                  : "token-count"
-            }
-          >
-            {preflight?.tokenCount ?? tokenCount}/{RULE_MAX_TOKENS}
-          </span>
-        </div>
-
-        {step === "review" ? (
-          <section
-            className="review-panel"
-            aria-labelledby="proposal-review-title"
-          >
-            <p className="eyebrow">Review proposal</p>
-            <h2 id="proposal-review-title">
-              Confirm this rule before devnet submission.
-            </h2>
-            <div className="sanitized-preview">
-              <span>Sanitized rule text</span>
-              <p>{preflight?.sanitizedText ?? sanitizedPreview}</p>
-            </div>
-            <div className="mock-check">
-              <span>Official interpretation preview</span>
-              <p>
-                Compare every eligible guess using this measurable rule:{" "}
-                {preflight?.sanitizedText ?? sanitizedPreview}
-              </p>
-            </div>
-            <div className="mock-check">
-              <span>Preflight commitment</span>
-              <p>
-                Server token count and hashes are locked before wallet approval.
-              </p>
-            </div>
-            <dl className="review-costs">
+    <main className="platform-stage">
+      <div className="platform-phone-shell">
+        <ProposalPhoneChrome />
+        <section
+          className="platform-screen platform-propose-screen"
+          aria-labelledby="rule-composer-title"
+        >
+          <div className="platform-ambient" />
+          <div className="platform-scroll platform-propose-scroll">
+            <header className="platform-screen-header proposal-chat-header">
+              <Link aria-label="Back to live round" href="/play">
+                <ArrowLeft aria-hidden="true" size={20} />
+              </Link>
               <div>
-                <dt>Proposal fee</dt>
-                <dd>{MVP_FEES_SOL.ruleProposal.toFixed(2)} SOL</dd>
+                <p className="platform-section-label">
+                  Turn TURN-{IDEALER_ACTIVE_TURN_ID.toString().padStart(4, "0")}
+                </p>
+                <h1 id="rule-composer-title">Dealer chat</h1>
               </div>
-              <div>
-                <dt>Token count</dt>
-                <dd>
-                  {preflight?.tokenCount ?? tokenCount}/{RULE_MAX_TOKENS}
-                </dd>
-              </div>
-              <div>
-                <dt>Wallet</dt>
-                <dd>
-                  {walletAddress
-                    ? truncateAddress(walletAddress)
-                    : "Not connected"}
-                </dd>
-              </div>
-            </dl>
-            {feedback.status !== "idle" ? (
-              <article
-                aria-live="polite"
-                className={`guess-status-card ${feedback.status}`}
-                role={feedback.status === "failed" ? "alert" : undefined}
+              <span
+                className={
+                  isOverLimit
+                    ? "proposal-token-pill over"
+                    : isNearLimit
+                      ? "proposal-token-pill warning"
+                      : "proposal-token-pill"
+                }
               >
-                <strong>
-                  {feedback.status === "preflighting"
-                    ? "Running preflight"
-                    : null}
-                  {feedback.status === "awaiting_approval"
-                    ? "Awaiting wallet approval"
-                    : null}
-                  {feedback.status === "pending" ? "Transaction pending" : null}
-                  {feedback.status === "confirmed"
-                    ? "Proposal confirmed"
-                    : null}
-                  {feedback.status === "failed" ? "Proposal failed" : null}
-                </strong>
-                <p>{feedback.message}</p>
-                {feedback.code ? <code>{feedback.code}</code> : null}
-                {feedback.signature ? (
-                  <a
-                    href={`https://explorer.solana.com/tx/${feedback.signature}?cluster=devnet`}
-                    rel="noreferrer"
-                    target="_blank"
+                {preflight?.tokenCount ?? tokenCount}/{RULE_MAX_TOKENS}
+              </span>
+            </header>
+
+            <section className="proposal-chat-intro">
+              <ProposalDealer />
+              <div>
+                <p className="platform-section-label">Free-form rule</p>
+                <h2>Describe a new way to win.</h2>
+                <p>
+                  Write one measurable winning condition. The server preflight
+                  locks tokens and hashes before wallet approval.
+                </p>
+              </div>
+            </section>
+
+            {step === "review" ? (
+              <section
+                className="proposal-chat-thread"
+                aria-labelledby="proposal-review-title"
+              >
+                <article className="proposal-bubble-ai">
+                  <Sparkles aria-hidden="true" size={16} />
+                  <div>
+                    <p className="platform-section-label">Review proposal</p>
+                    <h2 id="proposal-review-title">
+                      Confirm this rule before devnet submission.
+                    </h2>
+                  </div>
+                </article>
+                <div className="sanitized-preview proposal-bubble-user">
+                  <span>Sanitized rule text</span>
+                  <p>{preflight?.sanitizedText ?? sanitizedPreview}</p>
+                </div>
+                <div className="mock-check proposal-chat-card">
+                  <span>Official interpretation preview</span>
+                  <p>
+                    Compare every eligible guess using this measurable rule:{" "}
+                    {preflight?.sanitizedText ?? sanitizedPreview}
+                  </p>
+                </div>
+                <div className="mock-check proposal-chat-card">
+                  <span>Preflight commitment</span>
+                  <p>
+                    Server token count and hashes are locked before wallet
+                    approval.
+                  </p>
+                </div>
+                <dl className="review-costs proposal-meta-grid">
+                  <div>
+                    <dt>Proposal fee</dt>
+                    <dd>{MVP_FEES_SOL.ruleProposal.toFixed(2)} SOL</dd>
+                  </div>
+                  <div>
+                    <dt>Token count</dt>
+                    <dd>
+                      {preflight?.tokenCount ?? tokenCount}/{RULE_MAX_TOKENS}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Wallet</dt>
+                    <dd>
+                      {walletAddress
+                        ? truncateAddress(walletAddress)
+                        : "Not connected"}
+                    </dd>
+                  </div>
+                </dl>
+                {feedback.status !== "idle" ? (
+                  <article
+                    aria-live="polite"
+                    className={`guess-status-card proposal-status-card ${feedback.status}`}
+                    role={feedback.status === "failed" ? "alert" : undefined}
                   >
-                    View devnet transaction
-                  </a>
+                    <strong>
+                      {feedback.status === "preflighting"
+                        ? "Running preflight"
+                        : null}
+                      {feedback.status === "awaiting_approval"
+                        ? "Awaiting wallet approval"
+                        : null}
+                      {feedback.status === "pending"
+                        ? "Transaction pending"
+                        : null}
+                      {feedback.status === "confirmed"
+                        ? "Proposal confirmed"
+                        : null}
+                      {feedback.status === "failed" ? "Proposal failed" : null}
+                    </strong>
+                    <p>{feedback.message}</p>
+                    {feedback.code ? <code>{feedback.code}</code> : null}
+                    {feedback.signature ? (
+                      <a
+                        href={`https://explorer.solana.com/tx/${feedback.signature}?cluster=devnet`}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        View devnet transaction
+                      </a>
+                    ) : null}
+                  </article>
                 ) : null}
-              </article>
-            ) : null}
-            <div className="picker-actions">
+              </section>
+            ) : (
+              <section className="proposal-chat-thread">
+                <article className="proposal-bubble-ai">
+                  <ShieldCheck aria-hidden="true" size={16} />
+                  <div>
+                    <strong>Keep it clear and testable.</strong>
+                    <p>
+                      Avoid vague words. The rule can be creative, but it must
+                      compare guesses against the draw.
+                    </p>
+                  </div>
+                </article>
+
+                {sanitizedPreview ? (
+                  <div className="sanitized-preview proposal-bubble-user">
+                    <span>Your rule draft</span>
+                    <p>{sanitizedPreview}</p>
+                  </div>
+                ) : (
+                  <div className="sanitized-preview proposal-chat-card">
+                    <span>Sanitized preview</span>
+                    <p>Your normalized rule preview will appear here.</p>
+                  </div>
+                )}
+
+                {feedback.status === "failed" ? (
+                  <article
+                    className="guess-status-card proposal-status-card failed"
+                    role="alert"
+                  >
+                    <strong>Preflight failed</strong>
+                    <p>{feedback.message}</p>
+                    {feedback.code ? <code>{feedback.code}</code> : null}
+                  </article>
+                ) : null}
+
+                <div className="mock-check proposal-chat-card">
+                  <span>Preflight preview</span>
+                  <p>
+                    {isEmpty
+                      ? "Write a rule to run server-side preflight."
+                      : "Ready for server-side token, safety, and hash preflight."}
+                  </p>
+                </div>
+
+                <div className="mock-check proposal-chat-card">
+                  <span>Ambiguity check</span>
+                  <p>
+                    {isEmpty
+                      ? "Write a rule to run the ambiguity check."
+                      : ambiguityMessage}
+                  </p>
+                </div>
+
+                <section
+                  className="inspiration-panel proposal-chat-card"
+                  aria-labelledby="inspiration-title"
+                >
+                  <p className="platform-section-label">Inspiration only</p>
+                  <h2 id="inspiration-title">Examples are not templates.</h2>
+                  <ul>
+                    {INSPIRATION_EXAMPLES.map((example) => (
+                      <li key={example}>{example}</li>
+                    ))}
+                  </ul>
+                </section>
+              </section>
+            )}
+          </div>
+
+          {step === "compose" ? (
+            <nav
+              className="proposal-chat-composer"
+              aria-label="Rule proposal actions"
+            >
+              <div className="composer-field proposal-input-field">
+                <label htmlFor="rule-text">Rule text</label>
+                <textarea
+                  aria-describedby="rule-token-guidance"
+                  id="rule-text"
+                  maxLength={RULE_MAX_CHARACTERS}
+                  onChange={(event) => updateRuleText(event.target.value)}
+                  placeholder="Example: The guess with the closest even total wins."
+                  rows={2}
+                  value={ruleText}
+                />
+              </div>
               <button
-                className="secondary-action"
-                onClick={() => setStep("compose")}
+                aria-label="Review proposal"
+                className="proposal-send-button"
+                disabled={!canReview}
+                onClick={reviewProposal}
                 type="button"
               >
-                Edit rule
+                {feedback.status === "preflighting" ? (
+                  <LoaderCircle
+                    aria-hidden="true"
+                    className="wallet-spinner"
+                    size={19}
+                  />
+                ) : (
+                  <Send aria-hidden="true" size={19} />
+                )}
+                <span>Review proposal</span>
               </button>
-              {connected ? (
-                <button
-                  className="primary-action"
-                  disabled={isSubmitting}
-                  onClick={submitProposal}
-                  type="button"
-                >
-                  {isSubmitting ? "Submitting..." : "Submit to devnet"}
-                </button>
-              ) : (
-                <Link className="primary-action" href="/play/wallet">
-                  Connect wallet
-                </Link>
-              )}
-            </div>
-          </section>
-        ) : (
-          <>
-            <div className="composer-field">
-              <label htmlFor="rule-text">Rule text</label>
-              <textarea
-                aria-describedby="rule-token-guidance"
-                id="rule-text"
-                maxLength={RULE_MAX_CHARACTERS}
-                onChange={(event) => updateRuleText(event.target.value)}
-                placeholder="Example: The guess with the closest even total wins."
-                rows={6}
-                value={ruleText}
-              />
+              <button
+                className="proposal-clear-button"
+                onClick={() => updateRuleText("")}
+                type="button"
+              >
+                Clear
+              </button>
               <p
                 className={
                   isOverLimit
@@ -585,81 +741,43 @@ export function RuleProposalComposer() {
                     } over the limit. Shorten it before review.`
                   : isNearLimit
                     ? "Approaching the token limit. Keep the condition concise and measurable."
-                    : "Write freely. The server preflight is authoritative before wallet approval."}
+                    : "Write freely. Server preflight is authoritative."}
               </p>
-            </div>
-
-            {feedback.status === "failed" ? (
-              <article className="guess-status-card failed" role="alert">
-                <strong>Preflight failed</strong>
-                <p>{feedback.message}</p>
-                {feedback.code ? <code>{feedback.code}</code> : null}
-              </article>
-            ) : null}
-
-            <div className="sanitized-preview">
-              <span>Sanitized preview</span>
-              <p>
-                {sanitizedPreview ||
-                  "Your normalized rule preview will appear here."}
-              </p>
-            </div>
-
-            <div className="mock-check">
-              <span>Preflight preview</span>
-              <p>
-                {isEmpty
-                  ? "Write a rule to run server-side preflight."
-                  : "Ready for server-side token, safety, and hash preflight."}
-              </p>
-            </div>
-
-            <div className="mock-check">
-              <span>Ambiguity check</span>
-              <p>
-                {isEmpty
-                  ? "Write a rule to run the ambiguity check."
-                  : ambiguityMessage}
-              </p>
-            </div>
-
-            <section
-              className="inspiration-panel"
-              aria-labelledby="inspiration-title"
+            </nav>
+          ) : (
+            <nav
+              className="proposal-chat-actions"
+              aria-label="Rule proposal review actions"
             >
-              <p className="eyebrow">Inspiration only</p>
-              <h2 id="inspiration-title">Examples are not templates.</h2>
-              <ul>
-                {INSPIRATION_EXAMPLES.map((example) => (
-                  <li key={example}>{example}</li>
-                ))}
-              </ul>
-            </section>
-          </>
-        )}
-      </section>
-
-      {step === "compose" ? (
-        <nav className="composer-bottom-bar" aria-label="Rule proposal actions">
-          <button
-            className="secondary-action"
-            onClick={() => updateRuleText("")}
-            type="button"
-          >
-            Clear
-          </button>
-          <button
-            className="primary-action"
-            disabled={!canReview}
-            onClick={reviewProposal}
-            type="button"
-          >
-            {feedback.status === "preflighting"
-              ? "Checking..."
-              : "Review proposal"}
-          </button>
-        </nav>
-      ) : null}
+              <button
+                className="platform-ghost-button"
+                onClick={() => setStep("compose")}
+                type="button"
+              >
+                Edit rule
+              </button>
+              {connected ? (
+                <button
+                  className="platform-primary-button proposal-primary-button"
+                  disabled={isSubmitting}
+                  onClick={submitProposal}
+                  type="button"
+                >
+                  {isSubmitting ? "Submitting..." : "Submit to devnet"}
+                </button>
+              ) : (
+                <Link
+                  className="platform-primary-button proposal-primary-button"
+                  href="/play/wallet"
+                >
+                  <Wallet aria-hidden="true" size={17} />
+                  Connect wallet
+                </Link>
+              )}
+            </nav>
+          )}
+        </section>
+      </div>
     </main>
   );
 }
