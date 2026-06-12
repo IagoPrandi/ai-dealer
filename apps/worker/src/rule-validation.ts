@@ -1,5 +1,7 @@
 import {
   validateAndPrecompileRule,
+  type AgentModelIdentity,
+  type AgentProviderAttemptLog,
   type RuleValidationResult,
 } from "@idealer/rule-compiler";
 
@@ -16,10 +18,15 @@ export interface PublishedRuleValidation {
   confidenceAction: RuleValidationResult["log"]["confidenceAction"];
   decision: RuleValidationResult["decision"];
   evaluatedTestCases: RuleValidationResult["log"]["evaluatedTestCases"];
+  fallbackRateSample: number;
+  fallbackTriggered: boolean;
   finalConfidence: number;
   model: string;
+  modelIdentity: AgentModelIdentity;
   normalizedText: string;
   provider: string;
+  providerDisagreementRateSample: number;
+  providerPath: AgentProviderAttemptLog[];
   reasonCodes: RuleValidationResult["log"]["reasonCodes"];
   reasonSummary: string;
   ruleId: number;
@@ -67,10 +74,15 @@ export async function runRuleValidationCycle(
       confidenceAction: result.log.confidenceAction,
       decision: result.decision,
       evaluatedTestCases: result.log.evaluatedTestCases,
+      fallbackRateSample: result.log.fallbackRateSample,
+      fallbackTriggered: result.log.fallbackTriggered,
       finalConfidence: result.log.confidence.final_confidence,
       model: result.log.model,
+      modelIdentity: result.log.modelIdentity,
       normalizedText: result.log.normalizedText,
       provider: result.log.provider,
+      providerDisagreementRateSample: result.log.providerDisagreementRateSample,
+      providerPath: result.log.providerPath,
       reasonCodes: result.log.reasonCodes,
       reasonSummary: result.log.reasonSummary,
       ruleId: rule.ruleId,

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  createLocalOnlyProviderRoutingPolicy,
   createCompilerPlaceholder,
   getRuleValidationPromptContract,
   validateAndPrecompileRule,
@@ -139,4 +140,88 @@ test("stores canonical confidence breakdown and configured policy", () => {
     accept_min: 0.85,
     escalate_min: 0.7,
   });
+});
+
+test("uses the primary provider only for accepted rules", () => {
+  const result = validateAndPrecompileRule({
+    prompt: "Win if at least 4 of your numbers appear in the draw.",
+    tokenCount: 12,
+  });
+
+  assert.equal(result.decision, "VALID");
+  assert.equal(result.log.fallbackTriggered, false);
+  assert.equal(result.log.fallbackRateSample, 0);
+  assert.equal(result.log.providerDisagreementRateSample, 0);
+  assert.equal(result.log.providerPath.length, 1);
+  assert.equal(result.log.providerPath[0]?.priority, "primary");
+  assert.equal(result.artifact?.modelIdentity.provider, result.log.provider);
+  assert.deepEqual(result.artifact?.providerPath, result.log.providerPath);
+});
+
+test("escalates timeout, malformed, and schema failures through provider path", () => {
+  const timeout = validateAndPrecompileRule({
+    prompt: "Win if at least 4 of your numbers appear in the draw.",
+    providerFailureModeByPriority: { primary: "timeout" },
+    tokenCount: 12,
+  });
+  const malformed = validateAndPrecompileRule({
+    prompt: "Win if at least 4 of your numbers appear in the draw.",
+    providerFailureModeByPriority: { primary: "malformed_response" },
+    tokenCount: 12,
+  });
+  const schemaFailure = validateAndPrecompileRule({
+    prompt: "Win if at least 4 of your numbers appear in the draw.",
+    providerFailureModeByPriority: { primary: "schema_validation_failure" },
+    tokenCount: 12,
+  });
+
+  for (const result of [timeout, malformed, schemaFailure]) {
+    assert.equal(result.decision, "VALID");
+    assert.equal(result.log.fallbackTriggered, true);
+    assert.equal(result.log.fallbackRateSample, 1);
+    assert.equal(result.log.providerDisagreementRateSample, 0);
+    assert.equal(result.log.providerPath.length, 2);
+    assert.equal(result.log.providerPath[0]?.priority, "primary");
+    assert.equal(result.log.providerPath[1]?.priority, "secondary");
+  }
+
+  assert.equal(timeout.log.providerPath[0]?.status, "timeout");
+  assert.equal(malformed.log.providerPath[0]?.status, "malformed_response");
+  assert.equal(schemaFailure.log.providerPath[0]?.status, "schema_validation_failed");
+});
+
+test("supports local-only OpenAI-compatible routing with Ollama request shape", () => {
+  const result = validateAndPrecompileRule({
+    prompt: "Win if at least 4 of your numbers appear in the draw.",
+    providerRouting: createLocalOnlyProviderRoutingPolicy("http://localhost:11434/v1"),
+    tokenCount: 12,
+  });
+
+  assert.equal(result.decision, "VALID");
+  assert.equal(result.log.providerPath.length, 1);
+  assert.equal(result.log.providerPath[0]?.request_shape, "ollama_format");
+  assert.equal(result.log.providerPath[0]?.capability_flags.openai_compatible, true);
+  assert.equal(result.log.providerPath[0]?.capability_flags.grammar_constrained_decoding, true);
+  assert.equal(result.log.modelIdentity.serving_engine, "ollama");
+});
+
+test("uses tertiary path and fails closed when providers disagree", () => {
+  const result = validateAndPrecompileRule({
+    prompt: "Win if at least 4 of your numbers appear in the draw.",
+    providerConfidenceActionByPriority: {
+      primary: "ESCALATE",
+      tertiary: "REJECT",
+    },
+    tokenCount: 12,
+  });
+
+  assert.equal(result.decision, "INVALID");
+  assert.equal(result.artifactHash, null);
+  assert.equal(result.log.fallbackTriggered, true);
+  assert.equal(result.log.providerDisagreementRateSample, 1);
+  assert.ok(result.log.reasonCodes.includes("PROVIDER_DISAGREEMENT"));
+  assert.deepEqual(
+    result.log.providerPath.map((attempt) => attempt.priority),
+    ["primary", "secondary", "tertiary"],
+  );
 });

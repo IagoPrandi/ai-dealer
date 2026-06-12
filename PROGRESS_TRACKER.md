@@ -40,6 +40,7 @@ Opened before starting `M0.1`:
 | M3.3      | AI Rule Validation                            | Completed | Confirmed 2026-06-11 | Deterministic rule validation and precompilation implemented across compiler, API, worker, and public round UI. PRD checklist and approval criteria ticked after the user's explicit instruction to verify/do M3.3 and mark it done. |
 | M3.4      | Composite Confidence                          | Completed | Confirmed 2026-06-11 | Canonical composite compiler confidence schema, configured PRD weights, accept/escalate/reject threshold action, API/worker propagation, and confidence policy tests implemented. |
 | M3.5      | Guess Verification Queue                      | Completed | Confirmed 2026-06-11 | Queue job creation per submitted guess, deterministic original/alternative verification worker, retry/dead-letter/rate-limit handling, API job/result status, and Docker smoke verification implemented. |
+| M3.6      | Agent Fallback & Provider Dispute Handling    | Completed | Confirmed 2026-06-12 | Primary/secondary/tertiary provider routing, local OpenAI-compatible request-shape metadata, grammar/schema capability checks, timeout/malformed/schema fallback, provider path logging, model identity freezing, fallback/disagreement metrics, and tertiary dispute handling implemented. |
 
 ## M0.1 Work Log
 
@@ -1319,3 +1320,56 @@ Docker runtime:
 ## M3.5 Confirmation Gate
 
 `M3.5` was implemented and marked complete on 2026-06-11 after the user's explicit instruction to verify M3.4, mark it done if complete, and follow to the next milestone.
+
+## M3.6 Work Log
+
+### 2026-06-12
+
+- Reopened `PRD.md`, `AGENTS.md`, and `.claude/skills` before verifying `M3.5` and proceeding to `M3.6`, as required.
+- Opened the relevant local skills before implementation: `.claude/skills/best-practices/SKILL.md`, `.claude/skills/best-practices/references/agent-principles.md`, `.claude/skills/best-practices/references/web2-backend.md`, `.claude/skills/best-practices/references/testing.md`, and `.claude/skills/security-threat-checklist/SKILL.md`.
+- Verified `M3.5` was already complete in `PRD.md` and `PROGRESS_TRACKER.md`; `PRD.md` had all M3.5 checklist and approval items ticked.
+- Verified `M3.6` was not already complete: `PRD.md` had all M3.6 checklist and approval items unticked, and the existing compiler only accepted single provider/model labels without provider routing, fallback, dispute handling, or provider-path logging.
+- Agent core (`packages/agent-core`): added primary/secondary/tertiary provider routing policy, local-only routing helper, provider capability flags, OpenAI-compatible/Ollama request-shape metadata, per-role model routing, model identity fields, and provider attempt log contracts.
+- Rule compiler (`packages/rule-compiler`): added provider-attempt orchestration that uses the primary provider for normal accepted rules, escalates on timeout, malformed response, schema-constrained decoding failure, low confidence, and provider disagreement, and uses tertiary output as the dispute tiebreaker.
+- Rule compiler artifacts now freeze `modelIdentity` and `providerPath` alongside the deterministic DSL/AST artifact; logs now include provider path, fallback rate sample, provider disagreement rate sample, and model identity.
+- Worker/API validation projections now preserve provider path, model identity, fallback/disagreement metrics, and provider identity in validation records and summaries.
+- Documentation/config: added primary/secondary/tertiary provider environment keys to `.env.example` and documented provider attempt logs in `docs/agent-schema-draft.md`.
+- Updated `PRD.md` M3.6 checklist and approval criteria after the user's explicit instruction to verify M3.5, mark it done if complete, and follow to the next milestone.
+
+## M3.6 Validation Results
+
+| Requirement | Result |
+| --- | --- |
+| Configure primary/secondary/tertiary providers | `createDefaultProviderRoutingPolicy` creates all three provider priorities with model identity and request-shape metadata. |
+| Local/self-hosted OpenAI-compatible provider | `createLocalOnlyProviderRoutingPolicy` supports local OpenAI-compatible endpoints and identifies Ollama request shape. |
+| Capability flags and request shape | Provider attempts record grammar/schema flags, local/OpenAI compatibility, Ollama support, and request shape. |
+| Grammar/schema-constrained decoding | Providers without grammar/schema capability are treated as schema failures and escalated through the provider path. |
+| Timeout, malformed response, schema failure escalation | Focused compiler tests cover all three failure modes and verify fallback path creation. |
+| Low confidence escalation | Existing confidence action policy still escalates `0.70 <= final_confidence < 0.85`; provider orchestration continues on `ESCALATE`. |
+| Provider disagreement and tertiary tiebreaker | Focused compiler test drives primary/secondary/tertiary disagreement and verifies the unresolved dispute fails closed with provider path logged. |
+| Per-role model routing | Provider config includes model routing for compile, interpret, normalize, explain, and review roles. |
+| Model identity in logs/artifacts | Validation logs and frozen artifacts include provider, model, digest, quantization, and serving engine. |
+| Fallback/disagreement metrics | Validation logs expose `fallbackRateSample`, `fallbackTriggered`, and `providerDisagreementRateSample`; API/worker records preserve them. |
+
+## M3.6 Verification Commands
+
+Passed:
+
+- `pnpm --filter @idealer/agent-core lint`
+- `pnpm --filter @idealer/agent-core typecheck`
+- `pnpm --filter @idealer/agent-core build`
+- `pnpm --filter @idealer/rule-compiler typecheck`
+- `pnpm --filter @idealer/rule-compiler lint`
+- `pnpm --filter @idealer/rule-compiler test` (13/13)
+- `pnpm --filter @idealer/rule-compiler build`
+- `pnpm --filter @idealer/worker typecheck`
+- `pnpm --filter @idealer/worker lint`
+- `pnpm --filter @idealer/worker test` (22/22)
+- `pnpm --filter @idealer/worker build`
+- `pnpm --filter @idealer/api typecheck`
+- `pnpm --filter @idealer/api lint`
+- `pnpm --filter @idealer/api build`
+
+## M3.6 Confirmation Gate
+
+`M3.6` was implemented and marked complete on 2026-06-12 after the user's explicit instruction to verify M3.5, mark it done if complete, and follow to the next milestone.

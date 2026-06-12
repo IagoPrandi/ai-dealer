@@ -40,6 +40,10 @@ interface RuleCompilationResult {
   confidence_breakdown: CompilerConfidenceBreakdown;
   difficulty_class: "EASY" | "MEDIUM" | "HARD" | "EXTREME";
   test_summary: RuleTestSummary;
+  provider_path: ProviderAttemptLog[];
+  fallback_triggered: boolean;
+  fallback_rate_sample: 0 | 1;
+  provider_disagreement_rate_sample: 0 | 1;
   rejection_reasons?: string[];
   compiler_version: string;
   runtime_version: string;
@@ -64,8 +68,49 @@ interface CompiledRuleArtifact {
   uses_sum: boolean;
   uses_parity: boolean;
   uses_position: boolean;
+  model_identity: ModelIdentity;
+  provider_path: ProviderAttemptLog[];
 }
 ```
+
+## Provider Routing & Fallback
+
+```ts
+interface ModelIdentity {
+  provider: string;
+  model: string;
+  digest: string | null;
+  quantization: string | null;
+  serving_engine: string;
+}
+
+interface ProviderAttemptLog {
+  priority: "primary" | "secondary" | "tertiary";
+  provider: string;
+  model_identity: ModelIdentity;
+  request_shape: "deterministic_json_schema" | "ollama_format" | "openai_response_format";
+  capability_flags: {
+    grammar_constrained_decoding: boolean;
+    json_schema_response: boolean;
+    local: boolean;
+    openai_compatible: boolean;
+    supports_ollama_format: boolean;
+  };
+  confidence_action: "ACCEPT" | "ESCALATE" | "REJECT";
+  decision: "VALID" | "INVALID";
+  final_confidence: number;
+  status:
+    | "accepted"
+    | "escalated"
+    | "malformed_response"
+    | "provider_disagreement"
+    | "rejected"
+    | "schema_validation_failed"
+    | "timeout";
+}
+```
+
+Normal cases must stop after the primary provider. Timeout, malformed response, schema-constrained decoding failure, low confidence, and provider disagreement must add auditable provider-path entries. Tertiary provider output is used only as a tiebreaker for provider disagreement and never hides the provider path.
 
 ## Composite Confidence
 

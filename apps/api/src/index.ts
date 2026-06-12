@@ -9,6 +9,8 @@ import {
 } from "@idealer/constants";
 import {
   validateAndPrecompileRule,
+  type AgentModelIdentity,
+  type AgentProviderAttemptLog,
   type CompilerConfidenceBreakdown,
   type RuleCompiledArtifact,
   type RuleConfidenceAction,
@@ -108,8 +110,11 @@ export interface RulePrecompilationRecord {
 export interface RuleValidationSummary {
   confidenceAction: RuleConfidenceAction;
   decision: RuleValidationDecision;
+  fallbackTriggered: boolean;
   finalConfidence: number;
   model: string;
+  provider: string;
+  providerDisagreementRateSample: number;
   reasonCodes: RuleValidationReasonCode[];
   reasonSummary: string;
   validatedAt: string;
@@ -121,8 +126,13 @@ export interface RuleValidationRecord extends RuleValidationSummary {
   compiledArtifact: RuleCompiledArtifact | null;
   confidence: CompilerConfidenceBreakdown;
   evaluatedTestCases: RuleValidationTestResult[];
+  fallbackRateSample: number;
+  fallbackTriggered: boolean;
+  modelIdentity: AgentModelIdentity;
   normalizedText: string;
   provider: string;
+  providerDisagreementRateSample: number;
+  providerPath: AgentProviderAttemptLog[];
   ruleId: number;
   turnId: number;
 }
@@ -546,6 +556,16 @@ function isValidRuleValidation(value: unknown): value is RuleValidationRecord {
     record.reasonCodes.every((reason) => typeof reason === "string") &&
     typeof record.provider === "string" &&
     typeof record.model === "string" &&
+    typeof record.fallbackTriggered === "boolean" &&
+    typeof record.fallbackRateSample === "number" &&
+    record.fallbackRateSample >= 0 &&
+    record.fallbackRateSample <= 1 &&
+    typeof record.providerDisagreementRateSample === "number" &&
+    record.providerDisagreementRateSample >= 0 &&
+    record.providerDisagreementRateSample <= 1 &&
+    isValidModelIdentity(record.modelIdentity) &&
+    Array.isArray(record.providerPath) &&
+    record.providerPath.every(isValidProviderAttemptLog) &&
     typeof record.validatedAt === "string" &&
     !Number.isNaN(Date.parse(record.validatedAt)) &&
     typeof record.finalConfidence === "number" &&
@@ -556,6 +576,46 @@ function isValidRuleValidation(value: unknown): value is RuleValidationRecord {
     (record.compiledArtifact == null || isValidCompiledArtifact(record.compiledArtifact)) &&
     (record.decision === "VALID" ? record.compiledArtifact != null : true) &&
     Array.isArray(record.evaluatedTestCases)
+  );
+}
+
+function isValidModelIdentity(value: unknown): value is AgentModelIdentity {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const identity = value as Partial<AgentModelIdentity>;
+  return (
+    typeof identity.provider === "string" &&
+    identity.provider.length > 0 &&
+    typeof identity.model === "string" &&
+    identity.model.length > 0 &&
+    (identity.digest === null || typeof identity.digest === "string") &&
+    (identity.quantization === null || typeof identity.quantization === "string") &&
+    typeof identity.serving_engine === "string" &&
+    identity.serving_engine.length > 0
+  );
+}
+
+function isValidProviderAttemptLog(value: unknown): value is AgentProviderAttemptLog {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const attempt = value as Partial<AgentProviderAttemptLog>;
+  return (
+    typeof attempt.provider === "string" &&
+    isValidModelIdentity(attempt.model_identity) &&
+    typeof attempt.final_confidence === "number" &&
+    attempt.final_confidence >= 0 &&
+    attempt.final_confidence <= 1 &&
+    isValidConfidenceAction(attempt.confidence_action) &&
+    (attempt.decision === "VALID" || attempt.decision === "INVALID") &&
+    typeof attempt.request_shape === "string" &&
+    typeof attempt.status === "string" &&
+    typeof attempt.priority === "string" &&
+    !!attempt.capability_flags &&
+    typeof attempt.capability_flags === "object"
   );
 }
 
@@ -841,8 +901,11 @@ export function saveRuleValidation(record: RuleValidationRecord) {
   const validationSummary: RuleValidationSummary = {
     confidenceAction: record.confidenceAction,
     decision: record.decision,
+    fallbackTriggered: record.fallbackTriggered,
     finalConfidence: record.finalConfidence,
     model: record.model,
+    provider: record.provider,
+    providerDisagreementRateSample: record.providerDisagreementRateSample,
     reasonCodes: record.reasonCodes,
     reasonSummary: record.reasonSummary,
     validatedAt: record.validatedAt,
@@ -1095,10 +1158,15 @@ export function runRuleValidationForProposal(args: {
     confidenceAction: result.log.confidenceAction,
     decision: result.decision,
     evaluatedTestCases: result.log.evaluatedTestCases,
+    fallbackRateSample: result.log.fallbackRateSample,
+    fallbackTriggered: result.log.fallbackTriggered,
     finalConfidence: result.log.confidence.final_confidence,
     model: result.log.model,
+    modelIdentity: result.log.modelIdentity,
     normalizedText: result.log.normalizedText,
     provider: result.log.provider,
+    providerDisagreementRateSample: result.log.providerDisagreementRateSample,
+    providerPath: result.log.providerPath,
     reasonCodes: result.log.reasonCodes,
     reasonSummary: result.log.reasonSummary,
     ruleId: proposal.ruleId,

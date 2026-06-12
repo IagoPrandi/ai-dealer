@@ -1,9 +1,16 @@
 import { createHash } from "node:crypto";
 import {
+  createDefaultProviderRoutingPolicy,
   calculateCompilerConfidence,
   COMPILER_CONFIDENCE_THRESHOLDS,
   COMPILER_CONFIDENCE_WEIGHTS,
   selectCompilerConfidenceAction,
+  type AgentModelIdentity,
+  type AgentProviderAttemptLog,
+  type AgentProviderAttemptStatus,
+  type AgentProviderConfig,
+  type AgentProviderPriority,
+  type AgentProviderRoutingPolicy,
   type CompilerConfidenceAction,
   type CompilerConfidenceBreakdown,
   type CompilerConfidenceThresholds,
@@ -13,9 +20,17 @@ import { ruleAstSchema, type RuleAst } from "@idealer/rule-schema";
 import { evaluateRule } from "@idealer/rule-runtime";
 
 export type {
+  AgentModelIdentity,
+  AgentProviderAttemptLog,
+  AgentProviderRoutingPolicy,
   CompilerConfidenceBreakdown,
   CompilerConfidenceThresholds,
   CompilerConfidenceWeights,
+} from "@idealer/agent-core";
+
+export {
+  createDefaultProviderRoutingPolicy,
+  createLocalOnlyProviderRoutingPolicy,
 } from "@idealer/agent-core";
 
 export type RuleConfidenceAction = CompilerConfidenceAction;
@@ -23,6 +38,10 @@ export type RuleValidationDecision = "INVALID" | "VALID";
 export type RuleValidationReasonCode =
   | "AMBIGUOUS_RULE"
   | "EXTERNAL_DEPENDENCY"
+  | "PROVIDER_DISAGREEMENT"
+  | "PROVIDER_MALFORMED_RESPONSE"
+  | "PROVIDER_SCHEMA_UNCONSTRAINED"
+  | "PROVIDER_TIMEOUT"
   | "RUNTIME_TEST_FAILED"
   | "SCHEMA_INVALID"
   | "SUPPORTED_RULE"
@@ -32,7 +51,10 @@ export type RuleValidationReasonCode =
 export interface RuleCompilationRequest {
   model?: string;
   prompt: string;
+  providerConfidenceActionByPriority?: Partial<Record<AgentProviderPriority, RuleConfidenceAction>>;
   provider?: string;
+  providerFailureModeByPriority?: Partial<Record<AgentProviderPriority, ProviderFailureMode>>;
+  providerRouting?: AgentProviderRoutingPolicy;
   ruleId?: number;
   timestamp?: string;
   tokenCount: number;
@@ -63,11 +85,16 @@ export interface RuleValidationLog {
   confidenceWeights: CompilerConfidenceWeights;
   decision: RuleValidationDecision;
   evaluatedTestCases: RuleValidationTestResult[];
+  fallbackRateSample: number;
+  fallbackTriggered: boolean;
   generatedTestCases: RuleValidationTestCase[];
   model: string;
+  modelIdentity: AgentModelIdentity;
   normalizedText: string;
   promptContract: RuleValidationPromptContract;
   provider: string;
+  providerDisagreementRateSample: number;
+  providerPath: AgentProviderAttemptLog[];
   reasonCodes: RuleValidationReasonCode[];
   reasonSummary: string;
   ruleId: number | null;
@@ -84,10 +111,17 @@ export interface RuleValidationResult {
 
 export interface RuleCompiledArtifact {
   ast: RuleAst;
+  modelIdentity: AgentModelIdentity;
   normalizedText: string;
   promptContractVersion: string;
+  providerPath: AgentProviderAttemptLog[];
   schemaVersion: 1;
 }
+
+export type ProviderFailureMode =
+  | "malformed_response"
+  | "schema_validation_failure"
+  | "timeout";
 
 export interface RuleValidationPromptContract {
   allowedInputs: readonly ["guess", "draw"];
@@ -162,10 +196,165 @@ export function validateAndPrecompileRule(
   request: RuleCompilationRequest,
 ): RuleValidationResult {
   const timestamp = request.timestamp ?? new Date().toISOString();
-  const provider = request.provider ?? "idealer-deterministic-agent";
-  const model = request.model ?? "idealer-rule-validator-v1";
+  const providerRouting = normalizeProviderRouting(request);
+  const attempts: ProviderEvaluation[] = [];
+  let finalEvaluation: ProviderEvaluation | null = null;
+
+  for (const providerConfig of providerRouting.providers) {
+    const evaluation = evaluateProviderAttempt(request, timestamp, providerConfig);
+    attempts.push(evaluation);
+
+    if (evaluation.status === "accepted") {
+      if (attempts.length >= 2 && hasProviderDisagreement(attempts) && attempts.length < 3) {
+        continue;
+      }
+      finalEvaluation = evaluation;
+      break;
+    }
+
+    if (evaluation.status === "rejected" && evaluation.confidenceAction === "REJECT") {
+      finalEvaluation = evaluation;
+      break;
+    }
+  }
+
+  finalEvaluation ??= attempts.at(-1) ?? evaluateProviderAttempt(
+    request,
+    timestamp,
+    createDefaultProviderRoutingPolicy().providers[0] as AgentProviderConfig,
+  );
+
+  const providerPath = resolveProviderPath(attempts);
+  const fallbackTriggered = providerPath.length > 1;
+  const providerDisagreementRateSample = hasProviderDisagreement(attempts) ? 1 : 0;
+  const disagreementResolution =
+    providerDisagreementRateSample === 1 ? resolveProviderDisagreement(attempts) : null;
+  const selectedAttempt =
+    providerDisagreementRateSample === 1
+      ? (disagreementResolution ?? {
+          ...finalEvaluation,
+          artifact: null,
+          artifactHash: null,
+          decision: "INVALID" as const,
+          status: "provider_disagreement" as const,
+        })
+      : finalEvaluation;
+
+  const reasonCodes = new Set(selectedAttempt.reasonCodes);
+  if (providerDisagreementRateSample === 1) {
+    reasonCodes.add("PROVIDER_DISAGREEMENT");
+  }
+
+  const reasonSummary = summarizeReasons(
+    selectedAttempt.confidenceAction,
+    selectedAttempt.decision,
+    [...reasonCodes].filter((reason) => reason !== "SUPPORTED_RULE"),
+    selectedAttempt.confidence.final_confidence,
+    fallbackTriggered,
+    providerDisagreementRateSample === 1 && disagreementResolution === null,
+  );
+
+  const artifact =
+    selectedAttempt.decision === "VALID" && selectedAttempt.ast
+      ? {
+          ast: selectedAttempt.ast,
+          modelIdentity: selectedAttempt.modelIdentity,
+          normalizedText: selectedAttempt.normalizedText,
+          promptContractVersion: PROMPT_CONTRACT.version,
+          providerPath,
+          schemaVersion: 1 as const,
+        }
+      : null;
+  const artifactHash = artifact ? hashJson(artifact) : null;
+  const validationLogId = hashJson({
+    decision: selectedAttempt.decision,
+    normalizedText: selectedAttempt.normalizedText,
+    providerPath,
+    reasonCodes: [...reasonCodes].sort(),
+    ruleId: request.ruleId ?? null,
+    timestamp,
+  });
+
+  return {
+    artifact,
+    artifactHash,
+    decision: selectedAttempt.decision,
+    log: {
+      compiledArtifactHash: artifactHash,
+      confidence: selectedAttempt.confidence,
+      confidenceAction: selectedAttempt.confidenceAction,
+      confidenceThresholds: COMPILER_CONFIDENCE_THRESHOLDS,
+      confidenceWeights: COMPILER_CONFIDENCE_WEIGHTS,
+      decision: selectedAttempt.decision,
+      evaluatedTestCases: selectedAttempt.evaluatedTestCases,
+      fallbackRateSample: fallbackTriggered ? 1 : 0,
+      fallbackTriggered,
+      generatedTestCases: selectedAttempt.generatedTestCases,
+      model: selectedAttempt.modelIdentity.model,
+      modelIdentity: selectedAttempt.modelIdentity,
+      normalizedText: selectedAttempt.normalizedText,
+      promptContract: PROMPT_CONTRACT,
+      provider: selectedAttempt.modelIdentity.provider,
+      providerDisagreementRateSample,
+      providerPath,
+      reasonCodes: [...reasonCodes],
+      reasonSummary,
+      ruleId: request.ruleId ?? null,
+      timestamp,
+      validationLogId,
+    },
+  };
+}
+
+interface ProviderEvaluation {
+  artifact: RuleCompiledArtifact | null;
+  artifactHash: string | null;
+  ast: RuleAst | null;
+  capabilityFlags: AgentProviderConfig["capabilities"];
+  confidence: CompilerConfidenceBreakdown;
+  confidenceAction: RuleConfidenceAction;
+  decision: RuleValidationDecision;
+  evaluatedTestCases: RuleValidationTestResult[];
+  generatedTestCases: RuleValidationTestCase[];
+  modelIdentity: AgentModelIdentity;
+  normalizedText: string;
+  priority: AgentProviderPriority;
+  reasonCodes: RuleValidationReasonCode[];
+  requestShape: AgentProviderConfig["request_shape"];
+  status: AgentProviderAttemptStatus;
+}
+
+function evaluateProviderAttempt(
+  request: RuleCompilationRequest,
+  timestamp: string,
+  providerConfig: AgentProviderConfig,
+): ProviderEvaluation {
+  const forcedFailure = request.providerFailureModeByPriority?.[providerConfig.priority];
+  const modelIdentity = {
+    ...providerConfig.identity,
+    model:
+      request.model ??
+      providerConfig.model_by_role.compile ??
+      providerConfig.identity.model,
+    provider: request.provider ?? providerConfig.identity.provider,
+  };
   const normalizedText = normalizeRuleText(request.prompt);
   const reasonCodes = new Set<RuleValidationReasonCode>();
+
+  if (forcedFailure === "timeout") {
+    reasonCodes.add("PROVIDER_TIMEOUT");
+  }
+  if (forcedFailure === "malformed_response") {
+    reasonCodes.add("PROVIDER_MALFORMED_RESPONSE");
+  }
+  if (
+    forcedFailure === "schema_validation_failure" ||
+    !providerConfig.capabilities.grammar_constrained_decoding ||
+    !providerConfig.capabilities.json_schema_response
+  ) {
+    reasonCodes.add("PROVIDER_SCHEMA_UNCONSTRAINED");
+    reasonCodes.add("SCHEMA_INVALID");
+  }
 
   if (hasPattern(normalizedText, AMBIGUOUS_PATTERNS)) {
     reasonCodes.add("AMBIGUOUS_RULE");
@@ -175,23 +364,23 @@ export function validateAndPrecompileRule(
   }
 
   const ast = compileSupportedRule(normalizedText);
-  if (!ast) {
+  if (!ast || forcedFailure) {
     reasonCodes.add("UNSUPPORTED_RULE");
   } else {
     reasonCodes.add("SUPPORTED_RULE");
   }
 
-  const schemaResult = ast ? ruleAstSchema.safeParse(ast) : null;
+  const schemaResult = ast && !forcedFailure ? ruleAstSchema.safeParse(ast) : null;
   if (!schemaResult?.success) {
     reasonCodes.add("SCHEMA_INVALID");
   }
 
-  const hasSafeRuntimeBounds = ast ? validateRuntimeBounds(ast) : false;
+  const hasSafeRuntimeBounds = ast && !forcedFailure ? validateRuntimeBounds(ast) : false;
   if (!hasSafeRuntimeBounds) {
     reasonCodes.add("UNSAFE_RUNTIME_BOUNDS");
   }
 
-  const generatedTestCases = ast ? generateRuleTestCases(ast) : [];
+  const generatedTestCases = ast && !forcedFailure ? generateRuleTestCases(ast) : [];
   const evaluatedTestCases = ast
     ? generatedTestCases.map((testCase) => {
         const actual = evaluateRule(ast, testCase);
@@ -216,7 +405,9 @@ export function validateAndPrecompileRule(
   const blockingReasons = [...reasonCodes].filter(
     (reason) => reason !== "SUPPORTED_RULE",
   );
-  const confidenceAction = selectCompilerConfidenceAction(confidence.final_confidence);
+  const confidenceAction =
+    request.providerConfidenceActionByPriority?.[providerConfig.priority] ??
+    selectCompilerConfidenceAction(confidence.final_confidence);
   const decision: RuleValidationDecision =
     blockingReasons.length === 0 && confidenceAction === "ACCEPT" ? "VALID" : "INVALID";
 
@@ -224,50 +415,155 @@ export function validateAndPrecompileRule(
     decision === "VALID" && ast
       ? {
           ast,
+          modelIdentity,
           normalizedText,
           promptContractVersion: PROMPT_CONTRACT.version,
+          providerPath: [],
           schemaVersion: 1,
         }
       : null;
   const artifactHash = artifact ? hashJson(artifact) : null;
-  const reasonSummary = summarizeReasons(
-    confidenceAction,
-    decision,
-    blockingReasons,
-    confidence.final_confidence,
-  );
-  const validationLogId = hashJson({
-    decision,
-    normalizedText,
-    reasonCodes: [...reasonCodes].sort(),
-    ruleId: request.ruleId ?? null,
-    timestamp,
-  });
-
   return {
     artifact,
     artifactHash,
+    ast: forcedFailure ? null : ast,
+    capabilityFlags: providerConfig.capabilities,
+    confidence,
+    confidenceAction,
     decision,
-    log: {
-      compiledArtifactHash: artifactHash,
-      confidence,
-      confidenceAction,
-      confidenceThresholds: COMPILER_CONFIDENCE_THRESHOLDS,
-      confidenceWeights: COMPILER_CONFIDENCE_WEIGHTS,
-      decision,
-      evaluatedTestCases,
-      generatedTestCases,
-      model,
-      normalizedText,
-      promptContract: PROMPT_CONTRACT,
-      provider,
-      reasonCodes: [...reasonCodes],
-      reasonSummary,
-      ruleId: request.ruleId ?? null,
-      timestamp,
-      validationLogId,
-    },
+    evaluatedTestCases,
+    generatedTestCases,
+    modelIdentity,
+    normalizedText,
+    priority: providerConfig.priority,
+    reasonCodes: [...reasonCodes],
+    requestShape: providerConfig.request_shape,
+    status: determineAttemptStatus(forcedFailure, confidenceAction, decision),
   };
+}
+
+function normalizeProviderRouting(
+  request: RuleCompilationRequest,
+): AgentProviderRoutingPolicy {
+  if (request.providerRouting) {
+    return request.providerRouting;
+  }
+
+  if (request.provider || request.model) {
+    const [primary, secondary, tertiary] = createDefaultProviderRoutingPolicy().providers;
+    if (!primary || !secondary || !tertiary) {
+      return createDefaultProviderRoutingPolicy();
+    }
+    return {
+      providers: [
+        {
+          ...primary,
+          identity: {
+            ...primary.identity,
+            model: request.model ?? primary.identity.model,
+            provider: request.provider ?? primary.identity.provider,
+          },
+          model_by_role: {
+            ...primary.model_by_role,
+            compile: request.model ?? primary.model_by_role.compile ?? primary.identity.model,
+          },
+        },
+        secondary,
+        tertiary,
+      ],
+    };
+  }
+
+  return createDefaultProviderRoutingPolicy();
+}
+
+function determineAttemptStatus(
+  forcedFailure: ProviderFailureMode | undefined,
+  confidenceAction: RuleConfidenceAction,
+  decision: RuleValidationDecision,
+): AgentProviderAttemptStatus {
+  if (forcedFailure === "timeout") {
+    return "timeout";
+  }
+  if (forcedFailure === "malformed_response") {
+    return "malformed_response";
+  }
+  if (forcedFailure === "schema_validation_failure") {
+    return "schema_validation_failed";
+  }
+  if (decision === "VALID") {
+    return "accepted";
+  }
+  if (confidenceAction === "ESCALATE") {
+    return "escalated";
+  }
+  return "rejected";
+}
+
+function resolveProviderPath(attempts: ProviderEvaluation[]): AgentProviderAttemptLog[] {
+  return attempts.map((attempt) => ({
+    capability_flags: attempt.capabilityFlags,
+    confidence_action: attempt.confidenceAction,
+    decision: attempt.decision,
+    final_confidence: attempt.confidence.final_confidence,
+    model_identity: attempt.modelIdentity,
+    priority: attempt.priority,
+    provider: attempt.modelIdentity.provider,
+    request_shape: attempt.requestShape,
+    status: attempt.status,
+  }));
+}
+
+function hasProviderDisagreement(attempts: ProviderEvaluation[]) {
+  const completedAttempts = attempts.filter(isCompletedProviderOpinion);
+  if (completedAttempts.length < 2) {
+    return false;
+  }
+
+  const first = completedAttempts[0];
+  if (!first) {
+    return false;
+  }
+  const rest = completedAttempts.slice(1);
+  const firstSignature = providerDecisionSignature(first);
+  return rest.some((attempt) => providerDecisionSignature(attempt) !== firstSignature);
+}
+
+function resolveProviderDisagreement(attempts: ProviderEvaluation[]) {
+  if (attempts.length < 3) {
+    return null;
+  }
+
+  const secondary = attempts.find((attempt) => attempt.priority === "secondary");
+  const tertiary = attempts.find((attempt) => attempt.priority === "tertiary");
+  if (!secondary || !tertiary) {
+    return null;
+  }
+
+  const secondarySignature = providerDecisionSignature(secondary);
+  const tertiarySignature = providerDecisionSignature(tertiary);
+  if (secondarySignature !== tertiarySignature || tertiary.decision !== "VALID") {
+    return null;
+  }
+
+  return tertiary;
+}
+
+function isCompletedProviderOpinion(attempt: ProviderEvaluation) {
+  return (
+    attempt.status !== "timeout" &&
+    attempt.status !== "malformed_response" &&
+    attempt.status !== "schema_validation_failed"
+  );
+}
+
+function providerDecisionSignature(attempt: ProviderEvaluation) {
+  return JSON.stringify({
+    ast: attempt.ast,
+    confidenceAction: attempt.confidenceAction,
+    decision: attempt.decision,
+    normalizedText: attempt.normalizedText,
+  });
 }
 
 function normalizeRuleText(value: string) {
@@ -446,9 +742,16 @@ function summarizeReasons(
   decision: RuleValidationDecision,
   blockingReasons: RuleValidationReasonCode[],
   finalConfidence: number,
+  fallbackTriggered: boolean,
+  providerDisagreement: boolean,
 ) {
+  if (providerDisagreement) {
+    return "Rule rejected because provider attempts disagreed; tertiary tiebreaker path was logged for audit.";
+  }
   if (decision === "VALID") {
-    return `Rule accepted with final confidence ${finalConfidence.toFixed(4)}.`;
+    return fallbackTriggered
+      ? `Rule accepted after fallback with final confidence ${finalConfidence.toFixed(4)}.`
+      : `Rule accepted with final confidence ${finalConfidence.toFixed(4)}.`;
   }
   if (confidenceAction === "ESCALATE") {
     return `Rule requires escalation because final confidence ${finalConfidence.toFixed(4)} is below accept threshold ${COMPILER_CONFIDENCE_THRESHOLDS.accept_min}.`;

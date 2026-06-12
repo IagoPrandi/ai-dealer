@@ -4888,30 +4888,30 @@ Implement draw generation, rule election, AI rule validation, guess verification
 
 **Checklist:**
 
-- [ ] Configure primary provider (may be a local provider).
-- [ ] Configure secondary provider.
-- [ ] Configure tertiary provider.
-- [ ] Support local/self-hosted provider via OpenAI-compatible endpoint (`baseUrl`, optional `apiKey`).
-- [ ] Implement capability flags per provider and adapt request shape (e.g. Ollama `format` vs OpenAI `response_format`).
-- [ ] Enforce grammar/schema-constrained decoding for the DSL/AST compile step.
-- [ ] Escalate on timeout.
-- [ ] Escalate on malformed response.
-- [ ] Escalate on DSL/AST schema-validation failure.
-- [ ] Escalate on low final confidence.
-- [ ] Escalate on provider disagreement.
-- [ ] Use tertiary provider as tiebreaker.
-- [ ] Support per-role model routing (small/local for interpret/explain/normalize; escalate compile/review).
-- [ ] Record model identity (provider, model, digest, quantization, serving engine) in logs and frozen artifact.
-- [ ] Store provider path in logs.
-- [ ] Track fallback rate.
-- [ ] Track provider disagreement rate.
+- [x] Configure primary provider (may be a local provider).
+- [x] Configure secondary provider.
+- [x] Configure tertiary provider.
+- [x] Support local/self-hosted provider via OpenAI-compatible endpoint (`baseUrl`, optional `apiKey`).
+- [x] Implement capability flags per provider and adapt request shape (e.g. Ollama `format` vs OpenAI `response_format`).
+- [x] Enforce grammar/schema-constrained decoding for the DSL/AST compile step.
+- [x] Escalate on timeout.
+- [x] Escalate on malformed response.
+- [x] Escalate on DSL/AST schema-validation failure.
+- [x] Escalate on low final confidence.
+- [x] Escalate on provider disagreement.
+- [x] Use tertiary provider as tiebreaker.
+- [x] Support per-role model routing (small/local for interpret/explain/normalize; escalate compile/review).
+- [x] Record model identity (provider, model, digest, quantization, serving engine) in logs and frozen artifact.
+- [x] Store provider path in logs.
+- [x] Track fallback rate.
+- [x] Track provider disagreement rate.
 
 **Approval criteria:**
 
-- [ ] Normal cases use the primary provider only.
-- [ ] Edge cases escalate correctly.
-- [ ] A local-only configuration can compile valid rules end-to-end, escalating to a stronger model on schema failure or low confidence.
-- [ ] Disagreements are logged and resolved according to policy.
+- [x] Normal cases use the primary provider only.
+- [x] Edge cases escalate correctly.
+- [x] A local-only configuration can compile valid rules end-to-end, escalating to a stronger model on schema failure or low confidence.
+- [x] Disagreements are logged and resolved according to policy.
 
 ---
 
