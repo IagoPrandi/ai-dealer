@@ -1,5 +1,10 @@
 import { WalletFlow } from "../../../features/wallet/WalletFlow";
+import { SolanaProviders } from "../../../solana/SolanaProviders";
 
 export default function WalletPage() {
-  return <WalletFlow />;
+  return (
+    <SolanaProviders>
+      <WalletFlow />
+    </SolanaProviders>
+  );
 }

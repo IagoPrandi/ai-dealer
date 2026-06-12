@@ -1,4 +1,5 @@
 import { RoundPage } from "../../../features/round-page/RoundPage";
+import { SolanaProviders } from "../../../solana/SolanaProviders";
 
 export default async function Round({
   params,
@@ -7,5 +8,9 @@ export default async function Round({
 }) {
   const { turnId } = await params;
 
-  return <RoundPage turnId={turnId} />;
+  return (
+    <SolanaProviders>
+      <RoundPage turnId={turnId} />
+    </SolanaProviders>
+  );
 }

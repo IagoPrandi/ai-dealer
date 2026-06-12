@@ -712,6 +712,15 @@ M1 was marked complete after explicit user confirmation on 2026-06-04 because al
 - Removed the superseded live-round design CSS to avoid redundant or conflicting styles.
 - Did not change any milestone status or checkbox.
 
+### 2026-06-11 - Result Screen Exit Fix
+
+- Reopened `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/develop-frontend/SKILL.md`, `.claude/skills/playwright/SKILL.md`, `.claude/skills/solana-dev/SKILL.md`, and `solana-dev` frontend framework-kit guidance before fixing the result-screen exit issue.
+- Reproduced the Docker `/play` issue: the result screen rendered, but the page repeatedly remounted during dev Fast Refresh and the `Back to current round` click never reached a stable state.
+- Moved `SolanaProviders` out of the global root layout and wrapped only routes that use Solana hooks: `/play/pick`, `/play/propose`, `/play/vote`, `/play/wallet`, and `/round/[turnId]`.
+- Updated the web dev script and Playwright webServer command to use `next dev --webpack`, avoiding the observed Turbopack dev panic loop in Docker.
+- Rebuilt the Docker web service and verified the result-screen back button exits to the current round without `react-core` cluster warmup warnings on `/play`.
+- Did not change any milestone status or checkbox.
+
 ## M2.1 Work Log
 
 ### 2026-06-04

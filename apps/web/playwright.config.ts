@@ -9,7 +9,7 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   webServer: {
-    command: "pnpm exec next dev --hostname 127.0.0.1 --port 3005",
+    command: "pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3005",
     reuseExistingServer: true,
     timeout: 60_000,
     url: "http://127.0.0.1:3005/play/pick",
