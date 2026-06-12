@@ -217,3 +217,33 @@ Required public audit endpoints:
 - `GET /api/v1/players/{wallet}/history`
 
 Audit endpoints must expose hashes, versions, and status transitions without exposing secrets, raw provider prompts, or sensitive admin notes.
+
+Current local API compatibility endpoints:
+
+- `GET /audit?turnId={turn_id}&kind=compiler.validation`
+- `GET /audit?turnId={turn_id}&kind=guess.verification`
+- `GET /audit/{log_hash}`
+
+```ts
+interface PublicAuditLog {
+  schemaVersion: 1;
+  kind: "compiler.validation" | "guess.verification";
+  turnId: number;
+  ruleId: number | null;
+  player: string | null;
+  validationLogId: string | null;
+  resultId: string | null;
+  publicStateRef: {
+    type: "rule_validation" | "guess_verification_result";
+    key: string;
+  };
+  inputHash: string;
+  outputHash: string;
+  logHash: string;
+  previousLogHash: string | null;
+  commitmentHash: string;
+  commitmentMechanism: "postgres_hash_chain_v1";
+  result: string;
+  reason: string;
+}
+```

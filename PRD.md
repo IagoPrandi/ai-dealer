@@ -4921,25 +4921,25 @@ Implement draw generation, rule election, AI rule validation, guess verification
 
 **Checklist:**
 
-- [ ] Store compiler logs in PostgreSQL.
-- [ ] Include rule text/token count.
-- [ ] Include draw and guess where relevant.
-- [ ] Include result.
-- [ ] Include reason.
-- [ ] Include model used for compiler/agent validation logs when relevant.
-- [ ] Include `model_confidence` for compiler/agent validation logs when relevant.
-- [ ] Include `final_confidence`.
-- [ ] Include `confidence_breakdown`.
-- [ ] Generate input hash.
-- [ ] Generate output hash.
-- [ ] Commit hash on-chain or through auditable mechanism.
-- [ ] Expose public audit endpoint.
+- [x] Store compiler logs in PostgreSQL.
+- [x] Include rule text/token count.
+- [x] Include draw and guess where relevant.
+- [x] Include result.
+- [x] Include reason.
+- [x] Include model used for compiler/agent validation logs when relevant.
+- [x] Include `model_confidence` for compiler/agent validation logs when relevant.
+- [x] Include `final_confidence`.
+- [x] Include `confidence_breakdown`.
+- [x] Generate input hash.
+- [x] Generate output hash.
+- [x] Commit hash on-chain or through auditable mechanism.
+- [x] Expose public audit endpoint.
 
 **Approval criteria:**
 
-- [ ] Every validation and verification has a traceable log.
-- [ ] Logs can be matched to public result state.
-- [ ] Hashes detect tampering.
+- [x] Every validation and verification has a traceable log.
+- [x] Logs can be matched to public result state.
+- [x] Hashes detect tampering.
 
 ---
 

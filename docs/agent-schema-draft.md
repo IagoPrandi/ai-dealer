@@ -177,6 +177,35 @@ interface CompilerAgentLog {
 }
 ```
 
+## Validation & Verification Attestation
+
+```ts
+interface AuditLogRecord {
+  schemaVersion: 1;
+  kind: "compiler.validation" | "guess.verification";
+  turnId: number;
+  ruleId: number | null;
+  player: string | null;
+  validationLogId: string | null;
+  resultId: string | null;
+  publicStateRef: {
+    type: "rule_validation" | "guess_verification_result";
+    key: string;
+  };
+  inputHash: string;
+  outputHash: string;
+  logHash: string;
+  previousLogHash: string | null;
+  commitmentHash: string;
+  commitmentMechanism: "postgres_hash_chain_v1";
+  reason: string;
+  result: string;
+  createdAt: string;
+}
+```
+
+Compiler validation audit input includes sanitized rule text and token count. Compiler output includes model identity, `model_confidence`, `final_confidence`, and the full confidence breakdown. Guess verification audit input includes draw and guess data plus the frozen artifact hash when relevant; output includes original and alternative branch results. `logHash` and `commitmentHash` must be recomputable from the stored row to detect tampering.
+
 ## Formal Rule State Machine
 
 Primary path:

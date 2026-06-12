@@ -108,6 +108,7 @@ export interface RulePrecompilationRecord {
 }
 
 export interface RuleValidationSummary {
+  auditLogHash?: string | null;
   confidenceAction: RuleConfidenceAction;
   decision: RuleValidationDecision;
   fallbackTriggered: boolean;
@@ -122,6 +123,7 @@ export interface RuleValidationSummary {
 }
 
 export interface RuleValidationRecord extends RuleValidationSummary {
+  auditLogHash?: string;
   compiledArtifactHash: string | null;
   compiledArtifact: RuleCompiledArtifact | null;
   confidence: CompilerConfidenceBreakdown;
@@ -187,6 +189,7 @@ export interface RuleVerificationResultRecord {
 export interface GuessVerificationResultRecord {
   activeRuleId: number | null;
   alternative: RuleVerificationResultRecord | null;
+  auditLogHash?: string;
   completedAt: string;
   jobId: string;
   original: RuleVerificationResultRecord;
@@ -195,6 +198,98 @@ export interface GuessVerificationResultRecord {
   status: "completed";
   turnId: number;
 }
+
+export type AuditLogKind = "compiler.validation" | "guess.verification";
+export type AuditPublicStateType = "guess_verification_result" | "rule_validation";
+
+export interface AuditPublicStateRef {
+  key: string;
+  type: AuditPublicStateType;
+}
+
+export interface AuditLogRecord {
+  commitmentHash: string;
+  commitmentMechanism: "postgres_hash_chain_v1";
+  createdAt: string;
+  input: unknown;
+  inputHash: string;
+  jobId: string | null;
+  kind: AuditLogKind;
+  logHash: string;
+  output: unknown;
+  outputHash: string;
+  player: string | null;
+  postgresTable: "audit_logs";
+  previousLogHash: string | null;
+  publicStateRef: AuditPublicStateRef;
+  reason: string;
+  result: string;
+  resultId: string | null;
+  ruleId: number | null;
+  schemaVersion: 1;
+  turnId: number;
+  validationLogId: string | null;
+}
+
+export interface PostgresAuditLogRow {
+  commitment_hash: string;
+  commitment_mechanism: AuditLogRecord["commitmentMechanism"];
+  created_at: string;
+  input_hash: string;
+  input_json: unknown;
+  job_id: string | null;
+  log_hash: string;
+  log_id: string;
+  log_kind: AuditLogKind;
+  output_hash: string;
+  output_json: unknown;
+  player_wallet: string | null;
+  previous_log_hash: string | null;
+  public_state_key: string;
+  public_state_type: AuditPublicStateType;
+  reason: string;
+  result: string;
+  result_id: string | null;
+  rule_id: string | null;
+  turn_id: string;
+  validation_log_id: string | null;
+}
+
+export interface PostgresAuditClient {
+  query: (text: string, values: unknown[]) => Promise<unknown>;
+}
+
+export const M3_7_POSTGRES_AUDIT_SCHEMA = `
+CREATE TABLE IF NOT EXISTS audit_logs (
+  log_id text PRIMARY KEY,
+  log_kind text NOT NULL,
+  turn_id text NOT NULL,
+  rule_id text,
+  player_wallet text,
+  job_id text,
+  validation_log_id text,
+  result_id text,
+  public_state_type text NOT NULL,
+  public_state_key text NOT NULL,
+  input_hash text NOT NULL,
+  output_hash text NOT NULL,
+  log_hash text NOT NULL UNIQUE,
+  previous_log_hash text,
+  commitment_hash text NOT NULL UNIQUE,
+  commitment_mechanism text NOT NULL,
+  reason text NOT NULL,
+  result text NOT NULL,
+  input_json jsonb NOT NULL,
+  output_json jsonb NOT NULL,
+  created_at timestamptz NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS audit_logs_turn_kind_idx
+  ON audit_logs (turn_id, log_kind, created_at);
+
+CREATE INDEX IF NOT EXISTS audit_logs_public_state_idx
+  ON audit_logs (public_state_type, public_state_key);
+`;
 
 export interface RuleElectionRecord {
   activeRuleArtifactHash: string | null;
@@ -229,6 +324,9 @@ const elections = new Map<number, RuleElectionRecord>();
 const ruleValidations = new Map<string, RuleValidationRecord>();
 const verificationJobs = new Map<string, GuessVerificationJobRecord>();
 const verificationResults = new Map<string, GuessVerificationResultRecord>();
+const auditLogs = new Map<string, AuditLogRecord>();
+const auditLogOrder: string[] = [];
+let lastAuditLogHash: string | null = null;
 const LOCAL_WEB_ORIGIN_PATTERN =
   /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 const CORS_PATHS = new Set([
@@ -244,6 +342,7 @@ const CORS_PATHS = new Set([
   "/verification-jobs",
   "/verification-jobs/create-turn",
   "/verification-results",
+  "/audit",
 ]);
 
 function getGuessReceiptKey(turnId: number, player: string) {
@@ -290,6 +389,217 @@ function hashBytes(value: string) {
 
 function hashJson(value: unknown) {
   return createHash("sha256").update(JSON.stringify(value), "utf8").digest("hex");
+}
+
+function appendAuditLog(args: {
+  createdAt: string;
+  input: unknown;
+  jobId?: string | null;
+  kind: AuditLogKind;
+  output: unknown;
+  player?: string | null;
+  publicStateRef: AuditPublicStateRef;
+  reason: string;
+  result: string;
+  resultId?: string | null;
+  ruleId?: number | null;
+  turnId: number;
+  validationLogId?: string | null;
+}): AuditLogRecord {
+  const inputHash = hashJson(args.input);
+  const outputHash = hashJson(args.output);
+  const logHash = hashJson({
+    inputHash,
+    jobId: args.jobId ?? null,
+    kind: args.kind,
+    outputHash,
+    player: args.player ?? null,
+    previousLogHash: lastAuditLogHash,
+    publicStateRef: args.publicStateRef,
+    result: args.result,
+    resultId: args.resultId ?? null,
+    ruleId: args.ruleId ?? null,
+    schemaVersion: 1,
+    turnId: args.turnId,
+    validationLogId: args.validationLogId ?? null,
+  });
+  const commitmentHash = hashJson({
+    commitmentMechanism: "postgres_hash_chain_v1",
+    logHash,
+    postgresTable: "audit_logs",
+    previousLogHash: lastAuditLogHash,
+  });
+  const record: AuditLogRecord = {
+    commitmentHash,
+    commitmentMechanism: "postgres_hash_chain_v1",
+    createdAt: args.createdAt,
+    input: args.input,
+    inputHash,
+    jobId: args.jobId ?? null,
+    kind: args.kind,
+    logHash,
+    output: args.output,
+    outputHash,
+    player: args.player ?? null,
+    postgresTable: "audit_logs",
+    previousLogHash: lastAuditLogHash,
+    publicStateRef: args.publicStateRef,
+    reason: args.reason,
+    result: args.result,
+    resultId: args.resultId ?? null,
+    ruleId: args.ruleId ?? null,
+    schemaVersion: 1,
+    turnId: args.turnId,
+    validationLogId: args.validationLogId ?? null,
+  };
+
+  auditLogs.set(logHash, record);
+  auditLogOrder.push(logHash);
+  lastAuditLogHash = logHash;
+  return record;
+}
+
+export function verifyAuditLogIntegrity(record: AuditLogRecord) {
+  const inputHash = hashJson(record.input);
+  const outputHash = hashJson(record.output);
+  const logHash = hashJson({
+    inputHash,
+    jobId: record.jobId,
+    kind: record.kind,
+    outputHash,
+    player: record.player,
+    previousLogHash: record.previousLogHash,
+    publicStateRef: record.publicStateRef,
+    result: record.result,
+    resultId: record.resultId,
+    ruleId: record.ruleId,
+    schemaVersion: record.schemaVersion,
+    turnId: record.turnId,
+    validationLogId: record.validationLogId,
+  });
+  const commitmentHash = hashJson({
+    commitmentMechanism: record.commitmentMechanism,
+    logHash,
+    postgresTable: record.postgresTable,
+    previousLogHash: record.previousLogHash,
+  });
+
+  return (
+    record.inputHash === inputHash &&
+    record.outputHash === outputHash &&
+    record.logHash === logHash &&
+    record.commitmentHash === commitmentHash
+  );
+}
+
+export function toPostgresAuditLogRow(record: AuditLogRecord): PostgresAuditLogRow {
+  return {
+    commitment_hash: record.commitmentHash,
+    commitment_mechanism: record.commitmentMechanism,
+    created_at: record.createdAt,
+    input_hash: record.inputHash,
+    input_json: record.input,
+    job_id: record.jobId,
+    log_hash: record.logHash,
+    log_id: record.logHash,
+    log_kind: record.kind,
+    output_hash: record.outputHash,
+    output_json: record.output,
+    player_wallet: record.player,
+    previous_log_hash: record.previousLogHash,
+    public_state_key: record.publicStateRef.key,
+    public_state_type: record.publicStateRef.type,
+    reason: record.reason,
+    result: record.result,
+    result_id: record.resultId,
+    rule_id: record.ruleId === null ? null : String(record.ruleId),
+    turn_id: String(record.turnId),
+    validation_log_id: record.validationLogId,
+  };
+}
+
+export async function storeAuditLogInPostgres(
+  client: PostgresAuditClient,
+  record: AuditLogRecord,
+) {
+  const row = toPostgresAuditLogRow(record);
+  await client.query(
+    `
+    INSERT INTO audit_logs (
+      log_id, log_kind, turn_id, rule_id, player_wallet, job_id,
+      validation_log_id, result_id, public_state_type, public_state_key,
+      input_hash, output_hash, log_hash, previous_log_hash,
+      commitment_hash, commitment_mechanism, reason, result,
+      input_json, output_json, created_at
+    )
+    VALUES (
+      $1, $2, $3, $4, $5, $6,
+      $7, $8, $9, $10,
+      $11, $12, $13, $14,
+      $15, $16, $17, $18,
+      $19::jsonb, $20::jsonb, $21
+    )
+    ON CONFLICT (log_id) DO NOTHING
+    `,
+    [
+      row.log_id,
+      row.log_kind,
+      row.turn_id,
+      row.rule_id,
+      row.player_wallet,
+      row.job_id,
+      row.validation_log_id,
+      row.result_id,
+      row.public_state_type,
+      row.public_state_key,
+      row.input_hash,
+      row.output_hash,
+      row.log_hash,
+      row.previous_log_hash,
+      row.commitment_hash,
+      row.commitment_mechanism,
+      row.reason,
+      row.result,
+      JSON.stringify(row.input_json),
+      JSON.stringify(row.output_json),
+      row.created_at,
+    ],
+  );
+}
+
+export function listAuditLogs(args: {
+  kind?: AuditLogKind;
+  turnId?: number;
+} = {}) {
+  return auditLogOrder
+    .map((logHash) => auditLogs.get(logHash))
+    .filter((record): record is AuditLogRecord => {
+      if (!record) {
+        return false;
+      }
+      if (args.turnId !== undefined && record.turnId !== args.turnId) {
+        return false;
+      }
+      return args.kind === undefined || record.kind === args.kind;
+    });
+}
+
+export function getAuditLog(logHash: string) {
+  return auditLogs.get(logHash) ?? null;
+}
+
+export function resetApiStateForTests() {
+  guessReceipts.clear();
+  ruleProposals.clear();
+  ruleVotes.clear();
+  draws.clear();
+  elections.clear();
+  ruleValidations.clear();
+  verificationJobs.clear();
+  verificationResults.clear();
+  auditLogs.clear();
+  auditLogOrder.length = 0;
+  lastAuditLogHash = null;
 }
 
 function getRuleTitle(sanitizedText: string) {
@@ -898,7 +1208,14 @@ export function saveRuleValidation(record: RuleValidationRecord) {
     throw new Error("RULE_PROPOSAL_NOT_FOUND");
   }
 
+  const normalizedRecord: RuleValidationRecord = {
+    ...record,
+    compiledArtifact: record.compiledArtifact ?? null,
+  };
+  const auditLog = appendCompilerValidationAuditLog(proposal, normalizedRecord);
+  normalizedRecord.auditLogHash = auditLog.logHash;
   const validationSummary: RuleValidationSummary = {
+    auditLogHash: normalizedRecord.auditLogHash,
     confidenceAction: record.confidenceAction,
     decision: record.decision,
     fallbackTriggered: record.fallbackTriggered,
@@ -910,10 +1227,6 @@ export function saveRuleValidation(record: RuleValidationRecord) {
     reasonSummary: record.reasonSummary,
     validatedAt: record.validatedAt,
     validationLogId: record.validationLogId,
-  };
-  const normalizedRecord: RuleValidationRecord = {
-    ...record,
-    compiledArtifact: record.compiledArtifact ?? null,
   };
   const updated: RuleProposalRecord = {
     ...proposal,
@@ -929,6 +1242,46 @@ export function saveRuleValidation(record: RuleValidationRecord) {
   );
   ruleProposals.set(getRuleProposalKey(record.turnId, record.ruleId), updated);
   return normalizedRecord;
+}
+
+function appendCompilerValidationAuditLog(
+  proposal: RuleProposalRecord,
+  record: RuleValidationRecord,
+) {
+  return appendAuditLog({
+    createdAt: record.validatedAt,
+    input: {
+      maxTokens: RULE_MAX_TOKENS,
+      ruleId: record.ruleId,
+      ruleText: proposal.sanitizedText,
+      tokenCount: proposal.tokenCount,
+      turnId: record.turnId,
+    },
+    kind: "compiler.validation",
+    output: {
+      compiledArtifactHash: record.compiledArtifactHash,
+      confidenceBreakdown: record.confidence,
+      confidenceAction: record.confidenceAction,
+      finalConfidence: record.finalConfidence,
+      model: record.model,
+      modelConfidence: record.confidence.model_confidence,
+      modelIdentity: record.modelIdentity,
+      provider: record.provider,
+      providerPath: record.providerPath,
+      reasonCodes: record.reasonCodes,
+      result: record.decision,
+      validationLogId: record.validationLogId,
+    },
+    publicStateRef: {
+      key: getRuleValidationKey(record.turnId, record.ruleId),
+      type: "rule_validation",
+    },
+    reason: record.reasonSummary,
+    result: record.decision,
+    ruleId: record.ruleId,
+    turnId: record.turnId,
+    validationLogId: record.validationLogId,
+  });
 }
 
 export function getRuleValidation(turnId: number, ruleId: number) {
@@ -1097,10 +1450,61 @@ export function saveGuessVerificationResult(result: GuessVerificationResultRecor
     status: "completed",
     updatedAt: result.completedAt,
   };
+  const auditLog = appendGuessVerificationAuditLog(job, result);
+  const normalizedResult: GuessVerificationResultRecord = {
+    ...result,
+    auditLogHash: auditLog.logHash,
+  };
 
   verificationJobs.set(job.idempotencyKey, updatedJob);
-  verificationResults.set(getVerificationResultKey(result.turnId, result.player), result);
-  return result;
+  verificationResults.set(
+    getVerificationResultKey(result.turnId, result.player),
+    normalizedResult,
+  );
+  return normalizedResult;
+}
+
+function appendGuessVerificationAuditLog(
+  job: GuessVerificationJobRecord,
+  result: GuessVerificationResultRecord,
+) {
+  return appendAuditLog({
+    createdAt: result.completedAt,
+    input: {
+      activeRuleId: result.activeRuleId,
+      compiledArtifactHash: job.payload.compiled_artifact_hash ?? null,
+      draw: job.draw,
+      drawHash: job.payload.draw_hash,
+      guess: job.playerGuess,
+      guessHash: job.payload.guess_hash,
+      jobId: job.id,
+      player: result.player,
+      turnId: result.turnId,
+    },
+    jobId: job.id,
+    kind: "guess.verification",
+    output: {
+      alternative: result.alternative,
+      original: result.original,
+      resultId: result.resultId,
+      status: result.status,
+    },
+    player: result.player,
+    publicStateRef: {
+      key: getVerificationResultKey(result.turnId, result.player),
+      type: "guess_verification_result",
+    },
+    reason: [
+      `original:${result.original.result}`,
+      `alternative:${result.alternative?.result ?? "NONE"}`,
+    ].join(";"),
+    result: result.alternative?.result === "WIN" || result.original.result === "WIN"
+      ? "WIN"
+      : "LOSE",
+    resultId: result.resultId,
+    ruleId: result.activeRuleId,
+    turnId: result.turnId,
+  });
 }
 
 export function getVerificationSummary(turnId: number) {
@@ -1175,8 +1579,7 @@ export function runRuleValidationForProposal(args: {
     validationLogId: result.log.validationLogId,
   };
 
-  saveRuleValidation(record);
-  return record;
+  return saveRuleValidation(record);
 }
 
 export function saveRuleElection(election: RuleElectionRecord) {
@@ -1450,7 +1853,10 @@ if (isMainModule()) {
       return;
     }
 
-    if (request.method === "OPTIONS" && CORS_PATHS.has(url.pathname)) {
+    if (
+      request.method === "OPTIONS" &&
+      (CORS_PATHS.has(url.pathname) || url.pathname.startsWith("/audit/"))
+    ) {
       sendNoContent(request, response);
       return;
     }
@@ -1901,6 +2307,57 @@ if (isMainModule()) {
         results: listVerificationResults(turnId),
         summary: getVerificationSummary(turnId),
       });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/audit") {
+      const rawTurnId = url.searchParams.get("turnId");
+      const rawKind = url.searchParams.get("kind");
+      const turnId = rawTurnId === null ? undefined : Number(rawTurnId);
+      const kind =
+        rawKind === "compiler.validation" || rawKind === "guess.verification"
+          ? rawKind
+          : undefined;
+
+      if (rawTurnId !== null && (!Number.isInteger(turnId) || Number(turnId) <= 0)) {
+        sendJson(request, response, 400, { error: "invalid_query" });
+        return;
+      }
+      if (rawKind !== null && kind === undefined) {
+        sendJson(request, response, 400, { error: "invalid_audit_kind" });
+        return;
+      }
+
+      const filters: { kind?: AuditLogKind; turnId?: number } = {};
+      if (kind !== undefined) {
+        filters.kind = kind;
+      }
+      if (turnId !== undefined) {
+        filters.turnId = turnId;
+      }
+
+      sendJson(request, response, 200, {
+        logs: listAuditLogs(filters),
+      });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname.startsWith("/audit/")) {
+      const logHash = url.pathname.slice("/audit/".length);
+      if (!isHexHash(logHash)) {
+        sendJson(request, response, 400, { error: "invalid_audit_log_hash" });
+        return;
+      }
+
+      const log = getAuditLog(logHash);
+      sendJson(
+        request,
+        response,
+        log ? 200 : 404,
+        log
+          ? { integrity: verifyAuditLogIntegrity(log), log }
+          : { error: "not_found" },
+      );
       return;
     }
 

@@ -41,6 +41,7 @@ Opened before starting `M0.1`:
 | M3.4      | Composite Confidence                          | Completed | Confirmed 2026-06-11 | Canonical composite compiler confidence schema, configured PRD weights, accept/escalate/reject threshold action, API/worker propagation, and confidence policy tests implemented. |
 | M3.5      | Guess Verification Queue                      | Completed | Confirmed 2026-06-11 | Queue job creation per submitted guess, deterministic original/alternative verification worker, retry/dead-letter/rate-limit handling, API job/result status, and Docker smoke verification implemented. |
 | M3.6      | Agent Fallback & Provider Dispute Handling    | Completed | Confirmed 2026-06-12 | Primary/secondary/tertiary provider routing, local OpenAI-compatible request-shape metadata, grammar/schema capability checks, timeout/malformed/schema fallback, provider path logging, model identity freezing, fallback/disagreement metrics, and tertiary dispute handling implemented. |
+| M3.7      | Verification Logs & Attestation               | Completed | Confirmed 2026-06-12 | Compiler validation and guess verification now append hash-chained audit records, expose public audit endpoints, map logs to public state, provide a PostgreSQL `audit_logs` schema/adapter, and verify tamper detection with API tests. |
 
 ## M0.1 Work Log
 
@@ -1373,3 +1374,47 @@ Passed:
 ## M3.6 Confirmation Gate
 
 `M3.6` was implemented and marked complete on 2026-06-12 after the user's explicit instruction to verify M3.5, mark it done if complete, and follow to the next milestone.
+
+## M3.7 Work Log
+
+### 2026-06-12
+
+- Reopened `PRD.md`, `AGENTS.md`, and `.claude/skills` before verifying `M3.6` and proceeding to `M3.7`, as required.
+- Opened the relevant local skills before implementation: `.claude/skills/best-practices/SKILL.md`, `.claude/skills/best-practices/references/agent-principles.md`, `.claude/skills/best-practices/references/web2-backend.md`, `.claude/skills/best-practices/references/testing.md`, and `.claude/skills/security-threat-checklist/SKILL.md`.
+- Verified `M3.6` was already complete in `PRD.md` and `PROGRESS_TRACKER.md`; `PRD.md` had all M3.6 checklist and approval items ticked.
+- Verified `M3.7` was not already complete: `PRD.md` had all M3.7 checklist and approval items unticked, and API/worker state had no unified public audit log, hash-chain commitment, PostgreSQL audit-log schema, or public audit endpoint.
+- API (`apps/api`): added `AuditLogRecord`, `audit_logs` PostgreSQL schema contract, PostgreSQL row adapter, hash-chain commitment generation, tamper verification helper, and public `/audit` plus `/audit/{logHash}` endpoints.
+- Compiler validation saves now append audit records containing sanitized rule text, token count, model identity, model confidence, final confidence, confidence breakdown, result, reason, input hash, output hash, and validation public-state reference.
+- Guess verification result saves now append audit records containing draw, guess, frozen artifact hash when present, original/alternative branch results, result reason, input hash, output hash, and result public-state reference.
+- Docs updated: `docs/data-model-draft.md`, `docs/api-contracts.md`, and `docs/agent-schema-draft.md` now describe the audit table, endpoints, and attestation record shape.
+- Updated `PRD.md` M3.7 checklist and approval criteria after the user's explicit instruction to verify M3.6, mark it done if complete, and follow to the next milestone.
+
+## M3.7 Validation Results
+
+| Requirement | Result |
+| --- | --- |
+| Store compiler logs in PostgreSQL | `M3_7_POSTGRES_AUDIT_SCHEMA`, `toPostgresAuditLogRow`, and `storeAuditLogInPostgres` define and exercise the PostgreSQL `audit_logs` storage path. |
+| Rule text/token count | Compiler audit input includes sanitized rule text, token count, max token limit, turn id, and rule id. |
+| Draw and guess where relevant | Guess verification audit input includes draw, draw hash, guess, guess hash, player, job id, turn id, and frozen artifact hash when active. |
+| Result and reason | Audit logs include `result` and `reason` for validation and verification records. |
+| Model and confidence fields | Compiler audit output includes provider/model identity, `modelConfidence`, `finalConfidence`, and full confidence breakdown. |
+| Input/output hashes | Every audit record stores recomputable `inputHash` and `outputHash`. |
+| Auditable commitment | Every audit record stores `previousLogHash`, `logHash`, and `commitmentHash` using `postgres_hash_chain_v1`. |
+| Public audit endpoint | Local API exposes `GET /audit` and `GET /audit/{logHash}`. |
+| Traceable to public state | Audit logs carry `publicStateRef` for `rule_validation` or `guess_verification_result`. |
+| Tamper detection | API tests mutate an audit output and verify `verifyAuditLogIntegrity` fails. |
+
+## M3.7 Verification Commands
+
+Passed:
+
+- `pnpm --filter @idealer/api typecheck`
+- `pnpm --filter @idealer/api lint`
+- `pnpm --filter @idealer/api test` (3/3)
+- `pnpm --filter @idealer/api build`
+- `pnpm --filter @idealer/worker typecheck`
+- `pnpm --filter @idealer/rule-compiler typecheck`
+
+## M3.7 Confirmation Gate
+
+`M3.7` was implemented and marked complete on 2026-06-12 after the user's explicit instruction to verify M3.6, mark it done if complete, and follow to the next milestone.

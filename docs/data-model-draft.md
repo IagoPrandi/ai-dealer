@@ -25,6 +25,7 @@ This is the M0.4 PostgreSQL model draft. On-chain accounts remain the source of 
 | `rule_preflight_tokens` | Short-lived token issuance audit. | Unique `token_hash`; expires quickly. |
 | `rule_precompilation_cache` | Background compilation cache. | Unique `(rule_id, original_text_hash)`. |
 | `agent_logs` | Compiler agent logs, separate from gate checks. | Indexed `rule_id`, `agent_name`, `result`. |
+| `audit_logs` | Public validation and verification audit trail with hash-chain commitments. | Unique `log_hash`; indexed `turn_id`, `log_kind`, public state ref. |
 | `verification_jobs` | Guess and payout verification orchestration. | Unique idempotency key. |
 | `compiled_rule_artifacts` | Hashable DSL/AST artifacts and version metadata. | Unique `artifact_hash`. |
 | `election_vrf_records` | Switchboard election request/fulfillment projection. | Unique `turn_id`. |
@@ -96,6 +97,34 @@ locked_at timestamptz,
 completed_at timestamptz,
 failed_at timestamptz,
 last_error_code text
+```
+
+### `audit_logs`
+
+Compiler validation and deterministic guess verification both append audit records. The API keeps the canonical storage contract in `M3_7_POSTGRES_AUDIT_SCHEMA`; each row stores input/output hashes, a hash-chain commitment, and a public-state reference that links the log to either a rule validation record or a guess verification result.
+
+```sql
+log_id text primary key,
+log_kind text not null,
+turn_id text not null,
+rule_id text,
+player_wallet text,
+job_id text,
+validation_log_id text,
+result_id text,
+public_state_type text not null,
+public_state_key text not null,
+input_hash text not null,
+output_hash text not null,
+log_hash text not null unique,
+previous_log_hash text,
+commitment_hash text not null unique,
+commitment_mechanism text not null,
+reason text not null,
+result text not null,
+input_json jsonb not null,
+output_json jsonb not null,
+created_at timestamptz not null
 ```
 
 ## Creator Reward Accounting
