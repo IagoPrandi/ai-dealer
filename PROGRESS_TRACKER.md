@@ -1508,10 +1508,7 @@ Passed:
 - `pnpm --filter @idealer/api lint`
 - `pnpm --filter @idealer/api build`
 - `cargo fmt --check`
-
-Blocked by local toolchain:
-
-- `cargo test -p idealer --test core` did not run to completion because this Windows shell is missing the MSVC linker `link.exe`; compilation stopped before reaching the Idealer test code.
+- `cargo test -p idealer --test core` (14/14, after the 2026-06-13 Windows GNU toolchain fix documented below)
 
 ## M4.1 Confirmation Gate
 
@@ -1553,11 +1550,110 @@ Passed:
 - `pnpm --filter @idealer/api build`
 - `pnpm --filter @idealer/constants build`
 - `cargo fmt --check`
+- `cargo test -p idealer --test core` (14/14, after the 2026-06-13 Windows GNU toolchain fix documented below)
 
-Known local toolchain blocker still applies:
+## Windows Rust Toolchain Work Log
 
-- `cargo test -p idealer --test core` cannot run in this Windows shell until MSVC `link.exe` is available; this blocker was already observed before M4.2 and occurs before Idealer test code runs.
+### 2026-06-13
+
+- Reopened `PRD.md`, `AGENTS.md`, and `.claude/skills` before fixing the Windows test toolchain blocker, as required.
+- Opened `.claude/skills/solana-dev/SKILL.md` before working on the Solana test command.
+- Resolved the `cargo test -p idealer --test core` Windows linker blocker by installing and using `stable-x86_64-pc-windows-gnu` for `contracts/solana`, with WinLibs GCC ahead of LLVM-MinGW in the user PATH and MSYS2 Perl/Make available for vendored OpenSSL builds.
+- Set a rustup directory override for `contracts/solana` to `stable-x86_64-pc-windows-gnu`, so plain `cargo test -p idealer --test core` no longer uses the MSVC toolchain that requires `link.exe`.
+- Verified the exact command from a fresh PATH simulation: `cargo test -p idealer --test core` passed with 14/14 tests.
 
 ## M4.2 Confirmation Gate
 
 `M4.2` was implemented and marked complete on 2026-06-13 after the user's explicit instruction to verify `M4.1`, mark it done if complete, and follow to the next milestone.
+
+## M4.3 Work Log
+
+### 2026-06-13
+
+- Reopened `PRD.md`, `AGENTS.md`, and `.claude/skills` before verifying `M4.2` and proceeding to `M4.3`, as required.
+- Opened the relevant local skill guidance before implementation: `.claude/skills/solana-dev/SKILL.md` and `.claude/skills/solana-dev/backend-async.md`.
+- Verified `M4.2` was already complete in `PRD.md` and `PROGRESS_TRACKER.md`; the PRD checklist and approval criteria were already ticked.
+- Constants (`packages/constants`): added `VOTER_REWARD_RATE_BPS` and `VOTER_REWARD_CONFIG.capPerTurnLamports`.
+- API (`apps/api`): added deterministic creator and voter reward projection records, a pure reward distribution helper, creator-first reserve funding, voter-pool cap handling, distinct elected-rule voter resolution, and reward recalculation after verification results.
+- API (`apps/api`): exposed reward state in `RoundSummary.rewards` and added local compatibility endpoints `POST /reward-records/calculate-turn` and `GET /reward-records?turnId={turn_id}`.
+- Docs: updated `docs/api-contracts.md` and `docs/data-model-draft.md` with reward-record response and storage contracts.
+- Updated `PRD.md` M4.3 checklist and approval criteria after implementation and verification.
+
+## M4.3 Validation Results
+
+| Requirement | Result |
+| --- | --- |
+| Identify creator of active rule | Creator wallet is read from the active rule proposal selected by the settled election. |
+| Check alternative-rule winners | Reward calculation returns no creator or voter reward when the active alternative rule has zero winners. |
+| Calculate individual alternative payout | Reward basis uses `WinnerCalculationSummary.alternative.individualPayoutLamports`. |
+| Calculate creator reward | Creator reward is `15%` of the individual alternative payout per alternative winner, subject to cap and reserve availability. |
+| Resolve elected-rule voters | Voters are distinct wallets with recorded votes for the active elected rule. |
+| Calculate voter reward pool | Voter pool is `15%` of one individual alternative payout, capped and split equally across elected-rule voters. |
+| Fund creator first, then voters | Creator reward consumes reserve first; voter pool uses only remaining reserve. |
+| Do not reduce winner payouts | Tests verify winner payout remains unchanged while reward records are calculated separately. |
+| Store reward records | Creator and voter reward records are stored in API projection maps and exposed through summary/endpoints. |
+| Edge cases | Tests cover no alternative winners, multiple alternative winners, and zero elected-rule voters. |
+
+## M4.3 Verification Commands
+
+Passed:
+
+- `pnpm --filter @idealer/constants build`
+- `pnpm --filter @idealer/api test` (11/11)
+- `pnpm --filter @idealer/api typecheck`
+- `pnpm --filter @idealer/constants typecheck`
+- `pnpm --filter @idealer/api lint`
+- `pnpm --filter @idealer/api build`
+- `cargo test -p idealer --test core` (14/14)
+
+## M4.3 Confirmation Gate
+
+`M4.3` was implemented and marked complete on 2026-06-13 after the user's explicit instruction to verify `M4.2`, mark it done if complete, and follow to the next milestone.
+
+## M4.4 Work Log
+
+### 2026-06-13
+
+- Reopened `PRD.md`, `AGENTS.md`, and `.claude/skills` before verifying `M4.3` and proceeding to `M4.4`, as required.
+- Opened the relevant local skill guidance before implementation: `.claude/skills/solana-dev/SKILL.md` and `.claude/skills/solana-dev/backend-async.md`.
+- Verified `M4.3` was already complete in `PRD.md` and `PROGRESS_TRACKER.md`; the PRD checklist and approval criteria were already ticked.
+- Constants (`packages/constants`): added default claim threshold and claim-window constants.
+- API (`apps/api`): added claim records for winner payouts, creator rewards, and elected-rule voter rewards; generated claims from winner/reward projections; exposed claim summaries in `RoundSummary.claims`.
+- API (`apps/api`): added local claim endpoints `POST /claim-records/create-turn`, `GET /claim-records`, `POST /claim-records/request`, and `POST /claim-records/complete`.
+- API (`apps/api`): modeled wallet approval states (`not_requested`, `pending`, `approved`, `failed`), successful claims, failed wallet approvals, below-threshold unavailable claims, and double-claim rejection.
+- Web (`apps/web`): added a mobile result claim panel with claimable balance, pending wallet approval, success, failure, retry, and simulated wallet approval actions.
+- Docs: updated `docs/api-contracts.md` and `docs/data-model-draft.md` with claim-record endpoint and storage contracts.
+- Updated `PRD.md` M4.4 checklist and approval criteria after implementation and verification.
+
+## M4.4 Validation Results
+
+| Requirement | Result |
+| --- | --- |
+| Winner claim flow | Winner payout records generate claim records and can transition from available to pending wallet approval to claimed. |
+| Creator reward claim flow | Creator reward records generate claim records when above the minimum claim threshold. |
+| Voter reward claim flow | Elected-rule voter reward records generate claim records and are claimable. |
+| Prevent double claim | Claimed records reject a second approval request with `PAYOUT_ALREADY_CLAIMED`. |
+| Claimable balance | Claim summaries expose available, pending, claimed, and failed lamport totals. |
+| Pending/success/failure states | API and result UI expose pending wallet approval, claimed, and failed approval states. |
+| Mobile wallet approval flow | Result page includes simulated claim, approve, reject, and retry actions. |
+| Edge cases | Tests cover below-threshold unavailable claims, failed wallet approvals, double-claim blocking, and voter reward claims. |
+
+## M4.4 Verification Commands
+
+Passed:
+
+- `pnpm --filter @idealer/constants build`
+- `pnpm --filter @idealer/api test` (14/14)
+- `pnpm --filter @idealer/api typecheck`
+- `pnpm --filter @idealer/constants typecheck`
+- `pnpm --filter @idealer/web typecheck`
+- `pnpm --filter @idealer/api lint`
+- `pnpm --filter @idealer/api build`
+- `pnpm --filter @idealer/web lint`
+- `pnpm --filter @idealer/web build`
+- `pnpm --filter @idealer/web exec playwright test e2e/draw-result.spec.ts` (1/1)
+- `cargo test -p idealer --test core` (14/14)
+
+## M4.4 Confirmation Gate
+
+`M4.4` was implemented and marked complete on 2026-06-13 after the user's explicit instruction to verify `M4.3`, mark it done if complete, and follow to the next milestone.

@@ -289,6 +289,115 @@ interface WinnerCalculationSummary {
 }
 ```
 
+Current local API compatibility endpoints for M4.3 creator and voter reward projection:
+
+- `POST /reward-records/calculate-turn`
+- `GET /reward-records?turnId={turn_id}`
+
+```ts
+interface CreatorRewardRecord {
+  turnId: number;
+  activeRuleId: number;
+  creatorWallet: string;
+  winnerCount: number;
+  individualAltPayoutLamports: number;
+  rewardRateBps: number;
+  calculatedRewardLamports: number;
+  availableReserveLamports: number;
+  capPerTurnLamports: number;
+  finalRewardLamports: number;
+  wasCapped: boolean;
+  status: "calculated" | "not_available";
+  calculatedAt: string;
+}
+
+interface VoterRewardRecord {
+  turnId: number;
+  activeRuleId: number;
+  voter: string;
+  voterCount: number;
+  individualAltPayoutLamports: number;
+  rewardRateBps: number;
+  rewardPoolLamports: number;
+  finalRewardLamports: number;
+  status: "calculated" | "not_available";
+  calculatedAt: string;
+}
+
+interface RewardCalculationSummary {
+  turnId: number;
+  activeRuleId: number | null;
+  creatorRewardReserveLamports: number;
+  remainingReserveLamports: number;
+  creator: CreatorRewardRecord | null;
+  voterRewardPool: {
+    rewardRateBps: number;
+    capPerTurnLamports: number;
+    calculatedPoolLamports: number;
+    finalPoolLamports: number;
+    individualRewardLamports: number;
+    remainderLamports: number;
+    voterCount: number;
+    wasCapped: boolean;
+  };
+  voters: VoterRewardRecord[];
+}
+```
+
+Current local API compatibility endpoints for M4.4 claim flow:
+
+- `POST /claim-records/create-turn`
+- `GET /claim-records?turnId={turn_id}&wallet={wallet}`
+- `POST /claim-records/request`
+- `POST /claim-records/complete`
+
+```ts
+type ClaimKind = "winner_payout" | "creator_reward" | "voter_reward";
+type ClaimRecordStatus =
+  | "available"
+  | "pending_wallet_approval"
+  | "claimed"
+  | "failed"
+  | "unavailable";
+
+interface ClaimRecord {
+  claimId: string;
+  turnId: number;
+  wallet: string;
+  kind: ClaimKind;
+  category: "original" | "alternative" | null;
+  activeRuleId: number | null;
+  amountLamports: number;
+  sourceRecordKey: string;
+  status: ClaimRecordStatus;
+  statusReason: string;
+  availableAt: string;
+  claimWindowExpiresAt: string;
+  claimWindowTurns: number;
+  claimedAt: string | null;
+  failedAt: string | null;
+  walletApproval: {
+    required: true;
+    state: "not_requested" | "pending" | "approved" | "failed";
+    transactionLabel: string;
+    approvalStartedAt: string | null;
+    completedAt: string | null;
+    signature: string | null;
+    failureReason: string | null;
+  };
+}
+
+interface ClaimSummary {
+  turnId: number;
+  wallet: string | null;
+  availableLamports: number;
+  pendingLamports: number;
+  claimedLamports: number;
+  failedLamports: number;
+  records: ClaimRecord[];
+}
+```
+
 ## History
 
 `GET /api/v1/players/{wallet}/history?cursor=...&limit=...`

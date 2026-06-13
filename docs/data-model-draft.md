@@ -192,6 +192,57 @@ was_capped boolean not null,
 status text not null
 ```
 
+Creator rewards are funded first from the creator reward reserve sourced from platform monetization. The reward basis is `15%` of the individual alternative-rule winner payout for each alternative-rule winner, subject to the per-turn creator cap and available reserve.
+
+## Voter Reward Accounting
+
+`voter_reward_records` store rewards for wallets that voted for the elected active rule. Voter rewards are funded only after creator reward funding from the remaining creator reward reserve, and winner-visible payouts are never reduced.
+
+```sql
+turn_id text not null,
+active_rule_id text not null,
+voter_wallet text not null,
+voter_count integer not null,
+individual_alt_payout_lamports numeric(20,0) not null,
+reward_rate_bps integer not null,
+reward_pool_lamports numeric(20,0) not null,
+final_reward_lamports numeric(20,0) not null,
+status text not null,
+calculated_at timestamptz not null,
+primary key (turn_id, active_rule_id, voter_wallet)
+```
+
+The voter reward pool is `15%` of a single individual alternative-rule winner payout, capped by `VOTER_REWARD_CONFIG.capPerTurnLamports`, then split equally across distinct wallets with recorded votes for the elected rule. If the elected rule has no recorded voters or the active rule produces no alternative-rule winners, no voter reward records are claimable.
+
+## Claim Records
+
+`claim_records` store claimable winner payouts, creator rewards, and elected-rule voter rewards. The local API projection models the wallet approval lifecycle before on-chain transfer instructions are enabled by later mainnet gates.
+
+```sql
+claim_id text primary key,
+turn_id text not null,
+wallet text not null,
+claim_kind text not null check (claim_kind in ('winner_payout', 'creator_reward', 'voter_reward')),
+category text check (category in ('original', 'alternative')),
+active_rule_id text,
+amount_lamports numeric(20,0) not null,
+source_record_key text not null,
+status text not null check (status in ('available', 'pending_wallet_approval', 'claimed', 'failed', 'unavailable')),
+status_reason text not null,
+available_at timestamptz not null,
+claim_window_expires_at timestamptz not null,
+claim_window_turns integer not null,
+wallet_approval_state text not null,
+wallet_approval_signature text,
+wallet_approval_failure_reason text,
+claimed_at timestamptz,
+failed_at timestamptz,
+created_at timestamptz not null,
+updated_at timestamptz not null
+```
+
+Claims below the configured minimum threshold are created with `unavailable` status and `PAYOUT_BELOW_MINIMUM`. A claim must transition through `pending_wallet_approval` before it can become `claimed` or `failed`; a claimed record cannot be requested again.
+
 ## pgvector HNSW Migration
 
 ```sql

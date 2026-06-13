@@ -5127,29 +5127,29 @@ Implement prize pool accounting, treasury/platform monetization, payouts, rollov
 
 **Checklist:**
 
-- [ ] Identify creator of active rule in the turn.
-- [ ] Check whether active rule produced alternative-rule winners.
-- [ ] Calculate individual alternative-rule winner payout.
-- [ ] Calculate creator reward as `15% × individual alternative-rule winner payout` per winner.
-- [ ] Resolve the elected-rule voter set from recorded `RuleVote` accounts.
-- [ ] Calculate voter reward pool as `15% × a single individual alternative-rule winner payout` and split it equally among elected-rule voters.
-- [ ] Fund creator reward first, then voter reward from the remaining creator reward reserve (sourced from platform monetization).
-- [ ] Cap voter reward pool by `VOTER_REWARD_CONFIG.capPerTurnLamports`.
-- [ ] Do not reduce winner-visible payout for creator or voter reward.
-- [ ] Store creator reward and voter reward records.
-- [ ] Handle no alternative-rule winner case (no creator or voter reward).
-- [ ] Handle multiple alternative-rule winner case.
-- [ ] Handle elected rule with zero recorded voters (no voter reward).
-- [ ] Add example test: total prize 100, 10 winners, individual payout 10, creator reward basis 15% of 10 per winner, voter reward pool 15% of 10 split among voters.
-- [ ] Add accounting tests to ensure the reserve covers creator reward first, then voter reward.
+- [x] Identify creator of active rule in the turn.
+- [x] Check whether active rule produced alternative-rule winners.
+- [x] Calculate individual alternative-rule winner payout.
+- [x] Calculate creator reward as `15% × individual alternative-rule winner payout` per winner.
+- [x] Resolve the elected-rule voter set from recorded `RuleVote` accounts.
+- [x] Calculate voter reward pool as `15% × a single individual alternative-rule winner payout` and split it equally among elected-rule voters.
+- [x] Fund creator reward first, then voter reward from the remaining creator reward reserve (sourced from platform monetization).
+- [x] Cap voter reward pool by `VOTER_REWARD_CONFIG.capPerTurnLamports`.
+- [x] Do not reduce winner-visible payout for creator or voter reward.
+- [x] Store creator reward and voter reward records.
+- [x] Handle no alternative-rule winner case (no creator or voter reward).
+- [x] Handle multiple alternative-rule winner case.
+- [x] Handle elected rule with zero recorded voters (no voter reward).
+- [x] Add example test: total prize 100, 10 winners, individual payout 10, creator reward basis 15% of 10 per winner, voter reward pool 15% of 10 split among voters.
+- [x] Add accounting tests to ensure the reserve covers creator reward first, then voter reward.
 
 **Approval criteria:**
 
-- [ ] Creator reward is computed from the individual winner payout basis.
-- [ ] Voter reward pool is 15% of a single individual payout, split equally among elected-rule voters.
-- [ ] Winner payout is not reduced by creator or voter reward display/accounting.
-- [ ] Reward source is the creator reward reserve sourced from platform monetization, drawn creator-first then voter.
-- [ ] Creator reward and voter reward records are auditable.
+- [x] Creator reward is computed from the individual winner payout basis.
+- [x] Voter reward pool is 15% of a single individual payout, split equally among elected-rule voters.
+- [x] Winner payout is not reduced by creator or voter reward display/accounting.
+- [x] Reward source is the creator reward reserve sourced from platform monetization, drawn creator-first then voter.
+- [x] Creator reward and voter reward records are auditable.
 
 ---
 
@@ -5159,24 +5159,24 @@ Implement prize pool accounting, treasury/platform monetization, payouts, rollov
 
 **Checklist:**
 
-- [ ] Implement winner claim instruction/API flow.
-- [ ] Implement creator reward claim instruction/API flow if rewards are claimed separately.
-- [ ] Implement voter reward claim instruction/API flow for elected-rule voters if rewards are claimed separately.
-- [ ] Prevent double claim.
-- [ ] Show claimable balance.
-- [ ] Show pending claim state.
-- [ ] Show successful claim state.
-- [ ] Show failed claim state.
-- [ ] Add mobile wallet approval flow for claims.
-- [ ] Add tests for claim edge cases.
+- [x] Implement winner claim instruction/API flow.
+- [x] Implement creator reward claim instruction/API flow if rewards are claimed separately.
+- [x] Implement voter reward claim instruction/API flow for elected-rule voters if rewards are claimed separately.
+- [x] Prevent double claim.
+- [x] Show claimable balance.
+- [x] Show pending claim state.
+- [x] Show successful claim state.
+- [x] Show failed claim state.
+- [x] Add mobile wallet approval flow for claims.
+- [x] Add tests for claim edge cases.
 
 **Approval criteria:**
 
-- [ ] Eligible winners can claim.
-- [ ] Eligible creators can receive/claim rewards.
-- [ ] Eligible elected-rule voters can receive/claim rewards.
-- [ ] Double claims are blocked.
-- [ ] Claim states are clear in mobile UI.
+- [x] Eligible winners can claim.
+- [x] Eligible creators can receive/claim rewards.
+- [x] Eligible elected-rule voters can receive/claim rewards.
+- [x] Double claims are blocked.
+- [x] Claim states are clear in mobile UI.
 
 ---
 

@@ -17,5 +17,12 @@ export const TREASURY_FEE_BPS = 500;
 export const CREATOR_REWARD_RATE_BPS = 1_500;
 export const CREATOR_REWARD_RESERVE_SHARE_BPS = 2_000;
 export const CREATOR_REWARD_CAP_SOL = 0.25;
+export const VOTER_REWARD_RATE_BPS = 1_500;
+export const VOTER_REWARD_CONFIG = {
+  capPerTurnLamports: 250_000_000
+} as const;
+export const MINIMUM_CLAIM_THRESHOLD_SOL = 0.005;
+export const CLAIM_WINDOW_TURNS = 12;
+export const CLAIM_WINDOW_DAYS = 7;
 
 export { SHARED_ERROR_CODES, type SharedErrorCode } from "./error-codes.js";

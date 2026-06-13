@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 type ResultMode = "near-miss" | "winner" | "creator";
+type ClaimStatus = "available" | "claimed" | "failed" | "pending";
 
 interface OutcomeCopy {
   eyebrow: string;
@@ -78,10 +79,27 @@ function NumberRow({
 
 export function DrawResultPanel() {
   const [mode, setMode] = useState<ResultMode>("near-miss");
+  const [claimStatus, setClaimStatus] = useState<ClaimStatus>("available");
   const outcome = OUTCOME_COPY[mode];
   const submittedGuess = mode === "near-miss" ? NEAR_MISS_GUESS : WINNING_GUESS;
   const missedNumbers = mode === "near-miss" ? [57, 83] : [83];
   const creatorRewardPercent = CREATOR_REWARD_RATE_BPS / 100;
+  const claimTitle =
+    claimStatus === "available"
+      ? "Claimable balance"
+      : claimStatus === "pending"
+        ? "Wallet approval pending"
+        : claimStatus === "claimed"
+          ? "Claim successful"
+          : "Claim failed";
+  const claimDetail =
+    claimStatus === "available"
+      ? "1.20 SOL payout is ready for wallet approval."
+      : claimStatus === "pending"
+        ? "Approve the claim in your wallet to receive the payout."
+        : claimStatus === "claimed"
+          ? "The payout claim was approved and recorded."
+          : "The wallet rejected the approval. You can try again.";
 
   return (
     <main className="result-shell">
@@ -196,6 +214,54 @@ export function DrawResultPanel() {
               <dd>0.00 SOL</dd>
             </div>
           </dl>
+        </section>
+
+        <section className="creator-outcome" aria-labelledby="claim-state-title">
+          <div className="section-heading">
+            <p className="eyebrow">Claim status</p>
+            <span>Mobile wallet approval</span>
+          </div>
+          <h2 id="claim-state-title">{claimTitle}</h2>
+          <p>{claimDetail}</p>
+          <dl>
+            <div>
+              <dt>Claimable payout</dt>
+              <dd>{claimStatus === "claimed" ? "0.00 SOL" : "1.20 SOL"}</dd>
+            </div>
+            <div>
+              <dt>Approval state</dt>
+              <dd>{claimStatus}</dd>
+            </div>
+          </dl>
+          <div className="result-actions">
+            {claimStatus === "available" || claimStatus === "failed" ? (
+              <button
+                className="primary-action"
+                onClick={() => setClaimStatus("pending")}
+                type="button"
+              >
+                Claim payout
+              </button>
+            ) : null}
+            {claimStatus === "pending" ? (
+              <>
+                <button
+                  className="primary-action"
+                  onClick={() => setClaimStatus("claimed")}
+                  type="button"
+                >
+                  Approve in wallet
+                </button>
+                <button
+                  className="secondary-action"
+                  onClick={() => setClaimStatus("failed")}
+                  type="button"
+                >
+                  Reject approval
+                </button>
+              </>
+            ) : null}
+          </div>
         </section>
 
         <section className="result-return" aria-labelledby="return-title">

@@ -2,12 +2,21 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   M3_7_POSTGRES_AUDIT_SCHEMA,
+  calculateAndStoreRewardRecords,
   calculateAndStoreWinnerRecords,
   calculatePrizePoolAccounting,
+  calculateRewardDistribution,
+  completeClaimApproval,
+  createClaimRecordsForTurn,
   createGuessVerificationJobsForTurn,
   getAuditLog,
+  getClaimSummary,
   getPrizePoolAccounting,
+  getRewardSummary,
   getRoundSummary,
+  listClaimRecords,
+  listCreatorRewardRecords,
+  listVoterRewardRecords,
   listWinnerRecords,
   listAuditLogs,
   resetApiStateForTests,
@@ -16,9 +25,11 @@ import {
   saveGuessReceipt,
   saveGuessVerificationResult,
   savePaidRuleRemoval,
+  saveRuleElection,
   saveRuleProposal,
   saveRuleVote,
   saveTurnRollover,
+  requestClaimApproval,
   storeAuditLogInPostgres,
   toPostgresAuditLogRow,
   verifyAuditLogIntegrity,
@@ -55,6 +66,30 @@ function proposal(turnId: number, ruleId: number): RuleProposalRecord {
   };
 }
 
+function settledElection(turnId: number, activeRuleId: number) {
+  return {
+    activeRuleArtifactHash: null,
+    activeRuleHash: "1".repeat(64),
+    activeRuleId,
+    electedFinalistIndex: 0,
+    eligibleRuleIds: [activeRuleId],
+    eligibleRulePoolHash: "2".repeat(64),
+    finalistRuleIds: [activeRuleId],
+    finalistSetHash: "3".repeat(64),
+    randomFinalistHash: "4".repeat(64),
+    randomRuleIds: [],
+    randomnessAccount: null,
+    randomnessSource: null,
+    randomnessValue: null,
+    requestedAt: "2026-06-12T12:10:00.000Z",
+    settledAt: "2026-06-12T12:16:00.000Z",
+    status: "settled" as const,
+    topVotedFinalistHash: "5".repeat(64),
+    topVotedRuleIds: [activeRuleId],
+    turnId,
+  };
+}
+
 function saveReceiptForWallet(turnId: number, player: string, numbers: number[]) {
   return saveGuessReceipt({
     gameToken: base58,
@@ -81,6 +116,22 @@ function saveFulfilledDraw(turnId: number) {
     status: "fulfilled",
     turnId,
   });
+}
+
+function savePaidRemovals(turnId: number, count: number) {
+  for (let index = 0; index < count; index += 1) {
+    const suffix = index.toString(36).padStart(4, "a");
+    savePaidRuleRemoval({
+      removalKind: "third_party",
+      remover: `7bYqf3rJ7m2nQh9sV1xCH8kLpWtD6eZaUg5oNbM${suffix}`,
+      removedAt: "2026-06-12T12:05:00.000Z",
+      ruleId: 10_000 + index,
+      ruleProposal: base58,
+      ruleRemoval: base58,
+      signature: base58,
+      turnId,
+    });
+  }
 }
 
 function resultForJob(args: {
@@ -341,6 +392,335 @@ test("winner calculation stores original and alternative winners with per-bucket
   assert.equal(summary.winners.records.length, 3);
   assert.equal(summary.winners.original.winnerCount, 2);
   assert.equal(summary.winners.alternative.winnerCount, 1);
+});
+
+test("reward distribution uses individual alternative payout basis and splits elected-rule voters", () => {
+  const rewards = calculateRewardDistribution({
+    activeRuleId: 7,
+    calculatedAt: "2026-06-12T12:18:00.000Z",
+    creatorRewardReserveLamports: 30,
+    creatorWallet: wallet,
+    individualAltPayoutLamports: 10,
+    turnId: 230,
+    voters: [wallet, walletTwo, walletThree],
+    winnerCount: 10,
+  });
+
+  assert.equal(rewards.creator?.calculatedRewardLamports, 10);
+  assert.equal(rewards.creator?.finalRewardLamports, 10);
+  assert.equal(rewards.voterRewardPool.calculatedPoolLamports, 1);
+  assert.equal(rewards.voterRewardPool.finalPoolLamports, 1);
+  assert.equal(rewards.voterRewardPool.individualRewardLamports, 0);
+  assert.equal(rewards.voterRewardPool.remainderLamports, 1);
+  assert.equal(rewards.voters.length, 3);
+  assert.equal(rewards.remainingReserveLamports, 19);
+});
+
+test("creator and voter reward records are stored without reducing winner payouts", () => {
+  resetApiStateForTests();
+  saveRuleProposal(proposal(231, 7));
+  saveRuleVote({
+    ruleId: 7,
+    ruleProposal: base58,
+    ruleVote: base58,
+    signature: base58,
+    submittedAt: "2026-06-12T12:06:00.000Z",
+    turnId: 231,
+    voter: wallet,
+  });
+  saveRuleVote({
+    ruleId: 7,
+    ruleProposal: base58,
+    ruleVote: base58,
+    signature: base58,
+    submittedAt: "2026-06-12T12:07:00.000Z",
+    turnId: 231,
+    voter: walletTwo,
+  });
+  saveReceiptForWallet(231, wallet, [1, 2, 3, 4, 5, 6]);
+  saveReceiptForWallet(231, walletTwo, [1, 2, 3, 4, 5, 7]);
+  saveFulfilledDraw(231);
+
+  const { jobs } = createGuessVerificationJobsForTurn(231);
+  saveRuleElection(settledElection(231, 7));
+  const byPlayer = new Map(jobs.map((job) => [job.payload.wallet, job]));
+  const jobOne = byPlayer.get(wallet);
+  const jobTwo = byPlayer.get(walletTwo);
+  assert.ok(jobOne);
+  assert.ok(jobTwo);
+
+  saveGuessVerificationResult(
+    resultForJob({
+      alternative: "WIN",
+      jobId: jobOne.id,
+      original: "LOSE",
+      player: wallet,
+      resultByte: "7",
+      turnId: 231,
+    }),
+  );
+  saveGuessVerificationResult(
+    resultForJob({
+      alternative: "WIN",
+      jobId: jobTwo.id,
+      original: "LOSE",
+      player: walletTwo,
+      resultByte: "8",
+      turnId: 231,
+    }),
+  );
+
+  const winners = calculateAndStoreWinnerRecords(
+    231,
+    "2026-06-12T12:18:00.000Z",
+  );
+  const rewards = calculateAndStoreRewardRecords(
+    231,
+    "2026-06-12T12:18:00.000Z",
+  );
+  const creatorRecords = listCreatorRewardRecords(231);
+  const voterRecords = listVoterRewardRecords(231);
+  const summary = getRoundSummary(231, 231);
+
+  assert.equal(winners.alternative.winnerCount, 2);
+  assert.equal(winners.alternative.individualPayoutLamports, 9_500_000);
+  assert.equal(rewards.creatorRewardReserveLamports, 400_000);
+  assert.equal(rewards.creator?.creatorWallet, wallet);
+  assert.equal(rewards.creator?.calculatedRewardLamports, 2_850_000);
+  assert.equal(rewards.creator?.finalRewardLamports, 400_000);
+  assert.equal(rewards.voterRewardPool.calculatedPoolLamports, 1_425_000);
+  assert.equal(rewards.voterRewardPool.finalPoolLamports, 0);
+  assert.equal(voterRecords.length, 2);
+  assert.equal(voterRecords[0]?.finalRewardLamports, 0);
+  assert.equal(creatorRecords.length, 1);
+  assert.equal(summary.winners.alternative.individualPayoutLamports, 9_500_000);
+  assert.equal(summary.rewards.creator?.finalRewardLamports, 400_000);
+});
+
+test("reward calculation handles no alternative winners and zero elected-rule voters", () => {
+  resetApiStateForTests();
+  saveRuleProposal(proposal(232, 7));
+  saveReceiptForWallet(232, wallet, [1, 2, 3, 4, 5, 6]);
+  saveFulfilledDraw(232);
+  const { jobs } = createGuessVerificationJobsForTurn(232);
+  saveRuleElection(settledElection(232, 7));
+  const job = jobs[0];
+  assert.ok(job);
+  saveGuessVerificationResult(
+    resultForJob({
+      alternative: "LOSE",
+      jobId: job.id,
+      original: "LOSE",
+      player: wallet,
+      resultByte: "9",
+      turnId: 232,
+    }),
+  );
+
+  const noWinnerRewards = getRewardSummary(232);
+  assert.equal(noWinnerRewards.creator, null);
+  assert.equal(noWinnerRewards.voters.length, 0);
+  assert.equal(noWinnerRewards.voterRewardPool.finalPoolLamports, 0);
+
+  resetApiStateForTests();
+  saveRuleProposal(proposal(233, 7));
+  saveReceiptForWallet(233, wallet, [1, 2, 3, 4, 5, 6]);
+  saveFulfilledDraw(233);
+  const { jobs: zeroVoterJobs } = createGuessVerificationJobsForTurn(233);
+  saveRuleElection(settledElection(233, 7));
+  const zeroVoterJob = zeroVoterJobs[0];
+  assert.ok(zeroVoterJob);
+  saveGuessVerificationResult(
+    resultForJob({
+      alternative: "WIN",
+      jobId: zeroVoterJob.id,
+      original: "LOSE",
+      player: wallet,
+      resultByte: "e",
+      turnId: 233,
+    }),
+  );
+
+  const zeroVoterRewards = calculateAndStoreRewardRecords(
+    233,
+    "2026-06-12T12:18:00.000Z",
+  );
+  assert.equal(zeroVoterRewards.creator?.finalRewardLamports, 300_000);
+  assert.equal(zeroVoterRewards.voterRewardPool.voterCount, 0);
+  assert.equal(zeroVoterRewards.voterRewardPool.finalPoolLamports, 0);
+  assert.equal(zeroVoterRewards.voters.length, 0);
+});
+
+test("claim flow creates winner and creator claims and blocks double claim", () => {
+  resetApiStateForTests();
+  saveRuleProposal(proposal(240, 7));
+  savePaidRemovals(240, 30);
+  saveReceiptForWallet(240, wallet, [1, 2, 3, 4, 5, 6]);
+  saveFulfilledDraw(240);
+  const { jobs } = createGuessVerificationJobsForTurn(240);
+  saveRuleElection(settledElection(240, 7));
+  const job = jobs[0];
+  assert.ok(job);
+  saveGuessVerificationResult(
+    resultForJob({
+      alternative: "WIN",
+      jobId: job.id,
+      original: "WIN",
+      player: wallet,
+      resultByte: "f",
+      turnId: 240,
+    }),
+  );
+
+  const { claims } = createClaimRecordsForTurn(
+    240,
+    "2026-06-12T12:20:00.000Z",
+  );
+  const winnerClaim = claims.find(
+    (claim) => claim.kind === "winner_payout" && claim.wallet === wallet,
+  );
+  const creatorClaim = claims.find((claim) => claim.kind === "creator_reward");
+  assert.ok(winnerClaim);
+  assert.ok(creatorClaim);
+  assert.equal(winnerClaim.status, "available");
+  assert.equal(creatorClaim.status, "available");
+  assert.equal(winnerClaim.walletApproval.state, "not_requested");
+  assert.equal(getClaimSummary({ turnId: 240, wallet }).availableLamports > 0, true);
+
+  const pending = requestClaimApproval({
+    claimId: winnerClaim.claimId,
+    requestedAt: "2026-06-12T12:21:00.000Z",
+    wallet,
+  });
+  assert.equal(pending.status, "pending_wallet_approval");
+  assert.equal(pending.walletApproval.state, "pending");
+
+  const claimed = completeClaimApproval({
+    claimId: winnerClaim.claimId,
+    completedAt: "2026-06-12T12:22:00.000Z",
+    signature: base58,
+    status: "claimed",
+    wallet,
+  });
+  assert.equal(claimed.status, "claimed");
+  assert.equal(claimed.walletApproval.state, "approved");
+  assert.equal(claimed.walletApproval.signature, base58);
+  assert.throws(
+    () =>
+      requestClaimApproval({
+        claimId: winnerClaim.claimId,
+        wallet,
+      }),
+    /PAYOUT_ALREADY_CLAIMED/,
+  );
+});
+
+test("claim flow exposes failed wallet approval and below-threshold unavailable claims", () => {
+  resetApiStateForTests();
+  saveRuleProposal(proposal(241, 7));
+  saveReceiptForWallet(241, wallet, [1, 2, 3, 4, 5, 6]);
+  saveFulfilledDraw(241);
+  const { jobs } = createGuessVerificationJobsForTurn(241);
+  saveRuleElection(settledElection(241, 7));
+  const job = jobs[0];
+  assert.ok(job);
+  saveGuessVerificationResult(
+    resultForJob({
+      alternative: "WIN",
+      jobId: job.id,
+      original: "LOSE",
+      player: wallet,
+      resultByte: "1",
+      turnId: 241,
+    }),
+  );
+
+  const { claims } = createClaimRecordsForTurn(
+    241,
+    "2026-06-12T12:20:00.000Z",
+  );
+  const creatorClaim = claims.find((claim) => claim.kind === "creator_reward");
+  const winnerClaim = claims.find((claim) => claim.kind === "winner_payout");
+  assert.ok(creatorClaim);
+  assert.ok(winnerClaim);
+  assert.equal(creatorClaim.status, "unavailable");
+  assert.equal(creatorClaim.statusReason, "PAYOUT_BELOW_MINIMUM");
+
+  requestClaimApproval({
+    claimId: winnerClaim.claimId,
+    requestedAt: "2026-06-12T12:21:00.000Z",
+    wallet,
+  });
+  const failed = completeClaimApproval({
+    claimId: winnerClaim.claimId,
+    completedAt: "2026-06-12T12:22:00.000Z",
+    failureReason: "WALLET_REJECTED",
+    status: "failed",
+    wallet,
+  });
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.walletApproval.state, "failed");
+  assert.equal(failed.walletApproval.failureReason, "WALLET_REJECTED");
+  const retried = requestClaimApproval({
+    claimId: winnerClaim.claimId,
+    requestedAt: "2026-06-12T12:23:00.000Z",
+    wallet,
+  });
+  assert.equal(retried.status, "pending_wallet_approval");
+  assert.equal(retried.walletApproval.state, "pending");
+});
+
+test("claim flow supports elected-rule voter reward claims", () => {
+  resetApiStateForTests();
+  saveRuleProposal(proposal(242, 7));
+  savePaidRemovals(242, 600);
+  saveRuleVote({
+    ruleId: 7,
+    ruleProposal: base58,
+    ruleVote: base58,
+    signature: base58,
+    submittedAt: "2026-06-12T12:06:00.000Z",
+    turnId: 242,
+    voter: walletTwo,
+  });
+  saveRuleVote({
+    ruleId: 7,
+    ruleProposal: base58,
+    ruleVote: base58,
+    signature: base58,
+    submittedAt: "2026-06-12T12:07:00.000Z",
+    turnId: 242,
+    voter: walletThree,
+  });
+  saveReceiptForWallet(242, wallet, [1, 2, 3, 4, 5, 6]);
+  saveFulfilledDraw(242);
+  const { jobs } = createGuessVerificationJobsForTurn(242);
+  saveRuleElection(settledElection(242, 7));
+  const job = jobs[0];
+  assert.ok(job);
+  saveGuessVerificationResult(
+    resultForJob({
+      alternative: "WIN",
+      jobId: job.id,
+      original: "LOSE",
+      player: wallet,
+      resultByte: "2",
+      turnId: 242,
+    }),
+  );
+
+  const { claims } = createClaimRecordsForTurn(
+    242,
+    "2026-06-12T12:20:00.000Z",
+  );
+  const voterClaims = claims.filter((claim) => claim.kind === "voter_reward");
+  assert.equal(voterClaims.length, 2);
+  assert.equal(voterClaims.every((claim) => claim.status === "available"), true);
+  assert.equal(voterClaims[0]?.amountLamports, 25_150_000);
+  assert.equal(
+    listClaimRecords({ turnId: 242, wallet: walletTwo })[0]?.kind,
+    "voter_reward",
+  );
 });
 
 test("rule validation creates a traceable compiler audit log", () => {

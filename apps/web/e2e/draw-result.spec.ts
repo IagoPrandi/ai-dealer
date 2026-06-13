@@ -15,6 +15,14 @@ test("simulated result explains outcomes, creator reward, return, and sharing", 
   await page.getByRole("button", { name: "Winner" }).click();
   await expect(page.getByRole("heading", { name: "Your guess won under the Rule of the Hour." })).toBeVisible();
   await expect(page.getByText("The active rule changed this outcome from a loss into a win.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Claimable balance" })).toBeVisible();
+  await page.getByRole("button", { name: "Claim payout" }).click();
+  await expect(page.getByRole("heading", { name: "Wallet approval pending" })).toBeVisible();
+  await page.getByRole("button", { name: "Reject approval" }).click();
+  await expect(page.getByRole("heading", { name: "Claim failed" })).toBeVisible();
+  await page.getByRole("button", { name: "Claim payout" }).click();
+  await page.getByRole("button", { name: "Approve in wallet" }).click();
+  await expect(page.getByRole("heading", { name: "Claim successful" })).toBeVisible();
 
   await page.getByRole("button", { name: "Creator" }).click();
   await expect(page.getByRole("heading", { name: "Your elected rule created a winner." })).toBeVisible();

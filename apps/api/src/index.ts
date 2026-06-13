@@ -3,11 +3,19 @@ import { createServer } from "node:http";
 import { resolve } from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import {
+  CLAIM_WINDOW_DAYS,
+  CLAIM_WINDOW_TURNS,
+  CREATOR_REWARD_CAP_SOL,
+  CREATOR_REWARD_RATE_BPS,
+  CREATOR_REWARD_RESERVE_SHARE_BPS,
   LAMPORTS_PER_SOL,
+  MINIMUM_CLAIM_THRESHOLD_SOL,
   MVP_FEES_SOL,
   RULE_MAX_TOKENS,
   TREASURY_FEE_BPS,
   TURN_DURATION_CYCLE_HOURS,
+  VOTER_REWARD_CONFIG,
+  VOTER_REWARD_RATE_BPS,
   VOTE_FEE_START_TURN,
 } from "@idealer/constants";
 import {
@@ -299,6 +307,108 @@ export interface WinnerCalculationSummary {
   turnId: number;
 }
 
+export interface CreatorRewardRecord {
+  activeRuleId: number;
+  availableReserveLamports: number;
+  calculatedAt: string;
+  calculatedRewardLamports: number;
+  capPerTurnLamports: number;
+  creatorWallet: string;
+  finalRewardLamports: number;
+  individualAltPayoutLamports: number;
+  rewardRateBps: number;
+  status: "calculated" | "not_available";
+  turnId: number;
+  wasCapped: boolean;
+  winnerCount: number;
+}
+
+export interface VoterRewardRecord {
+  activeRuleId: number;
+  calculatedAt: string;
+  finalRewardLamports: number;
+  individualAltPayoutLamports: number;
+  rewardPoolLamports: number;
+  rewardRateBps: number;
+  status: "calculated" | "not_available";
+  turnId: number;
+  voter: string;
+  voterCount: number;
+}
+
+export interface RewardCalculationSummary {
+  activeRuleId: number | null;
+  creator: CreatorRewardRecord | null;
+  creatorRewardReserveLamports: number;
+  remainingReserveLamports: number;
+  turnId: number;
+  voterRewardPool: {
+    capPerTurnLamports: number;
+    calculatedPoolLamports: number;
+    finalPoolLamports: number;
+    individualRewardLamports: number;
+    remainderLamports: number;
+    rewardRateBps: number;
+    voterCount: number;
+    wasCapped: boolean;
+  };
+  voters: VoterRewardRecord[];
+}
+
+export type ClaimKind = "creator_reward" | "voter_reward" | "winner_payout";
+export type ClaimRecordStatus =
+  | "available"
+  | "claimed"
+  | "failed"
+  | "pending_wallet_approval"
+  | "unavailable";
+export type ClaimWalletApprovalState =
+  | "approved"
+  | "failed"
+  | "not_requested"
+  | "pending";
+
+export interface ClaimWalletApproval {
+  approvalStartedAt: string | null;
+  completedAt: string | null;
+  failureReason: string | null;
+  required: true;
+  signature: string | null;
+  state: ClaimWalletApprovalState;
+  transactionLabel: string;
+}
+
+export interface ClaimRecord {
+  activeRuleId: number | null;
+  amountLamports: number;
+  availableAt: string;
+  category: WinnerCategory | null;
+  claimId: string;
+  claimWindowExpiresAt: string;
+  claimWindowTurns: number;
+  claimedAt: string | null;
+  createdAt: string;
+  failedAt: string | null;
+  kind: ClaimKind;
+  sourceRecordKey: string;
+  status: ClaimRecordStatus;
+  statusReason: string;
+  turnId: number;
+  updatedAt: string;
+  wallet: string;
+  walletApproval: ClaimWalletApproval;
+}
+
+export interface ClaimSummary {
+  availableLamports: number;
+  claimedLamports: number;
+  failedLamports: number;
+  pendingLamports: number;
+  records: ClaimRecord[];
+  turnId: number;
+  wallet: string | null;
+}
+
 export type AuditLogKind = "compiler.validation" | "guess.verification";
 export type AuditPublicStateType = "guess_verification_result" | "rule_validation";
 
@@ -427,6 +537,9 @@ const ruleValidations = new Map<string, RuleValidationRecord>();
 const verificationJobs = new Map<string, GuessVerificationJobRecord>();
 const verificationResults = new Map<string, GuessVerificationResultRecord>();
 const winnerRecords = new Map<string, WinnerRecord>();
+const creatorRewardRecords = new Map<string, CreatorRewardRecord>();
+const voterRewardRecords = new Map<string, VoterRewardRecord>();
+const claimRecords = new Map<string, ClaimRecord>();
 const auditLogs = new Map<string, AuditLogRecord>();
 const auditLogOrder: string[] = [];
 let lastAuditLogHash: string | null = null;
@@ -445,12 +558,18 @@ const CORS_PATHS = new Set([
   "/rule-validations",
   "/rule-validations/run",
   "/rule-votes",
+  "/reward-records",
+  "/reward-records/calculate-turn",
   "/verification-jobs",
   "/verification-jobs/create-turn",
   "/verification-results",
   "/winner-records",
   "/winner-records/calculate-turn",
   "/audit",
+  "/claim-records",
+  "/claim-records/complete",
+  "/claim-records/create-turn",
+  "/claim-records/request",
 ]);
 
 function getGuessReceiptKey(turnId: number, player: string) {
@@ -712,6 +831,9 @@ export function resetApiStateForTests() {
   verificationJobs.clear();
   verificationResults.clear();
   winnerRecords.clear();
+  creatorRewardRecords.clear();
+  voterRewardRecords.clear();
+  claimRecords.clear();
   auditLogs.clear();
   auditLogOrder.length = 0;
   lastAuditLogHash = null;
@@ -1098,6 +1220,79 @@ function isValidGuessVerificationCreateRequest(
 
   const request = value as { turnId?: unknown };
   return Number.isInteger(request.turnId) && Number(request.turnId) > 0;
+}
+
+function isValidClaimCreateRequest(
+  value: unknown,
+): value is { availableAt?: string; turnId: number } {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const request = value as { availableAt?: unknown; turnId?: unknown };
+  return (
+    Number.isInteger(request.turnId) &&
+    Number(request.turnId) > 0 &&
+    (request.availableAt === undefined ||
+      (typeof request.availableAt === "string" &&
+        !Number.isNaN(Date.parse(request.availableAt))))
+  );
+}
+
+function isValidClaimRequest(
+  value: unknown,
+): value is { claimId: string; requestedAt?: string; wallet: string } {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const request = value as {
+    claimId?: unknown;
+    requestedAt?: unknown;
+    wallet?: unknown;
+  };
+  return (
+    isHexHash(request.claimId) &&
+    isBase58Like(request.wallet) &&
+    (request.requestedAt === undefined ||
+      (typeof request.requestedAt === "string" &&
+        !Number.isNaN(Date.parse(request.requestedAt))))
+  );
+}
+
+function isValidClaimCompleteRequest(
+  value: unknown,
+): value is {
+  claimId: string;
+  completedAt?: string;
+  failureReason?: string;
+  signature?: string;
+  status: "claimed" | "failed";
+  wallet: string;
+} {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const request = value as {
+    claimId?: unknown;
+    completedAt?: unknown;
+    failureReason?: unknown;
+    signature?: unknown;
+    status?: unknown;
+    wallet?: unknown;
+  };
+  return (
+    isHexHash(request.claimId) &&
+    isBase58Like(request.wallet) &&
+    (request.status === "claimed" || request.status === "failed") &&
+    (request.signature === undefined || isBase58Like(request.signature)) &&
+    (request.failureReason === undefined ||
+      typeof request.failureReason === "string") &&
+    (request.completedAt === undefined ||
+      (typeof request.completedAt === "string" &&
+        !Number.isNaN(Date.parse(request.completedAt))))
+  );
 }
 
 function isValidVerificationOutcome(value: unknown): value is VerificationOutcome {
@@ -1634,6 +1829,575 @@ export function getWinnerSummary(turnId: number): WinnerCalculationSummary {
   return calculateAndStoreWinnerRecords(turnId);
 }
 
+function getCreatorRewardRecordKey(turnId: number, activeRuleId: number) {
+  return `${turnId}:${activeRuleId}`;
+}
+
+function getVoterRewardRecordKey(
+  turnId: number,
+  activeRuleId: number,
+  voter: string,
+) {
+  return `${turnId}:${activeRuleId}:${voter}`;
+}
+
+function getRewardReserveLamports(turnId: number) {
+  const accounting = getPrizePoolAccounting(turnId);
+  return Math.floor(
+    (accounting.platformMonetizationLamports *
+      CREATOR_REWARD_RESERVE_SHARE_BPS) /
+      10_000,
+  );
+}
+
+function listElectedRuleVoters(turnId: number, activeRuleId: number) {
+  const voters = [...ruleVotes.values()]
+    .filter((vote) => vote.turnId === turnId && vote.ruleId === activeRuleId)
+    .map((vote) => vote.voter);
+
+  return [...new Set(voters)].sort((left, right) => left.localeCompare(right));
+}
+
+function clearRewardRecordsForTurn(turnId: number) {
+  for (const key of [...creatorRewardRecords.keys()]) {
+    if (key.startsWith(`${turnId}:`)) {
+      creatorRewardRecords.delete(key);
+    }
+  }
+  for (const key of [...voterRewardRecords.keys()]) {
+    if (key.startsWith(`${turnId}:`)) {
+      voterRewardRecords.delete(key);
+    }
+  }
+}
+
+export function calculateRewardDistribution(args: {
+  activeRuleId: number;
+  calculatedAt: string;
+  creatorRewardReserveLamports: number;
+  creatorWallet: string;
+  individualAltPayoutLamports: number;
+  turnId: number;
+  voters: string[];
+  winnerCount: number;
+}): RewardCalculationSummary {
+  assertNonNegativeSafeInteger(
+    args.creatorRewardReserveLamports,
+    "creator_reward_reserve_lamports",
+  );
+  assertNonNegativeSafeInteger(
+    args.individualAltPayoutLamports,
+    "individual_alt_payout_lamports",
+  );
+  assertNonNegativeSafeInteger(args.winnerCount, "winner_count");
+
+  const voters = [...new Set(args.voters)].sort((left, right) =>
+    left.localeCompare(right),
+  );
+  const creatorRewardCapLamports = solToLamports(CREATOR_REWARD_CAP_SOL);
+  const perWinnerCreatorRewardLamports = Math.floor(
+    (args.individualAltPayoutLamports * CREATOR_REWARD_RATE_BPS) / 10_000,
+  );
+  const calculatedCreatorRewardLamports =
+    perWinnerCreatorRewardLamports * args.winnerCount;
+  const creatorRewardBeforeReserve = Math.min(
+    calculatedCreatorRewardLamports,
+    creatorRewardCapLamports,
+  );
+  const finalCreatorRewardLamports = Math.min(
+    creatorRewardBeforeReserve,
+    args.creatorRewardReserveLamports,
+  );
+  const remainingAfterCreatorLamports =
+    args.creatorRewardReserveLamports - finalCreatorRewardLamports;
+  const calculatedVoterPoolLamports = Math.floor(
+    (args.individualAltPayoutLamports * VOTER_REWARD_RATE_BPS) / 10_000,
+  );
+  const cappedVoterPoolLamports = Math.min(
+    calculatedVoterPoolLamports,
+    VOTER_REWARD_CONFIG.capPerTurnLamports,
+  );
+  const finalVoterPoolLamports =
+    voters.length === 0
+      ? 0
+      : Math.min(cappedVoterPoolLamports, remainingAfterCreatorLamports);
+  const individualVoterRewardLamports =
+    voters.length === 0 ? 0 : Math.floor(finalVoterPoolLamports / voters.length);
+  const voterRemainderLamports =
+    finalVoterPoolLamports - individualVoterRewardLamports * voters.length;
+  const creatorRecord: CreatorRewardRecord = {
+    activeRuleId: args.activeRuleId,
+    availableReserveLamports: args.creatorRewardReserveLamports,
+    calculatedAt: args.calculatedAt,
+    calculatedRewardLamports: calculatedCreatorRewardLamports,
+    capPerTurnLamports: creatorRewardCapLamports,
+    creatorWallet: args.creatorWallet,
+    finalRewardLamports: finalCreatorRewardLamports,
+    individualAltPayoutLamports: args.individualAltPayoutLamports,
+    rewardRateBps: CREATOR_REWARD_RATE_BPS,
+    status: "calculated",
+    turnId: args.turnId,
+    wasCapped:
+      finalCreatorRewardLamports < calculatedCreatorRewardLamports ||
+      calculatedCreatorRewardLamports > creatorRewardCapLamports,
+    winnerCount: args.winnerCount,
+  };
+  const voterRecords = voters.map(
+    (voter): VoterRewardRecord => ({
+      activeRuleId: args.activeRuleId,
+      calculatedAt: args.calculatedAt,
+      finalRewardLamports: individualVoterRewardLamports,
+      individualAltPayoutLamports: args.individualAltPayoutLamports,
+      rewardPoolLamports: finalVoterPoolLamports,
+      rewardRateBps: VOTER_REWARD_RATE_BPS,
+      status: individualVoterRewardLamports > 0 ? "calculated" : "not_available",
+      turnId: args.turnId,
+      voter,
+      voterCount: voters.length,
+    }),
+  );
+
+  return {
+    activeRuleId: args.activeRuleId,
+    creator: creatorRecord,
+    creatorRewardReserveLamports: args.creatorRewardReserveLamports,
+    remainingReserveLamports:
+      remainingAfterCreatorLamports - finalVoterPoolLamports,
+    turnId: args.turnId,
+    voterRewardPool: {
+      capPerTurnLamports: VOTER_REWARD_CONFIG.capPerTurnLamports,
+      calculatedPoolLamports: calculatedVoterPoolLamports,
+      finalPoolLamports: finalVoterPoolLamports,
+      individualRewardLamports: individualVoterRewardLamports,
+      remainderLamports: voterRemainderLamports,
+      rewardRateBps: VOTER_REWARD_RATE_BPS,
+      voterCount: voters.length,
+      wasCapped: finalVoterPoolLamports < calculatedVoterPoolLamports,
+    },
+    voters: voterRecords,
+  };
+}
+
+export function calculateAndStoreRewardRecords(
+  turnId: number,
+  calculatedAt: string = new Date().toISOString(),
+): RewardCalculationSummary {
+  const election = getRuleElection(turnId);
+  const activeRuleId = election?.activeRuleId ?? null;
+  const reserveLamports = getRewardReserveLamports(turnId);
+  const emptyVoterRewardPool = {
+    capPerTurnLamports: VOTER_REWARD_CONFIG.capPerTurnLamports,
+    calculatedPoolLamports: 0,
+    finalPoolLamports: 0,
+    individualRewardLamports: 0,
+    remainderLamports: 0,
+    rewardRateBps: VOTER_REWARD_RATE_BPS,
+    voterCount: 0,
+    wasCapped: false,
+  };
+
+  clearRewardRecordsForTurn(turnId);
+
+  if (activeRuleId === null) {
+    return {
+      activeRuleId,
+      creator: null,
+      creatorRewardReserveLamports: reserveLamports,
+      remainingReserveLamports: reserveLamports,
+      turnId,
+      voterRewardPool: emptyVoterRewardPool,
+      voters: [],
+    };
+  }
+
+  const proposal = ruleProposals.get(getRuleProposalKey(turnId, activeRuleId));
+  if (!proposal) {
+    throw new Error("ACTIVE_RULE_PROPOSAL_NOT_FOUND");
+  }
+
+  const winners = getWinnerSummary(turnId);
+  const winnerCount = winners.alternative.winnerCount;
+  const individualAltPayoutLamports =
+    winners.alternative.individualPayoutLamports;
+
+  if (winnerCount === 0 || individualAltPayoutLamports === 0) {
+    return {
+      activeRuleId,
+      creator: null,
+      creatorRewardReserveLamports: reserveLamports,
+      remainingReserveLamports: reserveLamports,
+      turnId,
+      voterRewardPool: emptyVoterRewardPool,
+      voters: [],
+    };
+  }
+
+  const distribution = calculateRewardDistribution({
+    activeRuleId,
+    calculatedAt,
+    creatorRewardReserveLamports: reserveLamports,
+    creatorWallet: proposal.proposer,
+    individualAltPayoutLamports,
+    turnId,
+    voters: listElectedRuleVoters(turnId, activeRuleId),
+    winnerCount,
+  });
+
+  creatorRewardRecords.set(
+    getCreatorRewardRecordKey(turnId, activeRuleId),
+    distribution.creator as CreatorRewardRecord,
+  );
+
+  for (const record of distribution.voters) {
+    voterRewardRecords.set(
+      getVoterRewardRecordKey(record.turnId, record.activeRuleId, record.voter),
+      record,
+    );
+  }
+
+  return distribution;
+}
+
+export function listCreatorRewardRecords(turnId: number) {
+  return [...creatorRewardRecords.values()]
+    .filter((record) => record.turnId === turnId)
+    .sort((left, right) => left.activeRuleId - right.activeRuleId);
+}
+
+export function listVoterRewardRecords(turnId: number) {
+  return [...voterRewardRecords.values()]
+    .filter((record) => record.turnId === turnId)
+    .sort((left, right) => left.voter.localeCompare(right.voter));
+}
+
+export function getRewardSummary(turnId: number): RewardCalculationSummary {
+  const creator = listCreatorRewardRecords(turnId)[0] ?? null;
+  const voters = listVoterRewardRecords(turnId);
+  if (creator || voters.length > 0) {
+    const activeRuleId = creator?.activeRuleId ?? voters[0]?.activeRuleId ?? null;
+    const reserveLamports = getRewardReserveLamports(turnId);
+    const finalVoterPoolLamports = voters[0]?.rewardPoolLamports ?? 0;
+    const calculatedVoterPoolLamports =
+      voters[0] === undefined
+        ? 0
+        : Math.floor(
+            (voters[0].individualAltPayoutLamports * VOTER_REWARD_RATE_BPS) /
+              10_000,
+          );
+
+    return {
+      activeRuleId,
+      creator,
+      creatorRewardReserveLamports: reserveLamports,
+      remainingReserveLamports:
+        reserveLamports -
+        (creator?.finalRewardLamports ?? 0) -
+        finalVoterPoolLamports,
+      turnId,
+      voterRewardPool: {
+        capPerTurnLamports: VOTER_REWARD_CONFIG.capPerTurnLamports,
+        calculatedPoolLamports: calculatedVoterPoolLamports,
+        finalPoolLamports: finalVoterPoolLamports,
+        individualRewardLamports: voters[0]?.finalRewardLamports ?? 0,
+        remainderLamports:
+          finalVoterPoolLamports -
+          (voters[0]?.finalRewardLamports ?? 0) * voters.length,
+        rewardRateBps: VOTER_REWARD_RATE_BPS,
+        voterCount: voters.length,
+        wasCapped: finalVoterPoolLamports < calculatedVoterPoolLamports,
+      },
+      voters,
+    };
+  }
+
+  return calculateAndStoreRewardRecords(turnId);
+}
+
+function getMinimumClaimThresholdLamports() {
+  return solToLamports(MINIMUM_CLAIM_THRESHOLD_SOL);
+}
+
+function addDays(isoDate: string, days: number) {
+  const date = new Date(isoDate);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString();
+}
+
+function getClaimSourceKey(args: {
+  activeRuleId: number | null;
+  category: WinnerCategory | null;
+  kind: ClaimKind;
+  turnId: number;
+  wallet: string;
+}) {
+  return [
+    args.turnId,
+    args.kind,
+    args.category ?? "none",
+    args.activeRuleId ?? "none",
+    args.wallet,
+  ].join(":");
+}
+
+function getClaimId(args: {
+  activeRuleId: number | null;
+  category: WinnerCategory | null;
+  kind: ClaimKind;
+  turnId: number;
+  wallet: string;
+}) {
+  return hashJson({
+    activeRuleId: args.activeRuleId,
+    category: args.category,
+    kind: args.kind,
+    turnId: args.turnId,
+    wallet: args.wallet,
+  });
+}
+
+function getClaimTransactionLabel(kind: ClaimKind) {
+  if (kind === "winner_payout") {
+    return "Claim winner payout";
+  }
+  if (kind === "creator_reward") {
+    return "Claim creator reward";
+  }
+  return "Claim voter reward";
+}
+
+function createClaimRecord(args: {
+  activeRuleId: number | null;
+  amountLamports: number;
+  availableAt: string;
+  category: WinnerCategory | null;
+  kind: ClaimKind;
+  turnId: number;
+  wallet: string;
+}): ClaimRecord {
+  assertNonNegativeSafeInteger(args.amountLamports, "claim_amount_lamports");
+  const sourceRecordKey = getClaimSourceKey(args);
+  const claimId = getClaimId(args);
+  const existing = claimRecords.get(claimId);
+  if (existing) {
+    return existing;
+  }
+
+  const minimumClaimThresholdLamports = getMinimumClaimThresholdLamports();
+  const isClaimable = args.amountLamports >= minimumClaimThresholdLamports;
+  const status: ClaimRecordStatus = isClaimable ? "available" : "unavailable";
+  const statusReason = isClaimable
+    ? "CLAIM_AVAILABLE"
+    : "PAYOUT_BELOW_MINIMUM";
+
+  return {
+    activeRuleId: args.activeRuleId,
+    amountLamports: args.amountLamports,
+    availableAt: args.availableAt,
+    category: args.category,
+    claimId,
+    claimWindowExpiresAt: addDays(args.availableAt, CLAIM_WINDOW_DAYS),
+    claimWindowTurns: CLAIM_WINDOW_TURNS,
+    claimedAt: null,
+    createdAt: args.availableAt,
+    failedAt: null,
+    kind: args.kind,
+    sourceRecordKey,
+    status,
+    statusReason,
+    turnId: args.turnId,
+    updatedAt: args.availableAt,
+    wallet: args.wallet,
+    walletApproval: {
+      approvalStartedAt: null,
+      completedAt: null,
+      failureReason: null,
+      required: true,
+      signature: null,
+      state: "not_requested",
+      transactionLabel: getClaimTransactionLabel(args.kind),
+    },
+  };
+}
+
+function saveClaimRecord(record: ClaimRecord) {
+  claimRecords.set(record.claimId, record);
+  return record;
+}
+
+export function createClaimRecordsForTurn(
+  turnId: number,
+  availableAt: string = new Date().toISOString(),
+) {
+  const winners = getWinnerSummary(turnId);
+  const rewards = getRewardSummary(turnId);
+  const claimableRecords = [
+    ...winners.records.map((winner) =>
+      createClaimRecord({
+        activeRuleId: winner.activeRuleId,
+        amountLamports: winner.payoutLamports,
+        availableAt,
+        category: winner.category,
+        kind: "winner_payout" as const,
+        turnId,
+        wallet: winner.player,
+      }),
+    ),
+    ...(rewards.creator && rewards.creator.finalRewardLamports > 0
+      ? [
+          createClaimRecord({
+            activeRuleId: rewards.creator.activeRuleId,
+            amountLamports: rewards.creator.finalRewardLamports,
+            availableAt,
+            category: null,
+            kind: "creator_reward",
+            turnId,
+            wallet: rewards.creator.creatorWallet,
+          }),
+        ]
+      : []),
+    ...rewards.voters
+      .filter((voter) => voter.finalRewardLamports > 0)
+      .map((voter) =>
+        createClaimRecord({
+          activeRuleId: voter.activeRuleId,
+          amountLamports: voter.finalRewardLamports,
+          availableAt,
+          category: null,
+          kind: "voter_reward" as const,
+          turnId,
+          wallet: voter.voter,
+        }),
+      ),
+  ];
+
+  for (const record of claimableRecords) {
+    saveClaimRecord(record);
+  }
+
+  return {
+    claims: listClaimRecords({ turnId }),
+    summary: getClaimSummary({ turnId }),
+  };
+}
+
+export function listClaimRecords(args: {
+  turnId?: number;
+  wallet?: string;
+} = {}) {
+  return [...claimRecords.values()]
+    .filter((record) => {
+      if (args.turnId !== undefined && record.turnId !== args.turnId) {
+        return false;
+      }
+      return args.wallet === undefined || record.wallet === args.wallet;
+    })
+    .sort((left, right) =>
+      left.turnId === right.turnId
+        ? left.claimId.localeCompare(right.claimId)
+        : left.turnId - right.turnId,
+    );
+}
+
+export function getClaimSummary(args: {
+  turnId: number;
+  wallet?: string;
+}): ClaimSummary {
+  const records = listClaimRecords(args);
+  return {
+    availableLamports: records
+      .filter((record) => record.status === "available")
+      .reduce((total, record) => total + record.amountLamports, 0),
+    claimedLamports: records
+      .filter((record) => record.status === "claimed")
+      .reduce((total, record) => total + record.amountLamports, 0),
+    failedLamports: records
+      .filter((record) => record.status === "failed")
+      .reduce((total, record) => total + record.amountLamports, 0),
+    pendingLamports: records
+      .filter((record) => record.status === "pending_wallet_approval")
+      .reduce((total, record) => total + record.amountLamports, 0),
+    records,
+    turnId: args.turnId,
+    wallet: args.wallet ?? null,
+  };
+}
+
+export function requestClaimApproval(args: {
+  claimId: string;
+  requestedAt?: string;
+  wallet: string;
+}) {
+  const record = claimRecords.get(args.claimId);
+  if (!record || record.wallet !== args.wallet) {
+    throw new Error("PAYOUT_NOT_AVAILABLE");
+  }
+  if (record.status === "claimed") {
+    throw new Error("PAYOUT_ALREADY_CLAIMED");
+  }
+  if (record.status === "pending_wallet_approval") {
+    return record;
+  }
+  if (record.status !== "available" && record.status !== "failed") {
+    throw new Error(record.statusReason);
+  }
+
+  const requestedAt = args.requestedAt ?? new Date().toISOString();
+  const updated: ClaimRecord = {
+    ...record,
+    status: "pending_wallet_approval",
+    statusReason: "WALLET_APPROVAL_PENDING",
+    updatedAt: requestedAt,
+    walletApproval: {
+      ...record.walletApproval,
+      approvalStartedAt: requestedAt,
+      state: "pending",
+    },
+  };
+  return saveClaimRecord(updated);
+}
+
+export function completeClaimApproval(args: {
+  claimId: string;
+  completedAt?: string;
+  failureReason?: string;
+  signature?: string;
+  status: "claimed" | "failed";
+  wallet: string;
+}) {
+  const record = claimRecords.get(args.claimId);
+  if (!record || record.wallet !== args.wallet) {
+    throw new Error("PAYOUT_NOT_AVAILABLE");
+  }
+  if (record.status === "claimed") {
+    throw new Error("PAYOUT_ALREADY_CLAIMED");
+  }
+  if (record.status !== "pending_wallet_approval") {
+    throw new Error("PAYOUT_NOT_PENDING");
+  }
+  if (args.status === "claimed" && !isBase58Like(args.signature)) {
+    throw new Error("INVALID_CLAIM_SIGNATURE");
+  }
+
+  const completedAt = args.completedAt ?? new Date().toISOString();
+  const failed = args.status === "failed";
+  const updated: ClaimRecord = {
+    ...record,
+    claimedAt: failed ? null : completedAt,
+    failedAt: failed ? completedAt : null,
+    status: args.status,
+    statusReason: failed ? (args.failureReason ?? "CLAIM_FAILED") : "CLAIMED",
+    updatedAt: completedAt,
+    walletApproval: {
+      ...record.walletApproval,
+      completedAt,
+      failureReason: failed ? (args.failureReason ?? "CLAIM_FAILED") : null,
+      signature: failed ? null : args.signature ?? null,
+      state: failed ? "failed" : "approved",
+    },
+  };
+  return saveClaimRecord(updated);
+}
+
 function getActiveRuleArtifact(turnId: number): {
   activeRuleArtifact: RuleCompiledArtifact;
   activeRuleId: number;
@@ -1792,6 +2556,7 @@ export function saveGuessVerificationResult(result: GuessVerificationResultRecor
     normalizedResult,
   );
   calculateAndStoreWinnerRecords(result.turnId, result.completedAt);
+  calculateAndStoreRewardRecords(result.turnId, result.completedAt);
   return normalizedResult;
 }
 
@@ -2019,6 +2784,7 @@ export interface RoundSummary {
     pattern: readonly number[];
     stepIndex: number;
   };
+  claims: ClaimSummary;
   draw: DrawRecord | null;
   election: RuleElectionRecord | null;
   pool: {
@@ -2040,6 +2806,7 @@ export interface RoundSummary {
   totalVotes: number;
   turnId: number;
   verification: ReturnType<typeof getVerificationSummary>;
+  rewards: RewardCalculationSummary;
   winners: WinnerCalculationSummary;
 }
 
@@ -2297,6 +3064,7 @@ export function getRoundSummary(
       pattern: TURN_DURATION_CYCLE_HOURS,
       stepIndex,
     },
+    claims: getClaimSummary({ turnId }),
     draw: getDraw(turnId),
     election: getRuleElection(turnId),
     pool: {
@@ -2330,6 +3098,7 @@ export function getRoundSummary(
     totalVotes: votes.length,
     turnId,
     verification: getVerificationSummary(turnId),
+    rewards: getRewardSummary(turnId),
     winners: getWinnerSummary(turnId),
   };
 }
@@ -3004,6 +3773,149 @@ if (isMainModule()) {
       sendJson(request, response, 200, {
         winners: getWinnerSummary(turnId),
       });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/reward-records/calculate-turn") {
+      void readJsonBody(request)
+        .then((body) => {
+          if (!isValidGuessVerificationCreateRequest(body)) {
+            sendJson(request, response, 400, {
+              error: "invalid_reward_calculation_request",
+            });
+            return;
+          }
+
+          try {
+            sendJson(request, response, 201, {
+              rewards: calculateAndStoreRewardRecords(body.turnId),
+            });
+          } catch (error) {
+            const code =
+              error instanceof Error ? error.message : "REWARD_CALCULATION_FAILED";
+            sendJson(request, response, 404, {
+              error: code,
+            });
+          }
+        })
+        .catch((error: unknown) => {
+          sendJson(request, response, 400, {
+            error: "invalid_json",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/reward-records") {
+      const turnId = Number(url.searchParams.get("turnId"));
+
+      if (!Number.isInteger(turnId) || turnId <= 0) {
+        sendJson(request, response, 400, { error: "invalid_query" });
+        return;
+      }
+
+      sendJson(request, response, 200, {
+        rewards: getRewardSummary(turnId),
+      });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/claim-records/create-turn") {
+      void readJsonBody(request)
+        .then((body) => {
+          if (!isValidClaimCreateRequest(body)) {
+            sendJson(request, response, 400, {
+              error: "invalid_claim_create_request",
+            });
+            return;
+          }
+
+          sendJson(request, response, 201, {
+            claims: createClaimRecordsForTurn(body.turnId, body.availableAt),
+          });
+        })
+        .catch((error: unknown) => {
+          sendJson(request, response, 400, {
+            error: "invalid_json",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/claim-records") {
+      const turnId = Number(url.searchParams.get("turnId"));
+      const wallet = url.searchParams.get("wallet") ?? undefined;
+
+      if (
+        !Number.isInteger(turnId) ||
+        turnId <= 0 ||
+        (wallet !== undefined && !isBase58Like(wallet))
+      ) {
+        sendJson(request, response, 400, { error: "invalid_query" });
+        return;
+      }
+
+      sendJson(request, response, 200, {
+        claims: getClaimSummary({ turnId, ...(wallet ? { wallet } : {}) }),
+      });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/claim-records/request") {
+      void readJsonBody(request)
+        .then((body) => {
+          if (!isValidClaimRequest(body)) {
+            sendJson(request, response, 400, {
+              error: "invalid_claim_request",
+            });
+            return;
+          }
+
+          try {
+            sendJson(request, response, 200, {
+              claim: requestClaimApproval(body),
+            });
+          } catch (error) {
+            const code = error instanceof Error ? error.message : "CLAIM_FAILED";
+            sendJson(request, response, 409, { error: code });
+          }
+        })
+        .catch((error: unknown) => {
+          sendJson(request, response, 400, {
+            error: "invalid_json",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/claim-records/complete") {
+      void readJsonBody(request)
+        .then((body) => {
+          if (!isValidClaimCompleteRequest(body)) {
+            sendJson(request, response, 400, {
+              error: "invalid_claim_completion_request",
+            });
+            return;
+          }
+
+          try {
+            sendJson(request, response, 200, {
+              claim: completeClaimApproval(body),
+            });
+          } catch (error) {
+            const code = error instanceof Error ? error.message : "CLAIM_FAILED";
+            sendJson(request, response, 409, { error: code });
+          }
+        })
+        .catch((error: unknown) => {
+          sendJson(request, response, 400, {
+            error: "invalid_json",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
       return;
     }
 
