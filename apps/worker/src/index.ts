@@ -2,10 +2,16 @@ import { createServer } from "node:http";
 import { getTurnDurationHours } from "@idealer/game-engine";
 import pg from "pg";
 import { createClient } from "redis";
+import {
+  createTurnAutomationConfig,
+  startTurnAutomationLoop,
+  type TurnAutomationConfig,
+} from "./turn-automation.js";
 
 export * from "./draw.js";
 export * from "./guess-verification.js";
 export * from "./rule-validation.js";
+export * from "./turn-automation.js";
 
 const { Pool } = pg;
 
@@ -15,6 +21,7 @@ export interface WorkerStatus {
   firstTurnDurationHours: number;
   postgres: "ok" | "error";
   redis: "ok" | "error";
+  turnAutomation: "disabled" | "enabled" | "error";
 }
 
 async function checkPostgres(databaseUrl: string): Promise<"ok" | "error"> {
@@ -45,6 +52,7 @@ async function checkRedis(redisUrl: string): Promise<"ok" | "error"> {
 export async function getWorkerStatus(): Promise<WorkerStatus> {
   const databaseUrl = process.env.DATABASE_URL;
   const redisUrl = process.env.REDIS_URL;
+  const turnAutomation = await createTurnAutomationConfig().catch(() => null);
 
   if (!databaseUrl || !redisUrl) {
     return {
@@ -52,19 +60,38 @@ export async function getWorkerStatus(): Promise<WorkerStatus> {
       status: "error",
       firstTurnDurationHours: getTurnDurationHours(0),
       postgres: databaseUrl ? "ok" : "error",
-      redis: redisUrl ? "ok" : "error"
+      redis: redisUrl ? "ok" : "error",
+      turnAutomation: getTurnAutomationStatus(turnAutomation),
     };
   }
 
-  const [postgres, redis] = await Promise.all([checkPostgres(databaseUrl), checkRedis(redisUrl)]);
+  const [postgres, redis] = await Promise.all([
+    checkPostgres(databaseUrl),
+    checkRedis(redisUrl),
+  ]);
 
   return {
     service: "worker",
     status: postgres === "ok" && redis === "ok" ? "ok" : "error",
     firstTurnDurationHours: getTurnDurationHours(0),
     postgres,
-    redis
+    redis,
+    turnAutomation: getTurnAutomationStatus(turnAutomation),
   };
+}
+
+function getTurnAutomationStatus(
+  config: null | TurnAutomationConfig,
+): WorkerStatus["turnAutomation"] {
+  if (!config) {
+    return "error";
+  }
+
+  if (!config.enabled) {
+    return "disabled";
+  }
+
+  return config.authorityKeypairBytes ? "enabled" : "error";
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -79,12 +106,30 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     }
 
     void getWorkerStatus().then((health) => {
-      response.writeHead(health.status === "ok" ? 200 : 503, { "content-type": "application/json" });
+      response.writeHead(health.status === "ok" ? 200 : 503, {
+        "content-type": "application/json",
+      });
       response.end(JSON.stringify(health));
     });
   });
 
   server.listen(port, host, () => {
     console.log(`@idealer/worker listening on ${host}:${port}`);
+  });
+
+  void createTurnAutomationConfig().then((config) => {
+    const timer = startTurnAutomationLoop(config);
+
+    if (!timer) {
+      return;
+    }
+
+    const stop = () => {
+      clearInterval(timer);
+      server.close();
+    };
+
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
   });
 }
