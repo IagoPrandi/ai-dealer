@@ -65,6 +65,30 @@ Opened before starting `M0.1`:
 - Captured and visually checked `/play/propose` compose and review states on a 390x844 mobile viewport through the updated dev server at `http://127.0.0.1:3005`.
 - No milestone checkbox was ticked; milestone approval still requires explicit user confirmation.
 
+### 2026-06-12
+
+- Reopened `PRD.md`, `AGENTS.md`, and `.claude/skills` before checking local Gemma/Ollama availability for M3 testing, as required.
+- Used `.claude/skills/best-practices/SKILL.md` and `references/agent-principles.md` for reproducible, fail-closed verification.
+- Verified Ollama is serving `gemma4:latest` at `http://127.0.0.1:11434`, with model digest `c6eb396dbd5992bbe3f5cdb947e8bbc0ee413d7c17e2beaae69f5d569cf982eb`, family `gemma4`, parameter size `8.0B`, and quantization `Q4_K_M`.
+- Verified a real OpenAI-compatible chat completion against `gemma4:latest` returned `IDEALER_GEMMA_OK`.
+- Verified `gemma4:laste` fails with model-not-found and corrected `.env.example` to use `gemma4:latest`.
+- Verified current `api` and `worker` containers are healthy but do not receive `LLM_*` variables from `docker-compose.yml`; Gemma must be passed through env configuration or explicit validation request fields.
+- Ran `pnpm --filter @idealer/rule-compiler test` and an API M3 smoke test (`rule-preflight -> rule-proposals -> rule-validations/run`) using `provider=local-openai-compatible` and `model=gemma4:latest`; the validation returned `VALID`, `finalConfidence: 0.936`, `fallbackTriggered: false`, `request_shape: ollama_format`, and model identity `gemma4:latest`/`ollama`.
+- No milestone checkbox was ticked; milestone approval still requires explicit user confirmation.
+
+### 2026-06-12
+
+- Reopened `PRD.md`, `AGENTS.md`, and `.claude/skills` before wiring the local Gemma/Ollama env vars into Docker services, as required.
+- Used `.claude/skills/best-practices/SKILL.md` and `references/agent-principles.md`.
+- Added `LLM_*` and `EMBEDDINGS_BASE_URL` environment variables to both `api` and `worker` in `docker-compose.yml`.
+- Used container-specific endpoint defaults (`http://host.docker.internal:11434/v1`) so Docker services can reach the host Ollama instance while host-side commands may continue using `http://localhost:11434/v1`.
+- Added `LLM_CONTAINER_BASE_URL`, `LLM_PRIMARY_CONTAINER_BASE_URL`, secondary/tertiary container URL overrides, and `EMBEDDINGS_CONTAINER_BASE_URL` to `.env.example`.
+- Cleaned local `.env` optional empty model/provider fields so inline comments are not passed into containers as model names.
+- Set the local `LLM_PRIMARY_MODEL_DIGEST` to the verified `gemma4:latest` digest `c6eb396dbd5992bbe3f5cdb947e8bbc0ee413d7c17e2beaae69f5d569cf982eb`.
+- Ran `docker compose config --quiet`, recreated `api` and `worker`, verified both are healthy, verified both containers see `gemma4:latest`, and verified a real chat completion from inside `api` returned `IDEALER_CONTAINER_OK`.
+- Ran an API M3 smoke test after recreation; validation returned `VALID`, `provider: local-openai-compatible`, `model: gemma4:latest`, `finalConfidence: 0.936`, `fallbackTriggered: false`, and the Gemma digest in `modelIdentity`.
+- No milestone checkbox was ticked; milestone approval still requires explicit user confirmation.
+
 ## M0.1 Work Log
 
 ### 2026-06-02

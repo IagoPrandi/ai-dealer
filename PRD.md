@@ -169,7 +169,7 @@ If no alternative rule is active, only the original rule is evaluated and the al
 
 If no winner exists in either category, that category's share accumulates into the next turn's pool.
 
-When an alternative rule is active and produces winners, the creator of the active rule receives a creator reward equal to 15% of each individual alternative-rule winner payout. This creator reward is funded from the creator reward reserve sourced from platform monetization and must not reduce the winner payout.
+When an alternative rule is active and produces winners, the creator of the active rule receives a creator reward equal to 15% of each individual alternative-rule winner payout. In addition, the wallets that voted for the elected rule share equally a voter reward equal to 15% of a single individual alternative-rule winner payout. Both rewards are funded from the creator reward reserve sourced from platform monetization and must not reduce the winner payout.
 
 ### 2.5 Prize Pool
 
@@ -180,6 +180,7 @@ Sources:
 - guess submission fees;
 - rule proposal fees;
 - paid rule removal fees included in MVP;
+- vote fees, charged only from turn 100 onward;
 - optional future game actions.
 
 A protocol treasury fee is retained before distribution.
@@ -473,11 +474,12 @@ Voting should be treated as a lightweight engagement loop.
 
 Requirements:
 
-- voting is free after the user has a valid turn Game Token;
+- voting is free before turn 100, given a valid turn Game Token; from turn 100 onward, voting requires a `VOTE_FEE` paid to the prize pool, and the fee must be shown before wallet confirmation;
 - spectators may browse rules, but the vote CTA asks them to play first;
 - voting is visually quick;
 - users see current top rules;
 - users understand that voting influences the rule finalist set, but VRF still selects the active rule;
+- users understand that voting for the elected rule can earn a reward when that rule produces winners;
 - vote state is obvious: voted, not voted, vote changed;
 - voting close time is visible.
 
@@ -638,7 +640,7 @@ Each player may perform the following actions per turn.
 | -------------- | ------------------------------------------------------------: | ----------------: | -------------------------------: |
 | Submit a guess |                                                            1x |               Yes | No; this action issues the token |
 | Propose a rule |                             5x per wallet per turn by default | Yes, per proposal |                              Yes |
-| Vote on a rule | 1 vote per rule; max 100 votes per wallet per turn by default |                No |                              Yes |
+| Vote on a rule | 1 vote per rule; max 100 votes per wallet per turn by default | No before turn 100; Yes from turn 100 |                              Yes |
 | Remove a rule  |  2x per wallet per turn by default; only before election lock |  Yes, removal fee |                              Yes |
 | Report a rule  |                            20x per wallet per turn by default |                No |                              Yes |
 
@@ -1471,12 +1473,26 @@ Deduplication must not permanently ban good rules from being used again. It shou
 
 Voting rules:
 
-- voting is free;
+- voting is free for turns before index 100; from turn 100 onward, voting requires a `VOTE_FEE` paid to the prize pool;
+- a current-turn Game Token is always required to vote, regardless of the fee;
 - each wallet must hold a valid Turn Game Token PDA for the current turn to vote;
 - each wallet gets one vote per rule per turn;
 - votes are recorded on-chain through the `RuleVote` account/instruction path;
 - votes do not carry over;
-- users can see top rules and vote count.
+- users can see top rules and vote count;
+- voter reward eligibility (section 8.4) is derived from the `RuleVote` records cast for the elected rule.
+
+Vote fee configuration:
+
+```typescript
+const VOTE_FEE_CONFIG = {
+  freeBeforeTurnIndex: 100,       // turns with index < 100 vote for free
+  feeAppliesFromTurnIndex: 100,   // from turn 100 onward, voting requires VOTE_FEE
+  voteFeeLamports: 5_000_000,     // 0.005 SOL (MVP/devnet default, configurable per environment)
+  feeDestination: "prize_pool",   // same destination as the paid rule removal fee
+  requireGameToken: true,         // Game Token gate applies to every turn
+};
+```
 
 Because free voting by wallet is easy to manipulate, MVP must include basic anti-Sybil controls and monitoring.
 
@@ -2356,7 +2372,7 @@ Default fee model:
 - fixed fee for guess submission;
 - fixed fee for rule proposal;
 - paid rule removal fee;
-- voting is free;
+- voting is free before turn 100; a fixed vote fee applies from turn 100 onward, paid to the prize pool;
 - rule reporting is free but rate-limited and requires a current-turn Game Token.
 
 Default MVP value-flow mode:
@@ -2375,7 +2391,7 @@ const MVP_FEE_CONFIG = {
   guessSubmissionFeeLamports: 10_000_000, // 0.01 SOL
   ruleProposalFeeLamports: 20_000_000, // 0.02 SOL
   ruleRemovalFeeLamports: 50_000_000, // 0.05 SOL
-  voteFeeLamports: 0,
+  voteFeeLamports: 5_000_000, // 0.005 SOL; applies only from turn 100 onward (see VOTE_FEE_CONFIG). 0 for turns before 100
   ruleReportFeeLamports: 0,
   treasuryFeeBps: 500, // 5%
 };
@@ -2390,6 +2406,16 @@ fee_destination = prize_pool only
 
 The rule removal fee is not configurable to treasury in MVP. This keeps product copy, smart contract accounting, and user expectations aligned.
 
+MVP vote fee policy:
+
+```text
+turn_index < 100  → voting is free
+turn_index >= 100 → VOTE_FEE → current turn prize pool
+fee_destination = prize_pool only
+```
+
+The vote fee follows the same prize-pool accounting as the rule removal fee and is not configurable to treasury in MVP. The current-turn Game Token requirement applies in every turn, with or without the fee.
+
 ### 8.3 Prize Distribution
 
 After treasury/platform monetization allocation, the playable prize pool is split:
@@ -2401,18 +2427,27 @@ After treasury/platform monetization allocation, the playable prize pool is spli
 
 If no alternative rule is active, if the alternative rule is invalidated, or if no alternative-rule winners exist, the alternative category follows the rollover rules defined in section 8.7.
 
-### 8.4 Active Rule Creator Reward
+### 8.4 Active Rule Creator Reward and Elected-Rule Voter Reward
 
 When an alternative rule is active in a turn and that rule produces winners, the creator of the active rule receives a reward equal to **15% of each individual alternative-rule winner payout**.
 
 This reward is calculated from the individual payout but funded from the creator reward reserve sourced from platform monetization. It must not reduce the winner's individual payout.
+
+In addition to the creator reward, the wallets that voted for the elected rule share an **elected-rule voter reward**:
+
+- the voter reward pool equals **15% of a single individual alternative-rule winner payout** (a fixed amount that does not scale with the number of winners);
+- the pool is split **equally** among the wallets that hold a recorded `RuleVote` for the elected rule: `per_voter = voter_reward_pool / elected_rule_voter_count`;
+- the voter reward is funded from the **same creator reward reserve** sourced from platform monetization;
+- it is paid **only when the elected rule produces winners**, and it must not reduce any winner's individual payout;
+- if the elected rule has zero recorded voters, no voter reward is distributed.
 
 Default assumption:
 
 ```text
 Winner individual payout remains unchanged.
 Creator reward is calculated as 15% of each individual alternative-rule winner payout.
-Creator reward is paid from the creator reward reserve sourced from platform monetization.
+Voter reward pool is calculated as 15% of a single individual alternative-rule winner payout.
+Both rewards are paid from the creator reward reserve sourced from platform monetization.
 ```
 
 Example:
@@ -2421,22 +2456,35 @@ Example:
 Alternative-rule prize pool: 100
 Alternative-rule winners: 10
 Individual payout: 100 / 10 = 10
+Final payout per winner: 10 (unchanged)
+
 Creator reward per individual payout: 15% × 10 = 1.5
-Final payout per winner: 10
 Total creator reward funded by creator reward reserve: 1.5 × 10 = 15
+
+Voter reward pool: 15% × 10 = 1.5 (from a single individual payout)
+Elected-rule voters: 4
+Voter reward per voter: 1.5 / 4 = 0.375
 ```
 
 ### 8.5 Creator Reward Reserve and Cap
 
-Creator rewards must never break platform monetization or create accounting deficits.
+Creator and voter rewards must never break platform monetization or create accounting deficits. Both are funded from the same creator reward reserve.
 
-Actual creator reward:
+The reserve is drawn in a deterministic order: the **creator reward is funded first**, then the **voter reward is funded from the remaining reserve**. Each reward is bounded independently:
 
 ```text
 creator_reward = min(
-  calculated_reward,
+  calculated_creator_reward,
   available_creator_reward_reserve,
   creator_reward_cap_per_turn
+)
+
+remaining_reserve = available_creator_reward_reserve - creator_reward
+
+voter_reward_pool = min(
+  calculated_voter_reward_pool,
+  remaining_reserve,
+  voter_reward_cap_per_turn
 )
 ```
 
@@ -2453,13 +2501,28 @@ const CREATOR_REWARD_CONFIG = {
 };
 ```
 
+Default MVP/devnet voter reward configuration:
+
+```typescript
+const VOTER_REWARD_CONFIG = {
+  rateBps: 1_500, // 15% of a single individual alternative-rule winner payout
+  capPerTurnLamports: 250_000_000, // 0.25 SOL maximum voter reward pool per turn
+  reserveSource: "platform_monetization", // same creator reward reserve
+  reserveDrawOrder: "creator_first_then_voter",
+  splitMethod: "equal_among_elected_rule_voters",
+  eligibleVoters: "wallets_with_recorded_RuleVote_for_elected_rule",
+  payOnlyWhenAlternativeRuleProducesWinners: true,
+  unpaidShortfallCreatesDebt: false,
+};
+```
+
 If the reserve is insufficient:
 
 - winner payouts are not reduced;
-- creator reward is capped at available reserve;
-- creator reward is also capped by `capPerTurnLamports`;
-- unpaid creator reward does not become debt unless explicitly configured in a future PRD;
-- admin insights should track capped creator reward events.
+- creator reward is capped at the available reserve and by `CREATOR_REWARD_CONFIG.capPerTurnLamports`;
+- voter reward pool is capped at the remaining reserve and by `VOTER_REWARD_CONFIG.capPerTurnLamports`;
+- unpaid creator or voter reward does not become debt unless explicitly configured in a future PRD;
+- admin insights should track capped creator reward and capped voter reward events.
 
 ### 8.6 Treasury / Platform Monetization
 
@@ -2475,6 +2538,7 @@ Treasury / platform monetization uses:
 - VRF costs;
 - LLM/API costs;
 - active rule creator rewards;
+- elected-rule voter rewards;
 - monitoring and operational costs;
 - maintenance;
 - future rewards or ecosystem incentives.
@@ -2491,6 +2555,7 @@ If no alternative rule is active:
 original pool → evaluated normally
 alternative pool → rolls over to next turn's alternative pool
 creator reward → none
+voter reward → none
 ```
 
 #### 8.7.2 Alternative Rule Invalidated
@@ -2501,6 +2566,7 @@ If the elected candidate fails compilation, testing, or validation:
 original pool → evaluated normally
 alternative pool → rolls over
 creator reward → none
+voter reward → none
 ```
 
 #### 8.7.3 No Winners
@@ -2601,9 +2667,33 @@ interface CreatorRewardRecord {
 }
 ```
 
+#### 8.7.9 Voter Reward Accounting
+
+Voter reward is calculated after the individual alternative-rule winner payout is known, and is funded from the creator reward reserve after the creator reward has been deducted (see section 8.5). The eligible voter set is derived from the `RuleVote` records cast for the elected rule.
+
+Voter reward must be idempotent and must not be recalculated differently after finalization. Per-voter rounding follows the same deterministic integer-lamport policy as payouts (section 8.7.5); any rounding remainder is sent to the same-category rollover bucket.
+
+Required fields:
+
+```typescript
+interface VoterRewardRecord {
+  turn_id: string;
+  rule_id: string; // elected rule
+  voter_count: string;
+  reward_pool_calculated: string;
+  reserve_available: string;
+  cap_per_turn: string;
+  reward_pool_final: string;
+  per_voter_reward: string;
+  input_hash: string;
+  output_hash: string;
+  idempotency_key: string;
+}
+```
+
 ### 8.8 Creator Recognition
 
-Rule creators receive a financial reward when their active rule produces winners, subject to reserve and cap.
+Rule creators receive a financial reward when their active rule produces winners, subject to reserve and cap. The wallets that voted for the elected rule also share a voter reward under the same conditions (section 8.4), reinforcing the value of participating in governance.
 
 In addition to this financial incentive, MVP should prioritize social recognition:
 
@@ -2612,7 +2702,8 @@ In addition to this financial incentive, MVP should prioritize social recognitio
 - winners created;
 - creator badges;
 - weekly leaderboard;
-- creator reward history.
+- creator reward history;
+- voter reward history for wallets that backed elected rules.
 
 ### 8.9 MVP Rate Limits
 
@@ -2674,6 +2765,7 @@ VerificationRecord
 CompiledRuleArtifactRecord
 PayoutRecord
 CreatorRewardRecord
+VoterRewardRecord
 TreasuryVault
 PrizeVault
 ```
@@ -3069,6 +3161,7 @@ election_vrf_records
 rule_finalist_sets
 payout_records
 creator_reward_records
+voter_reward_records
 idempotency_records
 creator_profiles
 activity_feed
@@ -3167,6 +3260,7 @@ submit_draw_result
 verify_winners
 calculate_payout
 calculate_creator_reward
+calculate_voter_reward
 apply_rollover
 claim_prize
 finalize_turn
@@ -3179,7 +3273,8 @@ Retries must never:
 - regenerate frozen rule artifacts;
 - change election VRF-derived finalist selection after fulfillment;
 - change winner status after finalization;
-- apply creator rewards more than once.
+- apply creator rewards more than once;
+- apply voter rewards more than once.
 
 ---
 
@@ -3891,6 +3986,16 @@ creator_reward_retention_lift
 creator_reward_share_events
 ```
 
+Voter reward and vote fee metrics:
+
+```text
+voter_rewards_paid_total
+voter_reward_recipients_total
+average_voter_reward_per_voter
+voter_reward_to_platform_monetization_ratio
+vote_fee_revenue_from_turn_100
+```
+
 #### 12.6.3 Admin Data Boundaries
 
 The admin console must not be used to influence live outcomes.
@@ -4062,7 +4167,10 @@ Requirements:
 - top rule vote concentration;
 - creator leaderboard participation;
 - creator reward recipients per day;
-- repeat rule proposals after receiving creator reward.
+- repeat rule proposals after receiving creator reward;
+- voter reward recipients per turn;
+- average voter reward per voter;
+- repeat voting after receiving a voter reward.
 
 ### 14.5 Game Health
 
@@ -4076,6 +4184,8 @@ Requirements:
 - percentage of rule proposals rejected for token limit;
 - average creator reward per active rule;
 - creator reward reserve funding ratio from platform monetization;
+- average voter reward pool per elected rule;
+- vote fee revenue from turn 100 onward;
 - turn activity by cycle position;
 - completion rate for 1h, 2h, and 8h turns.
 
@@ -4156,6 +4266,8 @@ Establish the product baseline, architecture baseline, monorepo structure, Docke
 - [x] Confirm paid rule removal is included in MVP with fixed prize-pool fee destination.
 - [x] Confirm active rule creator reward: 15% of each individual alternative-rule winner payout.
 - [x] Confirm creator reward is funded from the creator reward reserve sourced from platform monetization, not deducted from the winner-visible payout.
+- [ ] Confirm elected-rule voter reward: 15% of a single individual payout, split equally among the elected rule's voters, funded from the same reserve with its own per-turn cap.
+- [ ] Confirm vote fee from turn 100 onward, destination prize pool, with the current-turn Game Token requirement retained.
 - [x] Confirm admin console is separate from the public DApp.
 - [x] Confirm admin console is for insights, not direct game manipulation.
 - [x] Confirm monorepo and Docker Compose are required implementation constraints.
@@ -4957,7 +5069,7 @@ M3 is approved only if all M3 submilestones are approved and:
 
 #### Objective
 
-Implement prize pool accounting, treasury/platform monetization, payouts, rollover behavior, and active rule creator rewards.
+Implement prize pool accounting, treasury/platform monetization, payouts, rollover behavior, active rule creator rewards, and elected-rule voter rewards.
 
 ---
 
@@ -4970,6 +5082,7 @@ Implement prize pool accounting, treasury/platform monetization, payouts, rollov
 - [ ] Track guess submission fees.
 - [ ] Track rule proposal fees.
 - [ ] Track paid rule removal fees in MVP.
+- [ ] Track vote fees from turn 100 onward (free before turn 100).
 - [ ] Apply treasury/platform monetization logic.
 - [ ] Split post-fee prize pool into original and alternative buckets.
 - [ ] Track rollover per bucket.
@@ -5008,9 +5121,9 @@ Implement prize pool accounting, treasury/platform monetization, payouts, rollov
 
 ---
 
-#### M4.3 — Creator Reward Calculation
+#### M4.3 — Creator and Voter Reward Calculation
 
-**Objective:** reward the creator of the active alternative rule based on alternative-rule winner payouts.
+**Objective:** reward the creator of the active alternative rule and the wallets that voted for the elected rule, based on alternative-rule winner payouts.
 
 **Checklist:**
 
@@ -5018,31 +5131,37 @@ Implement prize pool accounting, treasury/platform monetization, payouts, rollov
 - [ ] Check whether active rule produced alternative-rule winners.
 - [ ] Calculate individual alternative-rule winner payout.
 - [ ] Calculate creator reward as `15% × individual alternative-rule winner payout` per winner.
-- [ ] Fund creator reward from the creator reward reserve sourced from platform monetization.
-- [ ] Do not reduce winner-visible payout for creator reward.
-- [ ] Store creator reward records.
-- [ ] Handle no alternative-rule winner case.
+- [ ] Resolve the elected-rule voter set from recorded `RuleVote` accounts.
+- [ ] Calculate voter reward pool as `15% × a single individual alternative-rule winner payout` and split it equally among elected-rule voters.
+- [ ] Fund creator reward first, then voter reward from the remaining creator reward reserve (sourced from platform monetization).
+- [ ] Cap voter reward pool by `VOTER_REWARD_CONFIG.capPerTurnLamports`.
+- [ ] Do not reduce winner-visible payout for creator or voter reward.
+- [ ] Store creator reward and voter reward records.
+- [ ] Handle no alternative-rule winner case (no creator or voter reward).
 - [ ] Handle multiple alternative-rule winner case.
-- [ ] Add example test: total prize 100, 10 winners, individual payout 10, creator reward basis 15% of 10 per winner.
-- [ ] Add accounting tests to ensure the creator reward reserve covers creator reward.
+- [ ] Handle elected rule with zero recorded voters (no voter reward).
+- [ ] Add example test: total prize 100, 10 winners, individual payout 10, creator reward basis 15% of 10 per winner, voter reward pool 15% of 10 split among voters.
+- [ ] Add accounting tests to ensure the reserve covers creator reward first, then voter reward.
 
 **Approval criteria:**
 
 - [ ] Creator reward is computed from the individual winner payout basis.
-- [ ] Winner payout is not reduced by creator reward display/accounting.
-- [ ] Reward source is the creator reward reserve sourced from platform monetization.
-- [ ] Creator reward records are auditable.
+- [ ] Voter reward pool is 15% of a single individual payout, split equally among elected-rule voters.
+- [ ] Winner payout is not reduced by creator or voter reward display/accounting.
+- [ ] Reward source is the creator reward reserve sourced from platform monetization, drawn creator-first then voter.
+- [ ] Creator reward and voter reward records are auditable.
 
 ---
 
 #### M4.4 — Claim Flow
 
-**Objective:** allow eligible winners and rule creators to claim funds when applicable.
+**Objective:** allow eligible winners, rule creators, and elected-rule voters to claim funds when applicable.
 
 **Checklist:**
 
 - [ ] Implement winner claim instruction/API flow.
 - [ ] Implement creator reward claim instruction/API flow if rewards are claimed separately.
+- [ ] Implement voter reward claim instruction/API flow for elected-rule voters if rewards are claimed separately.
 - [ ] Prevent double claim.
 - [ ] Show claimable balance.
 - [ ] Show pending claim state.
@@ -5055,6 +5174,7 @@ Implement prize pool accounting, treasury/platform monetization, payouts, rollov
 
 - [ ] Eligible winners can claim.
 - [ ] Eligible creators can receive/claim rewards.
+- [ ] Eligible elected-rule voters can receive/claim rewards.
 - [ ] Double claims are blocked.
 - [ ] Claim states are clear in mobile UI.
 
@@ -5079,7 +5199,7 @@ Implement prize pool accounting, treasury/platform monetization, payouts, rollov
 
 - [ ] Rollover amounts are correct.
 - [ ] Rollover display is understandable.
-- [ ] Rollover does not break creator reward accounting.
+- [ ] Rollover does not break creator reward or voter reward accounting.
 
 ---
 

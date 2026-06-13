@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { MVP_FEES_SOL } from "@idealer/constants";
 import { address } from "@solana/kit";
@@ -17,12 +18,28 @@ import {
   type GuessReceipt,
   validateGuessNumbers,
 } from "../../solana/idealerProgram";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  CheckCircle2,
+  Dice5,
+  ExternalLink,
+  LoaderCircle,
+  Sparkles,
+  Wallet,
+  X,
+  Zap,
+} from "lucide-react";
 
 const MAX_SELECTION_COUNT = 6;
 const NUMBER_OPTIONS = Array.from({ length: 100 }, (_, index) => index + 1);
 const PENDING_GUESS_KEY = "idealer.guess.pending";
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_IDEALER_API_URL ?? "http://localhost:3002";
+const LAMPORTS_PER_SOL = 1_000_000_000;
+const ESTIMATED_GUESS_RENT_AND_FEE_SOL = 0.003;
+const MINIMUM_SUBMIT_BALANCE_SOL =
+  MVP_FEES_SOL.guessSubmission + ESTIMATED_GUESS_RENT_AND_FEE_SOL;
 
 type PickerStep = "selecting" | "review" | "success";
 type GuessStatus =
@@ -66,8 +83,116 @@ function truncateAddress(value: string) {
   return `${value.slice(0, 5)}...${value.slice(-5)}`;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function stringifyErrorValue(value: unknown) {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (value instanceof Error) {
+    return value.message;
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function collectErrorDetails(error: unknown, depth = 0): string[] {
+  if (depth > 3 || !isRecord(error)) {
+    return [];
+  }
+
+  const details: string[] = [];
+  const message = error.message;
+  if (typeof message === "string") {
+    details.push(message);
+  }
+
+  for (const key of [
+    "transactionPlanResult",
+    "context",
+    "logs",
+    "err",
+    "error",
+    "details",
+  ]) {
+    if (key in error) {
+      details.push(stringifyErrorValue(error[key]));
+    }
+  }
+
+  if ("cause" in error) {
+    details.push(...collectErrorDetails(error.cause, depth + 1));
+  }
+
+  return details.filter(Boolean);
+}
+
+function getGuessErrorMessage(error: unknown) {
+  const details = collectErrorDetails(error);
+  if (details.length > 0) {
+    return details.join(" ");
+  }
+
+  return error instanceof Error ? error.message : String(error);
+}
+
+function normalizeProgramError(message: string) {
+  const normalizedMessage = message.toLowerCase();
+
+  if (
+    normalizedMessage.includes("custom program error: 0x1773") ||
+    normalizedMessage.includes("custom program error: 0x1774") ||
+    normalizedMessage.includes("no active turn") ||
+    normalizedMessage.includes("invalid turn id")
+  ) {
+    return {
+      code: "DEVNET_TURN_NOT_READY",
+      message:
+        "The configured devnet turn is not ready for this app build. Open a live turn or update NEXT_PUBLIC_IDEALER_ACTIVE_TURN_ID.",
+      status: "expired" as const,
+    };
+  }
+
+  if (
+    normalizedMessage.includes("action window") ||
+    normalizedMessage.includes("turn is not open") ||
+    normalizedMessage.includes("custom program error: 0x1775") ||
+    normalizedMessage.includes("custom program error: 0x1777")
+  ) {
+    return {
+      code: "TURN_NOT_ACCEPTING_GUESSES",
+      message:
+        "This turn is no longer accepting guesses. Return to the live round.",
+      status: "expired" as const,
+    };
+  }
+
+  if (
+    normalizedMessage.includes("insufficient") ||
+    normalizedMessage.includes("lamports") ||
+    normalizedMessage.includes("funds")
+  ) {
+    return {
+      code: "INSUFFICIENT_SOL",
+      message: `This wallet needs about ${MINIMUM_SUBMIT_BALANCE_SOL.toFixed(
+        3,
+      )} SOL on devnet for the entry fee, account rent, and network fee.`,
+      status: "failed" as const,
+    };
+  }
+
+  return null;
+}
+
 function normalizeGuessError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = getGuessErrorMessage(error);
   const normalizedMessage = message.toLowerCase();
 
   if (
@@ -94,20 +219,9 @@ function normalizeGuessError(error: unknown) {
     };
   }
 
-  if (
-    normalizedMessage.includes("action window") ||
-    normalizedMessage.includes("turn is not open") ||
-    normalizedMessage.includes("no active turn") ||
-    normalizedMessage.includes("custom program error: 0x1773") ||
-    normalizedMessage.includes("custom program error: 0x1775") ||
-    normalizedMessage.includes("custom program error: 0x1778")
-  ) {
-    return {
-      code: "TURN_NOT_ACCEPTING_GUESSES",
-      message:
-        "This turn is no longer accepting guesses. Return to the live round.",
-      status: "expired" as const,
-    };
+  const programError = normalizeProgramError(message);
+  if (programError) {
+    return programError;
   }
 
   return {
@@ -157,6 +271,68 @@ async function persistGuessReceipt(receipt: GuessReceipt) {
   if (!response.ok && response.status !== 409) {
     throw new Error(`Receipt API returned HTTP ${response.status}.`);
   }
+}
+
+function PickerPhoneChrome() {
+  return (
+    <>
+      <div className="platform-dynamic-island" aria-hidden="true" />
+      <div className="platform-statusbar" aria-hidden="true">
+        <span>9:41</span>
+        <span className="platform-status-icons">
+          <i className="platform-cell-signal">
+            <b />
+            <b />
+            <b />
+            <b />
+          </i>
+          <i className="platform-wifi">⌁</i>
+          <i className="platform-battery" />
+        </span>
+      </div>
+      <div className="platform-home-indicator" aria-hidden="true" />
+    </>
+  );
+}
+
+function Dealer({ size = 38 }: { size?: number }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="platform-dealer"
+      style={{ width: size, height: size }}
+    >
+      <span className="platform-dealer-hat" />
+      <i />
+      <i />
+      <b />
+    </span>
+  );
+}
+
+function PickerFrame({ children }: Readonly<{ children: ReactNode }>) {
+  return (
+    <main className="platform-stage">
+      <div className="platform-phone-shell">
+        <PickerPhoneChrome />
+        {children}
+      </div>
+    </main>
+  );
+}
+
+async function hasAccount(
+  client: ReturnType<typeof useSolanaClient>,
+  account: ReturnType<typeof address>,
+) {
+  const result = await client.runtime.rpc
+    .getAccountInfo(account, {
+      commitment: "confirmed",
+      encoding: "base64",
+    })
+    .send();
+
+  return Boolean(result.value);
 }
 
 function SelectedNumberTray({
@@ -343,6 +519,43 @@ export function NumberPicker() {
         player,
         turnId: IDEALER_ACTIVE_TURN_ID,
       });
+
+      const [globalConfigReady, turnReady, treasuryReady, prizeReady] =
+        await Promise.all([
+          hasAccount(client, accounts.globalConfig),
+          hasAccount(client, accounts.turnState),
+          hasAccount(client, accounts.treasuryVault),
+          hasAccount(client, accounts.prizeVault),
+        ]);
+
+      if (!globalConfigReady || !turnReady || !treasuryReady || !prizeReady) {
+        setFeedback({
+          code: "DEVNET_TURN_NOT_READY",
+          message:
+            "The devnet turn accounts are not ready for submissions. Open the turn before asking the wallet to approve.",
+          status: "expired",
+        });
+        return;
+      }
+
+      const balance = await client.runtime.rpc
+        .getBalance(player, { commitment: "confirmed" })
+        .send();
+      const balanceSol = Number(balance.value) / LAMPORTS_PER_SOL;
+
+      if (balanceSol < MINIMUM_SUBMIT_BALANCE_SOL) {
+        setFeedback({
+          code: "INSUFFICIENT_SOL",
+          message: `This wallet has ${balanceSol.toFixed(
+            4,
+          )} SOL. Add devnet SOL before submitting; this flow needs about ${MINIMUM_SUBMIT_BALANCE_SOL.toFixed(
+            3,
+          )} SOL for the entry fee, account rent, and network fee.`,
+          status: "failed",
+        });
+        return;
+      }
+
       const existingGuess = await client.runtime.rpc
         .getAccountInfo(accounts.playerGuess, {
           commitment: "confirmed",
@@ -432,47 +645,54 @@ export function NumberPicker() {
     const receipt = feedback.receipt;
 
     return (
-      <main className="picker-shell success-shell">
+      <PickerFrame>
         <section
-          className="picker-panel success-panel"
+          className="platform-screen platform-picker-screen"
           aria-labelledby="guess-success-title"
         >
-          <p className="eyebrow">Guess submitted</p>
-          <h1 id="guess-success-title">Your devnet guess is locked.</h1>
-          <p>
-            {feedback.message ||
-              "The guess receipt was confirmed for this wallet."}
-          </p>
-          <SelectedNumberTray
-            selectedNumbers={sortedSelection}
-            onRemove={() => undefined}
-          />
-          {receipt ? (
-            <dl className="review-costs">
-              <div>
-                <dt>PlayerGuess PDA</dt>
-                <dd>{truncateAddress(receipt.playerGuess)}</dd>
-              </div>
-              <div>
-                <dt>Signature</dt>
-                <dd>
-                  <a
-                    href={`https://explorer.solana.com/tx/${receipt.signature}?cluster=devnet`}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    View receipt
-                  </a>
-                </dd>
-              </div>
-            </dl>
-          ) : null}
-          <div className="picker-actions">
-            <Link className="secondary-link-action" href="/play">
-              Back to live round
+          <div className="platform-ambient" />
+          <div className="platform-scroll platform-picker-scroll">
+            <article className="platform-picker-success-card">
+              <CheckCircle2 aria-hidden="true" size={42} />
+              <p className="platform-section-label">Guess submitted</p>
+              <h1 id="guess-success-title">Your devnet guess is locked.</h1>
+              <p>
+                {feedback.message ||
+                  "The guess receipt was confirmed for this wallet."}
+              </p>
+              <SelectedNumberTray
+                selectedNumbers={sortedSelection}
+                onRemove={() => undefined}
+              />
+            </article>
+            {receipt ? (
+              <dl className="platform-picker-meta">
+                <div>
+                  <dt>PlayerGuess PDA</dt>
+                  <dd>{truncateAddress(receipt.playerGuess)}</dd>
+                </div>
+                <div>
+                  <dt>Signature</dt>
+                  <dd>
+                    <a
+                      href={`https://explorer.solana.com/tx/${receipt.signature}?cluster=devnet`}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      View receipt <ExternalLink aria-hidden="true" size={13} />
+                    </a>
+                  </dd>
+                </div>
+              </dl>
+            ) : null}
+          </div>
+          <div className="platform-picker-actions">
+            <Link className="platform-ghost-button" href="/play">
+              <ArrowLeft aria-hidden="true" size={17} />
+              Live round
             </Link>
             <button
-              className="primary-action"
+              className="platform-primary-button"
               onClick={() => {
                 setStep("selecting");
                 setSelectedNumbers([]);
@@ -481,209 +701,258 @@ export function NumberPicker() {
               }}
               type="button"
             >
+              <Dice5 aria-hidden="true" size={18} />
               Pick again
             </button>
           </div>
         </section>
-      </main>
+      </PickerFrame>
     );
   }
 
   return (
-    <main className="picker-shell">
-      <header className="picker-header">
-        <Link className="back-link" href="/play">
-          Live round
-        </Link>
-        <div>
-          <p className="eyebrow">
-            Turn TURN-{IDEALER_ACTIVE_TURN_ID.toString().padStart(4, "0")}
-          </p>
-          <strong>Pick 6 numbers</strong>
-        </div>
-      </header>
+    <PickerFrame>
+      <section
+        className="platform-screen platform-picker-screen"
+        aria-labelledby="number-picker-title"
+      >
+        <div className="platform-ambient" />
+        <div className="platform-scroll platform-picker-scroll">
+          <header className="platform-screen-header platform-picker-header">
+            <Link aria-label="Back to current round" href="/play">
+              <ArrowLeft aria-hidden="true" size={22} />
+            </Link>
+            <div>
+              <p className="platform-section-label">
+                TURN-{IDEALER_ACTIVE_TURN_ID.toString().padStart(4, "0")}
+              </p>
+              <h1 id="number-picker-title">Choose six unique numbers.</h1>
+            </div>
+            <span className="platform-picker-count">
+              {selectedNumbers.length}/6
+            </span>
+          </header>
 
-      <section className="picker-panel" aria-labelledby="number-picker-title">
-        <div className="picker-title-row">
-          <div>
-            <p className="eyebrow">Number picker</p>
-            <h1 id="number-picker-title">Choose six unique numbers.</h1>
-          </div>
-          <span>{selectedNumbers.length}/6</span>
-        </div>
-
-        <div className="sticky-selection">
-          <SelectedNumberTray
-            selectedNumbers={sortedSelection}
-            onRemove={removeNumber}
-          />
-          <p
-            className={
-              hasCompleteSelection
-                ? "selection-message ready"
-                : "selection-message"
-            }
-            id="number-picker-status"
-          >
-            {validationMessage}
-          </p>
-        </div>
-
-        {step === "review" ? (
-          <section
-            className="review-panel"
-            aria-labelledby="guess-review-title"
-          >
-            <p className="eyebrow">Review guess</p>
-            <h2 id="guess-review-title">
-              Confirm these numbers before devnet submission.
-            </h2>
-            <SelectedNumberTray
-              selectedNumbers={sortedSelection}
-              onRemove={removeNumber}
-            />
-            <dl className="review-costs">
-              <div>
-                <dt>Entry fee</dt>
-                <dd>{MVP_FEES_SOL.guessSubmission.toFixed(2)} SOL</dd>
-              </div>
-              <div>
-                <dt>Network fee</dt>
-                <dd>Shown by wallet</dd>
-              </div>
-              <div>
-                <dt>Wallet</dt>
-                <dd>
-                  {walletAddress
-                    ? truncateAddress(walletAddress)
-                    : "Not connected"}
-                </dd>
-              </div>
-            </dl>
-            {feedback.status !== "idle" ? (
-              <article
-                aria-live="polite"
-                className={`guess-status-card ${feedback.status}`}
-                role={feedback.status === "failed" ? "alert" : undefined}
+          <article className="platform-picker-card platform-picker-tray-card">
+            <span className="platform-chat-avatar" aria-hidden="true">
+              <Dealer size={30} />
+            </span>
+            <div>
+              <p className="platform-section-label">Your guess</p>
+              <SelectedNumberTray
+                selectedNumbers={sortedSelection}
+                onRemove={removeNumber}
+              />
+              <p
+                className={
+                  hasCompleteSelection
+                    ? "platform-picker-message ready"
+                    : "platform-picker-message"
+                }
+                id="number-picker-status"
               >
-                <strong>
-                  {feedback.status === "awaiting_approval"
-                    ? "Awaiting wallet approval"
-                    : null}
-                  {feedback.status === "pending" ? "Transaction pending" : null}
-                  {feedback.status === "confirmed" ? "Guess confirmed" : null}
-                  {feedback.status === "duplicate" ? "Duplicate blocked" : null}
-                  {feedback.status === "expired" ? "Turn closed" : null}
-                  {feedback.status === "failed" ? "Submission failed" : null}
-                </strong>
-                <p>{feedback.message}</p>
-                {feedback.code ? <code>{feedback.code}</code> : null}
-                {feedback.signature ? (
-                  <a
-                    href={`https://explorer.solana.com/tx/${feedback.signature}?cluster=devnet`}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    View devnet transaction
-                  </a>
-                ) : null}
-                {feedback.receipt?.playerGuess ? (
-                  <small>
-                    PlayerGuess PDA:{" "}
-                    {truncateAddress(feedback.receipt.playerGuess)}
-                  </small>
-                ) : null}
-              </article>
-            ) : null}
-            <div className="picker-actions">
-              <button
-                className="secondary-action"
-                onClick={() => setStep("selecting")}
-                type="button"
-              >
-                Edit numbers
-              </button>
-              {connected ? (
+                {validationMessage}
+              </p>
+            </div>
+          </article>
+
+          {step === "review" ? (
+            <section
+              className="platform-picker-card platform-picker-review"
+              aria-labelledby="guess-review-title"
+            >
+              <p className="platform-section-label">Review guess</p>
+              <h2 id="guess-review-title">
+                Confirm these numbers before devnet submission.
+              </h2>
+              <dl className="platform-picker-meta">
+                <div>
+                  <dt>Entry fee</dt>
+                  <dd>{MVP_FEES_SOL.guessSubmission.toFixed(2)} SOL</dd>
+                </div>
+                <div>
+                  <dt>Account rent</dt>
+                  <dd>Checked before wallet</dd>
+                </div>
+                <div>
+                  <dt>Network fee</dt>
+                  <dd>Shown by wallet</dd>
+                </div>
+                <div>
+                  <dt>Wallet</dt>
+                  <dd>
+                    {walletAddress
+                      ? truncateAddress(walletAddress)
+                      : "Not connected"}
+                  </dd>
+                </div>
+              </dl>
+              {feedback.status !== "idle" ? (
+                <article
+                  aria-live="polite"
+                  className={`guess-status-card platform-picker-status ${feedback.status}`}
+                  role={feedback.status === "failed" ? "alert" : undefined}
+                >
+                  {feedback.status === "awaiting_approval" ||
+                  feedback.status === "pending" ? (
+                    <LoaderCircle
+                      aria-hidden="true"
+                      className="wallet-spinner"
+                      size={20}
+                    />
+                  ) : feedback.status === "confirmed" ? (
+                    <CheckCircle2 aria-hidden="true" size={20} />
+                  ) : (
+                    <AlertTriangle aria-hidden="true" size={20} />
+                  )}
+                  <div>
+                    <strong>
+                      {feedback.status === "awaiting_approval"
+                        ? "Awaiting wallet approval"
+                        : null}
+                      {feedback.status === "pending"
+                        ? "Transaction pending"
+                        : null}
+                      {feedback.status === "confirmed"
+                        ? "Guess confirmed"
+                        : null}
+                      {feedback.status === "duplicate"
+                        ? "Duplicate blocked"
+                        : null}
+                      {feedback.status === "expired" ? "Turn closed" : null}
+                      {feedback.status === "failed"
+                        ? "Submission failed"
+                        : null}
+                    </strong>
+                    <p>{feedback.message}</p>
+                    {feedback.code ? <code>{feedback.code}</code> : null}
+                    {feedback.signature ? (
+                      <a
+                        href={`https://explorer.solana.com/tx/${feedback.signature}?cluster=devnet`}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        View devnet transaction{" "}
+                        <ExternalLink aria-hidden="true" size={13} />
+                      </a>
+                    ) : null}
+                    {feedback.receipt?.playerGuess ? (
+                      <small>
+                        PlayerGuess PDA:{" "}
+                        {truncateAddress(feedback.receipt.playerGuess)}
+                      </small>
+                    ) : null}
+                  </div>
+                </article>
+              ) : null}
+            </section>
+          ) : (
+            <>
+              <div className="platform-picker-tools" aria-label="Selection tools">
                 <button
-                  className="primary-action"
-                  disabled={isSubmitting}
-                  onClick={submitGuess}
+                  className="platform-ghost-button"
+                  onClick={randomizeSelection}
                   type="button"
                 >
-                  {isSubmitting ? "Submitting..." : "Submit to devnet"}
+                  <Dice5 aria-hidden="true" size={17} />
+                  Randomize
                 </button>
-              ) : (
-                <Link className="primary-action" href="/play/wallet">
-                  Connect wallet
-                </Link>
-              )}
-            </div>
-          </section>
-        ) : (
-          <>
-            <div className="picker-tools" aria-label="Selection tools">
-              <button
-                className="secondary-action"
-                onClick={randomizeSelection}
-                type="button"
-              >
-                Randomize
-              </button>
-              <button
-                className="secondary-action"
-                onClick={clearSelection}
-                type="button"
-              >
-                Clear
-              </button>
-            </div>
+                <button
+                  className="platform-ghost-button"
+                  onClick={clearSelection}
+                  type="button"
+                >
+                  <X aria-hidden="true" size={17} />
+                  Clear
+                </button>
+              </div>
 
-            <div
-              className="number-grid"
-              aria-describedby="number-picker-status"
+              <div
+                className="platform-picker-grid"
+                aria-describedby="number-picker-status"
+              >
+                {NUMBER_OPTIONS.map((number) => {
+                  const isSelected = selectedNumbers.includes(number);
+                  const isDisabled =
+                    !isSelected &&
+                    selectedNumbers.length >= MAX_SELECTION_COUNT;
+
+                  return (
+                    <button
+                      aria-pressed={isSelected}
+                      className="platform-picker-number"
+                      disabled={isDisabled}
+                      key={number}
+                      onClick={() => toggleNumber(number)}
+                      type="button"
+                    >
+                      {formatNumber(number)}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+
+        <nav className="platform-picker-actions" aria-label="Number picker actions">
+          {step === "review" ? (
+            <button
+              className="platform-ghost-button"
+              onClick={() => setStep("selecting")}
+              type="button"
             >
-              {NUMBER_OPTIONS.map((number) => {
-                const isSelected = selectedNumbers.includes(number);
-                const isDisabled =
-                  !isSelected && selectedNumbers.length >= MAX_SELECTION_COUNT;
-
-                return (
-                  <button
-                    aria-pressed={isSelected}
-                    className="number-tile"
-                    disabled={isDisabled}
-                    key={number}
-                    onClick={() => toggleNumber(number)}
-                    type="button"
-                  >
-                    {formatNumber(number)}
-                  </button>
-                );
-              })}
-            </div>
-          </>
-        )}
-      </section>
-
-      {step !== "review" ? (
-        <nav className="picker-bottom-bar" aria-label="Number picker actions">
-          <button
-            className="secondary-action"
-            onClick={randomizeSelection}
-            type="button"
-          >
-            Randomize
-          </button>
-          <button
-            className="primary-action"
-            disabled={!hasCompleteSelection}
-            onClick={() => setStep("review")}
-            type="button"
-          >
-            Review guess
-          </button>
+              <ArrowLeft aria-hidden="true" size={17} />
+              Edit numbers
+            </button>
+          ) : (
+            <button
+              className="platform-ghost-button"
+              onClick={randomizeSelection}
+              type="button"
+            >
+              <Sparkles aria-hidden="true" size={17} />
+              Lucky pick
+            </button>
+          )}
+          {step === "review" ? (
+            connected ? (
+              <button
+                className="platform-primary-button"
+                disabled={isSubmitting}
+                onClick={submitGuess}
+                type="button"
+              >
+                {isSubmitting ? (
+                  <LoaderCircle
+                    aria-hidden="true"
+                    className="wallet-spinner"
+                    size={18}
+                  />
+                ) : (
+                  <Zap aria-hidden="true" size={18} />
+                )}
+                {isSubmitting ? "Submitting..." : "Submit to devnet"}
+              </button>
+            ) : (
+              <Link className="platform-primary-button" href="/play/wallet">
+                <Wallet aria-hidden="true" size={18} />
+                Connect wallet
+              </Link>
+            )
+          ) : (
+            <button
+              className="platform-primary-button"
+              disabled={!hasCompleteSelection}
+              onClick={() => setStep("review")}
+              type="button"
+            >
+              <CheckCircle2 aria-hidden="true" size={18} />
+              Review guess
+            </button>
+          )}
         </nav>
-      ) : null}
-    </main>
+      </section>
+    </PickerFrame>
   );
 }
