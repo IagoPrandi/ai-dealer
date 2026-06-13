@@ -13,6 +13,8 @@ import {
   deriveRuleProposalAddress,
   deriveRuleVoteAddress,
   deriveSubmitGuessAccounts,
+  fetchActiveTurnSnapshot,
+  getTurnActionReadiness,
   IDEALER_ACTIVE_TURN_ID,
   type RuleVoteReceipt,
 } from "../../solana/idealerProgram";
@@ -131,7 +133,10 @@ function normalizeVoteError(error: unknown) {
   if (
     normalizedMessage.includes("action window") ||
     normalizedMessage.includes("turn is not open") ||
-    normalizedMessage.includes("no active turn")
+    normalizedMessage.includes("no active turn") ||
+    normalizedMessage.includes("custom program error: 0x1773") ||
+    normalizedMessage.includes("custom program error: 0x1775") ||
+    normalizedMessage.includes("custom program error: 0x1777")
   ) {
     return {
       code: "VOTING_CLOSED",
@@ -368,9 +373,26 @@ export function RuleVotingPanel() {
 
     try {
       const player = address(walletAddress);
+      const activeTurn = await fetchActiveTurnSnapshot(client);
+      const turnReadiness = getTurnActionReadiness({
+        cutoffBps: activeTurn.globalConfig.ruleElectionCutoffBps,
+        globalConfig: activeTurn.globalConfig,
+        turn: activeTurn.turnState,
+      });
+
+      if (!turnReadiness.ok) {
+        setFeedback({
+          code: turnReadiness.code,
+          message: turnReadiness.message,
+          status: "closed",
+        });
+        return;
+      }
+
+      const turnId = activeTurn.globalConfig.activeTurnId;
       const accounts = await deriveSubmitGuessAccounts({
         player,
-        turnId: IDEALER_ACTIVE_TURN_ID,
+        turnId,
       });
       const gameToken = await client.runtime.rpc
         .getAccountInfo(accounts.gameToken, {
@@ -390,12 +412,12 @@ export function RuleVotingPanel() {
 
       const ruleProposal = await deriveRuleProposalAddress({
         ruleId: rule.ruleId,
-        turnId: IDEALER_ACTIVE_TURN_ID,
+        turnId,
       });
       const ruleVote = await deriveRuleVoteAddress({
         player,
         ruleId: rule.ruleId,
-        turnId: IDEALER_ACTIVE_TURN_ID,
+        turnId,
       });
       const existingVote = await client.runtime.rpc
         .getAccountInfo(ruleVote, {
@@ -421,7 +443,7 @@ export function RuleVotingPanel() {
         ruleVote: ruleVote.toString(),
         signature: "",
         submittedAt: new Date().toISOString(),
-        turnId: IDEALER_ACTIVE_TURN_ID,
+        turnId,
         voter: walletAddress,
       };
       setFeedback({
@@ -433,7 +455,7 @@ export function RuleVotingPanel() {
       const instruction = await createVoteRuleInstruction({
         player,
         ruleId: rule.ruleId,
-        turnId: IDEALER_ACTIVE_TURN_ID,
+        turnId,
       });
       const signature = (
         await client.transaction.prepareAndSend(

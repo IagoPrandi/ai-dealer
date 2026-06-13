@@ -1,9 +1,14 @@
-use std::{env, error::Error, path::PathBuf};
+use std::{
+    env,
+    error::Error,
+    path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
 use idealer::{
     accounts, instruction, GlobalConfig, InitializeGlobalConfigArgs, PlayerGuess, ProposeRuleArgs,
-    RuleProposal, RuleVote,
+    RuleProposal, RuleVote, TurnState, TurnStatus,
 };
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
@@ -104,8 +109,35 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("initialize_global_config skipped");
     }
 
-    let config = read_account::<GlobalConfig>(&rpc, &global_config)?
+    let mut config = read_account::<GlobalConfig>(&rpc, &global_config)?
         .ok_or("global config should exist after initialization")?;
+
+    if config.has_active_turn {
+        let active_turn_state = pda(&[b"turn", &config.active_turn_id.to_le_bytes()]);
+        let active_turn = read_account::<TurnState>(&rpc, &active_turn_state)?
+            .ok_or("active turn account is missing")?;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|error| format!("system clock is before unix epoch: {error}"))?
+            .as_secs() as i64;
+
+        if active_turn.status == TurnStatus::Open && now >= active_turn.end_timestamp {
+            let close_ix = Instruction {
+                accounts: accounts::CloseTurn {
+                    authority: payer.pubkey(),
+                    global_config,
+                    turn_state: active_turn_state,
+                }
+                .to_account_metas(None),
+                data: instruction::CloseTurn {}.data(),
+                program_id: idealer::ID,
+            };
+            println!("close_turn {}", send(&rpc, &payer, close_ix)?);
+            config = read_account::<GlobalConfig>(&rpc, &global_config)?
+                .ok_or("global config should exist after close_turn")?;
+        }
+    }
+
     let turn_id = if config.has_active_turn {
         config.active_turn_id
     } else {

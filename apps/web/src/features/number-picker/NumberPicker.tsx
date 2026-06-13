@@ -13,6 +13,8 @@ import {
 import {
   createSubmitGuessInstruction,
   deriveSubmitGuessAccounts,
+  fetchActiveTurnSnapshot,
+  getTurnActionReadiness,
   IDEALER_ACTIVE_TURN_ID,
   IDEALER_PROGRAM_ID,
   type GuessReceipt,
@@ -371,6 +373,7 @@ export function NumberPicker() {
   const { connected, wallet } = useWalletConnection();
   const [selectedNumbers, setSelectedNumbers] = useState<number[]>([]);
   const [step, setStep] = useState<PickerStep>("selecting");
+  const [activeTurnId, setActiveTurnId] = useState(IDEALER_ACTIVE_TURN_ID);
   const [feedback, setFeedback] = useState<GuessFeedback>({
     message: "",
     status: "idle",
@@ -407,6 +410,23 @@ export function NumberPicker() {
       setStep(pendingGuess.status === "confirmed" ? "success" : "review");
     }
   }, []);
+
+  useEffect(() => {
+    let mounted = true;
+
+    void fetchActiveTurnSnapshot(client)
+      .then((snapshot) => {
+        if (!mounted || !snapshot.globalConfig.hasActiveTurn) {
+          return;
+        }
+        setActiveTurnId(snapshot.globalConfig.activeTurnId);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      mounted = false;
+    };
+  }, [client]);
 
   useEffect(() => {
     if (!feedback.signature || !feedback.receipt) {
@@ -515,9 +535,27 @@ export function NumberPicker() {
 
     try {
       const player = address(walletAddress);
+      const activeTurn = await fetchActiveTurnSnapshot(client);
+      const turnReadiness = getTurnActionReadiness({
+        cutoffBps: activeTurn.globalConfig.guessCutoffBps,
+        globalConfig: activeTurn.globalConfig,
+        turn: activeTurn.turnState,
+      });
+
+      if (!turnReadiness.ok) {
+        setFeedback({
+          code: turnReadiness.code,
+          message: turnReadiness.message,
+          status: "expired",
+        });
+        return;
+      }
+
+      const turnId = activeTurn.globalConfig.activeTurnId;
+      setActiveTurnId(turnId);
       const accounts = await deriveSubmitGuessAccounts({
         player,
-        turnId: IDEALER_ACTIVE_TURN_ID,
+        turnId,
       });
 
       const [globalConfigReady, turnReady, treasuryReady, prizeReady] =
@@ -572,7 +610,7 @@ export function NumberPicker() {
           programId: IDEALER_PROGRAM_ID.toString(),
           signature: feedback.signature ?? "",
           submittedAt: new Date().toISOString(),
-          turnId: IDEALER_ACTIVE_TURN_ID,
+          turnId,
         };
         setFeedback({
           code: "DUPLICATE_GUESS",
@@ -591,7 +629,7 @@ export function NumberPicker() {
         programId: IDEALER_PROGRAM_ID.toString(),
         signature: "",
         submittedAt: new Date().toISOString(),
-        turnId: IDEALER_ACTIVE_TURN_ID,
+        turnId,
       };
       const awaitingFeedback: GuessFeedback = {
         message: "Approve the devnet guess transaction in your wallet.",
@@ -605,7 +643,7 @@ export function NumberPicker() {
       const instruction = await createSubmitGuessInstruction({
         numbers: sortedSelection,
         player,
-        turnId: IDEALER_ACTIVE_TURN_ID,
+        turnId,
       });
       const signature = (
         await client.transaction.prepareAndSend(
@@ -724,7 +762,7 @@ export function NumberPicker() {
             </Link>
             <div>
               <p className="platform-section-label">
-                TURN-{IDEALER_ACTIVE_TURN_ID.toString().padStart(4, "0")}
+                TURN-{activeTurnId.toString().padStart(4, "0")}
               </p>
               <h1 id="number-picker-title">Choose six unique numbers.</h1>
             </div>

@@ -22,6 +22,8 @@ import {
   createProposeRuleInstruction,
   deriveRuleProposalAddress,
   deriveSubmitGuessAccounts,
+  fetchActiveTurnSnapshot,
+  getTurnActionReadiness,
   IDEALER_ACTIVE_TURN_ID,
   type RulePreflightResult,
   type RuleProposalReceipt,
@@ -145,7 +147,10 @@ function normalizeProposalError(error: unknown) {
   if (
     normalizedMessage.includes("action window") ||
     normalizedMessage.includes("turn is not open") ||
-    normalizedMessage.includes("no active turn")
+    normalizedMessage.includes("no active turn") ||
+    normalizedMessage.includes("custom program error: 0x1773") ||
+    normalizedMessage.includes("custom program error: 0x1775") ||
+    normalizedMessage.includes("custom program error: 0x1777")
   ) {
     return {
       code: "TURN_NOT_ACCEPTING_RULES",
@@ -327,9 +332,26 @@ export function RuleProposalComposer() {
 
     try {
       const player = address(walletAddress);
+      const activeTurn = await fetchActiveTurnSnapshot(client);
+      const turnReadiness = getTurnActionReadiness({
+        cutoffBps: activeTurn.globalConfig.ruleElectionCutoffBps,
+        globalConfig: activeTurn.globalConfig,
+        turn: activeTurn.turnState,
+      });
+
+      if (!turnReadiness.ok) {
+        setFeedback({
+          code: turnReadiness.code,
+          message: turnReadiness.message,
+          status: "failed",
+        });
+        return;
+      }
+
+      const turnId = activeTurn.globalConfig.activeTurnId;
       const accounts = await deriveSubmitGuessAccounts({
         player,
-        turnId: IDEALER_ACTIVE_TURN_ID,
+        turnId,
       });
       const gameToken = await client.runtime.rpc
         .getAccountInfo(accounts.gameToken, {
@@ -349,7 +371,7 @@ export function RuleProposalComposer() {
 
       const ruleProposal = await deriveRuleProposalAddress({
         ruleId: preflight.ruleId,
-        turnId: IDEALER_ACTIVE_TURN_ID,
+        turnId,
       });
       const existingRule = await client.runtime.rpc
         .getAccountInfo(ruleProposal, {
@@ -373,7 +395,7 @@ export function RuleProposalComposer() {
         ruleProposal: ruleProposal.toString(),
         signature: "",
         submittedAt: new Date().toISOString(),
-        turnId: IDEALER_ACTIVE_TURN_ID,
+        turnId,
       };
       setFeedback({
         message: "Approve the rule proposal transaction in your wallet.",
@@ -384,7 +406,7 @@ export function RuleProposalComposer() {
       const instruction = await createProposeRuleInstruction({
         player,
         preflight,
-        turnId: IDEALER_ACTIVE_TURN_ID,
+        turnId,
       });
       const signature = (
         await client.transaction.prepareAndSend(

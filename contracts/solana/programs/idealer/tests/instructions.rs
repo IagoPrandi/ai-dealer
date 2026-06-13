@@ -405,12 +405,13 @@ async fn rule_election_locks_requests_and_settles_active_rule() {
     .unwrap();
 
     let compiled_artifact_hash = [8; 32];
+    let authority = context.payer.pubkey();
     process(
         &mut context,
         Instruction {
             program_id: idealer::ID,
             accounts: accounts::PrecompileRule {
-                authority: context.payer.pubkey(),
+                authority,
                 global_config: pda(&[b"global_config"]),
                 turn_state: pda(&[b"turn", &turn_id.to_le_bytes()]),
                 rule_proposal: rule_address,

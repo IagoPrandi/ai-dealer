@@ -707,28 +707,31 @@ fn require_election_cutoff_reached(config: &GlobalConfig, turn: &TurnState) -> R
     Ok(())
 }
 
-fn read_election_candidates<'info>(
-    accounts: &[AccountInfo<'info>],
+fn read_election_candidates<'accounts, 'info>(
+    accounts: &'accounts [AccountInfo<'info>],
     turn_id: u64,
 ) -> Result<Vec<ElectionCandidate>> {
-    accounts
-        .iter()
-        .map(|account_info| {
-            let proposal = Account::<RuleProposal>::try_from(account_info)?;
-            require_eq!(proposal.turn_id, turn_id, IdealerError::InvalidTurnId);
-            Ok(ElectionCandidate {
-                rule_id: proposal.rule_id,
-                sanitized_text_hash: proposal.sanitized_text_hash,
-                compiled_artifact_hash: proposal.compiled_artifact_hash,
-                vote_count: proposal.vote_count,
-                report_count: proposal.report_count,
-                created_at: proposal.created_at,
-                is_eligible_state: proposal.state == RuleState::Eligible,
-                is_precompiled_valid: proposal.precompilation_status
-                    == PrecompilationStatus::Passed,
-            })
-        })
-        .collect()
+    let mut candidates = Vec::with_capacity(accounts.len());
+
+    for account_info in accounts {
+        require_keys_eq!(*account_info.owner, ID, IdealerError::InvalidTurnId);
+        let data = account_info.try_borrow_data()?;
+        let mut data_ref: &[u8] = &data;
+        let proposal = RuleProposal::try_deserialize(&mut data_ref)?;
+        require_eq!(proposal.turn_id, turn_id, IdealerError::InvalidTurnId);
+        candidates.push(ElectionCandidate {
+            rule_id: proposal.rule_id,
+            sanitized_text_hash: proposal.sanitized_text_hash,
+            compiled_artifact_hash: proposal.compiled_artifact_hash,
+            vote_count: proposal.vote_count,
+            report_count: proposal.report_count,
+            created_at: proposal.created_at,
+            is_eligible_state: proposal.state == RuleState::Eligible,
+            is_precompiled_valid: proposal.precompilation_status == PrecompilationStatus::Passed,
+        });
+    }
+
+    Ok(candidates)
 }
 
 fn collect_fee<'info>(

@@ -322,8 +322,8 @@ fn derive_unique_indices(
 ) -> Result<Vec<usize>> {
     let mut selected = Vec::with_capacity(count);
     let mut seen = vec![false; upper_bound];
-    for index in 0..start_index.min(upper_bound) {
-        seen[index] = true;
+    for already_selected in seen.iter_mut().take(start_index.min(upper_bound)) {
+        *already_selected = true;
     }
 
     let mut counter = 0u64;
@@ -375,8 +375,8 @@ fn derive_index_with_counter(
             bytes.copy_from_slice(chunk);
             let value = u64::from_le_bytes(bytes);
             if value < rejection_limit {
-                return usize::try_from(value % upper_bound_u64)
-                    .map_err(|_| IdealerError::ArithmeticOverflow);
+                return Ok(usize::try_from(value % upper_bound_u64)
+                    .map_err(|_| IdealerError::ArithmeticOverflow)?);
             }
         }
 
