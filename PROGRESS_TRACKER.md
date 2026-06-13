@@ -42,6 +42,8 @@ Opened before starting `M0.1`:
 | M3.5      | Guess Verification Queue                      | Completed | Confirmed 2026-06-11 | Queue job creation per submitted guess, deterministic original/alternative verification worker, retry/dead-letter/rate-limit handling, API job/result status, and Docker smoke verification implemented. |
 | M3.6      | Agent Fallback & Provider Dispute Handling    | Completed | Confirmed 2026-06-12 | Primary/secondary/tertiary provider routing, local OpenAI-compatible request-shape metadata, grammar/schema capability checks, timeout/malformed/schema fallback, provider path logging, model identity freezing, fallback/disagreement metrics, and tertiary dispute handling implemented. |
 | M3.7      | Verification Logs & Attestation               | Completed | Confirmed 2026-06-12 | Compiler validation and guess verification now append hash-chained audit records, expose public audit endpoints, map logs to public state, provide a PostgreSQL `audit_logs` schema/adapter, and verify tamper detection with API tests. |
+| M4.1      | Prize Pool Accounting                         | Completed | Confirmed 2026-06-13 | Deterministic lamport-level accounting implemented in API projections and Solana domain math; PRD checklist and approval criteria ticked after the user's explicit instruction to verify and mark done if complete. |
+| M4.2      | Winner Calculation                            | Completed | Confirmed 2026-06-13 | Winner records, separated original/alternative winner lists, per-bucket payout calculation, zero/many winner handling, and round/API exposure implemented and verified. |
 
 ## Maintenance Work Log
 
@@ -1464,3 +1466,98 @@ Passed:
 ## M3.7 Confirmation Gate
 
 `M3.7` was implemented and marked complete on 2026-06-12 after the user's explicit instruction to verify M3.6, mark it done if complete, and follow to the next milestone.
+
+## M4.1 Work Log
+
+### 2026-06-13
+
+- Reopened `PRD.md`, `AGENTS.md`, and `.claude/skills` before proceeding to `M4.1`, as required.
+- Opened the relevant local skill guidance before implementation: `.claude/skills/solana-dev/SKILL.md`, `.claude/skills/solana-dev/backend-async.md`, and `.claude/skills/solana-dev/ext/solana-dev/skill/SKILL.md`.
+- Verified `M3.7` was the last completed milestone in this tracker and `M4.1` was the next requested milestone.
+- API (`apps/api`): added deterministic lamport-level prize pool accounting for guess submission fees, rule proposal fees, paid rule removal fees, vote fees gated from turn 100 onward, treasury/platform monetization, original and alternative bucket splits, bucket rollover inputs, current turn pool, total visible prize pool, and no-winner next rollover amounts.
+- API (`apps/api`): added projected paid rule removal records, per-turn rollover records, `GET /prize-pool-accounting/{turn_id}`, `POST/GET /rule-removals`, and `POST/GET /prize-pool-rollovers` local compatibility endpoints.
+- Constants (`packages/constants`): added `LAMPORTS_PER_SOL` and `VOTE_FEE_START_TURN` exports for shared accounting behavior.
+- Solana program domain (`contracts/solana/programs/idealer/src/domain.rs`): added pure checked accounting structs and `calculate_prize_pool_accounting` so on-chain-adjacent logic has the same deterministic source/bucket math before later payout instructions consume it.
+- Docs: updated `docs/api-contracts.md` and `docs/data-model-draft.md` with the M4.1 accounting response, compatibility endpoints, and storage projection model.
+- No PRD checklist item or milestone checkbox was ticked; milestone approval still requires explicit user confirmation.
+
+## M4.1 Validation Results
+
+| Requirement | Result |
+| --- | --- |
+| Track guess submission fees | API accounting source `guessSubmissions` stores count, fee, gross, treasury, and prize lamports. |
+| Track rule proposal fees | API accounting source `ruleProposals` stores count, fee, gross, treasury, and prize lamports. |
+| Track paid rule removal fees | Added projected `PaidRuleRemovalRecord` storage and accounting source `paidRuleRemovals`. |
+| Track vote fees from turn 100 onward | Vote source is zero before turn 100 and counted from turn 100 onward; default MVP vote fee remains `0 SOL`. |
+| Apply treasury/platform monetization | Each source uses integer treasury basis-point split; `treasuryLamports` and `platformMonetizationLamports` are exposed. |
+| Split post-fee prize pool into buckets | Current turn pool is split into separated original and alternative buckets without losing odd lamports. |
+| Track rollover per bucket | `TurnRolloverRecord` stores original and alternative rollover inputs separately. |
+| Track current turn pool | `currentTurnPoolLamports` is exposed after treasury/platform split. |
+| Track total visible prize pool | `totalVisiblePrizePoolLamports` includes current bucket totals plus bucket rollovers. |
+| Rollover when no winners exist | `nextRolloverIfNoWinnersLamports` returns the full original and alternative bucket totals independently. |
+
+## M4.1 Verification Commands
+
+Passed:
+
+- `pnpm --filter @idealer/constants typecheck`
+- `pnpm --filter @idealer/constants lint`
+- `pnpm --filter @idealer/constants build`
+- `pnpm --filter @idealer/api test` (6/6)
+- `pnpm --filter @idealer/api typecheck`
+- `pnpm --filter @idealer/api lint`
+- `pnpm --filter @idealer/api build`
+- `cargo fmt --check`
+
+Blocked by local toolchain:
+
+- `cargo test -p idealer --test core` did not run to completion because this Windows shell is missing the MSVC linker `link.exe`; compilation stopped before reaching the Idealer test code.
+
+## M4.1 Confirmation Gate
+
+`M4.1` was verified and marked complete on 2026-06-13 after the user's explicit instruction to verify it and mark it done if complete. PRD checklist and approval criteria are now ticked.
+
+## M4.2 Work Log
+
+### 2026-06-13
+
+- Reopened `PRD.md`, `AGENTS.md`, and `.claude/skills` before verifying `M4.1` and proceeding to `M4.2`, as required.
+- Opened the relevant local skill guidance before implementation: `.claude/skills/solana-dev/SKILL.md` and `.claude/skills/solana-dev/backend-async.md`.
+- Verified `M4.1` implementation with API tests and typecheck, then ticked `M4.1` PRD checklist and approval criteria after the user's explicit confirmation to mark it done if complete.
+- API (`apps/api`): added `WinnerRecord`, category summaries, deterministic winner calculation from completed verification results, and stored winner projection records keyed by turn, category, and player.
+- API (`apps/api`): separated original and alternative winner detection, calculated individual payout per bucket, handled zero-winner cases by preserving bucket remainder, and handled multiple winners with integer per-winner payouts.
+- API (`apps/api`): recalculates stored winner records when verification results are saved, exposes winner state in `RoundSummary`, and added `GET /winner-records?turnId={turn_id}` plus `POST /winner-records/calculate-turn`.
+- Docs: updated `docs/api-contracts.md` and `docs/data-model-draft.md` with winner-record response and storage model.
+- Updated `PRD.md` M4.2 checklist and approval criteria after implementation and verification.
+
+## M4.2 Validation Results
+
+| Requirement | Result |
+| --- | --- |
+| Identify original rule winners | Original winners are selected from completed verification results with `original.result === "WIN"`. |
+| Identify alternative rule winners | Alternative winners are selected from completed verification results with `alternative.result === "WIN"`. |
+| Handle no-winner cases | Zero-winner tests verify no records are stored and full bucket amounts remain as remainder. |
+| Handle multiple winners | Tests verify two original winners share the original bucket while one alternative winner receives the alternative bucket. |
+| Calculate individual payout per bucket | Payouts are calculated independently using each category bucket from M4.1 accounting. |
+| Store winner records | Winner records are stored in the API projection map and refreshed after verification result saves. |
+| Expose winner records to UI | `RoundSummary.winners` and local `/winner-records` endpoints expose winner records and payout state. |
+| Tests for zero, one, and many winners | API tests cover zero winners, one alternative winner, and multiple original winners. |
+
+## M4.2 Verification Commands
+
+Passed:
+
+- `pnpm --filter @idealer/api test` (8/8)
+- `pnpm --filter @idealer/api typecheck`
+- `pnpm --filter @idealer/api lint`
+- `pnpm --filter @idealer/api build`
+- `pnpm --filter @idealer/constants build`
+- `cargo fmt --check`
+
+Known local toolchain blocker still applies:
+
+- `cargo test -p idealer --test core` cannot run in this Windows shell until MSVC `link.exe` is available; this blocker was already observed before M4.2 and occurs before Idealer test code runs.
+
+## M4.2 Confirmation Gate
+
+`M4.2` was implemented and marked complete on 2026-06-13 after the user's explicit instruction to verify `M4.1`, mark it done if complete, and follow to the next milestone.

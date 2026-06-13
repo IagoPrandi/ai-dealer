@@ -18,6 +18,8 @@ This is the M0.4 PostgreSQL model draft. On-chain accounts remain the source of 
 | `rules` | Proposed rules and public rule state. | Unique `rule_id`; indexed `turn_id`, `creator_wallet`, `state`. |
 | `rule_votes` | On-chain vote projection. | Unique `(turn_id, rule_id, wallet)`. |
 | `rule_removal_records` | Paid removal records. | Unique `(turn_id, rule_id, remover_wallet)`. |
+| `prize_pool_rollovers` | Per-bucket rollover input for the next turn. | Unique `turn_id`; non-negative original and alternative rollover lamports. |
+| `prize_pool_accounting_snapshots` | Deterministic source, treasury, bucket, and visible-pool accounting snapshots. | Unique `(turn_id, accounting_version)`. |
 | `game_tokens_index` | Indexed Game Token PDA metadata. | Unique `(turn_id, wallet)`. |
 | `guesses` | Player guesses and submission metadata. | Unique `(turn_id, wallet)`. |
 | `gate_check_logs` | Preflight gate logs. | Indexed `turn_id`, `player_wallet`, `gate_type`, `result`. |
@@ -31,6 +33,7 @@ This is the M0.4 PostgreSQL model draft. On-chain accounts remain the source of 
 | `election_vrf_records` | Switchboard election request/fulfillment projection. | Unique `turn_id`. |
 | `rule_finalist_sets` | Locked finalist set and hashes. | Unique `turn_id`. |
 | `payout_records` | Winner payout projection and claim state. | Unique `(turn_id, wallet, category)`. |
+| `winner_records` | M4.2 calculated original and alternative winners before claim records are finalized. | Unique `(turn_id, wallet, category)`. |
 | `creator_reward_records` | Creator reward projection. | Unique `(turn_id, active_rule_id, creator_wallet)`. |
 | `idempotency_records` | API and worker idempotency. | Unique `idempotency_key`. |
 | `creator_profiles` | Creator aggregate profile projection. | Unique `wallet`. |
@@ -58,6 +61,49 @@ draw_numbers smallint[],
 active_rule_id text,
 finalist_set_hash text,
 draw_vrf_fulfillment_ref text
+```
+
+### `prize_pool_accounting_snapshots`
+
+M4.1 accounting snapshots are deterministic projections from indexed fee sources, configured fees, treasury basis points, and per-bucket rollover inputs. Original and alternative buckets are stored separately so payout calculation can reconcile each category independently.
+
+```sql
+turn_id text not null references turns(turn_id),
+accounting_version text not null,
+guess_submission_count integer not null,
+rule_proposal_count integer not null,
+paid_rule_removal_count integer not null,
+vote_fee_count integer not null,
+gross_fees_lamports numeric(20,0) not null,
+treasury_lamports numeric(20,0) not null,
+current_turn_pool_lamports numeric(20,0) not null,
+original_current_lamports numeric(20,0) not null,
+alternative_current_lamports numeric(20,0) not null,
+original_rollover_lamports numeric(20,0) not null,
+alternative_rollover_lamports numeric(20,0) not null,
+original_total_lamports numeric(20,0) not null,
+alternative_total_lamports numeric(20,0) not null,
+total_visible_prize_pool_lamports numeric(20,0) not null,
+created_at timestamptz not null,
+primary key (turn_id, accounting_version)
+```
+
+### `winner_records`
+
+Winner records are calculated from completed deterministic guess verification results. They remain category-specific because a wallet may win the original rule, the active alternative rule, or both.
+
+```sql
+turn_id text not null references turns(turn_id),
+category text not null check (category in ('original', 'alternative')),
+player_wallet text not null,
+result_id text not null,
+active_rule_id text,
+bucket_lamports numeric(20,0) not null,
+winner_count integer not null,
+payout_lamports numeric(20,0) not null,
+status text not null,
+calculated_at timestamptz not null,
+primary key (turn_id, player_wallet, category)
 ```
 
 ### `rules`

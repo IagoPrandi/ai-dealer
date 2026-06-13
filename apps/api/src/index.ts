@@ -3,9 +3,12 @@ import { createServer } from "node:http";
 import { resolve } from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import {
+  LAMPORTS_PER_SOL,
   MVP_FEES_SOL,
   RULE_MAX_TOKENS,
+  TREASURY_FEE_BPS,
   TURN_DURATION_CYCLE_HOURS,
+  VOTE_FEE_START_TURN,
 } from "@idealer/constants";
 import {
   validateAndPrecompileRule,
@@ -82,6 +85,74 @@ export interface RuleVoteRecord {
   submittedAt: string;
   turnId: number;
   voter: string;
+}
+
+export interface PaidRuleRemovalRecord {
+  removalKind: "creator_self" | "third_party";
+  remover: string;
+  removedAt: string;
+  ruleId: number;
+  ruleProposal: string;
+  ruleRemoval: string;
+  signature: string;
+  turnId: number;
+}
+
+export interface TurnRolloverRecord {
+  alternativeRolloverLamports: number;
+  originalRolloverLamports: number;
+  recordedAt: string;
+  sourceTurnId: number | null;
+  turnId: number;
+}
+
+export interface PrizePoolAccountingConfig {
+  guessSubmissionFeeLamports: number;
+  paidRuleRemovalFeeLamports: number;
+  ruleProposalFeeLamports: number;
+  treasuryFeeBps: number;
+  voteFeeLamports: number;
+  voteFeeStartTurn: number;
+}
+
+export interface PrizePoolFeeSourceAccounting {
+  count: number;
+  feeLamports: number;
+  grossLamports: number;
+  prizeLamports: number;
+  treasuryLamports: number;
+}
+
+export interface PrizePoolAccounting {
+  buckets: {
+    alternative: {
+      currentTurnLamports: number;
+      rolloverLamports: number;
+      totalLamports: number;
+    };
+    original: {
+      currentTurnLamports: number;
+      rolloverLamports: number;
+      totalLamports: number;
+    };
+  };
+  config: PrizePoolAccountingConfig;
+  currentTurnPoolLamports: number;
+  grossFeesLamports: number;
+  nextRolloverIfNoWinnersLamports: {
+    alternative: number;
+    original: number;
+  };
+  platformMonetizationLamports: number;
+  sources: {
+    guessSubmissions: PrizePoolFeeSourceAccounting;
+    paidRuleRemovals: PrizePoolFeeSourceAccounting;
+    ruleProposals: PrizePoolFeeSourceAccounting;
+    votes: PrizePoolFeeSourceAccounting & { feeActive: boolean };
+  };
+  totalVisiblePrizePoolLamports: number;
+  treasuryLamports: number;
+  turnId: number;
 }
 
 export type DrawStatus = "failed" | "fulfilled" | "requested";
@@ -196,6 +267,35 @@ export interface GuessVerificationResultRecord {
   player: string;
   resultId: string;
   status: "completed";
+  turnId: number;
+}
+
+export type WinnerCategory = "alternative" | "original";
+
+export interface WinnerRecord {
+  activeRuleId: number | null;
+  bucketLamports: number;
+  calculatedAt: string;
+  category: WinnerCategory;
+  payoutLamports: number;
+  player: string;
+  resultId: string;
+  status: "calculated";
+  turnId: number;
+  winnerCount: number;
+}
+
+export interface WinnerCategorySummary {
+  bucketLamports: number;
+  individualPayoutLamports: number;
+  remainderLamports: number;
+  winnerCount: number;
+}
+
+export interface WinnerCalculationSummary {
+  alternative: WinnerCategorySummary;
+  original: WinnerCategorySummary;
+  records: WinnerRecord[];
   turnId: number;
 }
 
@@ -319,11 +419,14 @@ const IDEALER_ACTIVE_TURN_ID = Number(
 const guessReceipts = new Map<string, GuessReceiptRecord>();
 const ruleProposals = new Map<string, RuleProposalRecord>();
 const ruleVotes = new Map<string, RuleVoteRecord>();
+const paidRuleRemovals = new Map<string, PaidRuleRemovalRecord>();
+const turnRollovers = new Map<number, TurnRolloverRecord>();
 const draws = new Map<number, DrawRecord>();
 const elections = new Map<number, RuleElectionRecord>();
 const ruleValidations = new Map<string, RuleValidationRecord>();
 const verificationJobs = new Map<string, GuessVerificationJobRecord>();
 const verificationResults = new Map<string, GuessVerificationResultRecord>();
+const winnerRecords = new Map<string, WinnerRecord>();
 const auditLogs = new Map<string, AuditLogRecord>();
 const auditLogOrder: string[] = [];
 let lastAuditLogHash: string | null = null;
@@ -333,8 +436,11 @@ const CORS_PATHS = new Set([
   "/draws",
   "/elections",
   "/guess-receipts",
+  "/prize-pool-accounting",
+  "/prize-pool-rollovers",
   "/rule-precompilations",
   "/rule-preflight",
+  "/rule-removals",
   "/rule-proposals",
   "/rule-validations",
   "/rule-validations/run",
@@ -342,6 +448,8 @@ const CORS_PATHS = new Set([
   "/verification-jobs",
   "/verification-jobs/create-turn",
   "/verification-results",
+  "/winner-records",
+  "/winner-records/calculate-turn",
   "/audit",
 ]);
 
@@ -355,6 +463,10 @@ function getRuleProposalKey(turnId: number, ruleId: number) {
 
 function getRuleVoteKey(turnId: number, ruleId: number, voter: string) {
   return `${turnId}:${ruleId}:${voter}`;
+}
+
+function getPaidRuleRemovalKey(turnId: number, ruleId: number, remover: string) {
+  return `${turnId}:${ruleId}:${remover}`;
 }
 
 function isBase58Like(value: unknown) {
@@ -592,11 +704,14 @@ export function resetApiStateForTests() {
   guessReceipts.clear();
   ruleProposals.clear();
   ruleVotes.clear();
+  paidRuleRemovals.clear();
+  turnRollovers.clear();
   draws.clear();
   elections.clear();
   ruleValidations.clear();
   verificationJobs.clear();
   verificationResults.clear();
+  winnerRecords.clear();
   auditLogs.clear();
   auditLogOrder.length = 0;
   lastAuditLogHash = null;
@@ -756,6 +871,51 @@ function isValidRuleVote(value: unknown): value is RuleVoteRecord {
     isBase58Like(vote.signature) &&
     typeof vote.submittedAt === "string" &&
     !Number.isNaN(Date.parse(vote.submittedAt))
+  );
+}
+
+function isValidPaidRuleRemoval(value: unknown): value is PaidRuleRemovalRecord {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const removal = value as Partial<PaidRuleRemovalRecord>;
+
+  return (
+    Number.isInteger(removal.turnId) &&
+    Number(removal.turnId) > 0 &&
+    Number.isInteger(removal.ruleId) &&
+    Number(removal.ruleId) > 0 &&
+    (removal.removalKind === "creator_self" ||
+      removal.removalKind === "third_party") &&
+    isBase58Like(removal.remover) &&
+    isBase58Like(removal.ruleProposal) &&
+    isBase58Like(removal.ruleRemoval) &&
+    isBase58Like(removal.signature) &&
+    typeof removal.removedAt === "string" &&
+    !Number.isNaN(Date.parse(removal.removedAt))
+  );
+}
+
+function isValidTurnRollover(value: unknown): value is TurnRolloverRecord {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const rollover = value as Partial<TurnRolloverRecord>;
+
+  return (
+    Number.isInteger(rollover.turnId) &&
+    Number(rollover.turnId) > 0 &&
+    Number.isSafeInteger(rollover.originalRolloverLamports) &&
+    Number(rollover.originalRolloverLamports) >= 0 &&
+    Number.isSafeInteger(rollover.alternativeRolloverLamports) &&
+    Number(rollover.alternativeRolloverLamports) >= 0 &&
+    (rollover.sourceTurnId === null ||
+      (Number.isInteger(rollover.sourceTurnId) &&
+        Number(rollover.sourceTurnId) > 0)) &&
+    typeof rollover.recordedAt === "string" &&
+    !Number.isNaN(Date.parse(rollover.recordedAt))
   );
 }
 
@@ -1166,6 +1326,19 @@ export function saveRuleVote(vote: RuleVoteRecord) {
   return vote;
 }
 
+export function savePaidRuleRemoval(removal: PaidRuleRemovalRecord) {
+  paidRuleRemovals.set(
+    getPaidRuleRemovalKey(removal.turnId, removal.ruleId, removal.remover),
+    removal,
+  );
+  return removal;
+}
+
+export function saveTurnRollover(record: TurnRolloverRecord) {
+  turnRollovers.set(record.turnId, record);
+  return record;
+}
+
 export function listRuleVotes(turnId: number) {
   const votes = [...ruleVotes.values()].filter(
     (vote) => vote.turnId === turnId,
@@ -1302,6 +1475,163 @@ function listVerificationJobs(turnId: number) {
 
 function listVerificationResults(turnId: number) {
   return [...verificationResults.values()].filter((result) => result.turnId === turnId);
+}
+
+function getWinnerRecordKey(
+  turnId: number,
+  category: WinnerCategory,
+  player: string,
+) {
+  return `${turnId}:${category}:${player}`;
+}
+
+function isWinnerForCategory(
+  result: GuessVerificationResultRecord,
+  category: WinnerCategory,
+) {
+  return category === "original"
+    ? result.original.result === "WIN"
+    : result.alternative?.result === "WIN";
+}
+
+function calculateCategoryWinnerRecords(args: {
+  bucketLamports: number;
+  calculatedAt: string;
+  category: WinnerCategory;
+  results: GuessVerificationResultRecord[];
+  turnId: number;
+}) {
+  const winningResults = args.results
+    .filter((result) => isWinnerForCategory(result, args.category))
+    .sort((left, right) => left.player.localeCompare(right.player));
+  const winnerCount = winningResults.length;
+  const payoutLamports =
+    winnerCount === 0 ? 0 : Math.floor(args.bucketLamports / winnerCount);
+  const records = winningResults.map(
+    (result): WinnerRecord => ({
+      activeRuleId: args.category === "alternative" ? result.activeRuleId : null,
+      bucketLamports: args.bucketLamports,
+      calculatedAt: args.calculatedAt,
+      category: args.category,
+      payoutLamports,
+      player: result.player,
+      resultId: result.resultId,
+      status: "calculated",
+      turnId: args.turnId,
+      winnerCount,
+    }),
+  );
+
+  return {
+    individualPayoutLamports: payoutLamports,
+    records,
+    remainderLamports:
+      args.bucketLamports - payoutLamports * Math.max(winnerCount, 0),
+    winnerCount,
+  };
+}
+
+export function calculateAndStoreWinnerRecords(
+  turnId: number,
+  calculatedAt: string = new Date().toISOString(),
+): WinnerCalculationSummary {
+  const accounting = getPrizePoolAccounting(turnId);
+  const results = listVerificationResults(turnId).filter(
+    (result) => result.status === "completed",
+  );
+  const original = calculateCategoryWinnerRecords({
+    bucketLamports: accounting.buckets.original.totalLamports,
+    calculatedAt,
+    category: "original",
+    results,
+    turnId,
+  });
+  const alternative = calculateCategoryWinnerRecords({
+    bucketLamports: accounting.buckets.alternative.totalLamports,
+    calculatedAt,
+    category: "alternative",
+    results,
+    turnId,
+  });
+
+  for (const key of [...winnerRecords.keys()]) {
+    if (key.startsWith(`${turnId}:`)) {
+      winnerRecords.delete(key);
+    }
+  }
+
+  const records = [...original.records, ...alternative.records];
+  for (const record of records) {
+    winnerRecords.set(
+      getWinnerRecordKey(record.turnId, record.category, record.player),
+      record,
+    );
+  }
+
+  return {
+    alternative: {
+      bucketLamports: accounting.buckets.alternative.totalLamports,
+      individualPayoutLamports: alternative.individualPayoutLamports,
+      remainderLamports: alternative.remainderLamports,
+      winnerCount: alternative.winnerCount,
+    },
+    original: {
+      bucketLamports: accounting.buckets.original.totalLamports,
+      individualPayoutLamports: original.individualPayoutLamports,
+      remainderLamports: original.remainderLamports,
+      winnerCount: original.winnerCount,
+    },
+    records,
+    turnId,
+  };
+}
+
+export function listWinnerRecords(turnId: number) {
+  return [...winnerRecords.values()]
+    .filter((record) => record.turnId === turnId)
+    .sort((left, right) =>
+      left.category === right.category
+        ? left.player.localeCompare(right.player)
+        : left.category.localeCompare(right.category),
+    );
+}
+
+export function getWinnerSummary(turnId: number): WinnerCalculationSummary {
+  const records = listWinnerRecords(turnId);
+  if (records.length > 0) {
+    const accounting = getPrizePoolAccounting(turnId);
+    const originalRecords = records.filter(
+      (record) => record.category === "original",
+    );
+    const alternativeRecords = records.filter(
+      (record) => record.category === "alternative",
+    );
+    const originalPayout = originalRecords[0]?.payoutLamports ?? 0;
+    const alternativePayout = alternativeRecords[0]?.payoutLamports ?? 0;
+
+    return {
+      alternative: {
+        bucketLamports: accounting.buckets.alternative.totalLamports,
+        individualPayoutLamports: alternativePayout,
+        remainderLamports:
+          accounting.buckets.alternative.totalLamports -
+          alternativePayout * alternativeRecords.length,
+        winnerCount: alternativeRecords.length,
+      },
+      original: {
+        bucketLamports: accounting.buckets.original.totalLamports,
+        individualPayoutLamports: originalPayout,
+        remainderLamports:
+          accounting.buckets.original.totalLamports -
+          originalPayout * originalRecords.length,
+        winnerCount: originalRecords.length,
+      },
+      records,
+      turnId,
+    };
+  }
+
+  return calculateAndStoreWinnerRecords(turnId);
 }
 
 function getActiveRuleArtifact(turnId: number): {
@@ -1461,6 +1791,7 @@ export function saveGuessVerificationResult(result: GuessVerificationResultRecor
     getVerificationResultKey(result.turnId, result.player),
     normalizedResult,
   );
+  calculateAndStoreWinnerRecords(result.turnId, result.completedAt);
   return normalizedResult;
 }
 
@@ -1691,17 +2022,25 @@ export interface RoundSummary {
   draw: DrawRecord | null;
   election: RuleElectionRecord | null;
   pool: {
+    accounting: PrizePoolAccounting;
     guessSol: number;
     guesses: number;
     indicativeSol: number;
+    paidRemovalSol: number;
+    paidRemovals: number;
     proposalSol: number;
     proposals: number;
+    totalVisiblePrizePoolSol: number;
+    treasurySol: number;
+    voteFeeSol: number;
+    voteFees: number;
   };
   rules: RoundRuleSummary[];
   status: "completed" | "current" | "upcoming";
   totalVotes: number;
   turnId: number;
   verification: ReturnType<typeof getVerificationSummary>;
+  winners: WinnerCalculationSummary;
 }
 
 function cycleDurationHours(stepIndex: number): number {
@@ -1716,6 +2055,204 @@ function roundSol(value: number) {
   return Number(value.toFixed(4));
 }
 
+function solToLamports(value: number) {
+  return Math.round(value * LAMPORTS_PER_SOL);
+}
+
+function assertNonNegativeSafeInteger(value: number, label: string) {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`INVALID_${label.toUpperCase()}`);
+  }
+}
+
+function splitFeeLamports(amountLamports: number, treasuryFeeBps: number) {
+  assertNonNegativeSafeInteger(amountLamports, "fee_lamports");
+  assertNonNegativeSafeInteger(treasuryFeeBps, "treasury_fee_bps");
+  if (treasuryFeeBps > 10_000) {
+    throw new Error("INVALID_TREASURY_FEE_BPS");
+  }
+
+  const treasuryLamports = Math.floor((amountLamports * treasuryFeeBps) / 10_000);
+  const prizeLamports = amountLamports - treasuryLamports;
+  return { prizeLamports, treasuryLamports };
+}
+
+function accountFeeSource(
+  count: number,
+  feeLamports: number,
+  treasuryFeeBps: number,
+): PrizePoolFeeSourceAccounting {
+  assertNonNegativeSafeInteger(count, "fee_count");
+  assertNonNegativeSafeInteger(feeLamports, "fee_lamports");
+
+  const grossLamports = count * feeLamports;
+  assertNonNegativeSafeInteger(grossLamports, "gross_lamports");
+  const { prizeLamports, treasuryLamports } = splitFeeLamports(
+    grossLamports,
+    treasuryFeeBps,
+  );
+
+  return {
+    count,
+    feeLamports,
+    grossLamports,
+    prizeLamports,
+    treasuryLamports,
+  };
+}
+
+function defaultAccountingConfig(): PrizePoolAccountingConfig {
+  return {
+    guessSubmissionFeeLamports: solToLamports(MVP_FEES_SOL.guessSubmission),
+    paidRuleRemovalFeeLamports: solToLamports(MVP_FEES_SOL.paidRuleRemoval),
+    ruleProposalFeeLamports: solToLamports(MVP_FEES_SOL.ruleProposal),
+    treasuryFeeBps: TREASURY_FEE_BPS,
+    voteFeeLamports: solToLamports(MVP_FEES_SOL.vote),
+    voteFeeStartTurn: VOTE_FEE_START_TURN,
+  };
+}
+
+export function calculatePrizePoolAccounting(args: {
+  alternativeRolloverLamports?: number;
+  config?: Partial<PrizePoolAccountingConfig>;
+  guessCount: number;
+  originalRolloverLamports?: number;
+  paidRuleRemovalCount: number;
+  ruleProposalCount: number;
+  turnId: number;
+  voteCount: number;
+}): PrizePoolAccounting {
+  assertNonNegativeSafeInteger(args.turnId, "turn_id");
+  if (args.turnId <= 0) {
+    throw new Error("INVALID_TURN_ID");
+  }
+
+  const config = {
+    ...defaultAccountingConfig(),
+    ...args.config,
+  };
+  const voteFeeActive = args.turnId >= config.voteFeeStartTurn;
+  const guessSubmissions = accountFeeSource(
+    args.guessCount,
+    config.guessSubmissionFeeLamports,
+    config.treasuryFeeBps,
+  );
+  const ruleProposals = accountFeeSource(
+    args.ruleProposalCount,
+    config.ruleProposalFeeLamports,
+    config.treasuryFeeBps,
+  );
+  const paidRuleRemovals = accountFeeSource(
+    args.paidRuleRemovalCount,
+    config.paidRuleRemovalFeeLamports,
+    config.treasuryFeeBps,
+  );
+  const votes = {
+    ...accountFeeSource(
+      voteFeeActive ? args.voteCount : 0,
+      config.voteFeeLamports,
+      config.treasuryFeeBps,
+    ),
+    feeActive: voteFeeActive,
+  };
+
+  const grossFeesLamports =
+    guessSubmissions.grossLamports +
+    ruleProposals.grossLamports +
+    paidRuleRemovals.grossLamports +
+    votes.grossLamports;
+  const treasuryLamports =
+    guessSubmissions.treasuryLamports +
+    ruleProposals.treasuryLamports +
+    paidRuleRemovals.treasuryLamports +
+    votes.treasuryLamports;
+  const currentTurnPoolLamports =
+    guessSubmissions.prizeLamports +
+    ruleProposals.prizeLamports +
+    paidRuleRemovals.prizeLamports +
+    votes.prizeLamports;
+
+  const originalCurrentTurnLamports = Math.floor(currentTurnPoolLamports / 2);
+  const alternativeCurrentTurnLamports =
+    currentTurnPoolLamports - originalCurrentTurnLamports;
+  const originalRolloverLamports = args.originalRolloverLamports ?? 0;
+  const alternativeRolloverLamports = args.alternativeRolloverLamports ?? 0;
+  assertNonNegativeSafeInteger(originalRolloverLamports, "original_rollover_lamports");
+  assertNonNegativeSafeInteger(
+    alternativeRolloverLamports,
+    "alternative_rollover_lamports",
+  );
+
+  const originalTotalLamports =
+    originalCurrentTurnLamports + originalRolloverLamports;
+  const alternativeTotalLamports =
+    alternativeCurrentTurnLamports + alternativeRolloverLamports;
+  const totalVisiblePrizePoolLamports =
+    originalTotalLamports + alternativeTotalLamports;
+
+  return {
+    buckets: {
+      alternative: {
+        currentTurnLamports: alternativeCurrentTurnLamports,
+        rolloverLamports: alternativeRolloverLamports,
+        totalLamports: alternativeTotalLamports,
+      },
+      original: {
+        currentTurnLamports: originalCurrentTurnLamports,
+        rolloverLamports: originalRolloverLamports,
+        totalLamports: originalTotalLamports,
+      },
+    },
+    config,
+    currentTurnPoolLamports,
+    grossFeesLamports,
+    nextRolloverIfNoWinnersLamports: {
+      alternative: alternativeTotalLamports,
+      original: originalTotalLamports,
+    },
+    platformMonetizationLamports: treasuryLamports,
+    sources: {
+      guessSubmissions,
+      paidRuleRemovals,
+      ruleProposals,
+      votes,
+    },
+    totalVisiblePrizePoolLamports,
+    treasuryLamports,
+    turnId: args.turnId,
+  };
+}
+
+function lamportsToSol(lamports: number) {
+  return lamports / LAMPORTS_PER_SOL;
+}
+
+function listPaidRuleRemovals(turnId: number) {
+  return [...paidRuleRemovals.values()].filter(
+    (removal) => removal.turnId === turnId,
+  );
+}
+
+function getTurnRollover(turnId: number) {
+  return turnRollovers.get(turnId) ?? null;
+}
+
+export function getPrizePoolAccounting(turnId: number) {
+  const proposals = listRuleProposals(turnId);
+  const { votes } = listRuleVotes(turnId);
+  const rollover = getTurnRollover(turnId);
+
+  return calculatePrizePoolAccounting({
+    alternativeRolloverLamports: rollover?.alternativeRolloverLamports ?? 0,
+    guessCount: listGuessReceipts(turnId).length,
+    originalRolloverLamports: rollover?.originalRolloverLamports ?? 0,
+    paidRuleRemovalCount: listPaidRuleRemovals(turnId).length,
+    ruleProposalCount: proposals.length,
+    turnId,
+    voteCount: votes.length,
+  });
+}
+
 export function getRoundSummary(
   turnId: number,
   activeTurnId: number = IDEALER_ACTIVE_TURN_ID,
@@ -1725,12 +2262,26 @@ export function getRoundSummary(
   const guesses = [...guessReceipts.values()].filter(
     (receipt) => receipt.turnId === turnId,
   ).length;
+  const removals = listPaidRuleRemovals(turnId).length;
+  const accounting = getPrizePoolAccounting(turnId);
 
   const cycleLength = TURN_DURATION_CYCLE_HOURS.length;
   const stepIndex = (turnId - 1) % cycleLength;
   const nextStepIndex = turnId % cycleLength;
-  const guessSol = guesses * MVP_FEES_SOL.guessSubmission;
-  const proposalSol = proposals.length * MVP_FEES_SOL.ruleProposal;
+  const guessSol = lamportsToSol(
+    accounting.sources.guessSubmissions.grossLamports,
+  );
+  const proposalSol = lamportsToSol(
+    accounting.sources.ruleProposals.grossLamports,
+  );
+  const paidRemovalSol = lamportsToSol(
+    accounting.sources.paidRuleRemovals.grossLamports,
+  );
+  const voteFeeSol = lamportsToSol(accounting.sources.votes.grossLamports);
+  const totalVisiblePrizePoolSol = lamportsToSol(
+    accounting.totalVisiblePrizePoolLamports,
+  );
+  const treasurySol = lamportsToSol(accounting.treasuryLamports);
 
   const status =
     turnId < activeTurnId
@@ -1749,11 +2300,18 @@ export function getRoundSummary(
     draw: getDraw(turnId),
     election: getRuleElection(turnId),
     pool: {
+      accounting,
       guessSol: roundSol(guessSol),
       guesses,
-      indicativeSol: roundSol(guessSol + proposalSol),
+      indicativeSol: roundSol(totalVisiblePrizePoolSol),
+      paidRemovalSol: roundSol(paidRemovalSol),
+      paidRemovals: removals,
       proposalSol: roundSol(proposalSol),
       proposals: proposals.length,
+      totalVisiblePrizePoolSol: roundSol(totalVisiblePrizePoolSol),
+      treasurySol: roundSol(treasurySol),
+      voteFeeSol: roundSol(voteFeeSol),
+      voteFees: accounting.sources.votes.count,
     },
     rules: proposals.map((proposal) => ({
       compiledArtifactHash: proposal.compiledArtifactHash ?? null,
@@ -1772,6 +2330,7 @@ export function getRoundSummary(
     totalVotes: votes.length,
     turnId,
     verification: getVerificationSummary(turnId),
+    winners: getWinnerSummary(turnId),
   };
 }
 
@@ -1855,7 +2414,9 @@ if (isMainModule()) {
 
     if (
       request.method === "OPTIONS" &&
-      (CORS_PATHS.has(url.pathname) || url.pathname.startsWith("/audit/"))
+      (CORS_PATHS.has(url.pathname) ||
+        url.pathname.startsWith("/audit/") ||
+        url.pathname.startsWith("/prize-pool-accounting/"))
     ) {
       sendNoContent(request, response);
       return;
@@ -2138,6 +2699,105 @@ if (isMainModule()) {
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/rule-removals") {
+      void readJsonBody(request)
+        .then((body) => {
+          if (!isValidPaidRuleRemoval(body)) {
+            sendJson(request, response, 400, {
+              error: "invalid_rule_removal",
+            });
+            return;
+          }
+
+          const existing = paidRuleRemovals.get(
+            getPaidRuleRemovalKey(body.turnId, body.ruleId, body.remover),
+          );
+          if (existing && existing.signature !== body.signature) {
+            sendJson(request, response, 409, {
+              error: "duplicate_rule_removal",
+              removal: existing,
+            });
+            return;
+          }
+
+          sendJson(request, response, 201, {
+            removal: savePaidRuleRemoval(body),
+          });
+        })
+        .catch((error: unknown) => {
+          sendJson(request, response, 400, {
+            error: "invalid_json",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/rule-removals") {
+      const turnId = Number(url.searchParams.get("turnId"));
+
+      if (!Number.isInteger(turnId) || turnId <= 0) {
+        sendJson(request, response, 400, { error: "invalid_query" });
+        return;
+      }
+
+      sendJson(request, response, 200, {
+        removals: listPaidRuleRemovals(turnId),
+      });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/prize-pool-rollovers") {
+      void readJsonBody(request)
+        .then((body) => {
+          if (!isValidTurnRollover(body)) {
+            sendJson(request, response, 400, {
+              error: "invalid_prize_pool_rollover",
+            });
+            return;
+          }
+
+          sendJson(request, response, 201, {
+            rollover: saveTurnRollover(body),
+          });
+        })
+        .catch((error: unknown) => {
+          sendJson(request, response, 400, {
+            error: "invalid_json",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/prize-pool-rollovers") {
+      const turnId = Number(url.searchParams.get("turnId"));
+
+      if (!Number.isInteger(turnId) || turnId <= 0) {
+        sendJson(request, response, 400, { error: "invalid_query" });
+        return;
+      }
+
+      sendJson(request, response, 200, {
+        rollover: getTurnRollover(turnId),
+      });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname.startsWith("/prize-pool-accounting/")) {
+      const turnId = Number(url.pathname.slice("/prize-pool-accounting/".length));
+
+      if (!Number.isInteger(turnId) || turnId <= 0) {
+        sendJson(request, response, 400, { error: "invalid_turn_id" });
+        return;
+      }
+
+      sendJson(request, response, 200, {
+        accounting: getPrizePoolAccounting(turnId),
+      });
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/draws") {
       void readJsonBody(request)
         .then((body) => {
@@ -2306,6 +2966,43 @@ if (isMainModule()) {
       sendJson(request, response, 200, {
         results: listVerificationResults(turnId),
         summary: getVerificationSummary(turnId),
+      });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/winner-records/calculate-turn") {
+      void readJsonBody(request)
+        .then((body) => {
+          if (!isValidGuessVerificationCreateRequest(body)) {
+            sendJson(request, response, 400, {
+              error: "invalid_winner_calculation_request",
+            });
+            return;
+          }
+
+          sendJson(request, response, 201, {
+            winners: calculateAndStoreWinnerRecords(body.turnId),
+          });
+        })
+        .catch((error: unknown) => {
+          sendJson(request, response, 400, {
+            error: "invalid_json",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/winner-records") {
+      const turnId = Number(url.searchParams.get("turnId"));
+
+      if (!Number.isInteger(turnId) || turnId <= 0) {
+        sendJson(request, response, 400, { error: "invalid_query" });
+        return;
+      }
+
+      sendJson(request, response, 200, {
+        winners: getWinnerSummary(turnId),
       });
       return;
     }

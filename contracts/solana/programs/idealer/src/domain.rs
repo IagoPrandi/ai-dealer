@@ -31,6 +31,57 @@ pub struct ElectionResult {
     pub finalist_set_hash: [u8; 32],
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FeeSourceAccounting {
+    pub count: u64,
+    pub fee_lamports: u64,
+    pub gross_lamports: u64,
+    pub treasury_lamports: u64,
+    pub prize_lamports: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PrizePoolAccountingInput {
+    pub turn_id: u64,
+    pub guess_submission_count: u64,
+    pub rule_proposal_count: u64,
+    pub paid_rule_removal_count: u64,
+    pub vote_count: u64,
+    pub guess_submission_fee_lamports: u64,
+    pub rule_proposal_fee_lamports: u64,
+    pub paid_rule_removal_fee_lamports: u64,
+    pub vote_fee_lamports: u64,
+    pub treasury_fee_bps: u16,
+    pub original_rollover_lamports: u64,
+    pub alternative_rollover_lamports: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PrizePoolBucketAccounting {
+    pub current_turn_lamports: u64,
+    pub rollover_lamports: u64,
+    pub total_lamports: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PrizePoolAccounting {
+    pub guess_submissions: FeeSourceAccounting,
+    pub rule_proposals: FeeSourceAccounting,
+    pub paid_rule_removals: FeeSourceAccounting,
+    pub votes: FeeSourceAccounting,
+    pub vote_fee_active: bool,
+    pub gross_fees_lamports: u64,
+    pub treasury_lamports: u64,
+    pub current_turn_pool_lamports: u64,
+    pub original_bucket: PrizePoolBucketAccounting,
+    pub alternative_bucket: PrizePoolBucketAccounting,
+    pub total_visible_prize_pool_lamports: u64,
+    pub next_original_rollover_if_no_winners_lamports: u64,
+    pub next_alternative_rollover_if_no_winners_lamports: u64,
+}
+
+pub const VOTE_FEE_START_TURN: u64 = 100;
+
 pub struct ConfigValidation<'a> {
     pub treasury_fee_bps: u16,
     pub turn_duration_cycle: &'a [u32; TURN_DURATION_CYCLE_LEN],
@@ -157,6 +208,110 @@ pub fn split_fee(amount: u64, treasury_fee_bps: u16) -> Result<(u64, u64)> {
         .checked_sub(treasury_amount)
         .ok_or(IdealerError::ArithmeticOverflow)?;
     Ok((treasury_amount, prize_amount))
+}
+
+fn account_fee_source(
+    count: u64,
+    fee_lamports: u64,
+    treasury_fee_bps: u16,
+) -> Result<FeeSourceAccounting> {
+    let gross_lamports = count
+        .checked_mul(fee_lamports)
+        .ok_or(IdealerError::ArithmeticOverflow)?;
+    let (treasury_lamports, prize_lamports) = split_fee(gross_lamports, treasury_fee_bps)?;
+
+    Ok(FeeSourceAccounting {
+        count,
+        fee_lamports,
+        gross_lamports,
+        treasury_lamports,
+        prize_lamports,
+    })
+}
+
+pub fn calculate_prize_pool_accounting(
+    input: &PrizePoolAccountingInput,
+) -> Result<PrizePoolAccounting> {
+    require!(input.turn_id > 0, IdealerError::InvalidTurnId);
+
+    let guess_submissions = account_fee_source(
+        input.guess_submission_count,
+        input.guess_submission_fee_lamports,
+        input.treasury_fee_bps,
+    )?;
+    let rule_proposals = account_fee_source(
+        input.rule_proposal_count,
+        input.rule_proposal_fee_lamports,
+        input.treasury_fee_bps,
+    )?;
+    let paid_rule_removals = account_fee_source(
+        input.paid_rule_removal_count,
+        input.paid_rule_removal_fee_lamports,
+        input.treasury_fee_bps,
+    )?;
+    let vote_fee_active = input.turn_id >= VOTE_FEE_START_TURN;
+    let votes = account_fee_source(
+        if vote_fee_active { input.vote_count } else { 0 },
+        input.vote_fee_lamports,
+        input.treasury_fee_bps,
+    )?;
+
+    let gross_fees_lamports = guess_submissions
+        .gross_lamports
+        .checked_add(rule_proposals.gross_lamports)
+        .and_then(|value| value.checked_add(paid_rule_removals.gross_lamports))
+        .and_then(|value| value.checked_add(votes.gross_lamports))
+        .ok_or(IdealerError::ArithmeticOverflow)?;
+    let treasury_lamports = guess_submissions
+        .treasury_lamports
+        .checked_add(rule_proposals.treasury_lamports)
+        .and_then(|value| value.checked_add(paid_rule_removals.treasury_lamports))
+        .and_then(|value| value.checked_add(votes.treasury_lamports))
+        .ok_or(IdealerError::ArithmeticOverflow)?;
+    let current_turn_pool_lamports = guess_submissions
+        .prize_lamports
+        .checked_add(rule_proposals.prize_lamports)
+        .and_then(|value| value.checked_add(paid_rule_removals.prize_lamports))
+        .and_then(|value| value.checked_add(votes.prize_lamports))
+        .ok_or(IdealerError::ArithmeticOverflow)?;
+
+    let original_current_turn_lamports = current_turn_pool_lamports / 2;
+    let alternative_current_turn_lamports = current_turn_pool_lamports
+        .checked_sub(original_current_turn_lamports)
+        .ok_or(IdealerError::ArithmeticOverflow)?;
+    let original_total_lamports = original_current_turn_lamports
+        .checked_add(input.original_rollover_lamports)
+        .ok_or(IdealerError::ArithmeticOverflow)?;
+    let alternative_total_lamports = alternative_current_turn_lamports
+        .checked_add(input.alternative_rollover_lamports)
+        .ok_or(IdealerError::ArithmeticOverflow)?;
+    let total_visible_prize_pool_lamports = original_total_lamports
+        .checked_add(alternative_total_lamports)
+        .ok_or(IdealerError::ArithmeticOverflow)?;
+
+    Ok(PrizePoolAccounting {
+        guess_submissions,
+        rule_proposals,
+        paid_rule_removals,
+        votes,
+        vote_fee_active,
+        gross_fees_lamports,
+        treasury_lamports,
+        current_turn_pool_lamports,
+        original_bucket: PrizePoolBucketAccounting {
+            current_turn_lamports: original_current_turn_lamports,
+            rollover_lamports: input.original_rollover_lamports,
+            total_lamports: original_total_lamports,
+        },
+        alternative_bucket: PrizePoolBucketAccounting {
+            current_turn_lamports: alternative_current_turn_lamports,
+            rollover_lamports: input.alternative_rollover_lamports,
+            total_lamports: alternative_total_lamports,
+        },
+        total_visible_prize_pool_lamports,
+        next_original_rollover_if_no_winners_lamports: original_total_lamports,
+        next_alternative_rollover_if_no_winners_lamports: alternative_total_lamports,
+    })
 }
 
 pub fn next_cycle_index(current: u8) -> Result<u8> {

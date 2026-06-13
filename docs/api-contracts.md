@@ -179,6 +179,60 @@ interface VoteResponse {
 }
 ```
 
+## Prize Pool Accounting
+
+`GET /api/v1/turns/{turn_id}/accounting`
+
+Returns deterministic lamport-level accounting for the turn. The current local API compatibility endpoint is `GET /prize-pool-accounting/{turn_id}`.
+
+```ts
+interface PrizePoolFeeSourceAccounting {
+  count: number;
+  feeLamports: number;
+  grossLamports: number;
+  treasuryLamports: number;
+  prizeLamports: number;
+}
+
+interface PrizePoolAccountingResponse {
+  turnId: number;
+  sources: {
+    guessSubmissions: PrizePoolFeeSourceAccounting;
+    ruleProposals: PrizePoolFeeSourceAccounting;
+    paidRuleRemovals: PrizePoolFeeSourceAccounting;
+    votes: PrizePoolFeeSourceAccounting & { feeActive: boolean };
+  };
+  treasuryLamports: number;
+  platformMonetizationLamports: number;
+  currentTurnPoolLamports: number;
+  buckets: {
+    original: {
+      currentTurnLamports: number;
+      rolloverLamports: number;
+      totalLamports: number;
+    };
+    alternative: {
+      currentTurnLamports: number;
+      rolloverLamports: number;
+      totalLamports: number;
+    };
+  };
+  totalVisiblePrizePoolLamports: number;
+  nextRolloverIfNoWinnersLamports: {
+    original: number;
+    alternative: number;
+  };
+}
+```
+
+Local compatibility endpoints added for M4.1 projections:
+
+- `POST /rule-removals`
+- `GET /rule-removals?turnId={turn_id}`
+- `POST /prize-pool-rollovers`
+- `GET /prize-pool-rollovers?turnId={turn_id}`
+- `GET /prize-pool-accounting/{turn_id}`
+
 ## Results
 
 `GET /api/v1/turns/{turn_id}/results`
@@ -193,6 +247,45 @@ interface TurnResultsResponse {
   alternative_bucket_lamports: string;
   active_rule?: PublicRule;
   payouts_available: boolean;
+}
+```
+
+Current local API compatibility endpoints for M4.2 winner projection:
+
+- `POST /winner-records/calculate-turn`
+- `GET /winner-records?turnId={turn_id}`
+
+```ts
+type WinnerCategory = "original" | "alternative";
+
+interface WinnerRecord {
+  turnId: number;
+  category: WinnerCategory;
+  player: string;
+  resultId: string;
+  activeRuleId: number | null;
+  bucketLamports: number;
+  winnerCount: number;
+  payoutLamports: number;
+  status: "calculated";
+  calculatedAt: string;
+}
+
+interface WinnerCalculationSummary {
+  turnId: number;
+  original: {
+    bucketLamports: number;
+    winnerCount: number;
+    individualPayoutLamports: number;
+    remainderLamports: number;
+  };
+  alternative: {
+    bucketLamports: number;
+    winnerCount: number;
+    individualPayoutLamports: number;
+    remainderLamports: number;
+  };
+  records: WinnerRecord[];
 }
 ```
 

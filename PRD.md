@@ -5079,22 +5079,22 @@ Implement prize pool accounting, treasury/platform monetization, payouts, rollov
 
 **Checklist:**
 
-- [ ] Track guess submission fees.
-- [ ] Track rule proposal fees.
-- [ ] Track paid rule removal fees in MVP.
-- [ ] Track vote fees from turn 100 onward (free before turn 100).
-- [ ] Apply treasury/platform monetization logic.
-- [ ] Split post-fee prize pool into original and alternative buckets.
-- [ ] Track rollover per bucket.
-- [ ] Track current turn pool.
-- [ ] Track total visible prize pool.
-- [ ] Add accounting tests for each source and bucket.
+- [x] Track guess submission fees.
+- [x] Track rule proposal fees.
+- [x] Track paid rule removal fees in MVP.
+- [x] Track vote fees from turn 100 onward (free before turn 100).
+- [x] Apply treasury/platform monetization logic.
+- [x] Split post-fee prize pool into original and alternative buckets.
+- [x] Track rollover per bucket.
+- [x] Track current turn pool.
+- [x] Track total visible prize pool.
+- [x] Add accounting tests for each source and bucket.
 
 **Approval criteria:**
 
-- [ ] Prize pool math is deterministic.
-- [ ] Original and alternative buckets are separated.
-- [ ] Rollover is correct when no winners exist.
+- [x] Prize pool math is deterministic.
+- [x] Original and alternative buckets are separated.
+- [x] Rollover is correct when no winners exist.
 
 ---
 
@@ -5104,20 +5104,20 @@ Implement prize pool accounting, treasury/platform monetization, payouts, rollov
 
 **Checklist:**
 
-- [ ] Identify original rule winners.
-- [ ] Identify alternative rule winners.
-- [ ] Handle no-winner cases.
-- [ ] Handle multiple winners.
-- [ ] Calculate individual payout per bucket.
-- [ ] Store winner records.
-- [ ] Expose winner records to UI.
-- [ ] Add tests for zero, one, and many winners.
+- [x] Identify original rule winners.
+- [x] Identify alternative rule winners.
+- [x] Handle no-winner cases.
+- [x] Handle multiple winners.
+- [x] Calculate individual payout per bucket.
+- [x] Store winner records.
+- [x] Expose winner records to UI.
+- [x] Add tests for zero, one, and many winners.
 
 **Approval criteria:**
 
-- [ ] Winner list matches verification results.
-- [ ] Individual payout is calculated correctly.
-- [ ] UI can display payout state clearly.
+- [x] Winner list matches verification results.
+- [x] Individual payout is calculated correctly.
+- [x] UI can display payout state clearly.
 
 ---
 

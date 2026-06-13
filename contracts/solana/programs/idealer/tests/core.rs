@@ -1,7 +1,8 @@
 use anchor_lang::prelude::Pubkey;
 use idealer::domain::{
-    derive_draw_numbers, next_cycle_index, run_rule_election, split_fee, validate_action_window,
-    validate_config, validate_guess, validate_rule, ConfigValidation, ElectionCandidate,
+    calculate_prize_pool_accounting, derive_draw_numbers, next_cycle_index, run_rule_election,
+    split_fee, validate_action_window, validate_config, validate_guess, validate_rule,
+    ConfigValidation, ElectionCandidate, PrizePoolAccountingInput,
 };
 use solana_sha256_hasher::hash;
 
@@ -84,6 +85,91 @@ fn fee_split_preserves_total_lamports() {
     assert_eq!(treasury, 500_000);
     assert_eq!(prize, 9_500_000);
     assert_eq!(treasury.checked_add(prize), Some(fee));
+}
+
+#[test]
+fn prize_pool_accounting_tracks_sources_buckets_and_rollover() {
+    let accounting = calculate_prize_pool_accounting(&PrizePoolAccountingInput {
+        turn_id: 150,
+        guess_submission_count: 2,
+        rule_proposal_count: 2,
+        paid_rule_removal_count: 1,
+        vote_count: 3,
+        guess_submission_fee_lamports: 10_000_000,
+        rule_proposal_fee_lamports: 20_000_000,
+        paid_rule_removal_fee_lamports: 50_000_000,
+        vote_fee_lamports: 2_000_000,
+        treasury_fee_bps: 500,
+        original_rollover_lamports: 7,
+        alternative_rollover_lamports: 9,
+    })
+    .unwrap();
+
+    assert_eq!(accounting.guess_submissions.gross_lamports, 20_000_000);
+    assert_eq!(accounting.rule_proposals.gross_lamports, 40_000_000);
+    assert_eq!(accounting.paid_rule_removals.gross_lamports, 50_000_000);
+    assert_eq!(accounting.votes.gross_lamports, 6_000_000);
+    assert!(accounting.vote_fee_active);
+    assert_eq!(accounting.gross_fees_lamports, 116_000_000);
+    assert_eq!(accounting.treasury_lamports, 5_800_000);
+    assert_eq!(accounting.current_turn_pool_lamports, 110_200_000);
+    assert_eq!(accounting.original_bucket.current_turn_lamports, 55_100_000);
+    assert_eq!(
+        accounting.alternative_bucket.current_turn_lamports,
+        55_100_000
+    );
+    assert_eq!(accounting.original_bucket.total_lamports, 55_100_007);
+    assert_eq!(accounting.alternative_bucket.total_lamports, 55_100_009);
+    assert_eq!(accounting.total_visible_prize_pool_lamports, 110_200_016);
+    assert_eq!(
+        accounting.next_original_rollover_if_no_winners_lamports,
+        55_100_007
+    );
+    assert_eq!(
+        accounting.next_alternative_rollover_if_no_winners_lamports,
+        55_100_009
+    );
+}
+
+#[test]
+fn prize_pool_accounting_gates_vote_fees_at_turn_100() {
+    let before_gate = calculate_prize_pool_accounting(&PrizePoolAccountingInput {
+        turn_id: 99,
+        guess_submission_count: 0,
+        rule_proposal_count: 0,
+        paid_rule_removal_count: 0,
+        vote_count: 10,
+        guess_submission_fee_lamports: 10_000_000,
+        rule_proposal_fee_lamports: 20_000_000,
+        paid_rule_removal_fee_lamports: 50_000_000,
+        vote_fee_lamports: 2_000_000,
+        treasury_fee_bps: 500,
+        original_rollover_lamports: 0,
+        alternative_rollover_lamports: 0,
+    })
+    .unwrap();
+    let after_gate = calculate_prize_pool_accounting(&PrizePoolAccountingInput {
+        turn_id: 100,
+        guess_submission_count: 0,
+        rule_proposal_count: 0,
+        paid_rule_removal_count: 0,
+        vote_count: 10,
+        guess_submission_fee_lamports: 10_000_000,
+        rule_proposal_fee_lamports: 20_000_000,
+        paid_rule_removal_fee_lamports: 50_000_000,
+        vote_fee_lamports: 2_000_000,
+        treasury_fee_bps: 500,
+        original_rollover_lamports: 0,
+        alternative_rollover_lamports: 0,
+    })
+    .unwrap();
+
+    assert!(!before_gate.vote_fee_active);
+    assert_eq!(before_gate.votes.count, 0);
+    assert_eq!(before_gate.votes.gross_lamports, 0);
+    assert!(after_gate.vote_fee_active);
+    assert_eq!(after_gate.votes.count, 10);
+    assert_eq!(after_gate.votes.gross_lamports, 20_000_000);
 }
 
 #[test]
