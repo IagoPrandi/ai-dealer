@@ -31,9 +31,10 @@ import {
 } from "@idealer/rule-compiler";
 import pg from "pg";
 import { createClient } from "redis";
+import { interpretRuleWithAgent, RuleAgentError } from "./llm.js";
 
 const { Pool } = pg;
-const MAX_RULE_TEXT_BYTES = 320;
+const MAX_RULE_TEXT_BYTES = 6000;
 const RULE_PREVENTED_PATTERNS = [
   /\bignore\b.{0,40}\b(instructions?|rules?|prompt)\b/i,
   /\b(system|developer)\s+(prompt|message|instruction)\b/i,
@@ -62,8 +63,14 @@ export interface GuessReceiptRecord {
 }
 
 export interface RulePreflightResult {
+  addedOperationalClauses: string[];
+  clarityNote: string;
+  dealerMessage: string;
   maxTokens: number;
+  needsClarification: boolean;
+  normalizedText: string;
   normalizedTextHash: readonly number[];
+  officialInterpretation: string;
   officialInterpretationHash: readonly number[];
   preflightResultHash: readonly number[];
   ruleId: number;
@@ -855,7 +862,7 @@ function createRuleId() {
   return Date.now() * 1_000 + randomInt(0, 1_000);
 }
 
-function createRulePreflight(text: string): RulePreflightResult {
+async function createRulePreflight(text: string): Promise<RulePreflightResult> {
   const sanitizedText = sanitizeRuleText(text);
   const tokenCount = countRuleTokens(sanitizedText);
   const textByteLength = Buffer.byteLength(sanitizedText, "utf8");
@@ -876,8 +883,12 @@ function createRulePreflight(text: string): RulePreflightResult {
     throw new Error("RULE_TEXT_TOO_LONG");
   }
 
-  const normalizedText = sanitizedText.toLowerCase();
-  const officialInterpretation = `Compare every eligible guess using this measurable rule: ${sanitizedText}`;
+  // The dealer agent (real LLM) interprets and normalizes the rule. If the
+  // model is unreachable this throws a RuleAgentError, which the route surfaces
+  // to the user instead of submitting an un-worked rule.
+  const interpretation = await interpretRuleWithAgent(sanitizedText);
+  const normalizedText = interpretation.normalizedText;
+  const officialInterpretation = interpretation.officialInterpretation;
   const ruleId = createRuleId();
   const preflightResult = JSON.stringify({
     maxTokens: RULE_MAX_TOKENS,
@@ -888,8 +899,14 @@ function createRulePreflight(text: string): RulePreflightResult {
   });
 
   return {
+    addedOperationalClauses: interpretation.addedOperationalClauses,
+    clarityNote: interpretation.clarityNote,
+    dealerMessage: interpretation.dealerMessage,
     maxTokens: RULE_MAX_TOKENS,
+    needsClarification: interpretation.needsClarification,
+    normalizedText,
     normalizedTextHash: hashBytes(normalizedText),
+    officialInterpretation,
     officialInterpretationHash: hashBytes(officialInterpretation),
     preflightResultHash: hashBytes(preflightResult),
     ruleId,
@@ -3193,7 +3210,7 @@ if (isMainModule()) {
 
     if (request.method === "POST" && url.pathname === "/rule-preflight") {
       void readJsonBody(request)
-        .then((body) => {
+        .then(async (body) => {
           const text =
             body && typeof body === "object" && "text" in body
               ? (body as { text?: unknown }).text
@@ -3206,9 +3223,24 @@ if (isMainModule()) {
 
           try {
             sendJson(request, response, 200, {
-              preflight: createRulePreflight(text),
+              preflight: await createRulePreflight(text),
             });
           } catch (error) {
+            if (error instanceof RuleAgentError) {
+              sendJson(request, response, 502, {
+                error: error.code,
+                message:
+                  error.code === "RULE_AGENT_NOT_CONFIGURED"
+                    ? "The rule agent is not configured. Set LLM_BASE_URL and LLM_MODEL."
+                    : error.code === "RULE_AGENT_TIMEOUT"
+                      ? "The dealer agent took too long to respond. Try again."
+                      : error.code === "RULE_AGENT_BAD_RESPONSE"
+                        ? "The dealer agent returned an unusable response. Try rephrasing the rule."
+                        : "The dealer agent is unavailable. Make sure the model is running and try again.",
+              });
+              return;
+            }
+
             const code =
               error instanceof Error ? error.message : "RULE_REJECTED";
             sendJson(request, response, 400, {

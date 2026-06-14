@@ -88,7 +88,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     turn_duration_cycle: [7_200, 7_200, 28_800, 28_800],
                     rule_election_cutoff_bps: 7_500,
                     guess_cutoff_bps: 9_670,
-                    max_rule_tokens: 80,
+                    max_rule_tokens: 1000,
                     top_voted_finalist_count: 3,
                     random_finalist_count: 7,
                     max_rule_proposals_per_wallet_per_turn: 5,

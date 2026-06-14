@@ -47,6 +47,16 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-06-13 (Rule agent, token limit, wallet hardening)
+
+- Opened `PRD.md` and `.claude/skills/idealer-design-system/SKILL.md` before working, as required.
+- Raised `RULE_MAX_TOKENS` from 80 to 1000 in `packages/constants`, `.env.example`, and the on-chain config bootstrap (`devnet_bootstrap.rs`); raised `MAX_RULE_TEXT_BYTES` from 320 to 6000 in the API and the Anchor program so 1000-token rules fit on-chain.
+- Wired a real AI Rule Compiler: new `apps/api/src/llm.ts` calls an OpenAI-compatible/Ollama endpoint (`LLM_BASE_URL`/`LLM_MODEL`) to interpret and normalize the proposed rule. `/rule-preflight` now returns the dealer message, normalized text, official interpretation, and added operational clauses; if the model is unreachable it returns a typed `RULE_AGENT_*` error instead of a silent template.
+- Reworked the rule composer review step to display the dealer-worked rule (normalized text, official interpretation, operational clauses, clarification flag) and block submission when clarification is needed.
+- Over-limit input now shows a light warning only when exceeding the limit and blocks the send/review action; hardened the wallet guard so the composer surfaces a clear "wallet connection failed / reconnect" message instead of an empty error.
+- Verified with `pnpm --filter @idealer/api typecheck`, `pnpm --filter @idealer/web typecheck`, and `pnpm --filter @idealer/api test` (14/14 pass). The Anchor program and on-chain `GlobalConfig` must be rebuilt/redeployed/re-initialized for the new byte and token caps to take effect on devnet.
+- No milestone checkbox was ticked; milestone approval still requires explicit user confirmation.
+
 ### 2026-06-12
 
 - Opened `PRD.md`, `AGENTS.md`, and `.claude/skills` before working on the chat and wallet configuration UI alignment, as required.

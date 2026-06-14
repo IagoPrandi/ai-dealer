@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { RULE_MAX_TOKENS } from "@idealer/constants";
 import { address } from "@solana/kit";
 import {
   useSolanaClient,
@@ -641,7 +642,7 @@ export function RuleVotingPanel() {
                     </div>
                     <div>
                       <dt>Tokens</dt>
-                      <dd>{rule.tokenCount}/80</dd>
+                      <dd>{rule.tokenCount}/{RULE_MAX_TOKENS}</dd>
                     </div>
                   </dl>
 

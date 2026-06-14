@@ -49,8 +49,16 @@ function hashArray(byte: number) {
 
 function proposal(turnId: number, ruleId: number): RuleProposalRecord {
   return {
-    maxTokens: 80,
+    addedOperationalClauses: [],
+    clarityNote: "",
+    dealerMessage: "Win if at least four of your numbers are drawn.",
+    maxTokens: 1000,
+    needsClarification: false,
+    normalizedText:
+      "Win if at least 4 of your guessed numbers appear in the draw.",
     normalizedTextHash: hashArray(1),
+    officialInterpretation:
+      "Compare every eligible guess by counting how many of its numbers appear in the draw; a guess wins when at least four match.",
     officialInterpretationHash: hashArray(2),
     preflightResultHash: hashArray(3),
     proposer: wallet,

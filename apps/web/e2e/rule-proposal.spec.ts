@@ -8,8 +8,17 @@ test("free-form rule composer enforces token limit and requires wallet for devne
       contentType: "application/json",
       json: {
         preflight: {
-          maxTokens: 80,
+          addedOperationalClauses: [],
+          clarityNote: "",
+          dealerMessage:
+            "Got it — the guess whose even total is closest to the drawn total wins.",
+          maxTokens: 1000,
+          needsClarification: false,
+          normalizedText:
+            "The guess with the even total closest to the drawn total wins.",
           normalizedTextHash: Array.from({ length: 32 }, (_, index) => index),
+          officialInterpretation:
+            "Compare every eligible guess by the absolute distance between its even total and the drawn total; the smallest distance wins.",
           officialInterpretationHash: Array.from(
             { length: 32 },
             (_, index) => 31 - index,
@@ -32,16 +41,18 @@ test("free-form rule composer enforces token limit and requires wallet for devne
   const reviewButton = page.getByRole("button", { name: "Review proposal" });
 
   await expect(reviewButton).toBeDisabled();
+  // Each "wordN" entry counts as two approximate tokens (letters + number), so
+  // 600 entries (~1200 tokens) exceeds the 1000-token limit.
   await ruleInput.fill(
-    Array.from({ length: 81 }, (_, index) => `word${index}`).join(" "),
+    Array.from({ length: 600 }, (_, index) => `word${index}`).join(" "),
   );
-  await expect(page.getByText(/over the limit/)).toBeVisible();
+  await expect(page.getByText(/over the .*-token limit/)).toBeVisible();
   await expect(reviewButton).toBeDisabled();
 
   await ruleInput.fill(
     "The guess with the closest even total to the drawn total wins.",
   );
-  await expect(page.locator(".sanitized-preview p")).toHaveText(
+  await expect(page.locator(".sanitized-preview p").first()).toHaveText(
     "The guess with the closest even total to the drawn total wins.",
   );
   await reviewButton.click();

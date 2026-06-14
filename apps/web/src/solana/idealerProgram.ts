@@ -73,8 +73,14 @@ export interface ActiveTurnSnapshot {
 }
 
 export interface RulePreflightResult {
+  addedOperationalClauses: string[];
+  clarityNote: string;
+  dealerMessage: string;
   maxTokens: number;
+  needsClarification: boolean;
+  normalizedText: string;
   normalizedTextHash: readonly number[];
+  officialInterpretation: string;
   officialInterpretationHash: readonly number[];
   preflightResultHash: readonly number[];
   ruleId: number;

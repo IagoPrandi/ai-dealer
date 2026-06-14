@@ -1,4 +1,4 @@
-export const RULE_MAX_TOKENS = 80;
+export const RULE_MAX_TOKENS = 1000;
 export const MAX_REMOVABLE_NUMBERS = 4;
 export const LAMPORTS_PER_SOL = 1_000_000_000;
 

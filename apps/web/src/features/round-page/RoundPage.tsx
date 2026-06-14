@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { address } from "@solana/kit";
+import { RULE_MAX_TOKENS } from "@idealer/constants";
 import { useSolanaClient, useWalletConnection } from "@solana/react-hooks";
 import {
   deriveRoundAccounts,
@@ -705,7 +706,7 @@ export function RoundPage({ turnId: rawTurnId }: { turnId: string }) {
                       </div>
                       <div>
                         <dt>Tokens</dt>
-                        <dd>{rule.tokenCount}/80</dd>
+                        <dd>{rule.tokenCount}/{RULE_MAX_TOKENS}</dd>
                       </div>
                       <div>
                         <dt>Account</dt>

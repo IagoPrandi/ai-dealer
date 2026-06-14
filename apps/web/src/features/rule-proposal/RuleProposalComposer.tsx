@@ -29,8 +29,7 @@ import {
   type RuleProposalReceipt,
 } from "../../solana/idealerProgram";
 
-const RULE_WARNING_THRESHOLD = 64;
-const RULE_MAX_CHARACTERS = 320;
+const RULE_MAX_CHARACTERS = 6000;
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_IDEALER_API_URL ?? "http://localhost:3002";
 const INSPIRATION_EXAMPLES = [
@@ -145,6 +144,20 @@ function normalizeProposalError(error: unknown) {
   }
 
   if (
+    normalizedMessage.includes("wallet connection failed") ||
+    normalizedMessage.includes("not connected") ||
+    normalizedMessage.includes("no wallet") ||
+    normalizedMessage.includes("disconnected") ||
+    normalizedMessage.trim().length === 0
+  ) {
+    return {
+      code: "WALLET_CONNECTION_FAILED",
+      message:
+        "The wallet connection dropped. Reconnect your wallet and try submitting again.",
+    };
+  }
+
+  if (
     normalizedMessage.includes("action window") ||
     normalizedMessage.includes("turn is not open") ||
     normalizedMessage.includes("no active turn") ||
@@ -198,7 +211,12 @@ async function persistRuleProposal(receipt: RuleProposalReceipt) {
 
 export function RuleProposalComposer() {
   const client = useSolanaClient();
-  const { connected, wallet } = useWalletConnection();
+  const {
+    connected,
+    error: connectionError,
+    status: connectionStatus,
+    wallet,
+  } = useWalletConnection();
   const [ruleText, setRuleText] = useState("");
   const [step, setStep] = useState<ComposerStep>("compose");
   const [preflight, setPreflight] = useState<RulePreflightResult | null>(null);
@@ -218,7 +236,6 @@ export function RuleProposalComposer() {
   const walletAddress = wallet?.account.address.toString();
   const isEmpty = sanitizedPreview.length === 0;
   const isOverLimit = tokenCount > RULE_MAX_TOKENS;
-  const isNearLimit = tokenCount >= RULE_WARNING_THRESHOLD && !isOverLimit;
   const isSubmitting =
     feedback.status === "preflighting" ||
     feedback.status === "awaiting_approval" ||
@@ -295,7 +312,7 @@ export function RuleProposalComposer() {
     }
 
     setFeedback({
-      message: "Running server-side token and safety preflight.",
+      message: "The dealer is interpreting and normalizing your rule.",
       status: "preflighting",
     });
 
@@ -319,10 +336,28 @@ export function RuleProposalComposer() {
       return;
     }
 
-    if (!connected || !wallet || !walletAddress) {
+    if (preflight.needsClarification) {
+      setFeedback({
+        code: "RULE_NEEDS_CLARIFICATION",
+        message:
+          preflight.clarityNote ||
+          "The dealer needs a clearer, measurable rule. Edit it and try again.",
+        status: "failed",
+      });
+      return;
+    }
+
+    if (
+      !connected ||
+      !wallet ||
+      !walletAddress ||
+      connectionStatus !== "connected"
+    ) {
       setFeedback({
         code: "WALLET_NOT_CONNECTED",
-        message: "Connect a Solana devnet wallet before submitting your rule.",
+        message: connectionError
+          ? "The wallet connection failed. Reconnect your wallet and try again."
+          : "Connect a Solana devnet wallet before submitting your rule.",
         status: "failed",
       });
       return;
@@ -526,10 +561,8 @@ export function RuleProposalComposer() {
               <span
                 className={
                   isOverLimit
-                    ? "proposal-token-pill over"
-                    : isNearLimit
-                      ? "proposal-token-pill warning"
-                      : "proposal-token-pill"
+                    ? "proposal-token-pill warning"
+                    : "proposal-token-pill"
                 }
               >
                 {preflight?.tokenCount ?? tokenCount}/{RULE_MAX_TOKENS}
@@ -562,17 +595,49 @@ export function RuleProposalComposer() {
                     </h2>
                   </div>
                 </article>
+                {preflight?.dealerMessage ? (
+                  <article className="proposal-bubble-ai">
+                    <Sparkles aria-hidden="true" size={16} />
+                    <div>
+                      <strong>Dealer worked your rule</strong>
+                      <p>{preflight.dealerMessage}</p>
+                    </div>
+                  </article>
+                ) : null}
                 <div className="sanitized-preview proposal-bubble-user">
-                  <span>Sanitized rule text</span>
+                  <span>Your rule text</span>
                   <p>{preflight?.sanitizedText ?? sanitizedPreview}</p>
                 </div>
+                {preflight?.needsClarification ? (
+                  <article
+                    className="guess-status-card proposal-status-card failed"
+                    role="alert"
+                  >
+                    <strong>Needs clarification</strong>
+                    <p>
+                      {preflight.clarityNote ||
+                        "The dealer could not interpret this rule objectively. Edit it and try again."}
+                    </p>
+                  </article>
+                ) : null}
                 <div className="mock-check proposal-chat-card">
-                  <span>Official interpretation preview</span>
-                  <p>
-                    Compare every eligible guess using this measurable rule:{" "}
-                    {preflight?.sanitizedText ?? sanitizedPreview}
-                  </p>
+                  <span>Normalized rule</span>
+                  <p>{preflight?.normalizedText ?? sanitizedPreview}</p>
                 </div>
+                <div className="mock-check proposal-chat-card">
+                  <span>Official interpretation</span>
+                  <p>{preflight?.officialInterpretation ?? sanitizedPreview}</p>
+                </div>
+                {preflight && preflight.addedOperationalClauses.length > 0 ? (
+                  <div className="mock-check proposal-chat-card">
+                    <span>Added operational clauses</span>
+                    <ul>
+                      {preflight.addedOperationalClauses.map((clause) => (
+                        <li key={clause}>{clause}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
                 <div className="mock-check proposal-chat-card">
                   <span>Preflight commitment</span>
                   <p>
@@ -749,21 +814,15 @@ export function RuleProposalComposer() {
               </button>
               <p
                 className={
-                  isOverLimit
-                    ? "token-guidance error"
-                    : isNearLimit
-                      ? "token-guidance warning"
-                      : "token-guidance"
+                  isOverLimit ? "token-guidance warning" : "token-guidance"
                 }
                 id="rule-token-guidance"
               >
                 {isOverLimit
-                  ? `Rule is ${tokenCount - RULE_MAX_TOKENS} approximate token${
+                  ? `Your rule is ${tokenCount - RULE_MAX_TOKENS} token${
                       tokenCount - RULE_MAX_TOKENS === 1 ? "" : "s"
-                    } over the limit. Shorten it before review.`
-                  : isNearLimit
-                    ? "Approaching the token limit. Keep the condition concise and measurable."
-                    : "Write freely. Server preflight is authoritative."}
+                    } over the ${RULE_MAX_TOKENS}-token limit. Trim it a little before sending it to the dealer.`
+                  : "Write freely. The dealer reviews your rule before submission."}
               </p>
             </nav>
           ) : (
@@ -781,7 +840,7 @@ export function RuleProposalComposer() {
               {connected ? (
                 <button
                   className="platform-primary-button proposal-primary-button"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || preflight?.needsClarification === true}
                   onClick={submitProposal}
                   type="button"
                 >

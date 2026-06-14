@@ -19,7 +19,7 @@ use domain::{
 declare_id!("6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4");
 
 pub const TURN_DURATION_CYCLE_LEN: usize = 4;
-pub const MAX_RULE_TEXT_BYTES: usize = 320;
+pub const MAX_RULE_TEXT_BYTES: usize = 6000;
 pub const BASIS_POINTS_DENOMINATOR: u16 = 10_000;
 
 #[program]
