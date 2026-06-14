@@ -638,6 +638,31 @@ export function RuleProposalComposer() {
                     </ul>
                   </div>
                 ) : null}
+                {preflight?.decision ? (
+                  <div
+                    className={`mock-check proposal-chat-card${
+                      preflight.decision === "VALID" ? "" : " failed"
+                    }`}
+                  >
+                    <span>Compiled &amp; tested</span>
+                    <p>
+                      {preflight.decision === "VALID"
+                        ? `The dealer compiled this into a verifiable ${
+                            preflight.ruleMode === "ranking"
+                              ? "ranking rule (best score wins)"
+                              : "win/lose rule"
+                          }.`
+                        : preflight.reasonSummary ||
+                          "This rule could not be compiled into a verifiable condition."}
+                      {typeof preflight.finalConfidence === "number"
+                        ? ` Confidence ${(preflight.finalConfidence * 100).toFixed(0)}%.`
+                        : ""}
+                      {preflight.difficultyClass
+                        ? ` Difficulty: ${preflight.difficultyClass}.`
+                        : ""}
+                    </p>
+                  </div>
+                ) : null}
                 <div className="mock-check proposal-chat-card">
                   <span>Preflight commitment</span>
                   <p>
@@ -840,7 +865,12 @@ export function RuleProposalComposer() {
               {connected ? (
                 <button
                   className="platform-primary-button proposal-primary-button"
-                  disabled={isSubmitting || preflight?.needsClarification === true}
+                  disabled={
+                    isSubmitting ||
+                    preflight?.needsClarification === true ||
+                    (preflight?.decision !== undefined &&
+                      preflight.decision !== "VALID")
+                  }
                   onClick={submitProposal}
                   type="button"
                 >

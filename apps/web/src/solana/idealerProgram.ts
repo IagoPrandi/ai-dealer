@@ -75,7 +75,12 @@ export interface ActiveTurnSnapshot {
 export interface RulePreflightResult {
   addedOperationalClauses: string[];
   clarityNote: string;
+  // Compile-gate verdict: the rule is only proposable when decision === "VALID".
+  compiledArtifactHash?: string | null;
+  decision?: "VALID" | "INVALID";
   dealerMessage: string;
+  difficultyClass?: string;
+  finalConfidence?: number;
   maxTokens: number;
   needsClarification: boolean;
   normalizedText: string;
@@ -83,7 +88,9 @@ export interface RulePreflightResult {
   officialInterpretation: string;
   officialInterpretationHash: readonly number[];
   preflightResultHash: readonly number[];
+  reasonSummary?: string;
   ruleId: number;
+  ruleMode?: "predicate" | "ranking";
   sanitizedText: string;
   sanitizedTextHash: readonly number[];
   tokenCount: number;

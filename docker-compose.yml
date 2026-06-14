@@ -58,6 +58,8 @@ services:
       LLM_BASE_URL: ${LLM_CONTAINER_BASE_URL:-http://host.docker.internal:11434/v1}
       LLM_MODEL: ${LLM_MODEL:-gemma4:latest}
       LLM_API_KEY: ${LLM_API_KEY:-ollama}
+      LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-180000}
+      LLM_SEED: ${LLM_SEED:-7}
       LLM_PRIMARY_PROVIDER: ${LLM_PRIMARY_PROVIDER:-local-openai-compatible}
       LLM_PRIMARY_BASE_URL: ${LLM_PRIMARY_CONTAINER_BASE_URL:-http://host.docker.internal:11434/v1}
       LLM_PRIMARY_MODEL: ${LLM_PRIMARY_MODEL:-gemma4:latest}
@@ -122,6 +124,8 @@ services:
       LLM_BASE_URL: ${LLM_CONTAINER_BASE_URL:-http://host.docker.internal:11434/v1}
       LLM_MODEL: ${LLM_MODEL:-gemma4:latest}
       LLM_API_KEY: ${LLM_API_KEY:-ollama}
+      LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-180000}
+      LLM_SEED: ${LLM_SEED:-7}
       LLM_PRIMARY_PROVIDER: ${LLM_PRIMARY_PROVIDER:-local-openai-compatible}
       LLM_PRIMARY_BASE_URL: ${LLM_PRIMARY_CONTAINER_BASE_URL:-http://host.docker.internal:11434/v1}
       LLM_PRIMARY_MODEL: ${LLM_PRIMARY_MODEL:-gemma4:latest}

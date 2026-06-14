@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { evaluateRule } from "@idealer/rule-runtime";
-import type { RuleAst } from "@idealer/rule-schema";
+import { evaluatePredicate, scoreGuess } from "@idealer/rule-runtime";
+import { isRankingRule, type RuleAst } from "@idealer/rule-schema";
 
 export type GuessVerificationJobStatus =
   | "completed"
@@ -16,7 +16,7 @@ export interface FrozenRuleArtifact {
   normalizedText: string;
   promptContractVersion: string;
   ruleId: number;
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
 }
 
 export interface GuessVerificationJobPayload {
@@ -47,11 +47,15 @@ export interface RuleVerificationResult {
   result: VerificationOutcome;
   runtimeMs: number;
   runtimeSteps: number;
+  // Present for ranking rules: the per-guess score used by the turn-level argmax.
+  score?: number;
 }
 
 export interface GuessVerificationResult {
   activeRuleId: number | null;
   alternative: RuleVerificationResult | null;
+  alternativeDirection?: "max" | "min";
+  alternativeMode?: "predicate" | "ranking";
   completedAt: string;
   jobId: string;
   original: RuleVerificationResult;
@@ -109,10 +113,20 @@ export function verifyGuessJob(
   const alternative = job.activeRuleArtifact
     ? evaluateAlternativeRule(job, job.activeRuleArtifact)
     : null;
+  const alternativeAst = job.activeRuleArtifact?.ast;
+  const ranking = alternativeAst ? isRankingRule(alternativeAst) : false;
+  const direction =
+    ranking && alternativeAst?.schemaVersion === 2 && alternativeAst.result.type === "ranking"
+      ? alternativeAst.result.direction
+      : undefined;
 
   return {
     activeRuleId: job.activeRuleArtifact?.ruleId ?? null,
     alternative,
+    ...(job.activeRuleArtifact
+      ? { alternativeMode: ranking ? "ranking" : "predicate" }
+      : {}),
+    ...(direction ? { alternativeDirection: direction } : {}),
     completedAt,
     jobId: job.id,
     original,
@@ -193,8 +207,29 @@ function evaluateRuntimeRule(args: {
     guess: args.guess,
     ruleArtifactHash: args.ruleArtifactHash,
   });
-  const won = evaluateRule(args.ast, { draw: args.draw, guess: args.guess });
-  const result: VerificationOutcome = won ? "WIN" : "LOSE";
+
+  // Ranking rules have no absolute per-guess winner: compute a comparable score
+  // and leave `result` provisional (LOSE) until the turn-level argmax decides
+  // winners. Predicate rules resolve WIN/LOSE here.
+  if (isRankingRule(args.ast)) {
+    const score = scoreGuess(args.ast, { draw: args.draw, guess: args.guess });
+    const outputHash = hashJson({ branch: args.branch, inputHash, score });
+    return {
+      inputHash,
+      matchedRuleBranch: args.branch,
+      outputHash,
+      result: "LOSE",
+      runtimeMs: 0,
+      runtimeSteps: 1,
+      score,
+    };
+  }
+
+  const evaluation = evaluatePredicate(args.ast, {
+    draw: args.draw,
+    guess: args.guess,
+  });
+  const result: VerificationOutcome = evaluation.result;
   const outputHash = hashJson({
     branch: args.branch,
     inputHash,
@@ -207,7 +242,7 @@ function evaluateRuntimeRule(args: {
     outputHash,
     result,
     runtimeMs: 0,
-    runtimeSteps: 1,
+    runtimeSteps: evaluation.runtimeSteps,
   };
 }
 

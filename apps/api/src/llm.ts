@@ -18,6 +18,7 @@ export interface RuleAgentConfig {
   apiKey: string;
   baseUrl: string;
   model: string;
+  seed: number;
   timeoutMs: number;
 }
 
@@ -38,6 +39,10 @@ export class RuleAgentError extends Error {
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+// Fixed seed + temperature 0 make the dealer deterministic: the same rule text
+// always compiles to the same normalized rule, which the on-chain hashes depend
+// on. Override with LLM_SEED only if you intentionally want a different anchor.
+const DEFAULT_SEED = 7;
 
 const SYSTEM_PROMPT = [
   "You are the Idealer Dealer, the AI Rule Compiler for an on-chain lottery game.",
@@ -65,22 +70,45 @@ const SYSTEM_PROMPT = [
   "- addedOperationalClauses: each guard clause you added (empty array if none).",
   "- dealerMessage: a short, friendly note in English to the player about what",
   "  you understood (1-2 sentences).",
+  "",
+  "Do not think out loud or add any text before or after the JSON. Output the",
+  "JSON object only. Be deterministic: identical input must produce identical",
+  "output.",
+  "",
+  "Example input: the guess with the most drawn numbers wins",
+  'Example output: {"normalizedText":"The winning guess is the one whose six',
+  ' numbers include the most numbers that also appear in the official draw.",',
+  ' "officialInterpretation":"For each guess, count how many of its six numbers',
+  ' appear in the six-number official draw; the highest count wins.",',
+  ' "addedOperationalClauses":["If two or more guesses tie on the count, the',
+  ' earliest valid submission wins."],"needsClarification":false,',
+  ' "clarityNote":"","dealerMessage":"Got it - the guess matching the most',
+  ' drawn numbers takes the round."}',
 ].join("\n");
+
+// Returns the first env var that is set AND non-blank. We deliberately do NOT
+// use `??` here: optional overrides like LLM_MODEL_INTERPRET are commonly
+// present but empty (`LLM_MODEL_INTERPRET=`), and `??` only falls through on
+// null/undefined, so an empty override would shadow the real LLM_MODEL value.
+function firstConfigured(...values: Array<string | undefined>): string {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+  return "";
+}
 
 export function resolveRuleAgentConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): RuleAgentConfig {
-  const baseUrl = (
-    env.LLM_BASE_URL ??
-    env.LLM_PRIMARY_BASE_URL ??
-    ""
-  ).trim();
-  const model = (
-    env.LLM_MODEL_INTERPRET ??
-    env.LLM_MODEL ??
-    env.LLM_PRIMARY_MODEL ??
-    ""
-  ).trim();
+  const baseUrl = firstConfigured(env.LLM_BASE_URL, env.LLM_PRIMARY_BASE_URL);
+  const model = firstConfigured(
+    env.LLM_MODEL_INTERPRET,
+    env.LLM_MODEL,
+    env.LLM_PRIMARY_MODEL,
+  );
 
   if (!baseUrl || !model) {
     throw new RuleAgentError(
@@ -95,10 +123,14 @@ export function resolveRuleAgentConfig(
       ? timeoutRaw
       : DEFAULT_TIMEOUT_MS;
 
+  const seedRaw = Number(env.LLM_SEED ?? DEFAULT_SEED);
+  const seed = Number.isInteger(seedRaw) ? seedRaw : DEFAULT_SEED;
+
   return {
     apiKey: (env.LLM_API_KEY ?? "").trim(),
     baseUrl: baseUrl.replace(/\/+$/, ""),
     model,
+    seed,
     timeoutMs,
   };
 }
@@ -175,10 +207,15 @@ function coerceInterpretation(value: unknown): RuleAgentInterpretation {
   };
 }
 
-export async function interpretRuleWithAgent(
-  sanitizedText: string,
-  config: RuleAgentConfig = resolveRuleAgentConfig(),
-): Promise<RuleAgentInterpretation> {
+// Shared transport: POST an OpenAI-compatible chat completion and recover the
+// JSON text from the response (stripping <think> blocks / falling back to the
+// `reasoning` field for local thinking models). Returns the raw text candidate;
+// callers extract/validate the JSON object themselves.
+async function requestAgentJson(
+  systemPrompt: string,
+  userText: string,
+  config: RuleAgentConfig,
+): Promise<string> {
   const headers: Record<string, string> = {
     "content-type": "application/json",
   };
@@ -191,13 +228,17 @@ export async function interpretRuleWithAgent(
     response = await fetch(`${config.baseUrl}/chat/completions`, {
       body: JSON.stringify({
         messages: [
-          { content: SYSTEM_PROMPT, role: "system" },
-          { content: sanitizedText, role: "user" },
+          { content: systemPrompt, role: "system" },
+          { content: userText, role: "user" },
         ],
         model: config.model,
         response_format: { type: "json_object" },
+        seed: config.seed,
         stream: false,
-        temperature: 0.2,
+        // Greedy decoding (temperature 0, top_p 1) so the same rule text always
+        // compiles to the same on-chain hashes. No nucleus/temperature jitter.
+        temperature: 0,
+        top_p: 1,
       }),
       headers,
       method: "POST",
@@ -236,16 +277,88 @@ export async function interpretRuleWithAgent(
     );
   }
 
-  const content = (
-    payload as { choices?: Array<{ message?: { content?: unknown } }> }
-  )?.choices?.[0]?.message?.content;
+  const message = (
+    payload as {
+      choices?: Array<{
+        message?: { content?: unknown; reasoning?: unknown };
+      }>;
+    }
+  )?.choices?.[0]?.message;
 
-  if (typeof content !== "string" || content.trim().length === 0) {
+  const rawContent =
+    typeof message?.content === "string" ? message.content : "";
+  const reasoning =
+    typeof message?.reasoning === "string" ? message.reasoning : "";
+  const strippedContent = rawContent
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .trim();
+  const candidate = strippedContent || rawContent.trim() || reasoning.trim();
+
+  if (candidate.length === 0) {
     throw new RuleAgentError(
       "RULE_AGENT_BAD_RESPONSE",
       "The rule agent response did not contain any content.",
     );
   }
 
-  return coerceInterpretation(extractJsonObject(content));
+  return candidate;
+}
+
+export async function interpretRuleWithAgent(
+  sanitizedText: string,
+  config: RuleAgentConfig = resolveRuleAgentConfig(),
+): Promise<RuleAgentInterpretation> {
+  const candidate = await requestAgentJson(SYSTEM_PROMPT, sanitizedText, config);
+  return coerceInterpretation(extractJsonObject(candidate));
+}
+
+// Compile step (PRD §7.3.1): ask the model to EMIT a rule AST conforming to the
+// DSL JSON schema. The JSON schema is embedded in the prompt and json_object
+// response mode is requested (Ollama-compatible). The returned object is raw and
+// is schema-validated by @idealer/rule-compiler — this function never decides
+// validity. Throws a typed RuleAgentError so the caller can escalate.
+export async function compileRuleToAst(
+  normalizedText: string,
+  config: RuleAgentConfig = resolveRuleAgentConfig(),
+): Promise<unknown> {
+  // The grammar is conveyed compactly (node list + two worked examples) rather
+  // than by embedding the full JSON schema, which bloats the prompt and stalls
+  // small local models. Zod re-validates the output against the real schema, so
+  // syntactic guidance here is enough.
+  const systemPrompt = [
+    "You are the Idealer Rule Compiler. Convert the player's winning rule into a",
+    "single JSON object (a rule AST). Output the JSON object only — no prose, no",
+    "markdown, no comments.",
+    "",
+    "The AST may only read `guess` (the player's 6 numbers) and `draw` (the 6",
+    "official numbers). Top-level shape: {\"schemaVersion\":2,\"result\":<result>}.",
+    "<result> is either:",
+    '  {"type":"predicate","predicate":<pred>}  — absolute win/lose per guess, or',
+    '  {"type":"ranking","direction":"max"|"min","tieBreak":"share_pool",',
+    '   "score":<scalar>}  — best score wins (use for "whoever matches the most ...").',
+    "",
+    "Array nodes: {\"kind\":\"source\",\"source\":\"guess\"|\"draw\"};",
+    '  {"kind":"digits","place":"units"|"tens","of":<array>};',
+    '  {"kind":"intersection"|"difference","left":<array>,"right":<array>};',
+    '  {"kind":"map_arithmetic","op":"add"|"sub"|"mul"|"div"|"mod","operand":<int>,"of":<array>}.',
+    "Scalar nodes: {\"kind\":\"lit\",\"value\":<int>};",
+    '  {"kind":"reduce","op":"sum"|"product"|"count"|"min"|"max"|"range_span","of":<array>};',
+    '  {"kind":"arith","op":...,"left":<scalar>,"right":<scalar>};{"kind":"at","index":<int>,"of":<array>}.',
+    "Predicate nodes: {\"kind\":\"compare\",\"op\":\"eq\"|\"neq\"|\"lt\"|\"lte\"|\"gt\"|\"gte\",\"left\":<scalar>,\"right\":<scalar>};",
+    '  {"kind":"count_at_least","value":<int>,"of":<array>};{"kind":"and"|"or","clauses":[<pred>...]};{"kind":"not","clause":<pred>}.',
+    "",
+    'Example "whoever matches the most units digits": {"schemaVersion":2,"result":',
+    '{"type":"ranking","direction":"max","tieBreak":"share_pool","score":{"kind":',
+    '"reduce","op":"count","of":{"kind":"intersection","left":{"kind":"digits",',
+    '"place":"units","of":{"kind":"source","source":"guess"}},"right":{"kind":',
+    '"digits","place":"units","of":{"kind":"source","source":"draw"}}}}}}',
+    "",
+    'Example "win if at least 4 of your numbers are drawn": {"schemaVersion":2,',
+    '"result":{"type":"predicate","predicate":{"kind":"count_at_least","value":4,',
+    '"of":{"kind":"intersection","left":{"kind":"source","source":"guess"},',
+    '"right":{"kind":"source","source":"draw"}}}}}',
+  ].join("\n");
+
+  const candidate = await requestAgentJson(systemPrompt, normalizedText, config);
+  return extractJsonObject(candidate);
 }

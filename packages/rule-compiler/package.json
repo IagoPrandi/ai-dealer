@@ -15,7 +15,8 @@
   "dependencies": {
     "@idealer/agent-core": "workspace:*",
     "@idealer/rule-runtime": "workspace:*",
-    "@idealer/rule-schema": "workspace:*"
+    "@idealer/rule-schema": "workspace:*",
+    "@idealer/rule-test-harness": "workspace:*"
   },
   "devDependencies": {
     "@idealer/config": "workspace:*"

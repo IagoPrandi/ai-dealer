@@ -19,10 +19,13 @@ import {
   VOTE_FEE_START_TURN,
 } from "@idealer/constants";
 import {
+  compileRuleArtifact,
+  resolveRankingWinners,
   validateAndPrecompileRule,
   type AgentModelIdentity,
   type AgentProviderAttemptLog,
   type CompilerConfidenceBreakdown,
+  type RuleAstProvider,
   type RuleCompiledArtifact,
   type RuleConfidenceAction,
   type RuleValidationDecision,
@@ -31,7 +34,12 @@ import {
 } from "@idealer/rule-compiler";
 import pg from "pg";
 import { createClient } from "redis";
-import { interpretRuleWithAgent, RuleAgentError } from "./llm.js";
+import {
+  compileRuleToAst,
+  interpretRuleWithAgent,
+  resolveRuleAgentConfig,
+  RuleAgentError,
+} from "./llm.js";
 
 const { Pool } = pg;
 const MAX_RULE_TEXT_BYTES = 6000;
@@ -65,7 +73,14 @@ export interface GuessReceiptRecord {
 export interface RulePreflightResult {
   addedOperationalClauses: string[];
   clarityNote: string;
+  // Compile gate (PRD §7.5): the rule is only payable/proposable when the dealer
+  // can compile it into a verifiable AST. These fields carry that verdict so the
+  // frontend can gate submission on `decision === "VALID"`.
+  compiledArtifactHash?: string | null;
+  decision?: RuleValidationDecision;
   dealerMessage: string;
+  difficultyClass?: string;
+  finalConfidence?: number;
   maxTokens: number;
   needsClarification: boolean;
   normalizedText: string;
@@ -73,7 +88,9 @@ export interface RulePreflightResult {
   officialInterpretation: string;
   officialInterpretationHash: readonly number[];
   preflightResultHash: readonly number[];
+  reasonSummary?: string;
   ruleId: number;
+  ruleMode?: "predicate" | "ranking" | undefined;
   sanitizedText: string;
   sanitizedTextHash: readonly number[];
   tokenCount: number;
@@ -270,11 +287,20 @@ export interface RuleVerificationResultRecord {
   result: VerificationOutcome;
   runtimeMs: number;
   runtimeSteps: number;
+  // For ranking rules the per-guess outcome is provisional (LOSE) until the
+  // turn-level argmax; `score` carries the comparable value used by that argmax.
+  score?: number;
 }
 
 export interface GuessVerificationResultRecord {
   activeRuleId: number | null;
   alternative: RuleVerificationResultRecord | null;
+  // Ranking rules ("whoever matches the most ...") decide winners by comparing
+  // scores across all guesses. The worker records the rule mode + direction so
+  // winner calculation can run the argmax. Absent/`predicate` keeps the existing
+  // per-guess WIN/LOSE behaviour.
+  alternativeDirection?: "max" | "min";
+  alternativeMode?: "predicate" | "ranking";
   auditLogHash?: string;
   completedAt: string;
   jobId: string;
@@ -890,26 +916,51 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
   const normalizedText = interpretation.normalizedText;
   const officialInterpretation = interpretation.officialInterpretation;
   const ruleId = createRuleId();
+
+  // Compile gate: this FREE step asks the dealer to emit a verifiable AST and
+  // validates it. Payment/proposal is only allowed when `decision === "VALID"`.
+  // Policy: ANY rule is allowed except those depending on external events or
+  // that cannot be verified — both are rejected here by the compiler.
+  const agentConfig = resolveRuleAgentConfig();
+  const astProvider: RuleAstProvider = async ({ normalizedText: text }) =>
+    compileRuleToAst(text, agentConfig);
+  const validation = await compileRuleArtifact(
+    { model: agentConfig.model, prompt: normalizedText, ruleId, tokenCount },
+    { astProvider },
+  );
+
   const preflightResult = JSON.stringify({
+    compiledArtifactHash: validation.artifactHash,
+    decision: validation.decision,
     maxTokens: RULE_MAX_TOKENS,
     ruleId,
     sanitizedText,
     tokenCount,
-    version: 1,
+    version: 2,
   });
 
   return {
     addedOperationalClauses: interpretation.addedOperationalClauses,
-    clarityNote: interpretation.clarityNote,
+    clarityNote:
+      validation.decision === "VALID"
+        ? interpretation.clarityNote
+        : interpretation.clarityNote || validation.log.reasonSummary,
+    compiledArtifactHash: validation.artifactHash,
+    decision: validation.decision,
     dealerMessage: interpretation.dealerMessage,
+    difficultyClass: validation.log.difficultyClass,
+    finalConfidence: validation.log.confidence.final_confidence,
     maxTokens: RULE_MAX_TOKENS,
-    needsClarification: interpretation.needsClarification,
+    needsClarification:
+      interpretation.needsClarification || validation.decision !== "VALID",
     normalizedText,
     normalizedTextHash: hashBytes(normalizedText),
     officialInterpretation,
     officialInterpretationHash: hashBytes(officialInterpretation),
     preflightResultHash: hashBytes(preflightResult),
+    reasonSummary: validation.log.reasonSummary,
     ruleId,
+    ruleMode: validation.artifact?.ruleMode,
     sanitizedText,
     sanitizedTextHash: hashBytes(sanitizedText),
     tokenCount,
@@ -1706,6 +1757,30 @@ function isWinnerForCategory(
     : result.alternative?.result === "WIN";
 }
 
+// Comparative ("ranking") alternative rules pick winners by best score across
+// all guesses (ties share the pool), instead of an absolute per-guess WIN/LOSE.
+function selectRankingWinners(
+  results: GuessVerificationResultRecord[],
+): GuessVerificationResultRecord[] | null {
+  const ranking = results.filter(
+    (result) =>
+      result.alternativeMode === "ranking" &&
+      typeof result.alternative?.score === "number",
+  );
+  if (ranking.length === 0) {
+    return null;
+  }
+  const direction = ranking[0]?.alternativeDirection === "min" ? "min" : "max";
+  const winners = resolveRankingWinners(
+    ranking.map((result) => ({
+      player: result.resultId,
+      score: result.alternative?.score ?? 0,
+    })),
+    direction,
+  );
+  return ranking.filter((result) => winners.has(result.resultId));
+}
+
 function calculateCategoryWinnerRecords(args: {
   bucketLamports: number;
   calculatedAt: string;
@@ -1713,8 +1788,15 @@ function calculateCategoryWinnerRecords(args: {
   results: GuessVerificationResultRecord[];
   turnId: number;
 }) {
-  const winningResults = args.results
-    .filter((result) => isWinnerForCategory(result, args.category))
+  // Ranking rules only apply to the alternative (community) category; the
+  // original rule is always an absolute predicate.
+  const rankingWinners =
+    args.category === "alternative" ? selectRankingWinners(args.results) : null;
+  const winningResults = (
+    rankingWinners ??
+    args.results.filter((result) => isWinnerForCategory(result, args.category))
+  )
+    .slice()
     .sort((left, right) => left.player.localeCompare(right.player));
   const winnerCount = winningResults.length;
   const payoutLamports =

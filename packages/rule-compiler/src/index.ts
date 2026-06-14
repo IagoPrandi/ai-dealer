@@ -16,8 +16,16 @@ import {
   type CompilerConfidenceThresholds,
   type CompilerConfidenceWeights,
 } from "@idealer/agent-core";
-import { ruleAstSchema, type RuleAst } from "@idealer/rule-schema";
-import { evaluateRule } from "@idealer/rule-runtime";
+import {
+  MAX_AST_DEPTH,
+  ruleAstSchema,
+  type RuleAst,
+} from "@idealer/rule-schema";
+import {
+  generateAndRunTests,
+  RULE_TEST_HARNESS_VERSION,
+  type RuleDifficultyClass,
+} from "@idealer/rule-test-harness";
 
 export type {
   AgentModelIdentity,
@@ -33,10 +41,23 @@ export {
   createLocalOnlyProviderRoutingPolicy,
 } from "@idealer/agent-core";
 
+export {
+  getRuleAstJsonSchema,
+  isRankingRule,
+  ruleAstSchema,
+  type RuleAst,
+} from "@idealer/rule-schema";
+export {
+  resolveRankingWinners,
+  type RankingEntry,
+} from "@idealer/rule-runtime";
+export { type RuleDifficultyClass } from "@idealer/rule-test-harness";
+
 export type RuleConfidenceAction = CompilerConfidenceAction;
 export type RuleValidationDecision = "INVALID" | "VALID";
 export type RuleValidationReasonCode =
   | "AMBIGUOUS_RULE"
+  | "COMPLEXITY_EXCEEDED"
   | "EXTERNAL_DEPENDENCY"
   | "PROVIDER_DISAGREEMENT"
   | "PROVIDER_MALFORMED_RESPONSE"
@@ -47,6 +68,15 @@ export type RuleValidationReasonCode =
   | "SUPPORTED_RULE"
   | "UNSUPPORTED_RULE"
   | "UNSAFE_RUNTIME_BOUNDS";
+
+// Async hook that asks an LLM provider to emit a rule AST (raw JSON) for the
+// given normalized text. Injected by the API (apps/api/src/llm.ts). When absent,
+// the compiler falls back to the deterministic offline pattern compiler.
+export type RuleAstProvider = (params: {
+  normalizedText: string;
+  prompt: string;
+  providerConfig: AgentProviderConfig;
+}) => Promise<unknown>;
 
 export interface RuleCompilationRequest {
   model?: string;
@@ -84,6 +114,8 @@ export interface RuleValidationLog {
   confidenceThresholds: CompilerConfidenceThresholds;
   confidenceWeights: CompilerConfidenceWeights;
   decision: RuleValidationDecision;
+  difficultyClass: RuleDifficultyClass;
+  estimatedWinRate: number;
   evaluatedTestCases: RuleValidationTestResult[];
   fallbackRateSample: number;
   fallbackTriggered: boolean;
@@ -111,11 +143,16 @@ export interface RuleValidationResult {
 
 export interface RuleCompiledArtifact {
   ast: RuleAst;
+  complexityScore: number;
+  constrainedDecodingUsed: boolean;
+  difficultyClass: RuleDifficultyClass;
   modelIdentity: AgentModelIdentity;
   normalizedText: string;
   promptContractVersion: string;
   providerPath: AgentProviderAttemptLog[];
-  schemaVersion: 1;
+  ruleMode: "predicate" | "ranking";
+  schemaVersion: 1 | 2;
+  testHarnessVersion: string;
 }
 
 export type ProviderFailureMode =
@@ -192,37 +229,32 @@ export function createCompilerPlaceholder(request: RuleCompilationRequest): Rule
   };
 }
 
-export function validateAndPrecompileRule(
+function shouldContinueAfterAttempt(attempts: ProviderEvaluation[]): boolean {
+  // Re-ask another provider when the current one disagrees with the first
+  // completed opinion (PRD §7.4 escalation), up to the tertiary tiebreaker.
+  return attempts.length >= 2 && hasProviderDisagreement(attempts) && attempts.length < 3;
+}
+
+// Turns the collected per-provider attempts into the final validation result
+// (selection, disagreement resolution, artifact, audit log). Shared by the
+// offline and LLM orchestrators.
+function finalizeValidation(
   request: RuleCompilationRequest,
+  timestamp: string,
+  attempts: ProviderEvaluation[],
+  fallbackAttempt: ProviderEvaluation,
 ): RuleValidationResult {
-  const timestamp = request.timestamp ?? new Date().toISOString();
-  const providerRouting = normalizeProviderRouting(request);
-  const attempts: ProviderEvaluation[] = [];
   let finalEvaluation: ProviderEvaluation | null = null;
-
-  for (const providerConfig of providerRouting.providers) {
-    const evaluation = evaluateProviderAttempt(request, timestamp, providerConfig);
-    attempts.push(evaluation);
-
+  for (const evaluation of attempts) {
     if (evaluation.status === "accepted") {
-      if (attempts.length >= 2 && hasProviderDisagreement(attempts) && attempts.length < 3) {
-        continue;
-      }
       finalEvaluation = evaluation;
-      break;
     }
-
     if (evaluation.status === "rejected" && evaluation.confidenceAction === "REJECT") {
       finalEvaluation = evaluation;
       break;
     }
   }
-
-  finalEvaluation ??= attempts.at(-1) ?? evaluateProviderAttempt(
-    request,
-    timestamp,
-    createDefaultProviderRoutingPolicy().providers[0] as AgentProviderConfig,
-  );
+  finalEvaluation ??= attempts.at(-1) ?? fallbackAttempt;
 
   const providerPath = resolveProviderPath(attempts);
   const fallbackTriggered = providerPath.length > 1;
@@ -254,16 +286,9 @@ export function validateAndPrecompileRule(
     providerDisagreementRateSample === 1 && disagreementResolution === null,
   );
 
-  const artifact =
-    selectedAttempt.decision === "VALID" && selectedAttempt.ast
-      ? {
-          ast: selectedAttempt.ast,
-          modelIdentity: selectedAttempt.modelIdentity,
-          normalizedText: selectedAttempt.normalizedText,
-          promptContractVersion: PROMPT_CONTRACT.version,
-          providerPath,
-          schemaVersion: 1 as const,
-        }
+  const artifact: RuleCompiledArtifact | null =
+    selectedAttempt.decision === "VALID" && selectedAttempt.artifact
+      ? { ...selectedAttempt.artifact, providerPath }
       : null;
   const artifactHash = artifact ? hashJson(artifact) : null;
   const validationLogId = hashJson({
@@ -286,6 +311,8 @@ export function validateAndPrecompileRule(
       confidenceThresholds: COMPILER_CONFIDENCE_THRESHOLDS,
       confidenceWeights: COMPILER_CONFIDENCE_WEIGHTS,
       decision: selectedAttempt.decision,
+      difficultyClass: selectedAttempt.difficultyClass,
+      estimatedWinRate: selectedAttempt.estimatedWinRate,
       evaluatedTestCases: selectedAttempt.evaluatedTestCases,
       fallbackRateSample: fallbackTriggered ? 1 : 0,
       fallbackTriggered,
@@ -306,6 +333,77 @@ export function validateAndPrecompileRule(
   };
 }
 
+/**
+ * Deterministic, offline compilation: the AST comes from the pattern compiler.
+ * Used as the fallback when no LLM provider is configured and by tests.
+ */
+export function validateAndPrecompileRule(
+  request: RuleCompilationRequest,
+): RuleValidationResult {
+  const timestamp = request.timestamp ?? new Date().toISOString();
+  const providerRouting = normalizeProviderRouting(request);
+  const attempts: ProviderEvaluation[] = [];
+
+  for (const providerConfig of providerRouting.providers) {
+    const evaluation = evaluateProviderAttempt(request, timestamp, providerConfig);
+    attempts.push(evaluation);
+    if (evaluation.status === "accepted" && !shouldContinueAfterAttempt(attempts)) {
+      break;
+    }
+    if (evaluation.status === "rejected" && evaluation.confidenceAction === "REJECT") {
+      break;
+    }
+  }
+
+  const fallback =
+    attempts[0] ??
+    evaluateProviderAttempt(
+      request,
+      timestamp,
+      createDefaultProviderRoutingPolicy().providers[0] as AgentProviderConfig,
+    );
+  return finalizeValidation(request, timestamp, attempts, fallback);
+}
+
+/**
+ * LLM-backed compilation: the AST is emitted by the injected provider via
+ * constrained decoding (PRD §7.3.1). Preserves the provider fallback / escalation
+ * / disagreement machinery; the LLM call happens inside the provider loop.
+ */
+export async function compileRuleArtifact(
+  request: RuleCompilationRequest,
+  options: { astProvider: RuleAstProvider },
+): Promise<RuleValidationResult> {
+  const timestamp = request.timestamp ?? new Date().toISOString();
+  const providerRouting = normalizeProviderRouting(request);
+  const attempts: ProviderEvaluation[] = [];
+
+  for (const providerConfig of providerRouting.providers) {
+    const evaluation = await evaluateProviderAttemptAsync(
+      request,
+      timestamp,
+      providerConfig,
+      options.astProvider,
+    );
+    attempts.push(evaluation);
+    if (evaluation.status === "accepted" && !shouldContinueAfterAttempt(attempts)) {
+      break;
+    }
+    if (evaluation.status === "rejected" && evaluation.confidenceAction === "REJECT") {
+      break;
+    }
+  }
+
+  const fallback =
+    attempts[0] ??
+    evaluateProviderAttempt(
+      request,
+      timestamp,
+      createDefaultProviderRoutingPolicy().providers[0] as AgentProviderConfig,
+    );
+  return finalizeValidation(request, timestamp, attempts, fallback);
+}
+
 interface ProviderEvaluation {
   artifact: RuleCompiledArtifact | null;
   artifactHash: string | null;
@@ -314,6 +412,8 @@ interface ProviderEvaluation {
   confidence: CompilerConfidenceBreakdown;
   confidenceAction: RuleConfidenceAction;
   decision: RuleValidationDecision;
+  difficultyClass: RuleDifficultyClass;
+  estimatedWinRate: number;
   evaluatedTestCases: RuleValidationTestResult[];
   generatedTestCases: RuleValidationTestCase[];
   modelIdentity: AgentModelIdentity;
@@ -324,11 +424,17 @@ interface ProviderEvaluation {
   status: AgentProviderAttemptStatus;
 }
 
-function evaluateProviderAttempt(
+interface AttemptContext {
+  forcedFailure: ProviderFailureMode | undefined;
+  modelIdentity: AgentModelIdentity;
+  normalizedText: string;
+  reasonCodes: Set<RuleValidationReasonCode>;
+}
+
+function buildAttemptContext(
   request: RuleCompilationRequest,
-  timestamp: string,
   providerConfig: AgentProviderConfig,
-): ProviderEvaluation {
+): AttemptContext {
   const forcedFailure = request.providerFailureModeByPriority?.[providerConfig.priority];
   const modelIdentity = {
     ...providerConfig.identity,
@@ -347,6 +453,8 @@ function evaluateProviderAttempt(
   if (forcedFailure === "malformed_response") {
     reasonCodes.add("PROVIDER_MALFORMED_RESPONSE");
   }
+  // Schema-constrained decoding is mandatory for AST emission (PRD §7.3.1). A
+  // provider without it cannot reliably emit a schema-valid AST.
   if (
     forcedFailure === "schema_validation_failure" ||
     !providerConfig.capabilities.grammar_constrained_decoding ||
@@ -363,34 +471,75 @@ function evaluateProviderAttempt(
     reasonCodes.add("EXTERNAL_DEPENDENCY");
   }
 
-  const ast = compileSupportedRule(normalizedText);
+  return { forcedFailure, modelIdentity, normalizedText, reasonCodes };
+}
+
+// Shared validation core: given a candidate AST (from the offline pattern
+// compiler OR an LLM provider), run schema validation, runtime-bound checks, the
+// deterministic test harness, difficulty classification, and the composite
+// confidence score, and produce a decision + artifact. Pure and synchronous.
+function validateResolvedAst(
+  request: RuleCompilationRequest,
+  providerConfig: AgentProviderConfig,
+  ctx: AttemptContext,
+  rawAst: unknown,
+): ProviderEvaluation {
+  const { forcedFailure, modelIdentity, normalizedText } = ctx;
+  const reasonCodes = ctx.reasonCodes;
+
+  const parsed =
+    rawAst != null && !forcedFailure ? ruleAstSchema.safeParse(rawAst) : null;
+  const ast: RuleAst | null = parsed?.success ? parsed.data : null;
+
   if (!ast || forcedFailure) {
     reasonCodes.add("UNSUPPORTED_RULE");
   } else {
     reasonCodes.add("SUPPORTED_RULE");
   }
-
-  const schemaResult = ast && !forcedFailure ? ruleAstSchema.safeParse(ast) : null;
-  if (!schemaResult?.success) {
+  if (rawAst != null && !forcedFailure && !parsed?.success) {
     reasonCodes.add("SCHEMA_INVALID");
   }
 
-  const hasSafeRuntimeBounds = ast && !forcedFailure ? validateRuntimeBounds(ast) : false;
+  const bounds = ast && !forcedFailure ? validateRuntimeBounds(ast) : null;
+  const hasSafeRuntimeBounds = bounds?.safe === true;
   if (!hasSafeRuntimeBounds) {
     reasonCodes.add("UNSAFE_RUNTIME_BOUNDS");
   }
+  if (bounds && !bounds.withinComplexity) {
+    reasonCodes.add("COMPLEXITY_EXCEEDED");
+  }
 
-  const generatedTestCases = ast && !forcedFailure ? generateRuleTestCases(ast) : [];
-  const evaluatedTestCases = ast
-    ? generatedTestCases.map((testCase) => {
-        const actual = evaluateRule(ast, testCase);
-        return { ...testCase, actual, passed: actual === testCase.expected };
-      })
-    : [];
+  // Deterministic test harness + bounded Monte-Carlo difficulty (PRD §6.8, §7.8).
+  const harness =
+    ast && hasSafeRuntimeBounds ? generateAndRunTests(ast) : null;
+  const difficultyClass: RuleDifficultyClass =
+    harness?.difficulty.difficultyClass ?? "IMPOSSIBLE";
+  const estimatedWinRate = harness?.difficulty.estimatedWinRate ?? 0;
 
-  if (evaluatedTestCases.some((testCase) => !testCase.passed)) {
+  // Policy: ANY verifiable rule is allowed; the only hard limits are external
+  // dependencies and unverifiability. Difficulty (ALWAYS_TRUE / IMPOSSIBLE /
+  // TOO_EASY) is a label, never a gate. The harness only blocks when a runtime
+  // safety/determinism/serialization check actually fails.
+  if (harness && harness.coverageScore < 1) {
     reasonCodes.add("RUNTIME_TEST_FAILED");
   }
+
+  // Represent harness checks in the existing test-case log shape (draw/guess are
+  // exercised internally by the harness over many Monte-Carlo samples).
+  const countedCases = (harness?.cases ?? []).filter((c) => c.counted);
+  const evaluatedTestCases: RuleValidationTestResult[] = countedCases.map(
+    (c) => ({
+      draw: [],
+      expected: true,
+      guess: [],
+      name: c.name,
+      actual: c.passed,
+      passed: c.passed,
+    }),
+  );
+  const generatedTestCases: RuleValidationTestCase[] = evaluatedTestCases.map(
+    ({ draw, expected, guess, name }) => ({ draw, expected, guess, name }),
+  );
 
   const confidence = computeConfidenceBreakdown({
     evaluatedTestCases,
@@ -398,7 +547,7 @@ function evaluateProviderAttempt(
     hasExternalDependency: reasonCodes.has("EXTERNAL_DEPENDENCY"),
     hasSafeRuntimeBounds,
     hasSupportedRule: ast !== null,
-    schemaValid: schemaResult?.success === true,
+    schemaValid: parsed?.success === true,
     tokenCount: request.tokenCount,
   });
 
@@ -409,20 +558,36 @@ function evaluateProviderAttempt(
     request.providerConfidenceActionByPriority?.[providerConfig.priority] ??
     selectCompilerConfidenceAction(confidence.final_confidence);
   const decision: RuleValidationDecision =
-    blockingReasons.length === 0 && confidenceAction === "ACCEPT" ? "VALID" : "INVALID";
+    blockingReasons.length === 0 && confidenceAction === "ACCEPT"
+      ? "VALID"
+      : "INVALID";
+
+  const constrainedDecodingUsed =
+    providerConfig.capabilities.grammar_constrained_decoding === true &&
+    providerConfig.capabilities.json_schema_response === true;
+  const ruleMode: "predicate" | "ranking" =
+    ast?.schemaVersion === 2 && ast.result.type === "ranking"
+      ? "ranking"
+      : "predicate";
 
   const artifact: RuleCompiledArtifact | null =
     decision === "VALID" && ast
       ? {
           ast,
+          complexityScore: bounds?.complexity ?? 0,
+          constrainedDecodingUsed,
+          difficultyClass,
           modelIdentity,
           normalizedText,
           promptContractVersion: PROMPT_CONTRACT.version,
           providerPath: [],
-          schemaVersion: 1,
+          ruleMode,
+          schemaVersion: ast.schemaVersion,
+          testHarnessVersion: RULE_TEST_HARNESS_VERSION,
         }
       : null;
   const artifactHash = artifact ? hashJson(artifact) : null;
+
   return {
     artifact,
     artifactHash,
@@ -431,6 +596,8 @@ function evaluateProviderAttempt(
     confidence,
     confidenceAction,
     decision,
+    difficultyClass,
+    estimatedWinRate,
     evaluatedTestCases,
     generatedTestCases,
     modelIdentity,
@@ -440,6 +607,42 @@ function evaluateProviderAttempt(
     requestShape: providerConfig.request_shape,
     status: determineAttemptStatus(forcedFailure, confidenceAction, decision),
   };
+}
+
+// Offline (deterministic) attempt: AST comes from the pattern compiler. Used as
+// the fallback when no LLM provider is injected and by the deterministic tests.
+function evaluateProviderAttempt(
+  request: RuleCompilationRequest,
+  _timestamp: string,
+  providerConfig: AgentProviderConfig,
+): ProviderEvaluation {
+  const ctx = buildAttemptContext(request, providerConfig);
+  const rawAst = ctx.forcedFailure ? null : compileSupportedRule(ctx.normalizedText);
+  return validateResolvedAst(request, providerConfig, ctx, rawAst);
+}
+
+// LLM attempt: AST is emitted by the injected provider (constrained decoding).
+async function evaluateProviderAttemptAsync(
+  request: RuleCompilationRequest,
+  _timestamp: string,
+  providerConfig: AgentProviderConfig,
+  astProvider: RuleAstProvider,
+): Promise<ProviderEvaluation> {
+  const ctx = buildAttemptContext(request, providerConfig);
+  let rawAst: unknown = null;
+  if (!ctx.forcedFailure) {
+    try {
+      rawAst = await astProvider({
+        normalizedText: ctx.normalizedText,
+        prompt: request.prompt,
+        providerConfig,
+      });
+    } catch {
+      ctx.reasonCodes.add("PROVIDER_MALFORMED_RESPONSE");
+      rawAst = null;
+    }
+  }
+  return validateResolvedAst(request, providerConfig, ctx, rawAst);
 }
 
 function normalizeProviderRouting(
@@ -617,79 +820,55 @@ function parseMatchCountRule(text: string) {
   return Number.isInteger(value) && value >= 1 && value <= 6 ? value : null;
 }
 
-function validateRuntimeBounds(ast: RuleAst) {
-  if (ast.node.kind === "match_count_at_least") {
-    return Number.isInteger(ast.node.value) && (ast.node.value ?? 0) >= 1 && (ast.node.value ?? 0) <= 6;
-  }
-  return ast.node.kind === "ordered_exact" || ast.node.kind === "sum_equals";
+const MAX_COMPLEXITY = 64;
+
+interface RuntimeBounds {
+  safe: boolean;
+  withinComplexity: boolean;
+  complexity: number;
 }
 
-function generateRuleTestCases(ast: RuleAst): RuleValidationTestCase[] {
-  if (ast.node.kind === "match_count_at_least") {
-    const threshold = ast.node.value ?? 4;
-    const draw = [1, 2, 3, 4, 5, 6];
-    const passingGuess = [
-      ...draw.slice(0, threshold),
-      ...[90, 91, 92, 93, 94, 95].slice(0, 6 - threshold),
-    ];
-    const failingMatchCount = Math.max(0, threshold - 1);
-    const failingGuess = [
-      ...draw.slice(0, failingMatchCount),
-      ...[90, 91, 92, 93, 94, 95].slice(0, 6 - failingMatchCount),
-    ];
-    return [
-      {
-        draw,
-        expected: true,
-        guess: passingGuess,
-        name: "threshold-or-better matches",
-      },
-      {
-        draw,
-        expected: false,
-        guess: failingGuess,
-        name: "below-threshold matches",
-      },
-      {
-        draw: [10, 20, 30, 40, 50, 60],
-        expected: false,
-        guess: [1, 2, 3, 4, 5, 6],
-        name: "zero matches",
-      },
-    ];
+// Measures AST depth + node count and confirms the rule is within the runtime
+// sandbox limits (PRD §7.7). Zod already guarantees only known node kinds, so
+// this layer enforces depth/complexity bounds. Handles both legacy v1 and v2.
+function validateRuntimeBounds(ast: RuleAst): RuntimeBounds {
+  if (ast.schemaVersion === 1) {
+    const value = ast.node.value;
+    const valid =
+      ast.node.kind === "ordered_exact" ||
+      ast.node.kind === "sum_equals" ||
+      (ast.node.kind === "match_count_at_least" &&
+        Number.isInteger(value) &&
+        (value ?? 0) >= 1 &&
+        (value ?? 0) <= 6);
+    return { safe: valid, withinComplexity: true, complexity: 1 };
   }
 
-  if (ast.node.kind === "sum_equals") {
-    return [
-      {
-        draw: [1, 2, 3, 4, 5, 6],
-        expected: true,
-        guess: [6, 5, 4, 3, 2, 1],
-        name: "same sum different order",
-      },
-      {
-        draw: [1, 2, 3, 4, 5, 6],
-        expected: false,
-        guess: [1, 2, 3, 4, 5, 7],
-        name: "different sum",
-      },
-    ];
-  }
+  let complexity = 0;
+  const measure = (node: unknown, depth: number): number => {
+    complexity += 1;
+    if (depth > MAX_AST_DEPTH) {
+      return depth;
+    }
+    if (!node || typeof node !== "object") {
+      return depth;
+    }
+    let maxChild = depth;
+    for (const value of Object.values(node as Record<string, unknown>)) {
+      if (value && typeof value === "object") {
+        maxChild = Math.max(maxChild, measure(value, depth + 1));
+      }
+    }
+    return maxChild;
+  };
 
-  return [
-    {
-      draw: [1, 2, 3, 4, 5, 6],
-      expected: true,
-      guess: [1, 2, 3, 4, 5, 6],
-      name: "exact ordered match",
-    },
-    {
-      draw: [1, 2, 3, 4, 5, 6],
-      expected: false,
-      guess: [6, 5, 4, 3, 2, 1],
-      name: "same numbers wrong order",
-    },
-  ];
+  const maxDepth = measure(ast.result, 1);
+  const withinComplexity = complexity <= MAX_COMPLEXITY;
+  return {
+    safe: maxDepth <= MAX_AST_DEPTH && withinComplexity,
+    withinComplexity,
+    complexity,
+  };
 }
 
 function computeConfidenceBreakdown(input: {

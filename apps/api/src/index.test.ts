@@ -402,6 +402,54 @@ test("winner calculation stores original and alternative winners with per-bucket
   assert.equal(summary.winners.alternative.winnerCount, 1);
 });
 
+test("ranking alternative rule picks the best-score guesses as winners (ties share)", () => {
+  resetApiStateForTests();
+  saveReceiptForWallet(240, wallet, [1, 2, 3, 4, 5, 6]);
+  saveReceiptForWallet(240, walletTwo, [1, 2, 3, 4, 5, 7]);
+  saveReceiptForWallet(240, walletThree, [90, 91, 92, 93, 94, 95]);
+  saveFulfilledDraw(240);
+
+  const { jobs } = createGuessVerificationJobsForTurn(240);
+  const byPlayer = new Map(jobs.map((job) => [job.payload.wallet, job]));
+  const saveRanking = (
+    player: string,
+    jobId: string,
+    resultByte: string,
+    score: number,
+  ) => {
+    const base = resultForJob({
+      alternative: "LOSE",
+      jobId,
+      original: "LOSE",
+      player,
+      resultByte,
+      turnId: 240,
+    });
+    saveGuessVerificationResult({
+      ...base,
+      alternativeDirection: "max",
+      alternativeMode: "ranking",
+      alternative: { ...base.alternative!, score },
+    });
+  };
+
+  // wallet and walletTwo tie for the top score; walletThree is lower.
+  saveRanking(wallet, byPlayer.get(wallet)!.id, "b", 5);
+  saveRanking(walletTwo, byPlayer.get(walletTwo)!.id, "c", 5);
+  saveRanking(walletThree, byPlayer.get(walletThree)!.id, "d", 2);
+
+  const winners = calculateAndStoreWinnerRecords(240, "2026-06-12T12:18:00.000Z");
+  const altPlayers = listWinnerRecords(240)
+    .filter((record) => record.category === "alternative")
+    .map((record) => record.player)
+    .sort();
+
+  assert.equal(winners.alternative.winnerCount, 2);
+  assert.deepEqual(altPlayers, [wallet, walletTwo].sort());
+  // The single highest scorer alone would not tie; the lower scorer never wins.
+  assert.ok(!altPlayers.includes(walletThree));
+});
+
 test("reward distribution uses individual alternative payout basis and splits elected-rule voters", () => {
   const rewards = calculateRewardDistribution({
     activeRuleId: 7,

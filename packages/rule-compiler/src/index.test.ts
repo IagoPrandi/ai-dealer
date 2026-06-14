@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  compileRuleArtifact,
   createLocalOnlyProviderRoutingPolicy,
   createCompilerPlaceholder,
   getRuleValidationPromptContract,
@@ -16,8 +17,9 @@ test("validates and precompiles a clear match-count rule", () => {
   });
 
   assert.equal(result.decision, "VALID");
-  assert.equal(result.artifact?.ast.node.kind, "match_count_at_least");
-  assert.equal(result.artifact?.ast.node.value, 4);
+  const ast = result.artifact?.ast;
+  assert.ok(ast?.schemaVersion === 1 && ast.node.kind === "match_count_at_least");
+  assert.equal(ast.node.value, 4);
   assert.match(result.artifactHash ?? "", /^[0-9a-f]{64}$/);
   assert.equal(result.log.confidenceAction, "ACCEPT");
   assert.ok(result.log.confidence.final_confidence >= 0.85);
@@ -35,9 +37,11 @@ test("validates supported sum and exact-order rules", () => {
   });
 
   assert.equal(sum.decision, "VALID");
-  assert.equal(sum.artifact?.ast.node.kind, "sum_equals");
+  const sumAst = sum.artifact?.ast;
+  assert.ok(sumAst?.schemaVersion === 1 && sumAst.node.kind === "sum_equals");
   assert.equal(exact.decision, "VALID");
-  assert.equal(exact.artifact?.ast.node.kind, "ordered_exact");
+  const exactAst = exact.artifact?.ast;
+  assert.ok(exactAst?.schemaVersion === 1 && exactAst.node.kind === "ordered_exact");
 });
 
 test("fails ambiguous or external-dependent rules closed", () => {
@@ -101,7 +105,71 @@ test("keeps the legacy compiler placeholder backed by validation", () => {
     tokenCount: 9,
   });
 
-  assert.equal(result.ast.node.kind, "match_count_at_least");
+  assert.ok(
+    result.ast.schemaVersion === 1 && result.ast.node.kind === "match_count_at_least",
+  );
+});
+
+test("compiles an LLM-emitted v2 ranking AST (digit rule) to a VALID artifact", async () => {
+  const rankingAst = {
+    schemaVersion: 2,
+    result: {
+      type: "ranking",
+      direction: "max",
+      tieBreak: "share_pool",
+      score: {
+        kind: "reduce",
+        op: "count",
+        of: {
+          kind: "intersection",
+          left: { kind: "digits", place: "units", of: { kind: "source", source: "guess" } },
+          right: { kind: "digits", place: "units", of: { kind: "source", source: "draw" } },
+        },
+      },
+    },
+  };
+  const result = await compileRuleArtifact(
+    {
+      prompt: "The winner is whoever matches the most units digits of the draw.",
+      tokenCount: 14,
+    },
+    { astProvider: async () => rankingAst },
+  );
+
+  assert.equal(result.decision, "VALID");
+  assert.equal(result.artifact?.ruleMode, "ranking");
+  assert.equal(result.artifact?.schemaVersion, 2);
+  assert.ok(result.artifact?.constrainedDecodingUsed);
+  assert.match(result.artifactHash ?? "", /^[0-9a-f]{64}$/);
+});
+
+test("rejects an LLM response that is not a valid AST and escalates", async () => {
+  const result = await compileRuleArtifact(
+    { prompt: "Win if the numbers feel lucky.", tokenCount: 7 },
+    { astProvider: async () => ({ totally: "not an ast" }) },
+  );
+
+  assert.equal(result.decision, "INVALID");
+  assert.equal(result.artifactHash, null);
+  assert.ok(result.log.reasonCodes.includes("SCHEMA_INVALID"));
+});
+
+test("allows an LLM-emitted ALWAYS_TRUE rule but labels its difficulty", async () => {
+  // Policy: difficulty never gates. A verifiable, external-free rule is allowed.
+  const alwaysTrue = {
+    schemaVersion: 2,
+    result: {
+      type: "predicate",
+      predicate: { kind: "count_at_least", value: 0, of: { kind: "source", source: "guess" } },
+    },
+  };
+  const result = await compileRuleArtifact(
+    { prompt: "Everyone always wins.", tokenCount: 5 },
+    { astProvider: async () => alwaysTrue },
+  );
+
+  assert.equal(result.decision, "VALID");
+  assert.equal(result.log.difficultyClass, "ALWAYS_TRUE");
 });
 
 test("exposes the prompt contract for audit", () => {

@@ -203,6 +203,9 @@ importers:
       '@idealer/rule-schema':
         specifier: workspace:*
         version: link:../rule-schema
+      '@idealer/rule-test-harness':
+        specifier: workspace:*
+        version: link:../rule-test-harness
     devDependencies:
       '@idealer/config':
         specifier: workspace:*
