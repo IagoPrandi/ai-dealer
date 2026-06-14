@@ -26,6 +26,7 @@ import {
   RULE_TEST_HARNESS_VERSION,
   type RuleDifficultyClass,
 } from "@idealer/rule-test-harness";
+import { RULE_COMPILER_SKILL_VERSION } from "./skill.js";
 
 export type {
   AgentModelIdentity,
@@ -48,10 +49,17 @@ export {
   type RuleAst,
 } from "@idealer/rule-schema";
 export {
+  evaluatePredicate,
   resolveRankingWinners,
+  scoreGuess,
   type RankingEntry,
 } from "@idealer/rule-runtime";
 export { type RuleDifficultyClass } from "@idealer/rule-test-harness";
+export {
+  buildRuleCompilerSkillPrompt,
+  RULE_COMPILER_SKILL,
+  RULE_COMPILER_SKILL_VERSION,
+} from "./skill.js";
 
 export type RuleConfidenceAction = CompilerConfidenceAction;
 export type RuleValidationDecision = "INVALID" | "VALID";
@@ -152,6 +160,7 @@ export interface RuleCompiledArtifact {
   providerPath: AgentProviderAttemptLog[];
   ruleMode: "predicate" | "ranking";
   schemaVersion: 1 | 2;
+  skillVersion: string;
   testHarnessVersion: string;
 }
 
@@ -583,6 +592,7 @@ function validateResolvedAst(
           providerPath: [],
           ruleMode,
           schemaVersion: ast.schemaVersion,
+          skillVersion: RULE_COMPILER_SKILL_VERSION,
           testHarnessVersion: RULE_TEST_HARNESS_VERSION,
         }
       : null;

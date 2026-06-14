@@ -1,3 +1,5 @@
+import { buildRuleCompilerSkillPrompt } from "@idealer/rule-compiler";
+
 // Real AI Rule Compiler bridge. Talks to an OpenAI-compatible chat-completions
 // endpoint (local Ollama / vLLM / llama.cpp, or a cloud provider) so the dealer
 // actually interprets and normalizes a proposed rule before it is submitted
@@ -321,44 +323,15 @@ export async function compileRuleToAst(
   normalizedText: string,
   config: RuleAgentConfig = resolveRuleAgentConfig(),
 ): Promise<unknown> {
-  // The grammar is conveyed compactly (node list + two worked examples) rather
-  // than by embedding the full JSON schema, which bloats the prompt and stalls
-  // small local models. Zod re-validates the output against the real schema, so
-  // syntactic guidance here is enough.
-  const systemPrompt = [
-    "You are the Idealer Rule Compiler. Convert the player's winning rule into a",
-    "single JSON object (a rule AST). Output the JSON object only — no prose, no",
-    "markdown, no comments.",
-    "",
-    "The AST may only read `guess` (the player's 6 numbers) and `draw` (the 6",
-    "official numbers). Top-level shape: {\"schemaVersion\":2,\"result\":<result>}.",
-    "<result> is either:",
-    '  {"type":"predicate","predicate":<pred>}  — absolute win/lose per guess, or',
-    '  {"type":"ranking","direction":"max"|"min","tieBreak":"share_pool",',
-    '   "score":<scalar>}  — best score wins (use for "whoever matches the most ...").',
-    "",
-    "Array nodes: {\"kind\":\"source\",\"source\":\"guess\"|\"draw\"};",
-    '  {"kind":"digits","place":"units"|"tens","of":<array>};',
-    '  {"kind":"intersection"|"difference","left":<array>,"right":<array>};',
-    '  {"kind":"map_arithmetic","op":"add"|"sub"|"mul"|"div"|"mod","operand":<int>,"of":<array>}.',
-    "Scalar nodes: {\"kind\":\"lit\",\"value\":<int>};",
-    '  {"kind":"reduce","op":"sum"|"product"|"count"|"min"|"max"|"range_span","of":<array>};',
-    '  {"kind":"arith","op":...,"left":<scalar>,"right":<scalar>};{"kind":"at","index":<int>,"of":<array>}.',
-    "Predicate nodes: {\"kind\":\"compare\",\"op\":\"eq\"|\"neq\"|\"lt\"|\"lte\"|\"gt\"|\"gte\",\"left\":<scalar>,\"right\":<scalar>};",
-    '  {"kind":"count_at_least","value":<int>,"of":<array>};{"kind":"and"|"or","clauses":[<pred>...]};{"kind":"not","clause":<pred>}.',
-    "",
-    'Example "whoever matches the most units digits": {"schemaVersion":2,"result":',
-    '{"type":"ranking","direction":"max","tieBreak":"share_pool","score":{"kind":',
-    '"reduce","op":"count","of":{"kind":"intersection","left":{"kind":"digits",',
-    '"place":"units","of":{"kind":"source","source":"guess"}},"right":{"kind":',
-    '"digits","place":"units","of":{"kind":"source","source":"draw"}}}}}}',
-    "",
-    'Example "win if at least 4 of your numbers are drawn": {"schemaVersion":2,',
-    '"result":{"type":"predicate","predicate":{"kind":"count_at_least","value":4,',
-    '"of":{"kind":"intersection","left":{"kind":"source","source":"guess"},',
-    '"right":{"kind":"source","source":"draw"}}}}}',
-  ].join("\n");
-
-  const candidate = await requestAgentJson(systemPrompt, normalizedText, config);
+  // The compile-step guidance lives in the versioned `compile_rule_to_ast` agent
+  // skill (PRD §7.10/§7.12), co-located with the DSL schema in @idealer/rule-compiler.
+  // The full JSON schema is intentionally NOT embedded (it bloats the prompt and
+  // stalls small local models); the skill conveys the grammar compactly and Zod
+  // re-validates the output against the real schema.
+  const candidate = await requestAgentJson(
+    buildRuleCompilerSkillPrompt(),
+    normalizedText,
+    config,
+  );
   return extractJsonObject(candidate);
 }

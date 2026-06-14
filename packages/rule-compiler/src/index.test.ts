@@ -1,12 +1,25 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  buildRuleCompilerSkillPrompt,
   compileRuleArtifact,
   createLocalOnlyProviderRoutingPolicy,
   createCompilerPlaceholder,
   getRuleValidationPromptContract,
+  RULE_COMPILER_SKILL_VERSION,
   validateAndPrecompileRule,
 } from "./index.js";
+
+test("the compile_rule_to_ast skill prompt is versioned and covers both rule modes", () => {
+  const prompt = buildRuleCompilerSkillPrompt();
+  assert.match(RULE_COMPILER_SKILL_VERSION, /^idealer_rule_compiler_skill_/);
+  assert.ok(prompt.includes('"schemaVersion":2'));
+  assert.ok(prompt.includes("predicate") && prompt.includes("ranking"));
+  // It must teach the digit + ranking path (the previously-impossible case).
+  assert.ok(prompt.includes("digits") && prompt.includes("units"));
+  // And forbid external/unverifiable inputs.
+  assert.ok(/wallets|votes|oracle|external/i.test(prompt));
+});
 
 test("validates and precompiles a clear match-count rule", () => {
   const result = validateAndPrecompileRule({
