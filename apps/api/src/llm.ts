@@ -121,6 +121,17 @@ export function resolveEscalationModel(
   return firstConfigured(env.LLM_ESCALATION_MODEL);
 }
 
+// Whether to translate the rule to English before interpret/compile. ON by
+// default (it removes cross-language ambiguity for small models). A capable
+// multilingual model (gemma4:latest and stronger) reads Portuguese directly and
+// the rule-authoring skill already carries a Portuguese trigger glossary, so it
+// can be turned OFF to save one LLM call without losing consistency.
+export function resolveTranslateToEnglish(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return (env.LLM_TRANSLATE_TO_ENGLISH ?? "true").trim().toLowerCase() !== "false";
+}
+
 export function resolveRuleAgentConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): RuleAgentConfig {
@@ -248,6 +259,9 @@ async function requestAgentJson(
   try {
     response = await fetch(`${config.baseUrl}/chat/completions`, {
       body: JSON.stringify({
+        // Keep the model resident between the sequential preflight calls so we
+        // don't pay a cold reload on each step (Ollama honors keep_alive).
+        keep_alive: "10m",
         messages: [
           { content: systemPrompt, role: "system" },
           { content: userText, role: "user" },
@@ -363,6 +377,7 @@ export async function translateRuleToEnglish(
   try {
     response = await fetch(`${config.baseUrl}/chat/completions`, {
       body: JSON.stringify({
+        keep_alive: "10m",
         messages: [
           { content: TRANSLATE_SYSTEM_PROMPT, role: "system" },
           { content: text, role: "user" },

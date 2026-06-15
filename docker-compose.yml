@@ -60,9 +60,12 @@ services:
       LLM_API_KEY: ${LLM_API_KEY:-ollama}
       LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-180000}
       LLM_SEED: ${LLM_SEED:-7}
-      LLM_GUARDIAN_MODEL: ${LLM_GUARDIAN_MODEL:-granite4.1-guardian:8b}
+      # `-` (not `:-`) so an explicitly empty value in .env disables the feature;
+      # the default only applies when the var is entirely unset.
+      LLM_GUARDIAN_MODEL: ${LLM_GUARDIAN_MODEL-granite4.1-guardian:8b}
       LLM_GUARDIAN_TIMEOUT_MS: ${LLM_GUARDIAN_TIMEOUT_MS:-120000}
-      LLM_ESCALATION_MODEL: ${LLM_ESCALATION_MODEL:-gemma4:latest}
+      LLM_ESCALATION_MODEL: ${LLM_ESCALATION_MODEL-gemma4:e2b}
+      LLM_TRANSLATE_TO_ENGLISH: ${LLM_TRANSLATE_TO_ENGLISH:-true}
       LLM_PRIMARY_PROVIDER: ${LLM_PRIMARY_PROVIDER:-local-openai-compatible}
       LLM_PRIMARY_BASE_URL: ${LLM_PRIMARY_CONTAINER_BASE_URL:-http://host.docker.internal:11434/v1}
       LLM_PRIMARY_MODEL: ${LLM_PRIMARY_MODEL:-gemma4:latest}

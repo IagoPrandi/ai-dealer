@@ -78,6 +78,7 @@ async function score(
   try {
     response = await fetch(config.chatUrl, {
       body: JSON.stringify({
+        keep_alive: "10m",
         messages,
         model: config.model,
         stream: false,

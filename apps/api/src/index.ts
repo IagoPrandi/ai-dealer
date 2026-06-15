@@ -39,6 +39,7 @@ import {
   interpretRuleWithAgent,
   resolveEscalationModel,
   resolveRuleAgentConfig,
+  resolveTranslateToEnglish,
   RuleAgentError,
   translateRuleToEnglish,
 } from "./llm.js";
@@ -897,6 +898,22 @@ function hasPreventedRulePattern(value: string) {
   return RULE_PREVENTED_PATTERNS.some((pattern) => pattern.test(value));
 }
 
+// High-signal markers (on the English text) for rule shapes the small primary
+// model compiles unreliably: negation/inverse and compound conditions. These are
+// routed straight to the stronger escalation model.
+const COMPLEX_RULE_PATTERNS = [
+  /\b(and|or|both|either|neither)\b/i,
+  /\b(not|without|except|non)\b/i,
+  // Inverse / minimisation. Note "least" is excluded here because "at least N"
+  // is a simple threshold, not an inverse — only the superlative "the least" is.
+  /\b(miss|misses|missed|missing|fewer|fewest|lowest|smallest|wrong|incorrect)\b/i,
+  /\bthe least\b/i,
+] as const;
+
+function isComplexRule(englishText: string) {
+  return COMPLEX_RULE_PATTERNS.some((pattern) => pattern.test(englishText));
+}
+
 function createRuleId() {
   return Date.now() * 1_000 + randomInt(0, 1_000);
 }
@@ -944,27 +961,32 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
     }
   }
 
-  // 2. Faithful translation to English so the dealer + compiler + guardian all
-  // reason in one language (cross-language phrasing was a source of ambiguity).
-  const englishText = await translateRuleToEnglish(sanitizedText, agentConfig);
+  // 2. Optionally translate to English so the dealer + compiler reason in one
+  // language (removes cross-language ambiguity for small models). A capable
+  // multilingual model reads the original directly — and the rule-authoring skill
+  // carries a Portuguese trigger glossary — so this step can be turned off
+  // (LLM_TRANSLATE_TO_ENGLISH=false) to save a call without losing consistency.
+  const compileText = resolveTranslateToEnglish()
+    ? await translateRuleToEnglish(sanitizedText, agentConfig)
+    : sanitizedText;
   const ruleId = createRuleId();
 
   // A full dealer pass for a given model: interpret (human message), compile the
-  // AST from the English original (skill-guided), and check groundedness.
+  // AST from the rule text (skill-guided), and check groundedness.
   const dealerPass = async (model: string) => {
     const passConfig = { ...agentConfig, model };
-    const interpretation = await interpretRuleWithAgent(englishText, passConfig);
+    const interpretation = await interpretRuleWithAgent(compileText, passConfig);
     const astProvider: RuleAstProvider = async ({ prompt }) =>
       compileRuleToAst(prompt, passConfig);
     const validation = await compileRuleArtifact(
-      { model, prompt: englishText, ruleId, tokenCount },
+      { model, prompt: compileText, ruleId, tokenCount },
       { astProvider },
     );
     let grounded: boolean | undefined;
     if (guardianConfig.enabled && validation.decision === "VALID") {
       try {
         grounded = await checkGroundedness(
-          englishText,
+          compileText,
           interpretation.officialInterpretation,
           guardianConfig,
         );
@@ -980,12 +1002,25 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
   // 3-5. Fast pass on the primary model. Escalate to the stronger model only when
   // the fast model produced an invalid AST or the guardian flagged a drifted
   // interpretation — then re-try before blocking the player (PRD §7.3/§7.4).
-  let pass = await dealerPass(agentConfig.model);
-  let escalated = false;
+  // Proactive routing: rules with negation/inverse ("miss/fewer/least") or
+  // compound connectors ("and/or") are exactly where the small model produces a
+  // wrong-but-plausible AST the guardian can miss. Route those straight to the
+  // stronger model instead of relying on a reactive catch.
   const escalationModel = resolveEscalationModel();
+  const firstModel =
+    escalationModel && isComplexRule(compileText)
+      ? escalationModel
+      : agentConfig.model;
+
+  let pass = await dealerPass(firstModel);
+  let escalated = firstModel !== agentConfig.model;
   const needsEscalation =
     pass.validation.decision !== "VALID" || pass.grounded === false;
-  if (needsEscalation && escalationModel && escalationModel !== agentConfig.model) {
+  if (
+    needsEscalation &&
+    escalationModel &&
+    pass.model !== escalationModel
+  ) {
     // The escalation attempt must never break the preflight: if the stronger
     // model is unavailable/slow, keep the primary result and surface the note.
     try {
@@ -1036,7 +1071,7 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
     decision: validation.decision,
     dealerMessage: interpretation.dealerMessage,
     difficultyClass: validation.log.difficultyClass,
-    englishText,
+    englishText: compileText,
     escalated,
     finalConfidence: validation.log.confidence.final_confidence,
     guardianChecked: guardianConfig.enabled,
