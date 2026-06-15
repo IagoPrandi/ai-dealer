@@ -325,6 +325,77 @@ export async function interpretRuleWithAgent(
   return coerceInterpretation(extractJsonObject(candidate));
 }
 
+const TRANSLATE_SYSTEM_PROMPT = [
+  "You are a faithful translator for a lottery game. Translate the player's",
+  "winning-rule text to English. Preserve the EXACT meaning — especially:",
+  "- polarity and comparison: 'mais/more/most', 'menos/fewer/least', keep the",
+  "  direction; never flip it.",
+  "- 'errar/errou' = to miss (a number NOT drawn); 'acertar' = to match a drawn",
+  "  number. Keep miss vs match intact.",
+  "- logical connectors: 'e'=and, 'ou'=or — keep every clause.",
+  "- thresholds: 'pelo menos N', 'N ou mais' stay as written.",
+  "Do not interpret, normalize, or add anything. If the text is already English,",
+  "return it unchanged. Output ONLY the translated rule sentence, no quotes, no",
+  "labels, no extra text.",
+].join("\n");
+
+// Faithful PT/any -> English translation so the downstream English prompts (and
+// the guardian) operate without cross-language ambiguity. This intentionally does
+// NOT editorialize (that is the interpret step's job); a pure translation is far
+// less likely to flip polarity than a "rewrite as a measurable sentence" step.
+export async function translateRuleToEnglish(
+  text: string,
+  config: RuleAgentConfig = resolveRuleAgentConfig(),
+): Promise<string> {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (config.apiKey) {
+    headers.authorization = `Bearer ${config.apiKey}`;
+  }
+  let response: Response;
+  try {
+    response = await fetch(`${config.baseUrl}/chat/completions`, {
+      body: JSON.stringify({
+        messages: [
+          { content: TRANSLATE_SYSTEM_PROMPT, role: "system" },
+          { content: text, role: "user" },
+        ],
+        model: config.model,
+        seed: config.seed,
+        stream: false,
+        temperature: 0,
+        top_p: 1,
+      }),
+      headers,
+      method: "POST",
+      signal: AbortSignal.timeout(config.timeoutMs),
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "TimeoutError") {
+      throw new RuleAgentError("RULE_AGENT_TIMEOUT", "The translator did not respond in time.");
+    }
+    throw new RuleAgentError(
+      "RULE_AGENT_UNAVAILABLE",
+      `The translator endpoint is unreachable: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (!response.ok) {
+    throw new RuleAgentError("RULE_AGENT_UNAVAILABLE", `The translator returned HTTP ${response.status}.`);
+  }
+  const payload = (await response.json().catch(() => null)) as {
+    choices?: Array<{ message?: { content?: unknown; reasoning?: unknown } }>;
+  } | null;
+  const message = payload?.choices?.[0]?.message;
+  const raw = typeof message?.content === "string" ? message.content : "";
+  const reasoning = typeof message?.reasoning === "string" ? message.reasoning : "";
+  const cleaned = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim() || reasoning.trim();
+  // Strip wrapping quotes the model sometimes adds.
+  const englishText = cleaned.replace(/^["'`]+|["'`]+$/g, "").trim();
+  if (!englishText) {
+    throw new RuleAgentError("RULE_AGENT_BAD_RESPONSE", "The translator returned no text.");
+  }
+  return englishText;
+}
+
 // Compile step (PRD §7.3.1): ask the model to EMIT a rule AST conforming to the
 // DSL JSON schema. The JSON schema is embedded in the prompt and json_object
 // response mode is requested (Ollama-compatible). The returned object is raw and

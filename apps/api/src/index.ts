@@ -39,7 +39,13 @@ import {
   interpretRuleWithAgent,
   resolveRuleAgentConfig,
   RuleAgentError,
+  translateRuleToEnglish,
 } from "./llm.js";
+import {
+  checkGroundedness,
+  detectJailbreak,
+  resolveGuardianConfig,
+} from "./guardian.js";
 
 const { Pool } = pg;
 const MAX_RULE_TEXT_BYTES = 6000;
@@ -80,7 +86,11 @@ export interface RulePreflightResult {
   decision?: RuleValidationDecision;
   dealerMessage: string;
   difficultyClass?: string;
+  englishText?: string;
   finalConfidence?: number;
+  guardianChecked?: boolean;
+  guardianGrounded?: boolean | undefined;
+  guardianNote?: string | undefined;
   maxTokens: number;
   needsClarification: boolean;
   normalizedText: string;
@@ -909,60 +919,110 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
     throw new Error("RULE_TEXT_TOO_LONG");
   }
 
-  // The dealer agent (real LLM) interprets and normalizes the rule. If the
-  // model is unreachable this throws a RuleAgentError, which the route surfaces
-  // to the user instead of submitting an un-worked rule.
-  const interpretation = await interpretRuleWithAgent(sanitizedText);
+  const agentConfig = resolveRuleAgentConfig();
+  const guardianConfig = resolveGuardianConfig();
+  let guardianNote = "";
+
+  // 1. Guardian input gate (Granite Guardian) — an ML jailbreak classifier in
+  // addition to the regex guard. If the guardian is down we keep the regex guard
+  // and surface the outage rather than silently dropping the check.
+  if (guardianConfig.enabled) {
+    try {
+      if (await detectJailbreak(sanitizedText, guardianConfig)) {
+        throw new Error("RULE_PROMPT_INJECTION");
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message === "RULE_PROMPT_INJECTION") {
+        throw error;
+      }
+      guardianNote = `Guardian jailbreak check unavailable: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+    }
+  }
+
+  // 2. Faithful translation to English so the dealer + compiler + guardian all
+  // reason in one language (cross-language phrasing was a source of ambiguity).
+  const englishText = await translateRuleToEnglish(sanitizedText, agentConfig);
+
+  // 3. Interpret (English) for the human-facing message.
+  const interpretation = await interpretRuleWithAgent(englishText, agentConfig);
   const normalizedText = interpretation.normalizedText;
   const officialInterpretation = interpretation.officialInterpretation;
   const ruleId = createRuleId();
 
-  // Compile gate: this FREE step asks the dealer to emit a verifiable AST and
-  // validates it. Payment/proposal is only allowed when `decision === "VALID"`.
-  // Policy: ANY rule is allowed except those depending on external events or
-  // that cannot be verified — both are rejected here by the compiler.
-  const agentConfig = resolveRuleAgentConfig();
-  // Compile the AST from the ORIGINAL sanitized text (guided by the rich
-  // rule-authoring skill), not from the prose normalization — a small model can
-  // flip polarity while normalizing ("errar mais" -> "fewest"), and that must not
-  // corrupt the executed rule. The interpretation is still shown to the player.
+  // 4. Compile gate (FREE): emit a verifiable AST from the ENGLISH original (the
+  // rich rule-authoring skill drives intent→AST; this avoids a flipped prose
+  // normalization corrupting the executed rule). Payment is only allowed when
+  // decision === "VALID". Policy: any verifiable, external-free rule is allowed.
   const astProvider: RuleAstProvider = async ({ prompt }) =>
     compileRuleToAst(prompt, agentConfig);
   const validation = await compileRuleArtifact(
-    { model: agentConfig.model, prompt: sanitizedText, ruleId, tokenCount },
+    { model: agentConfig.model, prompt: englishText, ruleId, tokenCount },
     { astProvider },
   );
+
+  // 5. Guardian groundedness — does the dealer's official interpretation faithfully
+  // represent the rule, or did it drift / flip? An ungrounded interpretation blocks
+  // submission (the player must clarify) even if the AST compiled.
+  let guardianGrounded: boolean | undefined;
+  if (guardianConfig.enabled && validation.decision === "VALID") {
+    try {
+      guardianGrounded = await checkGroundedness(
+        englishText,
+        officialInterpretation,
+        guardianConfig,
+      );
+    } catch (error) {
+      guardianNote = `Guardian groundedness check unavailable: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+    }
+  }
+
+  const guardianBlocked = guardianGrounded === false;
+  const needsClarification =
+    interpretation.needsClarification ||
+    validation.decision !== "VALID" ||
+    guardianBlocked;
+  const reasonSummary = guardianBlocked
+    ? "The dealer's interpretation may not match your rule. Please rephrase it."
+    : validation.log.reasonSummary;
 
   const preflightResult = JSON.stringify({
     compiledArtifactHash: validation.artifactHash,
     decision: validation.decision,
+    guardianGrounded: guardianGrounded ?? null,
     maxTokens: RULE_MAX_TOKENS,
     ruleId,
     sanitizedText,
     tokenCount,
-    version: 2,
+    version: 3,
   });
 
   return {
     addedOperationalClauses: interpretation.addedOperationalClauses,
     clarityNote:
-      validation.decision === "VALID"
-        ? interpretation.clarityNote
-        : interpretation.clarityNote || validation.log.reasonSummary,
+      needsClarification && !interpretation.clarityNote
+        ? reasonSummary
+        : interpretation.clarityNote,
     compiledArtifactHash: validation.artifactHash,
     decision: validation.decision,
     dealerMessage: interpretation.dealerMessage,
     difficultyClass: validation.log.difficultyClass,
+    englishText,
     finalConfidence: validation.log.confidence.final_confidence,
+    guardianChecked: guardianConfig.enabled,
+    guardianGrounded,
+    guardianNote: guardianNote || undefined,
     maxTokens: RULE_MAX_TOKENS,
-    needsClarification:
-      interpretation.needsClarification || validation.decision !== "VALID",
+    needsClarification,
     normalizedText,
     normalizedTextHash: hashBytes(normalizedText),
     officialInterpretation,
     officialInterpretationHash: hashBytes(officialInterpretation),
     preflightResultHash: hashBytes(preflightResult),
-    reasonSummary: validation.log.reasonSummary,
+    reasonSummary,
     ruleId,
     ruleMode: validation.artifact?.ruleMode,
     sanitizedText,
