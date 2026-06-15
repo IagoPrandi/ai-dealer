@@ -113,6 +113,14 @@ function firstConfigured(...values: Array<string | undefined>): string {
   return "";
 }
 
+// The stronger model used to re-try a rule when the fast primary model produces
+// an invalid/drifted result (escalation). Empty disables escalation.
+export function resolveEscalationModel(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return firstConfigured(env.LLM_ESCALATION_MODEL);
+}
+
 export function resolveRuleAgentConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): RuleAgentConfig {

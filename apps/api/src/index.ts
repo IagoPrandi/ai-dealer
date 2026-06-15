@@ -37,6 +37,7 @@ import { createClient } from "redis";
 import {
   compileRuleToAst,
   interpretRuleWithAgent,
+  resolveEscalationModel,
   resolveRuleAgentConfig,
   RuleAgentError,
   translateRuleToEnglish,
@@ -87,11 +88,13 @@ export interface RulePreflightResult {
   dealerMessage: string;
   difficultyClass?: string;
   englishText?: string;
+  escalated?: boolean;
   finalConfidence?: number;
   guardianChecked?: boolean;
   guardianGrounded?: boolean | undefined;
   guardianNote?: string | undefined;
   maxTokens: number;
+  modelUsed?: string;
   needsClarification: boolean;
   normalizedText: string;
   normalizedTextHash: readonly number[];
@@ -944,42 +947,64 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
   // 2. Faithful translation to English so the dealer + compiler + guardian all
   // reason in one language (cross-language phrasing was a source of ambiguity).
   const englishText = await translateRuleToEnglish(sanitizedText, agentConfig);
-
-  // 3. Interpret (English) for the human-facing message.
-  const interpretation = await interpretRuleWithAgent(englishText, agentConfig);
-  const normalizedText = interpretation.normalizedText;
-  const officialInterpretation = interpretation.officialInterpretation;
   const ruleId = createRuleId();
 
-  // 4. Compile gate (FREE): emit a verifiable AST from the ENGLISH original (the
-  // rich rule-authoring skill drives intent→AST; this avoids a flipped prose
-  // normalization corrupting the executed rule). Payment is only allowed when
-  // decision === "VALID". Policy: any verifiable, external-free rule is allowed.
-  const astProvider: RuleAstProvider = async ({ prompt }) =>
-    compileRuleToAst(prompt, agentConfig);
-  const validation = await compileRuleArtifact(
-    { model: agentConfig.model, prompt: englishText, ruleId, tokenCount },
-    { astProvider },
-  );
+  // A full dealer pass for a given model: interpret (human message), compile the
+  // AST from the English original (skill-guided), and check groundedness.
+  const dealerPass = async (model: string) => {
+    const passConfig = { ...agentConfig, model };
+    const interpretation = await interpretRuleWithAgent(englishText, passConfig);
+    const astProvider: RuleAstProvider = async ({ prompt }) =>
+      compileRuleToAst(prompt, passConfig);
+    const validation = await compileRuleArtifact(
+      { model, prompt: englishText, ruleId, tokenCount },
+      { astProvider },
+    );
+    let grounded: boolean | undefined;
+    if (guardianConfig.enabled && validation.decision === "VALID") {
+      try {
+        grounded = await checkGroundedness(
+          englishText,
+          interpretation.officialInterpretation,
+          guardianConfig,
+        );
+      } catch (error) {
+        guardianNote = `Guardian groundedness check unavailable: ${
+          error instanceof Error ? error.message : String(error)
+        }`;
+      }
+    }
+    return { grounded, interpretation, model, validation };
+  };
 
-  // 5. Guardian groundedness — does the dealer's official interpretation faithfully
-  // represent the rule, or did it drift / flip? An ungrounded interpretation blocks
-  // submission (the player must clarify) even if the AST compiled.
-  let guardianGrounded: boolean | undefined;
-  if (guardianConfig.enabled && validation.decision === "VALID") {
+  // 3-5. Fast pass on the primary model. Escalate to the stronger model only when
+  // the fast model produced an invalid AST or the guardian flagged a drifted
+  // interpretation — then re-try before blocking the player (PRD §7.3/§7.4).
+  let pass = await dealerPass(agentConfig.model);
+  let escalated = false;
+  const escalationModel = resolveEscalationModel();
+  const needsEscalation =
+    pass.validation.decision !== "VALID" || pass.grounded === false;
+  if (needsEscalation && escalationModel && escalationModel !== agentConfig.model) {
+    // The escalation attempt must never break the preflight: if the stronger
+    // model is unavailable/slow, keep the primary result and surface the note.
     try {
-      guardianGrounded = await checkGroundedness(
-        englishText,
-        officialInterpretation,
-        guardianConfig,
-      );
+      const strong = await dealerPass(escalationModel);
+      if (strong.validation.decision === "VALID" && strong.grounded !== false) {
+        pass = strong;
+        escalated = true;
+      }
     } catch (error) {
-      guardianNote = `Guardian groundedness check unavailable: ${
+      guardianNote = `Escalation to ${escalationModel} unavailable: ${
         error instanceof Error ? error.message : String(error)
       }`;
     }
   }
 
+  const { interpretation, validation } = pass;
+  const normalizedText = interpretation.normalizedText;
+  const officialInterpretation = interpretation.officialInterpretation;
+  const guardianGrounded = pass.grounded;
   const guardianBlocked = guardianGrounded === false;
   const needsClarification =
     interpretation.needsClarification ||
@@ -994,10 +1019,11 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
     decision: validation.decision,
     guardianGrounded: guardianGrounded ?? null,
     maxTokens: RULE_MAX_TOKENS,
+    modelUsed: pass.model,
     ruleId,
     sanitizedText,
     tokenCount,
-    version: 3,
+    version: 4,
   });
 
   return {
@@ -1011,11 +1037,13 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
     dealerMessage: interpretation.dealerMessage,
     difficultyClass: validation.log.difficultyClass,
     englishText,
+    escalated,
     finalConfidence: validation.log.confidence.final_confidence,
     guardianChecked: guardianConfig.enabled,
     guardianGrounded,
     guardianNote: guardianNote || undefined,
     maxTokens: RULE_MAX_TOKENS,
+    modelUsed: pass.model,
     needsClarification,
     normalizedText,
     normalizedTextHash: hashBytes(normalizedText),
