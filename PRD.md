@@ -2258,10 +2258,18 @@ Required hook groups:
 | `afterVotingClose`             | ANALYTICS |
 | `beforeEligiblePoolLock`       | CRITICAL  |
 | `afterEligiblePoolLock`        | ANALYTICS |
-| `beforeElectionVrfRequest`     | CRITICAL  |
-| `afterElectionVrfRequest`      | ANALYTICS |
-| `beforeElectionVrfFulfillment` | CRITICAL  |
-| `afterElectionVrfFulfillment`  | ANALYTICS |
+| `beforeFinalistElectionVrfRequest`     | CRITICAL  |
+| `afterFinalistElectionVrfRequest`      | ANALYTICS |
+| `beforeFinalistElectionVrfFulfillment` | CRITICAL  |
+| `afterFinalistElectionVrfFulfillment`  | ANALYTICS |
+| `beforeEliminationWindowOpen`  | CRITICAL  |
+| `afterEliminationWindowOpen`   | ANALYTICS |
+| `beforeEliminationWindowClose` | CRITICAL  |
+| `afterEliminationWindowClose`  | ANALYTICS |
+| `beforeActiveElectionVrfRequest`     | CRITICAL  |
+| `afterActiveElectionVrfRequest`      | ANALYTICS |
+| `beforeActiveElectionVrfFulfillment` | CRITICAL  |
+| `afterActiveElectionVrfFulfillment`  | ANALYTICS |
 | `beforeDraw`                   | CRITICAL  |
 | `afterDraw`                    | ANALYTICS |
 | `beforeVerification`           | CRITICAL  |
@@ -2971,9 +2979,13 @@ Stores:
 - top-voted finalist hash;
 - random finalist hash;
 - finalist set hash;
-- election VRF request reference;
-- election VRF fulfillment reference;
-- elected finalist index;
+- finalist-election VRF request reference;
+- finalist-election VRF fulfillment reference;
+- elimination window open/close timestamps;
+- eliminated finalist set hash;
+- active-election VRF request reference;
+- active-election VRF fulfillment reference;
+- elected survivor index;
 - draw VRF request reference;
 - state machine status;
 - original pool rollover;
@@ -3063,11 +3075,16 @@ open_turn
 submit_guess                  # also creates GameToken PDA
 propose_rule                  # requires GameToken PDA + valid preflight commitment
 vote_rule                     # requires GameToken PDA
+eliminate_vote_rule           # requires GameToken PDA + 2× vote fee; only during decision window; fee goes to prize pool
 remove_rule                   # requires GameToken PDA + removal fee; fee goes to prize pool
 report_rule                   # requires GameToken PDA, may be off-chain with commitment
 lock_eligible_rule_pool
-request_election_vrf
-fulfill_election_vrf
+request_finalist_election_vrf
+fulfill_finalist_election_vrf
+open_elimination_window
+close_elimination_window      # tallies elimination votes, applies up to 5 eliminations
+request_active_election_vrf
+fulfill_active_election_vrf
 freeze_active_rule
 request_draw_vrf
 submit_draw_result
@@ -3082,6 +3099,8 @@ update_config
 
 `remove_rule` is included in MVP as a paid player action. It must verify the remover role, vote-count thresholds, current-turn GameToken PDA, pre-election-lock timing, removal fee payment, and prize-pool fee destination. Rule invalidation remains a separate formal/security path handled by validation, reporting, abuse scoring, and restricted admin review.
 
+`eliminate_vote_rule` is the decision-window elimination vote. It must verify the current-turn GameToken PDA, that the target is a current finalist, that the decision window is open, one-elimination-vote-per-finalist-per-wallet uniqueness, the 2× vote-fee payment, and the prize-pool fee destination. `close_elimination_window` tallies the recorded `RuleEliminationVote` accounts, applies the elimination criterion and the cap of 5 (with the deterministic tie-break), persists the eliminated set hash, and must run before `request_active_election_vrf`.
+
 ### 9.9 On-Chain vs Off-Chain Split
 
 On-chain:
@@ -3093,11 +3112,14 @@ On-chain:
 - rule hashes;
 - full sanitized original rule text in `RuleProposal`;
 - `RuleVote` accounts and vote counts;
+- `RuleEliminationVote` accounts, elimination vote counts, and 2× vote-fee transfers to prize pool;
 - paid rule removal records and removal fee transfers to prize pool;
 - eligible pool hash;
 - finalist set hash;
-- election VRF request and fulfillment references;
-- elected finalist index;
+- finalist-election VRF request and fulfillment references;
+- eliminated finalist set hash;
+- active-election VRF request and fulfillment references;
+- elected survivor index;
 - guess commitments or guesses;
 - verification hashes;
 - claims.
@@ -3155,17 +3177,19 @@ Responsibilities:
 
 Responsibilities:
 
-- maintain the repeating turn duration cycle: `2h → 2h → 8h → 8h`;
-- assign the correct duration to each new turn;
+- maintain the repeating play-window duration cycle: `2h → 2h → 8h → 8h`;
+- assign the correct play-window duration to each new turn;
 - store the current cycle index;
-- calculate proportional cutoff times for rule election and guess submission;
-- continuously enqueue rule precompilation jobs while the turn is open;
-- trigger rule election at 75% of turn duration;
-- lock eligible precompiled rule pool at election cutoff;
-- request Switchboard VRF for rule election;
-- process election VRF fulfillment before guess close;
-- close guess submission at 96.7% of turn duration;
-- trigger Switchboard VRF draw at 100% of turn duration;
+- calculate proportional cutoff times for proposals/approval voting and guess submission within the play window;
+- continuously enqueue rule precompilation jobs while the play window is open;
+- close rule proposals and approval voting at 75% of the play-window duration;
+- close guess submission at 96.7% of the play-window duration;
+- lock the eligible precompiled rule pool at the end of the play window;
+- request Switchboard finalist-election VRF and form the 10-rule finalist set on fulfillment;
+- open the fixed 60-minute decision/elimination window after the finalist set is locked;
+- close the decision window after 60 minutes, tally elimination votes, and apply up to 5 eliminations;
+- request Switchboard active-election VRF over the survivors and freeze the elected rule on fulfillment;
+- trigger Switchboard VRF draw immediately after the active rule is frozen;
 - reset the cycle to 2 hours after the second 8-hour turn completes.
 
 ### 10.4 Token Counter Service
@@ -3301,6 +3325,7 @@ Suggested PostgreSQL tables:
 turns
 rules
 rule_votes
+rule_elimination_votes
 rule_removal_records
 game_tokens_index
 guesses
@@ -3313,6 +3338,7 @@ verification_jobs
 compiled_rule_artifacts
 election_vrf_records
 rule_finalist_sets
+rule_elimination_records
 payout_records
 creator_reward_records
 voter_reward_records
@@ -3366,6 +3392,7 @@ GET /api/v1/turns/{turn_id}/draw
 GET /api/v1/turns/{turn_id}/results
 GET /api/v1/turns/{turn_id}/traces
 GET /api/v1/turns/{turn_id}/election
+GET /api/v1/turns/{turn_id}/elimination
 GET /api/v1/rules/{rule_id}
 GET /api/v1/rules/{rule_id}/preflight
 GET /api/v1/players/{wallet}/history
@@ -3397,13 +3424,18 @@ submit_guess
 rule_preflight
 propose_rule
 vote_rule
+eliminate_vote_rule
 remove_rule
 report_rule
 precompile_rule
 lock_eligible_rule_pool
-request_election_vrf
-fulfill_election_vrf
+request_finalist_election_vrf
+fulfill_finalist_election_vrf
 select_rule_finalists
+open_elimination_window
+close_elimination_window
+request_active_election_vrf
+fulfill_active_election_vrf
 elect_rule
 compile_rule
 review_rule
@@ -4414,8 +4446,9 @@ Establish the product baseline, architecture baseline, monorepo structure, Docke
 - [x] Confirm turn duration cycle: `2h → 2h → 8h → 8h → repeat`.
 - [x] Confirm two winning conditions: original rule and active alternative rule.
 - [x] Confirm current-turn Game Token requirement for proposing, voting, removing, and reporting rules.
-- [x] Confirm rule election policy: exactly 10 finalists, composed of 3 top-voted eligible + 7 VRF-random eligible, then one VRF-elected active rule.
-- [x] Confirm Switchboard VRF is used for both draw and rule election.
+- [x] Confirm rule election policy: exactly 10 finalists, composed of 3 top-voted eligible + 7 VRF-random eligible, formed by a finalist-election VRF at the end of the play window.
+- [ ] Confirm rule elimination decision phase: a fixed 1-hour decision window after the finalist set is locked, in which Game-Token holders cast paid elimination votes (2× the effective vote fee → prize pool); a finalist is eliminated when its elimination votes exceed its frozen approval votes; up to 5 of the 10 may be eliminated (when more than 5 qualify, the 5 with the most elimination votes are eliminated, ties broken by fewest approval votes then lowest rule_id); the active rule is then VRF-selected from the survivors.
+- [x] Confirm Switchboard VRF is used for the draw, the finalist election, and the active election.
 - [x] Confirm no deterministic fallback finalist activation.
 - [x] Confirm paid rule removal is included in MVP with fixed prize-pool fee destination.
 - [x] Confirm active rule creator reward: 15% of each individual alternative-rule winner payout.
@@ -5032,7 +5065,7 @@ Implement draw generation, rule election, AI rule validation, guess verification
 
 #### M3.2 — Rule Election
 
-**Objective:** select the active alternative rule for the turn using an auditable finalist set and Switchboard VRF.
+**Objective:** form the auditable 10-rule finalist set and select the active alternative rule for the turn using Switchboard VRF. (The decision/elimination window inserted between finalist formation and active selection is specified separately in M3.8.)
 
 **Checklist:**
 
@@ -5206,6 +5239,32 @@ Implement draw generation, rule election, AI rule validation, guess verification
 - [x] Every validation and verification has a traceable log.
 - [x] Logs can be matched to public result state.
 - [x] Hashes detect tampering.
+
+---
+
+#### M3.8 — Rule Elimination Decision Phase
+
+**Objective:** insert the fixed 1-hour decision/elimination window between finalist-set formation and active-rule election, with paid elimination voting and survivor-only selection (sections 5.4, 6.12, 6.14a).
+
+**Checklist:**
+
+- [ ] Split rule election into finalist-election VRF (forms the 10) and active-election VRF (selects from survivors).
+- [ ] Lock each finalist's approval (positive) vote count when the finalist set is formed.
+- [ ] Open a fixed 60-minute decision/elimination window after the finalist set is locked.
+- [ ] Implement `eliminate_vote_rule` (Game Token gate, finalist-only target, decision-window-only, one-per-finalist-per-wallet, 2× vote-fee payment to prize pool) and the `RuleEliminationVote` account/projection.
+- [ ] Charge the elimination vote at 2× the effective vote fee for the turn (free before turn 100, 0.01 SOL from turn 100).
+- [ ] At window close, eliminate finalists whose elimination votes exceed their frozen approval votes, capped at 5, keeping at least 1 survivor.
+- [ ] When more than 5 qualify, eliminate the 5 with the most elimination votes; break ties by fewest approval votes, then lowest rule_id.
+- [ ] Persist the eliminated-finalist set hash and elimination tallies for audit; mark eliminated rules `ELIMINATED`.
+- [ ] Run the active-election VRF over the survivors only and freeze the elected rule.
+- [ ] Expose elimination state in the public audit API (`GET /api/v1/turns/{turn_id}/elimination`) and in the decision-window voting UI (approval vs elimination counts, threshold, Eliminated/Survived states, fee, countdown).
+
+**Approval criteria:**
+
+- [ ] Active rule is only ever elected from non-eliminated finalists.
+- [ ] Elimination criterion, cap of 5, and deterministic tie-break are enforced and auditable.
+- [ ] Elimination vote fee and Game Token gate are enforced on-chain.
+- [ ] Decision window timing is independent of the play-window duration cycle.
 
 ---
 

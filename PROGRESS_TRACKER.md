@@ -47,6 +47,15 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-06-14 (PRD — Rule Elimination Decision Phase)
+
+- Opened `PRD.md` and the project memories before working, as required. This is a PRD specification change only (no code), scoped by the user to the PRD.
+- Motivation (user direction): after the 10-rule finalist set is selected there must be a fixed **1-hour decision window** before the active rule is chosen; during it, Game-Token holders cast **paid elimination votes**; a finalist is eliminated when `elimination_votes > approval_votes`; **up to 5** of the 10 may be eliminated; an elimination vote costs **2× the effective vote fee** for the turn.
+- Confirmed design decisions (user Q&A): (1) the current turn durations (`2h/2h/8h/8h`) remain the **play & create-rules window**; the 1-hour decision phase is **appended after** it (end-to-end = play + 1h + selection/draw); (2) elimination fee = **2× the effective vote fee for the turn** (free before turn 100, 0.01 SOL from turn 100, → prize pool); (3) when more than 5 finalists qualify, eliminate the **5 with the most elimination votes** (deterministic tie-break: fewest approval votes, then lowest `rule_id`).
+- PRD edits (bumped to **v1.5.0**): §2.5 prize-pool sources; §2.6 Rule of the Hour; §5.1 player-actions table (new "vote to eliminate" row); §5.4 turn lifecycle (two-VRF flow + decision-window diagram + example); §5.5 turn state machine (`ELIMINATION_WINDOW_OPEN/CLOSED`, `ACTIVE_ELECTION_VRF_*`); §6.12 split into finalist-election and active-election flows + `RULE_ELIMINATION_CONFIG`; new §6.14a Rule Elimination Voting; §6.16 rule state machine (`ELIMINATED`, `SURVIVED_ELIMINATION`); §4.3/§4.6 UX (Eliminated/Survived statuses + decision-window voting copy); §8.2 fees (`eliminationVoteFeeLamports`, policy block); §8.9 rate limits; §9 accounts/GlobalConfig/TurnState/instructions; §10 worker scheduler steps, DB tables, audit endpoint, hooks, idempotency ops; §16 decision checklist (new unchecked elimination decision item); §15 new milestone **M3.8 — Rule Elimination Decision Phase**.
+- Verified internal consistency by grep (no leftover "single VRF selects the active rule at finalist time", `request_election_vrf`, or `75%/96.7% of turn duration` phrasing; all references now describe the two-VRF + 1h-decision model). No code, tests, or deploys touched.
+- No milestone checkbox was ticked; the §16 elimination decision item and M3.8 remain unchecked pending explicit user confirmation, per project rules.
+
 ### 2026-06-14 (Open-ended rule engine — P0–P2: DSL, runtime, harness, LLM-emitted AST)
 
 - Opened `PRD.md` (§6.4–§6.8, §7.1–§7.8) and project memories before working, as required. Extends/re-opens M3.3 (AI Rule Validation) toward the PRD's full compiler; no checkbox ticked pending user confirmation.
