@@ -608,7 +608,18 @@ export function RuleProposalComposer() {
                   <span>Your rule text</span>
                   <p>{preflight?.sanitizedText ?? sanitizedPreview}</p>
                 </div>
-                {preflight?.needsClarification ? (
+                {preflight?.reproposalBlocked ? (
+                  <article
+                    className="guess-status-card proposal-status-card failed"
+                    role="alert"
+                  >
+                    <strong>Rule already used</strong>
+                    <p>
+                      {preflight.reasonSummary ||
+                        "This rule was already the Rule of the Hour in a previous turn. Add a condition to differentiate it before reusing it."}
+                    </p>
+                  </article>
+                ) : preflight?.needsClarification ? (
                   <article
                     className="guess-status-card proposal-status-card failed"
                     role="alert"
@@ -868,6 +879,7 @@ export function RuleProposalComposer() {
                   disabled={
                     isSubmitting ||
                     preflight?.needsClarification === true ||
+                    preflight?.reproposalBlocked === true ||
                     (preflight?.decision !== undefined &&
                       preflight.decision !== "VALID")
                   }

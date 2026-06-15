@@ -1542,25 +1542,39 @@ Three top-voted eligible rules enter the finalist set, seven more are selected b
 A 1-hour decision window then lets players pay to vote finalists out (up to 5 of 10), and one surviving finalist is randomly elected.
 ```
 
-### 6.13 Rule Scope and Re-Proposal Cooldown
+### 6.13 Rule Scope and Mandate-Based Re-Proposal Gate
 
 - each rule is scoped to a single turn;
 - rules do not automatically carry over;
-- rules may be re-proposed in a future turn after the re-proposal cooldown;
 - historical rules are archived and viewable;
 - frozen artifacts remain immutable for auditability.
 
-Initial configuration:
+**Re-proposal policy (implemented).** A rule that has already held a **mandate** — i.e. was elected as the active Rule of the Hour in a past turn — cannot be proposed again **verbatim**. It may only return if the new proposal adds a **differentiating condition** (an additional clause in the DSL), so a re-used rule is always a new, more specific rule rather than a blind repeat.
+
+This replaces the earlier time-based re-proposal cooldown: there is no fixed N-turn waiting period. The constraint is on **identity**, not time — a mandated rule is blocked forever in its verbatim form, and is allowed back the moment it is meaningfully differentiated by an added condition.
+
+Identity is the rule's **meaning, not its text**. Two proposals are "the same rule" when their **canonical compiled AST signature** matches. The signature is computed over a canonicalized AST so it cannot be bypassed cosmetically:
+
+- `and`/`or` clauses are flattened, de-duplicated, and order-normalized;
+- a single-clause `and`/`or` collapses to its clause (`and[X]` ≡ `X`);
+- double negation collapses (`not[not[X]]` ≡ `X`);
+- commutative operands are ordered (`and`/`or` clauses, `intersection`, `arith add`/`mul`).
+
+Therefore reordering, wrapping, or other trivial edits do **not** unlock a repeat; only a substantive added clause (the "activation condition") changes the signature and is accepted.
 
 ```typescript
 const RULE_REPROPOSAL_CONFIG = {
-  cooldownTurns: 5,
-  allowExactReproposalAfterCooldown: true,
-  blockSameTurnDuplicates: true,
+  // Rules whose canonical AST signature was elected active in any past turn.
+  blockSignaturesThatHeldMandate: true,
+  // A blocked rule is allowed back only when an added DSL clause changes its
+  // canonical signature. There is no time-based cooldown.
+  allowReuseWithDifferentiatingCondition: true,
 };
 ```
 
-Deduplication must not permanently ban good rules from being used again. It should block same-turn duplicates and trivial variants, while allowing a rule to return after the cooldown if it still creates product value.
+The gate runs in the free preflight: when the compiled rule's signature is already mandated, preflight returns `reproposalBlocked: true` and the proposal/payment is refused with a message instructing the player to add a condition. The mandated signature set is derived from settled elections and their frozen compiled artifacts.
+
+> A mandate-holding rule whose frozen AST is unavailable cannot be signed and therefore cannot be matched/blocked; the gate degrades safely rather than failing closed.
 
 ### 6.14 Voting, Game Token Gate and Basic Anti-Sybil
 
@@ -1633,87 +1647,72 @@ Anti-abuse and integrity:
 - elimination votes feed the same vote-concentration monitoring and suspicious-activity alerts as approval votes;
 - elimination tallies, the qualifying set, the eliminated set, and `eliminated_finalist_hash` are persisted for auditability.
 
-### 6.15 Rule Similarity, Deduplication and Preflight
+### 6.15 Rule Preflight and Canonical-Signature Re-Proposal Gate
 
-Rule deduplication is a pre-submission gate, not part of the compiler pipeline.
+Preflight is the free pre-submission gate that runs before the user pays the rule
+proposal fee or signs the proposal transaction. It does the safety, verifiability,
+and re-proposal checks so that payment is only ever spent on an accepted rule.
 
-It must run before the user pays the rule proposal fee or signs the proposal transaction.
+This section **supersedes the earlier semantic-embeddings deduplication design**.
+Rule identity is the rule's **compiled meaning**, compared by the canonical AST
+signature defined in Section 6.13 — not by natural-language text similarity or
+embeddings. There is no `preflight_token` and no `RuleDedupResult`; the gate is
+deterministic.
 
-Preflight checks:
+Preflight checks (in order):
 
 ```text
-1. current-turn Game Token exists
-2. rule text is present
-3. token count is within limit
-4. prohibited references are absent
-5. prompt-injection patterns are absent
-6. same-turn duplicate check passes
-7. historical re-proposal cooldown check passes
-8. semantic similarity check passes
-9. deterministic canonical-rule signature check passes when possible
+1. rule text is present and within the byte limit
+2. token count is within RULE_MAX_TOKENS
+3. prohibited references / prompt-injection absent
+     (deterministic patterns + optional Granite Guardian jailbreak classifier)
+4. the rule COMPILES to a verifiable DSL/AST (the verifiability gate)
+5. (optional) Granite Guardian groundedness: the official interpretation is
+     faithful to the rule
+6. re-proposal gate: the compiled rule's canonical AST signature has NOT already
+     held a mandate (Section 6.13)
 ```
+
+A check that fails sets `decision: "INVALID"` and/or a specific block flag; a
+verifiable, safe, non-repeat rule returns `decision: "VALID"`.
 
 Preflight endpoint:
 
 ```http
-POST /api/v1/rules/preflight
+POST /rule-preflight
 ```
 
-Response shape:
+Response shape (implemented):
 
 ```typescript
 interface RulePreflightResult {
-  valid: boolean;
-  turn_id: string;
-  player_wallet: string;
-  token_count: number;
-  max_tokens: number;
-  prohibited_reference_result: "PASS" | "BLOCK";
-  dedup_result: RuleDedupResult;
-  preflight_token?: string;
-  preflight_token_expires_at?: string;
-  rejection_reasons?: string[];
+  decision: "VALID" | "INVALID";
+  needsClarification: boolean;
+  reproposalBlocked: boolean;      // already held a mandate (Section 6.13)
+  reasonSummary: string;
+  compiledArtifactHash: string | null;
+  ruleMode?: "predicate" | "ranking";
+  difficultyClass?: string;        // label only, never a gate
+  finalConfidence?: number;
+  guardianChecked?: boolean;
+  guardianGrounded?: boolean;
+  // dealer-facing fields: normalizedText, officialInterpretation,
+  // addedOperationalClauses, dealerMessage, and the canonical hashes that bind
+  // the on-chain proposal.
 }
-```
-
-Dedup result:
-
-```typescript
-interface RuleDedupResult {
-  rule_id?: string;
-  turn_id: string;
-  verdict: "PASS" | "WARN" | "BLOCK";
-  score: number;
-  similarity_threshold_used: number;
-  similar_rule_ids: string[];
-  similar_rule_snippets?: string[];
-  checked_at: string;
-  embedding_model_version: string;
-  canonical_signature_version?: string;
-}
-```
-
-A successful preflight returns a short-lived signed `preflight_token`.
-
-Initial configuration:
-
-```typescript
-const RULE_PREFLIGHT_CONFIG = {
-  preflightTokenTtlSeconds: 60,
-  sameTurnDuplicateBlockThreshold: 0.92,
-  historicalSimilarityWarnThreshold: 0.86,
-  reproposalCooldownTurns: 5,
-};
 ```
 
 Implementation requirements:
 
-- `/propose` must reject missing, expired, or mismatched `preflight_token`;
-- the token must bind `turn_id`, `player_wallet`, `rule_text_hash`, `token_count`, and `dedup_result_hash`;
-- dedup should use semantic embeddings plus canonical rule signatures where available;
-- minor numeric or structural differences that change the actual winning logic must not be blocked only because natural-language text is similar;
-- dedup logs are stored as gate-check logs, not compiler logs;
-- `RuleCompilationResult` must not include `dedup_score` or `dedup_similar_rules`.
+- the re-proposal gate uses the canonical AST signature (Section 6.13), so minor
+  numeric or structural differences that change the actual winning logic are
+  treated as different rules, while cosmetic edits are not;
+- a re-proposal that is blocked must surface a clear, user-readable reason telling
+  the player to add a differentiating condition;
+- the verifiability gate (step 4) is the authoritative off-topic/garbage filter:
+  anything that cannot compile to a guess/draw-only AST is rejected;
+- gate outcomes are recorded as gate-check logs, separate from compiler logs;
+- `RuleCompilationResult` must not include any text-similarity or dedup fields.
 
 ### 6.16 Formal Rule State Machine
 

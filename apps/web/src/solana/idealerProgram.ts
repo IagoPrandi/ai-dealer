@@ -89,6 +89,7 @@ export interface RulePreflightResult {
   officialInterpretationHash: readonly number[];
   preflightResultHash: readonly number[];
   reasonSummary?: string;
+  reproposalBlocked?: boolean;
   ruleId: number;
   ruleMode?: "predicate" | "ranking";
   sanitizedText: string;
