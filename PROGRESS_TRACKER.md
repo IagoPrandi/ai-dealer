@@ -47,6 +47,14 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-06-15 (Re-proposal gate: no repeating a rule that held a mandate)
+
+- User-chosen policy: a rule that was **elected as the active Rule of the Hour** in a past turn cannot be proposed again **verbatim**; it may only return if the new proposal adds a **differentiating condition** (a clause in the DSL).
+- Identity is the rule's MEANING, not its text: new helpers in `apps/api/src/index.ts` — `ruleSignature(ast)` hashes a **canonicalized** AST and `getMandatedRuleSignatures()` collects the signatures of every settled election's active rule (via `getRuleValidation(turnId, activeRuleId).compiledArtifact.ast`). Canonicalization flattens `and`/`or`, drops single-clause wrappers (`and[X]`≡`X`), collapses double negation, and sorts commutative operands (`and`/`or` clauses, `intersection`, `arith add/mul`) — so the gate **cannot be bypassed cosmetically**; only a substantive added clause changes the signature.
+- `createRulePreflight` now blocks when the compiled rule's signature is already mandated (`reproposalBlocked`), setting `needsClarification` + a message telling the player to add a condition. New `RulePreflightResult` field `reproposalBlocked`; folded into `preflightResultHash` (v5).
+- Tests: 17/17 `@idealer/api` — `ruleSignature` canonicalization (trivial wrappers/commutative collapse to the same signature; an added clause differs) and `getMandatedRuleSignatures` collection from a settled election. Typecheck clean.
+- Notes/limits: the mandated set is computed per preflight from in-memory elections+validations (fine at this scale; would be a query at DB scale). A mandated rule whose validation AST isn't stored cannot be signed/blocked (graceful). This is distinct from the PRD's §6.13 time-based re-proposal cooldown / §6.15 semantic dedup, which remain unimplemented.
+
 ### 2026-06-14 (PRD — Rule Elimination Decision Phase)
 
 - Opened `PRD.md` and the project memories before working, as required. This is a PRD specification change only (no code), scoped by the user to the PRD.

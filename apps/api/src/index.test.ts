@@ -11,9 +11,12 @@ import {
   createGuessVerificationJobsForTurn,
   getAuditLog,
   getClaimSummary,
+  getMandatedRuleSignatures,
   getPrizePoolAccounting,
   getRewardSummary,
   getRoundSummary,
+  getRuleValidation,
+  ruleSignature,
   listClaimRecords,
   listCreatorRewardRecords,
   listVoterRewardRecords,
@@ -796,6 +799,61 @@ test("rule validation creates a traceable compiler audit log", () => {
   assert.equal(verifyAuditLogIntegrity(log as AuditLogRecord), true);
   assert.match(log?.inputHash ?? "", /^[0-9a-f]{64}$/);
   assert.match(log?.outputHash ?? "", /^[0-9a-f]{64}$/);
+});
+
+test("ruleSignature canonicalizes trivial wrappers and commutative operands", () => {
+  type Ast = Parameters<typeof ruleSignature>[0];
+  const intGD = {
+    kind: "intersection",
+    left: { kind: "source", source: "guess" },
+    right: { kind: "source", source: "draw" },
+  };
+  const intDG = {
+    kind: "intersection",
+    left: { kind: "source", source: "draw" },
+    right: { kind: "source", source: "guess" },
+  };
+  const base = (predicate: unknown) =>
+    ({ schemaVersion: 2, result: { type: "predicate", predicate } }) as Ast;
+  const X = { kind: "count_at_least", value: 4, of: intGD };
+  const Y = { kind: "count_at_least", value: 1, of: intGD };
+
+  // and[X] === X (single-clause wrapper dropped)
+  assert.equal(ruleSignature(base({ kind: "and", clauses: [X] })), ruleSignature(base(X)));
+  // not[not[X]] === X (double negation)
+  assert.equal(
+    ruleSignature(base({ kind: "not", clause: { kind: "not", clause: X } })),
+    ruleSignature(base(X)),
+  );
+  // intersection is commutative
+  assert.equal(
+    ruleSignature(base({ kind: "count_at_least", value: 4, of: intGD })),
+    ruleSignature(base({ kind: "count_at_least", value: 4, of: intDG })),
+  );
+  // reordered and-clauses are equal
+  assert.equal(
+    ruleSignature(base({ kind: "and", clauses: [X, Y] })),
+    ruleSignature(base({ kind: "and", clauses: [Y, X] })),
+  );
+  // adding a real differentiating clause DOES change the signature
+  assert.notEqual(
+    ruleSignature(base(X)),
+    ruleSignature(base({ kind: "and", clauses: [X, Y] })),
+  );
+});
+
+test("a rule that held a mandate is collected as a mandated signature", () => {
+  resetApiStateForTests();
+  saveRuleProposal(proposal(300, 50));
+  const validation = runRuleValidationForProposal({ ruleId: 50, turnId: 300 });
+  assert.equal(validation.decision, "VALID");
+  saveRuleElection(settledElection(300, 50));
+
+  const ast = getRuleValidation(300, 50)?.compiledArtifact?.ast;
+  assert.ok(ast);
+  const signatures = getMandatedRuleSignatures();
+  assert.equal(signatures.size, 1);
+  assert.ok(signatures.has(ruleSignature(ast)));
 });
 
 test("guess verification result creates an audit log matched to public result state", () => {

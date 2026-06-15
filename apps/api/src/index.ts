@@ -25,6 +25,7 @@ import {
   type AgentModelIdentity,
   type AgentProviderAttemptLog,
   type CompilerConfidenceBreakdown,
+  type RuleAst,
   type RuleAstProvider,
   type RuleCompiledArtifact,
   type RuleConfidenceAction,
@@ -103,6 +104,7 @@ export interface RulePreflightResult {
   officialInterpretationHash: readonly number[];
   preflightResultHash: readonly number[];
   reasonSummary?: string;
+  reproposalBlocked?: boolean;
   ruleId: number;
   ruleMode?: "predicate" | "ranking" | undefined;
   sanitizedText: string;
@@ -1041,13 +1043,26 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
   const officialInterpretation = interpretation.officialInterpretation;
   const guardianGrounded = pass.grounded;
   const guardianBlocked = guardianGrounded === false;
+
+  // Re-proposal gate: block a rule whose canonical meaning already held a mandate
+  // (was elected active in a past turn). It may only return with an added,
+  // differentiating condition (which changes the canonical signature).
+  const ruleAst = validation.artifact?.ast ?? null;
+  const reproposalBlocked =
+    validation.decision === "VALID" &&
+    ruleAst !== null &&
+    getMandatedRuleSignatures().has(ruleSignature(ruleAst));
+
   const needsClarification =
     interpretation.needsClarification ||
     validation.decision !== "VALID" ||
-    guardianBlocked;
-  const reasonSummary = guardianBlocked
-    ? "The dealer's interpretation may not match your rule. Please rephrase it."
-    : validation.log.reasonSummary;
+    guardianBlocked ||
+    reproposalBlocked;
+  const reasonSummary = reproposalBlocked
+    ? "This rule was already the Rule of the Hour in a previous turn. To reuse it, add a condition that differentiates it (e.g. combine it with another criterion over the numbers)."
+    : guardianBlocked
+      ? "The dealer's interpretation may not match your rule. Please rephrase it."
+      : validation.log.reasonSummary;
 
   const preflightResult = JSON.stringify({
     compiledArtifactHash: validation.artifactHash,
@@ -1055,10 +1070,11 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
     guardianGrounded: guardianGrounded ?? null,
     maxTokens: RULE_MAX_TOKENS,
     modelUsed: pass.model,
+    reproposalBlocked,
     ruleId,
     sanitizedText,
     tokenCount,
-    version: 4,
+    version: 5,
   });
 
   return {
@@ -1086,6 +1102,7 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
     officialInterpretationHash: hashBytes(officialInterpretation),
     preflightResultHash: hashBytes(preflightResult),
     reasonSummary,
+    reproposalBlocked,
     ruleId,
     ruleMode: validation.artifact?.ruleMode,
     sanitizedText,
@@ -1849,6 +1866,113 @@ function appendCompilerValidationAuditLog(
 
 export function getRuleValidation(turnId: number, ruleId: number) {
   return ruleValidations.get(getRuleValidationKey(turnId, ruleId)) ?? null;
+}
+
+// --- Re-proposal gate: a rule that already held a mandate (was elected as the
+// active Rule of the Hour) cannot be proposed again verbatim. It may only return
+// if the new proposal adds a differentiating condition. Identity is the rule's
+// MEANING, so we compare a CANONICAL signature of the compiled AST: trivial
+// wrappers (and[X] == X, double negation) and reordered commutative operands
+// (and/or clauses, intersection, add/mul) collapse to the same signature, so the
+// gate cannot be bypassed cosmetically — only a substantive added clause changes it.
+
+type AstRecord = Record<string, unknown>;
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value as AstRecord)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableStringify((value as AstRecord)[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function canonicalizeNode(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+  const node = value as AstRecord;
+  const kind = node.kind;
+
+  if (kind === "and" || kind === "or") {
+    const raw = Array.isArray(node.clauses) ? node.clauses : [];
+    const flattened = raw
+      .map(canonicalizeNode)
+      .flatMap((clause) => {
+        const c = clause as AstRecord;
+        return c && c.kind === kind && Array.isArray(c.clauses) ? c.clauses : [clause];
+      });
+    const seen = new Set<string>();
+    const unique: unknown[] = [];
+    for (const clause of flattened) {
+      const sig = stableStringify(clause);
+      if (!seen.has(sig)) {
+        seen.add(sig);
+        unique.push(clause);
+      }
+    }
+    unique.sort((a, b) => stableStringify(a).localeCompare(stableStringify(b)));
+    return unique.length === 1 ? unique[0] : { kind, clauses: unique };
+  }
+
+  if (kind === "not") {
+    const inner = canonicalizeNode(node.clause) as AstRecord;
+    if (inner && inner.kind === "not") {
+      return inner.clause; // collapse double negation
+    }
+    return { kind, clause: inner };
+  }
+
+  // Commutative binary operands: order them deterministically.
+  if (
+    kind === "intersection" ||
+    (kind === "arith" && (node.op === "add" || node.op === "mul"))
+  ) {
+    const operands = [canonicalizeNode(node.left), canonicalizeNode(node.right)].sort(
+      (a, b) => stableStringify(a).localeCompare(stableStringify(b)),
+    );
+    return { ...node, left: operands[0], right: operands[1] };
+  }
+
+  const out: AstRecord = { ...node };
+  for (const field of ["of", "left", "right", "clause", "predicate", "score", "guard"]) {
+    if (out[field] !== undefined) {
+      out[field] = canonicalizeNode(out[field]);
+    }
+  }
+  if (Array.isArray(out.clauses)) {
+    out.clauses = out.clauses.map(canonicalizeNode);
+  }
+  return out;
+}
+
+export function ruleSignature(ast: RuleAst): string {
+  const canonical =
+    ast.schemaVersion === 2
+      ? { result: canonicalizeNode(ast.result), v: 2 }
+      : { node: ast.node, v: 1 };
+  return createHash("sha256").update(stableStringify(canonical), "utf8").digest("hex");
+}
+
+// Signatures of every rule that has held a mandate (was the elected active rule
+// in a settled election). Computed from stored elections + their compiled ASTs.
+export function getMandatedRuleSignatures(): Set<string> {
+  const signatures = new Set<string>();
+  for (const election of elections.values()) {
+    if (election.status !== "settled" || election.activeRuleId === null) {
+      continue;
+    }
+    const validation = getRuleValidation(election.turnId, election.activeRuleId);
+    const ast = validation?.compiledArtifact?.ast;
+    if (ast) {
+      signatures.add(ruleSignature(ast));
+    }
+  }
+  return signatures;
 }
 
 function getVerificationResultKey(turnId: number, player: string) {
