@@ -1,8 +1,8 @@
 # Idealer — Product Requirements Document
 
-> **Version:** 1.4.0  
-> **Status:** Implementation Baseline — MVP defaults integrated; local/self-hosted LLM support added  
-> **Last Updated:** 2026-06-10  
+> **Version:** 1.5.0  
+> **Status:** Implementation Baseline — MVP defaults integrated; local/self-hosted LLM support added; rule elimination decision phase added  
+> **Last Updated:** 2026-06-14  
 > **Primary Product Surface:** Mobile-first DApp  
 > **Language:** Portuguese / English technical terms where useful
 
@@ -181,6 +181,7 @@ Sources:
 - rule proposal fees;
 - paid rule removal fees included in MVP;
 - vote fees, charged only from turn 100 onward;
+- rule elimination vote fees, charged only from turn 100 onward (the elimination vote costs 2× the effective vote fee for the turn; see section 6.14a and section 8.2);
 - optional future game actions.
 
 A protocol treasury fee is retained before distribution.
@@ -194,6 +195,8 @@ Default treasury fee:
 ### 2.6 Rule of the Hour
 
 The **Rule of the Hour** is the elected and validated alternative rule for the current turn.
+
+It is elected from the **surviving finalists** after the community decision/elimination window: once the 10-rule finalist set is formed at the end of the play window, a fixed 1-hour decision phase lets players cast paid elimination votes against finalists; up to 5 finalists may be eliminated, and the Rule of the Hour is then selected only from the survivors (see sections 5.4, 6.12, and 6.14a).
 
 It is the main narrative object of the game.
 
@@ -376,7 +379,7 @@ Required fields:
 - estimated difficulty label;
 - token count;
 - max token limit;
-- status: Draft, Preflight Passed, Proposed, Precompiling, Precompiled, Eligible, Top Finalist, Random Finalist, VRF Elected, Frozen, Active, Invalidated, Expired.
+- status: Draft, Preflight Passed, Proposed, Precompiling, Precompiled, Eligible, Top Finalist, Random Finalist, Eliminated, Survived Elimination, VRF Elected, Frozen, Active, Invalidated, Expired.
 
 Example:
 
@@ -478,7 +481,7 @@ Requirements:
 - spectators may browse rules, but the vote CTA asks them to play first;
 - voting is visually quick;
 - users see current top rules;
-- users understand that voting influences the rule finalist set, but VRF still selects the active rule;
+- users understand that voting influences the rule finalist set, but VRF still selects the active rule from the survivors;
 - users understand that voting for the elected rule can earn a reward when that rule produces winners;
 - vote state is obvious: voted, not voted, vote changed;
 - voting close time is visible.
@@ -487,10 +490,31 @@ UX copy example:
 
 ```text
 Vote for the rule you want to see in the finalist set.
-At election time, the system locks 3 top-voted eligible rules and uses Switchboard VRF fulfillment to select 7 additional eligible rules and the final Rule of the Hour.
+At the end of the play window, the system locks 3 top-voted eligible rules and uses Switchboard VRF fulfillment to select 7 additional eligible rules, forming the 10 finalists.
 ```
 
 Voting is gated by a turn Game Token in MVP. Users without a submitted guess can still browse, share, and follow rules, but voting requires playing the current turn first. This keeps governance tied to actual game participation and reduces low-cost Sybil manipulation.
+
+#### Decision-window (elimination) voting
+
+Once the 10 finalists are locked, a separate 1-hour decision window lets players vote finalists out before the Rule of the Hour is chosen (section 6.14a).
+
+Requirements:
+
+- elimination voting only appears while the decision window is open and only for finalist rules;
+- the elimination CTA is visually distinct from the approval vote, so users do not confuse "support" with "vote out";
+- the elimination vote fee (2× the effective vote fee for the turn) must be shown before wallet confirmation;
+- each rule card shows its approval votes vs elimination votes and whether it is currently above the elimination threshold;
+- the UI explains, in plain language, that a finalist is eliminated when its elimination votes pass its approval votes, that up to 5 of the 10 can be eliminated, and that the active rule is then drawn from the survivors;
+- the decision-window close time and the resulting Eliminated / Survived Elimination states are visible.
+
+UX copy example:
+
+```text
+These 10 rules are finalists. You have 1 hour to vote some out.
+A rule is eliminated if its "vote out" count passes its support count — up to 5 of the 10 can go.
+Voting out costs 2× a normal vote. One surviving rule is then drawn as the Rule of the Hour.
+```
 
 ### 4.7 Retention Loops
 
@@ -641,6 +665,7 @@ Each player may perform the following actions per turn.
 | Submit a guess |                                                            1x |               Yes | No; this action issues the token |
 | Propose a rule |                             5x per wallet per turn by default | Yes, per proposal |                              Yes |
 | Vote on a rule | 1 vote per rule; max 100 votes per wallet per turn by default | No before turn 100; Yes from turn 100 |                              Yes |
+| Vote to eliminate a rule | 1 elimination vote per finalist rule; only during the 1-hour decision window | Yes, 2× the effective vote fee for the turn (free before turn 100) |                              Yes |
 | Remove a rule  |  2x per wallet per turn by default; only before election lock |  Yes, removal fee |                              Yes |
 | Report a rule  |                            20x per wallet per turn by default |                No |                              Yes |
 
@@ -740,24 +765,32 @@ Mitigations:
 
 ### 5.4 Turn Lifecycle
 
-The lifecycle uses proportional cutoffs so the same logic works across all turn durations, while rule compilation is amortized during the turn instead of being concentrated only after election.
+The lifecycle has two parts: a **play & create-rules window** whose length follows the turn-duration cycle (`2h → 2h → 8h → 8h`), and a **fixed 1-hour decision/elimination window** appended after it. Proportional cutoffs inside the play window keep the same logic across all play-window durations, while rule compilation is amortized during the play window instead of being concentrated only after the finalist set is formed.
+
+The current turn-duration intervals represent only the time to **play and create rules**. They do not include the decision window. A turn's end-to-end wall-clock is therefore `play-window duration + 1 hour decision window + final selection + draw`.
 
 Recommended default:
 
 ```text
-Rule preflight and background precompilation run continuously while the turn is open.
-Rule election closes at 75% of turn duration.
-Guess submission closes at 96.7% of turn duration.
-VRF draw occurs at 100% of turn duration.
+Rule preflight and background precompilation run continuously while the play window is open.
+Rule proposals and approval voting close at 75% of the play-window duration.
+Guess submission closes at 96.7% of the play-window duration.
+Finalist set of 10 is locked at 100% of the play-window duration (eligible pool lock + 3 top-voted + finalist-election VRF for 7 random). No active rule is chosen yet.
+Decision/elimination window runs for a fixed 60 minutes after the play window closes.
+At the end of the decision window: eliminations are applied, the active-election VRF selects one rule from the survivors, and the artifact is frozen.
+VRF draw occurs immediately after the active rule is frozen.
 ```
 
-For a 1-hour turn, this maps to:
+For a 2-hour play window, this maps to:
 
 ```text
-Rule preflight/precompilation: 0–45 minutes, continuously after each proposal.
-Rule election closes at 45 minutes.
-Guess submission closes at 58 minutes.
-Draw occurs at 60 minutes.
+Rule preflight/precompilation: 0–120 minutes, continuously after each proposal.
+Rule proposals and approval voting close at 90 minutes.
+Guess submission closes at ~116 minutes.
+Finalist set of 10 locked at 120 minutes (end of play window).
+Decision/elimination window: 120–180 minutes (fixed 1 hour).
+Active rule elected from survivors and frozen at ~180 minutes.
+Draw occurs right after the active rule is frozen (~180 minutes).
 ```
 
 Generic flow:
@@ -765,42 +798,60 @@ Generic flow:
 ```text
 Turn N begins
 │
-├── [0%] Turn opens
-│   ├── Players submit guesses
-│   ├── submit_guess issues a turn-scoped Game Token PDA
-│   ├── Game Token holders may propose natural-language rules
-│   ├── Game Token holders may vote on proposed rules
-│   ├── Rule proposal preflight runs before payment/signature
-│   │   ├── game token check
-│   │   ├── token count
-│   │   ├── prohibited references
-│   │   ├── rule similarity / deduplication
-│   │   └── signed preflight_token issued if all gates pass
-│   └── Valid paid proposals enter background precompilation
-│       ├── interpret
-│       ├── normalize
-│       ├── compile to DSL/AST
-│       ├── run tests
-│       ├── classify difficulty
-│       └── cache precompiled artifact and status
+├── PLAY & CREATE-RULES WINDOW (duration follows the 2h/2h/8h/8h cycle)
+│   │
+│   ├── [0%] Play window opens
+│   │   ├── Players submit guesses
+│   │   ├── submit_guess issues a turn-scoped Game Token PDA
+│   │   ├── Game Token holders may propose natural-language rules
+│   │   ├── Game Token holders may vote (approve) proposed rules
+│   │   ├── Rule proposal preflight runs before payment/signature
+│   │   │   ├── game token check
+│   │   │   ├── token count
+│   │   │   ├── prohibited references
+│   │   │   ├── rule similarity / deduplication
+│   │   │   └── signed preflight_token issued if all gates pass
+│   │   └── Valid paid proposals enter background precompilation
+│   │       ├── interpret
+│   │       ├── normalize
+│   │       ├── compile to DSL/AST
+│   │       ├── run tests
+│   │       ├── classify difficulty
+│   │       └── cache precompiled artifact and status
+│   │
+│   ├── [75%] Rule proposals and approval voting close
+│   │   └── Each finalist's approval (positive) vote count is the value locked here
+│   │
+│   ├── [96.7%] Guess submission window closes
+│   │
+│   └── [100%] Finalist set of 10 is locked (no active rule chosen yet)
+│       ├── Eligible pool is locked from rules with valid precompiled artifacts
+│       ├── Top-voted finalist subset is locked: 3 rules by default
+│       ├── Eligible pool hash and top finalist hash are committed
+│       ├── Switchboard finalist-election VRF request is submitted
+│       ├── On VRF fulfillment, random finalist subset is derived from the VRF word
+│       │   └── 7 additional rules by default from the remaining eligible pool
+│       └── Finalist set is formed: 3 top-voted + 7 VRF-random = 10 by default
 │
-├── [75%] Rule election window closes
-│   ├── Eligible pool is locked from rules with valid precompiled artifacts
-│   ├── Top-voted finalist subset is locked: 3 rules by default
-│   ├── Eligible pool hash and top finalist hash are committed
-│   ├── Switchboard VRF election request is submitted
-│   ├── On VRF fulfillment, random finalist subset is derived from the VRF word
-│   │   └── 7 additional rules by default from the remaining eligible pool
-│   ├── Finalist set is formed: 3 top-voted + 7 VRF-random = 10 by default
-│   ├── One rule is selected uniformly from the finalist set using ranged VRF output
+├── DECISION / ELIMINATION WINDOW (fixed 60 minutes)
+│   ├── Game Token holders may cast paid elimination votes against finalists
+│   │   └── elimination vote fee = 2× the effective vote fee for the turn → prize pool
+│   ├── A finalist qualifies for elimination when elimination_votes > approval_votes
+│   ├── At window close, up to 5 finalists are eliminated
+│   │   ├── if more than 5 qualify, the 5 with the most elimination votes are eliminated
+│   │   ├── tie-break: fewest approval votes, then lowest rule_id
+│   │   └── at least 1 survivor is always kept
+│   └── Eliminated finalists move to ELIMINATED and are excluded from the active election
+│
+├── ACTIVE RULE ELECTION
+│   ├── Switchboard active-election VRF request is submitted over the survivors
+│   ├── One rule is selected uniformly from the survivors using ranged VRF output
 │   ├── Selected precompiled artifact is verified against stored hashes
 │   └── Valid artifact is frozen before draw
 │       ├── Active → frozen DSL/AST becomes Rule of the Hour
-│       └── Invalid/hash mismatch → no alternative rule for that turn; no deterministic fallback to the next finalist
+│       └── Invalid/hash mismatch → no alternative rule for that turn; no deterministic fallback to the next survivor
 │
-├── [96.7%] Guess submission window closes
-│
-├── [100%] Switchboard VRF draw occurs
+├── Switchboard VRF draw occurs (right after the active rule is frozen)
 │   ├── 6 unique numbers published
 │   ├── Original rule evaluated deterministically
 │   ├── Alternative rule evaluated by rule runtime if active
@@ -813,13 +864,14 @@ Turn N begins
 The UI must clearly explain the election mechanic:
 
 ```text
-The finalist set is formed from 3 top-voted eligible rules plus 7 eligible rules selected by Switchboard VRF.
-Then Switchboard VRF selects one rule from that finalist set to become the Rule of the Hour.
+At the end of the play window, the finalist set is formed from 3 top-voted eligible rules plus 7 eligible rules selected by Switchboard VRF.
+A 1-hour decision window then lets players pay to vote out finalists: a finalist is eliminated when its elimination votes pass its approval votes, and up to 5 of the 10 can be eliminated.
+Finally, Switchboard VRF selects one rule from the surviving finalists to become the Rule of the Hour.
 ```
 
-Default finalist count is **10**, because the selected policy is `3 top-voted + 7 random`. The PRD must not describe `3 + 6` as 10.
+Default finalist count is **10**, because the selected policy is `3 top-voted + 7 random`. The PRD must not describe `3 + 6` as 10. After the decision window, between **5 and 10** finalists survive into the final active-rule selection (up to 5 may be eliminated, and at least 1 survivor is always kept).
 
-This prevents users from assuming that the globally most-voted rule automatically wins, while preserving a strong role for voting and a chance for discovery.
+This prevents users from assuming that the globally most-voted rule automatically wins, while preserving a strong role for voting, a chance for discovery, and a community veto through the elimination window.
 
 ### 5.5 Formal Turn State Machine
 
@@ -834,6 +886,10 @@ OPEN
 → ELECTION_VRF_REQUESTED
 → ELECTION_VRF_FULFILLED
 → RULE_FINALISTS_SELECTED
+→ ELIMINATION_WINDOW_OPEN
+→ ELIMINATION_WINDOW_CLOSED
+→ ACTIVE_ELECTION_VRF_REQUESTED
+→ ACTIVE_ELECTION_VRF_FULFILLED
 → RULE_ELECTED
 → RULE_FROZEN
 → DRAW_PENDING
@@ -843,6 +899,8 @@ OPEN
 → CLAIMABLE
 → CLOSED
 ```
+
+`ELECTION_VRF_REQUESTED` / `ELECTION_VRF_FULFILLED` are the **finalist-election** VRF (used to derive the 7 random finalists and form the 10-rule finalist set). `ACTIVE_ELECTION_VRF_REQUESTED` / `ACTIVE_ELECTION_VRF_FULFILLED` are the **active-election** VRF, run only after the elimination window closes, to select one active rule from the surviving finalists. `ELIMINATION_WINDOW_OPEN` → `ELIMINATION_WINDOW_CLOSED` bound the fixed 1-hour decision phase.
 
 Failure and exception states:
 
@@ -1401,9 +1459,12 @@ Rationale:
 
 ### 6.12 Rule Election by Finalist Set
 
-At the election cutoff, the system elects the Rule of the Hour using a Switchboard VRF election request.
+The Rule of the Hour is elected in **two VRF-backed steps separated by the decision/elimination window** (section 6.14a):
 
-Default election configuration:
+1. **Finalist election** — at the end of the play window, a Switchboard finalist-election VRF request forms the 10-rule finalist set (3 top-voted + 7 random). No active rule is chosen here.
+2. **Active election** — after the fixed 1-hour decision window closes and eliminations are applied, a second Switchboard active-election VRF request selects one active rule from the surviving finalists.
+
+Default finalist-election configuration:
 
 ```typescript
 const RULE_ELECTION_CONFIG = {
@@ -1415,38 +1476,70 @@ const RULE_ELECTION_CONFIG = {
   selectionMethod: "vrf_ranged_output",
   requirePrecompiledEligibleFinalists: true,
   fallbackToNextFinalistOnInvalid: false,
+  // The finalist-election VRF only forms the 10-rule set; the active rule is
+  // selected by a separate active-election VRF after the elimination window.
+  activeRuleElectedAfterEliminationWindow: true,
 };
 ```
 
-Election flow:
+Default elimination configuration (decision window, section 6.14a):
+
+```typescript
+const RULE_ELIMINATION_CONFIG = {
+  decisionWindowMinutes: 60,                          // fixed 1-hour window, separate from the play window
+  maxEliminatedRules: 5,                              // up to 5 of the 10 finalists may be eliminated
+  eliminationCriterion: "elimination_votes > approval_votes",
+  overflowSelection: "most_elimination_votes",        // when more than 5 qualify, eliminate the 5 with the most elimination votes
+  overflowTiebreak: ["fewest_approval_votes", "lowest_rule_id"], // deterministic, auditable tie-break
+  minSurvivors: 1,                                    // never eliminate the last surviving finalist
+  effectiveMaxEliminated: "min(maxEliminatedRules, finalistCount - minSurvivors)",
+  approvalVoteCountLockedAt: "finalist_set_lock",     // positive-vote count frozen when the 10 finalists lock
+  eliminationVoteFeeMultiplier: 2,                    // × the effective vote fee for the turn
+  eliminationVoteFeeDestination: "prize_pool",
+  requireGameToken: true,
+  activeRuleSelectedFromSurvivorsOnly: true,
+};
+```
+
+Finalist-election flow (end of play window):
 
 1. filter the eligible rule pool to rules with valid precompiled artifacts;
 2. lock the eligible pool and persist `eligible_pool_hash`;
 3. select the 3 highest-voted eligible rules as the top-voted subset;
 4. persist `top_voted_finalist_hash`;
-5. submit a Switchboard VRF election request using the election commitment;
+5. submit a Switchboard finalist-election VRF request using the election commitment;
 6. after VRF fulfillment, derive 7 additional random finalists from the remaining eligible pool using the fulfilled VRF word, not request entropy;
-7. form the finalist set from `top_voted_finalists + random_finalists`;
-8. select one active rule uniformly from the finalist set using VRF ranged output or equivalent rejection-sampling utility;
-9. verify that the selected rule's precompiled artifact hash matches the stored artifact;
-10. freeze the selected artifact as the active alternative rule for the turn;
-11. if the selected artifact is unavailable, invalid, or hash-mismatched, no alternative rule is active for that turn and the alternative pool follows rollover rules.
+7. form the finalist set from `top_voted_finalists + random_finalists` and persist `finalist_set_hash`;
+8. lock each finalist's **approval (positive) vote count** as the value used by the elimination criterion;
+9. open the decision/elimination window (no active rule chosen yet).
+
+Active-election flow (after the decision window closes):
+
+1. compute eliminations from the elimination votes (section 6.14a): a finalist qualifies when `elimination_votes > approval_votes`; eliminate up to 5, choosing the 5 with the most elimination votes when more than 5 qualify, always keeping at least 1 survivor;
+2. mark eliminated finalists as `ELIMINATED` and persist `eliminated_finalist_hash`;
+3. submit a Switchboard active-election VRF request over the surviving finalists;
+4. select one active rule uniformly from the survivors using VRF ranged output or equivalent rejection-sampling utility;
+5. verify that the selected rule's precompiled artifact hash matches the stored artifact;
+6. freeze the selected artifact as the active alternative rule for the turn;
+7. if the selected artifact is unavailable, invalid, or hash-mismatched, no alternative rule is active for that turn and the alternative pool follows rollover rules.
 
 The system must not use:
 
 - Chainlink VRF for Solana MVP;
-- backend-generated randomness for finalist selection;
+- backend-generated randomness for finalist selection or active selection;
 - VRF request transaction hash as entropy;
-- `vrf_random_word % finalist_pool_size` when a ranged-output helper or rejection sampling is available;
-- deterministic fallback to the next finalist after an invalid selected rule.
+- `vrf_random_word % survivor_pool_size` when a ranged-output helper or rejection sampling is available;
+- deterministic fallback to the next survivor after an invalid selected rule;
+- the finalist-election VRF word to also select the active rule (the survivor set is unknown until the elimination window closes, so a separate active-election VRF is required).
 
-If fewer than 10 eligible rules exist, the finalist set is formed from the available eligible rules. If zero eligible rules exist, no alternative rule is active for the turn.
+If fewer than 10 eligible rules exist, the finalist set is formed from the available eligible rules and `effectiveMaxEliminated` still keeps at least 1 survivor. If zero eligible rules exist, no alternative rule is active for the turn and the decision window is skipped.
 
 The UI must clearly communicate:
 
 ```text
 The highest-voted rule overall does not automatically win.
-Three top-voted eligible rules enter the finalist set, seven more are selected by verified randomness, and one finalist is randomly elected.
+Three top-voted eligible rules enter the finalist set, seven more are selected by verified randomness.
+A 1-hour decision window then lets players pay to vote finalists out (up to 5 of 10), and one surviving finalist is randomly elected.
 ```
 
 ### 6.13 Rule Scope and Re-Proposal Cooldown
@@ -1509,6 +1602,36 @@ Required controls:
 - generate suspicious voting alerts.
 
 The MVP does not need perfect Sybil resistance, but it must make manipulation visible and make governance actions costlier than creating fresh wallets.
+
+### 6.14a Rule Elimination Voting (Decision Window)
+
+After the 10-rule finalist set is locked at the end of the play window, a fixed **1-hour decision/elimination window** opens before the active rule is elected. During this window, players can pay to vote finalists out of contention. This gives the community a veto over the finalist set while preserving the role of approval voting and verified randomness.
+
+Elimination voting rules:
+
+- the decision window lasts a fixed 60 minutes and is separate from the play window (it does not consume turn-cycle duration);
+- only wallets holding a valid current-turn Game Token may cast elimination votes;
+- elimination votes may only target rules in the current finalist set, and only while the window is open;
+- each wallet may cast **one elimination vote per finalist rule** per turn;
+- an elimination vote costs **2× the effective vote fee for the turn** (free before turn 100, `2 × VOTE_FEE = 0.01 SOL` from turn 100 onward), paid to the prize pool (section 8.2);
+- elimination votes are recorded on-chain through a dedicated `RuleEliminationVote` account/instruction path, distinct from the approval `RuleVote` path;
+- elimination votes do not carry over to other turns;
+- approval (positive) vote counts used by the elimination criterion are frozen when the finalist set locks; elimination votes accrue during the window and are compared at window close.
+
+Elimination resolution at window close:
+
+- a finalist **qualifies for elimination** when its elimination votes are strictly greater than its frozen approval votes (`elimination_votes > approval_votes`);
+- at most **5** finalists may be eliminated;
+- if **more than 5** finalists qualify, the **5 with the most elimination votes** are eliminated; ties are broken deterministically by fewest approval votes, then by lowest `rule_id`;
+- at least **1 survivor** is always kept, so when fewer than 10 finalists exist the effective cap is `min(5, finalistCount − 1)`;
+- eliminated finalists transition to `ELIMINATED` (section 6.16), are excluded from the active-election VRF, and remain visible in history and audit views;
+- the active rule is then VRF-selected uniformly from the surviving finalists only (section 6.12).
+
+Anti-abuse and integrity:
+
+- the paid 2× fee and the Game Token gate make coordinated elimination costlier than creating fresh wallets;
+- elimination votes feed the same vote-concentration monitoring and suspicious-activity alerts as approval votes;
+- elimination tallies, the qualifying set, the eliminated set, and `eliminated_finalist_hash` are persisted for auditability.
 
 ### 6.15 Rule Similarity, Deduplication and Preflight
 
@@ -1607,6 +1730,7 @@ DRAFT
 → PRECOMPILED_VALID
 → ELIGIBLE_FOR_ELECTION
 → FINALIST_SET_MEMBER
+→ SURVIVED_ELIMINATION
 → VRF_ELECTED
 → FROZEN
 → ACTIVE
@@ -1626,6 +1750,7 @@ REJECTED_ALWAYS_TRUE
 REJECTED_IMPOSSIBLE
 REPORTED
 REMOVED_PAID
+ELIMINATED
 INVALIDATED
 CANCELLED_BY_TURN_END
 ```
@@ -1637,8 +1762,10 @@ State transition requirements:
 - `TOP_FINALIST` and `RANDOM_FINALIST` are finalist membership labels derived from election records;
 - a rule can become `REMOVED_PAID` only before eligible pool lock and only through a paid `remove_rule` action that passes threshold checks;
 - a `REMOVED_PAID` rule is excluded from election, cannot become a finalist, and remains visible in history/audit views;
+- a `FINALIST_SET_MEMBER` can transition to `ELIMINATED` only at the close of the decision/elimination window, when it meets the elimination criterion and is within the eliminated set (section 6.14a); an `ELIMINATED` rule is excluded from the active-election VRF and remains visible in history/audit views;
+- only a finalist that reaches `SURVIVED_ELIMINATION` (was not eliminated) is eligible for the active-election VRF and may become `VRF_ELECTED`;
 - a rule can only become `ACTIVE` from `FROZEN`;
-- a rule can only become `FROZEN` if the precompiled artifact hash matches the selected election artifact;
+- a rule can only become `FROZEN` if the precompiled artifact hash matches the selected active-election artifact;
 - invalid transitions are rejected by `packages/game-engine`;
 - the UI must render from this state model and derived labels, not ad-hoc booleans.
 
@@ -2373,6 +2500,7 @@ Default fee model:
 - fixed fee for rule proposal;
 - paid rule removal fee;
 - voting is free before turn 100; a fixed vote fee applies from turn 100 onward, paid to the prize pool;
+- elimination voting (decision window) costs 2× the effective vote fee for the turn, paid to the prize pool (free before turn 100, since the support vote is free then);
 - rule reporting is free but rate-limited and requires a current-turn Game Token.
 
 Default MVP value-flow mode:
@@ -2392,6 +2520,8 @@ const MVP_FEE_CONFIG = {
   ruleProposalFeeLamports: 20_000_000, // 0.02 SOL
   ruleRemovalFeeLamports: 50_000_000, // 0.05 SOL
   voteFeeLamports: 5_000_000, // 0.005 SOL; applies only from turn 100 onward (see VOTE_FEE_CONFIG). 0 for turns before 100
+  eliminationVoteFeeLamports: 10_000_000, // 2 × voteFeeLamports = 0.01 SOL from turn 100 onward; 0 for turns before 100 (see RULE_ELIMINATION_CONFIG)
+  eliminationVoteFeeMultiplier: 2, // elimination vote = 2× the effective vote fee for the turn
   ruleReportFeeLamports: 0,
   treasuryFeeBps: 500, // 5%
 };
@@ -2415,6 +2545,17 @@ fee_destination = prize_pool only
 ```
 
 The vote fee follows the same prize-pool accounting as the rule removal fee and is not configurable to treasury in MVP. The current-turn Game Token requirement applies in every turn, with or without the fee.
+
+MVP elimination vote fee policy:
+
+```text
+elimination_vote_fee = 2 × effective_vote_fee_for_turn
+turn_index < 100  → elimination voting is free (effective vote fee is 0)
+turn_index >= 100 → 2 × VOTE_FEE = 0.01 SOL → current turn prize pool
+fee_destination = prize_pool only
+```
+
+The elimination vote fee follows the same prize-pool accounting as the vote and removal fees and is not configurable to treasury in MVP. The current-turn Game Token requirement applies to elimination voting in every turn, with or without the fee (section 6.14a).
 
 ### 8.3 Prize Distribution
 
@@ -2726,6 +2867,10 @@ const MVP_RATE_LIMIT_CONFIG = {
   votesPerWalletPerMinute: 30,
   votesPerRulePerWalletPerTurn: 1,
 
+  eliminationVotesPerWalletPerTurn: 10, // at most one per finalist; the finalist set holds up to 10 rules
+  eliminationVotesPerWalletPerMinute: 30,
+  eliminationVotesPerRulePerWalletPerTurn: 1,
+
   ruleRemovalsPerWalletPerTurn: 2,
   ruleRemovalAttemptsPerWalletPerMinute: 3,
 
@@ -2740,7 +2885,7 @@ const MVP_RATE_LIMIT_CONFIG = {
 Rate-limit requirements:
 
 - limits must be enforced server-side;
-- on-chain uniqueness constraints remain the source of truth for one-guess-per-wallet, one-vote-per-rule-per-wallet, and paid removal idempotency;
+- on-chain uniqueness constraints remain the source of truth for one-guess-per-wallet, one-vote-per-rule-per-wallet, one-elimination-vote-per-finalist-per-wallet, and paid removal idempotency;
 - rate-limit rejections must be user-readable;
 - suspicious rate-limit events must be visible in the admin abuse dashboard;
 - changing default rate limits requires updating `packages/constants`, backend config, admin documentation, and tests.
@@ -2758,9 +2903,12 @@ GameToken
 PlayerGuess
 RuleProposal
 RuleVote
+RuleEliminationVote
 RuleRemovalRecord
 ElectionVrfRequestRecord
+ActiveElectionVrfRequestRecord
 RuleFinalistSetRecord
+RuleEliminationRecord
 VerificationRecord
 CompiledRuleArtifactRecord
 PayoutRecord
@@ -2781,13 +2929,19 @@ Stores:
 - treasury fee bps;
 - turn duration cycle;
 - active turn duration index;
-- rule election cutoff ratio;
-- guess cutoff ratio;
+- rule proposal/approval voting cutoff ratio (within the play window);
+- guess cutoff ratio (within the play window);
+- decision/elimination window duration minutes (fixed, default 60);
+- max eliminated rules per turn (default 5);
+- elimination vote fee multiplier (default 2× the effective vote fee);
 - max rule tokens;
 - Switchboard VRF configuration for draw;
-- Switchboard VRF configuration for rule election;
+- Switchboard VRF configuration for finalist election;
+- Switchboard VRF configuration for active election (post-elimination);
 - top-voted finalist count;
 - random finalist count;
+- vote fee lamports;
+- elimination vote fee lamports;
 - rule removal fee lamports;
 - rule removal fee destination fixed to `prize_pool` for MVP;
 - minimum claim threshold lamports;

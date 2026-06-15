@@ -922,10 +922,14 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
   // Policy: ANY rule is allowed except those depending on external events or
   // that cannot be verified — both are rejected here by the compiler.
   const agentConfig = resolveRuleAgentConfig();
-  const astProvider: RuleAstProvider = async ({ normalizedText: text }) =>
-    compileRuleToAst(text, agentConfig);
+  // Compile the AST from the ORIGINAL sanitized text (guided by the rich
+  // rule-authoring skill), not from the prose normalization — a small model can
+  // flip polarity while normalizing ("errar mais" -> "fewest"), and that must not
+  // corrupt the executed rule. The interpretation is still shown to the player.
+  const astProvider: RuleAstProvider = async ({ prompt }) =>
+    compileRuleToAst(prompt, agentConfig);
   const validation = await compileRuleArtifact(
-    { model: agentConfig.model, prompt: normalizedText, ruleId, tokenCount },
+    { model: agentConfig.model, prompt: sanitizedText, ruleId, tokenCount },
     { astProvider },
   );
 
