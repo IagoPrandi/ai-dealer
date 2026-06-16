@@ -1102,6 +1102,74 @@ p {
   font-size: 16px;
 }
 
+.proposal-bubble-error {
+  border-color: rgb(255 210 63 / 48%);
+  background: rgb(255 210 63 / 8%);
+}
+
+.proposal-bubble-error > svg {
+  color: var(--platform-yellow);
+}
+
+.proposal-bubble-ai code {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 2px 8px;
+  border-radius: 8px;
+  background: var(--platform-bg);
+  color: var(--platform-yellow);
+  font-family: "Space Grotesk", Consolas, monospace;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.proposal-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 11px;
+}
+
+.proposal-chip {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  min-height: 34px;
+  padding: 6px 13px;
+  border: 1px solid var(--platform-line-2);
+  border-radius: 999px;
+  background: var(--platform-bg);
+  color: var(--platform-text);
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 800;
+  line-height: 1.2;
+  text-align: left;
+}
+
+.proposal-chip > svg {
+  flex: none;
+  color: var(--platform-green);
+}
+
+.proposal-chip:hover {
+  border-color: var(--platform-green);
+}
+
+.proposal-chip-example {
+  max-width: 100%;
+  border-style: dashed;
+  color: var(--platform-muted);
+  font-weight: 600;
+}
+
+.proposal-chip-example > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .proposal-meta-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

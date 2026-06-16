@@ -1,9 +1,11 @@
 import { expect, test } from "@playwright/test";
 
-test("free-form rule composer enforces token limit and requires wallet for devnet submission", async ({
+test("dealer chat onboards, answers questions, and only preflights real rules", async ({
   page,
 }) => {
+  let preflightCalls = 0;
   await page.route("**/rule-preflight", async (route) => {
+    preflightCalls += 1;
     await route.fulfill({
       contentType: "application/json",
       json: {
@@ -37,31 +39,44 @@ test("free-form rule composer enforces token limit and requires wallet for devne
 
   await page.goto("/play/propose");
 
-  const ruleInput = page.getByLabel("Rule text");
-  const reviewButton = page.getByRole("button", { name: "Review proposal" });
+  const messageInput = page.getByLabel("Message", { exact: true });
+  const sendButton = page.getByRole("button", { name: "Send message" });
 
-  await expect(reviewButton).toBeDisabled();
-  // Each "wordN" entry counts as two approximate tokens (letters + number), so
-  // 600 entries (~1200 tokens) exceeds the 1000-token limit.
-  await ruleInput.fill(
+  // The dealer greets the player up front (onboarding), no rule required.
+  await expect(page.getByText("Welcome — I'm the Dealer.").first()).toBeVisible();
+  await expect(sendButton).toBeDisabled();
+
+  // A plain greeting is answered as chat — it must NOT trigger a preflight.
+  await messageInput.fill("oi");
+  await sendButton.click();
+  await expect(page.getByText("You", { exact: true }).first()).toBeVisible();
+  expect(preflightCalls).toBe(0);
+
+  // A question is answered with a canned topic — still no preflight.
+  await messageInput.fill("how does it work?");
+  await sendButton.click();
+  await expect(page.getByText("How a rule works")).toBeVisible();
+  expect(preflightCalls).toBe(0);
+
+  // The token limit still blocks before any preflight.
+  await messageInput.fill(
     Array.from({ length: 600 }, (_, index) => `word${index}`).join(" "),
   );
   await expect(page.getByText(/over the .*-token limit/)).toBeVisible();
-  await expect(reviewButton).toBeDisabled();
+  await expect(sendButton).toBeDisabled();
 
-  await ruleInput.fill(
+  // A real rule draft is preflighted and routed to the review step.
+  await messageInput.fill(
     "The guess with the closest even total to the drawn total wins.",
   );
-  await expect(page.locator(".sanitized-preview p").first()).toHaveText(
-    "The guess with the closest even total to the drawn total wins.",
-  );
-  await reviewButton.click();
+  await sendButton.click();
 
   await expect(
     page.getByRole("heading", {
       name: "Confirm this rule before devnet submission.",
     }),
   ).toBeVisible();
+  expect(preflightCalls).toBe(1);
   await expect(
     page.getByText("Server token count and hashes are locked"),
   ).toBeVisible();

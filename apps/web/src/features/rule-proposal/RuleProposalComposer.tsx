@@ -1,10 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   CheckCircle2,
+  Coins,
+  HelpCircle,
+  Lightbulb,
   LoaderCircle,
   Send,
   ShieldCheck,
@@ -33,9 +36,10 @@ const RULE_MAX_CHARACTERS = 6000;
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_IDEALER_API_URL ?? "http://localhost:3002";
 const INSPIRATION_EXAMPLES = [
-  "The guess with the closest even total wins.",
+  "Win if at least 4 of your numbers appear in the draw.",
+  "The guess with the closest even total to the drawn total wins.",
+  "Win if the sum of your numbers equals the sum of the drawn numbers.",
   "The guess containing the most drawn numbers wins.",
-  "The guess with the smallest distance between its highest and lowest numbers wins.",
 ] as const;
 
 type ComposerStep = "compose" | "review" | "success";
@@ -53,6 +57,30 @@ interface ProposalFeedback {
   receipt?: RuleProposalReceipt;
   signature?: string;
   status: ProposalStatus;
+}
+
+// Topics the dealer can explain without ever calling the model. These power the
+// onboarding so a new player can ask "how does it work?" and get a real answer
+// instead of a failed preflight.
+type AnswerTopic = "welcome" | "how" | "create" | "examples" | "costs";
+
+interface ChatChip {
+  label: string;
+  // A chip either opens another canned topic, drops example text into the input,
+  // or asks the dealer to preflight a specific text the player already wrote.
+  insert?: string;
+  preflight?: string;
+  topic?: AnswerTopic;
+}
+
+interface ChatMessage {
+  id: string;
+  role: "dealer" | "user";
+  title?: string;
+  body: string;
+  chips?: ChatChip[];
+  code?: string;
+  tone?: "error";
 }
 
 function countApproximateTokens(value: string) {
@@ -77,6 +105,183 @@ function sanitizePreview(value: string) {
 
 function truncateAddress(value: string) {
   return `${value.slice(0, 5)}...${value.slice(-5)}`;
+}
+
+// --- Intent detection -------------------------------------------------------
+// The composer must tell apart "the player is chatting / asking" from "the
+// player is proposing a rule". Only the latter is worth a server preflight.
+// This is deliberately a local, deterministic heuristic: onboarding must keep
+// working even when the LLM is down (which is exactly what produced the
+// RULE_PREFLIGHT_FAILED on a plain "oi").
+
+type MessageIntent = "greeting" | "thanks" | "help" | "rule";
+
+const GREETING_RE =
+  /^(oi+|ol[aá]+|al[oô]+|e[ -]?a[ií]|hey+|hi+|hell?o+|hola|yo|sup|bom dia|boa tarde|boa noite|tudo bem|tudo bom)\b/i;
+const THANKS_RE = /\b(thanks|thank you|thx|obrigad[oa]|valeu|vlw)\b/i;
+const QUESTION_START_RE =
+  /^(how|what|why|when|where|can|could|do|does|should|would|is|are|which|como|o que|por ?qu[eê]|qual|quais|posso|tem como|d[aá] pra)\b/i;
+const HELP_RE =
+  /\?|\b(help|explain|example|examples|cost|costs|fee|fees|token|tokens|limit|works?|funciona|ajuda|d[uú]vida|exemplo|exemplos|custa|pre[çc]o|limite|criar|allowed)\b/i;
+const RULE_RE =
+  /\b(win|wins|winner|won|lose|loses?|guess|guesses|draw|drawn|number|numbers|sum|total|totals|match|matches|matching|even|odd|highest|lowest|closest|most|least|fewer|greater|ganha|ganh\w*|vence\w*|vencedor|n[uú]mero|n[uú]meros|soma|somar|acert\w*|err\w*|maior|menor|par|[íi]mpar|sorte-?\w*|sorteado)\b/i;
+
+function classifyIntent(text: string): MessageIntent {
+  const trimmed = text.trim();
+  const words = trimmed.split(/\s+/).filter(Boolean).length;
+  const isQuestion = /\?\s*$/.test(trimmed) || QUESTION_START_RE.test(trimmed);
+
+  if (THANKS_RE.test(trimmed) && words <= 4) {
+    return "thanks";
+  }
+
+  if (GREETING_RE.test(trimmed) && words <= 3) {
+    return "greeting";
+  }
+
+  // A question is answered, never preflighted — even if it mentions rule words.
+  if (isQuestion) {
+    return "help";
+  }
+
+  // A declarative sentence with rule vocabulary is a rule draft.
+  if (RULE_RE.test(trimmed) && words >= 3) {
+    return "rule";
+  }
+
+  if (HELP_RE.test(trimmed)) {
+    return "help";
+  }
+
+  // A long declarative sentence is most likely a rule attempt.
+  if (words >= 6) {
+    return "rule";
+  }
+
+  if (GREETING_RE.test(trimmed)) {
+    return "greeting";
+  }
+
+  return "help";
+}
+
+function detectTopic(text: string): AnswerTopic {
+  const value = text.toLowerCase();
+
+  if (/example|exemplo|inspir/.test(value)) {
+    return "examples";
+  }
+
+  if (/cost|fee|custa|pre[çc]o|token|limit|limite|sol\b/.test(value)) {
+    return "costs";
+  }
+
+  if (/what can|o que posso|posso (criar|fazer)|create|criar|allowed|kind of/.test(value)) {
+    return "create";
+  }
+
+  return "how";
+}
+
+// --- Canned dealer answers --------------------------------------------------
+
+function exampleChips(): ChatChip[] {
+  return INSPIRATION_EXAMPLES.map((example) => ({
+    insert: example,
+    label: example,
+  }));
+}
+
+function buildAnswer(topic: AnswerTopic): Omit<ChatMessage, "id" | "role"> {
+  switch (topic) {
+    case "how":
+      return {
+        body:
+          "Every round draws 6 numbers from 1 to 100. Your rule decides who wins by comparing each player's guess (their 6 numbers) against that draw. Write it in plain words — I rewrite it into one clear, measurable condition, run a safety and token check, and you confirm it before it goes on-chain. Tip: you need to play a guess in this round first to unlock proposing.",
+        chips: [
+          { label: "What can I create?", topic: "create" },
+          { label: "Show examples", topic: "examples" },
+          { label: "Costs & limits", topic: "costs" },
+        ],
+        title: "How a rule works",
+      };
+    case "create":
+      return {
+        body:
+          "A rule can only look at two things: your guess (6 numbers) and the draw (6 numbers). From there you can compare totals, count how many match, look at the highest or lowest, even or odd, ranges, positions, or drop a few numbers. It just has to be objective and testable — no vague words like 'nice' or 'lucky', and nothing about wallets, votes, time, or other players.",
+        chips: [
+          { label: "Show examples", topic: "examples" },
+          { label: "Costs & limits", topic: "costs" },
+          { label: "How does it work?", topic: "how" },
+        ],
+        title: "What you can create",
+      };
+    case "examples":
+      return {
+        body:
+          "Here are a few for inspiration — tap one to drop it into the box, then make it your own. These are not templates; write whatever way to win you can imagine.",
+        chips: [
+          ...exampleChips(),
+          { label: "What can I create?", topic: "create" },
+        ],
+        title: "Example rules",
+      };
+    case "costs":
+      return {
+        body: `Proposing a rule costs ${MVP_FEES_SOL.ruleProposal.toFixed(
+          2,
+        )} SOL, and the text must fit within ${RULE_MAX_TOKENS} tokens — you'll see a live counter as you type. You also need a Game Token, which you get by playing a guess in this round first.`,
+        chips: [
+          { label: "How does it work?", topic: "how" },
+          { label: "Show examples", topic: "examples" },
+        ],
+        title: "Costs & limits",
+      };
+    case "welcome":
+    default:
+      return {
+        body:
+          "Tell me how you'd like players to win this round and I'll turn it into a rule the game can verify. New here? Ask me anything, or tap an option below to get started.",
+        chips: [
+          { label: "How does it work?", topic: "how" },
+          { label: "What can I create?", topic: "create" },
+          { label: "Show examples", topic: "examples" },
+          { label: "Costs & limits", topic: "costs" },
+        ],
+        title: "Welcome — I'm the Dealer.",
+      };
+  }
+}
+
+async function requestRulePreflight(text: string) {
+  const response = await fetch(`${API_BASE_URL}/rule-preflight`, {
+    body: JSON.stringify({ text }),
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+  const body = (await response.json()) as {
+    error?: string;
+    message?: string;
+    preflight?: RulePreflightResult;
+  };
+
+  if (!response.ok || !body.preflight) {
+    throw new Error(body.message ?? body.error ?? "Rule preflight failed.");
+  }
+
+  return body.preflight;
+}
+
+async function persistRuleProposal(receipt: RuleProposalReceipt) {
+  const response = await fetch(`${API_BASE_URL}/rule-proposals`, {
+    body: JSON.stringify(receipt),
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+
+  if (!response.ok && response.status !== 409) {
+    throw new Error(`Rule proposal API returned HTTP ${response.status}.`);
+  }
 }
 
 function ProposalPhoneChrome() {
@@ -114,18 +319,6 @@ function ProposalDealer({ size = 42 }: { size?: number }) {
       <b />
     </span>
   );
-}
-
-function getAmbiguityMessage(value: string, tokenCount: number) {
-  if (tokenCount < 8) {
-    return "Add more detail about how guesses are compared.";
-  }
-
-  if (/\b(any|anything|something|whatever|somehow)\b/i.test(value)) {
-    return "Replace vague words with measurable conditions.";
-  }
-
-  return "No obvious ambiguity detected.";
 }
 
 function normalizeProposalError(error: unknown) {
@@ -178,35 +371,46 @@ function normalizeProposalError(error: unknown) {
   };
 }
 
-async function requestRulePreflight(text: string) {
-  const response = await fetch(`${API_BASE_URL}/rule-preflight`, {
-    body: JSON.stringify({ text }),
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  });
-  const body = (await response.json()) as {
-    error?: string;
-    message?: string;
-    preflight?: RulePreflightResult;
+function dealerErrorMessage(rawMessage: string, originalText: string): {
+  body: string;
+  code: string;
+} {
+  const message = rawMessage.toLowerCase();
+
+  if (
+    message.includes("unusable response") ||
+    message.includes("did not respond") ||
+    message.includes("unreachable") ||
+    message.includes("not configured")
+  ) {
+    return {
+      body: "I couldn't process that just now — the dealer engine didn't answer. Give it another try in a moment, or rephrase your rule a little.",
+      code: "RULE_AGENT_UNAVAILABLE",
+    };
+  }
+
+  if (message.includes("token")) {
+    return {
+      body: `That's a bit long for the ${RULE_MAX_TOKENS}-token limit. Trim it to one clear sentence and send it again.`,
+      code: "RULE_TOKEN_LIMIT_EXCEEDED",
+    };
+  }
+
+  if (message.includes("injection")) {
+    return {
+      body: "I can only work with game conditions. Describe a measurable way to win that compares the guess to the draw — leave out any instructions to me.",
+      code: "RULE_PROMPT_INJECTION",
+    };
+  }
+
+  // Generic: the text didn't read as a rule. Nudge with a concrete shape.
+  const looksTiny = originalText.trim().split(/\s+/).filter(Boolean).length < 3;
+  return {
+    body: looksTiny
+      ? "I didn't catch a rule there. Try describing one clear way to win — for example, “Win if at least 4 of your numbers appear in the draw.”"
+      : "I couldn't read that as a measurable rule. Try one clear condition that compares your guess to the draw — for example, “Win if at least 4 of your numbers appear in the draw.”",
+    code: "RULE_PREFLIGHT_FAILED",
   };
-
-  if (!response.ok || !body.preflight) {
-    throw new Error(body.message ?? body.error ?? "Rule preflight failed.");
-  }
-
-  return body.preflight;
-}
-
-async function persistRuleProposal(receipt: RuleProposalReceipt) {
-  const response = await fetch(`${API_BASE_URL}/rule-proposals`, {
-    body: JSON.stringify(receipt),
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  });
-
-  if (!response.ok && response.status !== 409) {
-    throw new Error(`Rule proposal API returned HTTP ${response.status}.`);
-  }
 }
 
 export function RuleProposalComposer() {
@@ -224,15 +428,21 @@ export function RuleProposalComposer() {
     message: "",
     status: "idle",
   });
+  const messageIdRef = useRef(0);
+  const nextMessageId = () => {
+    messageIdRef.current += 1;
+    return `msg-${messageIdRef.current}`;
+  };
+  const [messages, setMessages] = useState<ChatMessage[]>(() => [
+    { ...buildAnswer("welcome"), id: "msg-0", role: "dealer" },
+  ]);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const tokenCount = useMemo(
     () => countApproximateTokens(ruleText),
     [ruleText],
   );
   const sanitizedPreview = useMemo(() => sanitizePreview(ruleText), [ruleText]);
-  const ambiguityMessage = useMemo(
-    () => getAmbiguityMessage(sanitizedPreview, tokenCount),
-    [sanitizedPreview, tokenCount],
-  );
   const walletAddress = wallet?.account.address.toString();
   const isEmpty = sanitizedPreview.length === 0;
   const isOverLimit = tokenCount > RULE_MAX_TOKENS;
@@ -240,12 +450,21 @@ export function RuleProposalComposer() {
     feedback.status === "preflighting" ||
     feedback.status === "awaiting_approval" ||
     feedback.status === "pending";
-  const canReview = !isEmpty && !isOverLimit && !isSubmitting;
+  const isThinking = feedback.status === "preflighting";
+  const canSend = !isEmpty && !isOverLimit && !isSubmitting;
   const signatureStatus = useWaitForSignature(feedback.signature, {
     commitment: "confirmed",
     disabled: !feedback.signature,
     subscribe: true,
   });
+
+  // Keep the latest message in view as the conversation grows (no scrollIntoView).
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (node) {
+      node.scrollTop = node.scrollHeight;
+    }
+  }, [messages, isThinking, step]);
 
   useEffect(() => {
     if (!feedback.signature || !feedback.receipt) {
@@ -293,21 +512,40 @@ export function RuleProposalComposer() {
     signatureStatus.waitError,
   ]);
 
+  function appendMessages(...entries: Array<Omit<ChatMessage, "id">>) {
+    setMessages((current) => [
+      ...current,
+      ...entries.map((entry) => ({ ...entry, id: nextMessageId() })),
+    ]);
+  }
+
   function resetComposer() {
     setRuleText("");
     setStep("compose");
     setPreflight(null);
     setFeedback({ message: "", status: "idle" });
+    messageIdRef.current = 0;
+    setMessages([{ ...buildAnswer("welcome"), id: "msg-0", role: "dealer" }]);
   }
 
-  function updateRuleText(value: string) {
-    setRuleText(value);
+  function answerTopic(topic: AnswerTopic) {
+    appendMessages({ ...buildAnswer(topic), role: "dealer" });
+  }
+
+  function focusInput() {
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }
+
+  function insertExample(text: string) {
+    setRuleText(text);
     setPreflight(null);
     setFeedback({ message: "", status: "idle" });
+    focusInput();
   }
 
-  async function reviewProposal() {
-    if (!canReview) {
+  async function runPreflight(text: string) {
+    const clean = sanitizePreview(text);
+    if (!clean) {
       return;
     }
 
@@ -317,22 +555,87 @@ export function RuleProposalComposer() {
     });
 
     try {
-      const result = await requestRulePreflight(ruleText);
+      const result = await requestRulePreflight(text);
       setPreflight(result);
+      setRuleText(text);
       setFeedback({ message: "", status: "idle" });
       setStep("review");
     } catch (error) {
-      setFeedback({
-        code: "RULE_PREFLIGHT_FAILED",
-        message: error instanceof Error ? error.message : String(error),
-        status: "failed",
+      const raw = error instanceof Error ? error.message : String(error);
+      const { body, code } = dealerErrorMessage(raw, text);
+      setFeedback({ message: "", status: "idle" });
+      appendMessages({
+        body,
+        chips: [
+          { label: "Show examples", topic: "examples" },
+          { label: "What can I create?", topic: "create" },
+        ],
+        code,
+        role: "dealer",
+        title: "Let's adjust that",
+        tone: "error",
       });
+    }
+  }
+
+  function answerIntent(intent: MessageIntent, text: string) {
+    if (intent === "rule") {
+      void runPreflight(text);
+      return;
+    }
+
+    if (intent === "greeting" || intent === "thanks") {
+      appendMessages({ ...buildAnswer("welcome"), role: "dealer" });
+      return;
+    }
+
+    // help — route to the closest topic. If the question still carried rule
+    // vocabulary, offer a one-tap shortcut to actually preflight what they wrote.
+    const answer = buildAnswer(detectTopic(text));
+    const chips = [...(answer.chips ?? [])];
+    if (RULE_RE.test(text) && sanitizePreview(text).split(/\s+/).length >= 3) {
+      chips.unshift({ label: "Check that as a rule", preflight: text });
+    }
+    appendMessages({ ...answer, chips, role: "dealer" });
+  }
+
+  function handleSend() {
+    const text = ruleText;
+    const clean = sanitizePreview(text);
+    if (!clean || isOverLimit || isSubmitting) {
+      return;
+    }
+
+    const intent = classifyIntent(clean);
+    appendMessages({ body: clean, role: "user" });
+
+    if (intent === "rule") {
+      // Keep the draft in the box so "Edit rule" on the review screen works.
+      void runPreflight(text);
+    } else {
+      setRuleText("");
+      answerIntent(intent, clean);
+    }
+  }
+
+  function handleChip(chip: ChatChip) {
+    if (chip.topic) {
+      answerTopic(chip.topic);
+      return;
+    }
+    if (chip.preflight) {
+      setRuleText(chip.preflight);
+      void runPreflight(chip.preflight);
+      return;
+    }
+    if (chip.insert) {
+      insertExample(chip.insert);
     }
   }
 
   async function submitProposal() {
     if (!preflight) {
-      await reviewProposal();
+      await runPreflight(ruleText);
       return;
     }
 
@@ -547,7 +850,10 @@ export function RuleProposalComposer() {
           aria-labelledby="rule-composer-title"
         >
           <div className="platform-ambient" />
-          <div className="platform-scroll platform-propose-scroll">
+          <div
+            className="platform-scroll platform-propose-scroll"
+            ref={scrollRef}
+          >
             <header className="platform-screen-header proposal-chat-header">
               <Link aria-label="Back to live round" href="/play">
                 <ArrowLeft aria-hidden="true" size={20} />
@@ -575,8 +881,9 @@ export function RuleProposalComposer() {
                 <p className="platform-section-label">Free-form rule</p>
                 <h2>Describe a new way to win.</h2>
                 <p>
-                  Write one measurable winning condition. The server preflight
-                  locks tokens and hashes before wallet approval.
+                  Chat with the dealer. Ask how it works, or just describe how
+                  players should win — I&apos;ll know the difference and only run
+                  a preflight when you propose an actual rule.
                 </p>
               </div>
             </section>
@@ -737,71 +1044,80 @@ export function RuleProposalComposer() {
                 ) : null}
               </section>
             ) : (
-              <section className="proposal-chat-thread">
-                <article className="proposal-bubble-ai">
-                  <ShieldCheck aria-hidden="true" size={16} />
-                  <div>
-                    <strong>Keep it clear and testable.</strong>
-                    <p>
-                      Avoid vague words. The rule can be creative, but it must
-                      compare guesses against the draw.
-                    </p>
-                  </div>
-                </article>
-
-                {sanitizedPreview ? (
-                  <div className="sanitized-preview proposal-bubble-user">
-                    <span>Your rule draft</span>
-                    <p>{sanitizedPreview}</p>
-                  </div>
-                ) : (
-                  <div className="sanitized-preview proposal-chat-card">
-                    <span>Sanitized preview</span>
-                    <p>Your normalized rule preview will appear here.</p>
-                  </div>
+              <section className="proposal-chat-thread" aria-label="Dealer conversation">
+                {messages.map((message) =>
+                  message.role === "user" ? (
+                    <div
+                      className="sanitized-preview proposal-bubble-user"
+                      key={message.id}
+                    >
+                      <span>You</span>
+                      <p>{message.body}</p>
+                    </div>
+                  ) : (
+                    <article
+                      className={
+                        message.tone === "error"
+                          ? "proposal-bubble-ai proposal-bubble-error"
+                          : "proposal-bubble-ai"
+                      }
+                      key={message.id}
+                    >
+                      {message.tone === "error" ? (
+                        <ShieldCheck aria-hidden="true" size={16} />
+                      ) : (
+                        <Sparkles aria-hidden="true" size={16} />
+                      )}
+                      <div>
+                        {message.title ? <strong>{message.title}</strong> : null}
+                        <p>{message.body}</p>
+                        {message.code ? <code>{message.code}</code> : null}
+                        {message.chips && message.chips.length > 0 ? (
+                          <div className="proposal-chip-row">
+                            {message.chips.map((chip) => (
+                              <button
+                                className={
+                                  chip.insert
+                                    ? "proposal-chip proposal-chip-example"
+                                    : "proposal-chip"
+                                }
+                                key={chip.label}
+                                onClick={() => handleChip(chip)}
+                                type="button"
+                              >
+                                {chip.topic === "examples" ? (
+                                  <Lightbulb aria-hidden="true" size={13} />
+                                ) : chip.topic === "costs" ? (
+                                  <Coins aria-hidden="true" size={13} />
+                                ) : chip.topic ? (
+                                  <HelpCircle aria-hidden="true" size={13} />
+                                ) : null}
+                                <span>{chip.label}</span>
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    </article>
+                  ),
                 )}
 
-                {feedback.status === "failed" ? (
+                {isThinking ? (
                   <article
-                    className="guess-status-card proposal-status-card failed"
-                    role="alert"
+                    className="proposal-bubble-ai"
+                    aria-live="polite"
                   >
-                    <strong>Preflight failed</strong>
-                    <p>{feedback.message}</p>
-                    {feedback.code ? <code>{feedback.code}</code> : null}
+                    <LoaderCircle
+                      aria-hidden="true"
+                      className="wallet-spinner"
+                      size={16}
+                    />
+                    <div>
+                      <strong>Working on your rule…</strong>
+                      <p>Interpreting, normalizing, and running the preflight.</p>
+                    </div>
                   </article>
                 ) : null}
-
-                <div className="mock-check proposal-chat-card">
-                  <span>Preflight preview</span>
-                  <p>
-                    {isEmpty
-                      ? "Write a rule to run server-side preflight."
-                      : "Ready for server-side token, safety, and hash preflight."}
-                  </p>
-                </div>
-
-                <div className="mock-check proposal-chat-card">
-                  <span>Ambiguity check</span>
-                  <p>
-                    {isEmpty
-                      ? "Write a rule to run the ambiguity check."
-                      : ambiguityMessage}
-                  </p>
-                </div>
-
-                <section
-                  className="inspiration-panel proposal-chat-card"
-                  aria-labelledby="inspiration-title"
-                >
-                  <p className="platform-section-label">Inspiration only</p>
-                  <h2 id="inspiration-title">Examples are not templates.</h2>
-                  <ul>
-                    {INSPIRATION_EXAMPLES.map((example) => (
-                      <li key={example}>{example}</li>
-                    ))}
-                  </ul>
-                </section>
               </section>
             )}
           </div>
@@ -812,25 +1128,35 @@ export function RuleProposalComposer() {
               aria-label="Rule proposal actions"
             >
               <div className="composer-field proposal-input-field">
-                <label htmlFor="rule-text">Rule text</label>
+                <label htmlFor="rule-text">Message</label>
                 <textarea
                   aria-describedby="rule-token-guidance"
                   id="rule-text"
                   maxLength={RULE_MAX_CHARACTERS}
-                  onChange={(event) => updateRuleText(event.target.value)}
-                  placeholder="Example: The guess with the closest even total wins."
+                  onChange={(event) => {
+                    setRuleText(event.target.value);
+                    setPreflight(null);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      handleSend();
+                    }
+                  }}
+                  placeholder="Ask how it works, or describe a way to win…"
+                  ref={textareaRef}
                   rows={2}
                   value={ruleText}
                 />
               </div>
               <button
-                aria-label="Review proposal"
+                aria-label="Send message"
                 className="proposal-send-button"
-                disabled={!canReview}
-                onClick={reviewProposal}
+                disabled={!canSend}
+                onClick={handleSend}
                 type="button"
               >
-                {feedback.status === "preflighting" ? (
+                {isThinking ? (
                   <LoaderCircle
                     aria-hidden="true"
                     className="wallet-spinner"
@@ -839,11 +1165,11 @@ export function RuleProposalComposer() {
                 ) : (
                   <Send aria-hidden="true" size={19} />
                 )}
-                <span>Review proposal</span>
+                <span>Send message</span>
               </button>
               <button
                 className="proposal-clear-button"
-                onClick={() => updateRuleText("")}
+                onClick={() => setRuleText("")}
                 type="button"
               >
                 Clear
@@ -858,7 +1184,7 @@ export function RuleProposalComposer() {
                   ? `Your rule is ${tokenCount - RULE_MAX_TOKENS} token${
                       tokenCount - RULE_MAX_TOKENS === 1 ? "" : "s"
                     } over the ${RULE_MAX_TOKENS}-token limit. Trim it a little before sending it to the dealer.`
-                  : "Write freely. The dealer reviews your rule before submission."}
+                  : "Write freely. Questions get answered; rules get a preflight."}
               </p>
             </nav>
           ) : (

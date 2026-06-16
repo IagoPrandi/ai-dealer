@@ -4430,6 +4430,9 @@ A milestone is approved only when **all of its submilestones are approved**. A s
 Establish the product baseline, architecture baseline, monorepo structure, Docker runtime, and implementation contracts before building the game loop.
 
 ---
+#### R - Review
+
+- [] Replace and change name Idealer to Justealer
 
 #### M0.1 — PRD Baseline
 
