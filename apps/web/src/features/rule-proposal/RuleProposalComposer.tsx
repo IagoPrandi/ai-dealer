@@ -850,7 +850,7 @@ export function RuleProposalComposer() {
         <div className="platform-phone-shell">
           <ProposalPhoneChrome />
           <section
-            className="platform-screen platform-propose-screen"
+            className="platform-screen platform-propose-screen proposal-action-mode"
             aria-labelledby="proposal-success-title"
           >
             <div className="platform-ambient" />
@@ -914,7 +914,9 @@ export function RuleProposalComposer() {
       <div className="platform-phone-shell">
         <ProposalPhoneChrome />
         <section
-          className="platform-screen platform-propose-screen"
+          className={`platform-screen platform-propose-screen ${
+            step === "compose" ? "proposal-compose-mode" : "proposal-action-mode"
+          }`}
           aria-labelledby="rule-composer-title"
         >
           <div className="platform-ambient" />

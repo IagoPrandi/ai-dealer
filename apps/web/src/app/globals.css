@@ -956,13 +956,21 @@ p {
 }
 
 .platform-propose-screen {
+  --proposal-chat-dock-space: 118px;
   background: var(--platform-bg);
 }
 
-.platform-propose-scroll {
-  /* Clears the absolutely-positioned chat composer/action bar so the last
-     dealer bubble (and its action chips) is never hidden behind it. */
-  padding-bottom: 248px;
+.platform-propose-screen.proposal-compose-mode {
+  --proposal-chat-dock-space: 248px;
+}
+
+.platform-scroll.platform-propose-scroll {
+  position: absolute;
+  inset: 0 0 var(--proposal-chat-dock-space);
+  height: auto;
+  /* The fixed chat composer/action bar sits outside this scroll viewport. */
+  padding-bottom: 22px;
+  overscroll-behavior: contain;
 }
 
 .proposal-chat-header {

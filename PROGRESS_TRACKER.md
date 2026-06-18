@@ -47,6 +47,15 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-06-18 (Rule proposal mobile composer overlap)
+
+- Opened required project markdown before working: `PRD.md`, `AGENTS.md`, `.claude/skills/develop-frontend/SKILL.md`, and `.claude/skills/idealer-design-system/SKILL.md`.
+- Investigated the mobile rule proposal chat shown in the user screenshot; the fixed bottom composer could cover the last dealer message because `.platform-scroll` was declared later and reset the intended `.platform-propose-scroll` bottom padding from `248px` back to `96px`.
+- Updated `apps/web/src/app/globals.css` and `apps/web/src/features/rule-proposal/RuleProposalComposer.tsx` so the proposal chat has explicit compose/action mode classes and the scroll viewport ends above the fixed bottom composer instead of relying only on padding.
+- Verified the "How does it work?" chat path with Playwright at mobile viewports `360x740`, `390x844`, `430x900`, and `686x1335`; in each case the final dealer bubble remains visible above the composer.
+- Docker note: `docker compose build web` did not complete within the available command timeout, so the two changed web files were copied into the running `idealer-web` container and `docker compose restart web` was used; Playwright against `http://localhost:3000/play/propose` then verified `dockSpace: 248px`, no overlay, no console errors, and the final dealer bubble visible above the composer.
+- No milestone checkbox was ticked; this is a maintenance UI fix pending user confirmation.
+
 ### 2026-06-15 (Re-proposal gate: no repeating a rule that held a mandate)
 
 - User-chosen policy: a rule that was **elected as the active Rule of the Hour** in a past turn cannot be proposed again **verbatim**; it may only return if the new proposal adds a **differentiating condition** (a clause in the DSL).
