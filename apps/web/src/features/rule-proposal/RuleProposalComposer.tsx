@@ -107,6 +107,50 @@ function truncateAddress(value: string) {
   return `${value.slice(0, 5)}...${value.slice(-5)}`;
 }
 
+function getRuleModeLabel(preflight: RulePreflightResult) {
+  return preflight.ruleMode === "ranking"
+    ? "Ranking rule: every eligible guess is scored, and the best score wins."
+    : "Win/lose rule: each eligible guess is checked independently against the draw.";
+}
+
+function getStructuredRuleText(preflight: RulePreflightResult) {
+  const sections = [
+    preflight.normalizedText
+      ? `Rule: ${preflight.normalizedText}`
+      : `Rule: ${preflight.sanitizedText}`,
+    preflight.officialInterpretation
+      ? `How it works: ${preflight.officialInterpretation}`
+      : null,
+    `Evaluation mode: ${getRuleModeLabel(preflight)}`,
+    preflight.addedOperationalClauses.length > 0
+      ? `Operational clauses: ${preflight.addedOperationalClauses.join(" ")}`
+      : null,
+  ].filter(Boolean);
+
+  return sections.join("\n\n");
+}
+
+function getCompiledSummary(preflight: RulePreflightResult) {
+  const status =
+    preflight.decision === "VALID"
+      ? `Compiled as a verifiable ${
+          preflight.ruleMode === "ranking"
+            ? "ranking rule"
+            : "win/lose rule"
+        }.`
+      : preflight.reasonSummary ||
+        "This rule could not be compiled into a verifiable condition.";
+  const confidence =
+    typeof preflight.finalConfidence === "number"
+      ? ` Confidence ${(preflight.finalConfidence * 100).toFixed(0)}%.`
+      : "";
+  const difficulty = preflight.difficultyClass
+    ? ` Difficulty: ${preflight.difficultyClass}.`
+    : "";
+
+  return `${status}${confidence}${difficulty}`;
+}
+
 // --- Intent detection -------------------------------------------------------
 // The composer must tell apart "the player is chatting / asking" from "the
 // player is proposing a rule". Only the latter is worth a server preflight.
@@ -701,6 +745,16 @@ export function RuleProposalComposer() {
     }
   }
 
+  function editStructuredRule() {
+    if (preflight) {
+      setRuleText(getStructuredRuleText(preflight));
+      setPreflight(null);
+      setFeedback({ message: "", status: "idle" });
+    }
+    setStep("compose");
+    focusInput();
+  }
+
   async function submitProposal() {
     if (!preflight) {
       await runPreflight(ruleText);
@@ -963,28 +1017,67 @@ export function RuleProposalComposer() {
                 className="proposal-chat-thread"
                 aria-labelledby="proposal-review-title"
               >
-                <article className="proposal-bubble-ai">
+                <article className="proposal-bubble-ai proposal-structured-rule">
                   <Sparkles aria-hidden="true" size={16} />
                   <div>
                     <p className="platform-section-label">Review proposal</p>
                     <h2 id="proposal-review-title">
-                      Confirm this rule before devnet submission.
+                      Confirm the structured rule before devnet submission.
                     </h2>
+                    {preflight ? (
+                      <div className="proposal-structured-rule-body">
+                        {preflight.dealerMessage ? (
+                          <section>
+                            <span>Dealer summary</span>
+                            <p>{preflight.dealerMessage}</p>
+                          </section>
+                        ) : null}
+                        <section>
+                          <span>Structured rule</span>
+                          <p>{preflight.normalizedText}</p>
+                        </section>
+                        <section>
+                          <span>How this rule will work</span>
+                          <p>{preflight.officialInterpretation}</p>
+                        </section>
+                        <section>
+                          <span>Evaluation mode</span>
+                          <p>{getRuleModeLabel(preflight)}</p>
+                        </section>
+                        <section>
+                          <span>Operational clauses</span>
+                          {preflight.addedOperationalClauses.length > 0 ? (
+                            <ul>
+                              {preflight.addedOperationalClauses.map((clause) => (
+                                <li key={clause}>{clause}</li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p>
+                              No extra clauses were added; the rule only uses the
+                              player guess and the draw.
+                            </p>
+                          )}
+                        </section>
+                        <section>
+                          <span>Preflight result</span>
+                          <p>{getCompiledSummary(preflight)}</p>
+                        </section>
+                        <section>
+                          <span>Original message</span>
+                          <p>{preflight.sanitizedText}</p>
+                        </section>
+                        <section>
+                          <span>Commitment</span>
+                          <p>
+                            Server token count and hashes are locked before wallet
+                            approval.
+                          </p>
+                        </section>
+                      </div>
+                    ) : null}
                   </div>
                 </article>
-                {preflight?.dealerMessage ? (
-                  <article className="proposal-bubble-ai">
-                    <Sparkles aria-hidden="true" size={16} />
-                    <div>
-                      <strong>Dealer worked your rule</strong>
-                      <p>{preflight.dealerMessage}</p>
-                    </div>
-                  </article>
-                ) : null}
-                <div className="sanitized-preview proposal-bubble-user">
-                  <span>Your rule text</span>
-                  <p>{preflight?.sanitizedText ?? sanitizedPreview}</p>
-                </div>
                 {preflight?.reproposalBlocked ? (
                   <article
                     className="guess-status-card proposal-status-card failed"
@@ -1008,56 +1101,6 @@ export function RuleProposalComposer() {
                     </p>
                   </article>
                 ) : null}
-                <div className="mock-check proposal-chat-card">
-                  <span>Normalized rule</span>
-                  <p>{preflight?.normalizedText ?? sanitizedPreview}</p>
-                </div>
-                <div className="mock-check proposal-chat-card">
-                  <span>Official interpretation</span>
-                  <p>{preflight?.officialInterpretation ?? sanitizedPreview}</p>
-                </div>
-                {preflight && preflight.addedOperationalClauses.length > 0 ? (
-                  <div className="mock-check proposal-chat-card">
-                    <span>Added operational clauses</span>
-                    <ul>
-                      {preflight.addedOperationalClauses.map((clause) => (
-                        <li key={clause}>{clause}</li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-                {preflight?.decision ? (
-                  <div
-                    className={`mock-check proposal-chat-card${
-                      preflight.decision === "VALID" ? "" : " failed"
-                    }`}
-                  >
-                    <span>Compiled &amp; tested</span>
-                    <p>
-                      {preflight.decision === "VALID"
-                        ? `The dealer compiled this into a verifiable ${
-                            preflight.ruleMode === "ranking"
-                              ? "ranking rule (best score wins)"
-                              : "win/lose rule"
-                          }.`
-                        : preflight.reasonSummary ||
-                          "This rule could not be compiled into a verifiable condition."}
-                      {typeof preflight.finalConfidence === "number"
-                        ? ` Confidence ${(preflight.finalConfidence * 100).toFixed(0)}%.`
-                        : ""}
-                      {preflight.difficultyClass
-                        ? ` Difficulty: ${preflight.difficultyClass}.`
-                        : ""}
-                    </p>
-                  </div>
-                ) : null}
-                <div className="mock-check proposal-chat-card">
-                  <span>Preflight commitment</span>
-                  <p>
-                    Server token count and hashes are locked before wallet
-                    approval.
-                  </p>
-                </div>
                 <dl className="review-costs proposal-meta-grid">
                   <div>
                     <dt>Proposal fee</dt>
@@ -1264,10 +1307,10 @@ export function RuleProposalComposer() {
             >
               <button
                 className="platform-ghost-button"
-                onClick={() => setStep("compose")}
+                onClick={editStructuredRule}
                 type="button"
               >
-                Edit rule
+                Edit structured rule
               </button>
               {connected ? (
                 <button

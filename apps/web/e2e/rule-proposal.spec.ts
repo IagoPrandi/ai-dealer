@@ -12,8 +12,11 @@ test("dealer chat onboards, answers questions, and only preflights real rules", 
         preflight: {
           addedOperationalClauses: [],
           clarityNote: "",
+          decision: "VALID",
           dealerMessage:
             "Got it — the guess whose even total is closest to the drawn total wins.",
+          difficultyClass: "MEDIUM",
+          finalConfidence: 0.91,
           maxTokens: 1000,
           needsClarification: false,
           normalizedText:
@@ -27,6 +30,7 @@ test("dealer chat onboards, answers questions, and only preflights real rules", 
           ),
           preflightResultHash: Array.from({ length: 32 }, () => 7),
           ruleId: 123456,
+          ruleMode: "ranking",
           sanitizedText:
             "The guess with the closest even total to the drawn total wins.",
           sanitizedTextHash: Array.from({ length: 32 }, () => 9),
@@ -73,17 +77,29 @@ test("dealer chat onboards, answers questions, and only preflights real rules", 
 
   await expect(
     page.getByRole("heading", {
-      name: "Confirm this rule before devnet submission.",
+      name: "Confirm the structured rule before devnet submission.",
     }),
   ).toBeVisible();
   expect(preflightCalls).toBe(1);
+  const structuredRuleBubble = page.locator(".proposal-structured-rule");
+  await expect(structuredRuleBubble).toHaveCount(1);
+  await expect(
+    structuredRuleBubble.getByText("Structured rule", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    structuredRuleBubble.getByText("How this rule will work", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    structuredRuleBubble.getByText("Evaluation mode", { exact: true }),
+  ).toBeVisible();
   await expect(
     page.getByText("Server token count and hashes are locked"),
   ).toBeVisible();
   await expect(page.getByText("Not connected")).toBeVisible();
 
-  await page.getByRole("link", { name: "Connect wallet" }).click();
-  await expect(page).toHaveURL(/\/play\/wallet$/);
+  await page.getByRole("button", { name: "Edit structured rule" }).click();
+  await expect(messageInput).toHaveValue(/Rule: The guess with the even total/);
+  await expect(messageInput).toHaveValue(/How it works: Compare every eligible guess/);
 });
 
 test("an offline dealer engine is reported honestly, not as a bad rule", async ({
@@ -118,7 +134,7 @@ test("an offline dealer engine is reported honestly, not as a bad rule", async (
   ).toBeVisible();
   await expect(
     page.getByRole("heading", {
-      name: "Confirm this rule before devnet submission.",
+      name: "Confirm the structured rule before devnet submission.",
     }),
   ).toHaveCount(0);
 });

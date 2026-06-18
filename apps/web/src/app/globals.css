@@ -1084,6 +1084,53 @@ p {
   line-height: 1.45;
 }
 
+.proposal-structured-rule {
+  max-width: 100%;
+}
+
+.proposal-structured-rule-body {
+  display: grid;
+  gap: 11px;
+  margin-top: 12px;
+}
+
+.proposal-structured-rule-body section {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--platform-line);
+}
+
+.proposal-structured-rule-body section:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.proposal-structured-rule-body span {
+  color: var(--platform-green);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.proposal-structured-rule-body p,
+.proposal-structured-rule-body li {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--platform-muted);
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+.proposal-structured-rule-body ul {
+  display: grid;
+  gap: 6px;
+  padding-left: 17px;
+  margin: 0;
+}
+
 .proposal-bubble-user {
   justify-self: end;
   max-width: 92%;

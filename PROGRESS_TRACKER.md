@@ -47,6 +47,17 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-06-18 (Rule proposal structured review bubble)
+
+- Opened required project markdown and local skill guidance before working: `PRD.md`, `AGENTS.md`, `.claude/skills/develop-frontend/SKILL.md`, `.claude/skills/idealer-design-system/SKILL.md`, `.claude/skills/idealer-design-system/references/01-tokens.md`, `.claude/skills/idealer-design-system/references/02-components.md`, and `.claude/skills/idealer-design-system/references/03-screens-and-state.md`.
+- Updated `apps/web/src/features/rule-proposal/RuleProposalComposer.tsx` so the review step presents the structured rule explanation in one dealer bubble, including dealer summary, structured rule text, official interpretation, evaluation mode, operational clauses, preflight result, original message, and commitment.
+- Changed the review edit action so `Edit structured rule` returns to compose with the structured rule text (`Rule`, `How it works`, evaluation mode, and operational clauses) instead of only restoring the user's original prompt.
+- Updated `apps/web/src/app/globals.css` with mobile-safe styles for the single structured review bubble, using existing platform tokens and text wrapping.
+- Updated `apps/web/e2e/rule-proposal.spec.ts` to assert the single structured bubble and verify that editing reopens the structured rule text.
+- Verification passed: `pnpm --filter @idealer/web typecheck`, `pnpm --filter @idealer/web lint`, and `pnpm --filter @idealer/web test:e2e -- e2e/rule-proposal.spec.ts`.
+- Browser verification note: Vercel `agent-browser` guidance was opened because the E2E command started a dev server, but the `agent-browser` CLI is not installed in this Windows environment (`CommandNotFoundException`). The Playwright E2E provided the functional browser verification for the rule proposal flow.
+- No milestone checkbox was ticked; this is a maintenance UI fix pending user confirmation.
+
 ### 2026-06-18 (Rule proposal mobile composer overlap)
 
 - Opened required project markdown before working: `PRD.md`, `AGENTS.md`, `.claude/skills/develop-frontend/SKILL.md`, and `.claude/skills/idealer-design-system/SKILL.md`.
