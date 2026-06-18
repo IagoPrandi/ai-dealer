@@ -167,6 +167,118 @@ export function resolveRuleAgentConfig(
   };
 }
 
+export interface ModelWarmupResult {
+  loaded: boolean;
+  model: string;
+  // True when the endpoint is not an Ollama-native server we can pre-load
+  // through (vLLM/llama.cpp/cloud) — there is nothing to "run" in that case.
+  skipped: boolean;
+  note?: string;
+}
+
+// ".../v1" -> ".../" host root, where Ollama's native /api/* lives.
+function deriveOllamaNativeBase(baseUrl: string): string {
+  return baseUrl.replace(/\/+$/, "").replace(/\/v1$/, "");
+}
+
+async function listLoadedOllamaModels(
+  nativeBase: string,
+  timeoutMs: number,
+): Promise<string[] | null> {
+  try {
+    const response = await fetch(`${nativeBase}/api/ps`, {
+      method: "GET",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!response.ok) {
+      return null;
+    }
+    const payload = (await response.json()) as {
+      models?: Array<{ model?: string; name?: string }>;
+    };
+    return (payload.models ?? [])
+      .map((entry) => entry.model ?? entry.name ?? "")
+      .filter((name) => name.length > 0);
+  } catch {
+    return null;
+  }
+}
+
+function modelMatches(loaded: string, wanted: string): boolean {
+  if (loaded === wanted) {
+    return true;
+  }
+  // Ollama normalizes "gemma4" -> "gemma4:latest"; match the family head too.
+  const head = (value: string) => value.split(":")[0];
+  return head(loaded) === head(wanted);
+}
+
+// Make sure `model` is resident in Ollama before a time-boxed chat call hits it.
+// A cold model load can take far longer than the per-request LLM_TIMEOUT_MS, so
+// the first preflight after boot otherwise times out and looks like a failure.
+// This pre-loads the model via Ollama's native /api/generate (no prompt = load
+// only) with a generous timeout — effectively running the model on demand, like
+// `ollama run`, when it is not already loaded.
+//
+// Best-effort and Ollama-specific: a non-Ollama endpoint returns null from
+// /api/ps and we skip (those keep models resident or have no such concept). The
+// function never throws — if a load genuinely fails, the real call that follows
+// surfaces the typed error honestly instead of this hiding it.
+export async function ensureModelLoaded(
+  model: string,
+  config: RuleAgentConfig = resolveRuleAgentConfig(),
+  loadTimeoutMs = 180_000,
+): Promise<ModelWarmupResult> {
+  if (!model) {
+    return { loaded: false, model, note: "no model", skipped: true };
+  }
+
+  const nativeBase = deriveOllamaNativeBase(config.baseUrl);
+  const loaded = await listLoadedOllamaModels(nativeBase, 5_000);
+  if (loaded === null) {
+    return { loaded: false, model, note: "ps unavailable", skipped: true };
+  }
+
+  if (loaded.some((name) => modelMatches(name, model))) {
+    return { loaded: true, model, skipped: false };
+  }
+
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+  };
+  if (config.apiKey) {
+    headers.authorization = `Bearer ${config.apiKey}`;
+  }
+
+  try {
+    const response = await fetch(`${nativeBase}/api/generate`, {
+      // No `prompt`: Ollama loads the model into memory and returns. keep_alive
+      // matches the chat calls so the warmed model stays resident between steps.
+      body: JSON.stringify({ keep_alive: "10m", model }),
+      headers,
+      method: "POST",
+      signal: AbortSignal.timeout(loadTimeoutMs),
+    });
+    if (!response.ok) {
+      return {
+        loaded: false,
+        model,
+        note: `load HTTP ${response.status}`,
+        skipped: false,
+      };
+    }
+    await response.json().catch(() => undefined);
+    return { loaded: true, model, skipped: false };
+  } catch (error) {
+    return {
+      loaded: false,
+      model,
+      note: error instanceof Error ? error.message : String(error),
+      skipped: false,
+    };
+  }
+}
+
 function extractJsonObject(content: string): unknown {
   const trimmed = content.trim();
   const withoutFences = trimmed

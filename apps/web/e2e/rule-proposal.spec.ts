@@ -85,3 +85,40 @@ test("dealer chat onboards, answers questions, and only preflights real rules", 
   await page.getByRole("link", { name: "Connect wallet" }).click();
   await expect(page).toHaveURL(/\/play\/wallet$/);
 });
+
+test("an offline dealer engine is reported honestly, not as a bad rule", async ({
+  page,
+}) => {
+  await page.route("**/rule-preflight", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      json: {
+        error: "RULE_AGENT_UNAVAILABLE",
+        message: "The dealer agent is unavailable. Make sure the model is running and try again.",
+      },
+      status: 502,
+    });
+  });
+
+  await page.goto("/play/propose");
+
+  const messageInput = page.getByLabel("Message", { exact: true });
+  const sendButton = page.getByRole("button", { name: "Send message" });
+
+  await messageInput.fill(
+    "Win if at least 4 of your numbers appear in the draw.",
+  );
+  await sendButton.click();
+
+  // Honest, infra-focused message — and it must NOT blame the rule or advance
+  // to the review step.
+  await expect(page.getByText("Dealer engine unavailable")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Try again" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", {
+      name: "Confirm this rule before devnet submission.",
+    }),
+  ).toHaveCount(0);
+});

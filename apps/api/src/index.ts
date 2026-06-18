@@ -37,6 +37,7 @@ import pg from "pg";
 import { createClient } from "redis";
 import {
   compileRuleToAst,
+  ensureModelLoaded,
   interpretRuleWithAgent,
   resolveEscalationModel,
   resolveRuleAgentConfig,
@@ -945,6 +946,15 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
   const guardianConfig = resolveGuardianConfig();
   let guardianNote = "";
 
+  // 0. Make sure the models are actually loaded before any time-boxed call. A
+  // cold Ollama load otherwise blows past LLM_TIMEOUT_MS on the first request
+  // after boot and surfaces as a failure even though the rule is fine. This is
+  // a best-effort no-op for non-Ollama endpoints.
+  if (guardianConfig.enabled) {
+    await ensureModelLoaded(guardianConfig.model, agentConfig);
+  }
+  await ensureModelLoaded(agentConfig.model, agentConfig);
+
   // 1. Guardian input gate (Granite Guardian) — an ML jailbreak classifier in
   // addition to the regex guard. If the guardian is down we keep the regex guard
   // and surface the outage rather than silently dropping the check.
@@ -1014,6 +1024,9 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
       ? escalationModel
       : agentConfig.model;
 
+  if (firstModel !== agentConfig.model) {
+    await ensureModelLoaded(firstModel, agentConfig);
+  }
   let pass = await dealerPass(firstModel);
   let escalated = firstModel !== agentConfig.model;
   const needsEscalation =
@@ -1026,6 +1039,7 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
     // The escalation attempt must never break the preflight: if the stronger
     // model is unavailable/slow, keep the primary result and surface the note.
     try {
+      await ensureModelLoaded(escalationModel, agentConfig);
       const strong = await dealerPass(escalationModel);
       if (strong.validation.decision === "VALID" && strong.grounded !== false) {
         pass = strong;
@@ -4379,5 +4393,38 @@ if (isMainModule()) {
 
   server.listen(port, host, () => {
     console.log(`@idealer/api listening on ${host}:${port}`);
+    void warmDealerModels();
   });
+}
+
+// On boot, load the dealer (and guardian) models into Ollama so the first
+// player request doesn't pay the cold-load latency. Best-effort: logs what it
+// did and never blocks or crashes startup if the LLM isn't configured/running.
+async function warmDealerModels() {
+  let agentConfig;
+  try {
+    agentConfig = resolveRuleAgentConfig();
+  } catch {
+    console.log("[warmup] dealer LLM not configured; skipping model warm-up");
+    return;
+  }
+
+  const guardianConfig = resolveGuardianConfig();
+  const escalationModel = resolveEscalationModel();
+  const targets = [
+    agentConfig.model,
+    escalationModel,
+    guardianConfig.enabled ? guardianConfig.model : "",
+  ].filter((model, index, all) => model && all.indexOf(model) === index);
+
+  for (const model of targets) {
+    const result = await ensureModelLoaded(model, agentConfig);
+    if (result.skipped) {
+      console.log(`[warmup] ${model}: endpoint is not Ollama-native; skipped`);
+    } else if (result.loaded) {
+      console.log(`[warmup] ${model}: loaded and ready`);
+    } else {
+      console.log(`[warmup] ${model}: could not load (${result.note ?? "unknown"})`);
+    }
+  }
 }

@@ -960,7 +960,9 @@ p {
 }
 
 .platform-propose-scroll {
-  padding-bottom: 186px;
+  /* Clears the absolutely-positioned chat composer/action bar so the last
+     dealer bubble (and its action chips) is never hidden behind it. */
+  padding-bottom: 248px;
 }
 
 .proposal-chat-header {

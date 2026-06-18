@@ -253,20 +253,53 @@ function buildAnswer(topic: AnswerTopic): Omit<ChatMessage, "id" | "role"> {
   }
 }
 
+// Carries the server's machine-readable error code so the dealer can tell the
+// player the truth: "the rule is unclear" vs "the AI engine is offline" are very
+// different failures and must not be flattened into one generic message.
+class PreflightRequestError extends Error {
+  readonly code: string;
+
+  constructor(message: string, code: string) {
+    super(message);
+    this.name = "PreflightRequestError";
+    this.code = code;
+  }
+}
+
 async function requestRulePreflight(text: string) {
-  const response = await fetch(`${API_BASE_URL}/rule-preflight`, {
-    body: JSON.stringify({ text }),
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  });
-  const body = (await response.json()) as {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/rule-preflight`, {
+      body: JSON.stringify({ text }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+  } catch (error) {
+    throw new PreflightRequestError(
+      error instanceof Error ? error.message : String(error),
+      "RULE_SERVICE_UNREACHABLE",
+    );
+  }
+
+  let body: {
     error?: string;
     message?: string;
     preflight?: RulePreflightResult;
   };
+  try {
+    body = (await response.json()) as typeof body;
+  } catch {
+    throw new PreflightRequestError(
+      "The dealer service returned an unreadable response.",
+      "RULE_SERVICE_BAD_RESPONSE",
+    );
+  }
 
   if (!response.ok || !body.preflight) {
-    throw new Error(body.message ?? body.error ?? "Rule preflight failed.");
+    throw new PreflightRequestError(
+      body.message ?? body.error ?? "Rule preflight failed.",
+      body.error ?? "RULE_PREFLIGHT_FAILED",
+    );
   }
 
   return body.preflight;
@@ -371,45 +404,72 @@ function normalizeProposalError(error: unknown) {
   };
 }
 
-function dealerErrorMessage(rawMessage: string, originalText: string): {
+function dealerErrorMessage(
+  error: unknown,
+  originalText: string,
+): {
   body: string;
   code: string;
+  tone: "error" | "offline";
 } {
-  const message = rawMessage.toLowerCase();
+  const code =
+    error instanceof PreflightRequestError ? error.code : "RULE_PREFLIGHT_FAILED";
+  const raw = (error instanceof Error ? error.message : String(error)).toLowerCase();
 
+  // The API service itself can't be reached (API down, wrong URL, CORS).
   if (
-    message.includes("unusable response") ||
-    message.includes("did not respond") ||
-    message.includes("unreachable") ||
-    message.includes("not configured")
+    code === "RULE_SERVICE_UNREACHABLE" ||
+    /failed to fetch|networkerror|load failed|fetch failed/.test(raw)
   ) {
     return {
-      body: "I couldn't process that just now — the dealer engine didn't answer. Give it another try in a moment, or rephrase your rule a little.",
-      code: "RULE_AGENT_UNAVAILABLE",
+      body: "I can't reach the dealer service right now. Make sure the Idealer API is running, then send your rule again — this isn't about your rule.",
+      code: "RULE_SERVICE_UNREACHABLE",
+      tone: "offline",
     };
   }
 
-  if (message.includes("token")) {
+  // The AI model behind the dealer is offline, busy, or returned junk. Be honest:
+  // this is an engine problem, not the player's rule.
+  if (code.startsWith("RULE_AGENT") || code === "RULE_SERVICE_BAD_RESPONSE") {
+    return {
+      body: "The dealer engine couldn't process that — the AI model may be offline, busy, or misconfigured. This isn't about your rule; give it another try in a moment.",
+      code,
+      tone: "offline",
+    };
+  }
+
+  if (code === "RULE_TOKEN_LIMIT_EXCEEDED" || raw.includes("token")) {
     return {
       body: `That's a bit long for the ${RULE_MAX_TOKENS}-token limit. Trim it to one clear sentence and send it again.`,
       code: "RULE_TOKEN_LIMIT_EXCEEDED",
+      tone: "error",
     };
   }
 
-  if (message.includes("injection")) {
+  if (code === "RULE_PROMPT_INJECTION" || raw.includes("injection")) {
     return {
       body: "I can only work with game conditions. Describe a measurable way to win that compares the guess to the draw — leave out any instructions to me.",
       code: "RULE_PROMPT_INJECTION",
+      tone: "error",
     };
   }
 
-  // Generic: the text didn't read as a rule. Nudge with a concrete shape.
+  if (code === "RULE_EMPTY") {
+    return {
+      body: "Type a rule first — describe one clear way to win.",
+      code: "RULE_EMPTY",
+      tone: "error",
+    };
+  }
+
+  // Genuine rule problem: the text didn't read as a measurable rule.
   const looksTiny = originalText.trim().split(/\s+/).filter(Boolean).length < 3;
   return {
     body: looksTiny
       ? "I didn't catch a rule there. Try describing one clear way to win — for example, “Win if at least 4 of your numbers appear in the draw.”"
       : "I couldn't read that as a measurable rule. Try one clear condition that compares your guess to the draw — for example, “Win if at least 4 of your numbers appear in the draw.”",
-    code: "RULE_PREFLIGHT_FAILED",
+    code: code || "RULE_PREFLIGHT_FAILED",
+    tone: "error",
   };
 }
 
@@ -561,18 +621,26 @@ export function RuleProposalComposer() {
       setFeedback({ message: "", status: "idle" });
       setStep("review");
     } catch (error) {
-      const raw = error instanceof Error ? error.message : String(error);
-      const { body, code } = dealerErrorMessage(raw, text);
+      const { body, code, tone } = dealerErrorMessage(error, text);
       setFeedback({ message: "", status: "idle" });
+      // An engine/service outage isn't the player's fault — offer a retry, not
+      // "rewrite your rule". A genuine rule problem gets the examples shortcuts.
+      const chips: ChatChip[] =
+        tone === "offline"
+          ? [
+              { label: "Try again", preflight: text },
+              { label: "How does it work?", topic: "how" },
+            ]
+          : [
+              { label: "Show examples", topic: "examples" },
+              { label: "What can I create?", topic: "create" },
+            ];
       appendMessages({
         body,
-        chips: [
-          { label: "Show examples", topic: "examples" },
-          { label: "What can I create?", topic: "create" },
-        ],
+        chips,
         code,
         role: "dealer",
-        title: "Let's adjust that",
+        title: tone === "offline" ? "Dealer engine unavailable" : "Let's adjust that",
         tone: "error",
       });
     }
