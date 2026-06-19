@@ -139,6 +139,85 @@ export async function detectJailbreak(
   );
 }
 
+const SMALL_NUMBER_WORDS = new Map<string, number>([
+  ["one", 1],
+  ["two", 2],
+  ["three", 3],
+  ["four", 4],
+  ["five", 5],
+  ["six", 6],
+  ["um", 1],
+  ["uma", 1],
+  ["dois", 2],
+  ["duas", 2],
+  ["tres", 3],
+  ["quatro", 4],
+  ["cinco", 5],
+  ["seis", 6],
+]);
+
+function normalizeForComparison(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}<>=>\s]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function numberFromToken(token: string) {
+  const numeric = Number(token);
+  if (Number.isInteger(numeric)) {
+    return numeric;
+  }
+
+  return SMALL_NUMBER_WORDS.get(token);
+}
+
+function extractAtLeastMatchThreshold(value: string) {
+  const normalized = normalizeForComparison(value);
+  const threshold =
+    normalized.match(
+      /\b(?:at least|pelo menos|no minimo|minimum of|minimo de|>=)\s+([a-z0-9]+)\b/u,
+    ) ??
+    normalized.match(/\b([a-z0-9]+)\s+(?:or more|ou mais)\b/u);
+  const amount = threshold ? numberFromToken(threshold[1]!) : undefined;
+  if (!amount || amount < 1 || amount > 6) {
+    return null;
+  }
+
+  const mentionsGuessNumbers =
+    /\b(?:guess|guessed|player|your|seus?|suas?|palpite|apostad[ao])\b/u.test(
+      normalized,
+    ) && /\b(?:number|numbers|numero|numeros)\b/u.test(normalized);
+  const mentionsDraw =
+    /\b(?:draw|drawn|drawing|sorteio|sorteados?|sorteadas?)\b/u.test(
+      normalized,
+    );
+  const comparesMembership =
+    /\b(?:appear|appears|appearing|match|matches|matching|matched|acert|coincid|intersect|contain|contains|containing|contem|aparec)\w*\b/u.test(
+      normalized,
+    );
+
+  return mentionsGuessNumbers && mentionsDraw && comparesMembership ? amount : null;
+}
+
+// Deterministic low-risk acceptance for the common "at least N matched numbers"
+// pattern. This keeps an ML false positive from blocking a plainly equivalent
+// normalization while preserving guardian blocking for non-obvious rewrites.
+export function isClearlyGroundedRuleInterpretation(
+  rule: string,
+  interpretation: string,
+): boolean {
+  const ruleThreshold = extractAtLeastMatchThreshold(rule);
+  if (ruleThreshold === null) {
+    return false;
+  }
+
+  return ruleThreshold === extractAtLeastMatchThreshold(interpretation);
+}
+
 // True when the interpretation is FAITHFUL to (grounded in) the rule. Internally
 // the guardian scores ungroundedness (yes = drifted/contradicts), so this negates.
 export async function checkGroundedness(
@@ -146,14 +225,20 @@ export async function checkGroundedness(
   interpretation: string,
   config: GuardianConfig = resolveGuardianConfig(),
 ): Promise<boolean> {
+  if (isClearlyGroundedRuleInterpretation(rule, interpretation)) {
+    return true;
+  }
+
   const ungrounded = await score(
     [
-      { content: rule, role: "system" },
-      { content: interpretation, role: "assistant" },
+      {
+        content: `Context rule:\n${rule}\n\nAssistant interpretation:\n${interpretation}`,
+        role: "user",
+      },
       {
         content: guardianBlock(
           "groundedness",
-          "yes if the assistant response is NOT grounded in / contradicts or changes the meaning of the context rule, otherwise no.",
+          "Return yes only if the assistant interpretation contradicts, adds a materially different winning condition, removes a required condition, or flips the meaning of the context rule. Return no for faithful paraphrases, normalized wording, or operational details that preserve the same condition.",
         ),
         role: "user",
       },

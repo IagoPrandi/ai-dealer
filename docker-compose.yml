@@ -103,6 +103,8 @@ services:
       - idealer-internal
     ports:
       - "${API_PORT:-3002}:3002"
+    volumes:
+      - ./apps/api/src:/app/apps/api/src
 
   worker:
     build:

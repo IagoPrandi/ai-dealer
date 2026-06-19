@@ -47,6 +47,15 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-06-18 (Docker web container sync for structured rule review)
+
+- Opened required project context before working: `PRD.md`, `.claude/skills`, and `docker-compose.yml`.
+- Avoided a full Docker rebuild because rebuilding the shared Node image would be slow; copied only the changed web files into the running `idealer-web` container under `/app`.
+- Synced `apps/web/src/features/rule-proposal/RuleProposalComposer.tsx`, `apps/web/src/app/globals.css`, and `apps/web/e2e/rule-proposal.spec.ts` into `idealer-web`.
+- Restarted only the `web` service with `docker compose restart web`.
+- Verified `http://127.0.0.1:3000/play/propose` returned HTTP `200`, `idealer-web` returned to `healthy`, and the container files contain `Edit structured rule` plus `.proposal-structured-rule-body`.
+- No milestone checkbox was ticked; this was a local Docker runtime sync.
+
 ### 2026-06-18 (Rule proposal structured review bubble)
 
 - Opened required project markdown and local skill guidance before working: `PRD.md`, `AGENTS.md`, `.claude/skills/develop-frontend/SKILL.md`, `.claude/skills/idealer-design-system/SKILL.md`, `.claude/skills/idealer-design-system/references/01-tokens.md`, `.claude/skills/idealer-design-system/references/02-components.md`, and `.claude/skills/idealer-design-system/references/03-screens-and-state.md`.
