@@ -3861,6 +3861,15 @@ p {
   color: var(--platform-green);
 }
 
+.platform-pill-warning {
+  border-color: rgb(255 122 122 / 44%);
+  background: rgb(255 122 122 / 10%);
+}
+
+.platform-pill-warning svg {
+  color: var(--platform-danger);
+}
+
 .platform-pill strong {
   color: var(--platform-text);
   font-family: "Space Grotesk", Consolas, monospace;
@@ -3926,6 +3935,28 @@ p {
   color: var(--platform-yellow);
 }
 
+.platform-turn-message {
+  display: grid;
+  gap: 5px;
+  max-width: 280px;
+  margin-top: 12px;
+  color: var(--platform-muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.platform-turn-message code {
+  justify-self: center;
+  width: fit-content;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: rgb(255 210 63 / 12%);
+  color: var(--platform-yellow);
+  font-family: "Space Grotesk", Consolas, monospace;
+  font-size: 11px;
+}
+
 .platform-primary-button {
   display: flex;
   align-items: center;
@@ -3946,6 +3977,18 @@ p {
   font-size: 17px;
   font-weight: 700;
   text-decoration: none;
+}
+
+button.platform-primary-button {
+  border: 0;
+  cursor: pointer;
+}
+
+.platform-primary-button:disabled {
+  background: var(--platform-surface-2);
+  box-shadow: none;
+  color: var(--platform-muted);
+  cursor: not-allowed;
 }
 
 .platform-prompt-card {

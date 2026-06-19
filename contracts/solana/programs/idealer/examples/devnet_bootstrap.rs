@@ -21,6 +21,9 @@ use solana_sha256_hasher::hash;
 use solana_system_interface::program as system_program;
 
 const PLAYER_BALANCE_LAMPORTS: u64 = 1_000_000_000;
+const BASIS_POINTS_DENOMINATOR: u32 = 10_000;
+const DEFAULT_TEST_TURN_DURATION_SCALE_BPS: u32 = 1_500;
+const PRODUCTION_TURN_DURATION_CYCLE_SECONDS: [u32; 4] = [7_200, 7_200, 28_800, 28_800];
 
 fn pda(seeds: &[&[u8]]) -> solana_sdk::pubkey::Pubkey {
     solana_sdk::pubkey::Pubkey::find_program_address(seeds, &idealer::ID).0
@@ -52,6 +55,42 @@ fn send(
     Ok(rpc.send_and_confirm_transaction(&transaction)?)
 }
 
+fn parse_duration_scale_bps() -> Result<u32, Box<dyn Error>> {
+    match env::var("IDEALER_DEVNET_TURN_DURATION_SCALE_BPS") {
+        Ok(raw) => {
+            let scale_bps = raw.parse::<u32>().map_err(|error| {
+                format!("IDEALER_DEVNET_TURN_DURATION_SCALE_BPS must be an integer: {error}")
+            })?;
+
+            if scale_bps == 0 || scale_bps > BASIS_POINTS_DENOMINATOR {
+                return Err(
+                    "IDEALER_DEVNET_TURN_DURATION_SCALE_BPS must be between 1 and 10000.".into(),
+                );
+            }
+
+            Ok(scale_bps)
+        }
+        Err(env::VarError::NotPresent) => Ok(DEFAULT_TEST_TURN_DURATION_SCALE_BPS),
+        Err(error) => {
+            Err(format!("IDEALER_DEVNET_TURN_DURATION_SCALE_BPS could not be read: {error}").into())
+        }
+    }
+}
+
+fn devnet_turn_duration_cycle() -> Result<[u32; 4], Box<dyn Error>> {
+    let scale_bps = parse_duration_scale_bps()?;
+    let mut cycle = [0_u32; 4];
+
+    for (index, duration_seconds) in PRODUCTION_TURN_DURATION_CYCLE_SECONDS.iter().enumerate() {
+        let scaled = (u64::from(*duration_seconds) * u64::from(scale_bps))
+            / u64::from(BASIS_POINTS_DENOMINATOR);
+        cycle[index] = u32::try_from(scaled.max(1))
+            .map_err(|error| format!("scaled turn duration is invalid: {error}"))?;
+    }
+
+    Ok(cycle)
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let rpc_url = env::var("IDEALER_DEVNET_RPC_URL")
         .unwrap_or_else(|_| "https://api.devnet.solana.com".to_string());
@@ -66,6 +105,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let global_config = pda(&[b"global_config"]);
     let treasury_vault = pda(&[b"treasury_vault"]);
+    let turn_duration_cycle = devnet_turn_duration_cycle()?;
 
     if read_account::<GlobalConfig>(&rpc, &global_config)?.is_none() {
         let init_ix = Instruction {
@@ -85,7 +125,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     rule_proposal_fee_lamports: 20_000_000,
                     rule_removal_fee_lamports: 50_000_000,
                     treasury_fee_bps: 500,
-                    turn_duration_cycle: [7_200, 7_200, 28_800, 28_800],
+                    turn_duration_cycle,
                     rule_election_cutoff_bps: 7_500,
                     guess_cutoff_bps: 9_670,
                     max_rule_tokens: 1000,
@@ -111,6 +151,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut config = read_account::<GlobalConfig>(&rpc, &global_config)?
         .ok_or("global config should exist after initialization")?;
+    if config.turn_duration_cycle != turn_duration_cycle {
+        eprintln!(
+            "existing global config turn_duration_cycle {:?} differs from requested devnet test cycle {:?}; existing on-chain config was left unchanged",
+            config.turn_duration_cycle, turn_duration_cycle
+        );
+    }
 
     if config.has_active_turn {
         let active_turn_state = pda(&[b"turn", &config.active_turn_id.to_le_bytes()]);

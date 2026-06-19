@@ -3,6 +3,8 @@ export const MAX_REMOVABLE_NUMBERS = 4;
 export const LAMPORTS_PER_SOL = 1_000_000_000;
 
 export const TURN_DURATION_CYCLE_HOURS = [2, 2, 8, 8] as const;
+export const TURN_DURATION_CYCLE_SECONDS = [7_200, 7_200, 28_800, 28_800] as const;
+export const TEST_TURN_DURATION_SCALE_BPS = 1_500;
 export const VOTE_FEE_START_TURN = 100;
 
 export const MVP_FEES_SOL = {

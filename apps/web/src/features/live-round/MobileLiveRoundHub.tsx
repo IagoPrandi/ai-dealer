@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useSolanaClient } from "@solana/react-hooks";
 import {
   ArrowDownToLine,
   ArrowLeft,
@@ -20,7 +21,11 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { IDEALER_ACTIVE_TURN_ID } from "../../solana/idealerProgram";
+import {
+  fetchActiveTurnSnapshot,
+  getTurnActionReadiness,
+  IDEALER_ACTIVE_TURN_ID,
+} from "../../solana/idealerProgram";
 
 type AppScreen = "result" | "home" | "account";
 const API_BASE_URL =
@@ -40,6 +45,16 @@ interface ApiRuleProposal {
   ruleId: number;
   sanitizedText: string;
   title?: string;
+}
+
+type LiveTurnState = "checking" | "open" | "closed" | "unavailable";
+
+interface LiveTurnStatus {
+  activeTurnId: number;
+  code?: string | undefined;
+  endTimestamp: null | number;
+  message: string;
+  state: LiveTurnState;
 }
 
 const defaultRules: readonly Rule[] = [
@@ -102,16 +117,21 @@ function formatCountdown(totalSeconds: number) {
   );
 }
 
-function useCountdown(initialSeconds: number) {
-  const [remainingSeconds, setRemainingSeconds] = useState(initialSeconds);
+function useCountdown(endTimestamp: null | number) {
+  const [nowSeconds, setNowSeconds] = useState(() =>
+    Math.floor(Date.now() / 1000),
+  );
 
   useEffect(() => {
     const interval = window.setInterval(() => {
-      setRemainingSeconds((current) => Math.max(0, current - 1));
+      setNowSeconds(Math.floor(Date.now() / 1000));
     }, 1000);
 
     return () => window.clearInterval(interval);
   }, []);
+
+  const remainingSeconds =
+    endTimestamp === null ? 0 : Math.max(0, endTimestamp - nowSeconds);
 
   return formatCountdown(remainingSeconds);
 }
@@ -334,18 +354,80 @@ function HomeScreen({
   goAccount: () => void;
   goResult: () => void;
 }) {
-  const [hours, minutes, seconds] = useCountdown(1 * 3600 + 47 * 60 + 12);
+  const client = useSolanaClient();
+  const [turnStatus, setTurnStatus] = useState<LiveTurnStatus>({
+    activeTurnId: IDEALER_ACTIVE_TURN_ID,
+    endTimestamp: null,
+    message: "Checking the active devnet turn.",
+    state: "checking",
+  });
+  const [hours, minutes, seconds] = useCountdown(turnStatus.endTimestamp);
   const [expanded, setExpanded] = useState(false);
   const [activeRule, setActiveRule] = useState<Rule | null>(null);
   const [rules, setRules] = useState<Rule[]>(() => [...defaultRules]);
   const visibleRules = expanded ? rules : rules.slice(0, 3);
   const maxVotes = rules[0]?.votes ?? 1;
+  const canSubmitGuess = turnStatus.state === "open";
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function refreshActiveTurn() {
+      try {
+        const snapshot = await fetchActiveTurnSnapshot(client);
+        if (!mounted) {
+          return;
+        }
+
+        const readiness = getTurnActionReadiness({
+          cutoffBps: snapshot.globalConfig.guessCutoffBps,
+          globalConfig: snapshot.globalConfig,
+          turn: snapshot.turnState,
+        });
+
+        setTurnStatus({
+          activeTurnId:
+            snapshot.globalConfig.activeTurnId || IDEALER_ACTIVE_TURN_ID,
+          code: readiness.ok ? undefined : readiness.code,
+          endTimestamp: snapshot.turnState?.endTimestamp ?? null,
+          message: readiness.ok
+            ? "The active devnet turn is accepting guesses."
+            : readiness.message,
+          state: readiness.ok ? "open" : "closed",
+        });
+      } catch (error) {
+        if (!mounted) {
+          return;
+        }
+
+        console.error("Failed to load the active devnet turn.", error);
+        setTurnStatus({
+          activeTurnId: IDEALER_ACTIVE_TURN_ID,
+          code: "TURN_STATUS_UNAVAILABLE",
+          endTimestamp: null,
+          message:
+            "The live turn status could not be loaded. Try again before submitting a guess.",
+          state: "unavailable",
+        });
+      }
+    }
+
+    void refreshActiveTurn();
+    const interval = window.setInterval(() => void refreshActiveTurn(), 10000);
+    window.addEventListener("focus", refreshActiveTurn);
+
+    return () => {
+      mounted = false;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshActiveTurn);
+    };
+  }, [client]);
 
   useEffect(() => {
     const controller = new AbortController();
 
     void fetch(
-      `${API_BASE_URL}/rule-proposals?turnId=${IDEALER_ACTIVE_TURN_ID}`,
+      `${API_BASE_URL}/rule-proposals?turnId=${turnStatus.activeTurnId}`,
       { signal: controller.signal },
     )
       .then((response) => {
@@ -377,7 +459,7 @@ function HomeScreen({
       });
 
     return () => controller.abort();
-  }, []);
+  }, [turnStatus.activeTurnId]);
 
   return (
     <section className="platform-screen platform-home-screen">
@@ -419,12 +501,30 @@ function HomeScreen({
           aria-labelledby="platform-prize-title"
         >
           <div className="platform-prize-glow" />
-          <span className="platform-pill">
+          <span
+            className={
+              canSubmitGuess
+                ? "platform-pill"
+                : "platform-pill platform-pill-warning"
+            }
+          >
             <Clock3 aria-hidden="true" size={14} />
-            Ends in{" "}
-            <strong>
-              {hours}:{minutes}:{seconds}
-            </strong>
+            {canSubmitGuess ? (
+              <>
+                Ends in{" "}
+                <strong>
+                  {hours}:{minutes}:{seconds}
+                </strong>
+              </>
+            ) : (
+              <strong>
+                {turnStatus.state === "checking"
+                  ? "Checking turn"
+                  : turnStatus.state === "unavailable"
+                    ? "Turn unavailable"
+                    : "Turn closed"}
+              </strong>
+            )}
           </span>
           <p>Accumulated prize</p>
           <h1 id="platform-prize-title">
@@ -440,12 +540,32 @@ function HomeScreen({
               <Sparkles aria-hidden="true" size={14} /> 13 rules
             </span>
           </footer>
+          {!canSubmitGuess ? (
+            <span className="platform-turn-message" id="platform-turn-status">
+              {turnStatus.message}
+              {turnStatus.code ? <code>{turnStatus.code}</code> : null}
+            </span>
+          ) : null}
         </section>
 
-        <Link className="platform-primary-button" href="/play/pick">
-          <Zap aria-hidden="true" size={18} />
-          Play now · 0.01 SOL
-        </Link>
+        {canSubmitGuess ? (
+          <Link className="platform-primary-button" href="/play/pick">
+            <Zap aria-hidden="true" size={18} />
+            Play now · 0.01 SOL
+          </Link>
+        ) : (
+          <button
+            aria-describedby="platform-turn-status"
+            className="platform-primary-button"
+            disabled
+            type="button"
+          >
+            <Zap aria-hidden="true" size={18} />
+            {turnStatus.state === "checking"
+              ? "Checking turn"
+              : "Waiting for next turn"}
+          </button>
+        )}
 
         <article className="platform-prompt-card">
           <header>

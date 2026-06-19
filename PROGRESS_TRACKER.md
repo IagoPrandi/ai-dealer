@@ -47,6 +47,42 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-06-19 (Automatic turn lifecycle and test-phase durations)
+
+- Opened required project context before working: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/best-practices/SKILL.md`, `.claude/skills/best-practices/references/agent-principles.md`, `.claude/skills/best-practices/references/code-quality.md`, `.claude/skills/best-practices/references/testing.md`, `.claude/skills/best-practices/references/web3-contracts.md`, `.claude/skills/solana-dev/SKILL.md`, and `.claude/skills/solana-dev/ext/solana-dev/skill/SKILL.md`.
+- Worker/config: enabled turn automation by default for Docker/local env defaults and reduced the polling interval from 30s to 10s for the shortened test cadence.
+- Local env: aligned `.env` lifecycle settings with the new test defaults: `IDEALER_TURN_AUTOMATION_ENABLED=true`, `IDEALER_TURN_AUTOMATION_INTERVAL_MS=10000`, and `IDEALER_DEVNET_TURN_DURATION_SCALE_BPS=1500`.
+- Devnet bootstrap: added `IDEALER_DEVNET_TURN_DURATION_SCALE_BPS`, defaulting to `1500` bps, so newly initialized test/devnet configs use 15% of the production cycle: `1080s, 1080s, 4320s, 4320s` (85% shorter than `2h, 2h, 8h, 8h`).
+- Devnet bootstrap now fails on invalid duration scale values and warns when an existing on-chain `GlobalConfig` already has a different cycle, instead of silently hiding the mismatch.
+- Web: replaced manual "Open next turn" copy with "Waiting for next turn" and updated closed/ended/action-cutoff messages to explain that the next turn opens automatically.
+- Tests: added worker regression coverage for explicitly enabled automation and the required authority keypair error path.
+- Verification passed: `pnpm --filter @idealer/worker test` (27/27), `pnpm --filter @idealer/worker typecheck`, `pnpm --filter @idealer/web typecheck`, `pnpm --filter @idealer/constants typecheck`, `cargo fmt --check`, `pnpm --filter @idealer/worker lint`, `pnpm --filter @idealer/web lint`, `pnpm --filter @idealer/constants build`, `pnpm --filter @idealer/worker build`, `pnpm --filter @idealer/web build`, and `pnpm --filter @idealer/web test:e2e -- e2e/live-round-design.spec.ts` (1/1).
+- Verification limitation: `cargo check -p idealer --example devnet_bootstrap` did not reach project code because the Windows GNU toolchain failed inside dependency compilation with `dlltool.exe: CreateProcess` while building `getrandom`, even after adding Rust's self-contained GNU bin directory and using `CARGO_TARGET_DIR=C:\tmp\idealer-cargo-target`.
+- No PRD checklist item or milestone checkbox was ticked; milestone completion still requires explicit user confirmation.
+
+### 2026-06-19 (Live round turn-state alignment)
+
+- Opened required project context before working: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/develop-frontend/SKILL.md`, `.claude/skills/develop-web-game/SKILL.md`, `.claude/skills/solana-dev/SKILL.md`, Solana frontend framework-kit guidance, `.claude/skills/idealer-design-system/SKILL.md`, and Vercel React best-practices guidance.
+- Investigated the user-reported mismatch where `/play` showed an active countdown while `/play/pick` blocked submission with `TURN_ENDED`.
+- Root cause: `MobileLiveRoundHub` used a hardcoded local countdown, while `NumberPicker` correctly checked the active devnet `GlobalConfig` and `TurnState` before submission.
+- Updated `/play` to wrap `MobileLiveRoundHub` in `SolanaProviders`, read `fetchActiveTurnSnapshot`, evaluate `getTurnActionReadiness` with the same guess cutoff used by submission, and derive the countdown from the real `endTimestamp`.
+- Updated the hub CTA so it links to `/play/pick` only when the active devnet turn is accepting guesses; otherwise it shows a disabled state with the real readiness message/code instead of hiding the issue.
+- Updated the rule feed lookup to use the active turn id from devnet once loaded.
+- Updated the live-round E2E assertion to accept either the active CTA or the disabled live-state CTA because that route now reflects real devnet state.
+- Verification passed: `pnpm --filter @idealer/web typecheck`, `pnpm --filter @idealer/web lint`, and `pnpm --filter @idealer/web test:e2e -- e2e/live-round-design.spec.ts`.
+- No milestone checkbox was ticked; this is a maintenance bug fix pending user confirmation.
+
+### 2026-06-19 (Docker web sync for live round turn-state fix)
+
+- Reopened required project context before Docker work: `PRD.md`, `AGENTS.md`, and `.claude/skills`.
+- Confirmed `idealer-web` was not bind-mounted to the workspace and still contained the old `/play` source after the local fix.
+- Avoided a rebuild; copied only the changed web files into the running container: `apps/web/src/features/live-round/MobileLiveRoundHub.tsx`, `apps/web/src/app/play/page.tsx`, `apps/web/src/app/globals.css`, and `apps/web/e2e/live-round-design.spec.ts`.
+- Restarted only the `web` service with `docker compose restart web`.
+- Verified the copied files inside `idealer-web` via `docker cp` back out of the container and checked for `fetchActiveTurnSnapshot`, `Open next turn`, `SolanaProviders`, `.platform-pill-warning`, and `.platform-turn-message`.
+- Verified `http://127.0.0.1:3000/play` returns HTTP `200`.
+- Docker note: `idealer-web` reports `unhealthy` because Docker runtime `exec` calls used by the healthcheck fail with `fork/exec /proc/self/fd/6: no such file or directory`; the app HTTP route is serving successfully.
+- No milestone checkbox was ticked; this was a local Docker runtime sync.
+
 ### 2026-06-18 (Docker web container sync for structured rule review)
 
 - Opened required project context before working: `PRD.md`, `.claude/skills`, and `docker-compose.yml`.

@@ -371,7 +371,7 @@ export function getTurnActionReadiness({
   if (turn.status !== "open") {
     return {
       code: "TURN_CLOSED",
-      message: "This devnet turn is closed. Open the next turn before submitting.",
+      message: "This devnet turn is closed. The next turn opens automatically.",
       ok: false,
     } as const;
   }
@@ -388,7 +388,7 @@ export function getTurnActionReadiness({
     return {
       code: "TURN_ENDED",
       message:
-        "This devnet turn has ended. Close it and open the next turn before submitting.",
+        "This devnet turn has ended. The next turn opens automatically.",
       ok: false,
     } as const;
   }
@@ -398,7 +398,7 @@ export function getTurnActionReadiness({
     return {
       code: "ACTION_WINDOW_CLOSED",
       message:
-        "This devnet turn already passed its action cutoff. Close it and open the next turn before submitting.",
+        "This devnet turn already passed its action cutoff. Wait for the next automatic turn before submitting.",
       ok: false,
     } as const;
   }
