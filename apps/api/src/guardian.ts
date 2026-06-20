@@ -30,6 +30,10 @@ export class GuardianError extends Error {
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 
+function cleanEnvValue(value: string | undefined): string {
+  return (value ?? "").replace(/\s+#.*$/u, "").trim();
+}
+
 // Derives the native /api/chat URL from the OpenAI-compatible base URL
 // (".../v1" -> ".../api/chat"). Falls back to appending /api/chat to the host.
 function deriveChatUrl(baseUrl: string): string {
@@ -41,11 +45,11 @@ function deriveChatUrl(baseUrl: string): string {
 export function resolveGuardianConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): GuardianConfig {
-  const model = (env.LLM_GUARDIAN_MODEL ?? "").trim();
-  const baseUrl = (env.LLM_BASE_URL ?? env.LLM_PRIMARY_BASE_URL ?? "").trim();
-  const timeoutRaw = Number(env.LLM_GUARDIAN_TIMEOUT_MS ?? DEFAULT_TIMEOUT_MS);
+  const model = cleanEnvValue(env.LLM_GUARDIAN_MODEL);
+  const baseUrl = cleanEnvValue(env.LLM_BASE_URL ?? env.LLM_PRIMARY_BASE_URL);
+  const timeoutRaw = Number(cleanEnvValue(env.LLM_GUARDIAN_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS);
   return {
-    apiKey: (env.LLM_API_KEY ?? "").trim(),
+    apiKey: cleanEnvValue(env.LLM_API_KEY),
     chatUrl: deriveChatUrl(baseUrl),
     // The guardian is a feature flag: it only runs when a model is configured.
     enabled: model.length > 0 && baseUrl.length > 0,

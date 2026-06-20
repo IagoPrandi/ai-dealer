@@ -3,6 +3,7 @@ import { afterEach, test } from "node:test";
 import {
   checkGroundedness,
   isClearlyGroundedRuleInterpretation,
+  resolveGuardianConfig,
   type GuardianConfig,
 } from "./guardian.js";
 
@@ -42,4 +43,19 @@ test("does not treat a changed match threshold as clearly grounded", () => {
     ),
     false,
   );
+});
+
+test("guardian config ignores inline comments copied from .env examples", () => {
+  const config = resolveGuardianConfig({
+    LLM_API_KEY: "ollama # dummy value",
+    LLM_BASE_URL: "http://localhost:11434/v1 # local endpoint",
+    LLM_GUARDIAN_MODEL: "granite4.1-guardian:8b # guard model",
+    LLM_GUARDIAN_TIMEOUT_MS: "120000 # slow local model",
+  });
+
+  assert.equal(config.apiKey, "ollama");
+  assert.equal(config.chatUrl, "http://localhost:11434/api/chat");
+  assert.equal(config.enabled, true);
+  assert.equal(config.model, "granite4.1-guardian:8b");
+  assert.equal(config.timeoutMs, 120_000);
 });

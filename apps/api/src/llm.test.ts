@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { ensureModelLoaded, type RuleAgentConfig } from "./llm.js";
+import {
+  ensureModelLoaded,
+  resolveEscalationModel,
+  resolveRuleAgentConfig,
+  resolveTranslateToEnglish,
+  type RuleAgentConfig,
+} from "./llm.js";
 
 const CONFIG: RuleAgentConfig = {
   apiKey: "",
@@ -66,4 +72,26 @@ test("ensureModelLoaded loads the model when it is not resident", async () => {
     "http://localhost:11434/api/ps",
     "http://localhost:11434/api/generate",
   ]);
+});
+
+test("rule agent config ignores inline comments copied from .env examples", () => {
+  const env = {
+    LLM_API_KEY: "ollama # dummy value",
+    LLM_BASE_URL: "http://localhost:11434/v1 # local endpoint",
+    LLM_ESCALATION_MODEL: "gemma4:e2b # stronger model",
+    LLM_MODEL: "gemma4:latest # primary model",
+    LLM_SEED: "7 # deterministic",
+    LLM_TIMEOUT_MS: "180000 # slow local model",
+    LLM_TRANSLATE_TO_ENGLISH: "false # multilingual model",
+  };
+
+  const config = resolveRuleAgentConfig(env);
+
+  assert.equal(config.apiKey, "ollama");
+  assert.equal(config.baseUrl, "http://localhost:11434/v1");
+  assert.equal(config.model, "gemma4:latest");
+  assert.equal(config.seed, 7);
+  assert.equal(config.timeoutMs, 180_000);
+  assert.equal(resolveEscalationModel(env), "gemma4:e2b");
+  assert.equal(resolveTranslateToEnglish(env), false);
 });

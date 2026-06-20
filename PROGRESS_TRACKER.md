@@ -47,6 +47,19 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-06-20 (rule proposal dealer LLM env parsing fix)
+
+- Opened required project context before working: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/develop-frontend/SKILL.md`, `.claude/skills/playwright/SKILL.md`, and `packages/rule-compiler/rule-authoring/SKILL.md`.
+- Investigated the `Dealer engine unavailable` / `RULE_AGENT_UNAVAILABLE` failure in the rule proposal flow.
+- Confirmed the API and Ollama were running, and verified Ollama had the required local models installed: `gemma4:latest`, `gemma4:e2b`, and `granite4.1-guardian:8b`.
+- Root cause: `.env` / `.env.example` used inline comments on `LLM_*` values; Docker passed those comments into the API container, so `LLM_MODEL` became `gemma4:latest # e.g. ...` and Ollama rejected the chat request with `invalid model name`.
+- Updated `apps/api/src/llm.ts` and `apps/api/src/guardian.ts` to strip accidental inline comments from non-secret runtime config values before using model names, URLs, timeouts, seeds, booleans, and the local API key.
+- Cleaned the local `.env` and tracked `.env.example` so LLM comments are on separate lines and future containers start with clean values.
+- Added regression coverage for dealer and guardian config parsing with inline-comment env values while preserving the existing guardian groundedness tests.
+- Recreated only `idealer-api` without touching data volumes; the running API now sees clean `LLM_MODEL=gemma4:latest`, `LLM_ESCALATION_MODEL=gemma4:e2b`, and `LLM_GUARDIAN_MODEL=granite4.1-guardian:8b`.
+- Verification passed: `pnpm --filter @idealer/api test` (24/24), `pnpm --filter @idealer/api typecheck`, `pnpm --filter @idealer/api lint`, API `/health`, and a real `POST /rule-preflight` returning `decision: VALID` for `Win if at least 4 of your numbers appear in the draw.`
+- No PRD checklist item or milestone checkbox was ticked; this was a maintenance bug fix and milestone approval still requires user confirmation.
+
 ### 2026-06-20 (devnet guess submission rent pre-check)
 
 - Opened required project context before working: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/solana-dev/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/references/frontend-framework-kit.md`, and `.claude/skills/solana-dev/ext/solana-dev/skill/references/kit-web3-interop.md`.

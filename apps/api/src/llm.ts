@@ -103,9 +103,13 @@ const SYSTEM_PROMPT = [
 // use `??` here: optional overrides like LLM_MODEL_INTERPRET are commonly
 // present but empty (`LLM_MODEL_INTERPRET=`), and `??` only falls through on
 // null/undefined, so an empty override would shadow the real LLM_MODEL value.
+function cleanEnvValue(value: string | undefined): string {
+  return (value ?? "").replace(/\s+#.*$/u, "").trim();
+}
+
 function firstConfigured(...values: Array<string | undefined>): string {
   for (const value of values) {
-    const trimmed = value?.trim();
+    const trimmed = cleanEnvValue(value);
     if (trimmed) {
       return trimmed;
     }
@@ -129,7 +133,7 @@ export function resolveEscalationModel(
 export function resolveTranslateToEnglish(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return (env.LLM_TRANSLATE_TO_ENGLISH ?? "true").trim().toLowerCase() !== "false";
+  return cleanEnvValue(env.LLM_TRANSLATE_TO_ENGLISH ?? "true").toLowerCase() !== "false";
 }
 
 export function resolveRuleAgentConfig(
@@ -149,17 +153,17 @@ export function resolveRuleAgentConfig(
     );
   }
 
-  const timeoutRaw = Number(env.LLM_TIMEOUT_MS ?? DEFAULT_TIMEOUT_MS);
+  const timeoutRaw = Number(cleanEnvValue(env.LLM_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS);
   const timeoutMs =
     Number.isFinite(timeoutRaw) && timeoutRaw > 0
       ? timeoutRaw
       : DEFAULT_TIMEOUT_MS;
 
-  const seedRaw = Number(env.LLM_SEED ?? DEFAULT_SEED);
+  const seedRaw = Number(cleanEnvValue(env.LLM_SEED) || DEFAULT_SEED);
   const seed = Number.isInteger(seedRaw) ? seedRaw : DEFAULT_SEED;
 
   return {
-    apiKey: (env.LLM_API_KEY ?? "").trim(),
+    apiKey: cleanEnvValue(env.LLM_API_KEY),
     baseUrl: baseUrl.replace(/\/+$/, ""),
     model,
     seed,
