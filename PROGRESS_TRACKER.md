@@ -47,6 +47,16 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-06-20 (devnet guess transaction wallet signer fix)
+
+- Opened required project context before working: `PRD.md`, `.claude/skills`, `.claude/skills/solana-dev/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/references/frontend-framework-kit.md`, and `.claude/skills/solana-dev/ext/solana-dev/skill/references/kit-web3-interop.md`.
+- Investigated the reported inability to play because the wallet signature failed while submitting a bet/guess.
+- Root cause addressed in `apps/web/src/features/number-picker/NumberPicker.tsx`: the custom `submit_guess` transaction marked `player` as a signer account, but the transaction request used the raw player address as `feePayer`. The wallet session was passed as `authority`, but the transaction builder needs an explicit `TransactionSigner` when the fee payer/account signer must sign the compiled message.
+- Updated the guess submission flow to wrap the connected wallet with `createWalletTransactionSigner` and pass that signer as both `authority` and `feePayer`, so the same wallet signs the `player` signer account and pays the devnet transaction fee.
+- Synced the changed number picker file into the running `idealer-web` container and restarted only `idealer-web`.
+- Verification passed: `pnpm --filter @idealer/web typecheck`, `pnpm --filter @idealer/web lint`, `GET http://127.0.0.1:3000/play/pick` returned HTTP `200`, and `idealer-web` returned to `healthy`.
+- No PRD checklist item or milestone checkbox was ticked; this was a maintenance bug fix and milestone approval still requires user confirmation.
+
 ### 2026-06-20 (rule proposal dealer LLM env parsing fix)
 
 - Opened required project context before working: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/develop-frontend/SKILL.md`, `.claude/skills/playwright/SKILL.md`, and `packages/rule-compiler/rule-authoring/SKILL.md`.

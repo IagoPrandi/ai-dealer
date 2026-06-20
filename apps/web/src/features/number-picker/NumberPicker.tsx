@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { MVP_FEES_SOL } from "@idealer/constants";
+import { createWalletTransactionSigner } from "@solana/client";
 import { address } from "@solana/kit";
 import {
   useSolanaClient,
@@ -682,12 +683,15 @@ export function NumberPicker() {
         player,
         turnId,
       });
+      const walletSigner = createWalletTransactionSigner(wallet, {
+        commitment: "confirmed",
+      }).signer;
       const signature = (
         await client.transaction.prepareAndSend(
           {
-            authority: wallet,
+            authority: walletSigner,
             commitment: "confirmed",
-            feePayer: player,
+            feePayer: walletSigner,
             instructions: [instruction],
             version: 0,
           },
