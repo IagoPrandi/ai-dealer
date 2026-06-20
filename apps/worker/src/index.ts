@@ -19,6 +19,7 @@ export interface WorkerStatus {
   service: string;
   status: "ok" | "error";
   firstTurnDurationHours: number;
+  firstTurnDurationSeconds: number;
   postgres: "ok" | "error";
   redis: "ok" | "error";
   turnAutomation: "disabled" | "enabled" | "error";
@@ -55,10 +56,13 @@ export async function getWorkerStatus(): Promise<WorkerStatus> {
   const turnAutomation = await createTurnAutomationConfig().catch(() => null);
 
   if (!databaseUrl || !redisUrl) {
+    const firstTurnDurationSeconds =
+      getFirstTurnDurationSeconds(turnAutomation);
     return {
       service: "worker",
       status: "error",
-      firstTurnDurationHours: getTurnDurationHours(0),
+      firstTurnDurationHours: firstTurnDurationSeconds / 3_600,
+      firstTurnDurationSeconds,
       postgres: databaseUrl ? "ok" : "error",
       redis: redisUrl ? "ok" : "error",
       turnAutomation: getTurnAutomationStatus(turnAutomation),
@@ -70,14 +74,20 @@ export async function getWorkerStatus(): Promise<WorkerStatus> {
     checkRedis(redisUrl),
   ]);
 
+  const firstTurnDurationSeconds = getFirstTurnDurationSeconds(turnAutomation);
   return {
     service: "worker",
     status: postgres === "ok" && redis === "ok" ? "ok" : "error",
-    firstTurnDurationHours: getTurnDurationHours(0),
+    firstTurnDurationHours: firstTurnDurationSeconds / 3_600,
+    firstTurnDurationSeconds,
     postgres,
     redis,
     turnAutomation: getTurnAutomationStatus(turnAutomation),
   };
+}
+
+function getFirstTurnDurationSeconds(config: null | TurnAutomationConfig) {
+  return config?.desiredTurnDurationCycle?.[0] ?? getTurnDurationHours(0) * 3_600;
 }
 
 function getTurnAutomationStatus(

@@ -47,6 +47,44 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-06-20 (devnet turn recovery and shortened cycle enforcement)
+
+- Opened required project context before working: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/solana-dev/SKILL.md`, and `.claude/skills/best-practices/references/agent-principles.md`.
+- Root cause confirmed from worker/devnet logs: the legacy active turn account could not deserialize under the upgraded `TurnState` layout (`AccountDidNotDeserialize`), so `close_turn` could not clear `GlobalConfig.has_active_turn`.
+- Contract: added `force_skip_legacy_active_turn` to clear only an undersized legacy active turn PDA after authority, owner, PDA, and data-length checks; added `set_turn_duration_cycle` to authority-update the on-chain duration cycle and shorten the currently active open turn.
+- Worker: added recovery handling for legacy turn deserialization, base58/path keypair parsing with path priority, Docker deployer-keypair mounting, devnet duration scale enforcement (`1500` bps -> `[1080, 1080, 4320, 4320]`), transaction confirmation waiting, and health output for shortened first-turn duration.
+- Docker: updated `worker` to mount `idealer-solana-home` read-only at `/solana-home` and default `IDEALER_TURN_AUTHORITY_KEYPAIR_PATH` to the deployer keypair path, avoiding inline secret copying/printing.
+- devnet upgrade #1 deployed recovery-capable program: signature `5kdhogJ5jjiARxnnd26VwjHcAjh7pbt7Et6chRted4NC3g456Z1UumKMQT53AS48gVKLr5wCUSMRp7eMWbv6RuGV`, slot `470745183`, data length `527720`.
+- Worker recovery executed on devnet: skipped legacy turn `1` with signature `58VQM5B4pQhsbMrNRJWPhj8aaqc2pQva5QmCwD3F9yDrSQgwxhUECxTzX6trKNsG8dzaeWJxHEjLda9ntWkEHZ3e`, then opened turn `2` with signature `3nu1mayDxsc4kUAxcVZtfd1FcGatcEr473s8EJuSTzSgG2S5AuUCegyosXjqgqBDW1KNnZCReXKezza77ioM6EPx`.
+- devnet upgrade #2 deployed duration-cycle repair: signature `5hbmiVrmh6kSdTYGHrQ39bS2BVeZg1nadQ3z5UEXAfXhDYUsd29m4NMEUgkeuigsdHmbmDJ2BPPntDs7khLj1r1X`, slot `470758162`, data length `532048`.
+- Worker enforced the shortened cycle and continued automation: updated duration cycle for turn `2`, closed turn `2` with signature `MqFU2WiwkcYTHMa1p3PHMswjs4492ebWZep91xtzwrziyESSt3JaWyKsbfH3xUZ6RH9nBqnqvXtbU2yFPvYwRat`, and opened turn `3` with signature `2fqfXw9qCgocNutZdeg3keiARuDqXvQ9DzR4Yy4YeQEM6XJuBjeZH8jw448B1YmThUrAqsSBJ47zpwuWdA9YZBsY`.
+- Final devnet state verified: `GlobalConfig.hasActiveTurn=true`, `activeTurnId=3`, `paused=false`, `turnDurationCycle=[1080,1080,4320,4320]`; active turn `3` is `open`, `cycleIndex=2`, `turnDurationSeconds=4320`, `startTimestamp=1781970509`, `endTimestamp=1781974829`.
+- Runtime verification passed: `idealer-worker` health returned `status:"ok"`, Postgres ok, Redis ok, `turnAutomation:"enabled"`, `firstTurnDurationSeconds=1080`; `GET http://127.0.0.1:3000/play` returned HTTP `200`.
+- Local verification passed: `cargo fmt --check`, `cargo test -p idealer --test core`, `cargo test -p idealer --test instructions` (4 ignored by design without SBF env), `pnpm.cmd --filter @idealer/worker test` (32/32), and `pnpm.cmd --filter @idealer/worker typecheck`.
+- SBF build passed and produced `/sbf-target/deploy/idealer.so` (`532048` bytes). Known residual test caveat from the earlier SBF ignored suite remains: `core_instructions_execute_and_persist_state` failed on a duplicate-vote assertion unrelated to this recovery path and was not hidden.
+- No PRD checklist item or milestone checkbox was ticked; milestone completion still requires explicit user confirmation.
+
+### 2026-06-19 (Docker Compose rebuild on `idealer2`)
+
+- Reopened required project context before working: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/best-practices/SKILL.md`, and `.claude/skills/best-practices/references/agent-principles.md`.
+- Rebuilt and force-recreated API/Web using the healthy Compose workaround project to avoid the corrupted `idealer` metadata entries: `docker compose -p idealer2 up -d --build --force-recreate --no-deps api web`.
+- Kept Postgres and Redis running; no volumes were removed or pruned.
+- Verification passed: `GET http://127.0.0.1:3002/health` returned `status:"ok"` with Postgres and Redis ok; `GET http://127.0.0.1:3000/play` returned HTTP `200`.
+- Final Docker status: `idealer-api`, `idealer-web`, `idealer-postgres`, and `idealer-redis` are healthy.
+- No PRD checklist item or milestone checkbox was ticked.
+
+### 2026-06-19 (Docker Compose recovery after interrupted recreate)
+
+- Reopened required project context before working: `PRD.md`, `AGENTS.md`, and `.claude/skills`.
+- Diagnosed the failed `docker compose up -d --build --force-recreate web api` error: Compose had a stale replacement container reference for `3670170967f617540e8a707a0fb98243870aa193d6bc2496387f8a0441770e6d` after an interrupted recreate.
+- Confirmed the new images existed: `idealer-api:latest` and `idealer-web:latest` were rebuilt successfully.
+- Restarted `idealer-postgres` and `idealer-redis`; both became healthy. Existing volumes were preserved.
+- Removed visible partial app containers, but Docker Desktop still reports two nameless `dead` containers under project `idealer` that return `No such container` when removed by ID. `docker container prune --filter label=com.docker.compose.project=idealer` did not clear those dead metadata entries.
+- Worked around the corrupted `idealer` Compose metadata by tagging the new images as `idealer2-api:latest` and `idealer2-web:latest`, then starting `api` and `web` with `docker compose -p idealer2 up -d --no-deps --no-build api web`.
+- Verification passed: `GET http://127.0.0.1:3002/health` returned `status:"ok"` with Postgres and Redis ok; `GET http://127.0.0.1:3000/play` returned HTTP `200`.
+- Residual risk: the original `idealer` Compose project still contains two Docker Desktop `dead` metadata entries for old `web` and `worker` containers; the running API/Web containers currently belong to project label `idealer2` while keeping the same public container names/ports.
+- No PRD checklist item or milestone checkbox was ticked.
+
 ### 2026-06-19 (Automatic turn lifecycle and test-phase durations)
 
 - Opened required project context before working: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/best-practices/SKILL.md`, `.claude/skills/best-practices/references/agent-principles.md`, `.claude/skills/best-practices/references/code-quality.md`, `.claude/skills/best-practices/references/testing.md`, `.claude/skills/best-practices/references/web3-contracts.md`, `.claude/skills/solana-dev/SKILL.md`, and `.claude/skills/solana-dev/ext/solana-dev/skill/SKILL.md`.
@@ -1810,3 +1848,24 @@ Passed:
 ## M4.4 Confirmation Gate
 
 `M4.4` was implemented and marked complete on 2026-06-13 after the user's explicit instruction to verify `M4.3`, mark it done if complete, and follow to the next milestone.
+
+## Docker Recovery Work Log
+
+### 2026-06-19
+
+- Reopened `PRD.md`, `.claude/skills`, `.claude/skills/best-practices/SKILL.md`, and `.claude/skills/best-practices/references/agent-principles.md` before Docker recovery work, as required.
+- Diagnosed the accidental `idealer2` Compose project as a temporary workaround for corrupted Docker Desktop metadata in the required `idealer` project.
+- Confirmed the `idealer` project still contains two dead nameless Docker records for old `web` and `worker` containers; `docker rm`, `docker compose rm`, filtered prune, and Docker Desktop restart did not remove them because Docker reports the listed IDs as `No such container`.
+- Removed the stopped `idealer2` containers and recreated `idealer-api`, `idealer-web`, and `idealer-worker` with `com.docker.compose.project=idealer` labels; no `idealer2` containers remain.
+- Verified `idealer-api`, `idealer-web`, `idealer-worker`, `idealer-postgres`, and `idealer-redis` are running and healthy under the `idealer` project label.
+- Verified `GET http://127.0.0.1:3002/health` returns API status `ok`, `GET http://127.0.0.1:3000/play` returns HTTP 200, and `GET http://127.0.0.1:3003/health` returns worker status `ok`.
+- Identified a remaining configuration blocker for automatic turn execution: the worker receives empty `IDEALER_TURN_AUTHORITY_KEYPAIR` and `IDEALER_TURN_AUTHORITY_KEYPAIR_PATH` values, so turn automation correctly reports an error instead of running without authority credentials.
+- Rechecked the blocked turn-start state after the UI remained on `TURN_ENDED`: `idealer-worker` logs repeatedly show `Turn automation is enabled but IDEALER_TURN_AUTHORITY_KEYPAIR or IDEALER_TURN_AUTHORITY_KEYPAIR_PATH is not set`; `.env` and the running container both have empty authority keypair values, while `IDEALER_TURN_AUTOMATION_ENABLED=true`.
+- After `IDEALER_TURN_AUTHORITY_KEYPAIR` was populated in `.env`, recreated `idealer-worker` with `--env-file .env` and verified the worker sees the keypair without printing its value; `/health` now reports `turnAutomation: enabled`.
+- Fixed worker diagnostic serialization for Solana simulation errors containing `bigint` values and added test coverage; `pnpm --filter @idealer/worker test` passed 29/29 and `pnpm --filter @idealer/worker typecheck` passed.
+- Identified the remaining turn-start blocker as on-chain devnet state incompatibility: `close_turn` simulation fails with Anchor `AccountDidNotDeserialize` for `turn_state` (`Custom 3003`). The active on-chain turn account has the expected `TurnState` discriminator but is only 366 bytes, while the current `TurnState` layout is larger after recent schema additions, so the upgraded program cannot deserialize the stale active turn account to close it.
+- Implemented a restricted on-chain recovery path for the stale devnet active turn: `force_skip_legacy_active_turn` is authority-gated, validates the active turn PDA and owner manually through an `UncheckedAccount`, and only runs when the active turn account is undersized for the current `TurnState` layout.
+- Updated the worker to call the recovery instruction only when `close_turn` simulation fails specifically with Anchor `AccountDidNotDeserialize` for `turn_state`; other close-turn failures still fail closed.
+- Verification passed: `cargo fmt --check`, `cargo test -p idealer --test core` (14/14), `cargo test -p idealer --test instructions` (4 ignored as expected), `pnpm --filter @idealer/worker test` (30/30), `pnpm --filter @idealer/worker typecheck`, and SBF build through `contracts/solana/scripts/sbf.sh build`.
+- SBF instruction execution with ignored tests exposed an unrelated existing duplicate-vote expectation failure in `core_instructions_execute_and_persist_state`; the other 3 ignored SBF instruction tests passed. Devnet upgrade was not sent yet because it requires explicit user confirmation before broadcasting a transaction with deployer `4bY5krt2VnnSNB1R4c1bhiWdQYkTc1FvFTN1LaV5JxCH` on devnet.
+- Rechecked after the user reported setting `IDEALER_TURN_AUTHORITY_KEYPAIR` in `.env`: reopened `PRD.md`, `.claude/skills`, and best-practices guidance; the workspace `.env` still shows `IDEALER_TURN_AUTHORITY_KEYPAIR` and `IDEALER_TURN_AUTHORITY_KEYPAIR_PATH` as empty on lines 25-26, so the worker was not recreated.

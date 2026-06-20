@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import bs58 from "bs58";
 import {
   AccountRole,
   address,
@@ -24,6 +25,17 @@ const OPEN_TURN_DISCRIMINATOR = new Uint8Array([
 const CLOSE_TURN_DISCRIMINATOR = new Uint8Array([
   100, 243, 10, 218, 116, 61, 49, 153,
 ]);
+const FORCE_SKIP_LEGACY_ACTIVE_TURN_DISCRIMINATOR = new Uint8Array([
+  167, 139, 165, 45, 22, 50, 176, 166,
+]);
+const SET_TURN_DURATION_CYCLE_DISCRIMINATOR = new Uint8Array([
+  163, 41, 240, 31, 94, 126, 122, 36,
+]);
+const BASIS_POINTS_DENOMINATOR = 10_000;
+const PRODUCTION_TURN_DURATION_CYCLE_SECONDS = [
+  7_200, 7_200, 28_800, 28_800,
+] as const;
+const CURRENT_TURN_STATE_DATA_LENGTH = 448;
 const addressDecoder = getAddressDecoder();
 
 type SolanaAddress = ReturnType<typeof address>;
@@ -33,16 +45,21 @@ export interface GlobalConfigSnapshot {
   hasActiveTurn: boolean;
   nextTurnId: number;
   paused: boolean;
+  turnDurationCycle: readonly [number, number, number, number];
 }
 
 export interface TurnStateSnapshot {
+  cycleIndex: number;
   endTimestamp: number;
+  startTimestamp: number;
   status: "open" | "closed";
+  turnDurationSeconds: number;
   turnId: number;
 }
 
 export interface TurnAutomationConfig {
   authorityKeypairBytes: null | Uint8Array;
+  desiredTurnDurationCycle: null | readonly [number, number, number, number];
   enabled: boolean;
   intervalMs: number;
   programId: SolanaAddress;
@@ -56,6 +73,16 @@ export type TurnAutomationResult =
       turnId: number;
     }
   | {
+      action: "skipped_legacy_turn";
+      signature: string;
+      turnId: number;
+    }
+  | {
+      action: "updated_duration_cycle";
+      signature: string;
+      turnId: number;
+    }
+  | {
       action:
         | "active_turn_not_expired"
         | "disabled"
@@ -63,6 +90,20 @@ export type TurnAutomationResult =
         | "turn_already_closed";
       turnId?: number;
     };
+
+export function stringifySimulationError(error: unknown) {
+  return JSON.stringify(error, (_key, value: unknown) =>
+    typeof value === "bigint" ? value.toString() : value,
+  );
+}
+
+export function isLegacyTurnDeserializationError(error: unknown) {
+  return (
+    error instanceof Error &&
+    error.message.includes("AccountDidNotDeserialize") &&
+    error.message.includes("account: turn_state")
+  );
+}
 
 type AccountInfoResult = {
   value: null | {
@@ -86,6 +127,44 @@ function envNumber(value: string | undefined, fallback: number) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function resolveDesiredTurnDurationCycle(env: NodeJS.ProcessEnv) {
+  if (!env.IDEALER_DEVNET_TURN_DURATION_SCALE_BPS) {
+    return null;
+  }
+
+  const scaleBps = Number(env.IDEALER_DEVNET_TURN_DURATION_SCALE_BPS);
+  if (
+    !Number.isInteger(scaleBps) ||
+    scaleBps <= 0 ||
+    scaleBps > BASIS_POINTS_DENOMINATOR
+  ) {
+    throw new Error(
+      "IDEALER_DEVNET_TURN_DURATION_SCALE_BPS must be an integer between 1 and 10000.",
+    );
+  }
+
+  return PRODUCTION_TURN_DURATION_CYCLE_SECONDS.map((duration) =>
+    Math.max(
+      1,
+      Math.floor((duration * scaleBps) / BASIS_POINTS_DENOMINATOR),
+    ),
+  ) as [number, number, number, number];
+}
+
+function assertKeypairByteArray(value: unknown): asserts value is number[] {
+  if (
+    !Array.isArray(value) ||
+    value.length !== 64 ||
+    !value.every(
+      (byte) => Number.isInteger(byte) && byte >= 0 && byte <= 255,
+    )
+  ) {
+    throw new Error(
+      "Authority keypair must be a 64-byte Solana keypair JSON array or base58-encoded 64-byte secret key.",
+    );
+  }
+}
+
 function u64Le(value: number) {
   const bytes = new Uint8Array(8);
   new DataView(bytes.buffer).setBigUint64(0, BigInt(value), true);
@@ -96,31 +175,40 @@ function u64LeArray(value: number) {
   return Array.from(u64Le(value));
 }
 
-function parseJsonKeypairBytes(raw: string) {
-  const parsed = JSON.parse(raw) as unknown;
-  if (
-    !Array.isArray(parsed) ||
-    parsed.length !== 64 ||
-    !parsed.every(
-      (value) => Number.isInteger(value) && value >= 0 && value <= 255,
-    )
-  ) {
-    throw new Error(
-      "Authority keypair must be a 64-byte Solana keypair JSON array.",
-    );
+function u32LeArray(value: number) {
+  const bytes = new Uint8Array(4);
+  new DataView(bytes.buffer).setUint32(0, value, true);
+  return Array.from(bytes);
+}
+
+function parseAuthorityKeypairBytes(raw: string) {
+  const trimmed = raw.trim();
+
+  if (trimmed.startsWith("[")) {
+    const parsed = JSON.parse(trimmed) as unknown;
+    assertKeypairByteArray(parsed);
+    return Uint8Array.from(parsed);
   }
 
-  return Uint8Array.from(parsed);
+  try {
+    const decoded = bs58.decode(trimmed);
+    assertKeypairByteArray([...decoded]);
+    return decoded;
+  } catch {
+    throw new Error(
+      "Authority keypair must be a 64-byte Solana keypair JSON array or base58-encoded 64-byte secret key.",
+    );
+  }
 }
 
 export async function loadAuthorityKeypairBytesFromEnv(env = process.env) {
-  if (env.IDEALER_TURN_AUTHORITY_KEYPAIR) {
-    return parseJsonKeypairBytes(env.IDEALER_TURN_AUTHORITY_KEYPAIR);
-  }
-
   if (env.IDEALER_TURN_AUTHORITY_KEYPAIR_PATH) {
     const raw = await readFile(env.IDEALER_TURN_AUTHORITY_KEYPAIR_PATH, "utf8");
-    return parseJsonKeypairBytes(raw);
+    return parseAuthorityKeypairBytes(raw);
+  }
+
+  if (env.IDEALER_TURN_AUTHORITY_KEYPAIR) {
+    return parseAuthorityKeypairBytes(env.IDEALER_TURN_AUTHORITY_KEYPAIR);
   }
 
   return null;
@@ -131,6 +219,7 @@ export async function createTurnAutomationConfig(
 ): Promise<TurnAutomationConfig> {
   return {
     authorityKeypairBytes: await loadAuthorityKeypairBytesFromEnv(env),
+    desiredTurnDurationCycle: resolveDesiredTurnDurationCycle(env),
     enabled: envFlag(env.IDEALER_TURN_AUTOMATION_ENABLED),
     intervalMs: envNumber(env.IDEALER_TURN_AUTOMATION_INTERVAL_MS, 30_000),
     programId: address(
@@ -212,6 +301,11 @@ function createAccountReader(data: Uint8Array) {
       offset += 2;
       return value;
     },
+    readU32() {
+      const value = view.getUint32(offset, true);
+      offset += 4;
+      return value;
+    },
     readU64Number() {
       const value = Number(view.getBigUint64(offset, true));
       offset += 8;
@@ -239,7 +333,12 @@ export function decodeGlobalConfigAccount(
   reader.skip(32 * 3);
   reader.skip(8 + 8 + 8);
   reader.skip(2);
-  reader.skip(4 * 4);
+  const turnDurationCycle = [
+    reader.readU32(),
+    reader.readU32(),
+    reader.readU32(),
+    reader.readU32(),
+  ] as const;
   reader.skip(1);
   reader.readU16();
   reader.readU16();
@@ -254,13 +353,14 @@ export function decodeGlobalConfigAccount(
     hasActiveTurn,
     nextTurnId,
     paused,
+    turnDurationCycle,
   };
 }
 
 export function decodeTurnStateAccount(data: Uint8Array): TurnStateSnapshot {
   const reader = createAccountReader(data);
   const turnId = reader.readU64Number();
-  reader.readI64Number();
+  const startTimestamp = reader.readI64Number();
   const endTimestamp = reader.readI64Number();
   const statusIndex = reader.readU8();
 
@@ -268,9 +368,16 @@ export function decodeTurnStateAccount(data: Uint8Array): TurnStateSnapshot {
     throw new Error("TurnState status is invalid.");
   }
 
+  reader.skip(8);
+  const turnDurationSeconds = reader.readU32();
+  const cycleIndex = reader.readU8();
+
   return {
+    cycleIndex,
     endTimestamp,
+    startTimestamp,
     status: statusIndex === 0 ? "open" : "closed",
+    turnDurationSeconds,
     turnId,
   };
 }
@@ -349,12 +456,29 @@ async function fetchTurnState({
   });
   return {
     address: turnState,
+    dataLength: data.length,
     snapshot: decodeTurnStateAccount(data),
   };
 }
 
 function createOpenTurnData(turnId: number) {
   return new Uint8Array([...OPEN_TURN_DISCRIMINATOR, ...u64LeArray(turnId)]);
+}
+
+function createSetTurnDurationCycleData(
+  turnDurationCycle: readonly [number, number, number, number],
+) {
+  return new Uint8Array([
+    ...SET_TURN_DURATION_CYCLE_DISCRIMINATOR,
+    ...turnDurationCycle.flatMap((duration) => u32LeArray(duration)),
+  ]);
+}
+
+function turnDurationCyclesEqual(
+  left: readonly [number, number, number, number],
+  right: readonly [number, number, number, number],
+) {
+  return left.every((duration, index) => duration === right[index]);
 }
 
 async function createOpenTurnInstruction({
@@ -385,6 +509,30 @@ async function createOpenTurnInstruction({
   };
 }
 
+async function createSetTurnDurationCycleInstruction({
+  authority,
+  programId,
+  turnDurationCycle,
+  turnState,
+}: {
+  authority: SolanaAddress;
+  programId: SolanaAddress;
+  turnDurationCycle: readonly [number, number, number, number];
+  turnState: SolanaAddress;
+}) {
+  const globalConfig = await getGlobalConfigPda(programId);
+
+  return {
+    accounts: [
+      { address: authority, role: AccountRole.READONLY_SIGNER },
+      { address: globalConfig, role: AccountRole.WRITABLE },
+      { address: turnState, role: AccountRole.WRITABLE },
+    ],
+    data: createSetTurnDurationCycleData(turnDurationCycle),
+    programAddress: programId,
+  };
+}
+
 async function createCloseTurnInstruction({
   authority,
   programId,
@@ -403,6 +551,28 @@ async function createCloseTurnInstruction({
       { address: turnState, role: AccountRole.WRITABLE },
     ],
     data: CLOSE_TURN_DISCRIMINATOR,
+    programAddress: programId,
+  };
+}
+
+async function createForceSkipLegacyActiveTurnInstruction({
+  authority,
+  programId,
+  turnState,
+}: {
+  authority: SolanaAddress;
+  programId: SolanaAddress;
+  turnState: SolanaAddress;
+}) {
+  const globalConfig = await getGlobalConfigPda(programId);
+
+  return {
+    accounts: [
+      { address: authority, role: AccountRole.READONLY_SIGNER },
+      { address: globalConfig, role: AccountRole.WRITABLE },
+      { address: turnState, role: AccountRole.READONLY },
+    ],
+    data: FORCE_SKIP_LEGACY_ACTIVE_TURN_DISCRIMINATOR,
     programAddress: programId,
   };
 }
@@ -443,13 +613,13 @@ async function simulateAndSend({
 
   if (simulation.value.err) {
     throw new Error(
-      `Turn automation transaction simulation failed: ${JSON.stringify(
+      `Turn automation transaction simulation failed: ${stringifySimulationError(
         simulation.value.err,
-      )}`,
+      )}; logs=${stringifySimulationError(simulation.value.logs ?? [])}`,
     );
   }
 
-  return rpc
+  const signature = await rpc
     .sendTransaction(wireTransaction, {
       encoding: "base64",
       maxRetries: 3n,
@@ -457,6 +627,45 @@ async function simulateAndSend({
       skipPreflight: false,
     })
     .send();
+  await waitForSignatureConfirmation(rpc, signature.toString());
+  return signature;
+}
+
+async function waitForSignatureConfirmation(
+  rpc: RpcClient,
+  signature: string,
+) {
+  const deadline = Date.now() + 60_000;
+
+  while (Date.now() < deadline) {
+    const result = await rpc
+      .getSignatureStatuses([signature as never], {
+        searchTransactionHistory: true,
+      })
+      .send();
+    const status = result.value[0];
+
+    if (status?.err) {
+      throw new Error(
+        `Turn automation transaction ${signature} failed after send: ${stringifySimulationError(
+          status.err,
+        )}`,
+      );
+    }
+
+    if (
+      status?.confirmationStatus === "confirmed" ||
+      status?.confirmationStatus === "finalized"
+    ) {
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+
+  throw new Error(
+    `Turn automation transaction ${signature} was not confirmed within 60s.`,
+  );
 }
 
 export async function runTurnAutomationOnce(
@@ -507,6 +716,32 @@ export async function runTurnAutomationOnce(
     turnId: globalConfig.snapshot.activeTurnId,
   });
 
+  if (
+    config.desiredTurnDurationCycle &&
+    activeTurn.dataLength >= CURRENT_TURN_STATE_DATA_LENGTH &&
+    !turnDurationCyclesEqual(
+      globalConfig.snapshot.turnDurationCycle,
+      config.desiredTurnDurationCycle,
+    )
+  ) {
+    const instruction = await createSetTurnDurationCycleInstruction({
+      authority,
+      programId: config.programId,
+      turnDurationCycle: config.desiredTurnDurationCycle,
+      turnState: activeTurn.address,
+    });
+    const signature = await simulateAndSend({
+      authorityKeypairBytes: config.authorityKeypairBytes,
+      instruction,
+      rpc,
+    });
+    return {
+      action: "updated_duration_cycle",
+      signature: signature.toString(),
+      turnId: activeTurn.snapshot.turnId,
+    };
+  }
+
   if (activeTurn.snapshot.status !== "open") {
     return {
       action: "turn_already_closed",
@@ -527,11 +762,35 @@ export async function runTurnAutomationOnce(
     programId: config.programId,
     turnState: activeTurn.address,
   });
-  const signature = await simulateAndSend({
-    authorityKeypairBytes: config.authorityKeypairBytes,
-    instruction,
-    rpc,
-  });
+  let signature;
+  try {
+    signature = await simulateAndSend({
+      authorityKeypairBytes: config.authorityKeypairBytes,
+      instruction,
+      rpc,
+    });
+  } catch (error) {
+    if (!isLegacyTurnDeserializationError(error)) {
+      throw error;
+    }
+
+    const recoveryInstruction =
+      await createForceSkipLegacyActiveTurnInstruction({
+        authority,
+        programId: config.programId,
+        turnState: activeTurn.address,
+      });
+    const recoverySignature = await simulateAndSend({
+      authorityKeypairBytes: config.authorityKeypairBytes,
+      instruction: recoveryInstruction,
+      rpc,
+    });
+    return {
+      action: "skipped_legacy_turn",
+      signature: recoverySignature.toString(),
+      turnId: activeTurn.snapshot.turnId,
+    };
+  }
   return {
     action: "closed_turn",
     signature: signature.toString(),
@@ -546,7 +805,12 @@ export function startTurnAutomationLoop(config: TurnAutomationConfig) {
 
   let running = false;
   const logResult = (result: TurnAutomationResult) => {
-    if (result.action === "closed_turn" || result.action === "opened_turn") {
+    if (
+      result.action === "closed_turn" ||
+      result.action === "opened_turn" ||
+      result.action === "skipped_legacy_turn" ||
+      result.action === "updated_duration_cycle"
+    ) {
       console.log(
         `turn automation ${result.action} turn=${result.turnId} signature=${result.signature}`,
       );
@@ -563,7 +827,11 @@ export function startTurnAutomationLoop(config: TurnAutomationConfig) {
       const result = await runTurnAutomationOnce(config);
       logResult(result);
 
-      if (result.action === "closed_turn") {
+      if (
+        result.action === "closed_turn" ||
+        result.action === "skipped_legacy_turn" ||
+        result.action === "updated_duration_cycle"
+      ) {
         logResult(await runTurnAutomationOnce(config));
       }
     } catch (error) {

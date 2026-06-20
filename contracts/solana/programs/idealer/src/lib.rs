@@ -155,6 +155,61 @@ pub mod idealer {
         Ok(())
     }
 
+    pub fn set_turn_duration_cycle(
+        ctx: Context<SetTurnDurationCycle>,
+        args: SetTurnDurationCycleArgs,
+    ) -> Result<()> {
+        let config = &mut ctx.accounts.global_config;
+        require!(!config.paused, IdealerError::ProtocolPaused);
+        require!(config.has_active_turn, IdealerError::NoActiveTurn);
+        require_eq!(
+            config.active_turn_id,
+            ctx.accounts.turn_state.turn_id,
+            IdealerError::InvalidTurnId
+        );
+        require!(
+            ctx.accounts.turn_state.status == TurnStatus::Open,
+            IdealerError::TurnNotOpen
+        );
+
+        validate_config(&ConfigValidation {
+            treasury_fee_bps: config.treasury_fee_bps,
+            turn_duration_cycle: &args.turn_duration_cycle,
+            rule_election_cutoff_bps: config.rule_election_cutoff_bps,
+            guess_cutoff_bps: config.guess_cutoff_bps,
+            max_rule_tokens: config.max_rule_tokens,
+            top_voted_finalist_count: config.top_voted_finalist_count,
+            random_finalist_count: config.random_finalist_count,
+            max_rule_proposals_per_wallet_per_turn: config.max_rule_proposals_per_wallet_per_turn,
+            max_votes_per_wallet_per_turn: config.max_votes_per_wallet_per_turn,
+        })?;
+
+        let turn = &mut ctx.accounts.turn_state;
+        let old_duration_seconds = turn.turn_duration_seconds;
+        let old_end_timestamp = turn.end_timestamp;
+        let new_duration_seconds = *args
+            .turn_duration_cycle
+            .get(usize::from(turn.cycle_index))
+            .ok_or(IdealerError::InvalidCycleIndex)?;
+        let new_end_timestamp = turn
+            .start_timestamp
+            .checked_add(i64::from(new_duration_seconds))
+            .ok_or(IdealerError::ArithmeticOverflow)?;
+
+        config.turn_duration_cycle = args.turn_duration_cycle;
+        turn.turn_duration_seconds = new_duration_seconds;
+        turn.end_timestamp = new_end_timestamp;
+
+        emit!(TurnDurationCycleUpdated {
+            turn_id: turn.turn_id,
+            old_duration_seconds,
+            new_duration_seconds,
+            old_end_timestamp,
+            new_end_timestamp,
+        });
+        Ok(())
+    }
+
     pub fn submit_guess(ctx: Context<SubmitGuess>, numbers: [u8; 6]) -> Result<()> {
         let clock = Clock::get()?;
         let config = &ctx.accounts.global_config;
@@ -560,6 +615,47 @@ pub mod idealer {
         Ok(())
     }
 
+    pub fn force_skip_legacy_active_turn(ctx: Context<ForceSkipLegacyActiveTurn>) -> Result<()> {
+        let config = &mut ctx.accounts.global_config;
+        require!(!config.paused, IdealerError::ProtocolPaused);
+        require!(config.has_active_turn, IdealerError::NoActiveTurn);
+
+        let active_turn_id = config.active_turn_id;
+        let active_turn_id_bytes = active_turn_id.to_le_bytes();
+        let (expected_turn_state, _) = Pubkey::find_program_address(
+            &[b"turn".as_ref(), active_turn_id_bytes.as_ref()],
+            ctx.program_id,
+        );
+        require_keys_eq!(
+            ctx.accounts.turn_state.key(),
+            expected_turn_state,
+            IdealerError::InvalidTurnId
+        );
+        require_keys_eq!(
+            *ctx.accounts.turn_state.to_account_info().owner,
+            crate::ID,
+            IdealerError::InvalidTurnId
+        );
+        require!(
+            ctx.accounts.turn_state.to_account_info().data_len() < 8 + TurnState::INIT_SPACE,
+            IdealerError::ActiveTurnStateNotLegacy
+        );
+
+        config.has_active_turn = false;
+        config.active_turn_id = 0;
+        config.next_turn_id = active_turn_id
+            .checked_add(1)
+            .ok_or(IdealerError::ArithmeticOverflow)?;
+        config.active_turn_duration_index = next_cycle_index(config.active_turn_duration_index)?;
+
+        emit!(LegacyActiveTurnSkipped {
+            turn_id: active_turn_id,
+            legacy_data_len: ctx.accounts.turn_state.to_account_info().data_len() as u32,
+            expected_data_len: (8 + TurnState::INIT_SPACE) as u32,
+        });
+        Ok(())
+    }
+
     /// Request a draw for a turn once it has ended. Records the verifiable
     /// randomness account that will fulfill the draw. Idempotent retries are
     /// allowed only from `NotRequested` or `Failed`.
@@ -796,6 +892,11 @@ pub struct InitializeGlobalConfigArgs {
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct SetTurnDurationCycleArgs {
+    pub turn_duration_cycle: [u32; TURN_DURATION_CYCLE_LEN],
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct ProposeRuleArgs {
     pub rule_id: u64,
     pub sanitized_text: String,
@@ -885,6 +986,24 @@ pub struct OpenTurn<'info> {
     )]
     pub prize_vault: Account<'info, PrizeVault>,
     pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct SetTurnDurationCycle<'info> {
+    pub authority: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [b"global_config"],
+        bump = global_config.bump,
+        has_one = authority @ IdealerError::Unauthorized
+    )]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        mut,
+        seeds = [b"turn".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
+        bump = turn_state.bump
+    )]
+    pub turn_state: Box<Account<'info, TurnState>>,
 }
 
 #[derive(Accounts)]
@@ -1138,6 +1257,22 @@ pub struct CloseTurn<'info> {
         bump = turn_state.bump
     )]
     pub turn_state: Box<Account<'info, TurnState>>,
+}
+
+#[derive(Accounts)]
+pub struct ForceSkipLegacyActiveTurn<'info> {
+    pub authority: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [b"global_config"],
+        bump = global_config.bump,
+        has_one = authority @ IdealerError::Unauthorized
+    )]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    /// CHECK: This may be a legacy TurnState account that the current program
+    /// cannot deserialize. The handler manually verifies owner, PDA seeds, and
+    /// undersized data length before mutating GlobalConfig.
+    pub turn_state: UncheckedAccount<'info>,
 }
 
 #[derive(Accounts)]
@@ -1399,6 +1534,15 @@ pub struct TurnOpened {
 }
 
 #[event]
+pub struct TurnDurationCycleUpdated {
+    pub turn_id: u64,
+    pub old_duration_seconds: u32,
+    pub new_duration_seconds: u32,
+    pub old_end_timestamp: i64,
+    pub new_end_timestamp: i64,
+}
+
+#[event]
 pub struct GuessSubmitted {
     pub turn_id: u64,
     pub player: Pubkey,
@@ -1460,6 +1604,13 @@ pub struct TurnClosed {
 }
 
 #[event]
+pub struct LegacyActiveTurnSkipped {
+    pub turn_id: u64,
+    pub legacy_data_len: u32,
+    pub expected_data_len: u32,
+}
+
+#[event]
 pub struct DrawRequested {
     pub turn_id: u64,
     pub randomness_account: Pubkey,
@@ -1503,6 +1654,8 @@ pub enum IdealerError {
     InvalidCycleIndex,
     #[msg("Turn durations must be positive.")]
     InvalidTurnDuration,
+    #[msg("The active turn account is not a legacy undersized account.")]
+    ActiveTurnStateNotLegacy,
     #[msg("Basis points must be between 0 and 10,000.")]
     InvalidBasisPoints,
     #[msg("Election and guess cutoffs are invalid.")]

@@ -126,7 +126,8 @@ services:
       IDEALER_PROGRAM_ID: ${IDEALER_PROGRAM_ID:-6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4}
       IDEALER_TURN_AUTOMATION_ENABLED: ${IDEALER_TURN_AUTOMATION_ENABLED:-true}
       IDEALER_TURN_AUTOMATION_INTERVAL_MS: ${IDEALER_TURN_AUTOMATION_INTERVAL_MS:-10000}
-      IDEALER_TURN_AUTHORITY_KEYPAIR_PATH: ${IDEALER_TURN_AUTHORITY_KEYPAIR_PATH:-}
+      IDEALER_DEVNET_TURN_DURATION_SCALE_BPS: ${IDEALER_DEVNET_TURN_DURATION_SCALE_BPS:-1500}
+      IDEALER_TURN_AUTHORITY_KEYPAIR_PATH: ${IDEALER_TURN_AUTHORITY_KEYPAIR_PATH:-/solana-home/.config/idealer/devnet/idealer-deployer-keypair.json}
       IDEALER_TURN_AUTHORITY_KEYPAIR: ${IDEALER_TURN_AUTHORITY_KEYPAIR:-}
       LLM_MODE: ${LLM_MODE:-local}
       LLM_BASE_URL: ${LLM_CONTAINER_BASE_URL:-http://host.docker.internal:11434/v1}
@@ -171,6 +172,9 @@ services:
       - idealer-internal
     ports:
       - "${WORKER_PORT:-3003}:3003"
+    volumes:
+      - ./apps/worker/src:/app/apps/worker/src
+      - idealer-solana-home:/solana-home:ro
 
   web:
     build:
@@ -266,3 +270,5 @@ volumes:
     name: idealer-redis-data
   idealer-grafana-data:
     name: idealer-grafana-data
+  idealer-solana-home:
+    name: idealer-solana-home
