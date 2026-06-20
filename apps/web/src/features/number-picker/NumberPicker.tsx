@@ -39,9 +39,9 @@ const PENDING_GUESS_KEY = "idealer.guess.pending";
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_IDEALER_API_URL ?? "http://localhost:3002";
 const LAMPORTS_PER_SOL = 1_000_000_000;
-const ESTIMATED_GUESS_RENT_AND_FEE_SOL = 0.003;
-const MINIMUM_SUBMIT_BALANCE_SOL =
-  MVP_FEES_SOL.guessSubmission + ESTIMATED_GUESS_RENT_AND_FEE_SOL;
+const ESTIMATED_NETWORK_FEE_LAMPORTS = 100_000;
+const PLAYER_GUESS_ACCOUNT_SPACE = 99;
+const GAME_TOKEN_ACCOUNT_SPACE = 126;
 
 type PickerStep = "selecting" | "review" | "success";
 type GuessStatus =
@@ -183,9 +183,8 @@ function normalizeProgramError(message: string) {
   ) {
     return {
       code: "INSUFFICIENT_SOL",
-      message: `This wallet needs about ${MINIMUM_SUBMIT_BALANCE_SOL.toFixed(
-        3,
-      )} SOL on devnet for the entry fee, account rent, and network fee.`,
+      message:
+        "This wallet needs more devnet SOL for the entry fee, account rent, and network fee.",
       status: "failed" as const,
     };
   }
@@ -335,6 +334,39 @@ async function hasAccount(
     .send();
 
   return Boolean(result.value);
+}
+
+async function getMinimumBalanceForRentExemption(
+  client: ReturnType<typeof useSolanaClient>,
+  space: number,
+) {
+  const result = await client.runtime.rpc
+    .getMinimumBalanceForRentExemption(BigInt(space), {
+      commitment: "confirmed",
+    })
+    .send();
+
+  return BigInt(result);
+}
+
+async function getGuessSubmissionCostLamports(
+  client: ReturnType<typeof useSolanaClient>,
+) {
+  const [playerGuessRent, gameTokenRent] = await Promise.all([
+    getMinimumBalanceForRentExemption(client, PLAYER_GUESS_ACCOUNT_SPACE),
+    getMinimumBalanceForRentExemption(client, GAME_TOKEN_ACCOUNT_SPACE),
+  ]);
+
+  return (
+    BigInt(Math.round(MVP_FEES_SOL.guessSubmission * LAMPORTS_PER_SOL)) +
+    playerGuessRent +
+    gameTokenRent +
+    BigInt(ESTIMATED_NETWORK_FEE_LAMPORTS)
+  );
+}
+
+function lamportsToSol(lamports: bigint) {
+  return Number(lamports) / LAMPORTS_PER_SOL;
 }
 
 function SelectedNumberTray({
@@ -576,18 +608,23 @@ export function NumberPicker() {
         return;
       }
 
-      const balance = await client.runtime.rpc
-        .getBalance(player, { commitment: "confirmed" })
-        .send();
-      const balanceSol = Number(balance.value) / LAMPORTS_PER_SOL;
+      const [balance, requiredLamports] = await Promise.all([
+        client.runtime.rpc
+          .getBalance(player, { commitment: "confirmed" })
+          .send(),
+        getGuessSubmissionCostLamports(client),
+      ]);
+      const balanceLamports = BigInt(balance.value);
+      const balanceSol = lamportsToSol(balanceLamports);
+      const requiredSol = lamportsToSol(requiredLamports);
 
-      if (balanceSol < MINIMUM_SUBMIT_BALANCE_SOL) {
+      if (balanceLamports < requiredLamports) {
         setFeedback({
           code: "INSUFFICIENT_SOL",
           message: `This wallet has ${balanceSol.toFixed(
             4,
-          )} SOL. Add devnet SOL before submitting; this flow needs about ${MINIMUM_SUBMIT_BALANCE_SOL.toFixed(
-            3,
+          )} SOL. Add devnet SOL before submitting; this flow needs at least ${requiredSol.toFixed(
+            6,
           )} SOL for the entry fee, account rent, and network fee.`,
           status: "failed",
         });
@@ -810,7 +847,7 @@ export function NumberPicker() {
                 </div>
                 <div>
                   <dt>Account rent</dt>
-                  <dd>Checked before wallet</dd>
+                  <dd>Calculated before wallet</dd>
                 </div>
                 <div>
                   <dt>Network fee</dt>

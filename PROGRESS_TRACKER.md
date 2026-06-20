@@ -47,6 +47,17 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-06-20 (devnet guess submission rent pre-check)
+
+- Opened required project context before working: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/solana-dev/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/references/frontend-framework-kit.md`, and `.claude/skills/solana-dev/ext/solana-dev/skill/references/kit-web3-interop.md`.
+- Investigated the Phantom simulation failure reported during `submit_guess`.
+- Verified devnet state directly: active `turnId=3` is open, belongs to the configured program, and passes the guess action window.
+- Simulated the same `submit_guess` instruction against devnet with a funded diagnostic payer and confirmed the instruction succeeds when enough lamports are available.
+- Root cause addressed in the web pre-check: the frontend used a fixed `0.003 SOL` rent/fee estimate, while the actual observed cost is about `0.01335276 SOL` total for entry fee, two rent-exempt accounts, and network fee.
+- Updated `apps/web/src/features/number-picker/NumberPicker.tsx` to query `getMinimumBalanceForRentExemption` for the exact `PlayerGuess` and `GameToken` account sizes before opening the wallet, then compare the wallet balance in lamports and show the exact required SOL amount when insufficient.
+- Verification passed: `pnpm --filter @idealer/web lint`, `pnpm --filter @idealer/web typecheck`, and `pnpm --filter @idealer/web test:e2e -- number-picker.spec.ts`.
+- No PRD checklist item or milestone checkbox was ticked; this bug fix awaits user confirmation in the live wallet flow.
+
 ### 2026-06-20 (Compose metadata cleanup attempt and effective test duration visibility)
 
 - Opened required project context before working: `PRD.md`, `AGENTS.md`, and `.claude/skills`.
