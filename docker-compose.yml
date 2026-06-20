@@ -54,6 +54,7 @@ services:
       PORT: 3002
       DATABASE_URL: postgresql://${POSTGRES_USER:-idealer}:${POSTGRES_PASSWORD:-idealer_dev_password}@postgres:5432/${POSTGRES_DB:-idealer_dev}
       REDIS_URL: redis://redis:6379
+      IDEALER_DEVNET_TURN_DURATION_SCALE_BPS: ${IDEALER_DEVNET_TURN_DURATION_SCALE_BPS:-1500}
       LLM_MODE: ${LLM_MODE:-local}
       LLM_BASE_URL: ${LLM_CONTAINER_BASE_URL:-http://host.docker.internal:11434/v1}
       LLM_MODEL: ${LLM_MODEL:-gemma4:latest}
@@ -265,10 +266,13 @@ networks:
 
 volumes:
   idealer-postgres-data:
+    external: true
     name: idealer-postgres-data
   idealer-redis-data:
+    external: true
     name: idealer-redis-data
   idealer-grafana-data:
     name: idealer-grafana-data
   idealer-solana-home:
+    external: true
     name: idealer-solana-home

@@ -14,6 +14,7 @@ import {
   RULE_MAX_TOKENS,
   TREASURY_FEE_BPS,
   TURN_DURATION_CYCLE_HOURS,
+  TURN_DURATION_CYCLE_SECONDS,
   VOTER_REWARD_CONFIG,
   VOTER_REWARD_RATE_BPS,
   VOTE_FEE_START_TURN,
@@ -65,6 +66,8 @@ export interface ServiceHealth {
   service: string;
   status: "ok" | "error";
   turnDurationCycleHours: readonly number[];
+  turnDurationCycleSeconds: readonly number[];
+  turnDurationScaleBps: number | null;
   postgres: "ok" | "error";
   redis: "ok" | "error";
 }
@@ -3492,15 +3495,46 @@ async function checkRedis(redisUrl: string): Promise<"ok" | "error"> {
   }
 }
 
+function getEffectiveTurnDurationHealth() {
+  const rawScale = process.env.IDEALER_DEVNET_TURN_DURATION_SCALE_BPS;
+  if (!rawScale) {
+    return {
+      turnDurationCycleHours: TURN_DURATION_CYCLE_HOURS,
+      turnDurationCycleSeconds: TURN_DURATION_CYCLE_SECONDS,
+      turnDurationScaleBps: null,
+    };
+  }
+
+  const scaleBps = Number(rawScale);
+  if (!Number.isInteger(scaleBps) || scaleBps <= 0 || scaleBps > 10_000) {
+    throw new Error(
+      "IDEALER_DEVNET_TURN_DURATION_SCALE_BPS must be an integer between 1 and 10000.",
+    );
+  }
+
+  const turnDurationCycleSeconds = TURN_DURATION_CYCLE_SECONDS.map((duration) =>
+    Math.max(1, Math.floor((duration * scaleBps) / 10_000)),
+  );
+
+  return {
+    turnDurationCycleHours: turnDurationCycleSeconds.map(
+      (duration) => duration / 3_600,
+    ),
+    turnDurationCycleSeconds,
+    turnDurationScaleBps: scaleBps,
+  };
+}
+
 export async function getHealth(): Promise<ServiceHealth> {
   const databaseUrl = process.env.DATABASE_URL;
   const redisUrl = process.env.REDIS_URL;
+  const turnDurations = getEffectiveTurnDurationHealth();
 
   if (!databaseUrl || !redisUrl) {
     return {
       service: "api",
       status: "error",
-      turnDurationCycleHours: TURN_DURATION_CYCLE_HOURS,
+      ...turnDurations,
       postgres: databaseUrl ? "ok" : "error",
       redis: redisUrl ? "ok" : "error",
     };
@@ -3514,7 +3548,7 @@ export async function getHealth(): Promise<ServiceHealth> {
   return {
     service: "api",
     status: postgres === "ok" && redis === "ok" ? "ok" : "error",
-    turnDurationCycleHours: TURN_DURATION_CYCLE_HOURS,
+    ...turnDurations,
     postgres,
     redis,
   };

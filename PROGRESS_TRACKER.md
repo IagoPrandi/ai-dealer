@@ -47,6 +47,19 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-06-20 (Compose metadata cleanup attempt and effective test duration visibility)
+
+- Opened required project context before working: `PRD.md`, `AGENTS.md`, and `.claude/skills`.
+- Investigated the user's report that the test intervals were not in effect because `/play` showed roughly 1 hour remaining.
+- Verified devnet state directly from `GlobalConfig` and `TurnState`: `turnDurationCycle=[1080,1080,4320,4320]`, active `turnId=3`, `cycleIndex=2`, `turnDurationSeconds=4320`, `startTimestamp=1781970509`, `endTimestamp=1781974829`; the visible ~1 hour remaining is expected for the 8-hour cycle step shortened by 85% (`8h * 15% = 72min`) after elapsed time.
+- Updated API health reporting so it exposes the effective devnet test cycle instead of only production constants: `turnDurationCycleHours=[0.3,0.3,1.2,1.2]`, `turnDurationCycleSeconds=[1080,1080,4320,4320]`, and `turnDurationScaleBps=1500`.
+- Added `IDEALER_DEVNET_TURN_DURATION_SCALE_BPS` to the API environment in `docker-compose.yml` and marked existing named data/key volumes as external where they already existed (`idealer-postgres-data`, `idealer-redis-data`, `idealer-solana-home`) to avoid Compose project-label warnings without deleting data.
+- Cleaned one real stale `Created` replacement container and pruned stopped containers; Docker Desktop still retained two nameless `Dead` Compose ghosts (`3670170967f617540e8a707a0fb98243870aa193d6bc2496387f8a0441770e6d`, `b0643694c5587250efce75831d33d8a35cdfcd0cfc722875098d2aef62a80dd8`) that `docker rm`, `docker inspect`, and `docker container prune` all report as nonexistent.
+- Restarted Docker Desktop/WSL backend to try to clear the ghosts; the ghosts persisted. Search found those IDs only in Docker Desktop logs, not in `/var/lib/docker/containers` or a safe editable metadata store. Removing them completely appears to require a Docker Desktop data reset or a Docker Desktop bug fix, which would be destructive/risky for volumes and was not performed.
+- Restored the `idealer` runtime stack without rebuild: `idealer-postgres`, `idealer-redis`, `idealer-api`, `idealer-web`, and `idealer-worker` are running under the `idealer` group labels.
+- Verification passed: `pnpm.cmd --filter @idealer/api typecheck`, `GET http://127.0.0.1:3002/health` returned the shortened effective cycle and Postgres/Redis ok, `GET http://127.0.0.1:3003/health` returned `turnAutomation:"enabled"` and `firstTurnDurationSeconds=1080`, and `GET http://127.0.0.1:3000/play` returned HTTP `200`.
+- No PRD checklist item or milestone checkbox was ticked; this was maintenance/debugging work.
+
 ### 2026-06-20 (devnet turn recovery and shortened cycle enforcement)
 
 - Opened required project context before working: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/solana-dev/SKILL.md`, and `.claude/skills/best-practices/references/agent-principles.md`.
