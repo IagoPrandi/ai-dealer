@@ -4449,14 +4449,14 @@ Establish the product baseline, architecture baseline, monorepo structure, Docke
 - [x] Confirm two winning conditions: original rule and active alternative rule.
 - [x] Confirm current-turn Game Token requirement for proposing, voting, removing, and reporting rules.
 - [x] Confirm rule election policy: exactly 10 finalists, composed of 3 top-voted eligible + 7 VRF-random eligible, formed by a finalist-election VRF at the end of the play window.
-- [ ] Confirm rule elimination decision phase: a fixed 1-hour decision window after the finalist set is locked, in which Game-Token holders cast paid elimination votes (2× the effective vote fee → prize pool); a finalist is eliminated when its elimination votes exceed its frozen approval votes; up to 5 of the 10 may be eliminated (when more than 5 qualify, the 5 with the most elimination votes are eliminated, ties broken by fewest approval votes then lowest rule_id); the active rule is then VRF-selected from the survivors.
+- [x] Confirm rule elimination decision phase: a fixed 1-hour decision window after the finalist set is locked, in which Game-Token holders cast paid elimination votes (2× the effective vote fee → prize pool); a finalist is eliminated when its elimination votes exceed its frozen approval votes; up to 5 of the 10 may be eliminated (when more than 5 qualify, the 5 with the most elimination votes are eliminated, ties broken by fewest approval votes then lowest rule_id); the active rule is then VRF-selected from the survivors.
 - [x] Confirm Switchboard VRF is used for the draw, the finalist election, and the active election.
 - [x] Confirm no deterministic fallback finalist activation.
 - [x] Confirm paid rule removal is included in MVP with fixed prize-pool fee destination.
 - [x] Confirm active rule creator reward: 15% of each individual alternative-rule winner payout.
 - [x] Confirm creator reward is funded from the creator reward reserve sourced from platform monetization, not deducted from the winner-visible payout.
-- [ ] Confirm elected-rule voter reward: 15% of a single individual payout, split equally among the elected rule's voters, funded from the same reserve with its own per-turn cap.
-- [ ] Confirm vote fee from turn 100 onward, destination prize pool, with the current-turn Game Token requirement retained.
+- [x] Confirm elected-rule voter reward: 15% of a single individual payout, split equally among the elected rule's voters, funded from the same reserve with its own per-turn cap.
+- [x] Confirm vote fee from turn 100 onward, destination prize pool, with the current-turn Game Token requirement retained.
 - [x] Confirm admin console is separate from the public DApp.
 - [x] Confirm admin console is for insights, not direct game manipulation.
 - [x] Confirm monorepo and Docker Compose are required implementation constraints.
@@ -5250,23 +5250,23 @@ Implement draw generation, rule election, AI rule validation, guess verification
 
 **Checklist:**
 
-- [ ] Split rule election into finalist-election VRF (forms the 10) and active-election VRF (selects from survivors).
-- [ ] Lock each finalist's approval (positive) vote count when the finalist set is formed.
-- [ ] Open a fixed 60-minute decision/elimination window after the finalist set is locked.
-- [ ] Implement `eliminate_vote_rule` (Game Token gate, finalist-only target, decision-window-only, one-per-finalist-per-wallet, 2× vote-fee payment to prize pool) and the `RuleEliminationVote` account/projection.
-- [ ] Charge the elimination vote at 2× the effective vote fee for the turn (free before turn 100, 0.01 SOL from turn 100).
-- [ ] At window close, eliminate finalists whose elimination votes exceed their frozen approval votes, capped at 5, keeping at least 1 survivor.
-- [ ] When more than 5 qualify, eliminate the 5 with the most elimination votes; break ties by fewest approval votes, then lowest rule_id.
-- [ ] Persist the eliminated-finalist set hash and elimination tallies for audit; mark eliminated rules `ELIMINATED`.
-- [ ] Run the active-election VRF over the survivors only and freeze the elected rule.
-- [ ] Expose elimination state in the public audit API (`GET /api/v1/turns/{turn_id}/elimination`) and in the decision-window voting UI (approval vs elimination counts, threshold, Eliminated/Survived states, fee, countdown).
+- [x] Split rule election into finalist-election VRF (forms the 10) and active-election VRF (selects from survivors).
+- [x] Lock each finalist's approval (positive) vote count when the finalist set is formed.
+- [x] Open a fixed 60-minute decision/elimination window after the finalist set is locked.
+- [x] Implement `eliminate_vote_rule` (Game Token gate, finalist-only target, decision-window-only, one-per-finalist-per-wallet, 2× vote-fee payment to prize pool) and the `RuleEliminationVote` account/projection.
+- [x] Charge the elimination vote at 2× the effective vote fee for the turn (free before turn 100, 0.01 SOL from turn 100).
+- [x] At window close, eliminate finalists whose elimination votes exceed their frozen approval votes, capped at 5, keeping at least 1 survivor.
+- [x] When more than 5 qualify, eliminate the 5 with the most elimination votes; break ties by fewest approval votes, then lowest rule_id.
+- [x] Persist the eliminated-finalist set hash and elimination tallies for audit; mark eliminated rules `ELIMINATED`.
+- [x] Run the active-election VRF over the survivors only and freeze the elected rule.
+- [x] Expose elimination state in the public audit API (`GET /api/v1/turns/{turn_id}/elimination`) and in the decision-window voting UI (approval vs elimination counts, threshold, Eliminated/Survived states, fee, countdown).
 
 **Approval criteria:**
 
-- [ ] Active rule is only ever elected from non-eliminated finalists.
-- [ ] Elimination criterion, cap of 5, and deterministic tie-break are enforced and auditable.
-- [ ] Elimination vote fee and Game Token gate are enforced on-chain.
-- [ ] Decision window timing is independent of the play-window duration cycle.
+- [x] Active rule is only ever elected from non-eliminated finalists.
+- [x] Elimination criterion, cap of 5, and deterministic tie-break are enforced and auditable.
+- [x] Elimination vote fee and Game Token gate are enforced on-chain.
+- [x] Decision window timing is independent of the play-window duration cycle.
 
 ---
 

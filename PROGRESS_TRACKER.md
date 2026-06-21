@@ -15,7 +15,7 @@ Opened before starting `M0.1`:
 
 | Milestone | Name                                          | Status    | User Confirmation    | Notes                                                                                                                                                                              |
 | --------- | --------------------------------------------- | --------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| M0.1      | PRD Baseline                                  | Completed | Confirmed 2026-06-02 | Required artifacts implemented, consistency-checked, and marked complete after user confirmation.                                                                                  |
+| M0.1      | PRD Baseline                                  | Completed | Confirmed 2026-06-02; residual 2026-06-21 | Required artifacts implemented, consistency-checked, and marked complete after user confirmation; residual v1.5.0 rule-elimination, voter-reward, and vote-fee confirmations were verified and ticked on 2026-06-21. |
 | M0.2      | Monorepo Skeleton                             | Completed | Confirmed 2026-06-02 | Skeleton, workspace configs, README, and verification commands completed.                                                                                                          |
 | M0.3      | Docker Baseline                               | Completed | Confirmed 2026-06-02 | Required Docker stack implemented, verified, and marked complete.                                                                                                                  |
 | M0.4      | Technical Contracts                           | Completed | Confirmed 2026-06-03 | Required contract drafts implemented, validated, and marked complete after user confirmation.                                                                                      |
@@ -42,11 +42,21 @@ Opened before starting `M0.1`:
 | M3.5      | Guess Verification Queue                      | Completed | Confirmed 2026-06-11 | Queue job creation per submitted guess, deterministic original/alternative verification worker, retry/dead-letter/rate-limit handling, API job/result status, and Docker smoke verification implemented. |
 | M3.6      | Agent Fallback & Provider Dispute Handling    | Completed | Confirmed 2026-06-12 | Primary/secondary/tertiary provider routing, local OpenAI-compatible request-shape metadata, grammar/schema capability checks, timeout/malformed/schema fallback, provider path logging, model identity freezing, fallback/disagreement metrics, and tertiary dispute handling implemented. |
 | M3.7      | Verification Logs & Attestation               | Completed | Confirmed 2026-06-12 | Compiler validation and guess verification now append hash-chained audit records, expose public audit endpoints, map logs to public state, provide a PostgreSQL `audit_logs` schema/adapter, and verify tamper detection with API tests. |
-| M3.8      | Rule Elimination Decision Phase               | Implemented | Pending              | Two-step finalist/active election, elimination votes, survivor-only active selection, public audit API, decision-window UI, and M0.1 decision docs implemented. PRD checkboxes are not ticked pending explicit user confirmation. |
+| M3.8      | Rule Elimination Decision Phase               | Completed | Confirmed 2026-06-21 | Two-step finalist/active election, elimination votes, survivor-only active selection, public audit API, decision-window UI, on-chain vote fees, and M0.1 decision docs verified; PRD checklist and approval criteria ticked after user confirmation. |
 | M4.1      | Prize Pool Accounting                         | Completed | Confirmed 2026-06-13 | Deterministic lamport-level accounting implemented in API projections and Solana domain math; PRD checklist and approval criteria ticked after the user's explicit instruction to verify and mark done if complete. |
 | M4.2      | Winner Calculation                            | Completed | Confirmed 2026-06-13 | Winner records, separated original/alternative winner lists, per-bucket payout calculation, zero/many winner handling, and round/API exposure implemented and verified. |
 
 ## Maintenance Work Log
+
+### 2026-06-21 (M3.8 and M0.1 verification/confirmation)
+
+- Reopened required project context before verification: `PRD.md`, `.claude/skills`, and the previously loaded `M3.8` implementation references from `.claude/skills/solana-dev` and `.claude/skills/best-practices`.
+- Verified the existing `M3.8` implementation across Solana, worker/domain logic, API projections, public audit endpoint, public round UI, and decision-window voting UI.
+- Found and fixed one remaining `M0.1` fee enforcement gap: regular `vote_rule` now charges the effective vote fee from turn 100 onward to the per-turn prize vault and updates `TurnState.prize_pool_amount_lamports`; the web instruction builder, SBF instruction fixture, and devnet bootstrap account list now pass `prize_vault`.
+- Marked the remaining `M0.1` decision confirmations in `PRD.md`: rule elimination decision phase, elected-rule voter reward, and vote fee from turn 100 onward with current-turn Game Token requirement and prize-pool destination.
+- Marked the `M3.8` checklist and approval criteria in `PRD.md` after the user's explicit instruction to verify, implement any pending work, and mark complete.
+- Verification passed after the additional fix: `pnpm --filter @idealer/web typecheck` and `cargo test -p idealer`. The earlier `M3.8` verification remains valid: constants build/typecheck, worker test/typecheck/lint, API typecheck/test/lint, web typecheck/lint/e2e, and native contract tests.
+- SBF build/deploy was not completed in this Windows shell because the available SBF script requires `/bin/bash`; native Rust tests passed, while the SBF instruction tests remain ignored under `cargo test -p idealer` unless an SBF build environment is available.
 
 ### 2026-06-21 (M3.8 rule elimination decision phase and remaining M0.1 decisions)
 

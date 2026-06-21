@@ -640,10 +640,11 @@ export async function createVoteRuleInstruction({
     accounts: [
       { address: player, role: AccountRole.WRITABLE_SIGNER },
       { address: accounts.globalConfig, role: AccountRole.READONLY },
-      { address: accounts.turnState, role: AccountRole.READONLY },
+      { address: accounts.turnState, role: AccountRole.WRITABLE },
       { address: accounts.gameToken, role: AccountRole.WRITABLE },
       { address: ruleProposal, role: AccountRole.WRITABLE },
       { address: ruleVote, role: AccountRole.WRITABLE },
+      { address: accounts.prizeVault, role: AccountRole.WRITABLE },
       { address: SYSTEM_PROGRAM_ID, role: AccountRole.READONLY },
     ],
     data: VOTE_RULE_DISCRIMINATOR,

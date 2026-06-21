@@ -269,6 +269,7 @@ async fn core_instructions_execute_and_persist_state() {
             ]),
             rule_proposal: rule_address,
             rule_vote: vote_address,
+            prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
             system_program: system_program::ID,
         }
         .to_account_metas(None),

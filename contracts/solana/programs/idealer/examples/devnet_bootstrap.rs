@@ -295,6 +295,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 game_token,
                 rule_proposal,
                 rule_vote,
+                prize_vault,
                 system_program: system_program::ID,
             }
             .to_account_metas(None),

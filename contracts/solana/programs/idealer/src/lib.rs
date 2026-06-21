@@ -421,6 +421,14 @@ pub mod idealer {
             IdealerError::VoteLimitReached
         );
 
+        let vote_fee = effective_vote_fee_lamports(config, ctx.accounts.turn_state.turn_id);
+        collect_prize_pool_fee(
+            &ctx.accounts.voter,
+            &ctx.accounts.prize_vault,
+            &ctx.accounts.system_program,
+            vote_fee,
+        )?;
+
         let vote = &mut ctx.accounts.rule_vote;
         vote.turn_id = ctx.accounts.turn_state.turn_id;
         vote.rule_id = ctx.accounts.rule_proposal.rule_id;
@@ -439,6 +447,18 @@ pub mod idealer {
             .game_token
             .used_for_vote_count
             .checked_add(1)
+            .ok_or(IdealerError::ArithmeticOverflow)?;
+        ctx.accounts.prize_vault.total_collected_lamports = ctx
+            .accounts
+            .prize_vault
+            .total_collected_lamports
+            .checked_add(vote_fee)
+            .ok_or(IdealerError::ArithmeticOverflow)?;
+        ctx.accounts.turn_state.prize_pool_amount_lamports = ctx
+            .accounts
+            .turn_state
+            .prize_pool_amount_lamports
+            .checked_add(vote_fee)
             .ok_or(IdealerError::ArithmeticOverflow)?;
 
         emit!(RuleVoteCast {
@@ -628,11 +648,8 @@ pub mod idealer {
                 && clock.unix_timestamp < ctx.accounts.turn_state.elimination_window_end_timestamp,
             IdealerError::EliminationWindowNotOpen
         );
-        let index = finalist_index(
-            &ctx.accounts.turn_state,
-            ctx.accounts.rule_proposal.rule_id,
-        )
-        .ok_or(IdealerError::RuleNotFinalist)?;
+        let index = finalist_index(&ctx.accounts.turn_state, ctx.accounts.rule_proposal.rule_id)
+            .ok_or(IdealerError::RuleNotFinalist)?;
         require!(
             !ctx.accounts.turn_state.finalist_eliminated[index],
             IdealerError::RuleAlreadyEliminated
@@ -1107,12 +1124,14 @@ fn derive_active_survivor_index(
     survivor_count: usize,
 ) -> Result<usize> {
     require!(survivor_count > 0, IdealerError::NoSurvivingFinalist);
-    let digest = hash(&[
-        randomness.as_slice(),
-        &turn_id.to_le_bytes(),
-        b"active_survivor_v1",
-    ]
-    .concat())
+    let digest = hash(
+        &[
+            randomness.as_slice(),
+            &turn_id.to_le_bytes(),
+            b"active_survivor_v1",
+        ]
+        .concat(),
+    )
     .to_bytes();
     let mut bytes = [0u8; 8];
     bytes.copy_from_slice(&digest[..8]);
@@ -1459,6 +1478,7 @@ pub struct VoteRule<'info> {
     #[account(seeds = [b"global_config"], bump = global_config.bump)]
     pub global_config: Box<Account<'info, GlobalConfig>>,
     #[account(
+        mut,
         seeds = [b"turn".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
         bump = turn_state.bump
     )]
@@ -1499,6 +1519,12 @@ pub struct VoteRule<'info> {
         bump
     )]
     pub rule_vote: Account<'info, RuleVote>,
+    #[account(
+        mut,
+        seeds = [b"prize_vault".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
+        bump = prize_vault.bump
+    )]
+    pub prize_vault: Account<'info, PrizeVault>,
     pub system_program: Program<'info, System>,
 }
 
