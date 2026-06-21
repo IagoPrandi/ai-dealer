@@ -48,7 +48,32 @@ const completedRound = {
     topVotedRuleIds: [1],
     turnId: 2,
   },
+  elimination: {
+    closedAt: "2026-06-08T01:00:00.000Z",
+    decisionWindowClosesAt: "2026-06-08T01:00:00.000Z",
+    decisionWindowOpenedAt: "2026-06-08T00:00:00.000Z",
+    eliminatedFinalistHash:
+      "5555555555555555555555555555555555555555555555555555555555555555",
+    eliminatedRuleIds: [],
+    finalists: [
+      {
+        approvalVotes: 5,
+        eliminated: false,
+        eliminationVotes: 0,
+        ruleId: 1,
+        status: "survived",
+        threshold: 6,
+      },
+    ],
+    status: "closed",
+    survivorFinalistHash:
+      "6666666666666666666666666666666666666666666666666666666666666666",
+    survivorRuleIds: [1],
+    turnId: 2,
+  },
   pool: {
+    eliminationVoteFeeSol: 0,
+    eliminationVoteFees: 0,
     guessSol: 0.02,
     guesses: 2,
     indicativeSol: 0.06,
@@ -110,6 +135,9 @@ test("public round page shows indexed devnet round state and audit links", async
     page.getByRole("heading", { name: "Rule of the Hour settled" }),
   ).toBeVisible();
   await expect(page.getByText("Active alternative rule: #1.")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Elimination decision closed" }),
+  ).toBeVisible();
   await expect(page.getByText("VALID (91%)")).toBeVisible();
   await expect(page.locator(".round-draw-numbers li").first()).toHaveText("20");
   await expect(page.locator(".round-draw-numbers li")).toHaveCount(6);

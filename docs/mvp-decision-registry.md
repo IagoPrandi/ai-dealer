@@ -1,6 +1,6 @@
 # MVP Decision Registry
 
-This registry records binding MVP decisions from `PRD.md` version 1.3.4. Changes to these decisions require a future PRD revision.
+This registry records binding MVP decisions from `PRD.md` version 1.5.0. Changes to these decisions require a future PRD revision.
 
 | ID | Decision | Status | Source |
 |---:|---|---|---|
@@ -26,11 +26,13 @@ This registry records binding MVP decisions from `PRD.md` version 1.3.4. Changes
 | 20 | Optional local observability containers are included under a separate Docker Compose observability profile, not in the default local stack. | Locked | PRD section 16 |
 | 21 | M9 Mainnet Readiness Gates are mandatory before M6 can process any real SOL payment, payout, claim, treasury transfer, or creator reward on mainnet. | Locked | PRD section 16 |
 | 22 | Launch-blocking metrics are the M9 approval gates plus M6/M7 approval criteria for mobile reliability, automation, claims, abuse visibility, and payout/accounting reconciliation. | Locked | PRD section 16 |
-| 23 | Default MVP/testnet fees are guess `0.01 SOL`, rule proposal `0.02 SOL`, paid removal `0.05 SOL`, vote `0 SOL`, report `0 SOL`, and `treasuryFeeBps = 500`. | Locked | PRD section 16 |
+| 23 | Default MVP/testnet fees are guess `0.01 SOL`, rule proposal `0.02 SOL`, paid removal `0.05 SOL`, vote `0 SOL` before turn 100 and `0.005 SOL` from turn 100 onward, report `0 SOL`, and `treasuryFeeBps = 500`. | Locked | PRD sections 8.2 and 16 |
 | 24 | The default creator reward cap is `0.25 SOL` per turn, with 20% of platform monetization reserved for the creator reward reserve. | Locked | PRD section 16 |
 | 25 | The default minimum claim threshold is `0.005 SOL`; payouts below this threshold roll over to the same category bucket. | Locked | PRD section 16 |
 | 26 | The default claim window is 12 turns or 7 days, whichever happens first; expired unclaimed payouts roll over to the same category bucket. | Locked | PRD section 16 |
 | 27 | MVP rate limits are defined in `MVP_RATE_LIMIT_CONFIG` and must be enforced server-side, while on-chain uniqueness constraints remain the source of truth for guesses, votes, and paid removals. | Locked | PRD section 16 |
+| 28 | The rule elimination decision phase is a fixed 1-hour window after finalist locking; Game Token holders may cast one elimination vote per finalist, elimination costs 2x the effective vote fee, up to 5 finalists can be eliminated, and active election selects from survivors only. | Locked | PRD sections 6.14a and 15.7 |
+| 29 | Elected-rule voters share a voter reward equal to 15% of a single individual alternative-rule payout, funded from the creator reward reserve under its own per-turn cap. | Locked | PRD sections 2.4 and 8.8 |
 
 ## Open Change Process
 

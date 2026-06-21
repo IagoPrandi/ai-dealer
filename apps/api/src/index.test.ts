@@ -17,8 +17,10 @@ import {
   getRoundSummary,
   getRuleValidation,
   ruleSignature,
+  getRuleElimination,
   listClaimRecords,
   listCreatorRewardRecords,
+  listRuleEliminationVotes,
   listVoterRewardRecords,
   listWinnerRecords,
   listAuditLogs,
@@ -29,6 +31,8 @@ import {
   saveGuessVerificationResult,
   savePaidRuleRemoval,
   saveRuleElection,
+  saveRuleElimination,
+  saveRuleEliminationVote,
   saveRuleProposal,
   saveRuleVote,
   saveTurnRollover,
@@ -247,6 +251,102 @@ test("vote fees are free before turn 100 and counted from turn 100 onward", () =
   assert.equal(afterGate.sources.votes.feeActive, true);
 });
 
+test("elimination vote fees use twice the effective vote fee from turn 100", () => {
+  const beforeGate = calculatePrizePoolAccounting({
+    config: {
+      voteFeeLamports: 5_000_000,
+    },
+    eliminationVoteCount: 3,
+    guessCount: 0,
+    paidRuleRemovalCount: 0,
+    ruleProposalCount: 0,
+    turnId: 99,
+    voteCount: 0,
+  });
+  const afterGate = calculatePrizePoolAccounting({
+    config: {
+      voteFeeLamports: 5_000_000,
+    },
+    eliminationVoteCount: 3,
+    guessCount: 0,
+    paidRuleRemovalCount: 0,
+    ruleProposalCount: 0,
+    turnId: 100,
+    voteCount: 0,
+  });
+
+  assert.equal(beforeGate.sources.eliminationVotes.count, 0);
+  assert.equal(beforeGate.sources.eliminationVotes.grossLamports, 0);
+  assert.equal(afterGate.sources.eliminationVotes.count, 3);
+  assert.equal(afterGate.sources.eliminationVotes.feeLamports, 10_000_000);
+  assert.equal(afterGate.sources.eliminationVotes.grossLamports, 30_000_000);
+});
+
+test("rule elimination votes and closed decision state are projected for audit", () => {
+  resetApiStateForTests();
+  saveRuleElection({
+    ...settledElection(260, 2),
+    activeRuleArtifactHash: null,
+    activeRuleHash: null,
+    activeRuleId: null,
+    eliminatedFinalistHash: "6".repeat(64),
+    eliminatedRuleIds: [1],
+    finalistRuleIds: [1, 2],
+    status: "locked",
+    survivorFinalistHash: "7".repeat(64),
+    survivorRuleIds: [2],
+  });
+  saveRuleEliminationVote({
+    eliminationVote: base58,
+    ruleId: 1,
+    ruleProposal: base58,
+    signature: base58,
+    submittedAt: "2026-06-12T12:30:00.000Z",
+    turnId: 260,
+    voter: wallet,
+  });
+  saveRuleElimination({
+    closedAt: "2026-06-12T13:00:00.000Z",
+    decisionWindowClosesAt: "2026-06-12T13:00:00.000Z",
+    decisionWindowOpenedAt: "2026-06-12T12:00:00.000Z",
+    eliminatedFinalistHash: "6".repeat(64),
+    eliminatedRuleIds: [1],
+    finalists: [
+      {
+        approvalVotes: 0,
+        eliminated: true,
+        eliminationVotes: 1,
+        ruleId: 1,
+        status: "eliminated",
+        threshold: 1,
+      },
+      {
+        approvalVotes: 2,
+        eliminated: false,
+        eliminationVotes: 0,
+        ruleId: 2,
+        status: "survived",
+        threshold: 3,
+      },
+    ],
+    status: "closed",
+    survivorFinalistHash: "7".repeat(64),
+    survivorRuleIds: [2],
+    turnId: 260,
+  });
+
+  const votes = listRuleEliminationVotes(260);
+  const elimination = getRuleElimination(260);
+  const summary = getRoundSummary(260, 260);
+
+  assert.equal(votes.counts["1"], 1);
+  assert.equal(elimination.status, "closed");
+  assert.deepEqual(elimination.eliminatedRuleIds, [1]);
+  assert.deepEqual(elimination.survivorRuleIds, [2]);
+  assert.equal(summary.elimination.finalists[0]?.status, "eliminated");
+  assert.equal(summary.pool.eliminationVoteFees, 1);
+});
+
 test("round summary exposes tracked accounting sources and visible pool", () => {
   resetApiStateForTests();
   saveGuessReceipt({
@@ -295,12 +395,12 @@ test("round summary exposes tracked accounting sources and visible pool", () => 
   assert.equal(accounting.sources.paidRuleRemovals.count, 1);
   assert.equal(accounting.buckets.original.rolloverLamports, 3_000_000);
   assert.equal(accounting.buckets.alternative.rolloverLamports, 4_000_000);
-  assert.equal(summary.pool.accounting.totalVisiblePrizePoolLamports, 83_000_000);
+  assert.equal(summary.pool.accounting.totalVisiblePrizePoolLamports, 87_750_000);
   assert.equal(summary.pool.guesses, 1);
   assert.equal(summary.pool.proposals, 1);
   assert.equal(summary.pool.paidRemovals, 1);
-  assert.equal(summary.pool.indicativeSol, 0.083);
-  assert.equal(summary.pool.treasurySol, 0.004);
+  assert.equal(summary.pool.indicativeSol, 0.0877);
+  assert.equal(summary.pool.treasurySol, 0.0043);
 });
 
 test("winner calculation handles zero winners with full bucket rollover remainder", () => {
@@ -542,18 +642,18 @@ test("creator and voter reward records are stored without reducing winner payout
   const summary = getRoundSummary(231, 231);
 
   assert.equal(winners.alternative.winnerCount, 2);
-  assert.equal(winners.alternative.individualPayoutLamports, 9_500_000);
-  assert.equal(rewards.creatorRewardReserveLamports, 400_000);
+  assert.equal(winners.alternative.individualPayoutLamports, 11_875_000);
+  assert.equal(rewards.creatorRewardReserveLamports, 500_000);
   assert.equal(rewards.creator?.creatorWallet, wallet);
-  assert.equal(rewards.creator?.calculatedRewardLamports, 2_850_000);
-  assert.equal(rewards.creator?.finalRewardLamports, 400_000);
-  assert.equal(rewards.voterRewardPool.calculatedPoolLamports, 1_425_000);
+  assert.equal(rewards.creator?.calculatedRewardLamports, 3_562_500);
+  assert.equal(rewards.creator?.finalRewardLamports, 500_000);
+  assert.equal(rewards.voterRewardPool.calculatedPoolLamports, 1_781_250);
   assert.equal(rewards.voterRewardPool.finalPoolLamports, 0);
   assert.equal(voterRecords.length, 2);
   assert.equal(voterRecords[0]?.finalRewardLamports, 0);
   assert.equal(creatorRecords.length, 1);
-  assert.equal(summary.winners.alternative.individualPayoutLamports, 9_500_000);
-  assert.equal(summary.rewards.creator?.finalRewardLamports, 400_000);
+  assert.equal(summary.winners.alternative.individualPayoutLamports, 11_875_000);
+  assert.equal(summary.rewards.creator?.finalRewardLamports, 500_000);
 });
 
 test("reward calculation handles no alternative winners and zero elected-rule voters", () => {
@@ -775,7 +875,7 @@ test("claim flow supports elected-rule voter reward claims", () => {
   const voterClaims = claims.filter((claim) => claim.kind === "voter_reward");
   assert.equal(voterClaims.length, 2);
   assert.equal(voterClaims.every((claim) => claim.status === "available"), true);
-  assert.equal(voterClaims[0]?.amountLamports, 25_150_000);
+  assert.equal(voterClaims[0]?.amountLamports, 25_200_000);
   assert.equal(
     listClaimRecords({ turnId: 242, wallet: walletTwo })[0]?.kind,
     "voter_reward",

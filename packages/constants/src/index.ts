@@ -11,9 +11,10 @@ export const MVP_FEES_SOL = {
   guessSubmission: 0.01,
   ruleProposal: 0.02,
   paidRuleRemoval: 0.05,
-  vote: 0,
+  vote: 0.005,
   report: 0
 } as const;
+export const ELIMINATION_VOTE_FEE_MULTIPLIER = 2;
 
 export const TREASURY_FEE_BPS = 500;
 export const CREATOR_REWARD_RATE_BPS = 1_500;

@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  applyRuleEliminations,
+  buildFinalistSnapshots,
   planRuleElectionAction,
   runRuleElection,
   runRuleElectionCycle,
+  selectActiveRuleFromSurvivors,
   type ElectionCandidate,
   type ElectionTurn,
   type PublishedRuleElection,
@@ -128,6 +131,55 @@ test("runRuleElection filters invalid candidates and rejects duplicates", () => 
       { randomFinalistCount: 7, topVotedFinalistCount: 3 },
     ),
   );
+});
+
+test("applyRuleEliminations enforces threshold, cap, survivor floor, and tie-breaks", () => {
+  const finalists = [
+    { approvalVoteCount: 5, compiledArtifactHash: hex(11), ruleId: 1, sanitizedTextHash: hex(1) },
+    { approvalVoteCount: 3, compiledArtifactHash: hex(12), ruleId: 2, sanitizedTextHash: hex(2) },
+    { approvalVoteCount: 3, compiledArtifactHash: hex(13), ruleId: 3, sanitizedTextHash: hex(3) },
+    { approvalVoteCount: 2, compiledArtifactHash: hex(14), ruleId: 4, sanitizedTextHash: hex(4) },
+    { approvalVoteCount: 2, compiledArtifactHash: hex(15), ruleId: 5, sanitizedTextHash: hex(5) },
+    { approvalVoteCount: 2, compiledArtifactHash: hex(16), ruleId: 6, sanitizedTextHash: hex(6) },
+    { approvalVoteCount: 1, compiledArtifactHash: hex(17), ruleId: 7, sanitizedTextHash: hex(7) },
+  ];
+
+  const decision = applyRuleEliminations(finalists, [
+    { eliminationVoteCount: 6, ruleId: 1 },
+    { eliminationVoteCount: 8, ruleId: 2 },
+    { eliminationVoteCount: 8, ruleId: 3 },
+    { eliminationVoteCount: 4, ruleId: 4 },
+    { eliminationVoteCount: 4, ruleId: 5 },
+    { eliminationVoteCount: 4, ruleId: 6 },
+    { eliminationVoteCount: 1, ruleId: 7 },
+  ]);
+
+  assert.deepEqual(decision.eliminatedRuleIds, [1, 2, 3, 4, 5]);
+  assert.deepEqual(decision.survivorRuleIds, [6, 7]);
+  assert.equal(decision.finalists.find((finalist) => finalist.ruleId === 7)?.threshold, 2);
+  assert.match(decision.eliminatedFinalistHash, /^[0-9a-f]{64}$/);
+  assert.match(decision.survivorFinalistHash, /^[0-9a-f]{64}$/);
+});
+
+test("selectActiveRuleFromSurvivors only selects non-eliminated finalists", () => {
+  const candidates = [candidate(1, 10, 1), candidate(2, 9, 2), candidate(3, 8, 3)];
+  const finalistRuleIds = [1, 2, 3];
+  const finalists = buildFinalistSnapshots(candidates, finalistRuleIds);
+  const decision = applyRuleEliminations(finalists, [
+    { eliminationVoteCount: 11, ruleId: 1 },
+    { eliminationVoteCount: 0, ruleId: 2 },
+    { eliminationVoteCount: 0, ruleId: 3 },
+  ]);
+  const active = selectActiveRuleFromSurvivors(
+    finalists,
+    decision.survivorRuleIds,
+    new Uint8Array(32).fill(12),
+    44,
+  );
+
+  assert.notEqual(active.activeRuleId, 1);
+  assert.ok(decision.survivorRuleIds.includes(active.activeRuleId ?? 0));
+  assert.ok(active.electedSurvivorIndex < decision.survivorRuleIds.length);
 });
 
 function baseDeps(

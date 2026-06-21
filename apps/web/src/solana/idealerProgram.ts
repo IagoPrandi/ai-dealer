@@ -25,6 +25,9 @@ const PROPOSE_RULE_DISCRIMINATOR = new Uint8Array([
 const VOTE_RULE_DISCRIMINATOR = new Uint8Array([
   40, 87, 133, 249, 114, 164, 242, 183,
 ]);
+const ELIMINATE_VOTE_RULE_DISCRIMINATOR = new Uint8Array([
+  82, 128, 200, 74, 171, 186, 232, 227,
+]);
 const addressEncoder = getAddressEncoder();
 const textEncoder = new TextEncoder();
 
@@ -56,6 +59,7 @@ export interface GlobalConfigSnapshot {
   nextTurnId: number;
   paused: boolean;
   ruleElectionCutoffBps: number;
+  voteFeeLamports: bigint;
 }
 
 export interface TurnStateSnapshot {
@@ -109,6 +113,16 @@ export interface RuleVoteReceipt {
   ruleId: number;
   ruleProposal: string;
   ruleVote: string;
+  signature: string;
+  submittedAt: string;
+  turnId: number;
+  voter: string;
+}
+
+export interface RuleEliminationVoteReceipt {
+  eliminationVote: string;
+  ruleId: number;
+  ruleProposal: string;
   signature: string;
   submittedAt: string;
   turnId: number;
@@ -273,6 +287,7 @@ export function decodeGlobalConfigAccount(data: Uint8Array): GlobalConfigSnapsho
   reader.skip(32 * 3);
   const guessSubmissionFeeLamports = reader.readU64BigInt();
   reader.skip(8 + 8);
+  const voteFeeLamports = reader.readU64BigInt();
   reader.skip(2);
   reader.skip(4 * 4);
   reader.skip(1);
@@ -292,6 +307,7 @@ export function decodeGlobalConfigAccount(data: Uint8Array): GlobalConfigSnapsho
     nextTurnId,
     paused,
     ruleElectionCutoffBps,
+    voteFeeLamports,
   };
 }
 
@@ -510,6 +526,23 @@ export async function deriveRuleVoteAddress({
   ]);
 }
 
+export async function deriveRuleEliminationVoteAddress({
+  player,
+  ruleId,
+  turnId,
+}: {
+  player: ReturnType<typeof address>;
+  ruleId: number;
+  turnId: number;
+}) {
+  return derivePda([
+    "elimination_vote",
+    u64Le(turnId),
+    u64Le(ruleId),
+    addressEncoder.encode(player),
+  ]);
+}
+
 export async function createSubmitGuessInstruction({
   numbers,
   player,
@@ -614,6 +647,39 @@ export async function createVoteRuleInstruction({
       { address: SYSTEM_PROGRAM_ID, role: AccountRole.READONLY },
     ],
     data: VOTE_RULE_DISCRIMINATOR,
+    programAddress: IDEALER_PROGRAM_ID,
+  };
+}
+
+export async function createEliminateVoteRuleInstruction({
+  player,
+  ruleId,
+  turnId,
+}: {
+  player: ReturnType<typeof address>;
+  ruleId: number;
+  turnId: number;
+}) {
+  const accounts = await deriveSubmitGuessAccounts({ player, turnId });
+  const ruleProposal = await deriveRuleProposalAddress({ ruleId, turnId });
+  const ruleEliminationVote = await deriveRuleEliminationVoteAddress({
+    player,
+    ruleId,
+    turnId,
+  });
+
+  return {
+    accounts: [
+      { address: player, role: AccountRole.WRITABLE_SIGNER },
+      { address: accounts.globalConfig, role: AccountRole.READONLY },
+      { address: accounts.turnState, role: AccountRole.WRITABLE },
+      { address: accounts.gameToken, role: AccountRole.READONLY },
+      { address: ruleProposal, role: AccountRole.READONLY },
+      { address: ruleEliminationVote, role: AccountRole.WRITABLE },
+      { address: accounts.prizeVault, role: AccountRole.WRITABLE },
+      { address: SYSTEM_PROGRAM_ID, role: AccountRole.READONLY },
+    ],
+    data: ELIMINATE_VOTE_RULE_DISCRIMINATOR,
     programAddress: IDEALER_PROGRAM_ID,
   };
 }

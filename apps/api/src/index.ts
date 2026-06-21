@@ -8,6 +8,7 @@ import {
   CREATOR_REWARD_CAP_SOL,
   CREATOR_REWARD_RATE_BPS,
   CREATOR_REWARD_RESERVE_SHARE_BPS,
+  ELIMINATION_VOTE_FEE_MULTIPLIER,
   LAMPORTS_PER_SOL,
   MINIMUM_CLAIM_THRESHOLD_SOL,
   MVP_FEES_SOL,
@@ -139,6 +140,38 @@ export interface RuleVoteRecord {
   voter: string;
 }
 
+export interface RuleEliminationVoteRecord {
+  eliminationVote: string;
+  ruleId: number;
+  ruleProposal: string;
+  signature: string;
+  submittedAt: string;
+  turnId: number;
+  voter: string;
+}
+
+export interface RuleEliminationFinalistState {
+  approvalVotes: number;
+  eliminated: boolean;
+  eliminationVotes: number;
+  ruleId: number;
+  status: "eliminated" | "survived";
+  threshold: number;
+}
+
+export interface RuleEliminationRecord {
+  closedAt: string | null;
+  decisionWindowClosesAt: string | null;
+  decisionWindowOpenedAt: string | null;
+  eliminatedFinalistHash: string;
+  eliminatedRuleIds: number[];
+  finalists: RuleEliminationFinalistState[];
+  status: "closed" | "not_started" | "open";
+  survivorFinalistHash: string;
+  survivorRuleIds: number[];
+  turnId: number;
+}
+
 export interface PaidRuleRemovalRecord {
   removalKind: "creator_self" | "third_party";
   remover: string;
@@ -159,6 +192,7 @@ export interface TurnRolloverRecord {
 }
 
 export interface PrizePoolAccountingConfig {
+  eliminationVoteFeeMultiplier: number;
   guessSubmissionFeeLamports: number;
   paidRuleRemovalFeeLamports: number;
   ruleProposalFeeLamports: number;
@@ -200,6 +234,7 @@ export interface PrizePoolAccounting {
     guessSubmissions: PrizePoolFeeSourceAccounting;
     paidRuleRemovals: PrizePoolFeeSourceAccounting;
     ruleProposals: PrizePoolFeeSourceAccounting;
+    eliminationVotes: PrizePoolFeeSourceAccounting & { feeActive: boolean };
     votes: PrizePoolFeeSourceAccounting & { feeActive: boolean };
   };
   totalVisiblePrizePoolLamports: number;
@@ -555,12 +590,18 @@ CREATE INDEX IF NOT EXISTS audit_logs_public_state_idx
 `;
 
 export interface RuleElectionRecord {
+  activeElectionRandomnessAccount?: string | null;
+  activeElectionRandomnessSource?: string | null;
+  activeElectionRandomnessValue?: string | null;
   activeRuleArtifactHash: string | null;
   activeRuleHash: string | null;
   activeRuleId: number | null;
   electedFinalistIndex: number;
+  electedSurvivorIndex?: number | null;
   eligibleRuleIds: number[];
   eligibleRulePoolHash: string;
+  eliminatedFinalistHash?: string | null;
+  eliminatedRuleIds?: number[];
   finalistRuleIds: number[];
   finalistSetHash: string;
   randomFinalistHash: string;
@@ -571,6 +612,8 @@ export interface RuleElectionRecord {
   requestedAt: string | null;
   settledAt: string | null;
   status: "locked" | "original_only" | "requested" | "settled";
+  survivorFinalistHash?: string | null;
+  survivorRuleIds?: number[];
   topVotedFinalistHash: string;
   topVotedRuleIds: number[];
   turnId: number;
@@ -582,6 +625,8 @@ const IDEALER_ACTIVE_TURN_ID = Number(
 const guessReceipts = new Map<string, GuessReceiptRecord>();
 const ruleProposals = new Map<string, RuleProposalRecord>();
 const ruleVotes = new Map<string, RuleVoteRecord>();
+const ruleEliminationVotes = new Map<string, RuleEliminationVoteRecord>();
+const ruleEliminations = new Map<number, RuleEliminationRecord>();
 const paidRuleRemovals = new Map<string, PaidRuleRemovalRecord>();
 const turnRollovers = new Map<number, TurnRolloverRecord>();
 const draws = new Map<number, DrawRecord>();
@@ -611,6 +656,8 @@ const CORS_PATHS = new Set([
   "/rule-validations",
   "/rule-validations/run",
   "/rule-votes",
+  "/rule-elimination-votes",
+  "/api/v1/turns",
   "/reward-records",
   "/reward-records/calculate-turn",
   "/verification-jobs",
@@ -634,6 +681,14 @@ function getRuleProposalKey(turnId: number, ruleId: number) {
 }
 
 function getRuleVoteKey(turnId: number, ruleId: number, voter: string) {
+  return `${turnId}:${ruleId}:${voter}`;
+}
+
+function getRuleEliminationVoteKey(
+  turnId: number,
+  ruleId: number,
+  voter: string,
+) {
   return `${turnId}:${ruleId}:${voter}`;
 }
 
@@ -876,6 +931,8 @@ export function resetApiStateForTests() {
   guessReceipts.clear();
   ruleProposals.clear();
   ruleVotes.clear();
+  ruleEliminationVotes.clear();
+  ruleEliminations.clear();
   paidRuleRemovals.clear();
   turnRollovers.clear();
   draws.clear();
@@ -1219,6 +1276,28 @@ function isValidRuleVote(value: unknown): value is RuleVoteRecord {
     isBase58Like(vote.voter) &&
     isBase58Like(vote.ruleProposal) &&
     isBase58Like(vote.ruleVote) &&
+    isBase58Like(vote.signature) &&
+    typeof vote.submittedAt === "string" &&
+    !Number.isNaN(Date.parse(vote.submittedAt))
+  );
+}
+
+function isValidRuleEliminationVote(
+  value: unknown,
+): value is RuleEliminationVoteRecord {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const vote = value as Partial<RuleEliminationVoteRecord>;
+  return (
+    Number.isInteger(vote.turnId) &&
+    Number(vote.turnId) > 0 &&
+    Number.isInteger(vote.ruleId) &&
+    Number(vote.ruleId) > 0 &&
+    isBase58Like(vote.voter) &&
+    isBase58Like(vote.ruleProposal) &&
+    isBase58Like(vote.eliminationVote) &&
     isBase58Like(vote.signature) &&
     typeof vote.submittedAt === "string" &&
     !Number.isNaN(Date.parse(vote.submittedAt))
@@ -1621,20 +1700,43 @@ function isValidRuleElection(value: unknown): value is RuleElectionRecord {
       (Number.isInteger(record.activeRuleId) && Number(record.activeRuleId) > 0)) &&
     Number.isInteger(record.electedFinalistIndex) &&
     Number(record.electedFinalistIndex) >= 0 &&
+    (record.electedSurvivorIndex === undefined ||
+      record.electedSurvivorIndex === null ||
+      (Number.isInteger(record.electedSurvivorIndex) &&
+        Number(record.electedSurvivorIndex) >= 0)) &&
     isPositiveIntegerArray(record.eligibleRuleIds) &&
     isPositiveIntegerArray(record.topVotedRuleIds) &&
     isPositiveIntegerArray(record.randomRuleIds) &&
     isPositiveIntegerArray(record.finalistRuleIds) &&
+    (record.eliminatedRuleIds === undefined ||
+      isPositiveIntegerArray(record.eliminatedRuleIds)) &&
+    (record.survivorRuleIds === undefined ||
+      isPositiveIntegerArray(record.survivorRuleIds)) &&
     isHexHash(record.eligibleRulePoolHash) &&
     isHexHash(record.topVotedFinalistHash) &&
     isHexHash(record.randomFinalistHash) &&
     isHexHash(record.finalistSetHash) &&
+    (record.eliminatedFinalistHash === undefined ||
+      record.eliminatedFinalistHash === null ||
+      isHexHash(record.eliminatedFinalistHash)) &&
+    (record.survivorFinalistHash === undefined ||
+      record.survivorFinalistHash === null ||
+      isHexHash(record.survivorFinalistHash)) &&
     (record.activeRuleHash === null || isHexHash(record.activeRuleHash)) &&
     (record.activeRuleArtifactHash === null ||
       isHexHash(record.activeRuleArtifactHash)) &&
     (record.randomnessAccount === null || isBase58Like(record.randomnessAccount)) &&
     (record.randomnessSource === null || isBase58Like(record.randomnessSource)) &&
     (record.randomnessValue === null || isHexHash(record.randomnessValue)) &&
+    (record.activeElectionRandomnessAccount === undefined ||
+      record.activeElectionRandomnessAccount === null ||
+      isBase58Like(record.activeElectionRandomnessAccount)) &&
+    (record.activeElectionRandomnessSource === undefined ||
+      record.activeElectionRandomnessSource === null ||
+      isBase58Like(record.activeElectionRandomnessSource)) &&
+    (record.activeElectionRandomnessValue === undefined ||
+      record.activeElectionRandomnessValue === null ||
+      isHexHash(record.activeElectionRandomnessValue)) &&
     (record.requestedAt === null ||
       (typeof record.requestedAt === "string" &&
         !Number.isNaN(Date.parse(record.requestedAt)))) &&
@@ -1750,6 +1852,19 @@ export function saveRuleVote(vote: RuleVoteRecord) {
   return vote;
 }
 
+export function saveRuleEliminationVote(vote: RuleEliminationVoteRecord) {
+  ruleEliminationVotes.set(
+    getRuleEliminationVoteKey(vote.turnId, vote.ruleId, vote.voter),
+    vote,
+  );
+  return vote;
+}
+
+export function saveRuleElimination(record: RuleEliminationRecord) {
+  ruleEliminations.set(record.turnId, record);
+  return record;
+}
+
 export function savePaidRuleRemoval(removal: PaidRuleRemovalRecord) {
   paidRuleRemovals.set(
     getPaidRuleRemovalKey(removal.turnId, removal.ruleId, removal.remover),
@@ -1765,6 +1880,18 @@ export function saveTurnRollover(record: TurnRolloverRecord) {
 
 export function listRuleVotes(turnId: number) {
   const votes = [...ruleVotes.values()].filter(
+    (vote) => vote.turnId === turnId,
+  );
+  const counts = votes.reduce<Record<string, number>>((current, vote) => {
+    current[String(vote.ruleId)] = (current[String(vote.ruleId)] ?? 0) + 1;
+    return current;
+  }, {});
+
+  return { counts, votes };
+}
+
+export function listRuleEliminationVotes(turnId: number) {
+  const votes = [...ruleEliminationVotes.values()].filter(
     (vote) => vote.turnId === turnId,
   );
   const counts = votes.reduce<Record<string, number>>((current, vote) => {
@@ -3054,6 +3181,61 @@ export function getRuleElection(turnId: number) {
   return elections.get(turnId) ?? null;
 }
 
+function hashRuleIdsForAudit(domain: string, ruleIds: number[]) {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        domain,
+        ruleIds,
+      }),
+      "utf8",
+    )
+    .digest("hex");
+}
+
+export function getRuleElimination(turnId: number): RuleEliminationRecord {
+  const explicit = ruleEliminations.get(turnId);
+  if (explicit) {
+    return explicit;
+  }
+
+  const election = getRuleElection(turnId);
+  const { counts: approvalCounts } = listRuleVotes(turnId);
+  const { counts: eliminationCounts } = listRuleEliminationVotes(turnId);
+  const finalistRuleIds = election?.finalistRuleIds ?? [];
+  const finalists = finalistRuleIds.map((ruleId) => {
+    const approvalVotes =
+      approvalCounts[String(ruleId)] ??
+      (election?.topVotedRuleIds.includes(ruleId) ? 1 : 0);
+    const eliminationVotes = eliminationCounts[String(ruleId)] ?? 0;
+    const eliminated = false;
+    return {
+      approvalVotes,
+      eliminated,
+      eliminationVotes,
+      ruleId,
+      status: "survived" as const,
+      threshold: approvalVotes + 1,
+    };
+  });
+
+  return {
+    closedAt: null,
+    decisionWindowClosesAt: null,
+    decisionWindowOpenedAt: null,
+    eliminatedFinalistHash: hashRuleIdsForAudit("eliminated_finalists_v1", []),
+    eliminatedRuleIds: [],
+    finalists,
+    status: finalistRuleIds.length > 0 && !election?.activeRuleId ? "open" : "not_started",
+    survivorFinalistHash: hashRuleIdsForAudit(
+      "survivor_finalists_v1",
+      finalistRuleIds,
+    ),
+    survivorRuleIds: finalistRuleIds,
+    turnId,
+  };
+}
+
 function isUniqueDrawResult(value: unknown): value is number[] {
   return (
     Array.isArray(value) &&
@@ -3154,6 +3336,7 @@ export interface RoundSummary {
   claims: ClaimSummary;
   draw: DrawRecord | null;
   election: RuleElectionRecord | null;
+  elimination: RuleEliminationRecord;
   pool: {
     accounting: PrizePoolAccounting;
     guessSol: number;
@@ -3163,6 +3346,8 @@ export interface RoundSummary {
     paidRemovals: number;
     proposalSol: number;
     proposals: number;
+    eliminationVoteFeeSol: number;
+    eliminationVoteFees: number;
     totalVisiblePrizePoolSol: number;
     treasurySol: number;
     voteFeeSol: number;
@@ -3237,6 +3422,7 @@ function accountFeeSource(
 
 function defaultAccountingConfig(): PrizePoolAccountingConfig {
   return {
+    eliminationVoteFeeMultiplier: ELIMINATION_VOTE_FEE_MULTIPLIER,
     guessSubmissionFeeLamports: solToLamports(MVP_FEES_SOL.guessSubmission),
     paidRuleRemovalFeeLamports: solToLamports(MVP_FEES_SOL.paidRuleRemoval),
     ruleProposalFeeLamports: solToLamports(MVP_FEES_SOL.ruleProposal),
@@ -3249,6 +3435,7 @@ function defaultAccountingConfig(): PrizePoolAccountingConfig {
 export function calculatePrizePoolAccounting(args: {
   alternativeRolloverLamports?: number;
   config?: Partial<PrizePoolAccountingConfig>;
+  eliminationVoteCount?: number;
   guessCount: number;
   originalRolloverLamports?: number;
   paidRuleRemovalCount: number;
@@ -3281,6 +3468,14 @@ export function calculatePrizePoolAccounting(args: {
     config.paidRuleRemovalFeeLamports,
     config.treasuryFeeBps,
   );
+  const eliminationVotes = {
+    ...accountFeeSource(
+      voteFeeActive ? (args.eliminationVoteCount ?? 0) : 0,
+      config.voteFeeLamports * config.eliminationVoteFeeMultiplier,
+      config.treasuryFeeBps,
+    ),
+    feeActive: voteFeeActive,
+  };
   const votes = {
     ...accountFeeSource(
       voteFeeActive ? args.voteCount : 0,
@@ -3294,16 +3489,19 @@ export function calculatePrizePoolAccounting(args: {
     guessSubmissions.grossLamports +
     ruleProposals.grossLamports +
     paidRuleRemovals.grossLamports +
+    eliminationVotes.grossLamports +
     votes.grossLamports;
   const treasuryLamports =
     guessSubmissions.treasuryLamports +
     ruleProposals.treasuryLamports +
     paidRuleRemovals.treasuryLamports +
+    eliminationVotes.treasuryLamports +
     votes.treasuryLamports;
   const currentTurnPoolLamports =
     guessSubmissions.prizeLamports +
     ruleProposals.prizeLamports +
     paidRuleRemovals.prizeLamports +
+    eliminationVotes.prizeLamports +
     votes.prizeLamports;
 
   const originalCurrentTurnLamports = Math.floor(currentTurnPoolLamports / 2);
@@ -3347,6 +3545,7 @@ export function calculatePrizePoolAccounting(args: {
     platformMonetizationLamports: treasuryLamports,
     sources: {
       guessSubmissions,
+      eliminationVotes,
       paidRuleRemovals,
       ruleProposals,
       votes,
@@ -3374,10 +3573,12 @@ function getTurnRollover(turnId: number) {
 export function getPrizePoolAccounting(turnId: number) {
   const proposals = listRuleProposals(turnId);
   const { votes } = listRuleVotes(turnId);
+  const { votes: eliminationVotes } = listRuleEliminationVotes(turnId);
   const rollover = getTurnRollover(turnId);
 
   return calculatePrizePoolAccounting({
     alternativeRolloverLamports: rollover?.alternativeRolloverLamports ?? 0,
+    eliminationVoteCount: eliminationVotes.length,
     guessCount: listGuessReceipts(turnId).length,
     originalRolloverLamports: rollover?.originalRolloverLamports ?? 0,
     paidRuleRemovalCount: listPaidRuleRemovals(turnId).length,
@@ -3412,6 +3613,9 @@ export function getRoundSummary(
     accounting.sources.paidRuleRemovals.grossLamports,
   );
   const voteFeeSol = lamportsToSol(accounting.sources.votes.grossLamports);
+  const eliminationVoteFeeSol = lamportsToSol(
+    accounting.sources.eliminationVotes.grossLamports,
+  );
   const totalVisiblePrizePoolSol = lamportsToSol(
     accounting.totalVisiblePrizePoolLamports,
   );
@@ -3434,6 +3638,7 @@ export function getRoundSummary(
     claims: getClaimSummary({ turnId }),
     draw: getDraw(turnId),
     election: getRuleElection(turnId),
+    elimination: getRuleElimination(turnId),
     pool: {
       accounting,
       guessSol: roundSol(guessSol),
@@ -3443,6 +3648,8 @@ export function getRoundSummary(
       paidRemovals: removals,
       proposalSol: roundSol(proposalSol),
       proposals: proposals.length,
+      eliminationVoteFeeSol: roundSol(eliminationVoteFeeSol),
+      eliminationVoteFees: accounting.sources.eliminationVotes.count,
       totalVisiblePrizePoolSol: roundSol(totalVisiblePrizePoolSol),
       treasurySol: roundSol(treasurySol),
       voteFeeSol: roundSol(voteFeeSol),
@@ -3583,6 +3790,7 @@ if (isMainModule()) {
       request.method === "OPTIONS" &&
       (CORS_PATHS.has(url.pathname) ||
         url.pathname.startsWith("/audit/") ||
+        url.pathname.startsWith("/api/v1/turns/") ||
         url.pathname.startsWith("/prize-pool-accounting/"))
     ) {
       sendNoContent(request, response);
@@ -3878,6 +4086,70 @@ if (isMainModule()) {
       }
 
       sendJson(request, response, 200, listRuleVotes(turnId));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/rule-elimination-votes") {
+      void readJsonBody(request)
+        .then((body) => {
+          if (!isValidRuleEliminationVote(body)) {
+            sendJson(request, response, 400, {
+              error: "invalid_rule_elimination_vote",
+            });
+            return;
+          }
+
+          const existing = ruleEliminationVotes.get(
+            getRuleEliminationVoteKey(body.turnId, body.ruleId, body.voter),
+          );
+          if (existing && existing.signature !== body.signature) {
+            sendJson(request, response, 409, {
+              error: "duplicate_rule_elimination_vote",
+              vote: existing,
+            });
+            return;
+          }
+
+          sendJson(request, response, 201, {
+            vote: saveRuleEliminationVote(body),
+          });
+        })
+        .catch((error: unknown) => {
+          sendJson(request, response, 400, {
+            error: "invalid_json",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/rule-elimination-votes") {
+      const turnId = Number(url.searchParams.get("turnId"));
+
+      if (!Number.isInteger(turnId) || turnId <= 0) {
+        sendJson(request, response, 400, { error: "invalid_query" });
+        return;
+      }
+
+      sendJson(request, response, 200, listRuleEliminationVotes(turnId));
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      /^\/api\/v1\/turns\/\d+\/elimination$/.test(url.pathname)
+    ) {
+      const parts = url.pathname.split("/");
+      const turnId = Number(parts[4]);
+
+      if (!Number.isInteger(turnId) || turnId <= 0) {
+        sendJson(request, response, 400, { error: "invalid_turn_id" });
+        return;
+      }
+
+      sendJson(request, response, 200, {
+        elimination: getRuleElimination(turnId),
+      });
       return;
     }
 

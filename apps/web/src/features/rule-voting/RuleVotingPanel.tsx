@@ -11,12 +11,15 @@ import {
 } from "@solana/react-hooks";
 import {
   createVoteRuleInstruction,
+  createEliminateVoteRuleInstruction,
+  deriveRuleEliminationVoteAddress,
   deriveRuleProposalAddress,
   deriveRuleVoteAddress,
   deriveSubmitGuessAccounts,
   fetchActiveTurnSnapshot,
   getTurnActionReadiness,
   IDEALER_ACTIVE_TURN_ID,
+  type RuleEliminationVoteReceipt,
   type RuleVoteReceipt,
 } from "../../solana/idealerProgram";
 
@@ -52,9 +55,20 @@ interface VoteActivity {
 interface VoteFeedback {
   code?: string;
   message: string;
-  receipt?: RuleVoteReceipt;
+  receipt?: RuleVoteReceipt | RuleEliminationVoteReceipt;
   signature?: string;
   status: VoteStatus;
+}
+
+interface EliminationState {
+  finalists: Array<{
+    approvalVotes: number;
+    eliminationVotes: number;
+    ruleId: number;
+    status: "eliminated" | "survived";
+    threshold: number;
+  }>;
+  status: "closed" | "not_started" | "open";
 }
 
 interface ApiRuleProposal {
@@ -165,6 +179,18 @@ async function persistRuleVote(receipt: RuleVoteReceipt) {
   }
 }
 
+async function persistRuleEliminationVote(receipt: RuleEliminationVoteReceipt) {
+  const response = await fetch(`${API_BASE_URL}/rule-elimination-votes`, {
+    body: JSON.stringify(receipt),
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+
+  if (!response.ok && response.status !== 409) {
+    throw new Error(`Rule elimination vote API returned HTTP ${response.status}.`);
+  }
+}
+
 export function RuleVotingPanel() {
   const client = useSolanaClient();
   const { connected, wallet } = useWalletConnection();
@@ -175,6 +201,11 @@ export function RuleVotingPanel() {
   const [voteCounts, setVoteCounts] = useState<Record<number, number>>({
     [DEVNET_BOOTSTRAP_RULE.ruleId]: DEVNET_BOOTSTRAP_RULE.initialVotes,
   });
+  const [eliminationState, setEliminationState] = useState<EliminationState>({
+    finalists: [],
+    status: "not_started",
+  });
+  const [eliminationVoteCounts, setEliminationVoteCounts] = useState<Record<number, number>>({});
   const [currentVoteRuleId, setCurrentVoteRuleId] = useState<number | null>(
     null,
   );
@@ -214,8 +245,11 @@ export function RuleVotingPanel() {
       fetch(`${API_BASE_URL}/rule-votes?turnId=${IDEALER_ACTIVE_TURN_ID}`, {
         signal: controller.signal,
       }),
+      fetch(`${API_BASE_URL}/api/v1/turns/${IDEALER_ACTIVE_TURN_ID}/elimination`, {
+        signal: controller.signal,
+      }),
     ])
-      .then(async ([proposalResponse, voteResponse]) => {
+      .then(async ([proposalResponse, voteResponse, eliminationResponse]) => {
         const proposalBody = proposalResponse.ok
           ? ((await proposalResponse.json()) as {
               proposals?: ApiRuleProposal[];
@@ -224,6 +258,9 @@ export function RuleVotingPanel() {
         const voteBody = voteResponse.ok
           ? ((await voteResponse.json()) as { counts?: Record<string, number> })
           : { counts: {} };
+        const eliminationBody = eliminationResponse.ok
+          ? ((await eliminationResponse.json()) as { elimination?: EliminationState })
+          : { elimination: undefined };
         const apiRules = await Promise.all(
           (proposalBody.proposals ?? []).map(async (proposal) => ({
             clarity: "High" as const,
@@ -262,6 +299,17 @@ export function RuleVotingPanel() {
 
         setRules(nextRules);
         setVoteCounts(nextCounts);
+        if (eliminationBody.elimination) {
+          setEliminationState(eliminationBody.elimination);
+          setEliminationVoteCounts(
+            Object.fromEntries(
+              eliminationBody.elimination.finalists.map((finalist) => [
+                finalist.ruleId,
+                finalist.eliminationVotes,
+              ]),
+            ),
+          );
+        }
       })
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === "AbortError") {
@@ -290,15 +338,27 @@ export function RuleVotingPanel() {
     const votedRule = rules.find((rule) => rule.ruleId === receipt.ruleId);
 
     if (signatureStatus.isSuccess) {
-      void persistRuleVote(receipt)
+      const isEliminationVote = "eliminationVote" in receipt;
+      void (isEliminationVote
+        ? persistRuleEliminationVote(receipt)
+        : persistRuleVote(receipt))
         .then(() => {
-          setCurrentVoteRuleId(receipt.ruleId);
-          setVoteCounts((current) => ({
-            ...current,
-            [receipt.ruleId]: (current[receipt.ruleId] ?? 0) + 1,
-          }));
+          if (isEliminationVote) {
+            setEliminationVoteCounts((current) => ({
+              ...current,
+              [receipt.ruleId]: (current[receipt.ruleId] ?? 0) + 1,
+            }));
+          } else {
+            setCurrentVoteRuleId(receipt.ruleId);
+            setVoteCounts((current) => ({
+              ...current,
+              [receipt.ruleId]: (current[receipt.ruleId] ?? 0) + 1,
+            }));
+          }
           setFeedback({
-            message: `Vote confirmed for ${votedRule?.title ?? "the selected rule"}.`,
+            message: isEliminationVote
+              ? `Elimination vote confirmed for ${votedRule?.title ?? "the selected rule"}.`
+              : `Vote confirmed for ${votedRule?.title ?? "the selected rule"}.`,
             receipt,
             signature,
             status: "confirmed",
@@ -306,7 +366,9 @@ export function RuleVotingPanel() {
           activitySequence.current += 1;
           setActivity((current) => [
             {
-              detail: `You voted for ${votedRule?.title ?? "the selected rule"}.`,
+              detail: isEliminationVote
+                ? `You voted to eliminate ${votedRule?.title ?? "the selected rule"}.`
+                : `You voted for ${votedRule?.title ?? "the selected rule"}.`,
               id: `vote-${activitySequence.current}`,
               time: "Now",
             },
@@ -488,6 +550,128 @@ export function RuleVotingPanel() {
     }
   }
 
+  async function castEliminationVote(rule: ProposedRule) {
+    if (eliminationState.status !== "open") {
+      setFeedback({
+        code: "ELIMINATION_WINDOW_CLOSED",
+        message: "Elimination voting is not open for this turn.",
+        status: "closed",
+      });
+      return;
+    }
+
+    if (!connected || !wallet || !walletAddress) {
+      setFeedback({
+        code: "WALLET_NOT_CONNECTED",
+        message: "Connect a Solana devnet wallet before voting to eliminate.",
+        status: "failed",
+      });
+      return;
+    }
+
+    let receipt: RuleEliminationVoteReceipt | undefined;
+
+    try {
+      const player = address(walletAddress);
+      const activeTurn = await fetchActiveTurnSnapshot(client);
+      const turnId = activeTurn.globalConfig.activeTurnId;
+      const accounts = await deriveSubmitGuessAccounts({
+        player,
+        turnId,
+      });
+      const gameToken = await client.runtime.rpc
+        .getAccountInfo(accounts.gameToken, {
+          commitment: "confirmed",
+          encoding: "base64",
+        })
+        .send();
+
+      if (!gameToken.value) {
+        setFeedback({
+          code: "GAME_TOKEN_REQUIRED",
+          message: "Submit a guess for this turn before voting to eliminate.",
+          status: "failed",
+        });
+        return;
+      }
+
+      const ruleProposal = await deriveRuleProposalAddress({
+        ruleId: rule.ruleId,
+        turnId,
+      });
+      const eliminationVote = await deriveRuleEliminationVoteAddress({
+        player,
+        ruleId: rule.ruleId,
+        turnId,
+      });
+      const existingVote = await client.runtime.rpc
+        .getAccountInfo(eliminationVote, {
+          commitment: "confirmed",
+          encoding: "base64",
+        })
+        .send();
+
+      if (existingVote.value) {
+        setFeedback({
+          code: "DUPLICATE_RULE_ELIMINATION_VOTE",
+          message:
+            "This wallet already voted to eliminate this finalist in the active turn.",
+          status: "duplicate",
+        });
+        return;
+      }
+
+      receipt = {
+        eliminationVote: eliminationVote.toString(),
+        ruleId: rule.ruleId,
+        ruleProposal: ruleProposal.toString(),
+        signature: "",
+        submittedAt: new Date().toISOString(),
+        turnId,
+        voter: walletAddress,
+      };
+      setFeedback({
+        message: "Approve the elimination vote transaction in your wallet.",
+        receipt,
+        status: "awaiting_approval",
+      });
+
+      const instruction = await createEliminateVoteRuleInstruction({
+        player,
+        ruleId: rule.ruleId,
+        turnId,
+      });
+      const signature = (
+        await client.transaction.prepareAndSend(
+          {
+            authority: wallet,
+            commitment: "confirmed",
+            feePayer: player,
+            instructions: [instruction],
+            version: 0,
+          },
+          { commitment: "confirmed", maxRetries: 3, skipPreflight: false },
+        )
+      ).toString();
+      const pendingReceipt = { ...receipt, signature };
+      setFeedback({
+        message:
+          "Wallet approval returned. Waiting for devnet confirmation of the elimination vote.",
+        receipt: pendingReceipt,
+        signature,
+        status: "pending",
+      });
+    } catch (error) {
+      const normalized = normalizeVoteError(error);
+      setFeedback({
+        code: normalized.code,
+        message: normalized.message,
+        status: normalized.status,
+        ...(receipt ? { receipt } : {}),
+      });
+    }
+  }
+
   return (
     <main className="voting-shell">
       <header className="picker-header">
@@ -603,6 +787,11 @@ export function RuleVotingPanel() {
             {rules.map((rule) => {
               const isLeading = leadingRule.ruleId === rule.ruleId;
               const isCurrentVote = currentVoteRuleId === rule.ruleId;
+              const finalist = eliminationState.finalists.find(
+                (candidate) => candidate.ruleId === rule.ruleId,
+              );
+              const canEliminate =
+                eliminationState.status === "open" && finalist !== undefined;
 
               return (
                 <article
@@ -644,6 +833,16 @@ export function RuleVotingPanel() {
                       <dt>Tokens</dt>
                       <dd>{rule.tokenCount}/{RULE_MAX_TOKENS}</dd>
                     </div>
+                    {finalist ? (
+                      <div>
+                        <dt>Elimination</dt>
+                        <dd>
+                          {eliminationVoteCounts[rule.ruleId] ??
+                            finalist.eliminationVotes}
+                          /{finalist.threshold} · {finalist.status}
+                        </dd>
+                      </div>
+                    ) : null}
                   </dl>
 
                   {connected ? (
@@ -667,6 +866,16 @@ export function RuleVotingPanel() {
                       Connect wallet to vote
                     </Link>
                   )}
+                  {canEliminate && connected ? (
+                    <button
+                      className="vote-action danger"
+                      disabled={isSubmitting}
+                      onClick={() => castEliminationVote(rule)}
+                      type="button"
+                    >
+                      {isSubmitting ? "Submitting..." : `Vote out ${rule.title}`}
+                    </button>
+                  ) : null}
                 </article>
               );
             })}

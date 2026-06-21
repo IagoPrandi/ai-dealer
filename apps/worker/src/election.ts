@@ -18,6 +18,37 @@ export interface RuleElectionConfig {
   topVotedFinalistCount: number;
 }
 
+export interface FinalistSnapshot {
+  approvalVoteCount: number;
+  compiledArtifactHash: string;
+  ruleId: number;
+  sanitizedTextHash: string;
+}
+
+export interface RuleEliminationVoteTally {
+  eliminationVoteCount: number;
+  ruleId: number;
+}
+
+export interface RuleEliminationDecisionConfig {
+  maxEliminatedFinalists: number;
+  minimumSurvivorCount: number;
+}
+
+export interface RuleEliminationDecision {
+  eliminatedFinalistHash: string;
+  eliminatedRuleIds: number[];
+  finalists: Array<
+    FinalistSnapshot & {
+      eliminated: boolean;
+      eliminationVoteCount: number;
+      threshold: number;
+    }
+  >;
+  survivorFinalistHash: string;
+  survivorRuleIds: number[];
+}
+
 export interface RuleElectionResult {
   activeRuleId: number | null;
   activeRuleArtifactHash: string | null;
@@ -85,6 +116,29 @@ function hashRuleIds(domain: string, ruleIds: number[]) {
   const parts = [Buffer.from(domain), writeU64(ruleIds.length)];
   for (const ruleId of ruleIds) {
     parts.push(writeU64(ruleId));
+  }
+  return digest(Buffer.concat(parts)).toString("hex");
+}
+
+function hashEliminationTallies(
+  domain: string,
+  finalists: Array<{
+    approvalVoteCount: number;
+    eliminated?: boolean;
+    eliminationVoteCount: number;
+    ruleId: number;
+  }>,
+) {
+  const parts = [Buffer.from(domain), writeU64(finalists.length)];
+  for (const finalist of finalists) {
+    parts.push(writeU64(finalist.ruleId));
+    const approvalVoteCount = Buffer.alloc(4);
+    approvalVoteCount.writeUInt32LE(finalist.approvalVoteCount);
+    parts.push(approvalVoteCount);
+    const eliminationVoteCount = Buffer.alloc(4);
+    eliminationVoteCount.writeUInt32LE(finalist.eliminationVoteCount);
+    parts.push(eliminationVoteCount);
+    parts.push(Buffer.from([finalist.eliminated ? 1 : 0]));
   }
   return digest(Buffer.concat(parts)).toString("hex");
 }
@@ -322,6 +376,146 @@ export function runRuleElection(
     randomRuleIds,
     topVotedFinalistHash: hashRuleIds("top_finalists_v1", topVotedRuleIds),
     topVotedRuleIds,
+  };
+}
+
+export function buildFinalistSnapshots(
+  candidates: ElectionCandidate[],
+  finalistRuleIds: number[],
+): FinalistSnapshot[] {
+  const byRuleId = new Map(candidates.map((candidate) => [candidate.ruleId, candidate]));
+  return finalistRuleIds.map((ruleId) => {
+    const candidate = byRuleId.get(ruleId);
+    if (!candidate) {
+      throw new Error(`Finalist rule ${ruleId} is missing from candidates.`);
+    }
+    return {
+      approvalVoteCount: candidate.voteCount,
+      compiledArtifactHash: candidate.compiledArtifactHash,
+      ruleId,
+      sanitizedTextHash: candidate.sanitizedTextHash,
+    };
+  });
+}
+
+export function applyRuleEliminations(
+  finalists: FinalistSnapshot[],
+  tallies: RuleEliminationVoteTally[],
+  config: RuleEliminationDecisionConfig = {
+    maxEliminatedFinalists: 5,
+    minimumSurvivorCount: 1,
+  },
+): RuleEliminationDecision {
+  if (config.maxEliminatedFinalists < 0 || config.minimumSurvivorCount < 1) {
+    throw new Error("Invalid elimination decision configuration.");
+  }
+
+  const finalistRuleIds = finalists.map((finalist) => finalist.ruleId);
+  if (new Set(finalistRuleIds).size !== finalistRuleIds.length) {
+    throw new Error("Duplicate finalist rule id.");
+  }
+
+  const finalistSet = new Set(finalistRuleIds);
+  const tallyByRuleId = new Map<number, number>();
+  for (const tally of tallies) {
+    if (!finalistSet.has(tally.ruleId)) {
+      throw new Error("Elimination tally targets a non-finalist rule.");
+    }
+    if (!Number.isInteger(tally.eliminationVoteCount) || tally.eliminationVoteCount < 0) {
+      throw new Error("Invalid elimination vote count.");
+    }
+    tallyByRuleId.set(
+      tally.ruleId,
+      (tallyByRuleId.get(tally.ruleId) ?? 0) + tally.eliminationVoteCount,
+    );
+  }
+
+  const withTallies = finalists.map((finalist) => ({
+    ...finalist,
+    eliminated: false,
+    eliminationVoteCount: tallyByRuleId.get(finalist.ruleId) ?? 0,
+    threshold: finalist.approvalVoteCount + 1,
+  }));
+  const qualified = withTallies
+    .filter((finalist) => finalist.eliminationVoteCount > finalist.approvalVoteCount)
+    .sort(
+      (left, right) =>
+        right.eliminationVoteCount - left.eliminationVoteCount ||
+        left.approvalVoteCount - right.approvalVoteCount ||
+        left.ruleId - right.ruleId,
+    );
+  const eliminationCapacity = Math.max(
+    0,
+    finalists.length - config.minimumSurvivorCount,
+  );
+  const eliminatedRuleIds = qualified
+    .slice(0, Math.min(config.maxEliminatedFinalists, eliminationCapacity))
+    .map((finalist) => finalist.ruleId)
+    .sort((left, right) => left - right);
+  const eliminatedSet = new Set(eliminatedRuleIds);
+  const decidedFinalists = withTallies.map((finalist) => ({
+    ...finalist,
+    eliminated: eliminatedSet.has(finalist.ruleId),
+  }));
+  const survivorRuleIds = finalists
+    .map((finalist) => finalist.ruleId)
+    .filter((ruleId) => !eliminatedSet.has(ruleId));
+
+  return {
+    eliminatedFinalistHash: hashEliminationTallies(
+      "eliminated_finalists_v1",
+      decidedFinalists,
+    ),
+    eliminatedRuleIds,
+    finalists: decidedFinalists,
+    survivorFinalistHash: hashRuleIds("survivor_finalists_v1", survivorRuleIds),
+    survivorRuleIds,
+  };
+}
+
+export function selectActiveRuleFromSurvivors(
+  finalists: FinalistSnapshot[],
+  survivorRuleIds: number[],
+  randomness: Uint8Array,
+  turnId: number,
+) {
+  if (randomness.length !== 32 || randomness.every((byte) => byte === 0)) {
+    throw new Error("Active-election randomness must be a non-zero 32-byte value.");
+  }
+  if (survivorRuleIds.length === 0) {
+    return {
+      activeRuleArtifactHash: null,
+      activeRuleHash: null,
+      activeRuleId: null,
+      electedSurvivorIndex: 0,
+    };
+  }
+
+  const byRuleId = new Map(finalists.map((finalist) => [finalist.ruleId, finalist]));
+  const survivors = survivorRuleIds.map((ruleId) => {
+    const finalist = byRuleId.get(ruleId);
+    if (!finalist) {
+      throw new Error("Survivor is missing from finalist snapshot.");
+    }
+    return finalist;
+  });
+  const electedSurvivorIndex = deriveIndexWithCounter(
+    randomness,
+    turnId,
+    "active_survivor_v1",
+    survivors.length,
+    0n,
+  );
+  const active = survivors[electedSurvivorIndex];
+  if (!active) {
+    throw new Error("Elected survivor index out of range.");
+  }
+
+  return {
+    activeRuleArtifactHash: active.compiledArtifactHash,
+    activeRuleHash: active.sanitizedTextHash,
+    activeRuleId: active.ruleId,
+    electedSurvivorIndex,
   };
 }
 

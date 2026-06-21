@@ -1,6 +1,6 @@
 # Product Rule Summary
 
-This document summarizes the product rules that must remain stable during MVP implementation. It is derived from `PRD.md` version 1.3.4 and is part of milestone `M0.1 - PRD Baseline`.
+This document summarizes the product rules that must remain stable during MVP implementation. It is derived from `PRD.md` version 1.5.0 and is part of milestone `M0.1 - PRD Baseline`.
 
 ## Core Product Position
 
@@ -53,6 +53,11 @@ The current-turn Game Token is an on-chain PDA issued by `submit_guess`. It is r
 - Selection must use ranged VRF output or rejection sampling, not raw modulo reduction.
 - Deterministic fallback finalist activation is disallowed.
 - Finalists must be precompiled before election.
+- After the finalist set is locked, a fixed 1-hour decision/elimination window opens.
+- Game Token holders may cast one elimination vote per finalist rule during that window.
+- A finalist is eliminated when elimination votes exceed its frozen approval votes.
+- At most 5 finalists can be eliminated, ties broken by most elimination votes, then fewest approval votes, then lowest rule id.
+- The active rule is selected by a separate active-election VRF over survivors only.
 
 ## Paid Rule Removal
 
@@ -63,11 +68,13 @@ Paid rule removal is included in MVP. The removal fee destination is fixed to th
 - Default MVP/testnet guess submission fee: `0.01 SOL`.
 - Default MVP/testnet rule proposal fee: `0.02 SOL`.
 - Default MVP/testnet paid rule removal fee: `0.05 SOL`.
-- Vote fee: `0 SOL`.
+- Vote fee: `0 SOL` before turn 100; `0.005 SOL` from turn 100 onward, paid into the current turn prize pool.
+- Elimination vote fee: 2x the effective vote fee, therefore free before turn 100 and `0.01 SOL` from turn 100 onward.
 - Report fee: `0 SOL`.
 - Default treasury fee: `500 bps`.
 - Active rule creator reward: 15% of each individual alternative-rule winner payout.
 - Creator rewards are funded from the creator reward reserve sourced from platform monetization and must not reduce winner-visible payouts.
+- Elected-rule voter reward: 15% of a single individual alternative-rule winner payout, split equally among the elected rule's voters and funded from the creator reward reserve under its own cap.
 - MVP reserves 20% of platform monetization for the creator reward reserve.
 - Default creator reward cap: `0.25 SOL` per turn.
 - Default minimum claim threshold: `0.005 SOL`.

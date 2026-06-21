@@ -74,7 +74,28 @@ interface RoundSummary {
     topVotedFinalistHash: string;
     topVotedRuleIds: number[];
   } | null;
+  elimination: {
+    closedAt: string | null;
+    decisionWindowClosesAt: string | null;
+    decisionWindowOpenedAt: string | null;
+    eliminatedFinalistHash: string;
+    eliminatedRuleIds: number[];
+    finalists: Array<{
+      approvalVotes: number;
+      eliminated: boolean;
+      eliminationVotes: number;
+      ruleId: number;
+      status: "eliminated" | "survived";
+      threshold: number;
+    }>;
+    status: "closed" | "not_started" | "open";
+    survivorFinalistHash: string;
+    survivorRuleIds: number[];
+    turnId: number;
+  };
   pool: {
+    eliminationVoteFeeSol?: number;
+    eliminationVoteFees?: number;
     guessSol: number;
     guesses: number;
     indicativeSol: number;
@@ -651,6 +672,83 @@ export function RoundPage({ turnId: rawTurnId }: { turnId: string }) {
                 </dl>
               </>
             )}
+          </section>
+
+          <section className="voting-summary round-election">
+            <p className="eyebrow">Decision window</p>
+            <h2>
+              {round.elimination.status === "closed"
+                ? "Elimination decision closed"
+                : round.elimination.status === "open"
+                  ? "Elimination voting open"
+                  : "Elimination not started"}
+            </h2>
+            <p>
+              Finalists can be voted out when elimination votes pass their
+              frozen approval votes. At most five finalists can be eliminated,
+              and the active rule is selected only from survivors.
+            </p>
+            <dl className="round-stat-grid">
+              <div>
+                <dt>Eliminated</dt>
+                <dd>
+                  {round.elimination.eliminatedRuleIds.length > 0
+                    ? round.elimination.eliminatedRuleIds
+                        .map((ruleId) => `#${ruleId}`)
+                        .join(", ")
+                    : "None"}
+                </dd>
+              </div>
+              <div>
+                <dt>Survivors</dt>
+                <dd>
+                  {round.elimination.survivorRuleIds.length > 0
+                    ? round.elimination.survivorRuleIds
+                        .map((ruleId) => `#${ruleId}`)
+                        .join(", ")
+                    : "Pending"}
+                </dd>
+              </div>
+              <div>
+                <dt>Elimination vote fees</dt>
+                <dd>
+                  {(round.pool.eliminationVoteFeeSol ?? 0).toFixed(4)} SOL (
+                  {round.pool.eliminationVoteFees ?? 0})
+                </dd>
+              </div>
+              <div>
+                <dt>Eliminated set hash</dt>
+                <dd>
+                  <code>
+                    {truncateHash(round.elimination.eliminatedFinalistHash)}
+                  </code>
+                </dd>
+              </div>
+              <div>
+                <dt>Survivor set hash</dt>
+                <dd>
+                  <code>
+                    {truncateHash(round.elimination.survivorFinalistHash)}
+                  </code>
+                </dd>
+              </div>
+            </dl>
+            {round.elimination.finalists.length > 0 ? (
+              <ul className="round-elimination-list">
+                {round.elimination.finalists.map((finalist) => (
+                  <li key={finalist.ruleId}>
+                    <strong>#{finalist.ruleId}</strong>
+                    <span>
+                      {finalist.approvalVotes} approval /{" "}
+                      {finalist.eliminationVotes} elimination
+                    </span>
+                    <span>
+                      threshold {finalist.threshold} · {finalist.status}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </section>
 
           <section className="rule-voting-list" aria-label="Round rules">

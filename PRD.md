@@ -6294,7 +6294,7 @@ This section replaces the former open questions list. The following decisions ar
 20. Optional local observability containers (`idealer-prometheus`, `idealer-grafana`) are included under a separate Docker Compose observability profile, not in the default required local stack.
 21. M9 Mainnet Readiness Gates are mandatory before M6 can process any real SOL payment, payout, claim, treasury transfer, or creator reward on mainnet.
 22. Launch-blocking metrics are the M9 approval gates plus the M6/M7 approval criteria for mobile reliability, turn automation, job completion, claims, abuse visibility, and payout/accounting reconciliation.
-23. Default MVP/devnet fees are: guess submission `0.01 SOL`, rule proposal `0.02 SOL`, paid rule removal `0.05 SOL`, vote `0 SOL`, and report `0 SOL`, with `treasuryFeeBps = 500`.
+23. Default MVP/devnet fees are: guess submission `0.01 SOL`, rule proposal `0.02 SOL`, paid rule removal `0.05 SOL`, vote `0 SOL` before turn 100 and `0.005 SOL` from turn 100 onward, elimination vote `2×` the effective vote fee, and report `0 SOL`, with `treasuryFeeBps = 500`.
 24. The default creator reward cap is `0.25 SOL` per turn, with 20% of platform monetization reserved for the creator reward reserve.
 25. The default minimum claim threshold is `0.005 SOL`; payouts below this threshold roll over to the same category bucket.
 26. The default claim window is `12` turns or `7` days, whichever happens first; expired unclaimed payouts roll over to the same category bucket.

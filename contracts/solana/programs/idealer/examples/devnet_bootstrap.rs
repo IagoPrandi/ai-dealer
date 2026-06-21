@@ -124,6 +124,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     guess_submission_fee_lamports: 10_000_000,
                     rule_proposal_fee_lamports: 20_000_000,
                     rule_removal_fee_lamports: 50_000_000,
+                    vote_fee_lamports: 5_000_000,
                     treasury_fee_bps: 500,
                     turn_duration_cycle,
                     rule_election_cutoff_bps: 7_500,

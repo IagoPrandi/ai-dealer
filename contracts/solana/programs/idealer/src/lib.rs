@@ -14,11 +14,15 @@ pub mod domain;
 use domain::{
     derive_draw_numbers, next_cycle_index, run_rule_election, split_fee, validate_action_window,
     validate_config, validate_guess, validate_rule, ConfigValidation, ElectionCandidate,
+    VOTE_FEE_START_TURN,
 };
+use solana_sha256_hasher::hash;
 
 declare_id!("6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4");
 
 pub const TURN_DURATION_CYCLE_LEN: usize = 4;
+pub const MAX_FINALISTS: usize = 10;
+pub const ELIMINATION_WINDOW_SECONDS: i64 = 3_600;
 pub const MAX_RULE_TEXT_BYTES: usize = 6000;
 pub const BASIS_POINTS_DENOMINATOR: u16 = 10_000;
 
@@ -57,6 +61,7 @@ pub mod idealer {
         config.guess_submission_fee_lamports = args.guess_submission_fee_lamports;
         config.rule_proposal_fee_lamports = args.rule_proposal_fee_lamports;
         config.rule_removal_fee_lamports = args.rule_removal_fee_lamports;
+        config.vote_fee_lamports = args.vote_fee_lamports;
         config.treasury_fee_bps = args.treasury_fee_bps;
         config.turn_duration_cycle = args.turn_duration_cycle;
         config.active_turn_duration_index = 0;
@@ -124,9 +129,21 @@ pub mod idealer {
         turn.top_voted_finalist_hash = [0; 32];
         turn.random_finalist_hash = [0; 32];
         turn.finalist_set_hash = [0; 32];
+        turn.finalist_count = 0;
+        turn.finalist_rule_ids = [0; MAX_FINALISTS];
+        turn.finalist_approval_vote_counts = [0; MAX_FINALISTS];
+        turn.finalist_elimination_vote_counts = [0; MAX_FINALISTS];
+        turn.finalist_eliminated = [false; MAX_FINALISTS];
+        turn.eliminated_finalist_hash = [0; 32];
+        turn.survivor_finalist_hash = [0; 32];
+        turn.elimination_window_start_timestamp = 0;
+        turn.elimination_window_end_timestamp = 0;
         turn.election_vrf_request = Pubkey::default();
         turn.election_vrf_fulfillment = Pubkey::default();
         turn.elected_finalist_index = 0;
+        turn.active_election_vrf_request = Pubkey::default();
+        turn.active_election_vrf_fulfillment = Pubkey::default();
+        turn.elected_survivor_index = 0;
         turn.draw_status = DrawStatus::NotRequested;
         turn.draw_vrf_request = Pubkey::default();
         turn.draw_vrf_fulfillment = Pubkey::default();
@@ -554,19 +571,31 @@ pub mod idealer {
         turn.top_voted_finalist_hash = result.top_voted_finalist_hash;
         turn.random_finalist_hash = result.random_finalist_hash;
         turn.finalist_set_hash = result.finalist_set_hash;
-        turn.election_vrf_fulfillment = args.randomness_source;
-        turn.elected_finalist_index = result.elected_finalist_index;
-
-        if let Some(active_rule_id) = result.active_rule_id {
-            turn.active_rule_id = active_rule_id;
-            turn.active_rule_hash = result.active_rule_hash;
-            turn.frozen_rule_artifact_hash = result.active_rule_artifact_hash;
-        } else {
-            turn.active_rule_id = 0;
-            turn.active_rule_hash = [0; 32];
-            turn.frozen_rule_artifact_hash = [0; 32];
-            turn.elected_finalist_index = 0;
+        turn.finalist_count = result.finalist_rule_ids.len() as u8;
+        turn.finalist_rule_ids = [0; MAX_FINALISTS];
+        turn.finalist_approval_vote_counts = [0; MAX_FINALISTS];
+        turn.finalist_elimination_vote_counts = [0; MAX_FINALISTS];
+        turn.finalist_eliminated = [false; MAX_FINALISTS];
+        for (index, rule_id) in result.finalist_rule_ids.iter().enumerate() {
+            require!(index < MAX_FINALISTS, IdealerError::InvalidFinalistCounts);
+            let candidate = candidates
+                .iter()
+                .find(|candidate| candidate.rule_id == *rule_id)
+                .ok_or(IdealerError::InvalidTurnId)?;
+            turn.finalist_rule_ids[index] = *rule_id;
+            turn.finalist_approval_vote_counts[index] = candidate.vote_count;
         }
+        let clock = Clock::get()?;
+        turn.elimination_window_start_timestamp = clock.unix_timestamp;
+        turn.elimination_window_end_timestamp = clock
+            .unix_timestamp
+            .checked_add(ELIMINATION_WINDOW_SECONDS)
+            .ok_or(IdealerError::ArithmeticOverflow)?;
+        turn.election_vrf_fulfillment = args.randomness_source;
+        turn.elected_finalist_index = 0;
+        turn.active_rule_id = 0;
+        turn.active_rule_hash = [0; 32];
+        turn.frozen_rule_artifact_hash = [0; 32];
 
         emit!(RuleElectionSettled {
             turn_id: turn.turn_id,
@@ -575,6 +604,236 @@ pub mod idealer {
             top_voted_finalist_hash: turn.top_voted_finalist_hash,
             random_finalist_hash: turn.random_finalist_hash,
             finalist_set_hash: turn.finalist_set_hash,
+            randomness_source: args.randomness_source,
+        });
+        Ok(())
+    }
+
+    pub fn eliminate_vote_rule(ctx: Context<EliminateVoteRule>) -> Result<()> {
+        let clock = Clock::get()?;
+        let config = &ctx.accounts.global_config;
+        validate_live_turn(config, &ctx.accounts.turn_state)?;
+        validate_game_token(
+            &ctx.accounts.game_token,
+            ctx.accounts.turn_state.turn_id,
+            ctx.accounts.voter.key(),
+        )?;
+        require!(
+            ctx.accounts.turn_state.finalist_count > 0
+                && ctx.accounts.turn_state.elimination_window_start_timestamp > 0,
+            IdealerError::EliminationWindowNotOpen
+        );
+        require!(
+            clock.unix_timestamp >= ctx.accounts.turn_state.elimination_window_start_timestamp
+                && clock.unix_timestamp < ctx.accounts.turn_state.elimination_window_end_timestamp,
+            IdealerError::EliminationWindowNotOpen
+        );
+        let index = finalist_index(
+            &ctx.accounts.turn_state,
+            ctx.accounts.rule_proposal.rule_id,
+        )
+        .ok_or(IdealerError::RuleNotFinalist)?;
+        require!(
+            !ctx.accounts.turn_state.finalist_eliminated[index],
+            IdealerError::RuleAlreadyEliminated
+        );
+
+        let fee = effective_vote_fee_lamports(config, ctx.accounts.turn_state.turn_id)
+            .checked_mul(2)
+            .ok_or(IdealerError::ArithmeticOverflow)?;
+        collect_prize_pool_fee(
+            &ctx.accounts.voter,
+            &ctx.accounts.prize_vault,
+            &ctx.accounts.system_program,
+            fee,
+        )?;
+
+        let vote = &mut ctx.accounts.rule_elimination_vote;
+        vote.turn_id = ctx.accounts.turn_state.turn_id;
+        vote.rule_id = ctx.accounts.rule_proposal.rule_id;
+        vote.voter = ctx.accounts.voter.key();
+        vote.created_at = clock.unix_timestamp;
+        vote.bump = ctx.bumps.rule_elimination_vote;
+
+        let turn = &mut ctx.accounts.turn_state;
+        turn.finalist_elimination_vote_counts[index] = turn.finalist_elimination_vote_counts[index]
+            .checked_add(1)
+            .ok_or(IdealerError::ArithmeticOverflow)?;
+        turn.prize_pool_amount_lamports = turn
+            .prize_pool_amount_lamports
+            .checked_add(fee)
+            .ok_or(IdealerError::ArithmeticOverflow)?;
+        ctx.accounts.prize_vault.total_collected_lamports = ctx
+            .accounts
+            .prize_vault
+            .total_collected_lamports
+            .checked_add(fee)
+            .ok_or(IdealerError::ArithmeticOverflow)?;
+
+        emit!(RuleEliminationVoteCast {
+            turn_id: vote.turn_id,
+            rule_id: vote.rule_id,
+            voter: vote.voter,
+            fee_lamports: fee,
+        });
+        Ok(())
+    }
+
+    pub fn close_elimination_window(ctx: Context<CloseEliminationWindow>) -> Result<()> {
+        let clock = Clock::get()?;
+        let config = &ctx.accounts.global_config;
+        validate_live_turn(config, &ctx.accounts.turn_state)?;
+        require!(
+            ctx.accounts.turn_state.finalist_count > 0
+                && ctx.accounts.turn_state.elimination_window_end_timestamp > 0,
+            IdealerError::EliminationWindowNotOpen
+        );
+        require!(
+            clock.unix_timestamp >= ctx.accounts.turn_state.elimination_window_end_timestamp,
+            IdealerError::EliminationWindowNotClosed
+        );
+
+        let turn = &mut ctx.accounts.turn_state;
+        let finalist_count = usize::from(turn.finalist_count);
+        let mut qualified: Vec<usize> = (0..finalist_count)
+            .filter(|index| {
+                turn.finalist_elimination_vote_counts[*index]
+                    > turn.finalist_approval_vote_counts[*index]
+            })
+            .collect();
+        qualified.sort_by(|left, right| {
+            turn.finalist_elimination_vote_counts[*right]
+                .cmp(&turn.finalist_elimination_vote_counts[*left])
+                .then_with(|| {
+                    turn.finalist_approval_vote_counts[*left]
+                        .cmp(&turn.finalist_approval_vote_counts[*right])
+                })
+                .then_with(|| turn.finalist_rule_ids[*left].cmp(&turn.finalist_rule_ids[*right]))
+        });
+        let max_eliminations = 5usize.min(finalist_count.saturating_sub(1));
+        for index in qualified.into_iter().take(max_eliminations) {
+            turn.finalist_eliminated[index] = true;
+        }
+
+        let survivors: Vec<u64> = (0..finalist_count)
+            .filter(|index| !turn.finalist_eliminated[*index])
+            .map(|index| turn.finalist_rule_ids[index])
+            .collect();
+        require!(!survivors.is_empty(), IdealerError::NoSurvivingFinalist);
+        turn.eliminated_finalist_hash = hash_elimination_state(turn);
+        turn.survivor_finalist_hash = hash_rule_ids(b"survivor_finalists_v1", &survivors);
+
+        for account_info in ctx.remaining_accounts {
+            if *account_info.owner != ID || !account_info.is_writable {
+                continue;
+            }
+            let mut data = account_info.try_borrow_mut_data()?;
+            let mut data_ref: &[u8] = &data;
+            let mut proposal = RuleProposal::try_deserialize(&mut data_ref)?;
+            if let Some(index) = finalist_index(turn, proposal.rule_id) {
+                proposal.state = if turn.finalist_eliminated[index] {
+                    RuleState::Eliminated
+                } else {
+                    RuleState::SurvivedElimination
+                };
+                let mut output: &mut [u8] = &mut data;
+                proposal.try_serialize(&mut output)?;
+            }
+        }
+
+        emit!(EliminationWindowClosed {
+            turn_id: turn.turn_id,
+            eliminated_finalist_hash: turn.eliminated_finalist_hash,
+            survivor_finalist_hash: turn.survivor_finalist_hash,
+        });
+        Ok(())
+    }
+
+    pub fn request_active_election_vrf(
+        ctx: Context<RequestActiveElectionVrf>,
+        randomness_account: Pubkey,
+    ) -> Result<()> {
+        let config = &ctx.accounts.global_config;
+        validate_live_turn(config, &ctx.accounts.turn_state)?;
+        require!(
+            randomness_account != Pubkey::default(),
+            IdealerError::InvalidRandomnessAccount
+        );
+        require!(
+            ctx.accounts.turn_state.survivor_finalist_hash != [0; 32],
+            IdealerError::EliminationWindowNotClosed
+        );
+        require!(
+            ctx.accounts.turn_state.active_election_vrf_request == Pubkey::default(),
+            IdealerError::ElectionVrfAlreadyRequested
+        );
+
+        ctx.accounts.turn_state.active_election_vrf_request = randomness_account;
+        emit!(ActiveElectionVrfRequested {
+            turn_id: ctx.accounts.turn_state.turn_id,
+            randomness_account,
+        });
+        Ok(())
+    }
+
+    pub fn settle_active_election(
+        ctx: Context<SettleActiveElection>,
+        args: SettleRuleElectionArgs,
+    ) -> Result<()> {
+        let config = &ctx.accounts.global_config;
+        validate_live_turn(config, &ctx.accounts.turn_state)?;
+        require!(
+            ctx.accounts.turn_state.active_election_vrf_request != Pubkey::default(),
+            IdealerError::ElectionVrfNotRequested
+        );
+        require!(
+            args.randomness_source == ctx.accounts.turn_state.active_election_vrf_request,
+            IdealerError::RandomnessSourceMismatch
+        );
+
+        let turn = &mut ctx.accounts.turn_state;
+        let finalist_count = usize::from(turn.finalist_count);
+        let survivors: Vec<u64> = (0..finalist_count)
+            .filter(|index| !turn.finalist_eliminated[*index])
+            .map(|index| turn.finalist_rule_ids[index])
+            .collect();
+        let survivor_index =
+            derive_active_survivor_index(&args.randomness, turn.turn_id, survivors.len())?;
+        let active_rule_id = survivors[survivor_index];
+        let active_proposal_info = ctx
+            .remaining_accounts
+            .iter()
+            .find(|account_info| {
+                if *account_info.owner != ID {
+                    return false;
+                }
+                let Ok(data) = account_info.try_borrow_data() else {
+                    return false;
+                };
+                let mut data_ref: &[u8] = &data;
+                RuleProposal::try_deserialize(&mut data_ref)
+                    .map(|proposal| {
+                        proposal.turn_id == turn.turn_id && proposal.rule_id == active_rule_id
+                    })
+                    .unwrap_or(false)
+            })
+            .ok_or(IdealerError::RuleNotFinalist)?;
+        let data = active_proposal_info.try_borrow_data()?;
+        let mut data_ref: &[u8] = &data;
+        let active = RuleProposal::try_deserialize(&mut data_ref)?;
+
+        turn.active_rule_id = active_rule_id;
+        turn.active_rule_hash = active.sanitized_text_hash;
+        turn.frozen_rule_artifact_hash = active.compiled_artifact_hash;
+        turn.active_election_vrf_fulfillment = args.randomness_source;
+        turn.elected_survivor_index = survivor_index as u8;
+        turn.elected_finalist_index =
+            finalist_index(turn, active_rule_id).ok_or(IdealerError::RuleNotFinalist)? as u8;
+
+        emit!(ActiveElectionSettled {
+            turn_id: turn.turn_id,
+            active_rule_id,
+            elected_survivor_index: turn.elected_survivor_index,
             randomness_source: args.randomness_source,
         });
         Ok(())
@@ -781,6 +1040,85 @@ fn validate_game_token(game_token: &GameToken, turn_id: u64, player: Pubkey) -> 
     Ok(())
 }
 
+fn effective_vote_fee_lamports(config: &GlobalConfig, turn_id: u64) -> u64 {
+    if turn_id >= VOTE_FEE_START_TURN {
+        config.vote_fee_lamports
+    } else {
+        0
+    }
+}
+
+fn collect_prize_pool_fee<'info>(
+    payer: &Signer<'info>,
+    prize_vault: &Account<'info, PrizeVault>,
+    system_program: &Program<'info, System>,
+    fee_lamports: u64,
+) -> Result<()> {
+    if fee_lamports == 0 {
+        return Ok(());
+    }
+
+    system_program::transfer(
+        CpiContext::new(
+            system_program.to_account_info(),
+            Transfer {
+                from: payer.to_account_info(),
+                to: prize_vault.to_account_info(),
+            },
+        ),
+        fee_lamports,
+    )?;
+    Ok(())
+}
+
+fn finalist_index(turn: &TurnState, rule_id: u64) -> Option<usize> {
+    turn.finalist_rule_ids[..usize::from(turn.finalist_count)]
+        .iter()
+        .position(|candidate_rule_id| *candidate_rule_id == rule_id)
+}
+
+fn hash_rule_ids(domain: &[u8], rule_ids: &[u64]) -> [u8; 32] {
+    let mut input = Vec::with_capacity(domain.len() + 8 + rule_ids.len() * 8);
+    input.extend_from_slice(domain);
+    input.extend_from_slice(&(rule_ids.len() as u64).to_le_bytes());
+    for rule_id in rule_ids {
+        input.extend_from_slice(&rule_id.to_le_bytes());
+    }
+    hash(&input).to_bytes()
+}
+
+fn hash_elimination_state(turn: &TurnState) -> [u8; 32] {
+    let count = usize::from(turn.finalist_count);
+    let mut input = Vec::with_capacity(24 + count * 17);
+    input.extend_from_slice(b"eliminated_finalists_v1");
+    input.extend_from_slice(&(count as u64).to_le_bytes());
+    for index in 0..count {
+        input.extend_from_slice(&turn.finalist_rule_ids[index].to_le_bytes());
+        input.extend_from_slice(&turn.finalist_approval_vote_counts[index].to_le_bytes());
+        input.extend_from_slice(&turn.finalist_elimination_vote_counts[index].to_le_bytes());
+        input.push(u8::from(turn.finalist_eliminated[index]));
+    }
+    hash(&input).to_bytes()
+}
+
+fn derive_active_survivor_index(
+    randomness: &[u8; 32],
+    turn_id: u64,
+    survivor_count: usize,
+) -> Result<usize> {
+    require!(survivor_count > 0, IdealerError::NoSurvivingFinalist);
+    let digest = hash(&[
+        randomness.as_slice(),
+        &turn_id.to_le_bytes(),
+        b"active_survivor_v1",
+    ]
+    .concat())
+    .to_bytes();
+    let mut bytes = [0u8; 8];
+    bytes.copy_from_slice(&digest[..8]);
+    Ok((u64::from_le_bytes(bytes) % survivor_count as u64) as usize)
+}
+
 fn require_election_cutoff_reached(config: &GlobalConfig, turn: &TurnState) -> Result<()> {
     validate_live_turn(config, turn)?;
     let clock = Clock::get()?;
@@ -874,6 +1212,7 @@ pub struct InitializeGlobalConfigArgs {
     pub guess_submission_fee_lamports: u64,
     pub rule_proposal_fee_lamports: u64,
     pub rule_removal_fee_lamports: u64,
+    pub vote_fee_lamports: u64,
     pub treasury_fee_bps: u16,
     pub turn_duration_cycle: [u32; TURN_DURATION_CYCLE_LEN],
     pub rule_election_cutoff_bps: u16,
@@ -1164,6 +1503,65 @@ pub struct VoteRule<'info> {
 }
 
 #[derive(Accounts)]
+pub struct EliminateVoteRule<'info> {
+    #[account(mut)]
+    pub voter: Signer<'info>,
+    #[account(seeds = [b"global_config"], bump = global_config.bump)]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        mut,
+        seeds = [b"turn".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
+        bump = turn_state.bump
+    )]
+    pub turn_state: Box<Account<'info, TurnState>>,
+    #[account(
+        seeds = [
+            b"game_token".as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref(),
+            voter.key().as_ref()
+        ],
+        bump = game_token.bump,
+        constraint = game_token.player == voter.key() @ IdealerError::InvalidGameToken,
+        constraint = game_token.turn_id == turn_state.turn_id @ IdealerError::InvalidGameToken
+    )]
+    pub game_token: Account<'info, GameToken>,
+    #[account(
+        seeds = [
+            b"rule".as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref(),
+            rule_proposal.rule_id.to_le_bytes().as_ref()
+        ],
+        bump = rule_proposal.bump,
+        constraint = rule_proposal.turn_id == turn_state.turn_id @ IdealerError::InvalidTurnId
+    )]
+    pub rule_proposal: Box<Account<'info, RuleProposal>>,
+    #[account(
+        init,
+        payer = voter,
+        space = 8 + RuleEliminationVote::INIT_SPACE,
+        seeds = [
+            b"elimination_vote".as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref(),
+            rule_proposal.rule_id.to_le_bytes().as_ref(),
+            voter.key().as_ref()
+        ],
+        bump
+    )]
+    pub rule_elimination_vote: Account<'info, RuleEliminationVote>,
+    #[account(
+        mut,
+        seeds = [
+            b"prize_vault".as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref()
+        ],
+        bump = prize_vault.bump,
+        constraint = prize_vault.turn_id == turn_state.turn_id @ IdealerError::InvalidTurnId
+    )]
+    pub prize_vault: Account<'info, PrizeVault>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
 pub struct PrecompileRule<'info> {
     pub authority: Signer<'info>,
     #[account(
@@ -1226,6 +1624,57 @@ pub struct RequestRuleElectionVrf<'info> {
 
 #[derive(Accounts)]
 pub struct SettleRuleElection<'info> {
+    pub authority: Signer<'info>,
+    #[account(
+        seeds = [b"global_config"],
+        bump = global_config.bump,
+        has_one = authority @ IdealerError::Unauthorized
+    )]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        mut,
+        seeds = [b"turn".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
+        bump = turn_state.bump
+    )]
+    pub turn_state: Box<Account<'info, TurnState>>,
+}
+
+#[derive(Accounts)]
+pub struct CloseEliminationWindow<'info> {
+    pub authority: Signer<'info>,
+    #[account(
+        seeds = [b"global_config"],
+        bump = global_config.bump,
+        has_one = authority @ IdealerError::Unauthorized
+    )]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        mut,
+        seeds = [b"turn".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
+        bump = turn_state.bump
+    )]
+    pub turn_state: Box<Account<'info, TurnState>>,
+}
+
+#[derive(Accounts)]
+pub struct RequestActiveElectionVrf<'info> {
+    pub authority: Signer<'info>,
+    #[account(
+        seeds = [b"global_config"],
+        bump = global_config.bump,
+        has_one = authority @ IdealerError::Unauthorized
+    )]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        mut,
+        seeds = [b"turn".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
+        bump = turn_state.bump
+    )]
+    pub turn_state: Box<Account<'info, TurnState>>,
+}
+
+#[derive(Accounts)]
+pub struct SettleActiveElection<'info> {
     pub authority: Signer<'info>,
     #[account(
         seeds = [b"global_config"],
@@ -1337,6 +1786,7 @@ pub struct GlobalConfig {
     pub guess_submission_fee_lamports: u64,
     pub rule_proposal_fee_lamports: u64,
     pub rule_removal_fee_lamports: u64,
+    pub vote_fee_lamports: u64,
     pub treasury_fee_bps: u16,
     pub turn_duration_cycle: [u32; TURN_DURATION_CYCLE_LEN],
     pub active_turn_duration_index: u8,
@@ -1378,9 +1828,21 @@ pub struct TurnState {
     pub top_voted_finalist_hash: [u8; 32],
     pub random_finalist_hash: [u8; 32],
     pub finalist_set_hash: [u8; 32],
+    pub finalist_count: u8,
+    pub finalist_rule_ids: [u64; MAX_FINALISTS],
+    pub finalist_approval_vote_counts: [u32; MAX_FINALISTS],
+    pub finalist_elimination_vote_counts: [u32; MAX_FINALISTS],
+    pub finalist_eliminated: [bool; MAX_FINALISTS],
+    pub eliminated_finalist_hash: [u8; 32],
+    pub survivor_finalist_hash: [u8; 32],
+    pub elimination_window_start_timestamp: i64,
+    pub elimination_window_end_timestamp: i64,
     pub election_vrf_request: Pubkey,
     pub election_vrf_fulfillment: Pubkey,
     pub elected_finalist_index: u8,
+    pub active_election_vrf_request: Pubkey,
+    pub active_election_vrf_fulfillment: Pubkey,
+    pub elected_survivor_index: u8,
     pub draw_status: DrawStatus,
     pub draw_vrf_request: Pubkey,
     pub draw_vrf_fulfillment: Pubkey,
@@ -1456,6 +1918,16 @@ pub struct RuleVote {
 
 #[account]
 #[derive(InitSpace)]
+pub struct RuleEliminationVote {
+    pub turn_id: u64,
+    pub rule_id: u64,
+    pub voter: Pubkey,
+    pub created_at: i64,
+    pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
 pub struct TreasuryVault {
     pub authority: Pubkey,
     pub total_collected_lamports: u64,
@@ -1508,6 +1980,8 @@ pub enum RuleState {
     Proposed,
     Eligible,
     Frozen,
+    Eliminated,
+    SurvivedElimination,
     Invalidated,
     Expired,
 }
@@ -1566,6 +2040,14 @@ pub struct RuleVoteCast {
 }
 
 #[event]
+pub struct RuleEliminationVoteCast {
+    pub turn_id: u64,
+    pub rule_id: u64,
+    pub voter: Pubkey,
+    pub fee_lamports: u64,
+}
+
+#[event]
 pub struct RulePrecompiled {
     pub turn_id: u64,
     pub rule_id: u64,
@@ -1584,6 +2066,27 @@ pub struct RuleElectionPoolLocked {
 pub struct RuleElectionVrfRequested {
     pub turn_id: u64,
     pub randomness_account: Pubkey,
+}
+
+#[event]
+pub struct EliminationWindowClosed {
+    pub turn_id: u64,
+    pub eliminated_finalist_hash: [u8; 32],
+    pub survivor_finalist_hash: [u8; 32],
+}
+
+#[event]
+pub struct ActiveElectionVrfRequested {
+    pub turn_id: u64,
+    pub randomness_account: Pubkey,
+}
+
+#[event]
+pub struct ActiveElectionSettled {
+    pub turn_id: u64,
+    pub active_rule_id: u64,
+    pub elected_survivor_index: u8,
+    pub randomness_source: Pubkey,
 }
 
 #[event]
@@ -1720,4 +2223,14 @@ pub enum IdealerError {
     ElectionPoolHashMismatch,
     #[msg("The election candidate list includes a duplicate rule.")]
     DuplicateElectionCandidate,
+    #[msg("The decision/elimination window is not open.")]
+    EliminationWindowNotOpen,
+    #[msg("The decision/elimination window has not closed yet.")]
+    EliminationWindowNotClosed,
+    #[msg("The rule is not in the locked finalist set.")]
+    RuleNotFinalist,
+    #[msg("The finalist was already eliminated.")]
+    RuleAlreadyEliminated,
+    #[msg("The finalist set has no surviving rule.")]
+    NoSurvivingFinalist,
 }
