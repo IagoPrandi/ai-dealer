@@ -469,6 +469,111 @@ pub mod idealer {
         Ok(())
     }
 
+    pub fn remove_rule(ctx: Context<RemoveRule>) -> Result<()> {
+        let clock = Clock::get()?;
+        let config = &ctx.accounts.global_config;
+        validate_live_turn(config, &ctx.accounts.turn_state)?;
+        // Paid removal is only allowed while the turn is open and BEFORE the
+        // eligible rule pool is locked (PRD §6.11). Once the pool is locked the
+        // rule may already be a finalist, so paid player removal is closed.
+        require!(
+            ctx.accounts.turn_state.eligible_rule_pool_hash == [0; 32],
+            IdealerError::RuleRemovalWindowClosed
+        );
+        validate_game_token(
+            &ctx.accounts.game_token,
+            ctx.accounts.turn_state.turn_id,
+            ctx.accounts.remover.key(),
+        )?;
+        // Only still-live proposals can be removed by paid action. Finalist,
+        // elected, frozen, eliminated, survived, invalidated, expired, and
+        // already-removed rules are protected.
+        require!(
+            matches!(
+                ctx.accounts.rule_proposal.state,
+                RuleState::Proposed | RuleState::Eligible
+            ),
+            IdealerError::RuleNotRemovable
+        );
+
+        // Differentiated vote protection: the creator cannot self-remove a rule
+        // that already has community momentum, and third parties have an even
+        // higher threshold (PRD §6.11 / RULE_REMOVAL_CONFIG).
+        let is_creator = ctx.accounts.rule_proposal.proposer == ctx.accounts.remover.key();
+        let threshold = if is_creator {
+            config.min_votes_creator_self_remove
+        } else {
+            config.min_votes_third_party_remove
+        };
+        require!(
+            ctx.accounts.rule_proposal.vote_count < threshold,
+            IdealerError::RuleRemovalProtected
+        );
+
+        // The removal fee is routed to the current turn prize pool, retaining the
+        // standard protocol treasury fee like every other prize-pool source
+        // (PRD §2.5 / §6.11 "follows normal treasury/prize-pool accounting").
+        let fee = config.rule_removal_fee_lamports;
+        collect_fee(
+            &ctx.accounts.remover,
+            &ctx.accounts.treasury_vault,
+            &ctx.accounts.prize_vault,
+            &ctx.accounts.system_program,
+            fee,
+            config.treasury_fee_bps,
+        )?;
+        let (treasury_amount, prize_amount) = split_fee(fee, config.treasury_fee_bps)?;
+
+        let removal_kind = if is_creator {
+            RuleRemovalKind::CreatorSelf
+        } else {
+            RuleRemovalKind::ThirdParty
+        };
+        let vote_count_at_removal = ctx.accounts.rule_proposal.vote_count;
+
+        let removal = &mut ctx.accounts.rule_removal;
+        removal.turn_id = ctx.accounts.turn_state.turn_id;
+        removal.rule_id = ctx.accounts.rule_proposal.rule_id;
+        removal.remover = ctx.accounts.remover.key();
+        removal.removal_kind = removal_kind;
+        removal.fee_lamports = fee;
+        removal.vote_count_at_removal = vote_count_at_removal;
+        removal.removed_at = clock.unix_timestamp;
+        removal.bump = ctx.bumps.rule_removal;
+
+        // Status change only — historical data is preserved (PRD §6.11).
+        ctx.accounts.rule_proposal.state = RuleState::RemovedPaid;
+
+        ctx.accounts.treasury_vault.total_collected_lamports = ctx
+            .accounts
+            .treasury_vault
+            .total_collected_lamports
+            .checked_add(treasury_amount)
+            .ok_or(IdealerError::ArithmeticOverflow)?;
+        ctx.accounts.prize_vault.total_collected_lamports = ctx
+            .accounts
+            .prize_vault
+            .total_collected_lamports
+            .checked_add(prize_amount)
+            .ok_or(IdealerError::ArithmeticOverflow)?;
+        ctx.accounts.turn_state.prize_pool_amount_lamports = ctx
+            .accounts
+            .turn_state
+            .prize_pool_amount_lamports
+            .checked_add(prize_amount)
+            .ok_or(IdealerError::ArithmeticOverflow)?;
+
+        emit!(RuleRemoved {
+            turn_id: removal.turn_id,
+            rule_id: removal.rule_id,
+            remover: removal.remover,
+            removal_kind,
+            fee_lamports: fee,
+            vote_count_at_removal,
+        });
+        Ok(())
+    }
+
     pub fn precompile_rule(ctx: Context<PrecompileRule>, args: PrecompileRuleArgs) -> Result<()> {
         let clock = Clock::get()?;
         let config = &ctx.accounts.global_config;
@@ -1529,6 +1634,68 @@ pub struct VoteRule<'info> {
 }
 
 #[derive(Accounts)]
+pub struct RemoveRule<'info> {
+    #[account(mut)]
+    pub remover: Signer<'info>,
+    #[account(seeds = [b"global_config"], bump = global_config.bump)]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        mut,
+        seeds = [b"turn".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
+        bump = turn_state.bump
+    )]
+    pub turn_state: Box<Account<'info, TurnState>>,
+    #[account(
+        seeds = [
+            b"game_token".as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref(),
+            remover.key().as_ref()
+        ],
+        bump = game_token.bump,
+        constraint = game_token.player == remover.key() @ IdealerError::InvalidGameToken,
+        constraint = game_token.turn_id == turn_state.turn_id @ IdealerError::InvalidGameToken
+    )]
+    pub game_token: Account<'info, GameToken>,
+    #[account(
+        mut,
+        seeds = [
+            b"rule".as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref(),
+            rule_proposal.rule_id.to_le_bytes().as_ref()
+        ],
+        bump = rule_proposal.bump,
+        constraint = rule_proposal.turn_id == turn_state.turn_id @ IdealerError::InvalidTurnId
+    )]
+    pub rule_proposal: Box<Account<'info, RuleProposal>>,
+    #[account(
+        init,
+        payer = remover,
+        space = 8 + RuleRemoval::INIT_SPACE,
+        seeds = [
+            b"rule_removal".as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref(),
+            rule_proposal.rule_id.to_le_bytes().as_ref(),
+            remover.key().as_ref()
+        ],
+        bump
+    )]
+    pub rule_removal: Account<'info, RuleRemoval>,
+    #[account(mut, seeds = [b"treasury_vault"], bump = treasury_vault.bump)]
+    pub treasury_vault: Account<'info, TreasuryVault>,
+    #[account(
+        mut,
+        seeds = [
+            b"prize_vault".as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref()
+        ],
+        bump = prize_vault.bump,
+        constraint = prize_vault.turn_id == turn_state.turn_id @ IdealerError::InvalidTurnId
+    )]
+    pub prize_vault: Account<'info, PrizeVault>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
 pub struct EliminateVoteRule<'info> {
     #[account(mut)]
     pub voter: Signer<'info>,
@@ -1954,6 +2121,19 @@ pub struct RuleEliminationVote {
 
 #[account]
 #[derive(InitSpace)]
+pub struct RuleRemoval {
+    pub turn_id: u64,
+    pub rule_id: u64,
+    pub remover: Pubkey,
+    pub removal_kind: RuleRemovalKind,
+    pub fee_lamports: u64,
+    pub vote_count_at_removal: u32,
+    pub removed_at: i64,
+    pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
 pub struct TreasuryVault {
     pub authority: Pubkey,
     pub total_collected_lamports: u64,
@@ -2010,6 +2190,13 @@ pub enum RuleState {
     SurvivedElimination,
     Invalidated,
     Expired,
+    RemovedPaid,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, InitSpace, PartialEq, Eq)]
+pub enum RuleRemovalKind {
+    CreatorSelf,
+    ThirdParty,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, InitSpace, PartialEq, Eq)]
@@ -2063,6 +2250,16 @@ pub struct RuleVoteCast {
     pub turn_id: u64,
     pub rule_id: u64,
     pub voter: Pubkey,
+}
+
+#[event]
+pub struct RuleRemoved {
+    pub turn_id: u64,
+    pub rule_id: u64,
+    pub remover: Pubkey,
+    pub removal_kind: RuleRemovalKind,
+    pub fee_lamports: u64,
+    pub vote_count_at_removal: u32,
 }
 
 #[event]
@@ -2259,4 +2456,10 @@ pub enum IdealerError {
     RuleAlreadyEliminated,
     #[msg("The finalist set has no surviving rule.")]
     NoSurvivingFinalist,
+    #[msg("Paid rule removal is closed once the eligible rule pool is locked.")]
+    RuleRemovalWindowClosed,
+    #[msg("The rule is not in a removable state.")]
+    RuleNotRemovable,
+    #[msg("The rule has too many votes to be removed by paid action.")]
+    RuleRemovalProtected,
 }

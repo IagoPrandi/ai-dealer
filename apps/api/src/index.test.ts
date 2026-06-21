@@ -14,16 +14,24 @@ import {
   getMandatedRuleSignatures,
   getPrizePoolAccounting,
   getRewardSummary,
+  getActivityEvents,
+  getRolloverActivityEvents,
   getRoundSummary,
+  getRuleRemovalActivityEvents,
   getRuleValidation,
+  getTurnRolloverSettlement,
+  isRuleRemoved,
   ruleSignature,
   getRuleElimination,
   listClaimRecords,
   listCreatorRewardRecords,
+  listPaidRuleRemovals,
   listRuleEliminationVotes,
   listVoterRewardRecords,
   listWinnerRecords,
   listAuditLogs,
+  removeRule,
+  RuleRemovalRejectedError,
   resetApiStateForTests,
   runRuleValidationForProposal,
   saveDraw,
@@ -36,6 +44,7 @@ import {
   saveRuleProposal,
   saveRuleVote,
   saveTurnRollover,
+  settleTurnRollover,
   requestClaimApproval,
   storeAuditLogInPostgres,
   toPostgresAuditLogRow,
@@ -503,6 +512,133 @@ test("winner calculation stores original and alternative winners with per-bucket
   assert.equal(summary.winners.records.length, 3);
   assert.equal(summary.winners.original.winnerCount, 2);
   assert.equal(summary.winners.alternative.winnerCount, 1);
+});
+
+function recordNoWinnerTurn(turnId: number, player: string) {
+  saveReceiptForWallet(turnId, player, [1, 2, 3, 4, 5, 6]);
+  saveFulfilledDraw(turnId);
+  const { jobs } = createGuessVerificationJobsForTurn(turnId);
+  const job = jobs[0];
+  assert.ok(job);
+  saveGuessVerificationResult(
+    resultForJob({
+      alternative: "NONE",
+      jobId: job.id,
+      original: "LOSE",
+      player,
+      resultByte: "a",
+      turnId,
+    }),
+  );
+}
+
+test("rollover settlement carries no-winner buckets forward and accumulates across repeated no-winner turns", () => {
+  resetApiStateForTests();
+
+  // Turn 300: a single guess, no winner in either bucket.
+  recordNoWinnerTurn(300, wallet);
+
+  const settlement300 = settleTurnRollover(300, "2026-06-12T12:18:00.000Z");
+
+  assert.equal(settlement300.turnId, 300);
+  assert.equal(settlement300.nextTurnId, 301);
+  assert.equal(settlement300.original.reason, "no_winner");
+  assert.equal(settlement300.alternative.reason, "no_winner");
+  assert.equal(settlement300.original.rolloverLamports, 4_750_000);
+  assert.equal(settlement300.alternative.rolloverLamports, 4_750_000);
+  assert.equal(settlement300.totalRolloverLamports, 9_500_000);
+
+  // The next turn now starts with the rolled-over buckets as inbound rollover.
+  const accounting301 = getPrizePoolAccounting(301);
+  assert.equal(accounting301.buckets.original.rolloverLamports, 4_750_000);
+  assert.equal(accounting301.buckets.alternative.rolloverLamports, 4_750_000);
+
+  // The spectator-feed event narrates the no-winner rollover.
+  const events300 = getRolloverActivityEvents(300);
+  assert.equal(events300.length, 2);
+  assert.deepEqual(
+    events300.map((event) => `${event.bucket}:${event.rolloverLamports}`),
+    ["original:4750000", "alternative:4750000"],
+  );
+  assert.ok(events300.every((event) => event.toTurnId === 301));
+
+  // Turn 301: another single guess, again no winner — the pool accumulates.
+  recordNoWinnerTurn(301, wallet);
+
+  const settlement301 = settleTurnRollover(301, "2026-06-12T14:18:00.000Z");
+
+  // 4,750,000 carried in + 4,750,000 from this turn = 9,500,000 per bucket.
+  assert.equal(settlement301.original.rolloverLamports, 9_500_000);
+  assert.equal(settlement301.alternative.rolloverLamports, 9_500_000);
+  assert.equal(settlement301.totalRolloverLamports, 19_000_000);
+  assert.equal(getPrizePoolAccounting(302).buckets.original.rolloverLamports, 9_500_000);
+});
+
+test("rollover settlement pays accumulated pool to a winner after rollover without rolling that bucket again", () => {
+  resetApiStateForTests();
+
+  // Turn 310: no winner, rolls 4,750,000 per bucket into turn 311.
+  recordNoWinnerTurn(310, wallet);
+  settleTurnRollover(310, "2026-06-12T12:18:00.000Z");
+
+  // Turn 311: two guesses, one wins both the original and alternative buckets.
+  saveReceiptForWallet(311, wallet, [1, 2, 3, 4, 5, 6]);
+  saveReceiptForWallet(311, walletTwo, [90, 91, 92, 93, 94, 95]);
+  saveFulfilledDraw(311);
+  const { jobs } = createGuessVerificationJobsForTurn(311);
+  const byPlayer = new Map(jobs.map((job) => [job.payload.wallet, job]));
+  const jobOne = byPlayer.get(wallet);
+  const jobTwo = byPlayer.get(walletTwo);
+  assert.ok(jobOne);
+  assert.ok(jobTwo);
+  saveGuessVerificationResult(
+    resultForJob({
+      alternative: "WIN",
+      jobId: jobOne.id,
+      original: "WIN",
+      player: wallet,
+      resultByte: "b",
+      turnId: 311,
+    }),
+  );
+  saveGuessVerificationResult(
+    resultForJob({
+      alternative: "LOSE",
+      jobId: jobTwo.id,
+      original: "LOSE",
+      player: walletTwo,
+      resultByte: "c",
+      turnId: 311,
+    }),
+  );
+
+  const winners = calculateAndStoreWinnerRecords(311, "2026-06-12T14:18:00.000Z");
+
+  // Current pool for 2 guesses is 9,500,000 per bucket; the 4,750,000 inbound
+  // rollover lifts each bucket total — and the single winner's payout — to
+  // 14,250,000.
+  assert.equal(winners.original.bucketLamports, 14_250_000);
+  assert.equal(winners.alternative.bucketLamports, 14_250_000);
+  assert.equal(winners.original.individualPayoutLamports, 14_250_000);
+  assert.equal(winners.alternative.individualPayoutLamports, 14_250_000);
+
+  const settlement311 = settleTurnRollover(311, "2026-06-12T14:20:00.000Z");
+
+  // Both buckets had a winner and divided evenly: nothing rolls over, and no
+  // "pool rolls over" event is surfaced.
+  assert.equal(settlement311.original.reason, "none");
+  assert.equal(settlement311.alternative.reason, "none");
+  assert.equal(settlement311.totalRolloverLamports, 0);
+  assert.equal(getRolloverActivityEvents(311).length, 0);
+
+  // Settlement is a pure read of winner state — it neither mutates winner
+  // payouts nor disturbs reward accounting (rewards are funded from a separate
+  // platform-monetization reserve).
+  const rewardsBefore = getRewardSummary(311);
+  settleTurnRollover(311, "2026-06-12T14:21:00.000Z");
+  const rewardsAfter = getRewardSummary(311);
+  assert.deepEqual(rewardsAfter, rewardsBefore);
+  assert.equal(getTurnRolloverSettlement(311)?.totalRolloverLamports, 0);
 });
 
 test("ranking alternative rule picks the best-score guesses as winners (ties share)", () => {
@@ -1048,4 +1184,161 @@ test("audit hashes detect tampering and map to PostgreSQL rows", async () => {
   assert.match(M3_7_POSTGRES_AUDIT_SCHEMA, /CREATE TABLE IF NOT EXISTS audit_logs/);
   assert.equal(queries.length, 1);
   assert.match(queries[0]?.text ?? "", /INSERT INTO audit_logs/);
+});
+
+function removalInput(
+  turnId: number,
+  ruleId: number,
+  remover: string,
+  removalKind: "creator_self" | "third_party",
+) {
+  return {
+    removalKind,
+    remover,
+    removedAt: "2026-06-12T12:30:00.000Z",
+    ruleId,
+    ruleProposal: base58,
+    ruleRemoval: base58,
+    signature: base58,
+    turnId,
+  };
+}
+
+function addVotes(turnId: number, ruleId: number, count: number) {
+  for (let index = 0; index < count; index += 1) {
+    saveRuleVote({
+      ruleId,
+      ruleProposal: base58,
+      ruleVote: base58,
+      signature: base58,
+      submittedAt: "2026-06-12T12:05:00.000Z",
+      turnId,
+      voter: `voter-${turnId}-${ruleId}-${index}`,
+    });
+  }
+}
+
+test("paid removal by a third party routes fee to the prize pool and records an audit log", () => {
+  resetApiStateForTests();
+  const turnId = 400;
+  saveRuleProposal({ ...proposal(turnId, 1), proposer: wallet });
+
+  const { auditLog, removal } = removeRule(
+    removalInput(turnId, 1, walletTwo, "third_party"),
+  );
+
+  assert.equal(removal.removalKind, "third_party");
+  assert.equal(removal.feeLamports, 50_000_000);
+  assert.equal(removal.voteCountAtRemoval, 0);
+  assert.equal(isRuleRemoved(turnId, 1), true);
+  assert.equal(auditLog.kind, "rule.removal");
+  assert.equal(auditLog.result, "removed_paid");
+  assert.equal(verifyAuditLogIntegrity(auditLog), true);
+  assert.equal(listPaidRuleRemovals(turnId).length, 1);
+
+  const summary = getRoundSummary(turnId, turnId);
+  const rule = summary.rules.find((entry) => entry.ruleId === 1);
+  assert.equal(rule?.state, "removed_paid");
+  const removalEvent = summary.activity.find(
+    (event) => event.type === "rule_removed",
+  );
+  assert.equal(removalEvent?.type, "rule_removed");
+  // The removal fee follows normal treasury/prize accounting (PRD §2.5/§6.11):
+  // 0.05 SOL with the 5% treasury fee leaves the prize-pool share intact.
+  assert.equal(summary.pool.accounting.sources.paidRuleRemovals.count, 1);
+  assert.ok(
+    summary.pool.accounting.sources.paidRuleRemovals.prizeLamports > 0,
+  );
+});
+
+test("creator self-removal is allowed below the threshold and blocked once supported", () => {
+  resetApiStateForTests();
+  const turnId = 401;
+  saveRuleProposal({ ...proposal(turnId, 1), proposer: wallet });
+
+  // 4 votes: below the creator self-remove threshold of 5.
+  addVotes(turnId, 1, 4);
+  const { removal } = removeRule(removalInput(turnId, 1, wallet, "creator_self"));
+  assert.equal(removal.removalKind, "creator_self");
+  assert.equal(removal.voteCountAtRemoval, 4);
+
+  // A second supported rule reaches the threshold and is protected.
+  resetApiStateForTests();
+  saveRuleProposal({ ...proposal(turnId, 2), proposer: wallet });
+  addVotes(turnId, 2, 5);
+  assert.throws(
+    () => removeRule(removalInput(turnId, 2, wallet, "creator_self")),
+    (error: unknown) =>
+      error instanceof RuleRemovalRejectedError &&
+      error.code === "RULE_REMOVAL_PROTECTED" &&
+      error.threshold === 5 &&
+      error.voteCount === 5,
+  );
+});
+
+test("third-party removal is protected at the higher vote threshold", () => {
+  resetApiStateForTests();
+  const turnId = 402;
+  saveRuleProposal({ ...proposal(turnId, 1), proposer: wallet });
+
+  // 14 votes: a third party may still remove (below 15).
+  addVotes(turnId, 1, 14);
+  const allowed = removeRule(removalInput(turnId, 1, walletTwo, "third_party"));
+  assert.equal(allowed.removal.voteCountAtRemoval, 14);
+
+  // A different rule at 15 votes is protected from third-party removal.
+  resetApiStateForTests();
+  saveRuleProposal({ ...proposal(turnId, 2), proposer: wallet });
+  addVotes(turnId, 2, 15);
+  assert.throws(
+    () => removeRule(removalInput(turnId, 2, walletTwo, "third_party")),
+    (error: unknown) =>
+      error instanceof RuleRemovalRejectedError &&
+      error.code === "RULE_REMOVAL_PROTECTED" &&
+      error.threshold === 15,
+  );
+});
+
+test("a rule cannot be removed twice and removal closes after the eligible pool locks", () => {
+  resetApiStateForTests();
+  const turnId = 403;
+  saveRuleProposal({ ...proposal(turnId, 1), proposer: wallet });
+  removeRule(removalInput(turnId, 1, walletTwo, "third_party"));
+
+  // Duplicate removal (any remover) is rejected because the rule is gone.
+  assert.throws(
+    () => removeRule(removalInput(turnId, 1, walletThree, "third_party")),
+    (error: unknown) =>
+      error instanceof RuleRemovalRejectedError &&
+      error.code === "RULE_ALREADY_REMOVED",
+  );
+
+  // Post-lock removal is rejected once an election (eligible pool lock) exists.
+  resetApiStateForTests();
+  saveRuleProposal({ ...proposal(turnId, 2), proposer: wallet });
+  saveRuleElection(settledElection(turnId, 2));
+  assert.throws(
+    () => removeRule(removalInput(turnId, 2, walletTwo, "third_party")),
+    (error: unknown) =>
+      error instanceof RuleRemovalRejectedError &&
+      error.code === "RULE_REMOVAL_WINDOW_CLOSED",
+  );
+});
+
+test("removing an unknown rule is rejected and combined activity feed includes removals", () => {
+  resetApiStateForTests();
+  const turnId = 404;
+  assert.throws(
+    () => removeRule(removalInput(turnId, 99, walletTwo, "third_party")),
+    (error: unknown) =>
+      error instanceof RuleRemovalRejectedError &&
+      error.code === "RULE_NOT_FOUND",
+  );
+
+  saveRuleProposal({ ...proposal(turnId, 1), proposer: wallet });
+  removeRule(removalInput(turnId, 1, walletTwo, "third_party"));
+  const events = getRuleRemovalActivityEvents(turnId);
+  assert.equal(events.length, 1);
+  assert.equal(events[0]?.ruleId, 1);
+  assert.equal(getActivityEvents(turnId).length, 1);
 });

@@ -13,6 +13,7 @@ import {
   MINIMUM_CLAIM_THRESHOLD_SOL,
   MVP_FEES_SOL,
   RULE_MAX_TOKENS,
+  RULE_REMOVAL_CONFIG,
   TREASURY_FEE_BPS,
   TURN_DURATION_CYCLE_HOURS,
   TURN_DURATION_CYCLE_SECONDS,
@@ -124,7 +125,7 @@ export interface RuleProposalRecord extends RulePreflightResult {
   validation?: RuleValidationSummary | null;
   ruleProposal: string;
   signature: string;
-  state?: "eligible" | "invalidated" | "proposed";
+  state?: "eligible" | "invalidated" | "proposed" | "removed_paid";
   submittedAt: string;
   title: string;
   turnId: number;
@@ -173,6 +174,7 @@ export interface RuleEliminationRecord {
 }
 
 export interface PaidRuleRemovalRecord {
+  feeLamports?: number;
   removalKind: "creator_self" | "third_party";
   remover: string;
   removedAt: string;
@@ -181,6 +183,32 @@ export interface PaidRuleRemovalRecord {
   ruleRemoval: string;
   signature: string;
   turnId: number;
+  voteCountAtRemoval?: number;
+}
+
+export type RuleRemovalRejectionCode =
+  | "RULE_NOT_FOUND"
+  | "RULE_NOT_REMOVABLE"
+  | "RULE_REMOVAL_WINDOW_CLOSED"
+  | "RULE_REMOVAL_PROTECTED"
+  | "RULE_ALREADY_REMOVED";
+
+export class RuleRemovalRejectedError extends Error {
+  code: RuleRemovalRejectionCode;
+  threshold: number | undefined;
+  voteCount: number | undefined;
+
+  constructor(
+    code: RuleRemovalRejectionCode,
+    message: string,
+    details?: { threshold?: number; voteCount?: number },
+  ) {
+    super(message);
+    this.name = "RuleRemovalRejectedError";
+    this.code = code;
+    this.threshold = details?.threshold;
+    this.voteCount = details?.voteCount;
+  }
 }
 
 export interface TurnRolloverRecord {
@@ -190,6 +218,41 @@ export interface TurnRolloverRecord {
   sourceTurnId: number | null;
   turnId: number;
 }
+
+export type RolloverReason = "none" | "no_winner" | "dust_remainder";
+
+export interface RolloverBucketSettlement {
+  reason: RolloverReason;
+  rolloverLamports: number;
+  winnerCount: number;
+}
+
+export interface TurnRolloverSettlement {
+  alternative: RolloverBucketSettlement;
+  nextTurnId: number;
+  original: RolloverBucketSettlement;
+  settledAt: string;
+  totalRolloverLamports: number;
+  turnId: number;
+}
+
+export interface RolloverActivityEvent {
+  bucket: "alternative" | "original";
+  fromTurnId: number;
+  rolloverLamports: number;
+  toTurnId: number;
+  type: "pool_rollover";
+}
+
+export interface RuleRemovalActivityEvent {
+  removalKind: "creator_self" | "third_party";
+  ruleId: number;
+  ruleTitle: string | null;
+  turnId: number;
+  type: "rule_removed";
+}
+
+export type ActivityEvent = RolloverActivityEvent | RuleRemovalActivityEvent;
 
 export interface PrizePoolAccountingConfig {
   eliminationVoteFeeMultiplier: number;
@@ -497,8 +560,14 @@ export interface ClaimSummary {
   wallet: string | null;
 }
 
-export type AuditLogKind = "compiler.validation" | "guess.verification";
-export type AuditPublicStateType = "guess_verification_result" | "rule_validation";
+export type AuditLogKind =
+  | "compiler.validation"
+  | "guess.verification"
+  | "rule.removal";
+export type AuditPublicStateType =
+  | "guess_verification_result"
+  | "rule_removal"
+  | "rule_validation";
 
 export interface AuditPublicStateRef {
   key: string;
@@ -629,6 +698,7 @@ const ruleEliminationVotes = new Map<string, RuleEliminationVoteRecord>();
 const ruleEliminations = new Map<number, RuleEliminationRecord>();
 const paidRuleRemovals = new Map<string, PaidRuleRemovalRecord>();
 const turnRollovers = new Map<number, TurnRolloverRecord>();
+const turnRolloverSettlements = new Map<number, TurnRolloverSettlement>();
 const draws = new Map<number, DrawRecord>();
 const elections = new Map<number, RuleElectionRecord>();
 const ruleValidations = new Map<string, RuleValidationRecord>();
@@ -649,6 +719,8 @@ const CORS_PATHS = new Set([
   "/guess-receipts",
   "/prize-pool-accounting",
   "/prize-pool-rollovers",
+  "/turn-rollovers/settle",
+  "/turn-rollovers/settlement",
   "/rule-precompilations",
   "/rule-preflight",
   "/rule-removals",
@@ -935,6 +1007,7 @@ export function resetApiStateForTests() {
   ruleEliminations.clear();
   paidRuleRemovals.clear();
   turnRollovers.clear();
+  turnRolloverSettlements.clear();
   draws.clear();
   elections.clear();
   ruleValidations.clear();
@@ -1871,6 +1944,119 @@ export function savePaidRuleRemoval(removal: PaidRuleRemovalRecord) {
     removal,
   );
   return removal;
+}
+
+// A rule is considered removed (and excluded from election) once any paid
+// removal record exists for it, regardless of who removed it.
+export function isRuleRemoved(turnId: number, ruleId: number): boolean {
+  for (const removal of paidRuleRemovals.values()) {
+    if (removal.turnId === turnId && removal.ruleId === ruleId) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Enforces the PRD §6.11 paid-removal protections, then records the removal and
+// appends a hash-chained audit log. Throws RuleRemovalRejectedError when a
+// protection blocks the removal so the API responds with a typed error instead
+// of silently storing an invalid removal.
+export function removeRule(input: PaidRuleRemovalRecord): {
+  auditLog: AuditLogRecord;
+  removal: PaidRuleRemovalRecord;
+} {
+  const proposal = ruleProposals.get(
+    getRuleProposalKey(input.turnId, input.ruleId),
+  );
+  if (!proposal) {
+    throw new RuleRemovalRejectedError(
+      "RULE_NOT_FOUND",
+      "No proposed rule matches this turn and rule id.",
+    );
+  }
+
+  // Removal is closed once the eligible rule pool is locked (election started),
+  // because the rule may already be a finalist (PRD §6.11).
+  if (getRuleElection(input.turnId)) {
+    throw new RuleRemovalRejectedError(
+      "RULE_REMOVAL_WINDOW_CLOSED",
+      "Paid rule removal is closed once the eligible rule pool is locked.",
+    );
+  }
+
+  // Already removed — idempotent block (covers duplicate + already-removed).
+  if (isRuleRemoved(input.turnId, input.ruleId)) {
+    throw new RuleRemovalRejectedError(
+      "RULE_ALREADY_REMOVED",
+      "This rule has already been removed.",
+    );
+  }
+
+  // Only still-live proposals (proposed/eligible) can be removed by paid action.
+  const state = proposal.state ?? "proposed";
+  if (state === "invalidated") {
+    throw new RuleRemovalRejectedError(
+      "RULE_NOT_REMOVABLE",
+      "An invalidated rule cannot be removed by paid action.",
+    );
+  }
+
+  // Differentiated vote-threshold protection.
+  const voteCount = listRuleVotes(input.turnId).counts[String(input.ruleId)] ?? 0;
+  const isCreator = proposal.proposer === input.remover;
+  const removalKind: PaidRuleRemovalRecord["removalKind"] = isCreator
+    ? "creator_self"
+    : "third_party";
+  const threshold = isCreator
+    ? RULE_REMOVAL_CONFIG.minVotesCreatorSelfRemove
+    : RULE_REMOVAL_CONFIG.minVotesThirdPartyRemove;
+  if (voteCount >= threshold) {
+    throw new RuleRemovalRejectedError(
+      "RULE_REMOVAL_PROTECTED",
+      isCreator
+        ? "The creator cannot remove a rule that already has community support."
+        : "This rule has too much community support to be removed by a third party.",
+      { threshold, voteCount },
+    );
+  }
+
+  const feeLamports = solToLamports(MVP_FEES_SOL.paidRuleRemoval);
+  const removal: PaidRuleRemovalRecord = {
+    ...input,
+    feeLamports,
+    removalKind,
+    voteCountAtRemoval: voteCount,
+  };
+  savePaidRuleRemoval(removal);
+
+  const auditLog = appendAuditLog({
+    createdAt: input.removedAt,
+    input: {
+      remover: input.remover,
+      ruleId: input.ruleId,
+      threshold,
+      turnId: input.turnId,
+      voteCount,
+    },
+    kind: "rule.removal",
+    output: {
+      feeDestination: RULE_REMOVAL_CONFIG.removalFeeDestination,
+      feeLamports,
+      removalKind,
+      ruleRemoval: input.ruleRemoval,
+    },
+    player: input.remover,
+    publicStateRef: {
+      key: getPaidRuleRemovalKey(input.turnId, input.ruleId, input.remover),
+      type: "rule_removal",
+    },
+    reason: "Paid rule removal recorded after protection checks.",
+    result: "removed_paid",
+    ruleId: input.ruleId,
+    turnId: input.turnId,
+  });
+
+  return { auditLog, removal };
 }
 
 export function saveTurnRollover(record: TurnRolloverRecord) {
@@ -3319,7 +3505,7 @@ export interface RoundRuleSummary {
   ruleId: number;
   ruleProposal: string;
   sanitizedText: string;
-  state: "eligible" | "invalidated" | "proposed";
+  state: "eligible" | "invalidated" | "proposed" | "removed_paid";
   title: string;
   tokenCount: number;
   validation: RuleValidationSummary | null;
@@ -3327,6 +3513,7 @@ export interface RoundRuleSummary {
 }
 
 export interface RoundSummary {
+  activity: ActivityEvent[];
   cycle: {
     durationHours: number;
     nextDurationHours: number;
@@ -3353,6 +3540,7 @@ export interface RoundSummary {
     voteFeeSol: number;
     voteFees: number;
   };
+  rolloverSettlement: TurnRolloverSettlement | null;
   rules: RoundRuleSummary[];
   status: "completed" | "current" | "upcoming";
   totalVotes: number;
@@ -3560,7 +3748,7 @@ function lamportsToSol(lamports: number) {
   return lamports / LAMPORTS_PER_SOL;
 }
 
-function listPaidRuleRemovals(turnId: number) {
+export function listPaidRuleRemovals(turnId: number) {
   return [...paidRuleRemovals.values()].filter(
     (removal) => removal.turnId === turnId,
   );
@@ -3568,6 +3756,120 @@ function listPaidRuleRemovals(turnId: number) {
 
 function getTurnRollover(turnId: number) {
   return turnRollovers.get(turnId) ?? null;
+}
+
+function buildRolloverBucketSettlement(bucket: {
+  remainderLamports: number;
+  winnerCount: number;
+}): RolloverBucketSettlement {
+  const rolloverLamports = bucket.remainderLamports;
+  const reason: RolloverReason =
+    rolloverLamports === 0
+      ? "none"
+      : bucket.winnerCount === 0
+        ? "no_winner"
+        : "dust_remainder";
+  return { reason, rolloverLamports, winnerCount: bucket.winnerCount };
+}
+
+// Settles a finished turn's prize buckets into the next turn. Each bucket's
+// unallocated remainder rolls forward: the FULL bucket when it had no winner
+// (so a no-winner bucket — including any inbound rollover — accumulates across
+// repeated no-winner turns), or the integer-division dust when it had winners
+// (so no lamport is ever lost). Creator/voter rewards are funded from a
+// separate reserve and are unaffected by this settlement.
+export function settleTurnRollover(
+  turnId: number,
+  settledAt: string = new Date().toISOString(),
+): TurnRolloverSettlement {
+  assertNonNegativeSafeInteger(turnId, "turn_id");
+  if (turnId <= 0) {
+    throw new Error("INVALID_TURN_ID");
+  }
+
+  const winners = getWinnerSummary(turnId);
+  const original = buildRolloverBucketSettlement(winners.original);
+  const alternative = buildRolloverBucketSettlement(winners.alternative);
+  const nextTurnId = turnId + 1;
+
+  saveTurnRollover({
+    alternativeRolloverLamports: alternative.rolloverLamports,
+    originalRolloverLamports: original.rolloverLamports,
+    recordedAt: settledAt,
+    sourceTurnId: turnId,
+    turnId: nextTurnId,
+  });
+
+  const settlement: TurnRolloverSettlement = {
+    alternative,
+    nextTurnId,
+    original,
+    settledAt,
+    totalRolloverLamports:
+      original.rolloverLamports + alternative.rolloverLamports,
+    turnId,
+  };
+  turnRolloverSettlements.set(turnId, settlement);
+  return settlement;
+}
+
+export function getTurnRolloverSettlement(turnId: number) {
+  return turnRolloverSettlements.get(turnId) ?? null;
+}
+
+// Activity-feed events for the public spectator feed (PRD §4.7 Loop 5). Only a
+// genuine no-winner bucket surfaces a "pool rolls over" event; silent
+// dust-remainder accounting is not narrated.
+export function getRolloverActivityEvents(
+  turnId: number,
+): RolloverActivityEvent[] {
+  const settlement = getTurnRolloverSettlement(turnId);
+  if (!settlement) {
+    return [];
+  }
+
+  const events: RolloverActivityEvent[] = [];
+  for (const bucket of ["original", "alternative"] as const) {
+    const detail = settlement[bucket];
+    if (detail.reason === "no_winner") {
+      events.push({
+        bucket,
+        fromTurnId: settlement.turnId,
+        rolloverLamports: detail.rolloverLamports,
+        toTurnId: settlement.nextTurnId,
+        type: "pool_rollover",
+      });
+    }
+  }
+  return events;
+}
+
+// Spectator-feed events for paid rule removals (PRD §4.7 Loop 5), ordered by
+// removal time so the activity feed reads chronologically.
+export function getRuleRemovalActivityEvents(
+  turnId: number,
+): RuleRemovalActivityEvent[] {
+  const proposalsById = new Map(
+    listRuleProposals(turnId).map((proposal) => [proposal.ruleId, proposal]),
+  );
+  return listPaidRuleRemovals(turnId)
+    .slice()
+    .sort((left, right) => Date.parse(left.removedAt) - Date.parse(right.removedAt))
+    .map((removal) => ({
+      removalKind: removal.removalKind,
+      ruleId: removal.ruleId,
+      ruleTitle: proposalsById.get(removal.ruleId)?.title ?? null,
+      turnId,
+      type: "rule_removed" as const,
+    }));
+}
+
+// Combined public activity feed for the round (rollovers + paid removals).
+export function getActivityEvents(turnId: number): ActivityEvent[] {
+  return [
+    ...getRolloverActivityEvents(turnId),
+    ...getRuleRemovalActivityEvents(turnId),
+  ];
 }
 
 export function getPrizePoolAccounting(turnId: number) {
@@ -3629,6 +3931,7 @@ export function getRoundSummary(
         : "current";
 
   return {
+    activity: getActivityEvents(turnId),
     cycle: {
       durationHours: cycleDurationHours(stepIndex),
       nextDurationHours: cycleDurationHours(nextStepIndex),
@@ -3655,6 +3958,7 @@ export function getRoundSummary(
       voteFeeSol: roundSol(voteFeeSol),
       voteFees: accounting.sources.votes.count,
     },
+    rolloverSettlement: getTurnRolloverSettlement(turnId),
     rules: proposals.map((proposal) => ({
       compiledArtifactHash: proposal.compiledArtifactHash ?? null,
       precompilationStatus: proposal.precompilationStatus ?? "pending",
@@ -3662,7 +3966,11 @@ export function getRoundSummary(
       ruleId: proposal.ruleId,
       ruleProposal: proposal.ruleProposal,
       sanitizedText: proposal.sanitizedText,
-      state: proposal.state ?? "proposed",
+      // A removed rule is shown as removed (and excluded from election) but
+      // remains visible in history (PRD §6.11).
+      state: isRuleRemoved(turnId, proposal.ruleId)
+        ? ("removed_paid" as const)
+        : (proposal.state ?? "proposed"),
       title: proposal.title,
       tokenCount: proposal.tokenCount,
       validation: proposal.validation ?? null,
@@ -4163,20 +4471,39 @@ if (isMainModule()) {
             return;
           }
 
+          // Idempotent replay: re-posting the identical removal returns the
+          // stored record; a conflicting signature for the same key is 409.
           const existing = paidRuleRemovals.get(
             getPaidRuleRemovalKey(body.turnId, body.ruleId, body.remover),
           );
-          if (existing && existing.signature !== body.signature) {
-            sendJson(request, response, 409, {
-              error: "duplicate_rule_removal",
-              removal: existing,
-            });
+          if (existing) {
+            if (existing.signature === body.signature) {
+              sendJson(request, response, 200, { removal: existing });
+            } else {
+              sendJson(request, response, 409, {
+                error: "duplicate_rule_removal",
+                removal: existing,
+              });
+            }
             return;
           }
 
-          sendJson(request, response, 201, {
-            removal: savePaidRuleRemoval(body),
-          });
+          try {
+            const { auditLog, removal } = removeRule(body);
+            sendJson(request, response, 201, { auditLog, removal });
+          } catch (error: unknown) {
+            if (error instanceof RuleRemovalRejectedError) {
+              sendJson(request, response, 409, {
+                code: error.code,
+                error: "rule_removal_rejected",
+                message: error.message,
+                threshold: error.threshold,
+                voteCount: error.voteCount,
+              });
+              return;
+            }
+            throw error;
+          }
         })
         .catch((error: unknown) => {
           sendJson(request, response, 400, {
@@ -4234,6 +4561,44 @@ if (isMainModule()) {
 
       sendJson(request, response, 200, {
         rollover: getTurnRollover(turnId),
+      });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/turn-rollovers/settle") {
+      void readJsonBody(request)
+        .then((body) => {
+          if (!isValidGuessVerificationCreateRequest(body)) {
+            sendJson(request, response, 400, {
+              error: "invalid_rollover_settle_request",
+            });
+            return;
+          }
+
+          sendJson(request, response, 201, {
+            settlement: settleTurnRollover(body.turnId),
+          });
+        })
+        .catch((error: unknown) => {
+          sendJson(request, response, 400, {
+            error: "invalid_json",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/turn-rollovers/settlement") {
+      const turnId = Number(url.searchParams.get("turnId"));
+
+      if (!Number.isInteger(turnId) || turnId <= 0) {
+        sendJson(request, response, 400, { error: "invalid_query" });
+        return;
+      }
+
+      sendJson(request, response, 200, {
+        activity: getRolloverActivityEvents(turnId),
+        settlement: getTurnRolloverSettlement(turnId),
       });
       return;
     }

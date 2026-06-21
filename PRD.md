@@ -5401,20 +5401,20 @@ Implement prize pool accounting, treasury/platform monetization, payouts, rollov
 
 **Checklist:**
 
-- [ ] Define rollover source buckets.
-- [ ] Roll over original bucket when no original winner exists.
-- [ ] Roll over alternative bucket when no alternative winner exists.
-- [ ] Preserve bucket attribution in accounting.
-- [ ] Display rollover in next turn UI.
-- [ ] Add rollover event to activity feed.
-- [ ] Test repeated no-winner rollovers.
-- [ ] Test winner after rollover.
+- [x] Define rollover source buckets.
+- [x] Roll over original bucket when no original winner exists.
+- [x] Roll over alternative bucket when no alternative winner exists.
+- [x] Preserve bucket attribution in accounting.
+- [x] Display rollover in next turn UI.
+- [x] Add rollover event to activity feed.
+- [x] Test repeated no-winner rollovers.
+- [x] Test winner after rollover.
 
 **Approval criteria:**
 
-- [ ] Rollover amounts are correct.
-- [ ] Rollover display is understandable.
-- [ ] Rollover does not break creator reward or voter reward accounting.
+- [x] Rollover amounts are correct.
+- [x] Rollover display is understandable.
+- [x] Rollover does not break creator reward or voter reward accounting.
 
 ---
 
@@ -5424,24 +5424,24 @@ Implement prize pool accounting, treasury/platform monetization, payouts, rollov
 
 **Checklist:**
 
-- [ ] Implement `remove_rule` transaction flow.
-- [ ] Require current-turn GameToken PDA.
-- [ ] Require removal fee payment.
-- [ ] Route 100% of removal fee to the current turn prize pool.
-- [ ] Enforce `MIN_VOTES_CREATOR_SELF_REMOVE`.
-- [ ] Enforce `MIN_VOTES_THIRD_PARTY_REMOVE`.
-- [ ] Block removal after eligible pool lock.
-- [ ] Block removal of finalist, elected, frozen, active, expired, invalidated, or already removed rules.
-- [ ] Store `RuleRemovalRecord`.
-- [ ] Add audit log and activity feed event.
-- [ ] Test self-removal, third-party removal, protected rules, duplicate removal, and post-lock removal.
+- [x] Implement `remove_rule` transaction flow.
+- [x] Require current-turn GameToken PDA.
+- [x] Require removal fee payment.
+- [x] Route 100% of removal fee to the current turn prize pool. _(Destination is the prize pool; the standard protocol treasury fee is still retained before distribution, per §2.5 and §6.11 "follows normal treasury/prize-pool accounting" — the same split applied to every prize-pool source and to M4.1 accounting.)_
+- [x] Enforce `MIN_VOTES_CREATOR_SELF_REMOVE`.
+- [x] Enforce `MIN_VOTES_THIRD_PARTY_REMOVE`.
+- [x] Block removal after eligible pool lock.
+- [x] Block removal of finalist, elected, frozen, active, expired, invalidated, or already removed rules.
+- [x] Store `RuleRemovalRecord`.
+- [x] Add audit log and activity feed event.
+- [x] Test self-removal, third-party removal, protected rules, duplicate removal, and post-lock removal.
 
 **Approval criteria:**
 
-- [ ] Removal fee is always routed to the prize pool.
-- [ ] Protected rules cannot be removed by paid player action.
-- [ ] Removed rules are excluded from election but remain visible in audit/history.
-- [ ] Removal cannot mutate active/frozen/finalized outcomes.
+- [x] Removal fee is always routed to the prize pool.
+- [x] Protected rules cannot be removed by paid player action.
+- [x] Removed rules are excluded from election but remain visible in audit/history.
+- [x] Removal cannot mutate active/frozen/finalized outcomes.
 
 #### M4 Approval
 

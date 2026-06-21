@@ -283,6 +283,13 @@ async fn core_instructions_execute_and_persist_state() {
     let proposal: RuleProposal = read_anchor_account(&mut context, rule_address).await;
     assert_eq!(proposal.vote_count, 1);
 
+    // A repeat vote from the same wallet on the same proposal must fail: the
+    // `rule_vote` PDA is seeded by (turn, rule, voter), so re-`init` is rejected.
+    // Warp to a new slot first so the retry is a distinct transaction; otherwise
+    // the identical instruction reuses the same blockhash and banks returns the
+    // cached success of the first vote instead of re-executing on-chain.
+    let warp_clock: Clock = context.banks_client.get_sysvar().await.unwrap();
+    context.warp_to_slot(warp_clock.slot + 1).unwrap();
     assert!(process(&mut context, vote_instruction, &[&player])
         .await
         .is_err());
@@ -311,6 +318,146 @@ async fn core_instructions_execute_and_persist_state() {
     .unwrap();
     let turn: TurnState = read_anchor_account(&mut context, turn_address).await;
     assert_eq!(turn.status, TurnStatus::Closed);
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn propose_rule(
+    context: &mut ProgramTestContext,
+    proposer: &Keypair,
+    turn_id: u64,
+    rule_id: u64,
+    text: &str,
+) -> Result<(), BanksClientError> {
+    let rule_address = pda(&[b"rule", &turn_id.to_le_bytes(), &rule_id.to_le_bytes()]);
+    process(
+        context,
+        Instruction {
+            program_id: idealer::ID,
+            accounts: accounts::ProposeRule {
+                proposer: proposer.pubkey(),
+                global_config: pda(&[b"global_config"]),
+                turn_state: pda(&[b"turn", &turn_id.to_le_bytes()]),
+                game_token: pda(&[
+                    b"game_token",
+                    &turn_id.to_le_bytes(),
+                    proposer.pubkey().as_ref(),
+                ]),
+                rule_proposal: rule_address,
+                treasury_vault: pda(&[b"treasury_vault"]),
+                prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(None),
+            data: instruction::ProposeRule {
+                args: ProposeRuleArgs {
+                    rule_id,
+                    sanitized_text_hash: hash(text.as_bytes()).to_bytes(),
+                    sanitized_text: text.to_string(),
+                    normalized_text_hash: [2; 32],
+                    official_interpretation_hash: [3; 32],
+                    preflight_result_hash: [4; 32],
+                    token_count: 8,
+                },
+            }
+            .data(),
+        },
+        &[proposer],
+    )
+    .await
+}
+
+fn remove_rule_instruction(turn_id: u64, rule_id: u64, remover: Pubkey) -> Instruction {
+    Instruction {
+        program_id: idealer::ID,
+        accounts: accounts::RemoveRule {
+            remover,
+            global_config: pda(&[b"global_config"]),
+            turn_state: pda(&[b"turn", &turn_id.to_le_bytes()]),
+            game_token: pda(&[b"game_token", &turn_id.to_le_bytes(), remover.as_ref()]),
+            rule_proposal: pda(&[b"rule", &turn_id.to_le_bytes(), &rule_id.to_le_bytes()]),
+            rule_removal: pda(&[
+                b"rule_removal",
+                &turn_id.to_le_bytes(),
+                &rule_id.to_le_bytes(),
+                remover.as_ref(),
+            ]),
+            treasury_vault: pda(&[b"treasury_vault"]),
+            prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+        data: instruction::RemoveRule {}.data(),
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires an SBF build and SBF_OUT_DIR; run the explicit SBF integration suite"]
+async fn remove_rule_enforces_protection_and_routes_fee_to_prize_pool() {
+    let mut context = ProgramTest::new(
+        "idealer",
+        idealer::ID,
+        processor!(process_idealer_instruction),
+    )
+    .start_with_context()
+    .await;
+    let turn_id = 1_u64;
+    initialize_and_open_turn(&mut context, turn_id).await;
+
+    // Two players, each with a Game Token for this turn.
+    let creator = Keypair::new();
+    fund(&mut context, &creator.pubkey()).await;
+    submit_guess(&mut context, &creator, turn_id, [1, 2, 3, 4, 5, 6])
+        .await
+        .unwrap();
+    let third_party = Keypair::new();
+    fund(&mut context, &third_party.pubkey()).await;
+    submit_guess(&mut context, &third_party, turn_id, [7, 8, 9, 10, 11, 12])
+        .await
+        .unwrap();
+
+    // Third party removes the creator's still-live rule. Fee → prize pool.
+    let rule_id = 5_u64;
+    propose_rule(&mut context, &creator, turn_id, rule_id, "Win if odds win.")
+        .await
+        .unwrap();
+    let prize_vault = pda(&[b"prize_vault", &turn_id.to_le_bytes()]);
+    let prize_before = read_anchor_account::<idealer::PrizeVault>(&mut context, prize_vault)
+        .await
+        .total_collected_lamports;
+
+    process(
+        &mut context,
+        remove_rule_instruction(turn_id, rule_id, third_party.pubkey()),
+        &[&third_party],
+    )
+    .await
+    .unwrap();
+
+    let rule_address = pda(&[b"rule", &turn_id.to_le_bytes(), &rule_id.to_le_bytes()]);
+    let proposal: RuleProposal = read_anchor_account(&mut context, rule_address).await;
+    assert_eq!(proposal.state, RuleState::RemovedPaid);
+    let removal_address = pda(&[
+        b"rule_removal",
+        &turn_id.to_le_bytes(),
+        &rule_id.to_le_bytes(),
+        third_party.pubkey().as_ref(),
+    ]);
+    let removal: idealer::RuleRemoval = read_anchor_account(&mut context, removal_address).await;
+    assert_eq!(removal.removal_kind, idealer::RuleRemovalKind::ThirdParty);
+    let prize_after = read_anchor_account::<idealer::PrizeVault>(&mut context, prize_vault)
+        .await
+        .total_collected_lamports;
+    // 50_000_000 fee, 5% treasury → 47_500_000 to the prize pool.
+    assert_eq!(prize_after - prize_before, 47_500_000);
+
+    // A second removal of the same rule is rejected (already RemovedPaid).
+    assert!(process(
+        &mut context,
+        remove_rule_instruction(turn_id, rule_id, creator.pubkey()),
+        &[&creator],
+    )
+    .await
+    .is_err());
 }
 
 async fn advance_clock_to_turn_end(context: &mut ProgramTestContext, turn_id: u64) {
@@ -506,9 +653,92 @@ async fn rule_election_locks_requests_and_settles_active_rule() {
     .await
     .unwrap();
 
+    // SettleRuleElection now only selects finalists and opens the elimination
+    // window; the active rule is chosen later by `settle_active_election`.
     let turn: TurnState = read_anchor_account(&mut context, turn_address).await;
     assert_eq!(turn.election_vrf_request, election_randomness_account);
     assert_eq!(turn.election_vrf_fulfillment, election_randomness_account);
+    assert_ne!(turn.finalist_set_hash, [0; 32]);
+    assert_eq!(turn.finalist_count, 1);
+    assert_eq!(turn.finalist_rule_ids[0], rule_id);
+    assert_eq!(turn.active_rule_id, 0);
+    assert!(turn.elimination_window_end_timestamp > turn.elimination_window_start_timestamp);
+
+    // No elimination votes are cast, so the sole finalist survives. Advance past
+    // the elimination window and close it. The turn is still Open, so live-turn
+    // validation passes even though the clock is beyond the turn cutoff.
+    let mut clock: Clock = context.banks_client.get_sysvar().await.unwrap();
+    clock.unix_timestamp = turn.elimination_window_end_timestamp;
+    context.set_sysvar(&clock);
+    let mut close_accounts = accounts::CloseEliminationWindow {
+        authority,
+        global_config: pda(&[b"global_config"]),
+        turn_state: turn_address,
+    }
+    .to_account_metas(None);
+    close_accounts.push(AccountMeta::new(rule_address, false));
+    process(
+        &mut context,
+        Instruction {
+            program_id: idealer::ID,
+            accounts: close_accounts,
+            data: instruction::CloseEliminationWindow {}.data(),
+        },
+        &[],
+    )
+    .await
+    .unwrap();
+    let proposal: RuleProposal = read_anchor_account(&mut context, rule_address).await;
+    assert_eq!(proposal.state, RuleState::SurvivedElimination);
+
+    // Request and settle the active-rule election over the surviving finalist.
+    let active_randomness_account = Pubkey::new_unique();
+    process(
+        &mut context,
+        Instruction {
+            program_id: idealer::ID,
+            accounts: accounts::RequestActiveElectionVrf {
+                authority,
+                global_config: pda(&[b"global_config"]),
+                turn_state: turn_address,
+            }
+            .to_account_metas(None),
+            data: instruction::RequestActiveElectionVrf {
+                randomness_account: active_randomness_account,
+            }
+            .data(),
+        },
+        &[],
+    )
+    .await
+    .unwrap();
+
+    let mut active_settle_accounts = accounts::SettleActiveElection {
+        authority,
+        global_config: pda(&[b"global_config"]),
+        turn_state: turn_address,
+    }
+    .to_account_metas(None);
+    active_settle_accounts.push(AccountMeta::new_readonly(rule_address, false));
+    process(
+        &mut context,
+        Instruction {
+            program_id: idealer::ID,
+            accounts: active_settle_accounts,
+            data: instruction::SettleActiveElection {
+                args: SettleRuleElectionArgs {
+                    randomness: [11; 32],
+                    randomness_source: active_randomness_account,
+                },
+            }
+            .data(),
+        },
+        &[],
+    )
+    .await
+    .unwrap();
+
+    let turn: TurnState = read_anchor_account(&mut context, turn_address).await;
     assert_eq!(turn.active_rule_id, rule_id);
     assert_eq!(
         turn.active_rule_hash,

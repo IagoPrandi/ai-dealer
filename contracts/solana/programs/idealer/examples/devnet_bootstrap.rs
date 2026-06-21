@@ -138,8 +138,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                     claim_window_turns: 4,
                     claim_window_days: 7,
                     creator_reward_cap_lamports: 250_000_000,
-                    min_votes_creator_self_remove: 100,
-                    min_votes_third_party_remove: 250,
+                    min_votes_creator_self_remove: 5,
+                    min_votes_third_party_remove: 15,
                 },
             }
             .data(),

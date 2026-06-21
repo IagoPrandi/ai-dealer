@@ -18,7 +18,7 @@ interface RoundRuleSummary {
   ruleId: number;
   ruleProposal: string;
   sanitizedText: string;
-  state: "eligible" | "invalidated" | "proposed";
+  state: "eligible" | "invalidated" | "proposed" | "removed_paid";
   title: string;
   tokenCount: number;
   validation: {
@@ -94,6 +94,12 @@ interface RoundSummary {
     turnId: number;
   };
   pool: {
+    accounting?: {
+      buckets: {
+        alternative: { rolloverLamports: number; totalLamports: number };
+        original: { rolloverLamports: number; totalLamports: number };
+      };
+    };
     eliminationVoteFeeSol?: number;
     eliminationVoteFees?: number;
     guessSol: number;
@@ -102,6 +108,29 @@ interface RoundSummary {
     proposalSol: number;
     proposals: number;
   };
+  activity?: Array<
+    | {
+        bucket: "alternative" | "original";
+        fromTurnId: number;
+        rolloverLamports: number;
+        toTurnId: number;
+        type: "pool_rollover";
+      }
+    | {
+        removalKind: "creator_self" | "third_party";
+        ruleId: number;
+        ruleTitle: string | null;
+        turnId: number;
+        type: "rule_removed";
+      }
+  >;
+  rolloverSettlement?: {
+    alternative: { reason: string; rolloverLamports: number };
+    nextTurnId: number;
+    original: { reason: string; rolloverLamports: number };
+    totalRolloverLamports: number;
+    turnId: number;
+  } | null;
   rules: RoundRuleSummary[];
   status: "completed" | "current" | "upcoming";
   totalVotes: number;
@@ -139,6 +168,13 @@ const STATUS_LABEL: Record<RoundSummary["status"], string> = {
   upcoming: "Upcoming",
 };
 
+const RULE_STATE_LABEL: Record<RoundRuleSummary["state"], string> = {
+  eligible: "Eligible",
+  invalidated: "Invalidated",
+  proposed: "Proposed",
+  removed_paid: "Removed",
+};
+
 function formatTurnLabel(turnId: number) {
   return `TURN-${turnId.toString().padStart(4, "0")}`;
 }
@@ -153,6 +189,10 @@ function truncateHash(value: string) {
 
 function explorerLink(value: string) {
   return `${EXPLORER_BASE}/${value}?cluster=devnet`;
+}
+
+function lamportsToSolLabel(lamports: number) {
+  return `${(lamports / 1_000_000_000).toFixed(4)} SOL`;
 }
 
 export function RoundPage({ turnId: rawTurnId }: { turnId: string }) {
@@ -305,10 +345,17 @@ export function RoundPage({ turnId: rawTurnId }: { turnId: string }) {
   }, [client, connected, isValidTurnId, turnId, walletAddress]);
 
   const leadingRule = useMemo(() => {
-    if (!round || round.rules.length === 0) {
+    if (!round) {
       return null;
     }
-    return round.rules.reduce((leader, rule) =>
+    // Removed rules are excluded from election, so they never lead.
+    const contenders = round.rules.filter(
+      (rule) => rule.state !== "removed_paid",
+    );
+    if (contenders.length === 0) {
+      return null;
+    }
+    return contenders.reduce((leader, rule) =>
       rule.votes > leader.votes ? rule : leader,
     );
   }, [round]);
@@ -431,6 +478,78 @@ export function RoundPage({ turnId: rawTurnId }: { turnId: string }) {
                 <dd>{round.totalVotes}</dd>
               </div>
             </dl>
+            {(() => {
+              const buckets = round.pool.accounting?.buckets;
+              const inboundOriginal = buckets?.original.rolloverLamports ?? 0;
+              const inboundAlternative =
+                buckets?.alternative.rolloverLamports ?? 0;
+              const inboundTotal = inboundOriginal + inboundAlternative;
+              const settlement = round.rolloverSettlement ?? null;
+              const activityEvents = round.activity ?? [];
+              const rolloverEvents = activityEvents.flatMap((event) =>
+                event.type === "pool_rollover" ? [event] : [],
+              );
+              const removalEvents = activityEvents.flatMap((event) =>
+                event.type === "rule_removed" ? [event] : [],
+              );
+              if (
+                inboundTotal === 0 &&
+                !settlement &&
+                rolloverEvents.length === 0 &&
+                removalEvents.length === 0
+              ) {
+                return null;
+              }
+              return (
+                <div className="round-rollover">
+                  <p className="eyebrow">Rollover</p>
+                  {inboundTotal > 0 ? (
+                    <p>
+                      Carried in from the previous turn:{" "}
+                      {lamportsToSolLabel(inboundOriginal)} to the original
+                      bucket and {lamportsToSolLabel(inboundAlternative)} to the
+                      alternative bucket.
+                    </p>
+                  ) : null}
+                  {rolloverEvents.length > 0 ? (
+                    <ul className="round-rollover-events">
+                      {rolloverEvents.map((event) => (
+                        <li key={`${event.bucket}-${event.toTurnId}`}>
+                          No {event.bucket} winner —{" "}
+                          {lamportsToSolLabel(event.rolloverLamports)} rolls over
+                          to {formatTurnLabel(event.toTurnId)}.
+                        </li>
+                      ))}
+                    </ul>
+                  ) : settlement && settlement.totalRolloverLamports > 0 ? (
+                    <p>
+                      {lamportsToSolLabel(settlement.totalRolloverLamports)}{" "}
+                      carries forward to {formatTurnLabel(settlement.nextTurnId)}.
+                    </p>
+                  ) : settlement ? (
+                    <p>
+                      Both buckets paid out this turn — nothing rolls over to{" "}
+                      {formatTurnLabel(settlement.nextTurnId)}.
+                    </p>
+                  ) : null}
+                  {removalEvents.length > 0 ? (
+                    <ul className="round-rollover-events">
+                      {removalEvents.map((event) => (
+                        <li key={`removed-${event.ruleId}`}>
+                          Rule #{event.ruleId}
+                          {event.ruleTitle ? ` “${event.ruleTitle}”` : ""} was
+                          removed (
+                          {event.removalKind === "creator_self"
+                            ? "by its creator"
+                            : "by a player"}
+                          ); its fee went to the prize pool.
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              );
+            })()}
           </section>
 
           <article
@@ -760,19 +879,29 @@ export function RoundPage({ turnId: rawTurnId }: { turnId: string }) {
               </article>
             ) : (
               round.rules.map((rule) => {
-                const isLeading = leadingRule?.ruleId === rule.ruleId;
+                const isRemoved = rule.state === "removed_paid";
+                const isLeading =
+                  !isRemoved && leadingRule?.ruleId === rule.ruleId;
                 return (
                   <article
                     aria-labelledby={`round-rule-${rule.ruleId}`}
-                    className={
-                      isLeading ? "voting-rule-card leading" : "voting-rule-card"
-                    }
+                    className={[
+                      "voting-rule-card",
+                      isLeading ? "leading" : "",
+                      isRemoved ? "removed" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
                     key={rule.ruleId}
                   >
                     <div className="voting-card-heading">
                       <div>
                         <p className="eyebrow">
-                          {isLeading ? "Leading rule" : "Proposed rule"}
+                          {isRemoved
+                            ? "Removed rule"
+                            : isLeading
+                              ? "Leading rule"
+                              : "Proposed rule"}
                         </p>
                         <h2 id={`round-rule-${rule.ruleId}`}>{rule.title}</h2>
                       </div>
@@ -782,7 +911,7 @@ export function RoundPage({ turnId: rawTurnId }: { turnId: string }) {
                     <dl className="rule-metadata">
                       <div>
                         <dt>Status</dt>
-                        <dd>{rule.state}</dd>
+                        <dd>{RULE_STATE_LABEL[rule.state]}</dd>
                       </div>
                       <div>
                         <dt>Precompile</dt>

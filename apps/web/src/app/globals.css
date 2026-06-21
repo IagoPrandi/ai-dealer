@@ -1563,6 +1563,15 @@ p {
   background: var(--surface-warm);
 }
 
+.voting-rule-card.removed {
+  opacity: 0.62;
+  border-style: dashed;
+}
+
+.voting-rule-card.removed .rule-original-text {
+  text-decoration: line-through;
+}
+
 .voting-card-heading {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -4616,6 +4625,30 @@ button.platform-primary-button {
   margin: 0;
   font-size: 15px;
   font-weight: 700;
+}
+
+.round-rollover {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+}
+
+.round-rollover p:not(.eyebrow) {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.round-rollover-events {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 16px;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .round-elimination-list {
