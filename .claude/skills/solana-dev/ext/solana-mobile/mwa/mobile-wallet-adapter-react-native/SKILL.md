@@ -1,5 +1,5 @@
 ---
-name: mobile-wallet-adapter
+name: mobile-wallet-adapter-react-native
 description: Integrate Mobile Wallet Adapter (MWA) for wallet connection and transaction signing in React Native Expo apps using Beeman's Wallet UI SDK (@wallet-ui/react-native-web3js). Use when the user requests to add wallet connection, integrate Solana wallet support, add "connect wallet" button, implement transaction signing, send SOL transfers, or set up MWA in their React Native app.
 ---
 

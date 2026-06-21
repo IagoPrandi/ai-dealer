@@ -11,6 +11,7 @@ import {
   createGuessVerificationJobsForTurn,
   getAuditLog,
   getClaimSummary,
+  getPlayerClaimsSummary,
   getMandatedRuleSignatures,
   getPrizePoolAccounting,
   getRewardSummary,
@@ -907,6 +908,62 @@ test("claim flow creates winner and creator claims and blocks double claim", () 
         wallet,
       }),
     /PAYOUT_ALREADY_CLAIMED/,
+  );
+});
+
+test("player claims summary aggregates a wallet's claims across turns", () => {
+  resetApiStateForTests();
+  saveRuleProposal(proposal(243, 7));
+  savePaidRemovals(243, 30);
+  saveReceiptForWallet(243, wallet, [1, 2, 3, 4, 5, 6]);
+  saveFulfilledDraw(243);
+  const { jobs } = createGuessVerificationJobsForTurn(243);
+  saveRuleElection(settledElection(243, 7));
+  const job = jobs[0];
+  assert.ok(job);
+  saveGuessVerificationResult(
+    resultForJob({
+      alternative: "WIN",
+      jobId: job.id,
+      original: "WIN",
+      player: wallet,
+      resultByte: "f",
+      turnId: 243,
+    }),
+  );
+
+  const { claims } = createClaimRecordsForTurn(243, "2026-06-12T12:20:00.000Z");
+  const winnerClaim = claims.find(
+    (claim) => claim.kind === "winner_payout" && claim.wallet === wallet,
+  );
+  assert.ok(winnerClaim);
+
+  const before = getPlayerClaimsSummary(wallet);
+  assert.equal(before.wallet, wallet);
+  assert.equal(before.records.length > 0, true);
+  assert.equal(before.availableLamports > 0, true);
+  assert.equal(before.claimedLamports, 0);
+
+  requestClaimApproval({
+    claimId: winnerClaim.claimId,
+    requestedAt: "2026-06-12T12:21:00.000Z",
+    wallet,
+  });
+  completeClaimApproval({
+    claimId: winnerClaim.claimId,
+    completedAt: "2026-06-12T12:22:00.000Z",
+    signature: base58,
+    status: "claimed",
+    wallet,
+  });
+
+  const after = getPlayerClaimsSummary(wallet);
+  assert.equal(after.claimedLamports, winnerClaim.amountLamports);
+  assert.equal(
+    after.records.some(
+      (claim) => claim.claimId === winnerClaim.claimId && claim.status === "claimed",
+    ),
+    true,
   );
 });
 

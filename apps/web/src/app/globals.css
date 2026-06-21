@@ -1995,6 +1995,80 @@ p {
   gap: 12px;
 }
 
+.claim-list {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.claim-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgb(20 22 29 / 90%);
+}
+
+.claim-item-main {
+  display: grid;
+  gap: 2px;
+}
+
+.claim-item-meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.claim-item-amount {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+  text-align: right;
+}
+
+.claim-item .primary-action {
+  grid-column: 1 / -1;
+  padding: 8px 14px;
+  font-size: 13px;
+}
+
+.claim-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.claim-badge-available {
+  color: #7bd88f;
+  border-color: rgb(123 216 143 / 55%);
+}
+
+.claim-badge-claimed {
+  color: #42d9b8;
+  border-color: rgb(66 217 184 / 55%);
+}
+
+.claim-badge-pending_wallet_approval {
+  color: #f1c45c;
+  border-color: rgb(241 196 92 / 55%);
+}
+
+.claim-badge-failed {
+  color: #f1788a;
+  border-color: rgb(241 120 138 / 55%);
+}
+
+.claim-badge-unavailable {
+  color: var(--muted);
+}
+
 .result-hero.near-miss {
   border-color: rgb(241 196 92 / 55%);
 }

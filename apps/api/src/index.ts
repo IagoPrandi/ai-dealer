@@ -3002,6 +3002,41 @@ export function getClaimSummary(args: {
   };
 }
 
+export interface PlayerClaimsSummary {
+  availableLamports: number;
+  claimedLamports: number;
+  failedLamports: number;
+  pendingLamports: number;
+  records: ClaimRecord[];
+  totalLamports: number;
+  unavailableLamports: number;
+  wallet: string;
+}
+
+/// Aggregate every claim record for a wallet across all turns, for the player
+/// rewards-history surface. Ordered by turn then claim id (see listClaimRecords).
+export function getPlayerClaimsSummary(wallet: string): PlayerClaimsSummary {
+  const records = listClaimRecords({ wallet });
+  const sumByStatus = (status: ClaimRecordStatus) =>
+    records
+      .filter((record) => record.status === status)
+      .reduce((total, record) => total + record.amountLamports, 0);
+
+  return {
+    availableLamports: sumByStatus("available"),
+    claimedLamports: sumByStatus("claimed"),
+    failedLamports: sumByStatus("failed"),
+    pendingLamports: sumByStatus("pending_wallet_approval"),
+    records,
+    totalLamports: records.reduce(
+      (total, record) => total + record.amountLamports,
+      0,
+    ),
+    unavailableLamports: sumByStatus("unavailable"),
+    wallet,
+  };
+}
+
 export function requestClaimApproval(args: {
   claimId: string;
   requestedAt?: string;
@@ -4099,6 +4134,7 @@ if (isMainModule()) {
       (CORS_PATHS.has(url.pathname) ||
         url.pathname.startsWith("/audit/") ||
         url.pathname.startsWith("/api/v1/turns/") ||
+        url.pathname.startsWith("/players/") ||
         url.pathname.startsWith("/prize-pool-accounting/"))
     ) {
       sendNoContent(request, response);
@@ -4909,6 +4945,27 @@ if (isMainModule()) {
 
       sendJson(request, response, 200, {
         claims: getClaimSummary({ turnId, ...(wallet ? { wallet } : {}) }),
+      });
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      url.pathname.startsWith("/players/") &&
+      url.pathname.endsWith("/claims")
+    ) {
+      const wallet = url.pathname.slice(
+        "/players/".length,
+        url.pathname.length - "/claims".length,
+      );
+
+      if (!isBase58Like(wallet)) {
+        sendJson(request, response, 400, { error: "invalid_wallet" });
+        return;
+      }
+
+      sendJson(request, response, 200, {
+        claims: getPlayerClaimsSummary(wallet),
       });
       return;
     }

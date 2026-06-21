@@ -1138,6 +1138,145 @@ pub mod idealer {
         });
         Ok(())
     }
+
+    /// Authority posts the off-chain-computed claimable amount for a single
+    /// `(turn, wallet, kind)` so the wallet can later pull its funds on-chain.
+    /// The winner/creator/voter amounts are computed deterministically by the
+    /// API after the draw; this instruction mirrors a single claim record on
+    /// chain. Creating the `Claim` PDA via `init` makes it idempotent: a second
+    /// post for the same tuple fails, so the worker can treat "already exists"
+    /// as success.
+    pub fn record_claim(ctx: Context<RecordClaim>, args: RecordClaimArgs) -> Result<()> {
+        let config = &ctx.accounts.global_config;
+        require!(!config.paused, IdealerError::ProtocolPaused);
+        require!(
+            args.claimant != Pubkey::default(),
+            IdealerError::InvalidClaimant
+        );
+        require!(
+            ctx.accounts.turn_state.draw_status == DrawStatus::Fulfilled,
+            IdealerError::DrawNotSettleable
+        );
+        require!(
+            args.amount_lamports >= config.minimum_claim_threshold_lamports,
+            IdealerError::ClaimBelowMinimum
+        );
+
+        let clock = Clock::get()?;
+        let claim = &mut ctx.accounts.claim;
+        claim.turn_id = args.turn_id;
+        claim.claimant = args.claimant;
+        claim.kind = args.kind;
+        claim.amount_lamports = args.amount_lamports;
+        claim.status = ClaimState::Available;
+        claim.recorded_at = clock.unix_timestamp;
+        claim.claimed_at = 0;
+        claim.bump = ctx.bumps.claim;
+
+        emit!(ClaimRecorded {
+            turn_id: args.turn_id,
+            claimant: args.claimant,
+            kind: args.kind,
+            amount_lamports: args.amount_lamports,
+        });
+        Ok(())
+    }
+
+    /// Pull a recorded winner payout from the turn's prize vault. Signed by the
+    /// claimant wallet (pull-payment). The amount is whatever the authority
+    /// recorded; double-claim is blocked by the `Claimed` state flag.
+    pub fn claim_prize(ctx: Context<ClaimPrize>, turn_id: u64) -> Result<()> {
+        require!(
+            !ctx.accounts.global_config.paused,
+            IdealerError::ProtocolPaused
+        );
+        require!(
+            ctx.accounts.claim.kind == ClaimKind::WinnerPayout,
+            IdealerError::ClaimKindMismatch
+        );
+        require!(
+            ctx.accounts.claim.status == ClaimState::Available,
+            IdealerError::ClaimNotAvailable
+        );
+
+        let amount = ctx.accounts.claim.amount_lamports;
+        let claimant_key = ctx.accounts.claimant.key();
+        let clock = Clock::get()?;
+
+        // Checks-Effects-Interactions: mark claimed before moving lamports.
+        let claim = &mut ctx.accounts.claim;
+        claim.status = ClaimState::Claimed;
+        claim.claimed_at = clock.unix_timestamp;
+
+        pay_from_vault(
+            &ctx.accounts.prize_vault.to_account_info(),
+            &ctx.accounts.claimant.to_account_info(),
+            amount,
+        )?;
+        ctx.accounts.prize_vault.total_collected_lamports = ctx
+            .accounts
+            .prize_vault
+            .total_collected_lamports
+            .saturating_sub(amount);
+
+        emit!(ClaimSettled {
+            turn_id,
+            claimant: claimant_key,
+            kind: ClaimKind::WinnerPayout,
+            amount_lamports: amount,
+        });
+        Ok(())
+    }
+
+    /// Pull a recorded creator or voter reward from the global treasury vault,
+    /// which holds platform monetization and acts as the creator-reward
+    /// reserve. Signed by the claimant wallet (pull-payment). Winner payouts
+    /// must use `claim_prize` instead.
+    pub fn claim_reward(ctx: Context<ClaimReward>, turn_id: u64, kind: ClaimKind) -> Result<()> {
+        require!(
+            !ctx.accounts.global_config.paused,
+            IdealerError::ProtocolPaused
+        );
+        require!(
+            kind != ClaimKind::WinnerPayout,
+            IdealerError::ClaimKindMismatch
+        );
+        require!(
+            ctx.accounts.claim.kind == kind,
+            IdealerError::ClaimKindMismatch
+        );
+        require!(
+            ctx.accounts.claim.status == ClaimState::Available,
+            IdealerError::ClaimNotAvailable
+        );
+
+        let amount = ctx.accounts.claim.amount_lamports;
+        let claimant_key = ctx.accounts.claimant.key();
+        let clock = Clock::get()?;
+
+        let claim = &mut ctx.accounts.claim;
+        claim.status = ClaimState::Claimed;
+        claim.claimed_at = clock.unix_timestamp;
+
+        pay_from_vault(
+            &ctx.accounts.treasury_vault.to_account_info(),
+            &ctx.accounts.claimant.to_account_info(),
+            amount,
+        )?;
+        ctx.accounts.treasury_vault.total_collected_lamports = ctx
+            .accounts
+            .treasury_vault
+            .total_collected_lamports
+            .saturating_sub(amount);
+
+        emit!(ClaimSettled {
+            turn_id,
+            claimant: claimant_key,
+            kind,
+            amount_lamports: amount,
+        });
+        Ok(())
+    }
 }
 
 fn validate_live_turn(config: &GlobalConfig, turn: &TurnState) -> Result<()> {
@@ -1328,6 +1467,32 @@ fn collect_fee<'info>(
     Ok(())
 }
 
+/// Move lamports out of a program-owned vault PDA to a recipient by directly
+/// mutating lamport balances. `system_program::transfer` cannot be used here
+/// because the source is owned by this program, not the System Program. The
+/// vault must retain at least its rent-exempt minimum.
+fn pay_from_vault<'info>(
+    vault: &AccountInfo<'info>,
+    recipient: &AccountInfo<'info>,
+    amount: u64,
+) -> Result<()> {
+    if amount == 0 {
+        return Ok(());
+    }
+    let min_balance = Rent::get()?.minimum_balance(vault.data_len());
+    let remaining = vault
+        .lamports()
+        .checked_sub(amount)
+        .ok_or(IdealerError::InsufficientVaultBalance)?;
+    require!(
+        remaining >= min_balance,
+        IdealerError::InsufficientVaultBalance
+    );
+    **vault.try_borrow_mut_lamports()? -= amount;
+    **recipient.try_borrow_mut_lamports()? += amount;
+    Ok(())
+}
+
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct InitializeGlobalConfigArgs {
     pub treasury_address: Pubkey,
@@ -1394,6 +1559,18 @@ pub struct SettleRuleElectionArgs {
     /// The randomness account that produced the value. Must match the account
     /// recorded by `request_rule_election_vrf`.
     pub randomness_source: Pubkey,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct RecordClaimArgs {
+    /// The turn the claim belongs to.
+    pub turn_id: u64,
+    /// The wallet entitled to pull the funds.
+    pub claimant: Pubkey,
+    /// Which payout this claim represents (winner / creator / voter).
+    pub kind: ClaimKind,
+    /// The off-chain-computed claimable amount, in lamports.
+    pub amount_lamports: u64,
 }
 
 #[derive(Accounts)]
@@ -1968,6 +2145,102 @@ pub struct FailDraw<'info> {
     pub turn_state: Box<Account<'info, TurnState>>,
 }
 
+#[derive(Accounts)]
+#[instruction(args: RecordClaimArgs)]
+pub struct RecordClaim<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(
+        seeds = [b"global_config"],
+        bump = global_config.bump,
+        has_one = authority @ IdealerError::Unauthorized
+    )]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        seeds = [b"turn".as_ref(), args.turn_id.to_le_bytes().as_ref()],
+        bump = turn_state.bump,
+        constraint = turn_state.turn_id == args.turn_id @ IdealerError::InvalidTurnId
+    )]
+    pub turn_state: Box<Account<'info, TurnState>>,
+    #[account(
+        init,
+        payer = authority,
+        space = 8 + Claim::INIT_SPACE,
+        seeds = [
+            b"claim".as_ref(),
+            args.turn_id.to_le_bytes().as_ref(),
+            args.claimant.as_ref(),
+            &[args.kind as u8],
+        ],
+        bump
+    )]
+    pub claim: Box<Account<'info, Claim>>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(turn_id: u64)]
+pub struct ClaimPrize<'info> {
+    #[account(mut)]
+    pub claimant: Signer<'info>,
+    #[account(
+        seeds = [b"global_config"],
+        bump = global_config.bump
+    )]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        mut,
+        seeds = [
+            b"claim".as_ref(),
+            turn_id.to_le_bytes().as_ref(),
+            claimant.key().as_ref(),
+            &[ClaimKind::WinnerPayout as u8],
+        ],
+        bump = claim.bump,
+        constraint = claim.claimant == claimant.key() @ IdealerError::Unauthorized,
+        constraint = claim.turn_id == turn_id @ IdealerError::InvalidTurnId
+    )]
+    pub claim: Box<Account<'info, Claim>>,
+    #[account(
+        mut,
+        seeds = [b"prize_vault".as_ref(), turn_id.to_le_bytes().as_ref()],
+        bump = prize_vault.bump,
+        constraint = prize_vault.turn_id == turn_id @ IdealerError::InvalidTurnId
+    )]
+    pub prize_vault: Account<'info, PrizeVault>,
+}
+
+#[derive(Accounts)]
+#[instruction(turn_id: u64, kind: ClaimKind)]
+pub struct ClaimReward<'info> {
+    #[account(mut)]
+    pub claimant: Signer<'info>,
+    #[account(
+        seeds = [b"global_config"],
+        bump = global_config.bump
+    )]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        mut,
+        seeds = [
+            b"claim".as_ref(),
+            turn_id.to_le_bytes().as_ref(),
+            claimant.key().as_ref(),
+            &[kind as u8],
+        ],
+        bump = claim.bump,
+        constraint = claim.claimant == claimant.key() @ IdealerError::Unauthorized,
+        constraint = claim.turn_id == turn_id @ IdealerError::InvalidTurnId
+    )]
+    pub claim: Box<Account<'info, Claim>>,
+    #[account(
+        mut,
+        seeds = [b"treasury_vault"],
+        bump = treasury_vault.bump
+    )]
+    pub treasury_vault: Account<'info, TreasuryVault>,
+}
+
 #[account]
 #[derive(InitSpace)]
 pub struct GlobalConfig {
@@ -2146,6 +2419,32 @@ pub struct PrizeVault {
     pub turn_id: u64,
     pub total_collected_lamports: u64,
     pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct Claim {
+    pub turn_id: u64,
+    pub claimant: Pubkey,
+    pub kind: ClaimKind,
+    pub amount_lamports: u64,
+    pub status: ClaimState,
+    pub recorded_at: i64,
+    pub claimed_at: i64,
+    pub bump: u8,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, InitSpace, PartialEq, Eq)]
+pub enum ClaimKind {
+    WinnerPayout,
+    CreatorReward,
+    VoterReward,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, InitSpace, PartialEq, Eq)]
+pub enum ClaimState {
+    Available,
+    Claimed,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, InitSpace, PartialEq, Eq)]
@@ -2358,6 +2657,22 @@ pub struct DrawFailed {
     pub failed_at: i64,
 }
 
+#[event]
+pub struct ClaimRecorded {
+    pub turn_id: u64,
+    pub claimant: Pubkey,
+    pub kind: ClaimKind,
+    pub amount_lamports: u64,
+}
+
+#[event]
+pub struct ClaimSettled {
+    pub turn_id: u64,
+    pub claimant: Pubkey,
+    pub kind: ClaimKind,
+    pub amount_lamports: u64,
+}
+
 #[error_code]
 pub enum IdealerError {
     #[msg("The signer is not authorized for this instruction.")]
@@ -2462,4 +2777,14 @@ pub enum IdealerError {
     RuleNotRemovable,
     #[msg("The rule has too many votes to be removed by paid action.")]
     RuleRemovalProtected,
+    #[msg("The claimant address is empty.")]
+    InvalidClaimant,
+    #[msg("The claim amount is below the minimum claim threshold.")]
+    ClaimBelowMinimum,
+    #[msg("The claim is not available to settle.")]
+    ClaimNotAvailable,
+    #[msg("The claim kind does not match the requested vault.")]
+    ClaimKindMismatch,
+    #[msg("The vault has insufficient lamports above its rent-exempt minimum.")]
+    InsufficientVaultBalance,
 }

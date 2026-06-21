@@ -1,34 +1,36 @@
 import { expect, test } from "@playwright/test";
 
-test("simulated result explains outcomes, creator reward, return, and sharing", async ({ page }) => {
+test("claims panel prompts wallet connection and links to next round and history", async ({
+  page,
+}) => {
   await page.goto("/play/results");
 
+  // Without a connected wallet the panel asks the player to connect first.
   await expect(
-    page.getByRole("heading", { name: "One number away from an alternative-rule win." })
+    page.getByRole("heading", { name: "Connect your wallet to see claims" }),
   ).toBeVisible();
   await expect(
-    page.getByText("One more match would have triggered the active rule. Numbers 57 and 83 missed.")
+    page.getByRole("link", { name: "Connect wallet" }),
+  ).toHaveAttribute("href", "/play/wallet");
+
+  // The return section links to the next round and the reward history.
+  await expect(
+    page.getByRole("link", { name: "Join next round" }),
+  ).toHaveAttribute("href", "/play/pick");
+  await expect(
+    page.getByRole("link", { name: "Reward history" }),
+  ).toHaveAttribute("href", "/play/rewards");
+});
+
+test("reward history page prompts wallet connection and links back to claims", async ({
+  page,
+}) => {
+  await page.goto("/play/rewards");
+
+  await expect(
+    page.getByRole("heading", { name: "Connect your wallet" }),
   ).toBeVisible();
-  await expect(page.getByText("Deducted from winner")).toBeVisible();
-  await expect(page.getByText("0.00 SOL")).toBeVisible();
-
-  await page.getByRole("button", { name: "Winner" }).click();
-  await expect(page.getByRole("heading", { name: "Your guess won under the Rule of the Hour." })).toBeVisible();
-  await expect(page.getByText("The active rule changed this outcome from a loss into a win.")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Claimable balance" })).toBeVisible();
-  await page.getByRole("button", { name: "Claim payout" }).click();
-  await expect(page.getByRole("heading", { name: "Wallet approval pending" })).toBeVisible();
-  await page.getByRole("button", { name: "Reject approval" }).click();
-  await expect(page.getByRole("heading", { name: "Claim failed" })).toBeVisible();
-  await page.getByRole("button", { name: "Claim payout" }).click();
-  await page.getByRole("button", { name: "Approve in wallet" }).click();
-  await expect(page.getByRole("heading", { name: "Claim successful" })).toBeVisible();
-
-  await page.getByRole("button", { name: "Creator" }).click();
-  await expect(page.getByRole("heading", { name: "Your elected rule created a winner." })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Creator reward: 0.18 SOL" })).toBeVisible();
-  await expect(page.getByText(/winner still receives the full 1.20 SOL/)).toBeVisible();
-
-  await expect(page.getByRole("link", { name: "Share result" })).toHaveAttribute("href", "/play/share");
-  await expect(page.getByRole("link", { name: "Join next round" })).toHaveAttribute("href", "/play/pick");
+  await expect(
+    page.getByRole("link", { name: "Connect wallet" }),
+  ).toHaveAttribute("href", "/play/wallet");
 });

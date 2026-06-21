@@ -8,6 +8,7 @@ import {
   type TurnAutomationConfig,
 } from "./turn-automation.js";
 
+export * from "./claims.js";
 export * from "./draw.js";
 export * from "./guess-verification.js";
 export * from "./rule-validation.js";

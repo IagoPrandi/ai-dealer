@@ -712,6 +712,10 @@ function AccountScreen({
             <span>total received</span>
           </article>
         </div>
+        <Link className="platform-ghost-button" href="/play/results">
+          <Trophy aria-hidden="true" size={17} />
+          Rewards &amp; claims
+        </Link>
         <Link className="platform-ghost-button" href="/play/wallet">
           <Wallet aria-hidden="true" size={17} />
           Manage connected wallet

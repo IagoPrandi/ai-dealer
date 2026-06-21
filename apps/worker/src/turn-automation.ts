@@ -112,7 +112,7 @@ type AccountInfoResult = {
   };
 };
 
-type RpcClient = ReturnType<typeof createSolanaRpc>;
+export type RpcClient = ReturnType<typeof createSolanaRpc>;
 
 function envFlag(value: string | undefined) {
   return value === "1" || value?.toLowerCase() === "true";
@@ -577,13 +577,19 @@ async function createForceSkipLegacyActiveTurnInstruction({
   };
 }
 
-async function simulateAndSend({
+export interface AuthorityInstruction {
+  accounts: { address: SolanaAddress; role: AccountRole }[];
+  data: Uint8Array;
+  programAddress: SolanaAddress;
+}
+
+export async function simulateAndSend({
   authorityKeypairBytes,
   instruction,
   rpc,
 }: {
   authorityKeypairBytes: Uint8Array;
-  instruction: Awaited<ReturnType<typeof createOpenTurnInstruction>>;
+  instruction: AuthorityInstruction;
   rpc: RpcClient;
 }) {
   const authority = await createKeyPairSignerFromBytes(authorityKeypairBytes);

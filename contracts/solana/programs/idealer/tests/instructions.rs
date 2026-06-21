@@ -935,3 +935,256 @@ async fn invalid_guess_and_rule_proposal_are_rejected() {
         .await
         .is_err());
 }
+
+fn record_claim_instruction(
+    turn_id: u64,
+    authority: Pubkey,
+    claimant: Pubkey,
+    kind: idealer::ClaimKind,
+    amount_lamports: u64,
+) -> Instruction {
+    Instruction {
+        program_id: idealer::ID,
+        accounts: accounts::RecordClaim {
+            authority,
+            global_config: pda(&[b"global_config"]),
+            turn_state: pda(&[b"turn", &turn_id.to_le_bytes()]),
+            claim: pda(&[
+                b"claim",
+                &turn_id.to_le_bytes(),
+                claimant.as_ref(),
+                &[kind as u8],
+            ]),
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+        data: instruction::RecordClaim {
+            args: idealer::RecordClaimArgs {
+                turn_id,
+                claimant,
+                kind,
+                amount_lamports,
+            },
+        }
+        .data(),
+    }
+}
+
+fn claim_prize_instruction(turn_id: u64, claimant: Pubkey) -> Instruction {
+    Instruction {
+        program_id: idealer::ID,
+        accounts: accounts::ClaimPrize {
+            claimant,
+            global_config: pda(&[b"global_config"]),
+            claim: pda(&[
+                b"claim",
+                &turn_id.to_le_bytes(),
+                claimant.as_ref(),
+                &[idealer::ClaimKind::WinnerPayout as u8],
+            ]),
+            prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
+        }
+        .to_account_metas(None),
+        data: instruction::ClaimPrize { turn_id }.data(),
+    }
+}
+
+fn claim_reward_instruction(
+    turn_id: u64,
+    claimant: Pubkey,
+    kind: idealer::ClaimKind,
+) -> Instruction {
+    Instruction {
+        program_id: idealer::ID,
+        accounts: accounts::ClaimReward {
+            claimant,
+            global_config: pda(&[b"global_config"]),
+            claim: pda(&[
+                b"claim",
+                &turn_id.to_le_bytes(),
+                claimant.as_ref(),
+                &[kind as u8],
+            ]),
+            treasury_vault: pda(&[b"treasury_vault"]),
+        }
+        .to_account_metas(None),
+        data: instruction::ClaimReward { turn_id, kind }.data(),
+    }
+}
+
+async fn lamports_of(context: &mut ProgramTestContext, address: Pubkey) -> u64 {
+    context
+        .banks_client
+        .get_account(address)
+        .await
+        .unwrap()
+        .unwrap()
+        .lamports
+}
+
+#[tokio::test]
+#[ignore = "requires an SBF build and SBF_OUT_DIR; run the explicit SBF integration suite"]
+async fn claim_flow_records_and_pays_winner_and_reward() {
+    let mut context = ProgramTest::new(
+        "idealer",
+        idealer::ID,
+        processor!(process_idealer_instruction),
+    )
+    .start_with_context()
+    .await;
+    let turn_id = 1_u64;
+    initialize_and_open_turn(&mut context, turn_id).await;
+    let authority = context.payer.pubkey();
+
+    // A guess funds the prize vault, then the draw is settled so claims can be
+    // recorded.
+    let player = Keypair::new();
+    fund(&mut context, &player.pubkey()).await;
+    submit_guess(&mut context, &player, turn_id, [1, 2, 3, 4, 5, 6])
+        .await
+        .unwrap();
+    advance_clock_to_turn_end(&mut context, turn_id).await;
+    let randomness_account = Pubkey::new_unique();
+    process(
+        &mut context,
+        request_draw_instruction(turn_id, authority, randomness_account),
+        &[],
+    )
+    .await
+    .unwrap();
+    process(
+        &mut context,
+        settle_draw_instruction(turn_id, authority, [3u8; 32], randomness_account),
+        &[],
+    )
+    .await
+    .unwrap();
+
+    // A winner payout below the minimum claim threshold is rejected.
+    assert!(process(
+        &mut context,
+        record_claim_instruction(
+            turn_id,
+            authority,
+            player.pubkey(),
+            idealer::ClaimKind::WinnerPayout,
+            1_000_000,
+        ),
+        &[],
+    )
+    .await
+    .is_err());
+
+    // The authority records a valid winner payout.
+    let payout = 6_000_000_u64;
+    process(
+        &mut context,
+        record_claim_instruction(
+            turn_id,
+            authority,
+            player.pubkey(),
+            idealer::ClaimKind::WinnerPayout,
+            payout,
+        ),
+        &[],
+    )
+    .await
+    .unwrap();
+    let claim_address = pda(&[
+        b"claim",
+        &turn_id.to_le_bytes(),
+        player.pubkey().as_ref(),
+        &[idealer::ClaimKind::WinnerPayout as u8],
+    ]);
+    let claim: idealer::Claim = read_anchor_account(&mut context, claim_address).await;
+    assert_eq!(claim.status, idealer::ClaimState::Available);
+    assert_eq!(claim.amount_lamports, payout);
+
+    // Re-recording the same (turn, wallet, kind) tuple fails (idempotent init).
+    assert!(process(
+        &mut context,
+        record_claim_instruction(
+            turn_id,
+            authority,
+            player.pubkey(),
+            idealer::ClaimKind::WinnerPayout,
+            payout,
+        ),
+        &[],
+    )
+    .await
+    .is_err());
+
+    // A non-claimant wallet cannot pull the payout (its claim PDA does not exist).
+    let stranger = Keypair::new();
+    fund(&mut context, &stranger.pubkey()).await;
+    assert!(process(
+        &mut context,
+        claim_prize_instruction(turn_id, stranger.pubkey()),
+        &[&stranger],
+    )
+    .await
+    .is_err());
+
+    // The claimant pulls the winner payout from the prize vault.
+    let before = lamports_of(&mut context, player.pubkey()).await;
+    process(
+        &mut context,
+        claim_prize_instruction(turn_id, player.pubkey()),
+        &[&player],
+    )
+    .await
+    .unwrap();
+    let after = lamports_of(&mut context, player.pubkey()).await;
+    assert_eq!(after - before, payout);
+    let claim: idealer::Claim = read_anchor_account(&mut context, claim_address).await;
+    assert_eq!(claim.status, idealer::ClaimState::Claimed);
+
+    // Double-claim is blocked by the Claimed flag.
+    assert!(process(
+        &mut context,
+        claim_prize_instruction(turn_id, player.pubkey()),
+        &[&player],
+    )
+    .await
+    .is_err());
+
+    // Creator/voter rewards are paid from the treasury vault. Fund it, record a
+    // creator reward, and verify the wallet pulls it.
+    let treasury_vault = pda(&[b"treasury_vault"]);
+    fund(&mut context, &treasury_vault).await;
+    let reward = 5_000_000_u64;
+    process(
+        &mut context,
+        record_claim_instruction(
+            turn_id,
+            authority,
+            player.pubkey(),
+            idealer::ClaimKind::CreatorReward,
+            reward,
+        ),
+        &[],
+    )
+    .await
+    .unwrap();
+
+    // The reward instruction rejects a winner-payout kind (kind mismatch).
+    assert!(process(
+        &mut context,
+        claim_reward_instruction(turn_id, player.pubkey(), idealer::ClaimKind::WinnerPayout),
+        &[&player],
+    )
+    .await
+    .is_err());
+
+    let before = lamports_of(&mut context, player.pubkey()).await;
+    process(
+        &mut context,
+        claim_reward_instruction(turn_id, player.pubkey(), idealer::ClaimKind::CreatorReward),
+        &[&player],
+    )
+    .await
+    .unwrap();
+    let after = lamports_of(&mut context, player.pubkey()).await;
+    assert_eq!(after - before, reward);
+}

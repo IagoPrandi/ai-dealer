@@ -28,6 +28,22 @@ const VOTE_RULE_DISCRIMINATOR = new Uint8Array([
 const ELIMINATE_VOTE_RULE_DISCRIMINATOR = new Uint8Array([
   82, 128, 200, 74, 171, 186, 232, 227,
 ]);
+const CLAIM_PRIZE_DISCRIMINATOR = new Uint8Array([
+  157, 233, 139, 121, 246, 62, 234, 235,
+]);
+const CLAIM_REWARD_DISCRIMINATOR = new Uint8Array([
+  149, 95, 181, 242, 94, 90, 158, 162,
+]);
+// On-chain `ClaimKind` enum order: WinnerPayout=0, CreatorReward=1, VoterReward=2.
+export type ClaimKindLabel =
+  | "creator_reward"
+  | "voter_reward"
+  | "winner_payout";
+const CLAIM_KIND_BYTE: Readonly<Record<ClaimKindLabel, number>> = {
+  creator_reward: 1,
+  voter_reward: 2,
+  winner_payout: 0,
+};
 const addressEncoder = getAddressEncoder();
 const textEncoder = new TextEncoder();
 
@@ -683,6 +699,96 @@ export async function createEliminateVoteRuleInstruction({
     data: ELIMINATE_VOTE_RULE_DISCRIMINATOR,
     programAddress: IDEALER_PROGRAM_ID,
   };
+}
+
+export async function deriveClaimAddress({
+  claimant,
+  kind,
+  turnId,
+}: {
+  claimant: ReturnType<typeof address>;
+  kind: ClaimKindLabel;
+  turnId: number;
+}) {
+  return derivePda([
+    "claim",
+    u64Le(turnId),
+    addressEncoder.encode(claimant),
+    Uint8Array.of(CLAIM_KIND_BYTE[kind]),
+  ]);
+}
+
+export async function createClaimPrizeInstruction({
+  player,
+  turnId,
+}: {
+  player: ReturnType<typeof address>;
+  turnId: number;
+}) {
+  const [globalConfig, claim, prizeVault] = await Promise.all([
+    derivePda(["global_config"]),
+    deriveClaimAddress({ claimant: player, kind: "winner_payout", turnId }),
+    derivePda(["prize_vault", u64Le(turnId)]),
+  ]);
+  const data = [...CLAIM_PRIZE_DISCRIMINATOR];
+  pushU64Le(data, turnId);
+
+  return {
+    accounts: [
+      { address: player, role: AccountRole.WRITABLE_SIGNER },
+      { address: globalConfig, role: AccountRole.READONLY },
+      { address: claim, role: AccountRole.WRITABLE },
+      { address: prizeVault, role: AccountRole.WRITABLE },
+    ],
+    data: new Uint8Array(data),
+    programAddress: IDEALER_PROGRAM_ID,
+  };
+}
+
+export async function createClaimRewardInstruction({
+  kind,
+  player,
+  turnId,
+}: {
+  kind: "creator_reward" | "voter_reward";
+  player: ReturnType<typeof address>;
+  turnId: number;
+}) {
+  const [globalConfig, claim, treasuryVault] = await Promise.all([
+    derivePda(["global_config"]),
+    deriveClaimAddress({ claimant: player, kind, turnId }),
+    derivePda(["treasury_vault"]),
+  ]);
+  const data = [...CLAIM_REWARD_DISCRIMINATOR];
+  pushU64Le(data, turnId);
+  data.push(CLAIM_KIND_BYTE[kind]);
+
+  return {
+    accounts: [
+      { address: player, role: AccountRole.WRITABLE_SIGNER },
+      { address: globalConfig, role: AccountRole.READONLY },
+      { address: claim, role: AccountRole.WRITABLE },
+      { address: treasuryVault, role: AccountRole.WRITABLE },
+    ],
+    data: new Uint8Array(data),
+    programAddress: IDEALER_PROGRAM_ID,
+  };
+}
+
+/// Build the right claim instruction for a claim record: winner payouts pull
+/// from the turn prize vault, creator/voter rewards from the treasury reserve.
+export async function createClaimInstruction({
+  kind,
+  player,
+  turnId,
+}: {
+  kind: ClaimKindLabel;
+  player: ReturnType<typeof address>;
+  turnId: number;
+}) {
+  return kind === "winner_payout"
+    ? createClaimPrizeInstruction({ player, turnId })
+    : createClaimRewardInstruction({ kind, player, turnId });
 }
 
 export function validateGuessNumbers(numbers: readonly number[]) {

@@ -5443,6 +5443,48 @@ Implement prize pool accounting, treasury/platform monetization, payouts, rollov
 - [x] Removed rules are excluded from election but remain visible in audit/history.
 - [x] Removal cannot mutate active/frozen/finalized outcomes.
 
+#### M4.7 — On-chain Claim Execution
+
+**Objective:** execute real on-chain SOL transfers for winner payouts and creator/voter rewards, replacing the API-only claim state of M4.4 with a verifiable pull-payment backed by Solana program instructions.
+
+**Checklist:**
+
+- [ ] Add a `Claim` PDA per `(turn_id, wallet, kind)` with `WinnerPayout` / `CreatorReward` / `VoterReward` kinds and `Available` / `Claimed` state.
+- [ ] Implement authority-signed `record_claim` that mirrors an API-computed claimable amount on chain (draw fulfilled, amount ≥ `minimum_claim_threshold_lamports`, idempotent via `init`).
+- [ ] Implement `claim_prize` (winner payout from the turn prize vault) and `claim_reward` (creator/voter reward from the treasury reserve vault), signed by the claimant.
+- [ ] Pay out of program-owned vault PDAs by direct lamport mutation while preserving the vault's rent-exempt minimum.
+- [ ] Block double-claim via the `Claimed` flag (Checks-Effects-Interactions: mark claimed before transfer).
+- [ ] Worker posts `record_claim` for each available claim after settlement, tolerating already-recorded PDAs.
+- [ ] Frontend builds `claim_prize` / `claim_reward` instructions, signs in-wallet, and records the real signature through `POST /claim-records/complete`.
+- [ ] Add contract tests (record → claim, double-claim, wrong wallet, below-minimum, kind/vault mismatch, vault rent floor) and worker/API tests.
+
+**Approval criteria:**
+
+- [ ] A connected wallet can claim a real winner payout and a creator/voter reward on devnet, with SOL transferred.
+- [ ] Double-claim is rejected on-chain; below-minimum claims are never recorded.
+- [ ] Winner payouts draw from the prize vault and rewards from the treasury reserve, without reducing the winner-visible payout.
+
+---
+
+#### M4.8 — Player Rewards History
+
+**Objective:** give players a wallet-scoped view of their payouts and rewards across all turns, plus a claim surface for available items.
+
+**Checklist:**
+
+- [ ] Add `GET /players/{wallet}/claims` aggregating every claim record for a wallet across turns with per-status totals.
+- [ ] Implement a claims surface (`/play/results`) that lists claimable / pending / claimed payouts and rewards and triggers the on-chain claim flow.
+- [ ] Implement a read-only reward history screen (`/play/rewards`) grouped by turn, linking to each round's detail.
+- [ ] Surface the rewards entry point from the player account/hub navigation.
+- [ ] Add API and E2E coverage for the aggregation endpoint and the wallet-gated screens.
+
+**Approval criteria:**
+
+- [ ] A player can see all their rewards by turn and status, and reach the claim flow for available items.
+- [ ] The history reflects the real on-chain claim state (claimed / pending / available).
+
+---
+
 #### M4 Approval
 
 M4 is approved only if all M4 submilestones are approved and:
