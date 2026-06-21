@@ -52,6 +52,17 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-06-21 (SBF build + instruction suite + devnet upgrade for the rule-elimination/voting/prize-vault changes)
+
+- Opened required project context before working: `PRD.md` (§6.11 paid removal, §6.12 election, §6.13 elimination decision phase) and `PROGRESS_TRACKER.md`, and reviewed `.claude/skills` (followed `solana-build-deploy-workflow` + best-practices conventions; no new skill needed).
+- Built the SBF artifact for the current `lib.rs` (rule elimination + voting + prize-vault integration) in the pinned Agave toolchain container (`scripts/sbf.sh build`, Agave/`cargo-build-sbf` 4.0.0): `idealer.so` compiled clean at 658,616 bytes (up from the prior 448,024-byte build).
+- Ran the SBF instruction suite (`scripts/sbf.sh test-sbf`, `--test-threads=1`) and fixed two test-side failures (the contract behavior was correct):
+  - `core_instructions_execute_and_persist_state` (`tests/instructions.rs`): the double-vote rejection assertion re-sent the identical `VoteRule` instruction, which reused the same blockhash so banks returned the first vote's cached success without re-executing. Added a `warp_to_slot` before the retry so it is a distinct transaction that actually hits the `rule_vote` `init` (per-`(turn, rule, voter)` PDA) conflict.
+  - `rule_election_locks_requests_and_settles_active_rule` (`tests/instructions.rs`): the test asserted the old single-step election (active rule set at `settle_rule_election`). The contract now uses a two-phase flow, so `settle_rule_election` only selects finalists and opens the elimination window (`active_rule_id = 0`). Extended the test through `close_elimination_window` → `request_active_election_vrf` → `settle_active_election`, asserting finalist state at settle and the active rule (id/hash/artifact) after the active election.
+  - Result: `test result: ok. 5 passed; 0 failed`.
+- Deployed the devnet program upgrade (`scripts/sbf.sh deploy`) from the deployer/upgrade authority `4bY5krt2VnnSNB1R4c1bhiWdQYkTc1FvFTN1LaV5JxCH` (balance 16.10 SOL, no funding needed): program `6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4`, tx `3wbsuZYq264v2QBPGEwPgadBoCif1KwQFN6GJAP2LLEwgtm4mqAwF75GYrUvhsAuHYKtbZmTkUJpum4YivHG7nK3`, last deployed slot 470977802, data length 658,616 bytes, upgrade authority unchanged. Verified via `solana program show`.
+- No PRD checklist item or milestone checkbox was ticked; this entry records the build/test/deploy run only. The test edits in `tests/instructions.rs` remain uncommitted alongside the contract changes.
+
 ### 2026-06-21 (M4.5 confirmation + M4.6 paid rule removal accounting)
 
 - Opened required project context before working: `PRD.md` (§2.5/§2.6 prize pool, §5.1 player actions, §5.4 lifecycle, §6.11 paid removal, §6.12 election, §15.5 M4.5/M4.6) and `PROGRESS_TRACKER.md`, and reviewed `.claude/skills` (no removal-specific skill; followed best-practices conventions).
