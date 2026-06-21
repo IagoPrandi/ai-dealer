@@ -47,6 +47,17 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-06-20 (Phantom devnet chain selection for guess signing)
+
+- Reopened required project context before working: `PRD.md`, `.claude/skills`, `.claude/skills/solana-dev/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/SKILL.md`, and `.claude/skills/solana-dev/ext/solana-dev/skill/references/programs/anchor.md`.
+- Investigated the Phantom warning that the bet/guess transaction was reverted during wallet simulation.
+- Reproduced the `submit_guess` instruction directly against devnet with the same deployed program/account layout and confirmed the program simulation succeeds (`err=null`, `34518` compute units) for a funded devnet payer while the active turn is open.
+- Root cause addressed in `apps/web/src/solana/SolanaProviders.tsx`: the Mobile Wallet Adapter registration was devnet-scoped, but browser-extension Wallet Standard connectors from `autoDiscover()` did not receive `defaultChain`, so Phantom could simulate/sign on its default Solana network instead of devnet.
+- Updated Wallet Standard discovery to set `defaultChain: "solana:devnet"` for discovered connectors and reused the same `DEVNET_CHAIN` constant for MWA registration.
+- Synced `SolanaProviders.tsx` into the running `idealer-web` container and restarted only `idealer-web`.
+- Verification passed: `pnpm --filter @idealer/web typecheck`, `pnpm --filter @idealer/web lint`, direct devnet `submit_guess` simulation succeeded, `GET http://127.0.0.1:3000/play/pick` returned HTTP `200`, and `idealer-web` returned to `healthy`.
+- No PRD checklist item or milestone checkbox was ticked; this was a maintenance bug fix and milestone approval still requires user confirmation.
+
 ### 2026-06-20 (devnet guess transaction wallet signer fix)
 
 - Opened required project context before working: `PRD.md`, `.claude/skills`, `.claude/skills/solana-dev/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/references/frontend-framework-kit.md`, and `.claude/skills/solana-dev/ext/solana-dev/skill/references/kit-web3-interop.md`.

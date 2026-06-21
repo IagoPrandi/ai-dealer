@@ -14,6 +14,7 @@ const DEVNET_RPC_ENDPOINT =
   process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
 const DEVNET_WEBSOCKET_ENDPOINT =
   process.env.NEXT_PUBLIC_SOLANA_WS_URL ?? "wss://api.devnet.solana.com";
+const DEVNET_CHAIN = "solana:devnet";
 const MWA_REGISTRATION_KEY = "__idealerMwaRegistered";
 
 function registerMobileWalletAdapter() {
@@ -33,7 +34,7 @@ function registerMobileWalletAdapter() {
       uri: window.location.origin,
     },
     authorizationCache: createDefaultAuthorizationCache(),
-    chains: ["solana:devnet"],
+    chains: [DEVNET_CHAIN],
     chainSelector: createDefaultChainSelector(),
     onWalletNotFound: createDefaultWalletNotFoundHandler(),
     remoteHostAuthority: window.location.host,
@@ -46,7 +47,11 @@ function createIdealerSolanaClient() {
   return createClient({
     commitment: "confirmed",
     endpoint: DEVNET_RPC_ENDPOINT,
-    walletConnectors: autoDiscover(),
+    walletConnectors: autoDiscover({
+      overrides: () => ({
+        defaultChain: DEVNET_CHAIN,
+      }),
+    }),
     websocketEndpoint: DEVNET_WEBSOCKET_ENDPOINT,
   });
 }
