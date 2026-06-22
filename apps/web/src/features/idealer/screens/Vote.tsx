@@ -3,6 +3,8 @@
 /** REGRAS — two-phase voting hub. Ported from app-vote.jsx, wired to live data. */
 import { useState } from "react";
 
+import { ELIMINATION_VOTE_FEE_MULTIPLIER, VOTE_FEE_START_TURN } from "@idealer/constants";
+
 import { useIdealer } from "../context";
 import { fmtSol, fmtTurnId } from "../data/format";
 import type { UiRule } from "../data/types";
@@ -98,7 +100,7 @@ function FinalistRow({ rule }: { rule: UiRule }) {
 }
 
 export function VoteScreen() {
-  const { actionError, decisionEndsAt, played, rules, turnId } = useIdealer();
+  const { actionError, decisionEndsAt, fees, played, rules, turnId } = useIdealer();
   const [tab, setTab] = useState<"abertas" | "finalistas">("abertas");
   const [h, m, s] = useCountdownTo(decisionEndsAt);
 
@@ -106,6 +108,12 @@ export function VoteScreen() {
   const finalists = all.filter((r) => r.finalist);
   const eliminatedCount = finalists.filter((r) => finalistStatus(r) === "eliminada").length;
   const gated = !played;
+  // Voting is free before turn 100; paid (and 2× for down-votes) from then on.
+  const feeFree = turnId < VOTE_FEE_START_TURN;
+  const voteFeeLabel = feeFree ? "Free this turn" : `${fmtSol(fees.vote)} SOL`;
+  const elimFeeLabel = feeFree
+    ? "Free this turn"
+    : `${fmtSol(fees.vote * ELIMINATION_VOTE_FEE_MULTIPLIER)} SOL · 2×`;
 
   return (
     <div className="ide-app ide-screen" style={{ height: "100%", position: "relative", overflow: "hidden" }}>
@@ -129,9 +137,14 @@ export function VoteScreen() {
 
         {tab === "abertas" ? (
           <>
-            <p style={{ margin: "0 0 14px", fontSize: 13.5, color: "var(--muted)", lineHeight: 1.5 }}>
+            <p style={{ margin: "0 0 10px", fontSize: 13.5, color: "var(--muted)", lineHeight: 1.5 }}>
               Vote <b style={{ color: "var(--green)" }}>in favor</b> of the rules you want in this round. The most voted become finalists.
             </p>
+            <div style={{ marginBottom: 14 }}>
+              <span className="ide-pill" style={{ padding: "4px 11px", fontSize: 11.5, color: feeFree ? "var(--green)" : "var(--muted)" }}>
+                <Ico.up style={{ color: feeFree ? "var(--green)" : "var(--purple-soft)", width: 12, height: 12 }} /> Vote · <span className="ide-num">{voteFeeLabel}</span>
+              </span>
+            </div>
             {all.length === 0 ? (
               <div className="ide-card" style={{ padding: 18, textAlign: "center", color: "var(--muted)", fontSize: 14 }}>No rules to vote on yet.</div>
             ) : (
@@ -154,9 +167,10 @@ export function VoteScreen() {
               <p style={{ margin: "10px 0 0", fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5 }}>
                 10 finalists · 3 most voted + 7 by VRF. Vote <b style={{ color: "var(--red)" }}>against</b> to eliminate (max 5). A rule falls when down-votes overtake up-votes. Survivors go to the <b style={{ color: "var(--text)" }}>active rule</b> draw.
               </p>
-              <div style={{ marginTop: 11, display: "flex", gap: 7 }}>
+              <div style={{ marginTop: 11, display: "flex", gap: 7, flexWrap: "wrap" }}>
                 <span className="ide-pill" style={{ padding: "4px 10px", fontSize: 11 }}>{eliminatedCount} eliminated · {Math.max(0, 5 - eliminatedCount)} left</span>
                 <span className="ide-pill" style={{ padding: "4px 10px", fontSize: 11, color: "var(--green)" }}>{finalists.length - eliminatedCount} survivors</span>
+                <span className="ide-pill" style={{ padding: "4px 10px", fontSize: 11, color: feeFree ? "var(--green)" : "var(--red)" }}><Ico.down style={{ color: "currentColor", width: 12, height: 12 }} /> Down-vote · <span className="ide-num">{elimFeeLabel}</span></span>
               </div>
             </div>
 

@@ -1,6 +1,6 @@
 ---
 name: idealer-ui-coherence
-description: Preserve Idealer's visual identity when creating, editing, extending, or reviewing UI screens, components, flows, copy, styling, animations, responsive behavior, or frontend PRs. Use for any app/interface work that could affect screen limits, typography, font usage, colors, button shape, chat bubbles, component layout, copy tone, visual effects, mobile ergonomics, or consistency between new and existing Idealer surfaces.
+description: Preserve current app visual identity when creating, editing, extending, or reviewing UI screens, components, flows, copy, styling, animations, responsive behavior, or frontend PRs. Use for any app/interface work that could affect screen limits, typography, font usage, colors, button shape, chat bubbles, component layout, copy tone, visual effects, mobile ergonomics, or consistency between new and existing Idealer surfaces.
 ---
 
 # Idealer UI Coherence

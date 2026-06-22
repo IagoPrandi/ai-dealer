@@ -46,6 +46,30 @@ export function fmtTurnId(turnId: number): string {
   return `#${turnId.toString().padStart(4, "0")}`;
 }
 
+/** Relative "expires in …" from a future ISO timestamp, in English. */
+export function expiresInLabel(iso: string | null | undefined): string {
+  if (!iso) {
+    return "";
+  }
+  const at = Date.parse(iso);
+  if (Number.isNaN(at)) {
+    return "";
+  }
+  const seconds = Math.floor((at - Date.now()) / 1000);
+  if (seconds <= 0) {
+    return "expired";
+  }
+  const hours = Math.floor(seconds / 3600);
+  if (hours < 1) {
+    return "expires within the hour";
+  }
+  if (hours < 24) {
+    return `expires in ${hours} h`;
+  }
+  const days = Math.floor(hours / 24);
+  return `expires in ${days} day${days === 1 ? "" : "s"}`;
+}
+
 /** Relative "time ago" from an ISO timestamp, in English. */
 export function timeAgo(iso: string | null | undefined): string {
   if (!iso) {

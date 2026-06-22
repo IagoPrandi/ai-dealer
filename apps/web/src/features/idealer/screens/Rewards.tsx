@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 
 import { useIdealer } from "../context";
-import { fmtSol, lamportsToSol, truncateAddress } from "../data/format";
+import { expiresInLabel, fmtSol, lamportsToSol, truncateAddress } from "../data/format";
 import { usePlayerClaims } from "../data/hooks";
 import type { ClaimKind, ClaimRecordApi, ClaimStatus } from "../data/types";
 import { Dealer, Ico, ScreenHead, SectionLabel } from "../shared";
@@ -138,6 +138,9 @@ export function RewardsScreen() {
                         <div style={{ textAlign: "right" }}>
                           <div className="ide-num" style={{ fontWeight: 800, fontSize: 15 }}>{fmtSol(lamportsToSol(record.amountLamports))} SOL</div>
                           <div style={{ color: record.status === "available" ? "var(--green)" : "var(--muted)", fontSize: 11.5, marginTop: 2 }}>{STATUS_LABELS[record.status]}</div>
+                          {record.status === "available" && record.claimWindowExpiresAt ? (
+                            <div style={{ color: "var(--dim)", fontSize: 10.5, marginTop: 2 }}>{expiresInLabel(record.claimWindowExpiresAt)}</div>
+                          ) : null}
                         </div>
                       </div>
                     </div>

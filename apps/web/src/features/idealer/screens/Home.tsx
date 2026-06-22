@@ -50,11 +50,15 @@ function PromptInput() {
 
 export function HomeScreen() {
   const {
-    endSeconds, fees, go, openDetail, played, players, prizeSol, rules, turnId,
+    endSeconds, fees, go, guessCutoffEndsAt, openDetail, played, players, prizeSol, rules, turnId,
     turnReadyToPlay, turnStatusMessage,
   } = useIdealer();
 
   const [h, m, s] = useCountdownTo(endSeconds);
+  const [ch, cm, cs] = useCountdownTo(guessCutoffEndsAt);
+  const nowSec = Math.floor(Date.now() / 1000);
+  const showCutoff =
+    turnReadyToPlay && !played && guessCutoffEndsAt !== null && guessCutoffEndsAt > nowSec;
   const prize = useLivePrize(prizeSol);
   const top = rules.rules.slice(0, 3);
   const intStr = Math.floor(prize).toString();
@@ -70,7 +74,12 @@ export function HomeScreen() {
             <Dealer size={34} />
             <span style={{ fontWeight: 800, fontSize: 19, letterSpacing: "-0.02em" }}>Idealer</span>
           </div>
-          <WalletBtn />
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button onClick={() => go("share")} aria-label="Share round" style={{ width: 38, height: 38, borderRadius: 13, background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--purple-soft)", display: "grid", placeItems: "center", cursor: "pointer", flexShrink: 0 }} type="button">
+              <Ico.send style={{ color: "currentColor", width: 18, height: 18 }} />
+            </button>
+            <WalletBtn />
+          </div>
         </div>
 
         {/* HERO */}
@@ -90,10 +99,15 @@ export function HomeScreen() {
               <span className="ide-grad-text" style={{ fontSize: 34, fontWeight: 700, marginTop: 6 }}>{decStr}</span>
               <span style={{ fontSize: 21, fontWeight: 700, color: "var(--purple-soft)", marginTop: 11, marginLeft: 4 }}>SOL</span>
             </div>
-            <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 18 }}>
+            <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 18, flexWrap: "wrap" }}>
               <span className="ide-pill"><Ico.users style={{ color: "var(--purple-soft)" }} /> <span className="ide-num">{fmtInt(players)}</span> playing</span>
               <span className="ide-pill"><Ico.spark style={{ color: "var(--yellow)" }} /> {rules.rules.length} rules</span>
             </div>
+            {showCutoff ? (
+              <div style={{ display: "flex", justifyContent: "center", marginTop: 8 }}>
+                <span className="ide-pill" style={{ color: "var(--muted)" }}><Ico.bolt style={{ color: "var(--yellow)", width: 13, height: 13 }} /> Guessing closes in <span className="ide-num" style={{ color: "var(--text)", fontWeight: 700, marginLeft: 2 }}>{ch}:{cm}:{cs}</span></span>
+              </div>
+            ) : null}
           </div>
         </div>
 

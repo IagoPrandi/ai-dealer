@@ -125,6 +125,7 @@ export interface ClaimRecordApi {
   amountLamports: number;
   category: "alternative" | "original" | null;
   claimId: string;
+  claimWindowExpiresAt?: string;
   kind: ClaimKind;
   status: ClaimStatus;
   statusReason: string;

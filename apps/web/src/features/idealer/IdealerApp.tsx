@@ -21,6 +21,7 @@ import {
   deriveRuleProposalAddress,
   deriveRuleRemovalAddress,
   deriveRuleVoteAddress,
+  getActionCutoffTimestamp,
 } from "../../solana/idealerProgram";
 import {
   IdealerContext,
@@ -206,6 +207,18 @@ export function IdealerApp({
     };
   }, [activeTurn.snapshot]);
 
+  // When does guess submission close? (guessCutoffBps into the turn window.)
+  const guessCutoffEndsAt = useMemo(() => {
+    const snap = activeTurn.snapshot;
+    if (!snap?.turnState) {
+      return null;
+    }
+    return getActionCutoffTimestamp({
+      cutoffBps: snap.globalConfig.guessCutoffBps,
+      turn: snap.turnState,
+    });
+  }, [activeTurn.snapshot]);
+
   const value: IdealerContextValue = {
     actionError,
     approvedIds: rules.approvedIds,
@@ -221,6 +234,7 @@ export function IdealerApp({
     eliminatedIds: rules.eliminatedIds,
     endSeconds: activeTurn.endTimestamp,
     fees,
+    guessCutoffEndsAt,
     go,
     openDetail,
     players: round?.pool?.guesses ?? 0,

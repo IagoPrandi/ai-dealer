@@ -94,7 +94,15 @@ export function ResultScreen() {
       <div className="ide-ambient" />
       {youWon ? <Confetti /> : null}
       <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", padding: "52px 18px 96px" }}>
-        <ScreenHead onBack={() => go("home")} title="Result" />
+        <ScreenHead
+          onBack={() => go("home")}
+          title="Result"
+          right={
+            <button onClick={() => go("share")} aria-label="Share result" style={{ width: 40, height: 40, borderRadius: 13, background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--purple-soft)", display: "grid", placeItems: "center", cursor: "pointer", flexShrink: 0 }} type="button">
+              <Ico.send style={{ color: "currentColor" }} />
+            </button>
+          }
+        />
 
         {youWon ? (
           <div className="ide-card" style={{ padding: 20, marginBottom: 16, textAlign: "center", borderColor: "rgba(255,210,63,0.4)", background: "linear-gradient(160deg, rgba(255,210,63,0.16), var(--surface))", boxShadow: "0 0 36px -14px rgba(255,210,63,0.6)" }}>

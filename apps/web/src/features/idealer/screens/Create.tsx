@@ -29,12 +29,21 @@ interface ChatMessage {
 function RulePreview({ rule }: { rule: RulePreflightResult }) {
   const valid = rule.decision === "VALID" && !rule.needsClarification;
   const pct = Math.round((rule.tokenCount / RULE_MAX_TOKENS) * 100);
+  const confidencePct =
+    typeof rule.finalConfidence === "number"
+      ? Math.round(rule.finalConfidence * 100)
+      : null;
   return (
     <div className="ide-card" style={{ padding: 16, borderColor: "var(--line-2)", background: "linear-gradient(160deg, var(--surface-2), var(--surface))", animation: "ide-rise .3s ease both" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
         <span className="ide-pill" style={{ color: valid ? "var(--green)" : "var(--yellow)", padding: "4px 10px" }}>
           {valid ? <><Ico.check style={{ width: 13, height: 13, color: "var(--green)" }} /> valid rule</> : "needs adjustment"}
         </span>
+        {confidencePct !== null ? (
+          <span className="ide-pill" style={{ padding: "4px 10px", color: "var(--purple-soft)" }}>
+            <Ico.shield style={{ width: 12, height: 12, color: "var(--purple-soft)" }} /> <span className="ide-num">{confidencePct}%</span> confidence
+          </span>
+        ) : null}
         <span style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--dim)" }} className="ide-num">{rule.tokenCount}/{RULE_MAX_TOKENS} tokens</span>
       </div>
       {rule.normalizedText ? <p style={{ margin: "0 0 14px", fontSize: 15, color: "var(--text)", lineHeight: 1.45, fontWeight: 600 }}>{rule.normalizedText}</p> : null}
@@ -43,6 +52,16 @@ function RulePreview({ rule }: { rule: RulePreflightResult }) {
           <SectionLabel>How it works</SectionLabel>
           <p style={{ margin: "7px 0 0", fontSize: 14, lineHeight: 1.55, color: "var(--muted)" }}>{rule.officialInterpretation}</p>
         </>
+      ) : null}
+      {!valid && rule.reasonSummary ? (
+        <p style={{ margin: "12px 0 0", fontSize: 13, lineHeight: 1.5, color: "var(--yellow)", display: "flex", gap: 7 }}>
+          <Ico.info style={{ color: "var(--yellow)", flexShrink: 0, marginTop: 1 }} /> {rule.reasonSummary}
+        </p>
+      ) : null}
+      {rule.reproposalBlocked ? (
+        <p style={{ margin: "12px 0 0", fontSize: 13, lineHeight: 1.5, color: "var(--red)", display: "flex", gap: 7 }}>
+          <Ico.lock style={{ color: "var(--red)", flexShrink: 0, marginTop: 1 }} /> This rule was already rejected this turn and can&apos;t be re-proposed.
+        </p>
       ) : null}
       <div style={{ marginTop: 14, height: 6, borderRadius: 4, background: "var(--surface-3)", overflow: "hidden" }}>
         <div style={{ width: `${Math.min(100, pct)}%`, height: "100%", background: valid ? "var(--grad-btn)" : "var(--yellow)", borderRadius: 4, transition: "width .4s" }} />

@@ -134,6 +134,10 @@ export function ProfileScreen() {
           </div>
         </div>
 
+        <button onClick={() => go("rewards")} className="ide-btn-ghost ide-btn" style={{ width: "100%", padding: 13, marginBottom: 16 }} type="button">
+          <Ico.gift style={{ color: "var(--green)" }} /> Reward history
+        </button>
+
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
           <StatTile icon={<Ico.trophy style={{ color: "var(--gold)" }} />} n={fmtSol(earnedPrize)} unit="SOL" l="prize claimed" />
           <StatTile icon={<Ico.gift style={{ color: "var(--green)" }} />} n={fmtSol(earnedReward)} unit="SOL" l="reward claimed" />
