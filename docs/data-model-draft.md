@@ -18,6 +18,7 @@ This is the M0.4 PostgreSQL model draft. On-chain accounts remain the source of 
 | `rules` | Proposed rules and public rule state. | Unique `rule_id`; indexed `turn_id`, `creator_wallet`, `state`. |
 | `rule_votes` | On-chain vote projection. | Unique `(turn_id, rule_id, wallet)`. |
 | `rule_removal_records` | Paid removal records. | Unique `(turn_id, rule_id, remover_wallet)`. |
+| `conversation_drafts` | Wallet-scoped AI dealer draft projection for resumable rule conversations. | Unique `draft_id`; indexed `wallet`, `updated_at`. |
 | `prize_pool_rollovers` | Per-bucket rollover input for the next turn. | Unique `turn_id`; non-negative original and alternative rollover lamports. |
 | `prize_pool_accounting_snapshots` | Deterministic source, treasury, bucket, and visible-pool accounting snapshots. | Unique `(turn_id, accounting_version)`. |
 | `game_tokens_index` | Indexed Game Token PDA metadata. | Unique `(turn_id, wallet)`. |
@@ -124,6 +125,32 @@ report_count integer not null default 0,
 preflight_result_hash text,
 created_at timestamptz not null,
 updated_at timestamptz not null
+```
+
+### `conversation_drafts`
+
+AI dealer drafts are off-chain UI state. They do not authorize proposals or replace the on-chain rule proposal source of truth; submitted proposals still require the normal `propose_rule` transaction and API projection.
+
+```sql
+draft_id text primary key,
+wallet text not null,
+turn_id text not null references turns(turn_id),
+prompt text not null,
+normalized_text text,
+official_interpretation text,
+last_message text not null,
+token_count integer not null,
+rule_id text,
+status text not null check (status in ('draft', 'submitted')),
+created_at timestamptz not null,
+updated_at timestamptz not null
+```
+
+Recommended indexes:
+
+```sql
+CREATE INDEX conversation_drafts_wallet_updated_idx
+  ON conversation_drafts (wallet, updated_at DESC);
 ```
 
 ### `jobs`

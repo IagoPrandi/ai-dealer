@@ -12,6 +12,8 @@ import {
   getAuditLog,
   getClaimSummary,
   getPlayerClaimsSummary,
+  listConversationDrafts,
+  listPlayerHistory,
   getMandatedRuleSignatures,
   getPrizePoolAccounting,
   getRewardSummary,
@@ -44,6 +46,7 @@ import {
   saveRuleEliminationVote,
   saveRuleProposal,
   saveRuleVote,
+  saveConversationDraft,
   saveTurnRollover,
   settleTurnRollover,
   requestClaimApproval,
@@ -965,6 +968,93 @@ test("player claims summary aggregates a wallet's claims across turns", () => {
     ),
     true,
   );
+});
+
+test("player history aggregates guesses, proposals, votes, and claims", () => {
+  resetApiStateForTests();
+  saveReceiptForWallet(244, wallet, [1, 2, 3, 4, 5, 6]);
+  saveRuleProposal({
+    ...proposal(244, 7),
+    submittedAt: "2026-06-12T12:01:00.000Z",
+  });
+  saveRuleVote({
+    ruleId: 7,
+    ruleProposal: base58,
+    ruleVote: base58,
+    signature: base58,
+    submittedAt: "2026-06-12T12:02:00.000Z",
+    turnId: 244,
+    voter: wallet,
+  });
+  savePaidRemovals(244, 30);
+  saveFulfilledDraw(244);
+  const { jobs } = createGuessVerificationJobsForTurn(244);
+  saveRuleElection(settledElection(244, 7));
+  const job = jobs[0];
+  assert.ok(job);
+  saveGuessVerificationResult(
+    resultForJob({
+      alternative: "WIN",
+      jobId: job.id,
+      original: "LOSE",
+      player: wallet,
+      resultByte: "8",
+      turnId: 244,
+    }),
+  );
+  createClaimRecordsForTurn(244, "2026-06-12T12:20:00.000Z");
+
+  const page = listPlayerHistory({ limit: 3, wallet });
+
+  assert.equal(page.events.length, 3);
+  assert.equal(page.nextCursor, "3");
+  assert.equal(page.events[0]?.type, "claim");
+  assert.equal(
+    listPlayerHistory({ cursor: page.nextCursor, limit: 10, wallet }).events.some(
+      (event) => event.type === "guess",
+    ),
+    true,
+  );
+});
+
+test("conversation drafts are saved per wallet and newest draft is listed first", () => {
+  resetApiStateForTests();
+  const first = saveConversationDraft({
+    lastMessage: "I can compile this rule.",
+    normalizedText: "Win if at least four numbers match.",
+    officialInterpretation: "Count matching numbers between guess and draw.",
+    prompt: "Win if at least 4 numbers match",
+    ruleId: 101,
+    status: "draft",
+    tokenCount: 7,
+    turnId: 245,
+    updatedAt: "2026-06-12T12:00:00.000Z",
+    wallet,
+  });
+  const second = saveConversationDraft({
+    ...first,
+    lastMessage: "Rule submitted.",
+    status: "submitted",
+    updatedAt: "2026-06-12T12:05:00.000Z",
+  });
+  saveConversationDraft({
+    lastMessage: "Different wallet.",
+    normalizedText: null,
+    officialInterpretation: null,
+    prompt: "Win with the lowest number",
+    ruleId: null,
+    status: "draft",
+    tokenCount: 5,
+    turnId: 245,
+    wallet: walletTwo,
+  });
+
+  const drafts = listConversationDrafts(wallet);
+
+  assert.equal(first.draftId, second.draftId);
+  assert.equal(drafts.length, 1);
+  assert.equal(drafts[0]?.status, "submitted");
+  assert.equal(drafts[0]?.createdAt, first.createdAt);
 });
 
 test("claim flow exposes failed wallet approval and below-threshold unavailable claims", () => {

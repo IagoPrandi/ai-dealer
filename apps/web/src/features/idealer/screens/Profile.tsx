@@ -3,8 +3,8 @@
 /**
  * CONTA — wallet, claims/withdraw (prize + reward), my rules. Ported from
  * app-profile.jsx. Earnings/claims come from the wallet's claim ledger
- * (GET /players/{wallet}/claims). The "Conversations" (AI drafts) and full
- * "History" tabs have no backing API yet → honest empty states (deferred).
+ * (GET /players/{wallet}/claims). Conversations and History now read the
+ * player projection endpoints instead of deferred empty states.
  */
 import { useState } from "react";
 import { address } from "@solana/kit";
@@ -12,11 +12,11 @@ import { address } from "@solana/kit";
 import { createClaimInstruction } from "../../../solana/idealerProgram";
 import { useIdealer } from "../context";
 import { postClaimComplete, postClaimRequest } from "../data/apiClient";
-import { lamportsToSol, fmtSol, truncateAddress } from "../data/format";
-import { usePlayerClaims } from "../data/hooks";
+import { lamportsToSol, fmtSol, fmtTurnId, timeAgo, truncateAddress } from "../data/format";
+import { useConversationDrafts, usePlayerClaims, usePlayerHistory } from "../data/hooks";
 import { describeTxError, sendInstruction } from "../data/tx";
 import { Dealer, Ico, VoteTally } from "../shared";
-import type { ClaimRecordApi } from "../data/types";
+import type { ClaimRecordApi, ConversationDraftApi, PlayerHistoryEventApi } from "../data/types";
 
 function BalanceTile({ icon, label, value }: { icon: React.ReactNode; label: string; value: number }) {
   return (
@@ -43,9 +43,86 @@ function sumLamports(records: ClaimRecordApi[], predicate: (r: ClaimRecordApi) =
 
 const isReward = (kind: ClaimRecordApi["kind"]) => kind === "creator_reward" || kind === "voter_reward";
 
+function StatusPill({ children, tone = "purple" }: { children: React.ReactNode; tone?: "green" | "purple" | "yellow" }) {
+  const color = tone === "green" ? "var(--green)" : tone === "yellow" ? "var(--yellow)" : "var(--purple-soft)";
+  return (
+    <span className="ide-pill" style={{ color, padding: "4px 9px", whiteSpace: "nowrap" }}>
+      {children}
+    </span>
+  );
+}
+
+function ConversationRow({ draft, onResume }: { draft: ConversationDraftApi; onResume: () => void }) {
+  return (
+    <div className="ide-card" style={{ padding: "13px 15px", display: "grid", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+        <div style={{ width: 34, height: 34, borderRadius: 12, background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--purple-soft)", display: "grid", placeItems: "center", flexShrink: 0 }}>
+          <Ico.chat style={{ width: 17, height: 17, color: "var(--purple-soft)" }} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+            <div style={{ fontWeight: 800, fontSize: 15.5, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {draft.normalizedText || draft.prompt}
+            </div>
+          </div>
+          <div style={{ color: "var(--muted)", fontSize: 13, lineHeight: 1.45, overflowWrap: "anywhere" }}>
+            {draft.lastMessage || draft.prompt}
+          </div>
+        </div>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <StatusPill tone={draft.status === "submitted" ? "green" : "yellow"}>{draft.status}</StatusPill>
+        <span className="ide-pill"><span className="ide-num">{fmtTurnId(draft.turnId)}</span></span>
+        <span className="ide-pill"><span className="ide-num">{draft.tokenCount}</span> tokens</span>
+        <span style={{ color: "var(--dim)", fontSize: 12.5, marginLeft: "auto" }}>{timeAgo(draft.updatedAt)}</span>
+      </div>
+      <button onClick={onResume} className="ide-btn-ghost ide-btn" style={{ width: "100%", padding: 11 }} type="button">
+        <Ico.spark style={{ color: "var(--purple-soft)" }} /> {draft.status === "submitted" ? "Open conversation" : "Resume draft"}
+      </button>
+    </div>
+  );
+}
+
+function historyIcon(type: PlayerHistoryEventApi["type"]) {
+  if (type === "claim") {
+    return <Ico.gift style={{ width: 16, height: 16, color: "var(--green)" }} />;
+  }
+  if (type === "rule_proposal") {
+    return <Ico.spark style={{ width: 16, height: 16, color: "var(--purple-soft)" }} />;
+  }
+  if (type === "vote" || type === "elimination_vote") {
+    return <Ico.vote style={{ width: 16, height: 16, color: "var(--yellow)" }} />;
+  }
+  return <Ico.dice style={{ width: 16, height: 16, color: "var(--gold)" }} />;
+}
+
+function HistoryRow({ event }: { event: PlayerHistoryEventApi }) {
+  const amount = typeof event.amountLamports === "number" ? lamportsToSol(event.amountLamports) : null;
+  return (
+    <div className="ide-card" style={{ padding: "13px 15px", display: "flex", alignItems: "center", gap: 12 }}>
+      <div style={{ width: 36, height: 36, borderRadius: 12, background: "var(--surface-2)", border: "1px solid var(--line)", display: "grid", placeItems: "center", flexShrink: 0 }}>
+        {historyIcon(event.type)}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ fontWeight: 800, fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{event.title}</div>
+          <span style={{ color: "var(--dim)", fontSize: 12, marginLeft: "auto" }}>{timeAgo(event.createdAt)}</span>
+        </div>
+        <div style={{ color: "var(--muted)", fontSize: 12.8, marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{event.summary}</div>
+      </div>
+      <div style={{ textAlign: "right", flexShrink: 0 }}>
+        <div className="ide-num" style={{ fontSize: 13.5, fontWeight: 800 }}>{fmtTurnId(event.turnId)}</div>
+        {amount !== null ? <div className="ide-num" style={{ color: "var(--green)", fontSize: 12.5, fontWeight: 800 }}>{fmtSol(amount)} SOL</div> : <div style={{ color: "var(--dim)", fontSize: 12 }}>{event.status}</div>}
+      </div>
+    </div>
+  );
+}
+
 export function ProfileScreen() {
   const { client, connect, connected, go, rules, walletAddress, wallet } = useIdealer();
   const { claims, error, loading, reload } = usePlayerClaims(walletAddress);
+  const history = usePlayerHistory(walletAddress);
+  const conversations = useConversationDrafts(walletAddress);
   const [tab, setTab] = useState<"chats" | "hist" | "regras">("regras");
   const [busy, setBusy] = useState(false);
   const [txError, setTxError] = useState<null | string>(null);
@@ -176,20 +253,51 @@ export function ProfileScreen() {
         ) : null}
 
         {tab === "chats" ? (
-          <div className="ide-card" style={{ padding: 22, textAlign: "center" }}>
-            <div style={{ display: "grid", placeItems: "center", marginBottom: 10 }}><Ico.chat style={{ color: "var(--dim)", width: 22, height: 22 }} /></div>
-            <div style={{ fontWeight: 700, fontSize: 15 }}>Saved drafts are coming soon</div>
-            <p style={{ margin: "6px 0 14px", fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>Resuming AI rule drafts isn&apos;t available yet. For now, start a new rule from the round.</p>
-            <button onClick={() => go("create")} className="ide-btn-ghost ide-btn" style={{ padding: 12 }} type="button"><Ico.spark style={{ color: "var(--purple-soft)" }} /> Create a rule</button>
-          </div>
+          conversations.loading ? (
+            <div className="ide-card" style={{ padding: 18, textAlign: "center", color: "var(--muted)", fontSize: 14 }}>Loading conversations…</div>
+          ) : conversations.error ? (
+            <div className="ide-card" style={{ padding: 18, textAlign: "center", color: "var(--red)", fontSize: 14 }}>Could not load saved conversations.</div>
+          ) : conversations.drafts.length === 0 ? (
+            <div className="ide-card" style={{ padding: 22, textAlign: "center" }}>
+              <div style={{ display: "grid", placeItems: "center", marginBottom: 10 }}><Ico.chat style={{ color: "var(--dim)", width: 22, height: 22 }} /></div>
+              <div style={{ fontWeight: 700, fontSize: 15 }}>No AI drafts yet</div>
+              <p style={{ margin: "6px 0 14px", fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>Drafts appear here after the dealer compiles a rule preview.</p>
+              <button onClick={() => go("create", { seed: "" })} className="ide-btn-ghost ide-btn" style={{ padding: 12 }} type="button"><Ico.spark style={{ color: "var(--purple-soft)" }} /> Create a rule</button>
+            </div>
+          ) : (
+            <div style={{ display: "grid", gap: 9, gridTemplateColumns: "minmax(0, 1fr)" }}>
+              {conversations.drafts.map((draft) => (
+                <ConversationRow
+                  key={draft.draftId}
+                  draft={draft}
+                  onResume={() => go("create", { chatId: draft.draftId, seed: draft.prompt })}
+                />
+              ))}
+            </div>
+          )
         ) : null}
 
         {tab === "hist" ? (
-          <div className="ide-card" style={{ padding: 22, textAlign: "center" }}>
-            <div style={{ display: "grid", placeItems: "center", marginBottom: 10 }}><Ico.dice style={{ color: "var(--dim)", width: 22, height: 22 }} /></div>
-            <div style={{ fontWeight: 700, fontSize: 15 }}>Full play history is coming soon</div>
-            <p style={{ margin: "6px 0 0", fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>Per-wallet round-by-round history needs a new endpoint. Your claim records above reflect your settled wins and rewards.</p>
-          </div>
+          history.loading ? (
+            <div className="ide-card" style={{ padding: 18, textAlign: "center", color: "var(--muted)", fontSize: 14 }}>Loading history…</div>
+          ) : history.error ? (
+            <div className="ide-card" style={{ padding: 18, textAlign: "center", color: "var(--red)", fontSize: 14 }}>Could not load your play history.</div>
+          ) : (history.history?.events.length ?? 0) === 0 ? (
+            <div className="ide-card" style={{ padding: 22, textAlign: "center" }}>
+              <div style={{ display: "grid", placeItems: "center", marginBottom: 10 }}><Ico.dice style={{ color: "var(--dim)", width: 22, height: 22 }} /></div>
+              <div style={{ fontWeight: 700, fontSize: 15 }}>No play history yet</div>
+              <p style={{ margin: "6px 0 0", fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>Guesses, votes, rule proposals, and claims appear here after your wallet acts.</p>
+            </div>
+          ) : (
+            <div style={{ display: "grid", gap: 9, gridTemplateColumns: "minmax(0, 1fr)" }}>
+              {history.history?.events.map((event) => <HistoryRow key={event.id} event={event} />)}
+              {history.history?.nextCursor ? (
+                <div style={{ color: "var(--dim)", fontSize: 12.5, textAlign: "center", padding: "4px 0" }}>
+                  Showing latest <span className="ide-num">{history.history.events.length}</span> events.
+                </div>
+              ) : null}
+            </div>
+          )
         ) : null}
       </div>
     </div>

@@ -14,8 +14,10 @@ import {
   type ActiveTurnSnapshot,
 } from "../../../solana/idealerProgram";
 import {
+  getConversationDrafts,
   getGuessReceipt,
   getPlayerClaims,
+  getPlayerHistory,
   getRound,
   getRuleEliminationVotes,
   getRuleProposals,
@@ -24,7 +26,9 @@ import {
 import { truncateAddress } from "./format";
 import type {
   GuessReceiptApi,
+  ConversationDraftApi,
   PlayerClaimsApi,
+  PlayerHistoryApi,
   RoundSummaryApi,
   RuleProposalApi,
   UiRule,
@@ -361,4 +365,85 @@ export function usePlayerClaims(walletAddress: string | undefined) {
   }, [reload]);
 
   return { claims, error, loading, reload: () => reload() };
+}
+
+export function usePlayerHistory(walletAddress: string | undefined) {
+  const [history, setHistory] = useState<PlayerHistoryApi | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<null | string>(null);
+
+  const reload = useCallback(
+    (signal?: AbortSignal) => {
+      if (!walletAddress) {
+        setHistory(null);
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
+      getPlayerHistory(walletAddress, {
+        limit: 25,
+        ...(signal ? { signal } : {}),
+      })
+        .then((body) => {
+          setHistory(body?.history ?? null);
+          setError(null);
+        })
+        .catch((cause: unknown) => {
+          if (cause instanceof DOMException && cause.name === "AbortError") {
+            return;
+          }
+          console.error("Failed to load player history.", cause);
+          setError("history_unavailable");
+        })
+        .finally(() => setLoading(false));
+    },
+    [walletAddress],
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    reload(controller.signal);
+    return () => controller.abort();
+  }, [reload]);
+
+  return { error, history, loading, reload: () => reload() };
+}
+
+export function useConversationDrafts(walletAddress: string | undefined) {
+  const [drafts, setDrafts] = useState<ConversationDraftApi[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<null | string>(null);
+
+  const reload = useCallback(
+    (signal?: AbortSignal) => {
+      if (!walletAddress) {
+        setDrafts([]);
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
+      getConversationDrafts(walletAddress, signal)
+        .then((body) => {
+          setDrafts(body?.drafts ?? []);
+          setError(null);
+        })
+        .catch((cause: unknown) => {
+          if (cause instanceof DOMException && cause.name === "AbortError") {
+            return;
+          }
+          console.error("Failed to load conversation drafts.", cause);
+          setError("drafts_unavailable");
+        })
+        .finally(() => setLoading(false));
+    },
+    [walletAddress],
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    reload(controller.signal);
+    return () => controller.abort();
+  }, [reload]);
+
+  return { drafts, error, loading, reload: () => reload() };
 }

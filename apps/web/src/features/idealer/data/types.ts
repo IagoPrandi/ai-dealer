@@ -140,6 +140,50 @@ export interface PlayerClaimsApi {
   wallet: string;
 }
 
+export type PlayerHistoryType =
+  | "claim"
+  | "elimination_vote"
+  | "guess"
+  | "rule_proposal"
+  | "vote";
+
+export interface PlayerHistoryEventApi {
+  amountLamports?: number;
+  createdAt: string;
+  id: string;
+  ruleId?: number;
+  status: string;
+  summary: string;
+  title: string;
+  turnId: number;
+  type: PlayerHistoryType;
+}
+
+export interface PlayerHistoryApi {
+  cursor: string | null;
+  events: PlayerHistoryEventApi[];
+  limit: number;
+  nextCursor: string | null;
+  wallet: string;
+}
+
+export type ConversationDraftStatus = "draft" | "submitted";
+
+export interface ConversationDraftApi {
+  createdAt: string;
+  draftId: string;
+  lastMessage: string;
+  normalizedText: string | null;
+  officialInterpretation: string | null;
+  prompt: string;
+  ruleId: number | null;
+  status: ConversationDraftStatus;
+  tokenCount: number;
+  turnId: number;
+  updatedAt: string;
+  wallet: string;
+}
+
 export interface GuessReceiptApi {
   numbers: number[];
   signature: string;

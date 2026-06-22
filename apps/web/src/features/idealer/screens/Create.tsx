@@ -16,7 +16,7 @@ import {
   type RulePreflightResult,
 } from "../../../solana/idealerProgram";
 import { useIdealer } from "../context";
-import { postRuleProposal, postRulePreflight } from "../data/apiClient";
+import { postConversationDraft, postRuleProposal, postRulePreflight } from "../data/apiClient";
 import { fmtSol, fmtTurnId } from "../data/format";
 import { describeTxError, sendInstruction } from "../data/tx";
 import { Dealer, Ico, SectionLabel } from "../shared";
@@ -109,6 +109,7 @@ function CreateChat({ client, fees, go, played, reloadAll, seed, turnId, wallet,
   const [submitted, setSubmitted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<null | string>(null);
+  const [activeDraftId, setActiveDraftId] = useState<null | string>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const autoSentRef = useRef(false);
 
@@ -138,6 +139,24 @@ function CreateChat({ client, fees, go, played, reloadAll, seed, turnId, wallet,
         { text: preflight.dealerMessage || (valid ? "Done! I compiled your rule. Review it — if you like it, submit it to the round." : "Almost there! Try describing the win condition in a few clear words."), who: "ai" },
       ]);
       setRule(preflight);
+      if (walletAddress) {
+        try {
+          const saved = await postConversationDraft(walletAddress, {
+            lastMessage: preflight.dealerMessage,
+            normalizedText: preflight.normalizedText || null,
+            officialInterpretation: preflight.officialInterpretation || null,
+            prompt: preflight.sanitizedText,
+            ruleId: preflight.ruleId,
+            status: "draft",
+            tokenCount: preflight.tokenCount,
+            turnId,
+            wallet: walletAddress,
+          });
+          setActiveDraftId(saved.draft.draftId);
+        } catch (draftError) {
+          setError(`Rule compiled, but the draft could not be saved. ${describeTxError(draftError)}`);
+        }
+      }
     } catch (cause) {
       setMsgs((m) => [...m, { text: "The dealer couldn't reach the rule compiler. Try again in a moment.", who: "ai" }]);
       setError(describeTxError(cause));
@@ -177,6 +196,22 @@ function CreateChat({ client, fees, go, played, reloadAll, seed, turnId, wallet,
       });
       setSubmitted(true);
       reloadAll();
+      try {
+        await postConversationDraft(walletAddress, {
+          ...(activeDraftId ? { draftId: activeDraftId } : {}),
+          lastMessage: "Rule submitted to the round.",
+          normalizedText: rule.normalizedText || null,
+          officialInterpretation: rule.officialInterpretation || null,
+          prompt: rule.sanitizedText,
+          ruleId: rule.ruleId,
+          status: "submitted",
+          tokenCount: rule.tokenCount,
+          turnId,
+          wallet: walletAddress,
+        });
+      } catch (draftError) {
+        setError(`Rule submitted, but the draft status could not be updated. ${describeTxError(draftError)}`);
+      }
     } catch (cause) {
       setError(describeTxError(cause));
     } finally {
@@ -188,6 +223,7 @@ function CreateChat({ client, fees, go, played, reloadAll, seed, turnId, wallet,
     setRule(null);
     setSubmitted(false);
     setError(null);
+    setActiveDraftId(null);
     setMsgs([{ text: "On to the next one! How does your new rule decide the winner?", who: "ai" }]);
   }
 

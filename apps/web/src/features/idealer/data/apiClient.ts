@@ -7,8 +7,10 @@
  * asks for it (e.g. a guess receipt that does not exist yet).
  */
 import type {
+  ConversationDraftApi,
   GuessReceiptApi,
   PlayerClaimsApi,
+  PlayerHistoryApi,
   RoundSummaryApi,
   RuleProposalApi,
   RuleVotesApi,
@@ -129,6 +131,31 @@ export function getPlayerClaims(wallet: string, signal?: AbortSignal) {
   );
 }
 
+export function getPlayerHistory(
+  wallet: string,
+  args: { cursor?: string | null; limit?: number; signal?: AbortSignal } = {},
+) {
+  const params = new URLSearchParams();
+  if (args.cursor) {
+    params.set("cursor", args.cursor);
+  }
+  if (args.limit) {
+    params.set("limit", String(args.limit));
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return getJson<{ history: PlayerHistoryApi }>(
+    `/players/${wallet}/history${suffix}`,
+    args.signal ? { signal: args.signal } : {},
+  );
+}
+
+export function getConversationDrafts(wallet: string, signal?: AbortSignal) {
+  return getJson<{ drafts: ConversationDraftApi[] }>(
+    `/players/${wallet}/conversation-drafts`,
+    signal ? { signal } : {},
+  );
+}
+
 export async function getGuessReceipt(
   turnId: number,
   player: string,
@@ -195,4 +222,18 @@ export function postClaimComplete(body: {
   wallet: string;
 }) {
   return postJson<{ claim: unknown }>("/claim-records/complete", body);
+}
+
+export function postConversationDraft(
+  wallet: string,
+  body: Omit<ConversationDraftApi, "createdAt" | "draftId" | "updatedAt"> & {
+    createdAt?: string;
+    draftId?: string;
+    updatedAt?: string;
+  },
+) {
+  return postJson<{ draft: ConversationDraftApi }>(
+    `/players/${wallet}/conversation-drafts`,
+    body,
+  );
 }

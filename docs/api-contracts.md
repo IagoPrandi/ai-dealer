@@ -404,6 +404,67 @@ interface ClaimSummary {
 
 Returns paginated guess, vote, rule proposal, near-miss, payout, and creator reward history. Default limit is 25; maximum limit is 100.
 
+Current local compatibility endpoint:
+
+- `GET /players/{wallet}/history?cursor=...&limit=...`
+
+```ts
+type PlayerHistoryEventType =
+  | "claim"
+  | "elimination_vote"
+  | "guess"
+  | "rule_proposal"
+  | "vote";
+
+interface PlayerHistoryEvent {
+  id: string;
+  type: PlayerHistoryEventType;
+  turnId: number;
+  title: string;
+  summary: string;
+  status: string;
+  createdAt: string;
+  ruleId?: number;
+  amountLamports?: number;
+}
+
+interface PlayerHistoryPage {
+  wallet: string;
+  cursor: string | null;
+  nextCursor: string | null;
+  limit: number;
+  events: PlayerHistoryEvent[];
+}
+```
+
+## AI Conversation Drafts
+
+Current local compatibility endpoints:
+
+- `GET /players/{wallet}/conversation-drafts`
+- `POST /players/{wallet}/conversation-drafts`
+
+Draft writes are wallet-scoped. The body wallet must match the path wallet.
+
+```ts
+type ConversationDraftStatus = "draft" | "submitted";
+
+interface ConversationDraftRecord {
+  draftId: string;
+  wallet: string;
+  turnId: number;
+  prompt: string;
+  normalizedText: string | null;
+  officialInterpretation: string | null;
+  lastMessage: string;
+  tokenCount: number;
+  ruleId: number | null;
+  status: ConversationDraftStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+```
+
 ## Audit
 
 Required public audit endpoints:

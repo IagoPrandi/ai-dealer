@@ -560,6 +560,50 @@ export interface ClaimSummary {
   wallet: string | null;
 }
 
+export type PlayerHistoryEventType =
+  | "claim"
+  | "elimination_vote"
+  | "guess"
+  | "rule_proposal"
+  | "vote";
+
+export interface PlayerHistoryEvent {
+  amountLamports?: number;
+  createdAt: string;
+  id: string;
+  ruleId?: number;
+  status: string;
+  summary: string;
+  title: string;
+  turnId: number;
+  type: PlayerHistoryEventType;
+}
+
+export interface PlayerHistoryPage {
+  cursor: string | null;
+  events: PlayerHistoryEvent[];
+  limit: number;
+  nextCursor: string | null;
+  wallet: string;
+}
+
+export type ConversationDraftStatus = "draft" | "submitted";
+
+export interface ConversationDraftRecord {
+  createdAt: string;
+  draftId: string;
+  lastMessage: string;
+  normalizedText: string | null;
+  officialInterpretation: string | null;
+  prompt: string;
+  ruleId: number | null;
+  status: ConversationDraftStatus;
+  tokenCount: number;
+  turnId: number;
+  updatedAt: string;
+  wallet: string;
+}
+
 export type AuditLogKind =
   | "compiler.validation"
   | "guess.verification"
@@ -708,6 +752,7 @@ const winnerRecords = new Map<string, WinnerRecord>();
 const creatorRewardRecords = new Map<string, CreatorRewardRecord>();
 const voterRewardRecords = new Map<string, VoterRewardRecord>();
 const claimRecords = new Map<string, ClaimRecord>();
+const conversationDrafts = new Map<string, ConversationDraftRecord>();
 const auditLogs = new Map<string, AuditLogRecord>();
 const auditLogOrder: string[] = [];
 let lastAuditLogHash: string | null = null;
@@ -766,6 +811,14 @@ function getRuleEliminationVoteKey(
 
 function getPaidRuleRemovalKey(turnId: number, ruleId: number, remover: string) {
   return `${turnId}:${ruleId}:${remover}`;
+}
+
+function getConversationDraftKey(wallet: string, turnId: number, prompt: string) {
+  return hashJson({
+    prompt: sanitizeRuleText(prompt).toLowerCase(),
+    turnId,
+    wallet,
+  });
 }
 
 function isBase58Like(value: unknown) {
@@ -1017,6 +1070,7 @@ export function resetApiStateForTests() {
   creatorRewardRecords.clear();
   voterRewardRecords.clear();
   claimRecords.clear();
+  conversationDrafts.clear();
   auditLogs.clear();
   auditLogOrder.length = 0;
   lastAuditLogHash = null;
@@ -1673,6 +1727,51 @@ function isValidClaimCompleteRequest(
     (request.completedAt === undefined ||
       (typeof request.completedAt === "string" &&
         !Number.isNaN(Date.parse(request.completedAt))))
+  );
+}
+
+function isValidConversationDraft(
+  value: unknown,
+): value is Omit<ConversationDraftRecord, "createdAt" | "draftId" | "updatedAt"> & {
+  createdAt?: string;
+  draftId?: string;
+  updatedAt?: string;
+} {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const draft = value as Partial<ConversationDraftRecord>;
+  const sanitizedPrompt =
+    typeof draft.prompt === "string" ? sanitizeRuleText(draft.prompt) : "";
+  const tokenCount = countRuleTokens(sanitizedPrompt);
+
+  return (
+    isBase58Like(draft.wallet) &&
+    Number.isInteger(draft.turnId) &&
+    Number(draft.turnId) > 0 &&
+    typeof draft.prompt === "string" &&
+    sanitizedPrompt === draft.prompt &&
+    sanitizedPrompt.length > 0 &&
+    Buffer.byteLength(sanitizedPrompt, "utf8") <= MAX_RULE_TEXT_BYTES &&
+    Number.isInteger(draft.tokenCount) &&
+    Number(draft.tokenCount) === tokenCount &&
+    tokenCount > 0 &&
+    tokenCount <= RULE_MAX_TOKENS &&
+    (draft.status === "draft" || draft.status === "submitted") &&
+    (draft.ruleId === null ||
+      (Number.isInteger(draft.ruleId) && Number(draft.ruleId) > 0)) &&
+    (draft.normalizedText === null || typeof draft.normalizedText === "string") &&
+    (draft.officialInterpretation === null ||
+      typeof draft.officialInterpretation === "string") &&
+    typeof draft.lastMessage === "string" &&
+    Buffer.byteLength(draft.lastMessage, "utf8") <= MAX_RULE_TEXT_BYTES &&
+    (draft.createdAt === undefined ||
+      (typeof draft.createdAt === "string" &&
+        !Number.isNaN(Date.parse(draft.createdAt)))) &&
+    (draft.updatedAt === undefined ||
+      (typeof draft.updatedAt === "string" &&
+        !Number.isNaN(Date.parse(draft.updatedAt))))
   );
 }
 
@@ -3035,6 +3134,134 @@ export function getPlayerClaimsSummary(wallet: string): PlayerClaimsSummary {
     unavailableLamports: sumByStatus("unavailable"),
     wallet,
   };
+}
+
+function getClaimTitle(kind: ClaimKind) {
+  if (kind === "winner_payout") {
+    return "Prize claim";
+  }
+  if (kind === "creator_reward") {
+    return "Creator reward";
+  }
+  return "Voter reward";
+}
+
+function compareHistoryEvents(left: PlayerHistoryEvent, right: PlayerHistoryEvent) {
+  const timeDelta = Date.parse(right.createdAt) - Date.parse(left.createdAt);
+  return timeDelta !== 0 ? timeDelta : right.id.localeCompare(left.id);
+}
+
+export function listPlayerHistory(args: {
+  cursor?: string | null;
+  limit?: number;
+  wallet: string;
+}): PlayerHistoryPage {
+  const safeLimit = Math.min(Math.max(args.limit ?? 25, 1), 100);
+  const offset = args.cursor ? Number(args.cursor) : 0;
+  const start = Number.isInteger(offset) && offset > 0 ? offset : 0;
+  const events: PlayerHistoryEvent[] = [
+    ...[...guessReceipts.values()]
+      .filter((receipt) => receipt.player === args.wallet)
+      .map((receipt): PlayerHistoryEvent => ({
+        createdAt: receipt.submittedAt,
+        id: `guess:${receipt.turnId}:${receipt.player}`,
+        status: "submitted",
+        summary: `Numbers ${receipt.numbers.join(", ")}`,
+        title: "Guess submitted",
+        turnId: receipt.turnId,
+        type: "guess",
+      })),
+    ...[...ruleProposals.values()]
+      .filter((proposal) => proposal.proposer === args.wallet)
+      .map((proposal): PlayerHistoryEvent => ({
+        createdAt: proposal.submittedAt,
+        id: `rule:${proposal.turnId}:${proposal.ruleId}`,
+        ruleId: proposal.ruleId,
+        status: proposal.state ?? "proposed",
+        summary: proposal.sanitizedText,
+        title: proposal.title,
+        turnId: proposal.turnId,
+        type: "rule_proposal",
+      })),
+    ...[...ruleVotes.values()]
+      .filter((vote) => vote.voter === args.wallet)
+      .map((vote): PlayerHistoryEvent => ({
+        createdAt: vote.submittedAt,
+        id: `vote:${vote.turnId}:${vote.ruleId}:${vote.voter}`,
+        ruleId: vote.ruleId,
+        status: "cast",
+        summary: `Voted for rule #${vote.ruleId}.`,
+        title: "Rule vote",
+        turnId: vote.turnId,
+        type: "vote",
+      })),
+    ...[...ruleEliminationVotes.values()]
+      .filter((vote) => vote.voter === args.wallet)
+      .map((vote): PlayerHistoryEvent => ({
+        createdAt: vote.submittedAt,
+        id: `elimination:${vote.turnId}:${vote.ruleId}:${vote.voter}`,
+        ruleId: vote.ruleId,
+        status: "cast",
+        summary: `Voted to eliminate rule #${vote.ruleId}.`,
+        title: "Elimination vote",
+        turnId: vote.turnId,
+        type: "elimination_vote",
+      })),
+    ...listClaimRecords({ wallet: args.wallet }).map(
+      (claim): PlayerHistoryEvent => ({
+        amountLamports: claim.amountLamports,
+        createdAt: claim.claimedAt ?? claim.updatedAt,
+        id: `claim:${claim.claimId}`,
+        ...(claim.activeRuleId === null ? {} : { ruleId: claim.activeRuleId }),
+        status: claim.status,
+        summary: claim.statusReason,
+        title: getClaimTitle(claim.kind),
+        turnId: claim.turnId,
+        type: "claim",
+      }),
+    ),
+  ].sort(compareHistoryEvents);
+
+  const page = events.slice(start, start + safeLimit);
+  const nextOffset = start + page.length;
+
+  return {
+    cursor: args.cursor ?? null,
+    events: page,
+    limit: safeLimit,
+    nextCursor: nextOffset < events.length ? String(nextOffset) : null,
+    wallet: args.wallet,
+  };
+}
+
+export function saveConversationDraft(
+  draft: Omit<ConversationDraftRecord, "createdAt" | "draftId" | "updatedAt"> & {
+    createdAt?: string;
+    draftId?: string;
+    updatedAt?: string;
+  },
+) {
+  const draftId = draft.draftId ?? getConversationDraftKey(draft.wallet, draft.turnId, draft.prompt);
+  const existing = conversationDrafts.get(draftId);
+  const updatedAt = draft.updatedAt ?? new Date().toISOString();
+  const record: ConversationDraftRecord = {
+    ...draft,
+    createdAt: existing?.createdAt ?? draft.createdAt ?? updatedAt,
+    draftId,
+    updatedAt,
+  };
+  conversationDrafts.set(draftId, record);
+  return record;
+}
+
+export function listConversationDrafts(wallet: string) {
+  return [...conversationDrafts.values()]
+    .filter((draft) => draft.wallet === wallet)
+    .sort(
+      (left, right) =>
+        Date.parse(right.updatedAt) - Date.parse(left.updatedAt) ||
+        right.draftId.localeCompare(left.draftId),
+    );
 }
 
 export function requestClaimApproval(args: {
@@ -4967,6 +5194,104 @@ if (isMainModule()) {
       sendJson(request, response, 200, {
         claims: getPlayerClaimsSummary(wallet),
       });
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      url.pathname.startsWith("/players/") &&
+      url.pathname.endsWith("/history")
+    ) {
+      const wallet = url.pathname.slice(
+        "/players/".length,
+        url.pathname.length - "/history".length,
+      );
+      const cursor = url.searchParams.get("cursor");
+      const rawLimit = url.searchParams.get("limit");
+      const limit = rawLimit === null ? undefined : Number(rawLimit);
+
+      if (
+        !isBase58Like(wallet) ||
+        (cursor !== null && !/^\d+$/.test(cursor)) ||
+        (limit !== undefined && (!Number.isInteger(limit) || limit <= 0))
+      ) {
+        sendJson(request, response, 400, { error: "invalid_query" });
+        return;
+      }
+
+      sendJson(request, response, 200, {
+        history: listPlayerHistory({
+          ...(cursor === null ? {} : { cursor }),
+          ...(limit === undefined ? {} : { limit }),
+          wallet,
+        }),
+      });
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      url.pathname.startsWith("/players/") &&
+      url.pathname.endsWith("/conversation-drafts")
+    ) {
+      const wallet = url.pathname.slice(
+        "/players/".length,
+        url.pathname.length - "/conversation-drafts".length,
+      );
+
+      if (!isBase58Like(wallet)) {
+        sendJson(request, response, 400, { error: "invalid_wallet" });
+        return;
+      }
+
+      sendJson(request, response, 200, {
+        drafts: listConversationDrafts(wallet),
+      });
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      url.pathname.startsWith("/players/") &&
+      url.pathname.endsWith("/conversation-drafts")
+    ) {
+      const wallet = url.pathname.slice(
+        "/players/".length,
+        url.pathname.length - "/conversation-drafts".length,
+      );
+
+      if (!isBase58Like(wallet)) {
+        sendJson(request, response, 400, { error: "invalid_wallet" });
+        return;
+      }
+
+      void readJsonBody(request)
+        .then((body) => {
+          if (!isValidConversationDraft(body)) {
+            sendJson(request, response, 400, {
+              error: "invalid_conversation_draft",
+            });
+            return;
+          }
+
+          if (body.wallet !== wallet) {
+            sendJson(request, response, 409, {
+              error: "wallet_mismatch",
+              message: "Draft wallet must match the URL wallet.",
+            });
+            return;
+          }
+
+          sendJson(request, response, 201, {
+            draft: saveConversationDraft(body),
+          });
+        })
+        .catch((error: unknown) => {
+          sendJson(request, response, 400, {
+            error: "invalid_json",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
       return;
     }
 
