@@ -21,6 +21,7 @@ export const MOCK_GLOBAL_CONFIG = {
   nextTurnId: MOCK_ACTIVE_TURN_ID + 1,
   paused: false,
   ruleElectionCutoffBps: 6500,
+  ruleRemovalFeeLamports: 50_000_000n,
   voteFeeLamports: 5_000_000n,
 };
 

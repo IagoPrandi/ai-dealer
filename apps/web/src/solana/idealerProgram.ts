@@ -28,6 +28,9 @@ const VOTE_RULE_DISCRIMINATOR = new Uint8Array([
 const ELIMINATE_VOTE_RULE_DISCRIMINATOR = new Uint8Array([
   82, 128, 200, 74, 171, 186, 232, 227,
 ]);
+const REMOVE_RULE_DISCRIMINATOR = new Uint8Array([
+  208, 2, 212, 252, 142, 122, 159, 232,
+]);
 const CLAIM_PRIZE_DISCRIMINATOR = new Uint8Array([
   157, 233, 139, 121, 246, 62, 234, 235,
 ]);
@@ -75,6 +78,7 @@ export interface GlobalConfigSnapshot {
   nextTurnId: number;
   paused: boolean;
   ruleElectionCutoffBps: number;
+  ruleRemovalFeeLamports: bigint | null;
   voteFeeLamports: bigint;
 }
 
@@ -143,6 +147,17 @@ export interface RuleEliminationVoteReceipt {
   submittedAt: string;
   turnId: number;
   voter: string;
+}
+
+export interface RuleRemovalReceipt {
+  removalKind: "creator_self" | "third_party";
+  removedAt: string;
+  remover: string;
+  ruleId: number;
+  ruleProposal: string;
+  ruleRemoval: string;
+  signature: string;
+  turnId: number;
 }
 
 function u64Le(value: number) {
@@ -289,7 +304,30 @@ function createAccountReader(data: Uint8Array) {
   };
 }
 
-export function decodeGlobalConfigAccount(data: Uint8Array): GlobalConfigSnapshot {
+function isPlausibleGlobalConfig(snapshot: GlobalConfigSnapshot) {
+  if (
+    snapshot.guessCutoffBps > 10_000 ||
+    snapshot.ruleElectionCutoffBps > 10_000 ||
+    snapshot.voteFeeLamports > 100_000_000_000n
+  ) {
+    return false;
+  }
+
+  if (!snapshot.hasActiveTurn) {
+    return snapshot.activeTurnId === 0;
+  }
+
+  return (
+    snapshot.activeTurnId > 0 &&
+    snapshot.nextTurnId >= snapshot.activeTurnId &&
+    snapshot.nextTurnId - snapshot.activeTurnId < 10_000
+  );
+}
+
+function decodeGlobalConfigAccountWithLayout(
+  data: Uint8Array,
+  hasRuleRemovalFee: boolean,
+): GlobalConfigSnapshot {
   const reader = createAccountReader(data);
   reader.skip(32);
   const pendingAuthorityTag = reader.readU8();
@@ -302,7 +340,10 @@ export function decodeGlobalConfigAccount(data: Uint8Array): GlobalConfigSnapsho
 
   reader.skip(32 * 3);
   const guessSubmissionFeeLamports = reader.readU64BigInt();
-  reader.skip(8 + 8);
+  reader.skip(8);
+  const ruleRemovalFeeLamports = hasRuleRemovalFee
+    ? reader.readU64BigInt()
+    : null;
   const voteFeeLamports = reader.readU64BigInt();
   reader.skip(2);
   reader.skip(4 * 4);
@@ -323,8 +364,23 @@ export function decodeGlobalConfigAccount(data: Uint8Array): GlobalConfigSnapsho
     nextTurnId,
     paused,
     ruleElectionCutoffBps,
+    ruleRemovalFeeLamports,
     voteFeeLamports,
   };
+}
+
+export function decodeGlobalConfigAccount(data: Uint8Array): GlobalConfigSnapshot {
+  const withRuleRemovalFee = decodeGlobalConfigAccountWithLayout(data, true);
+  if (isPlausibleGlobalConfig(withRuleRemovalFee)) {
+    return withRuleRemovalFee;
+  }
+
+  const legacy = decodeGlobalConfigAccountWithLayout(data, false);
+  if (isPlausibleGlobalConfig(legacy)) {
+    return legacy;
+  }
+
+  throw new Error("GlobalConfig layout could not be decoded safely.");
 }
 
 export function decodeTurnStateAccount(data: Uint8Array): TurnStateSnapshot {
@@ -559,6 +615,23 @@ export async function deriveRuleEliminationVoteAddress({
   ]);
 }
 
+export async function deriveRuleRemovalAddress({
+  player,
+  ruleId,
+  turnId,
+}: {
+  player: ReturnType<typeof address>;
+  ruleId: number;
+  turnId: number;
+}) {
+  return derivePda([
+    "rule_removal",
+    u64Le(turnId),
+    u64Le(ruleId),
+    addressEncoder.encode(player),
+  ]);
+}
+
 export async function createSubmitGuessInstruction({
   numbers,
   player,
@@ -697,6 +770,36 @@ export async function createEliminateVoteRuleInstruction({
       { address: SYSTEM_PROGRAM_ID, role: AccountRole.READONLY },
     ],
     data: ELIMINATE_VOTE_RULE_DISCRIMINATOR,
+    programAddress: IDEALER_PROGRAM_ID,
+  };
+}
+
+export async function createRemoveRuleInstruction({
+  player,
+  ruleId,
+  turnId,
+}: {
+  player: ReturnType<typeof address>;
+  ruleId: number;
+  turnId: number;
+}) {
+  const accounts = await deriveSubmitGuessAccounts({ player, turnId });
+  const ruleProposal = await deriveRuleProposalAddress({ ruleId, turnId });
+  const ruleRemoval = await deriveRuleRemovalAddress({ player, ruleId, turnId });
+
+  return {
+    accounts: [
+      { address: player, role: AccountRole.WRITABLE_SIGNER },
+      { address: accounts.globalConfig, role: AccountRole.READONLY },
+      { address: accounts.turnState, role: AccountRole.WRITABLE },
+      { address: accounts.gameToken, role: AccountRole.READONLY },
+      { address: ruleProposal, role: AccountRole.WRITABLE },
+      { address: ruleRemoval, role: AccountRole.WRITABLE },
+      { address: accounts.treasuryVault, role: AccountRole.WRITABLE },
+      { address: accounts.prizeVault, role: AccountRole.WRITABLE },
+      { address: SYSTEM_PROGRAM_ID, role: AccountRole.READONLY },
+    ],
+    data: REMOVE_RULE_DISCRIMINATOR,
     programAddress: IDEALER_PROGRAM_ID,
   };
 }

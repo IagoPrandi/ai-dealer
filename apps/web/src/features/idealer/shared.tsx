@@ -7,7 +7,7 @@
  */
 import { useEffect, useState, type CSSProperties, type SVGProps } from "react";
 
-import { fmtCountdown } from "./data/format";
+import { fmtCountdown, fmtSol } from "./data/format";
 import type { UiRule } from "./data/types";
 
 type IconProps = SVGProps<SVGSVGElement>;
@@ -167,9 +167,15 @@ export interface RuleDetailVote {
   approved: boolean;
   busy?: boolean;
   canAgainst: boolean;
+  canRemove: boolean;
   eliminated: boolean;
   onApprove: () => void;
   onEliminate: () => void;
+  onPlayToRemove: () => void;
+  onRemove: () => void;
+  played: boolean;
+  removeBusy?: boolean;
+  removeFeeSol: number;
 }
 
 export function RuleDetail({
@@ -186,6 +192,8 @@ export function RuleDetail({
   const st = finalistStatus(rule);
   const approved = vote && vote.approved;
   const eliminated = vote && vote.eliminated;
+  const removalUnlocked = vote?.played && vote.canRemove && !rule.removed;
+  const removalGated = vote && !vote.played && vote.canRemove && !rule.removed;
   const balance = rule.approve - rule.against;
   const cardStyle: CSSProperties = {
     width: "100%", maxHeight: "90%", overflowY: "auto", WebkitOverflowScrolling: "touch", overscrollBehavior: "contain",
@@ -205,6 +213,7 @@ export function RuleDetail({
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {rank && rank <= 3 ? <Medal pos={rank} /> : null}
             {rule.finalist ? <span className="ide-pill" style={{ color: "var(--purple-soft)", borderColor: "rgba(199,125,255,0.3)" }}><Ico.shield style={{ color: "var(--purple-soft)", width: 13, height: 13 }} /> finalist</span> : null}
+            {rule.removed ? <span className="ide-pill" style={{ color: "var(--red)", borderColor: "rgba(255,107,107,0.3)" }}><Ico.close style={{ color: "var(--red)", width: 13, height: 13 }} /> Removed</span> : null}
             {st === "eliminada" ? <span className="ide-pill" style={{ color: "var(--red)", borderColor: "rgba(255,107,107,0.3)" }}>eliminated</span> : null}
             {st === "risco" ? <span className="ide-pill" style={{ color: "var(--yellow)", borderColor: "rgba(255,210,63,0.3)" }}><Ico.flame style={{ color: "var(--yellow)", width: 12, height: 12 }} /> at risk</span> : null}
           </div>
@@ -220,7 +229,7 @@ export function RuleDetail({
           {rule.finalist ? <span style={{ marginLeft: "auto", fontSize: 12, color: st === "eliminada" ? "var(--red)" : "var(--dim)" }}>{st === "eliminada" ? "down-votes overtook" : "balance " + (balance >= 0 ? "+" : "") + balance}</span> : null}
         </div>
 
-        {vote ? (
+        {vote?.played ? (
           <>
             <div style={{ display: "flex", gap: 10, marginBottom: vote.canAgainst ? 22 : 8 }}>
               <button onClick={() => vote.onApprove()} disabled={vote.busy} className={"ide-votebtn for" + (approved ? " on" : "")} style={{ flex: 1, justifyContent: "center", padding: "13px", fontSize: 14.5, opacity: vote.busy ? 0.6 : 1 }}>
@@ -232,6 +241,41 @@ export function RuleDetail({
             </div>
             {!vote.canAgainst ? <p style={{ margin: "0 0 20px", fontSize: 12, color: "var(--dim)", display: "flex", alignItems: "center", gap: 6 }}><Ico.info style={{ color: "var(--dim)" }} /> Voting against is only allowed in the finalist phase.</p> : null}
           </>
+        ) : null}
+
+        {removalUnlocked ? (
+          <div style={{ margin: "0 0 20px", padding: "13px", background: "rgba(255,107,107,0.08)", border: "1px solid rgba(255,107,107,0.22)", borderRadius: 16 }}>
+            <button
+              className="ide-votebtn against"
+              disabled={vote.removeBusy}
+              onClick={() => vote.onRemove()}
+              style={{ width: "100%", justifyContent: "center", padding: "13px", fontSize: 14.5, opacity: vote.removeBusy ? 0.6 : 1 }}
+              type="button"
+            >
+              <Ico.close style={{ color: "currentColor" }} />
+              {vote.removeBusy ? "Removing..." : `Remove · ${fmtSol(vote.removeFeeSol)} SOL`}
+            </button>
+            <p style={{ margin: "10px 2px 0", fontSize: 12, color: "var(--muted)", lineHeight: 1.45 }}>
+              Paid removal keeps the rule in the ledger and marks it as removed.
+            </p>
+          </div>
+        ) : null}
+
+        {removalGated ? (
+          <div style={{ margin: "0 0 20px", padding: "13px", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 16 }}>
+            <p style={{ margin: "0 0 10px", fontSize: 12.5, color: "var(--muted)", display: "flex", alignItems: "center", gap: 6 }}>
+              <Ico.lock style={{ color: "var(--dim)" }} /> Play this round before removing a rule.
+            </p>
+            <button className="ide-btn" onClick={() => vote.onPlayToRemove()} style={{ width: "100%", justifyContent: "center" }} type="button">
+              Play to remove
+            </button>
+          </div>
+        ) : null}
+
+        {rule.removed ? (
+          <p style={{ margin: "0 0 20px", fontSize: 12.5, color: "var(--muted)", display: "flex", alignItems: "center", gap: 6 }}>
+            <Ico.info style={{ color: "var(--dim)" }} /> This rule was removed by a paid on-chain action and remains visible for auditability.
+          </p>
         ) : null}
 
         <SectionLabel>How it works</SectionLabel>
@@ -252,6 +296,7 @@ export function RuleDetail({
           <Meta label="Wallet" value={rule.wallet} mono />
           <Meta label="When" value={rule.created} />
           <Meta label="Balance" value={`${balance >= 0 ? "+" : ""}${balance}`} mono />
+          <Meta label="Status" value={rule.removed ? "Removed" : rule.finalist ? "Finalist" : "Active"} />
         </div>
       </div>
     </div>

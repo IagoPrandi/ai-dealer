@@ -150,6 +150,7 @@ function buildUiRule(
   src: "top" | "vrf" | null,
   walletAddress: string | undefined,
 ): UiRule {
+  const state = proposal.state ?? "proposed";
   return {
     against,
     approve,
@@ -159,9 +160,12 @@ function buildUiRule(
     how: "The dealer evaluates every guess against this rule and the best one wins the round. The house applies it automatically after the draw (VRF).",
     id: `r${proposal.ruleId}`,
     mine: Boolean(walletAddress && proposal.proposer === walletAddress),
+    removed: state === "removed_paid",
     ruleId: proposal.ruleId,
+    ruleProposal: proposal.ruleProposal,
     seed: proposal.sanitizedText,
     src,
+    state,
     summary: proposal.sanitizedText,
     title: proposal.title ?? `Rule #${proposal.ruleId}`,
     tokens: proposal.tokenCount ?? 0,

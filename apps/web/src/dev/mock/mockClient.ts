@@ -59,12 +59,13 @@ function createAccountWriter(length: number) {
 }
 
 function encodeGlobalConfig(): Uint8Array {
-  const w = createAccountWriter(246);
+  const w = createAccountWriter(254);
   w.skip(32); // authority
   w.u8(0); // pendingAuthority option = none
   w.skip(96); // 3 pubkeys
   w.u64(MOCK_GLOBAL_CONFIG.guessSubmissionFeeLamports);
-  w.skip(16);
+  w.skip(8); // rule proposal fee
+  w.u64(MOCK_GLOBAL_CONFIG.ruleRemovalFeeLamports);
   w.u64(MOCK_GLOBAL_CONFIG.voteFeeLamports);
   w.skip(2);
   w.skip(16);

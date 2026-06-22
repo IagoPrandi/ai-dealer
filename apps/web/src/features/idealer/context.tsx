@@ -16,7 +16,9 @@ export type Screen =
   | "home"
   | "play"
   | "profile"
+  | "rewards"
   | "result"
+  | "share"
   | "vote";
 
 export interface NavParams {
@@ -39,13 +41,15 @@ export interface IdealerContextValue {
   decisionPhase: boolean;
   eliminatedIds: number[];
   endSeconds: null | number;
-  fees: { play: number; rule: number; vote: number };
+  fees: { play: number; remove: number; rule: number; vote: number };
   go: (screen: Screen, params?: NavParams) => void;
   openDetail: (ruleId: number, opts?: { canAgainst?: boolean; rank?: number | null }) => void;
   players: number;
   played: boolean;
   prizeSol: number;
   reloadAll: () => void;
+  removeBusyRuleId: null | number;
+  removeRule: (ruleId: number) => Promise<void>;
   round: RoundSummaryApi | null;
   roundLoading: boolean;
   rules: RulesView;

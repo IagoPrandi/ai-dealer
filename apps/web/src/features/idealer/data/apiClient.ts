@@ -51,6 +51,42 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   return (await response.json()) as T;
 }
 
+function apiErrorMessage(path: string, status: number, detail: unknown) {
+  if (detail && typeof detail === "object") {
+    const record = detail as Record<string, unknown>;
+    const message =
+      typeof record.message === "string"
+        ? record.message
+        : typeof record.error === "string"
+          ? record.error
+          : null;
+    if (message) {
+      return `POST ${path} returned HTTP ${status}. ${message}`;
+    }
+  }
+  return `POST ${path} returned HTTP ${status}.`;
+}
+
+async function postStrictJson<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    body: JSON.stringify(body),
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    let detail: unknown;
+    try {
+      detail = await response.json();
+    } catch {
+      detail = undefined;
+    }
+    throw new Error(apiErrorMessage(path, response.status, detail));
+  }
+
+  return (await response.json()) as T;
+}
+
 export function getRuleProposals(turnId: number, signal?: AbortSignal) {
   return getJson<{ proposals: RuleProposalApi[] }>(
     `/rule-proposals?turnId=${turnId}`,
@@ -139,6 +175,10 @@ export function postRuleVote(body: unknown) {
 
 export function postRuleEliminationVote(body: unknown) {
   return postJson<{ vote: unknown }>("/rule-elimination-votes", body);
+}
+
+export function postRuleRemoval(body: unknown) {
+  return postStrictJson<{ removal: unknown }>("/rule-removals", body);
 }
 
 export function postClaimRequest(claimId: string, wallet: string) {

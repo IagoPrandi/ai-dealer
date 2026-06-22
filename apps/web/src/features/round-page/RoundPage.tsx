@@ -258,31 +258,40 @@ export function RoundPage({ turnId: rawTurnId }: { turnId: string }) {
     }
 
     let active = true;
+    setAuditAddresses(null);
+    setOnChainPoolSol(null);
+    setOnChainPoolError(false);
 
-    void deriveRoundAccounts({ turnId }).then((accounts) => {
-      if (!active) {
-        return;
-      }
-      setAuditAddresses({
-        prizeVault: accounts.prizeVault.toString(),
-        turnState: accounts.turnState.toString(),
-      });
-
-      void client.runtime.rpc
-        .getBalance(accounts.prizeVault, { commitment: "confirmed" })
-        .send()
-        .then((balance) => {
-          if (!active) {
-            return;
-          }
-          setOnChainPoolSol(Number(balance.value) / 1_000_000_000);
-        })
-        .catch(() => {
-          if (active) {
-            setOnChainPoolError(true);
-          }
+    void deriveRoundAccounts({ turnId })
+      .then((accounts) => {
+        if (!active) {
+          return;
+        }
+        setAuditAddresses({
+          prizeVault: accounts.prizeVault.toString(),
+          turnState: accounts.turnState.toString(),
         });
-    });
+
+        void client.runtime.rpc
+          .getBalance(accounts.prizeVault, { commitment: "confirmed" })
+          .send()
+          .then((balance) => {
+            if (!active) {
+              return;
+            }
+            setOnChainPoolSol(Number(balance.value) / 1_000_000_000);
+          })
+          .catch(() => {
+            if (active) {
+              setOnChainPoolError(true);
+            }
+          });
+      })
+      .catch(() => {
+        if (active) {
+          setOnChainPoolError(true);
+        }
+      });
 
     return () => {
       active = false;

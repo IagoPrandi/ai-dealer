@@ -15,9 +15,11 @@ import { MVP_FEES_SOL } from "@idealer/constants";
 
 import {
   createEliminateVoteRuleInstruction,
+  createRemoveRuleInstruction,
   createVoteRuleInstruction,
   deriveRuleEliminationVoteAddress,
   deriveRuleProposalAddress,
+  deriveRuleRemovalAddress,
   deriveRuleVoteAddress,
 } from "../../solana/idealerProgram";
 import {
@@ -28,7 +30,7 @@ import {
 } from "./context";
 import { lamportsToSol } from "./data/format";
 import { usePlayerGuess, useActiveTurn, useRound, useRules } from "./data/hooks";
-import { postRuleEliminationVote, postRuleVote } from "./data/apiClient";
+import { postRuleEliminationVote, postRuleRemoval, postRuleVote } from "./data/apiClient";
 import { describeTxError, sendInstruction } from "./data/tx";
 import { Ico, RuleDetail, type RuleDetailVote } from "./shared";
 import { HomeScreen } from "./screens/Home";
@@ -36,7 +38,9 @@ import { PlayScreen } from "./screens/Play";
 import { VoteScreen } from "./screens/Vote";
 import { CreateScreen } from "./screens/Create";
 import { ProfileScreen } from "./screens/Profile";
+import { RewardsScreen } from "./screens/Rewards";
 import { ResultScreen } from "./screens/Result";
+import { ShareScreen } from "./screens/Share";
 import { ConnectOverlay } from "./screens/Connect";
 
 function PhoneChrome() {
@@ -56,7 +60,10 @@ function PhoneChrome() {
   );
 }
 
-export function IdealerApp({ initialScreen = "home" }: { initialScreen?: Screen } = {}) {
+export function IdealerApp({
+  initialConnect = false,
+  initialScreen = "home",
+}: { initialConnect?: boolean; initialScreen?: Screen } = {}) {
   const client = useSolanaClient();
   const { connect, connecting, connected, connectors, wallet } = useWalletConnection();
   const walletAddress = wallet?.account.address.toString();
@@ -70,8 +77,9 @@ export function IdealerApp({ initialScreen = "home" }: { initialScreen?: Screen 
   const [screen, setScreen] = useState<Screen>(initialScreen);
   const [seed, setSeed] = useState("");
   const [detail, setDetail] = useState<{ canAgainst: boolean; rank: number | null; ruleId: number } | null>(null);
-  const [showConnect, setShowConnect] = useState(false);
+  const [showConnect, setShowConnect] = useState(initialConnect);
   const [voteBusyRuleId, setVoteBusyRuleId] = useState<null | number>(null);
+  const [removeBusyRuleId, setRemoveBusyRuleId] = useState<null | number>(null);
   const [actionError, setActionError] = useState<null | string>(null);
 
   const go = useCallback((next: Screen, params?: NavParams) => {
@@ -131,10 +139,68 @@ export function IdealerApp({ initialScreen = "home" }: { initialScreen?: Screen 
     [client, connected, wallet, walletAddress, turnId, rules, requestConnect],
   );
 
+  const sendRemoveRule = useCallback(
+    async (ruleId: number) => {
+      if (!connected || !wallet || !walletAddress) {
+        requestConnect();
+        return;
+      }
+
+      const rule = rules.rules.find((candidate) => candidate.ruleId === ruleId);
+      if (!rule) {
+        setActionError("Rule is not available for removal.");
+        return;
+      }
+      if (rule.removed) {
+        setActionError("This rule has already been removed.");
+        return;
+      }
+      if (rule.finalist) {
+        setActionError("Finalist rules cannot be removed from this screen.");
+        return;
+      }
+      if (!played) {
+        go("play");
+        return;
+      }
+
+      setActionError(null);
+      setRemoveBusyRuleId(ruleId);
+      try {
+        const player = address(walletAddress);
+        const [ruleProposal, ruleRemoval] = await Promise.all([
+          deriveRuleProposalAddress({ ruleId, turnId }),
+          deriveRuleRemovalAddress({ player, ruleId, turnId }),
+        ]);
+        const instruction = await createRemoveRuleInstruction({ player, ruleId, turnId });
+        const signature = await sendInstruction(client, wallet, instruction);
+        await postRuleRemoval({
+          removalKind: rule.mine ? "creator_self" : "third_party",
+          removedAt: new Date().toISOString(),
+          remover: walletAddress,
+          ruleId,
+          ruleProposal: ruleProposal.toString(),
+          ruleRemoval: ruleRemoval.toString(),
+          signature,
+          turnId,
+        });
+        reloadAll();
+      } catch (error) {
+        setActionError(describeTxError(error));
+      } finally {
+        setRemoveBusyRuleId(null);
+      }
+    },
+    [client, connected, go, played, reloadAll, requestConnect, rules.rules, turnId, wallet, walletAddress],
+  );
+
   const fees = useMemo(() => {
     const gc = activeTurn.snapshot?.globalConfig;
     return {
       play: gc ? lamportsToSol(gc.guessSubmissionFeeLamports) : MVP_FEES_SOL.guessSubmission,
+      remove: gc?.ruleRemovalFeeLamports
+        ? lamportsToSol(gc.ruleRemovalFeeLamports)
+        : MVP_FEES_SOL.paidRuleRemoval,
       rule: MVP_FEES_SOL.ruleProposal,
       vote: gc ? lamportsToSol(gc.voteFeeLamports) : MVP_FEES_SOL.vote,
     };
@@ -162,6 +228,8 @@ export function IdealerApp({ initialScreen = "home" }: { initialScreen?: Screen 
     prizeSol:
       round?.pool?.totalVisiblePrizePoolSol ?? round?.pool?.indicativeSol ?? 0,
     reloadAll,
+    removeBusyRuleId,
+    removeRule: sendRemoveRule,
     round,
     roundLoading,
     rules,
@@ -180,14 +248,20 @@ export function IdealerApp({ initialScreen = "home" }: { initialScreen?: Screen 
   const showNav = screen === "home" || screen === "vote" || screen === "profile";
   const detailRule = detail ? rules.rules.find((r) => r.ruleId === detail.ruleId) ?? null : null;
   const detailVote: RuleDetailVote | null =
-    detailRule && played
+    detailRule
       ? {
           approved: rules.approvedIds.includes(detailRule.ruleId),
           busy: voteBusyRuleId === detailRule.ruleId,
           canAgainst: Boolean(detail?.canAgainst) && detailRule.finalist,
+          canRemove: !detailRule.finalist && !detailRule.removed,
           eliminated: rules.eliminatedIds.includes(detailRule.ruleId),
           onApprove: () => void sendVote(detailRule.ruleId, "approve"),
           onEliminate: () => void sendVote(detailRule.ruleId, "eliminate"),
+          onPlayToRemove: () => go("play"),
+          onRemove: () => void sendRemoveRule(detailRule.ruleId),
+          played,
+          removeBusy: removeBusyRuleId === detailRule.ruleId,
+          removeFeeSol: fees.remove,
         }
       : null;
 
@@ -202,7 +276,9 @@ export function IdealerApp({ initialScreen = "home" }: { initialScreen?: Screen 
             {screen === "vote" ? <VoteScreen /> : null}
             {screen === "create" ? <CreateScreen /> : null}
             {screen === "profile" ? <ProfileScreen /> : null}
+            {screen === "rewards" ? <RewardsScreen /> : null}
             {screen === "result" ? <ResultScreen /> : null}
+            {screen === "share" ? <ShareScreen /> : null}
 
             {showNav ? (
               <div className="ide-nav">

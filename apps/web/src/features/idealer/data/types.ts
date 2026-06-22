@@ -158,9 +158,12 @@ export interface UiRule {
   how: string;
   id: string;
   mine: boolean;
+  removed: boolean;
   ruleId: number;
+  ruleProposal: string | undefined;
   seed: string;
   src: "top" | "vrf" | null;
+  state: RuleProposalApi["state"];
   summary: string;
   title: string;
   tokens: number;
