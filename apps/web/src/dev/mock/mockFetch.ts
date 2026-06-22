@@ -6,7 +6,9 @@
  */
 import {
   MOCK_GUESS_RECEIPT,
+  MOCK_PLAYER_CLAIMS,
   MOCK_ROUND,
+  MOCK_RULE_ELIMINATION_VOTES,
   MOCK_RULE_PREFLIGHT,
   MOCK_RULE_PROPOSALS,
   MOCK_RULE_VOTES,
@@ -29,6 +31,9 @@ function resolveMock(url: string): unknown | undefined {
   if (url.includes("/rule-proposals")) {
     return MOCK_RULE_PROPOSALS;
   }
+  if (url.includes("/rule-elimination-votes")) {
+    return MOCK_RULE_ELIMINATION_VOTES;
+  }
   if (url.includes("/rule-votes")) {
     return MOCK_RULE_VOTES;
   }
@@ -38,6 +43,9 @@ function resolveMock(url: string): unknown | undefined {
   }
   if (url.includes("/guess-receipts")) {
     return MOCK_GUESS_RECEIPT;
+  }
+  if (url.includes("/claims")) {
+    return MOCK_PLAYER_CLAIMS;
   }
   if (url.includes("/rounds/")) {
     return MOCK_ROUND;

@@ -1,0 +1,254 @@
+"use client";
+
+/**
+ * CRIAR REGRA — chat with the AI dealer. Real flow: POST /rule-preflight to
+ * compile/validate, then propose on-chain (createProposeRuleInstruction) and
+ * POST /rule-proposals. Ported from app-create.jsx (local stub removed).
+ */
+import { useEffect, useRef, useState } from "react";
+import { address } from "@solana/kit";
+
+import { RULE_MAX_TOKENS } from "@idealer/constants";
+
+import {
+  createProposeRuleInstruction,
+  deriveRuleProposalAddress,
+  type RulePreflightResult,
+} from "../../../solana/idealerProgram";
+import { useIdealer } from "../context";
+import { postRuleProposal, postRulePreflight } from "../data/apiClient";
+import { fmtSol, fmtTurnId } from "../data/format";
+import { describeTxError, sendInstruction } from "../data/tx";
+import { Dealer, Ico, SectionLabel } from "../shared";
+
+interface ChatMessage {
+  text: string;
+  who: "ai" | "user";
+}
+
+function RulePreview({ rule }: { rule: RulePreflightResult }) {
+  const valid = rule.decision === "VALID" && !rule.needsClarification;
+  const pct = Math.round((rule.tokenCount / RULE_MAX_TOKENS) * 100);
+  return (
+    <div className="ide-card" style={{ padding: 16, borderColor: "var(--line-2)", background: "linear-gradient(160deg, var(--surface-2), var(--surface))", animation: "ide-rise .3s ease both" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <span className="ide-pill" style={{ color: valid ? "var(--green)" : "var(--yellow)", padding: "4px 10px" }}>
+          {valid ? <><Ico.check style={{ width: 13, height: 13, color: "var(--green)" }} /> valid rule</> : "needs adjustment"}
+        </span>
+        <span style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--dim)" }} className="ide-num">{rule.tokenCount}/{RULE_MAX_TOKENS} tokens</span>
+      </div>
+      {rule.normalizedText ? <p style={{ margin: "0 0 14px", fontSize: 15, color: "var(--text)", lineHeight: 1.45, fontWeight: 600 }}>{rule.normalizedText}</p> : null}
+      {rule.officialInterpretation ? (
+        <>
+          <SectionLabel>How it works</SectionLabel>
+          <p style={{ margin: "7px 0 0", fontSize: 14, lineHeight: 1.55, color: "var(--muted)" }}>{rule.officialInterpretation}</p>
+        </>
+      ) : null}
+      <div style={{ marginTop: 14, height: 6, borderRadius: 4, background: "var(--surface-3)", overflow: "hidden" }}>
+        <div style={{ width: `${Math.min(100, pct)}%`, height: "100%", background: valid ? "var(--grad-btn)" : "var(--yellow)", borderRadius: 4, transition: "width .4s" }} />
+      </div>
+    </div>
+  );
+}
+
+export function CreateScreen() {
+  const { client, connect, connected, fees, go, played, reloadAll, seed, turnId, wallet, walletAddress } = useIdealer();
+
+  if (!connected) {
+    return (
+      <div className="ide-app ide-screen" style={{ height: "100%", position: "relative", overflow: "hidden" }}>
+        <div className="ide-ambient" />
+        <div style={{ position: "relative", zIndex: 1, height: "100%", display: "flex", flexDirection: "column", padding: "52px 22px 30px" }}>
+          <div style={{ display: "flex" }}>
+            <button onClick={() => go("home")} style={{ width: 40, height: 40, borderRadius: 13, background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--text)", display: "grid", placeItems: "center", cursor: "pointer" }} type="button"><Ico.back /></button>
+          </div>
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
+            <div style={{ animation: "ide-float 4s ease-in-out infinite" }}><Dealer size={64} /></div>
+            <h2 style={{ fontSize: 25, fontWeight: 800, margin: "18px 0 8px", letterSpacing: "-0.02em" }}>Connect to create</h2>
+            <p style={{ color: "var(--muted)", fontSize: 15.5, lineHeight: 1.5, margin: "0 0 26px" }}>Chat with the dealer and design your winning rule by prompt. Submitting costs <span className="ide-num" style={{ color: "var(--text)" }}>{fmtSol(fees.rule)} SOL</span>.</p>
+            <button onClick={() => connect()} className="ide-btn" style={{ width: "100%", padding: 16, fontSize: 16 }} type="button">
+              <Ico.wallet style={{ color: "#08110C" }} /> Connect wallet
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return <CreateChat key={seed || "new"} {...{ client, fees, go, played, reloadAll, seed, turnId, wallet, walletAddress }} />;
+}
+
+type ChatProps = Pick<ReturnType<typeof useIdealer>, "client" | "fees" | "go" | "played" | "reloadAll" | "seed" | "turnId" | "wallet" | "walletAddress">;
+
+function CreateChat({ client, fees, go, played, reloadAll, seed, turnId, wallet, walletAddress }: ChatProps) {
+  const [msgs, setMsgs] = useState<ChatMessage[]>([
+    { text: "Hey! Tell me in one sentence how your rule decides the round winner. Be creative — I turn it into a valid rule. 🎲", who: "ai" },
+  ]);
+  const [val, setVal] = useState(seed ?? "");
+  const [typing, setTyping] = useState(false);
+  const [rule, setRule] = useState<RulePreflightResult | null>(null);
+  const [submitted, setSubmitted] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<null | string>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const autoSentRef = useRef(false);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [msgs, typing, rule]);
+
+  async function send(text?: string) {
+    const t = (text ?? val).trim();
+    if (!t || typing) {
+      return;
+    }
+    setVal("");
+    setError(null);
+    setMsgs((m) => [...m, { text: t, who: "user" }]);
+    setTyping(true);
+    setRule(null);
+    try {
+      const body = await postRulePreflight(t);
+      const preflight = body.preflight as unknown as RulePreflightResult;
+      const valid = preflight.decision === "VALID" && !preflight.needsClarification;
+      setMsgs((m) => [
+        ...m,
+        { text: preflight.dealerMessage || (valid ? "Done! I compiled your rule. Review it — if you like it, submit it to the round." : "Almost there! Try describing the win condition in a few clear words."), who: "ai" },
+      ]);
+      setRule(preflight);
+    } catch (cause) {
+      setMsgs((m) => [...m, { text: "The dealer couldn't reach the rule compiler. Try again in a moment.", who: "ai" }]);
+      setError(describeTxError(cause));
+    } finally {
+      setTyping(false);
+    }
+  }
+
+  // Auto-send the seed coming from the home prompt (once).
+  useEffect(() => {
+    if (seed && !autoSentRef.current) {
+      autoSentRef.current = true;
+      const id = window.setTimeout(() => void send(seed), 350);
+      return () => window.clearTimeout(id);
+    }
+    return undefined;
+  }, []);
+
+  async function submit() {
+    if (!rule || !played || !wallet || !walletAddress) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const player = address(walletAddress);
+      const instruction = await createProposeRuleInstruction({ player, preflight: rule, turnId });
+      const signature = await sendInstruction(client, wallet, instruction);
+      const ruleProposal = (await deriveRuleProposalAddress({ ruleId: rule.ruleId, turnId })).toString();
+      await postRuleProposal({
+        ...rule,
+        proposer: walletAddress,
+        ruleProposal,
+        signature,
+        submittedAt: new Date().toISOString(),
+        turnId,
+      });
+      setSubmitted(true);
+      reloadAll();
+    } catch (cause) {
+      setError(describeTxError(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function reset() {
+    setRule(null);
+    setSubmitted(false);
+    setError(null);
+    setMsgs([{ text: "On to the next one! How does your new rule decide the winner?", who: "ai" }]);
+  }
+
+  const valid = rule?.decision === "VALID" && !rule.needsClarification;
+
+  return (
+    <div className="ide-app ide-screen" style={{ height: "100%", position: "relative", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+      <div className="ide-ambient" />
+      <div style={{ position: "relative", zIndex: 2, padding: "52px 18px 12px", borderBottom: "1px solid var(--line)", background: "rgba(11,9,16,0.6)", backdropFilter: "blur(10px)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button onClick={() => go("home")} style={{ width: 40, height: 40, borderRadius: 13, background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--text)", display: "grid", placeItems: "center", cursor: "pointer" }} type="button"><Ico.back /></button>
+          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <Dealer size={30} />
+            <div>
+              <div style={{ fontWeight: 800, fontSize: 16, lineHeight: 1.15, whiteSpace: "nowrap" }}>AI Dealer</div>
+              <div style={{ fontSize: 12, color: "var(--green)", marginTop: 1, whiteSpace: "nowrap" }}>{submitted ? "● rule submitted" : "● crafting your rule"}</div>
+            </div>
+          </div>
+          <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--dim)" }}>submit <span className="ide-num" style={{ color: "var(--muted)" }}>{fmtSol(fees.rule)}</span></span>
+        </div>
+      </div>
+
+      <div ref={scrollRef} className="ide-scroll" style={{ position: "relative", zIndex: 1, flex: 1, overflowY: "auto", overflowX: "hidden", minWidth: 0, padding: "18px 16px 8px", display: "flex", flexDirection: "column", gap: 12 }}>
+        {msgs.map((mm, i) => (
+          <div key={i} className={mm.who === "ai" ? "ide-bubble-ai" : "ide-bubble-user"} style={{ animation: "ide-rise .3s ease both" }}>{mm.text}</div>
+        ))}
+        {typing ? <div className="ide-bubble-ai ide-typing" style={{ width: 56 }}><span /><span /><span /></div> : null}
+
+        {rule && !typing ? <RulePreview rule={rule} /> : null}
+
+        {rule && valid && !typing ? (
+          submitted ? (
+            <div className="ide-card" style={{ padding: 16, borderColor: "rgba(20,241,149,0.35)", background: "linear-gradient(120deg, rgba(20,241,149,0.12), var(--surface))", animation: "ide-rise .3s ease both" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                <span style={{ width: 28, height: 28, borderRadius: 9, background: "var(--green)", color: "#08110C", display: "grid", placeItems: "center" }}><Ico.check /></span>
+                <b style={{ fontSize: 15.5 }}>Rule in the round</b>
+              </div>
+              <p style={{ margin: "0 0 14px", color: "var(--muted)", fontSize: 14, lineHeight: 1.5 }}>In voting for round {fmtTurnId(turnId)}. If elected, you earn <b style={{ color: "var(--text)" }}>15%</b> of each prize.</p>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={reset} className="ide-btn-ghost ide-btn" style={{ flex: 1, padding: 13 }} type="button">Create another</button>
+                <button onClick={() => go("vote")} className="ide-btn" style={{ flex: 1, padding: 13 }} type="button">See in voting</button>
+              </div>
+            </div>
+          ) : played ? (
+            <button onClick={submit} disabled={busy} className="ide-btn" style={{ padding: 15, fontSize: 15.5, animation: "ide-rise .3s ease both", opacity: busy ? 0.7 : 1 }} type="button">
+              <Ico.check style={{ color: "#08110C" }} /> {busy ? "Submitting…" : `Submit to the round · ${fmtSol(fees.rule)} SOL`}
+            </button>
+          ) : (
+            <div className="ide-card" style={{ padding: 16, borderColor: "rgba(255,210,63,0.35)", background: "linear-gradient(120deg, rgba(255,210,63,0.1), var(--surface))", animation: "ide-rise .3s ease both" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 7 }}>
+                <Ico.lock style={{ color: "var(--yellow)", width: 16, height: 16 }} />
+                <b style={{ fontSize: 15 }}>Play to submit</b>
+              </div>
+              <p style={{ margin: "0 0 13px", color: "var(--muted)", fontSize: 13.5, lineHeight: 1.5 }}>Make a guess this round to unlock submitting. Your draft stays here.</p>
+              <button onClick={() => go("play")} className="ide-btn" style={{ width: "100%", padding: 13 }} type="button">
+                <Ico.bolt style={{ color: "#08110C" }} /> Play now · {fmtSol(fees.play)} SOL
+              </button>
+            </div>
+          )
+        ) : null}
+
+        {error ? <div className="ide-card" style={{ padding: "11px 14px", borderColor: "rgba(255,107,107,0.3)", color: "var(--red)", fontSize: 13 }}>{error}</div> : null}
+        <div style={{ height: 4 }} />
+      </div>
+
+      {!submitted ? (
+        <div style={{ position: "relative", zIndex: 2, padding: "10px 14px calc(14px + env(safe-area-inset-bottom,0px))", borderTop: "1px solid var(--line)", background: "rgba(11,9,16,0.7)", backdropFilter: "blur(12px)" }}>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 9 }}>
+            <textarea
+              value={val}
+              onChange={(e) => setVal(e.target.value)}
+              rows={1}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }}
+              placeholder={rule ? "Ask for a tweak or describe another rule…" : "Describe your rule…"}
+              style={{ flex: 1, resize: "none", background: "var(--surface)", border: "1px solid var(--line-2)", borderRadius: 16, padding: "13px 15px", color: "var(--text)", fontSize: 15, fontFamily: "Outfit", outline: "none", maxHeight: 90 }}
+            />
+            <button onClick={() => void send()} className="ide-btn" style={{ width: 48, height: 48, padding: 0, borderRadius: 15, flexShrink: 0 }} type="button"><Ico.send style={{ color: "#08110C" }} /></button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}

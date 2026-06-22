@@ -62,13 +62,50 @@ export const MOCK_RULE_PROPOSALS = {
   ],
 };
 
-// Resposta de GET /rule-votes?turnId=... (contagens por ruleId).
+// Resposta de GET /rule-votes?turnId=... (contagens por ruleId + votos crus).
 export const MOCK_RULE_VOTES = {
   counts: {
     "1": 125,
     "2": 98,
     "3": 64,
   } as Record<string, number>,
+  votes: [] as Array<{ ruleId: number; signature: string; turnId: number; voter: string }>,
+};
+
+// Resposta de GET /rule-elimination-votes?turnId=... (sem eliminações no mock).
+export const MOCK_RULE_ELIMINATION_VOTES = {
+  counts: { "2": 22 } as Record<string, number>,
+  votes: [] as Array<{ ruleId: number; signature: string; turnId: number; voter: string }>,
+};
+
+// Resposta de GET /players/{wallet}/claims — ledger de exemplo (1 prêmio disponível).
+export const MOCK_PLAYER_CLAIMS = {
+  claims: {
+    availableLamports: 920_000_000,
+    claimedLamports: 1_840_000_000,
+    records: [
+      {
+        amountLamports: 920_000_000,
+        category: "alternative" as const,
+        claimId: "a".repeat(64),
+        kind: "winner_payout" as const,
+        status: "available" as const,
+        statusReason: "READY",
+        turnId: MOCK_ACTIVE_TURN_ID - 1,
+      },
+      {
+        amountLamports: 1_840_000_000,
+        category: null,
+        claimId: "b".repeat(64),
+        kind: "creator_reward" as const,
+        status: "claimed" as const,
+        statusReason: "CLAIMED",
+        turnId: MOCK_ACTIVE_TURN_ID - 1,
+      },
+    ],
+    totalLamports: 2_760_000_000,
+    wallet: MOCK_WALLET_ADDRESS,
+  },
 };
 
 // Resposta de POST /rule-preflight (veredito VALID => proposável).

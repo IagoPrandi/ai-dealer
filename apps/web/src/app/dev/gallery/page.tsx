@@ -1,40 +1,30 @@
 "use client";
 
 /**
- * Galeria de validação de UI — renderiza TODAS as telas de uma vez, lado a lado,
- * já no estado "carregado", sem backend, devnet ou carteira.
+ * Galeria de validação de UI — renderiza as telas do Idealer lado a lado, já no
+ * estado "carregado", sem backend, devnet ou carteira real.
  *
  * Só funciona com o flag de mock ligado:  npm run dev:mock
  * Depois acesse:  http://localhost:3000/dev/gallery
  *
- * Como funciona: em modo mock o next.config.ts troca "@solana/react-hooks" pelo
- * mock local (carteira conectada + client falso) e esta página intercepta fetch
- * para responder a API com dados canned.
+ * Em modo mock o next.config.ts troca "@solana/react-hooks" pelo mock local
+ * (carteira conectada + client falso) e esta página intercepta fetch para
+ * responder a API com dados canned.
  */
 import { Component, type ReactNode } from "react";
 
 import { installMockFetch } from "../../../dev/mock/mockFetch";
-import { DrawResultPanel } from "../../../features/draw-result/DrawResultPanel";
-import { MobileLiveRoundHub } from "../../../features/live-round/MobileLiveRoundHub";
-import { NumberPicker } from "../../../features/number-picker/NumberPicker";
-import { RoundPage } from "../../../features/round-page/RoundPage";
-import { RuleProposalComposer } from "../../../features/rule-proposal/RuleProposalComposer";
-import { RuleVotingPanel } from "../../../features/rule-voting/RuleVotingPanel";
-import { ShareCardGenerator } from "../../../features/share-card/ShareCardGenerator";
-import { TurnCycleSimulator } from "../../../features/turn-cycle/TurnCycleSimulator";
-import { WalletFlow } from "../../../features/wallet/WalletFlow";
+import { IdealerApp } from "../../../features/idealer/IdealerApp";
+import type { Screen } from "../../../features/idealer/context";
+import { SolanaProviders } from "../../../solana/SolanaProviders";
 
-// Instala a interceptação de fetch antes de qualquer efeito das telas.
 if (typeof window !== "undefined") {
   installMockFetch();
 }
 
 const MOCK_ENABLED = process.env.NEXT_PUBLIC_UI_MOCK === "1";
 
-class CardBoundary extends Component<
-  { children: ReactNode },
-  { error: Error | null }
-> {
+class CardBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
 
   static getDerivedStateFromError(error: Error) {
@@ -54,36 +44,24 @@ class CardBoundary extends Component<
   }
 }
 
-const CARDS: Array<{ label: string; node: ReactNode; route: string }> = [
-  { label: "Live round hub", node: <MobileLiveRoundHub />, route: "/play" },
-  { label: "Number picker", node: <NumberPicker />, route: "/play/pick" },
-  {
-    label: "Rule proposal (dealer chat)",
-    node: <RuleProposalComposer />,
-    route: "/play/propose",
-  },
-  { label: "Rule voting", node: <RuleVotingPanel />, route: "/play/vote" },
-  { label: "Wallet flow", node: <WalletFlow />, route: "/play/wallet" },
-  { label: "Draw result", node: <DrawResultPanel />, route: "/play/results" },
-  { label: "Share card", node: <ShareCardGenerator />, route: "/play/share" },
-  {
-    label: "Turn cycle simulator",
-    node: <TurnCycleSimulator />,
-    route: "/play/simulate",
-  },
-  { label: "Round page", node: <RoundPage turnId="7" />, route: "/round/7" },
+const CARDS: Array<{ label: string; screen: Screen }> = [
+  { label: "Round (home)", screen: "home" },
+  { label: "Play (number picker)", screen: "play" },
+  { label: "Rules (voting)", screen: "vote" },
+  { label: "Create rule (dealer chat)", screen: "create" },
+  { label: "Account (claims)", screen: "profile" },
+  { label: "Result", screen: "result" },
 ];
 
 export default function GalleryPage() {
   if (!MOCK_ENABLED) {
     return (
       <main className="gx-disabled">
-        <h1>Galeria de UI desativada</h1>
+        <h1>UI gallery disabled</h1>
         <p>
-          Esta página só funciona em modo mock. Rode o servidor com:
-          <code>npm run dev:mock</code>
-          (na pasta <code>apps/web</code>) e acesse novamente
-          <code>/dev/gallery</code>.
+          This page only works in mock mode. Start the server with
+          <code>npm run dev:mock</code> (in <code>apps/web</code>) and open
+          <code>/dev/gallery</code> again.
         </p>
       </main>
     );
@@ -93,26 +71,30 @@ export default function GalleryPage() {
     <main className="gx-root">
       <style>{GALLERY_CSS}</style>
       <header className="gx-top">
-        <h1>Idealer — galeria de telas</h1>
+        <h1>Idealer — screen gallery</h1>
         <p>
-          Todas as telas com estado já carregado (carteira conectada, rodada
-          aberta, dados canned). Sem backend, devnet ou execução de funções.
-          Cada moldura é interativa, mas ações on-chain ficam desativadas.
+          Every screen with state already loaded (wallet connected, round open,
+          canned data). No backend, devnet, or on-chain execution. Each frame is
+          interactive, but on-chain actions are disabled.
         </p>
       </header>
-      <div className="gx-grid">
-        {CARDS.map((card) => (
-          <section className="gx-card" key={card.route}>
-            <div className="gx-label">
-              <span>{card.label}</span>
-              <code>{card.route}</code>
-            </div>
-            <div className="gx-frame">
-              <CardBoundary>{card.node}</CardBoundary>
-            </div>
-          </section>
-        ))}
-      </div>
+      <SolanaProviders>
+        <div className="gx-grid">
+          {CARDS.map((card) => (
+            <section className="gx-card" key={card.screen}>
+              <div className="gx-label">
+                <span>{card.label}</span>
+                <code>{card.screen}</code>
+              </div>
+              <div className="gx-frame">
+                <CardBoundary>
+                  <IdealerApp initialScreen={card.screen} />
+                </CardBoundary>
+              </div>
+            </section>
+          ))}
+        </div>
+      </SolanaProviders>
     </main>
   );
 }
@@ -147,14 +129,13 @@ const GALLERY_CSS = `
   padding: 2px 8px; border-radius: 999px;
 }
 .gx-frame {
-  width: 402px; height: 868px; overflow: auto; position: relative;
+  width: 402px; height: 868px; overflow: hidden; position: relative;
   border-radius: 24px; box-shadow: 0 30px 70px -30px rgba(0,0,0,0.7);
-  background: var(--platform-bg, #0b0910);
+  background: #0b0910;
 }
-.gx-frame::-webkit-scrollbar { width: 0; height: 0; }
-.gx-frame { scrollbar-width: none; }
-/* telas que já trazem a moldura de celular: não deixar encolher dentro do frame */
-.gx-frame .platform-phone-shell { max-width: none; max-height: none; }
+/* the screens already include a device frame; don't shrink inside the card */
+.gx-frame .ide-stage { padding: 0; min-height: 868px; }
+.gx-frame .ide-phone-shell { width: 402px; height: 868px; max-width: none; max-height: none; border-radius: 0; box-shadow: none; aspect-ratio: auto; }
 .gx-error {
   display: flex; flex-direction: column; gap: 8px; justify-content: center;
   height: 100%; padding: 24px; text-align: center;

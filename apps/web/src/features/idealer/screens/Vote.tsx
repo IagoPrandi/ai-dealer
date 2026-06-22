@@ -1,0 +1,177 @@
+"use client";
+
+/** REGRAS — two-phase voting hub. Ported from app-vote.jsx, wired to live data. */
+import { useState } from "react";
+
+import { useIdealer } from "../context";
+import { fmtSol, fmtTurnId } from "../data/format";
+import type { UiRule } from "../data/types";
+import { Ico, Medal, VoteTally, finalistStatus, useCountdownTo } from "../shared";
+
+function VoteGate() {
+  const { fees, go } = useIdealer();
+  return (
+    <div className="ide-card" style={{ padding: 16, marginBottom: 16, borderColor: "rgba(255,210,63,0.3)", background: "linear-gradient(120deg, rgba(255,210,63,0.08), var(--surface))" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 7 }}>
+        <Ico.lock style={{ color: "var(--yellow)", width: 16, height: 16 }} />
+        <b style={{ fontSize: 15 }}>Play to unlock voting</b>
+      </div>
+      <p style={{ margin: "0 0 13px", fontSize: 13.5, color: "var(--muted)", lineHeight: 1.5 }}>
+        You can follow everything now. To vote, make a guess this round — it issues your round pass.
+      </p>
+      <button onClick={() => go("play")} className="ide-btn" style={{ width: "100%", padding: 13 }} type="button">
+        <Ico.bolt style={{ color: "#08110C" }} /> Play now · {fmtSol(fees.play)} SOL
+      </button>
+    </div>
+  );
+}
+
+function RuleVoteRow({ rank, rule }: { rank: number; rule: UiRule }) {
+  const { approvedIds, openDetail, played, voteApprove, voteBusyRuleId } = useIdealer();
+  const approved = approvedIds.includes(rule.ruleId);
+  const isTop = rank <= 3;
+  const busy = voteBusyRuleId === rule.ruleId;
+  return (
+    <div className="ide-rulerow ide-tap" style={{ borderColor: isTop ? "var(--line-2)" : "var(--line)" }}>
+      <div onClick={() => openDetail(rule.ruleId, { canAgainst: false, rank })} style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
+        <Medal pos={rank} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 15.5, lineHeight: 1.2 }}>{rule.title}</div>
+          <div style={{ marginTop: 4 }}><VoteTally approve={rule.approve} against={rule.against} size="sm" /></div>
+        </div>
+      </div>
+      <button
+        onClick={() => (played ? voteApprove(rule.ruleId) : openDetail(rule.ruleId, { canAgainst: false, rank }))}
+        disabled={busy}
+        className={"ide-votebtn for" + (approved ? " on" : "")}
+        style={{ flexShrink: 0, opacity: played && !busy ? 1 : 0.5 }}
+        type="button"
+      >
+        <Ico.up style={{ color: "currentColor" }} /> {approved ? "voted" : "in favor"}
+      </button>
+    </div>
+  );
+}
+
+function FinalistRow({ rule }: { rule: UiRule }) {
+  const { eliminatedIds, openDetail, played, voteBusyRuleId, voteEliminate } = useIdealer();
+  const eliminated = eliminatedIds.includes(rule.ruleId);
+  const st = finalistStatus(rule);
+  const total = rule.approve + rule.against;
+  const forPct = total ? Math.round((rule.approve / total) * 100) : 50;
+  const dead = st === "eliminada";
+  const busy = voteBusyRuleId === rule.ruleId;
+  return (
+    <div className="ide-card" style={{
+      padding: "13px 15px",
+      borderColor: dead ? "rgba(255,107,107,0.3)" : st === "risco" ? "rgba(255,210,63,0.3)" : "var(--line)",
+      opacity: dead ? 0.72 : 1,
+    }}>
+      <div onClick={() => openDetail(rule.ruleId, { canAgainst: true })} className="ide-tap" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 11 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontWeight: 700, fontSize: 15.5, lineHeight: 1.2, textDecoration: dead ? "line-through" : "none", color: dead ? "var(--muted)" : "var(--text)" }}>{rule.title}</span>
+            {st === "risco" ? <span style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 3, fontSize: 10, fontWeight: 700, color: "var(--yellow)" }}><Ico.flame style={{ color: "var(--yellow)", width: 11, height: 11 }} /> risk</span> : null}
+            {dead ? <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, color: "var(--red)" }}>eliminated</span> : null}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--dim)", marginTop: 2 }}>{rule.src === "top" ? "most voted" : "VRF draw"} · {rule.handle}</div>
+        </div>
+        <VoteTally approve={rule.approve} against={rule.against} size="sm" />
+      </div>
+
+      <div className="ide-balance"><span style={{ width: `${forPct}%` }} /></div>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 11 }}>
+        <span style={{ fontSize: 11.5, color: "var(--dim)" }} className="ide-num">{forPct}% in favor</span>
+        <button
+          onClick={() => (played ? voteEliminate(rule.ruleId) : openDetail(rule.ruleId, { canAgainst: true }))}
+          disabled={busy}
+          className={"ide-votebtn against" + (eliminated ? " on" : "")}
+          style={{ opacity: played && !busy ? 1 : 0.5 }}
+          type="button"
+        >
+          <Ico.down style={{ color: "currentColor" }} /> {eliminated ? "voted against" : "vote against"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function VoteScreen() {
+  const { actionError, decisionEndsAt, played, rules, turnId } = useIdealer();
+  const [tab, setTab] = useState<"abertas" | "finalistas">("abertas");
+  const [h, m, s] = useCountdownTo(decisionEndsAt);
+
+  const all = rules.rules;
+  const finalists = all.filter((r) => r.finalist);
+  const eliminatedCount = finalists.filter((r) => finalistStatus(r) === "eliminada").length;
+  const gated = !played;
+
+  return (
+    <div className="ide-app ide-screen" style={{ height: "100%", position: "relative", overflow: "hidden" }}>
+      <div className="ide-ambient" />
+      <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", padding: "52px 18px 96px" }}>
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+          <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0, letterSpacing: "-0.025em" }}>Rules</h1>
+          <span className="ide-num" style={{ fontSize: 12.5, color: "var(--purple-soft)", fontWeight: 700, letterSpacing: "0.06em" }}>{fmtTurnId(turnId)}</span>
+        </div>
+
+        <div className="ide-seg" style={{ marginBottom: 16 }}>
+          <button className={tab === "abertas" ? "on" : ""} onClick={() => setTab("abertas")} type="button">Voting · {all.length}</button>
+          <button className={tab === "finalistas" ? "on" : ""} onClick={() => setTab("finalistas")} type="button">Finalists · {finalists.length}</button>
+        </div>
+
+        {gated ? <VoteGate /> : null}
+        {actionError ? (
+          <div className="ide-card" style={{ padding: "11px 14px", marginBottom: 14, borderColor: "rgba(255,107,107,0.3)", color: "var(--red)", fontSize: 13 }}>{actionError}</div>
+        ) : null}
+
+        {tab === "abertas" ? (
+          <>
+            <p style={{ margin: "0 0 14px", fontSize: 13.5, color: "var(--muted)", lineHeight: 1.5 }}>
+              Vote <b style={{ color: "var(--green)" }}>in favor</b> of the rules you want in this round. The most voted become finalists.
+            </p>
+            {all.length === 0 ? (
+              <div className="ide-card" style={{ padding: 18, textAlign: "center", color: "var(--muted)", fontSize: 14 }}>No rules to vote on yet.</div>
+            ) : (
+              <div style={{ display: "grid", gap: 9, gridTemplateColumns: "minmax(0, 1fr)" }}>
+                {all.map((r, i) => <RuleVoteRow key={r.id} rule={r} rank={i + 1} />)}
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <div className="ide-card" style={{ padding: "13px 15px", marginBottom: 14, borderColor: "rgba(255,210,63,0.3)", background: "linear-gradient(110deg, rgba(255,210,63,0.08), var(--surface))" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <span className="ide-phase decision"><span className="dot" /> Decision window</span>
+                {decisionEndsAt ? (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 13, color: "var(--muted)" }}>
+                    <Ico.clock style={{ color: "var(--yellow)" }} /> <span className="ide-num" style={{ fontWeight: 700, color: "var(--text)" }}>{h}:{m}:{s}</span>
+                  </span>
+                ) : null}
+              </div>
+              <p style={{ margin: "10px 0 0", fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5 }}>
+                10 finalists · 3 most voted + 7 by VRF. Vote <b style={{ color: "var(--red)" }}>against</b> to eliminate (max 5). A rule falls when down-votes overtake up-votes. Survivors go to the <b style={{ color: "var(--text)" }}>active rule</b> draw.
+              </p>
+              <div style={{ marginTop: 11, display: "flex", gap: 7 }}>
+                <span className="ide-pill" style={{ padding: "4px 10px", fontSize: 11 }}>{eliminatedCount} eliminated · {Math.max(0, 5 - eliminatedCount)} left</span>
+                <span className="ide-pill" style={{ padding: "4px 10px", fontSize: 11, color: "var(--green)" }}>{finalists.length - eliminatedCount} survivors</span>
+              </div>
+            </div>
+
+            {finalists.length === 0 ? (
+              <div className="ide-card" style={{ padding: 18, textAlign: "center", color: "var(--muted)", fontSize: 14 }}>
+                Finalists are locked when the play window closes.
+              </div>
+            ) : (
+              <div style={{ display: "grid", gap: 9, gridTemplateColumns: "minmax(0, 1fr)" }}>
+                {finalists.map((r) => <FinalistRow key={r.id} rule={r} />)}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}

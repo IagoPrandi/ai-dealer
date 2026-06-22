@@ -1,0 +1,174 @@
+"use client";
+
+/** RODADA (home) — prize, time, main action, rule preview. Ported from app-home.jsx. */
+import { useState } from "react";
+
+import { useIdealer } from "../context";
+import { fmtInt, fmtSol, fmtTurnId, truncateAddress } from "../data/format";
+import { Dealer, Ico, Medal, VoteTally, useCountdownTo, useLivePrize } from "../shared";
+
+function WalletBtn() {
+  const { connect, connected, go, walletAddress } = useIdealer();
+  return (
+    <button
+      onClick={() => (connected ? go("profile") : connect())}
+      className="ide-btn"
+      style={{ padding: "9px 14px", fontSize: 14, borderRadius: 13 }}
+      type="button"
+    >
+      <Ico.wallet style={{ color: "#08110C" }} />{" "}
+      {connected && walletAddress ? truncateAddress(walletAddress) : "Connect"}
+    </button>
+  );
+}
+
+function PromptInput() {
+  const { fees, go } = useIdealer();
+  const [val, setVal] = useState("");
+  return (
+    <div className="ide-card" style={{ padding: 12, borderColor: "var(--line-2)", background: "linear-gradient(180deg, var(--surface-2), var(--surface))" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 13.5, fontWeight: 700, whiteSpace: "nowrap" }}>Create your rule</span>
+        <span className="ide-pill" style={{ padding: "3px 8px", fontSize: 11 }}><Ico.spark style={{ width: 12, height: 12, color: "var(--purple-soft)" }} /> with AI</span>
+        <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--dim)" }}>cost <span className="ide-num" style={{ color: "var(--muted)" }}>{fmtSol(fees.rule)} SOL</span></span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <input
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { go("create", { seed: val }); } }}
+          placeholder="e.g. the sum closest to 100 wins…"
+          style={{ flex: 1, background: "var(--bg)", border: "1px solid var(--line-2)", borderRadius: 13, padding: "13px 14px", color: "var(--text)", fontSize: 14.5, fontFamily: "Outfit", outline: "none" }}
+        />
+        <button onClick={() => go("create", { seed: val })} className="ide-btn" style={{ padding: 13, borderRadius: 13, flexShrink: 0 }} title="Create rule" type="button">
+          <Ico.send style={{ color: "#08110C" }} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function HomeScreen() {
+  const {
+    endSeconds, fees, go, openDetail, played, players, prizeSol, rules, turnId,
+    turnReadyToPlay, turnStatusMessage,
+  } = useIdealer();
+
+  const [h, m, s] = useCountdownTo(endSeconds);
+  const prize = useLivePrize(prizeSol);
+  const top = rules.rules.slice(0, 3);
+  const intStr = Math.floor(prize).toString();
+  const decStr = (prize % 1).toFixed(2).slice(1);
+
+  return (
+    <div className="ide-app ide-screen" style={{ height: "100%", position: "relative", overflow: "hidden" }}>
+      <div className="ide-ambient" />
+      <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", padding: "52px 18px 96px" }}>
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 22 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <Dealer size={34} />
+            <span style={{ fontWeight: 800, fontSize: 19, letterSpacing: "-0.02em" }}>Idealer</span>
+          </div>
+          <WalletBtn />
+        </div>
+
+        {/* HERO */}
+        <div style={{ textAlign: "center", position: "relative", marginBottom: 24 }}>
+          <div style={{ position: "absolute", inset: "-26px 16px auto", height: 210, background: "radial-gradient(circle, rgba(20,241,149,0.2), transparent 68%)", filter: "blur(14px)", animation: "ide-pulse 3.6s ease-in-out infinite", zIndex: 0 }} />
+          <div style={{ position: "relative", zIndex: 1 }}>
+            <div style={{ display: "flex", justifyContent: "center", gap: 8, marginBottom: 14 }}>
+              {turnReadyToPlay ? (
+                <span className="ide-pill" style={{ color: "var(--muted)" }}><Ico.clock style={{ color: "var(--green)" }} /> Ends in <span className="ide-num" style={{ color: "var(--text)", fontWeight: 700, marginLeft: 2 }}>{h}:{m}:{s}</span></span>
+              ) : (
+                <span className="ide-pill" style={{ color: "var(--yellow)", borderColor: "rgba(255,210,63,0.3)" }}><Ico.clock style={{ color: "var(--yellow)" }} /> {turnStatusMessage}</span>
+              )}
+            </div>
+            <div style={{ fontSize: 13, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--dim)", fontWeight: 700, marginBottom: 2 }}>Accumulated prize</div>
+            <div className="ide-num" style={{ display: "flex", alignItems: "flex-start", justifyContent: "center", gap: 3 }}>
+              <span className="ide-grad-text" style={{ fontSize: 72, fontWeight: 700, lineHeight: 0.9 }}>{intStr}</span>
+              <span className="ide-grad-text" style={{ fontSize: 34, fontWeight: 700, marginTop: 6 }}>{decStr}</span>
+              <span style={{ fontSize: 21, fontWeight: 700, color: "var(--purple-soft)", marginTop: 11, marginLeft: 4 }}>SOL</span>
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 18 }}>
+              <span className="ide-pill"><Ico.users style={{ color: "var(--purple-soft)" }} /> <span className="ide-num">{fmtInt(players)}</span> playing</span>
+              <span className="ide-pill"><Ico.spark style={{ color: "var(--yellow)" }} /> {rules.rules.length} rules</span>
+            </div>
+          </div>
+        </div>
+
+        {/* MAIN ACTION */}
+        {played ? (
+          <div className="ide-card" style={{ padding: "13px 16px", marginBottom: 14, display: "flex", alignItems: "center", gap: 11, borderColor: "rgba(20,241,149,0.3)", background: "linear-gradient(100deg, rgba(20,241,149,0.1), var(--surface))" }}>
+            <span style={{ width: 30, height: 30, borderRadius: 10, background: "var(--green)", color: "#08110C", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.check /></span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 14.5 }}>You&apos;re in this round</div>
+              <div style={{ fontSize: 12.5, color: "var(--muted)" }}>Good luck! You can now vote and create rules.</div>
+            </div>
+            <button onClick={() => go("play")} className="ide-votebtn" style={{ flexShrink: 0 }} type="button">view guess</button>
+          </div>
+        ) : (
+          <button onClick={() => go("play")} disabled={!turnReadyToPlay} className="ide-btn" style={{ width: "100%", padding: "17px", fontSize: 17, marginBottom: 14, opacity: turnReadyToPlay ? 1 : 0.5 }} type="button">
+            <Ico.bolt style={{ color: "#08110C" }} /> {turnReadyToPlay ? `Play now · ${fmtSol(fees.play)} SOL` : "Waiting for next turn"}
+          </button>
+        )}
+
+        {/* PREVIOUS ROUND RESULT */}
+        {turnId > 1 ? (
+          <button onClick={() => go("result")} className="ide-tap" style={{
+            width: "100%", textAlign: "left", marginBottom: 22, padding: "13px 16px", borderRadius: 16, cursor: "pointer", color: "var(--text)",
+            border: "1px solid rgba(255,210,63,0.4)", background: "linear-gradient(110deg, rgba(255,210,63,0.13), var(--surface))",
+            display: "flex", alignItems: "center", gap: 12,
+          }} type="button">
+            <span style={{ width: 38, height: 38, borderRadius: 12, background: "var(--gold)", color: "#0B0910", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.trophy style={{ color: "#0B0910" }} /></span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14.5, fontWeight: 700 }}>Result of round {fmtTurnId(turnId - 1)}</div>
+              <div style={{ fontSize: 12.5, color: "var(--muted)" }}>See the drawn numbers and the elected rule</div>
+            </div>
+            <Ico.arrow style={{ color: "var(--gold)", flexShrink: 0 }} />
+          </button>
+        ) : null}
+
+        {/* CREATE RULE — prompt entry */}
+        <div style={{ marginBottom: 22 }}>
+          <PromptInput />
+        </div>
+
+        {/* RULE PREVIEW → voting */}
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", margin: "0 2px 12px" }}>
+          <span style={{ fontWeight: 800, fontSize: 22, letterSpacing: "-0.025em", whiteSpace: "nowrap" }}>The rules</span>
+          <button onClick={() => go("vote")} style={{ background: "none", border: "none", color: "var(--purple-soft)", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "Outfit", display: "inline-flex", alignItems: "center", gap: 4 }} type="button">
+            vote <Ico.arrow style={{ color: "var(--purple-soft)", width: 15, height: 15 }} />
+          </button>
+        </div>
+
+        {rules.loading && top.length === 0 ? (
+          <div style={{ display: "grid", gap: 9, marginBottom: 14 }}>
+            {[0, 1, 2].map((i) => <div key={i} className="ide-card" style={{ height: 64 }} />)}
+          </div>
+        ) : top.length === 0 ? (
+          <div className="ide-card" style={{ padding: 18, marginBottom: 14, textAlign: "center", color: "var(--muted)", fontSize: 14 }}>
+            No rules proposed yet — be the first to create one.
+          </div>
+        ) : (
+          <div style={{ display: "grid", gap: 9, marginBottom: 14, gridTemplateColumns: "minmax(0, 1fr)" }}>
+            {top.map((r, i) => (
+              <div key={r.id} onClick={() => openDetail(r.ruleId, { rank: i + 1 })} className="ide-rulerow ide-tap" style={{ borderColor: i === 0 ? "var(--line-2)" : "var(--line)", boxShadow: i === 0 ? "0 0 24px -14px rgba(255,210,63,0.6)" : "none" }}>
+                <Medal pos={i + 1} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 15.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title}</div>
+                  <div style={{ marginTop: 4 }}><VoteTally approve={r.approve} against={r.against} size="sm" /></div>
+                </div>
+                <Ico.chevron style={{ color: "var(--dim)", transform: "rotate(-90deg)", flexShrink: 0 }} />
+              </div>
+            ))}
+          </div>
+        )}
+
+        <button onClick={() => go("vote")} className="ide-btn-ghost ide-btn" style={{ width: "100%", padding: 13, marginBottom: 4 }} type="button">
+          <Ico.vote style={{ color: "var(--purple-soft)", width: 19, height: 19 }} /> View and vote on {rules.rules.length} rules
+        </button>
+      </div>
+    </div>
+  );
+}
