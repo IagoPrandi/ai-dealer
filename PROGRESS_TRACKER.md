@@ -54,6 +54,15 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-06-22 (Dealer chat avoids compiler calls for greetings)
+
+- Opened required context before working: `PRD.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/develop-frontend/SKILL.md`, `.claude/skills/playwright/SKILL.md`, and `packages/rule-compiler/rule-authoring/SKILL.md`; also followed the investigation workflow for the reported `POST /rule-preflight` HTTP 502.
+- Diagnosed the screenshot path: `CreateScreen` sent every chat message, including `hi`, directly to `POST /rule-preflight`, so a greeting could surface a compiler infrastructure failure instead of staying in the dealer chat.
+- Updated `apps/web/src/features/idealer/screens/Create.tsx` with a deterministic chat-vs-rule intent gate. Greetings and general questions now get an in-chat dealer response without contacting the compiler; actual rule-shaped drafts still call `/rule-preflight`. Added accessible labels for the message textarea and send button.
+- Updated `apps/web/src/features/idealer/data/apiClient.ts` so rule preflight uses the strict JSON helper and preserves server-provided error details for real compiler outages instead of reducing them to only `HTTP 502`.
+- Verification passed: `pnpm --filter @idealer/web typecheck` and `pnpm --filter @idealer/web lint`.
+- Browser verification note: the existing Next dev server on port 3000 was already running from this workspace and served `/dev/gallery`, but not with the mock wallet alias active, so the create chat remained behind the connect screen. A second mock dev server on port 3001 was blocked by Next's existing dev-server lock. No milestone checkbox or PRD checklist item was ticked.
+
 ### 2026-06-22 (Test-only manual turn control for the worker)
 
 - Opened required context before working: `PRD.md` (§2.1 Turn, §5.3 turn-duration cycle, §5.4 turn lifecycle, §5.5 turn state machine), `PROGRESS_TRACKER.md`, `.claude/CLAUDE.md`, and `.claude/skills` (reviewed `idealer-ui-coherence`, `automation-upkeep`).

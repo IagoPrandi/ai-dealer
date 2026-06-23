@@ -26,6 +26,44 @@ interface ChatMessage {
   who: "ai" | "user";
 }
 
+const RULE_DECISION_PATTERN =
+  /\b(win|wins|winner|winning|whoever|if|when|qualifies|eligible|ganha|ganhar|vence|vencer|vencedor|quem|se|quando)\b/i;
+
+const RULE_DATA_PATTERN =
+  /\b(guess|guesses|draw|drawn|numbers?|sequence|sum|total|digit|digits|units?|tens?|match|matches|matched|miss|misses|closest|highest|lowest|greater|less|equal|even|odd|prime|palpite|sorteio|numeros?|números?|dezena|dezenas|unidade|unidades|soma|maior|menor|igual|acertar|acerta|errar|erra|pares?|impares?|ímpares?)\b/i;
+
+const RULE_SHAPE_PATTERN =
+  /\b(at least|at most|exactly|closest|highest|lowest|greater than|less than|equal to|more than|fewer than|the most|the fewest|pelo menos|no maximo|no máximo|exatamente|mais|menos|maior|menor|igual)\b/i;
+
+const GREETING_PATTERN =
+  /^(hi|hello|hey|yo|oi|ola|olá|bom dia|boa tarde|boa noite|sup|e ai|e aí)[!.? ]*$/i;
+
+const QUESTION_PATTERN =
+  /^(how|what|why|where|when|can|could|should|do|does|is|are|como|o que|qual|por que|porque|quando|posso|pode|devo)\b/i;
+
+function isLikelyRuleDraft(text: string) {
+  const trimmed = text.trim();
+  if (!trimmed || GREETING_PATTERN.test(trimmed)) {
+    return false;
+  }
+
+  return (
+    (RULE_DECISION_PATTERN.test(trimmed) && RULE_DATA_PATTERN.test(trimmed)) ||
+    (RULE_SHAPE_PATTERN.test(trimmed) && RULE_DATA_PATTERN.test(trimmed))
+  );
+}
+
+function getDealerChatReply(text: string) {
+  const trimmed = text.trim();
+  if (GREETING_PATTERN.test(trimmed)) {
+    return "Hey. Send me one winner condition based on the guess and the official draw.";
+  }
+  if (QUESTION_PATTERN.test(trimmed) || trimmed.endsWith("?")) {
+    return "A valid rule can only use the player's guess and the official draw. Write the condition in one sentence, and I will compile it before payment.";
+  }
+  return "I need a winner condition based on the guess and draw. Try: Win if at least 4 of your numbers appear in the draw.";
+}
+
 function RulePreview({ rule }: { rule: RulePreflightResult }) {
   const valid = rule.decision === "VALID" && !rule.needsClarification;
   const pct = Math.round((rule.tokenCount / RULE_MAX_TOKENS) * 100);
@@ -131,6 +169,11 @@ function CreateChat({ client, fees, go, played, reloadAll, seed, turnId, wallet,
     setTyping(true);
     setRule(null);
     try {
+      if (!isLikelyRuleDraft(t)) {
+        setMsgs((m) => [...m, { text: getDealerChatReply(t), who: "ai" }]);
+        return;
+      }
+
       const body = await postRulePreflight(t);
       const preflight = body.preflight as unknown as RulePreflightResult;
       const valid = preflight.decision === "VALID" && !preflight.needsClarification;
@@ -158,7 +201,7 @@ function CreateChat({ client, fees, go, played, reloadAll, seed, turnId, wallet,
         }
       }
     } catch (cause) {
-      setMsgs((m) => [...m, { text: "The dealer couldn't reach the rule compiler. Try again in a moment.", who: "ai" }]);
+      setMsgs((m) => [...m, { text: "Dealer engine unavailable. The compiler must be online before I can lock a rule.", who: "ai" }]);
       setError(describeTxError(cause));
     } finally {
       setTyping(false);
@@ -293,6 +336,7 @@ function CreateChat({ client, fees, go, played, reloadAll, seed, turnId, wallet,
         <div style={{ position: "relative", zIndex: 2, padding: "10px 14px calc(14px + env(safe-area-inset-bottom,0px))", borderTop: "1px solid var(--line)", background: "rgba(11,9,16,0.7)", backdropFilter: "blur(12px)" }}>
           <div style={{ display: "flex", alignItems: "flex-end", gap: 9 }}>
             <textarea
+              aria-label="Message"
               value={val}
               onChange={(e) => setVal(e.target.value)}
               rows={1}
@@ -300,7 +344,7 @@ function CreateChat({ client, fees, go, played, reloadAll, seed, turnId, wallet,
               placeholder={rule ? "Ask for a tweak or describe another rule…" : "Describe your rule…"}
               style={{ flex: 1, resize: "none", background: "var(--surface)", border: "1px solid var(--line-2)", borderRadius: 16, padding: "13px 15px", color: "var(--text)", fontSize: 15, fontFamily: "Outfit", outline: "none", maxHeight: 90 }}
             />
-            <button onClick={() => void send()} className="ide-btn" style={{ width: 48, height: 48, padding: 0, borderRadius: 15, flexShrink: 0 }} type="button"><Ico.send style={{ color: "#08110C" }} /></button>
+            <button aria-label="Send message" onClick={() => void send()} className="ide-btn" style={{ width: 48, height: 48, padding: 0, borderRadius: 15, flexShrink: 0 }} type="button"><Ico.send style={{ color: "#08110C" }} /></button>
           </div>
         </div>
       ) : null}

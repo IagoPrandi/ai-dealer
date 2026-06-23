@@ -183,7 +183,7 @@ export interface RulePreflightApiResult {
 }
 
 export function postRulePreflight(text: string) {
-  return postJson<{ preflight: RulePreflightApiResult }>("/rule-preflight", {
+  return postStrictJson<{ preflight: RulePreflightApiResult }>("/rule-preflight", {
     text,
   });
 }
