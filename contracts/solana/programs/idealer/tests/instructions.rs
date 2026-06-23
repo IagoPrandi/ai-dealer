@@ -3,9 +3,9 @@ use anchor_lang::{
     AccountDeserialize, InstructionData, ToAccountMetas,
 };
 use idealer::{
-    accounts, instruction, DrawStatus, InitializeGlobalConfigArgs, PlayerGuess,
+    accounts, instruction, DrawStatus, GlobalConfig, InitializeGlobalConfigArgs, PlayerGuess,
     PrecompilationStatus, PrecompileRuleArgs, ProposeRuleArgs, RuleProposal, RuleState, RuleVote,
-    SettleDrawArgs, SettleRuleElectionArgs, TurnState, TurnStatus,
+    SetVrfConfigArgs, SettleDrawArgs, SettleRuleElectionArgs, TurnState, TurnStatus,
 };
 use solana_account_info::AccountInfo;
 use solana_program_error::ProgramResult;
@@ -147,6 +147,99 @@ async fn initialize_and_open_turn(context: &mut ProgramTestContext, turn_id: u64
     )
     .await
     .unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires an SBF build and SBF_OUT_DIR; run the explicit SBF integration suite"]
+async fn set_vrf_config_is_authority_gated_and_updates_global_config() {
+    let mut context = ProgramTest::new(
+        "idealer",
+        idealer::ID,
+        processor!(process_idealer_instruction),
+    )
+    .start_with_context()
+    .await;
+    initialize_and_open_turn(&mut context, 1).await;
+
+    let global_config = pda(&[b"global_config"]);
+    let old_config: GlobalConfig = read_anchor_account(&mut context, global_config).await;
+    let new_draw_vrf_config = Pubkey::new_unique();
+    let new_election_vrf_config = Pubkey::new_unique();
+    let authority = context.payer.pubkey();
+
+    process(
+        &mut context,
+        Instruction {
+            program_id: idealer::ID,
+            accounts: accounts::SetVrfConfig {
+                authority,
+                global_config,
+            }
+            .to_account_metas(None),
+            data: instruction::SetVrfConfig {
+                args: SetVrfConfigArgs {
+                    draw_vrf_config: new_draw_vrf_config,
+                    election_vrf_config: new_election_vrf_config,
+                },
+            }
+            .data(),
+        },
+        &[],
+    )
+    .await
+    .unwrap();
+
+    let updated: GlobalConfig = read_anchor_account(&mut context, global_config).await;
+    assert_eq!(updated.draw_vrf_config, new_draw_vrf_config);
+    assert_eq!(updated.election_vrf_config, new_election_vrf_config);
+    assert_ne!(updated.draw_vrf_config, old_config.draw_vrf_config);
+    assert_ne!(updated.election_vrf_config, old_config.election_vrf_config);
+
+    assert!(process(
+        &mut context,
+        Instruction {
+            program_id: idealer::ID,
+            accounts: accounts::SetVrfConfig {
+                authority,
+                global_config,
+            }
+            .to_account_metas(None),
+            data: instruction::SetVrfConfig {
+                args: SetVrfConfigArgs {
+                    draw_vrf_config: Pubkey::default(),
+                    election_vrf_config: new_election_vrf_config,
+                },
+            }
+            .data(),
+        },
+        &[],
+    )
+    .await
+    .is_err());
+
+    let unauthorized = Keypair::new();
+    fund(&mut context, &unauthorized.pubkey()).await;
+    assert!(process(
+        &mut context,
+        Instruction {
+            program_id: idealer::ID,
+            accounts: accounts::SetVrfConfig {
+                authority: unauthorized.pubkey(),
+                global_config,
+            }
+            .to_account_metas(None),
+            data: instruction::SetVrfConfig {
+                args: SetVrfConfigArgs {
+                    draw_vrf_config: Pubkey::new_unique(),
+                    election_vrf_config: Pubkey::new_unique(),
+                },
+            }
+            .data(),
+        },
+        &[&unauthorized],
+    )
+    .await
+    .is_err());
 }
 
 async fn submit_guess(

@@ -1,6 +1,6 @@
 # Trustless Settlement Pipeline — Action Plan
 
-> **Status:** Planned (not started)
+> **Status:** M5.0 implemented locally; awaiting user confirmation and approved devnet transaction execution before ticking the milestone.
 > **Created:** 2026-06-22
 > **Decision:** **Trustless** — `settle_*` instructions must verify Switchboard randomness on-chain (no authority-supplied randomness value).
 > **Scope:** Everything in the post-turn-close settlement pipeline EXCEPT turn open/close (which stays a manual test helper today and the automatic timed loop in production). Goal: validate the real pipeline end-to-end on devnet **without mocks or fallbacks**.
@@ -49,6 +49,7 @@ Phases map 1:1 to milestones. Each milestone lists Objective, Scope, Deliverable
 - **Acceptance:** the worker can create + commit + reveal a Switchboard randomness account on devnet and read a non-zero 32-byte value (proof-of-life script, no game state involved).
 - **Dependencies:** funded deployer (`4bY5krt2VnnSNB1R4c1bhiWdQYkTc1FvFTN1LaV5JxCH`), Docker SBF toolchain.
 - **Risks:** external dependency (Switchboard queue availability, cranking, SOL); SDK version compatibility with `@solana/kit`.
+- **Implementation note (2026-06-23):** Added worker and Rust Switchboard dependencies, documented the public devnet On-Demand queue in `deployments/solana-devnet.json` and `.env.example`, added authority-only `set_vrf_config`, and added manual worker scripts for `switchboard:set-vrf-config` and `switchboard:proof`. The milestone checkbox remains open until user confirmation; no live devnet transaction was broadcast during implementation.
 
 ### M5.1 — Trustless on-chain randomness verification (contract)
 - [ ] **M5.1**
@@ -117,7 +118,7 @@ M5.0–M5.3 are the critical path (the missing machinery). M5.4–M5.5 validate.
 
 | Milestone | Title | Status | Notes |
 | --- | --- | --- | --- |
-| M5.0 | Switchboard On-Demand provisioning (devnet) | Planned | — |
+| M5.0 | Switchboard On-Demand provisioning (devnet) | In review | Local implementation and validation complete; live `set_vrf_config` and proof-of-life transaction require explicit user approval before broadcast. |
 | M5.1 | Trustless on-chain randomness verification (contract) | Planned | — |
 | M5.2 | Worker randomness client + production settlement senders | Planned | — |
 | M5.3 | Settlement scheduler + state machine + worker→API bridge | Planned | — |

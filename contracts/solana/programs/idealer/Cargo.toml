@@ -26,6 +26,7 @@ no-log-ix-name = []
 [dependencies]
 anchor-lang = { workspace = true }
 solana-sha256-hasher = { workspace = true }
+switchboard-on-demand = { version = "0.13.0", features = ["anchor"] }
 
 [dev-dependencies]
 solana-account-info = "2.3.0"

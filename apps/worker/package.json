@@ -7,6 +7,8 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsx src/index.ts",
     "lint": "eslint src --max-warnings=0",
+    "switchboard:proof": "tsx src/switchboard-proof.ts",
+    "switchboard:set-vrf-config": "tsx src/switchboard-set-vrf-config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test --import tsx \"src/**/*.test.ts\""
   },
@@ -16,6 +18,8 @@
     "@idealer/rule-runtime": "workspace:*",
     "@idealer/rule-schema": "workspace:*",
     "@solana/kit": "5.5.1",
+    "@solana/web3.js": "1.98.4",
+    "@switchboard-xyz/on-demand": "3.10.4",
     "bs58": "6.0.0",
     "pg": "8.21.0",
     "redis": "6.0.0"

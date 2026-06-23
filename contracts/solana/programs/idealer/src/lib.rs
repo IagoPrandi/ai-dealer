@@ -96,6 +96,29 @@ pub mod idealer {
         Ok(())
     }
 
+    pub fn set_vrf_config(ctx: Context<SetVrfConfig>, args: SetVrfConfigArgs) -> Result<()> {
+        require!(
+            args.draw_vrf_config != Pubkey::default()
+                && args.election_vrf_config != Pubkey::default(),
+            IdealerError::InvalidConfigAddress
+        );
+
+        let config = &mut ctx.accounts.global_config;
+        let old_draw_vrf_config = config.draw_vrf_config;
+        let old_election_vrf_config = config.election_vrf_config;
+        config.draw_vrf_config = args.draw_vrf_config;
+        config.election_vrf_config = args.election_vrf_config;
+
+        emit!(VrfConfigUpdated {
+            authority: ctx.accounts.authority.key(),
+            old_draw_vrf_config,
+            new_draw_vrf_config: config.draw_vrf_config,
+            old_election_vrf_config,
+            new_election_vrf_config: config.election_vrf_config,
+        });
+        Ok(())
+    }
+
     pub fn open_turn(ctx: Context<OpenTurn>, turn_id: u64) -> Result<()> {
         let config = &mut ctx.accounts.global_config;
         require!(!config.paused, IdealerError::ProtocolPaused);
@@ -1636,6 +1659,12 @@ pub struct InitializeGlobalConfigArgs {
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct SetVrfConfigArgs {
+    pub draw_vrf_config: Pubkey,
+    pub election_vrf_config: Pubkey,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct SetTurnDurationCycleArgs {
     pub turn_duration_cycle: [u32; TURN_DURATION_CYCLE_LEN],
 }
@@ -1711,6 +1740,18 @@ pub struct InitializeGlobalConfig<'info> {
     )]
     pub treasury_vault: Account<'info, TreasuryVault>,
     pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct SetVrfConfig<'info> {
+    pub authority: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [b"global_config"],
+        bump = global_config.bump,
+        has_one = authority @ IdealerError::Unauthorized
+    )]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
 }
 
 #[derive(Accounts)]
@@ -2640,6 +2681,15 @@ pub enum PrecompilationStatus {
 pub struct GlobalConfigInitialized {
     pub authority: Pubkey,
     pub treasury_address: Pubkey,
+}
+
+#[event]
+pub struct VrfConfigUpdated {
+    pub authority: Pubkey,
+    pub old_draw_vrf_config: Pubkey,
+    pub new_draw_vrf_config: Pubkey,
+    pub old_election_vrf_config: Pubkey,
+    pub new_election_vrf_config: Pubkey,
 }
 
 #[event]

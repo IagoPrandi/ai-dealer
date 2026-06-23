@@ -5,6 +5,7 @@ import {
   address,
   appendTransactionMessageInstructions,
   getAddressDecoder,
+  getAddressEncoder,
   createKeyPairSignerFromBytes,
   createSolanaRpc,
   createTransactionMessage,
@@ -28,6 +29,9 @@ const CLOSE_TURN_DISCRIMINATOR = new Uint8Array([
 const FORCE_SKIP_LEGACY_ACTIVE_TURN_DISCRIMINATOR = new Uint8Array([
   167, 139, 165, 45, 22, 50, 176, 166,
 ]);
+const SET_VRF_CONFIG_DISCRIMINATOR = new Uint8Array([
+  53, 52, 195, 216, 205, 110, 46, 74,
+]);
 const SET_TURN_DURATION_CYCLE_DISCRIMINATOR = new Uint8Array([
   163, 41, 240, 31, 94, 126, 122, 36,
 ]);
@@ -37,11 +41,14 @@ const PRODUCTION_TURN_DURATION_CYCLE_SECONDS = [
 ] as const;
 const CURRENT_TURN_STATE_DATA_LENGTH = 448;
 const addressDecoder = getAddressDecoder();
+const addressEncoder = getAddressEncoder();
 
 export type SolanaAddress = ReturnType<typeof address>;
 
 export interface GlobalConfigSnapshot {
   activeTurnId: number;
+  drawVrfConfig: SolanaAddress;
+  electionVrfConfig: SolanaAddress;
   hasActiveTurn: boolean;
   nextTurnId: number;
   paused: boolean;
@@ -311,6 +318,13 @@ function createAccountReader(data: Uint8Array) {
       offset += 8;
       return value;
     },
+    readAddress() {
+      const value = addressDecoder.decode(
+        data.slice(offset, offset + 32),
+      ) as SolanaAddress;
+      offset += 32;
+      return value;
+    },
     skip(bytes: number) {
       offset += bytes;
     },
@@ -351,7 +365,9 @@ function decodeGlobalConfigAccountWithLayout(
     throw new Error("GlobalConfig pending authority option is invalid.");
   }
 
-  reader.skip(32 * 3);
+  reader.skip(32);
+  const drawVrfConfig = reader.readAddress();
+  const electionVrfConfig = reader.readAddress();
   // guess_submission + rule_proposal + [rule_removal] + vote fees.
   reader.skip(8 + 8 + (hasRuleRemovalFee ? 8 : 0) + 8);
   reader.skip(2);
@@ -372,6 +388,8 @@ function decodeGlobalConfigAccountWithLayout(
 
   return {
     activeTurnId,
+    drawVrfConfig,
+    electionVrfConfig,
     hasActiveTurn,
     nextTurnId,
     paused,
@@ -520,6 +538,20 @@ function createSetTurnDurationCycleData(
   ]);
 }
 
+function createSetVrfConfigData({
+  drawVrfConfig,
+  electionVrfConfig,
+}: {
+  drawVrfConfig: SolanaAddress;
+  electionVrfConfig: SolanaAddress;
+}) {
+  return new Uint8Array([
+    ...SET_VRF_CONFIG_DISCRIMINATOR,
+    ...addressEncoder.encode(drawVrfConfig),
+    ...addressEncoder.encode(electionVrfConfig),
+  ]);
+}
+
 function turnDurationCyclesEqual(
   left: readonly [number, number, number, number],
   right: readonly [number, number, number, number],
@@ -575,6 +607,29 @@ export async function createSetTurnDurationCycleInstruction({
       { address: turnState, role: AccountRole.WRITABLE },
     ],
     data: createSetTurnDurationCycleData(turnDurationCycle),
+    programAddress: programId,
+  };
+}
+
+export async function createSetVrfConfigInstruction({
+  authority,
+  drawVrfConfig,
+  electionVrfConfig,
+  programId,
+}: {
+  authority: SolanaAddress;
+  drawVrfConfig: SolanaAddress;
+  electionVrfConfig: SolanaAddress;
+  programId: SolanaAddress;
+}) {
+  const globalConfig = await getGlobalConfigPda(programId);
+
+  return {
+    accounts: [
+      { address: authority, role: AccountRole.READONLY_SIGNER },
+      { address: globalConfig, role: AccountRole.WRITABLE },
+    ],
+    data: createSetVrfConfigData({ drawVrfConfig, electionVrfConfig }),
     programAddress: programId,
   };
 }

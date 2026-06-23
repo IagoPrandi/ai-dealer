@@ -3,15 +3,32 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { address } from "@solana/kit";
+import { AccountRole, address, getAddressEncoder } from "@solana/kit";
 import bs58 from "bs58";
 import {
+  createSetVrfConfigInstruction,
   createTurnAutomationConfig,
+  decodeGlobalConfigAccount,
   isLegacyTurnDeserializationError,
   loadAuthorityKeypairBytesFromEnv,
   runTurnAutomationOnce,
   stringifySimulationError,
 } from "./turn-automation.js";
+
+const addressEncoder = getAddressEncoder();
+const SET_VRF_CONFIG_DISCRIMINATOR = [53, 52, 195, 216, 205, 110, 46, 74];
+
+function writeU32Le(data: Uint8Array, offset: number, value: number) {
+  new DataView(data.buffer).setUint32(offset, value, true);
+}
+
+function writeU64Le(data: Uint8Array, offset: number, value: number) {
+  new DataView(data.buffer).setBigUint64(offset, BigInt(value), true);
+}
+
+function writeAddress(data: Uint8Array, offset: number, value: string) {
+  data.set(addressEncoder.encode(address(value)), offset);
+}
 
 test("turn automation is disabled unless explicitly enabled", async () => {
   const config = await createTurnAutomationConfig({});
@@ -120,6 +137,62 @@ test("turn automation disabled check has no RPC side effects", async () => {
   });
 
   assert.deepEqual(result, { action: "disabled" });
+});
+
+test("global config decoder exposes configured VRF addresses", () => {
+  const drawVrfConfig = "EYiAmGSdsQTuCw413V5BzaruWuCCSDgTPtBGvLkXHbe7";
+  const electionVrfConfig = "EYiAmGSdsQTuCw413V5BzaruWuCCSDgTPtBGvLkXHbe7";
+  const data = new Uint8Array(256);
+  writeAddress(data, 73, drawVrfConfig);
+  writeAddress(data, 105, electionVrfConfig);
+  writeU32Le(data, 171, 7_200);
+  writeU32Le(data, 175, 7_200);
+  writeU32Le(data, 179, 28_800);
+  writeU32Le(data, 183, 28_800);
+  writeU64Le(data, 228, 1);
+  writeU64Le(data, 236, 0);
+
+  const snapshot = decodeGlobalConfigAccount(data);
+
+  assert.equal(snapshot.drawVrfConfig, drawVrfConfig);
+  assert.equal(snapshot.electionVrfConfig, electionVrfConfig);
+  assert.deepEqual(snapshot.turnDurationCycle, [7_200, 7_200, 28_800, 28_800]);
+});
+
+test("set VRF config instruction uses Anchor discriminator and queue accounts", async () => {
+  const authority = address("4bY5krt2VnnSNB1R4c1bhiWdQYkTc1FvFTN1LaV5JxCH");
+  const programId = address("6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4");
+  const drawVrfConfig = address("EYiAmGSdsQTuCw413V5BzaruWuCCSDgTPtBGvLkXHbe7");
+  const electionVrfConfig = address(
+    "EYiAmGSdsQTuCw413V5BzaruWuCCSDgTPtBGvLkXHbe7",
+  );
+
+  const instruction = await createSetVrfConfigInstruction({
+    authority,
+    drawVrfConfig,
+    electionVrfConfig,
+    programId,
+  });
+
+  assert.equal(instruction.programAddress, programId);
+  assert.deepEqual(
+    Array.from(instruction.data.slice(0, 8)),
+    SET_VRF_CONFIG_DISCRIMINATOR,
+  );
+  assert.equal(instruction.data.length, 72);
+  assert.deepEqual(Array.from(instruction.data.slice(8, 40)), [
+    ...addressEncoder.encode(drawVrfConfig),
+  ]);
+  assert.deepEqual(Array.from(instruction.data.slice(40, 72)), [
+    ...addressEncoder.encode(electionVrfConfig),
+  ]);
+  assert.deepEqual(instruction.accounts, [
+    { address: authority, role: AccountRole.READONLY_SIGNER },
+    {
+      address: address("EtZ5ZyHKb8wZmMHFDLM6LtVmZV1WUMvFPER72eFE4qob"),
+      role: AccountRole.WRITABLE,
+    },
+  ]);
 });
 
 test("enabled turn automation requires an authority keypair", async () => {
