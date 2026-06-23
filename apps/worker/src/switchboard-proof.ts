@@ -1,9 +1,13 @@
+import { pathToFileURL } from "node:url";
 import {
   createSwitchboardProofConfig,
   runSwitchboardRandomnessProofOfLife,
 } from "./switchboard.js";
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
   void createSwitchboardProofConfig()
     .then((config) => runSwitchboardRandomnessProofOfLife(config))
     .then((result) => {

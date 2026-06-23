@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { pathToFileURL } from "node:url";
 import { getTurnDurationHours } from "@idealer/game-engine";
 import pg from "pg";
 import { createClient } from "redis";
@@ -196,7 +197,10 @@ function handleManualControlRequest(
   return true;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
   const port = Number(process.env.PORT ?? 3003);
   const host = process.env.HOST ?? "0.0.0.0";
   const manualConfigPromise = createManualControlConfig();
