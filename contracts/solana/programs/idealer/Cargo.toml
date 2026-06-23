@@ -17,6 +17,11 @@ custom-heap = []
 # by default and MUST stay off for production builds so the instruction is
 # excluded from the program entirely.
 devnet-test = []
+# Selects which Switchboard On-Demand program id is accepted as the owner of
+# randomness accounts consumed by the trustless `settle_*` instructions. Enable
+# for devnet builds (binds the devnet Switchboard program); OFF for production
+# mainnet builds so the mainnet Switchboard program id is enforced instead.
+sb-devnet = []
 custom-panic = []
 idl-build = ["anchor-lang/idl-build"]
 no-entrypoint = []

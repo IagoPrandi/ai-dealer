@@ -17,6 +17,7 @@ use domain::{
     VOTE_FEE_START_TURN,
 };
 use solana_sha256_hasher::hash;
+use switchboard_on_demand::RandomnessAccountData;
 
 declare_id!("6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4");
 
@@ -25,6 +26,94 @@ pub const MAX_FINALISTS: usize = 10;
 pub const ELIMINATION_WINDOW_SECONDS: i64 = 3_600;
 pub const MAX_RULE_TEXT_BYTES: usize = 6000;
 pub const BASIS_POINTS_DENOMINATOR: u16 = 10_000;
+
+/// Raw 32-byte program id of the Switchboard On-Demand program that must own any
+/// randomness account consumed by the trustless `settle_*` instructions.
+///
+/// Resolved at build time: `sb-devnet` builds (paired with `devnet-test` for the
+/// devnet validation phase) bind the devnet Switchboard program; production
+/// mainnet builds bind the mainnet program. This is the trust anchor that makes
+/// `RandomnessAccountData::parse` meaningful — an account owned by any other
+/// program is rejected before its bytes are ever interpreted, so a forged
+/// look-alike account cannot inject a chosen randomness value.
+///
+/// Compared as raw bytes (not as `Pubkey`) because the Switchboard crate exposes
+/// its own `Pubkey` type, which need not be identical to Anchor's.
+#[cfg(feature = "sb-devnet")]
+pub fn expected_switchboard_program() -> [u8; 32] {
+    switchboard_on_demand::ON_DEMAND_DEVNET_PID.to_bytes()
+}
+#[cfg(not(feature = "sb-devnet"))]
+pub fn expected_switchboard_program() -> [u8; 32] {
+    switchboard_on_demand::ON_DEMAND_MAINNET_PID.to_bytes()
+}
+
+/// Parse a committed Switchboard On-Demand randomness account and return its
+/// configured queue + committed seed slot, after verifying the account is owned
+/// by the Switchboard program and originates from the trusted VRF queue.
+///
+/// Used by the `request_*` (commit) instructions so the queue/owner are checked
+/// once at commit time and the seed slot is recorded for the later settle.
+fn read_committed_randomness(
+    randomness_ai: &AccountInfo,
+    expected_queue: &Pubkey,
+) -> Result<u64> {
+    require!(
+        randomness_ai.owner.to_bytes() == expected_switchboard_program(),
+        IdealerError::InvalidRandomnessOwner
+    );
+    let data = randomness_ai.try_borrow_data()?;
+    let randomness = RandomnessAccountData::parse(data)
+        .map_err(|_| error!(IdealerError::InvalidRandomnessAccount))?;
+    require!(
+        randomness.queue.to_bytes() == expected_queue.to_bytes(),
+        IdealerError::RandomnessQueueMismatch
+    );
+    Ok(randomness.seed_slot)
+}
+
+/// Read and trustlessly verify a revealed Switchboard On-Demand randomness
+/// account, returning the 32-byte random value (PRD §5.6). No authority-supplied
+/// randomness is accepted: the value is read directly from the Switchboard
+/// account and bound to the account + commit slot recorded at request time.
+///
+/// Because `get_value` only succeeds when the current slot equals the account's
+/// reveal slot, the Switchboard reveal and this settle must execute in the same
+/// transaction — giving the caller exactly one shot per request and preventing
+/// abort-and-retry bias.
+fn verify_revealed_randomness(
+    randomness_ai: &AccountInfo,
+    expected_account: &Pubkey,
+    expected_queue: &Pubkey,
+    expected_commit_slot: u64,
+    clock: &Clock,
+) -> Result<[u8; 32]> {
+    require_keys_eq!(
+        randomness_ai.key(),
+        *expected_account,
+        IdealerError::RandomnessSourceMismatch
+    );
+    require!(
+        randomness_ai.owner.to_bytes() == expected_switchboard_program(),
+        IdealerError::InvalidRandomnessOwner
+    );
+    let data = randomness_ai.try_borrow_data()?;
+    let randomness = RandomnessAccountData::parse(data)
+        .map_err(|_| error!(IdealerError::InvalidRandomnessAccount))?;
+    require!(
+        randomness.queue.to_bytes() == expected_queue.to_bytes(),
+        IdealerError::RandomnessQueueMismatch
+    );
+    require!(
+        randomness.seed_slot == expected_commit_slot,
+        IdealerError::RandomnessCommitSlotMismatch
+    );
+    let value = randomness
+        .get_value(clock.slot)
+        .map_err(|_| error!(IdealerError::RandomnessNotResolved))?;
+    require!(value != [0; 32], IdealerError::InvalidRandomnessValue);
+    Ok(value)
+}
 
 #[program]
 pub mod idealer {
@@ -163,13 +252,16 @@ pub mod idealer {
         turn.elimination_window_end_timestamp = 0;
         turn.election_vrf_request = Pubkey::default();
         turn.election_vrf_fulfillment = Pubkey::default();
+        turn.election_commit_slot = 0;
         turn.elected_finalist_index = 0;
         turn.active_election_vrf_request = Pubkey::default();
         turn.active_election_vrf_fulfillment = Pubkey::default();
+        turn.active_election_commit_slot = 0;
         turn.elected_survivor_index = 0;
         turn.draw_status = DrawStatus::NotRequested;
         turn.draw_vrf_request = Pubkey::default();
         turn.draw_vrf_fulfillment = Pubkey::default();
+        turn.draw_commit_slot = 0;
         turn.draw_randomness = [0; 32];
         turn.draw_requested_at = 0;
         turn.drawn_at = 0;
@@ -656,17 +748,13 @@ pub mod idealer {
         Ok(())
     }
 
-    pub fn request_rule_election_vrf(
-        ctx: Context<RequestRuleElectionVrf>,
-        randomness_account: Pubkey,
-    ) -> Result<()> {
+    /// Finalist-election VRF commit step. Verifies the supplied Switchboard
+    /// account (owner + configured election queue) and records its address and
+    /// committed `seed_slot` for the later `settle_rule_election` verification.
+    pub fn request_rule_election_vrf(ctx: Context<RequestRuleElectionVrf>) -> Result<()> {
         let config = &ctx.accounts.global_config;
         require!(!config.paused, IdealerError::ProtocolPaused);
         require_election_cutoff_reached(config, &ctx.accounts.turn_state)?;
-        require!(
-            randomness_account != Pubkey::default(),
-            IdealerError::InvalidRandomnessAccount
-        );
         require!(
             ctx.accounts.turn_state.eligible_rule_pool_hash != [0; 32],
             IdealerError::ElectionPoolNotLocked
@@ -676,7 +764,11 @@ pub mod idealer {
             IdealerError::ElectionVrfAlreadyRequested
         );
 
+        let randomness_account = ctx.accounts.randomness.key();
+        let commit_slot =
+            read_committed_randomness(&ctx.accounts.randomness, &config.election_vrf_config)?;
         ctx.accounts.turn_state.election_vrf_request = randomness_account;
+        ctx.accounts.turn_state.election_commit_slot = commit_slot;
 
         emit!(RuleElectionVrfRequested {
             turn_id: ctx.accounts.turn_state.turn_id,
@@ -685,10 +777,10 @@ pub mod idealer {
         Ok(())
     }
 
-    pub fn settle_rule_election(
-        ctx: Context<SettleRuleElection>,
-        args: SettleRuleElectionArgs,
-    ) -> Result<()> {
+    /// Settle the finalist election by reading and verifying the revealed
+    /// Switchboard randomness on-chain (trustless), then deriving the finalist
+    /// set deterministically from that verified value.
+    pub fn settle_rule_election(ctx: Context<SettleRuleElection>) -> Result<()> {
         let config = &ctx.accounts.global_config;
         require!(!config.paused, IdealerError::ProtocolPaused);
         require_election_cutoff_reached(config, &ctx.accounts.turn_state)?;
@@ -696,16 +788,22 @@ pub mod idealer {
             ctx.accounts.turn_state.election_vrf_request != Pubkey::default(),
             IdealerError::ElectionVrfNotRequested
         );
-        require!(
-            args.randomness_source == ctx.accounts.turn_state.election_vrf_request,
-            IdealerError::RandomnessSourceMismatch
-        );
+
+        let clock = Clock::get()?;
+        let randomness_source = ctx.accounts.randomness.key();
+        let randomness = verify_revealed_randomness(
+            &ctx.accounts.randomness,
+            &ctx.accounts.turn_state.election_vrf_request,
+            &config.election_vrf_config,
+            ctx.accounts.turn_state.election_commit_slot,
+            &clock,
+        )?;
 
         let candidates =
             read_election_candidates(ctx.remaining_accounts, ctx.accounts.turn_state.turn_id)?;
         let result = run_rule_election(
             &candidates,
-            &args.randomness,
+            &randomness,
             ctx.accounts.turn_state.turn_id,
             config.top_voted_finalist_count,
             config.random_finalist_count,
@@ -733,13 +831,12 @@ pub mod idealer {
             turn.finalist_rule_ids[index] = *rule_id;
             turn.finalist_approval_vote_counts[index] = candidate.vote_count;
         }
-        let clock = Clock::get()?;
         turn.elimination_window_start_timestamp = clock.unix_timestamp;
         turn.elimination_window_end_timestamp = clock
             .unix_timestamp
             .checked_add(ELIMINATION_WINDOW_SECONDS)
             .ok_or(IdealerError::ArithmeticOverflow)?;
-        turn.election_vrf_fulfillment = args.randomness_source;
+        turn.election_vrf_fulfillment = randomness_source;
         turn.elected_finalist_index = 0;
         turn.active_rule_id = 0;
         turn.active_rule_hash = [0; 32];
@@ -752,7 +849,7 @@ pub mod idealer {
             top_voted_finalist_hash: turn.top_voted_finalist_hash,
             random_finalist_hash: turn.random_finalist_hash,
             finalist_set_hash: turn.finalist_set_hash,
-            randomness_source: args.randomness_source,
+            randomness_source,
         });
         Ok(())
     }
@@ -894,16 +991,12 @@ pub mod idealer {
         Ok(())
     }
 
-    pub fn request_active_election_vrf(
-        ctx: Context<RequestActiveElectionVrf>,
-        randomness_account: Pubkey,
-    ) -> Result<()> {
+    /// Active-election VRF commit step over the surviving finalists. Verifies the
+    /// supplied Switchboard account (owner + configured election queue) and
+    /// records its address and committed `seed_slot` for `settle_active_election`.
+    pub fn request_active_election_vrf(ctx: Context<RequestActiveElectionVrf>) -> Result<()> {
         let config = &ctx.accounts.global_config;
         validate_live_turn(config, &ctx.accounts.turn_state)?;
-        require!(
-            randomness_account != Pubkey::default(),
-            IdealerError::InvalidRandomnessAccount
-        );
         require!(
             ctx.accounts.turn_state.survivor_finalist_hash != [0; 32],
             IdealerError::EliminationWindowNotClosed
@@ -913,7 +1006,11 @@ pub mod idealer {
             IdealerError::ElectionVrfAlreadyRequested
         );
 
+        let randomness_account = ctx.accounts.randomness.key();
+        let commit_slot =
+            read_committed_randomness(&ctx.accounts.randomness, &config.election_vrf_config)?;
         ctx.accounts.turn_state.active_election_vrf_request = randomness_account;
+        ctx.accounts.turn_state.active_election_commit_slot = commit_slot;
         emit!(ActiveElectionVrfRequested {
             turn_id: ctx.accounts.turn_state.turn_id,
             randomness_account,
@@ -921,20 +1018,26 @@ pub mod idealer {
         Ok(())
     }
 
-    pub fn settle_active_election(
-        ctx: Context<SettleActiveElection>,
-        args: SettleRuleElectionArgs,
-    ) -> Result<()> {
+    /// Settle the active election by reading and verifying the revealed
+    /// Switchboard randomness on-chain (trustless), then selecting one active
+    /// rule uniformly from the surviving finalists using that verified value.
+    pub fn settle_active_election(ctx: Context<SettleActiveElection>) -> Result<()> {
         let config = &ctx.accounts.global_config;
         validate_live_turn(config, &ctx.accounts.turn_state)?;
         require!(
             ctx.accounts.turn_state.active_election_vrf_request != Pubkey::default(),
             IdealerError::ElectionVrfNotRequested
         );
-        require!(
-            args.randomness_source == ctx.accounts.turn_state.active_election_vrf_request,
-            IdealerError::RandomnessSourceMismatch
-        );
+
+        let clock = Clock::get()?;
+        let randomness_source = ctx.accounts.randomness.key();
+        let randomness = verify_revealed_randomness(
+            &ctx.accounts.randomness,
+            &ctx.accounts.turn_state.active_election_vrf_request,
+            &config.election_vrf_config,
+            ctx.accounts.turn_state.active_election_commit_slot,
+            &clock,
+        )?;
 
         let turn = &mut ctx.accounts.turn_state;
         let finalist_count = usize::from(turn.finalist_count);
@@ -943,7 +1046,7 @@ pub mod idealer {
             .map(|index| turn.finalist_rule_ids[index])
             .collect();
         let survivor_index =
-            derive_active_survivor_index(&args.randomness, turn.turn_id, survivors.len())?;
+            derive_active_survivor_index(&randomness, turn.turn_id, survivors.len())?;
         let active_rule_id = survivors[survivor_index];
         let active_proposal_info = ctx
             .remaining_accounts
@@ -970,7 +1073,7 @@ pub mod idealer {
         turn.active_rule_id = active_rule_id;
         turn.active_rule_hash = active.sanitized_text_hash;
         turn.frozen_rule_artifact_hash = active.compiled_artifact_hash;
-        turn.active_election_vrf_fulfillment = args.randomness_source;
+        turn.active_election_vrf_fulfillment = randomness_source;
         turn.elected_survivor_index = survivor_index as u8;
         turn.elected_finalist_index =
             finalist_index(turn, active_rule_id).ok_or(IdealerError::RuleNotFinalist)? as u8;
@@ -979,7 +1082,7 @@ pub mod idealer {
             turn_id: turn.turn_id,
             active_rule_id,
             elected_survivor_index: turn.elected_survivor_index,
-            randomness_source: args.randomness_source,
+            randomness_source,
         });
         Ok(())
     }
@@ -1060,16 +1163,19 @@ pub mod idealer {
         Ok(())
     }
 
-    /// Request a draw for a turn once it has ended. Records the verifiable
-    /// randomness account that will fulfill the draw. Idempotent retries are
-    /// allowed only from `NotRequested` or `Failed`.
-    pub fn request_draw(ctx: Context<RequestDraw>, randomness_account: Pubkey) -> Result<()> {
+    /// Request a draw for a turn once it has ended (Switchboard On-Demand commit
+    /// step). Verifies the supplied randomness account is a genuine Switchboard
+    /// account from the configured draw queue, then records its address and
+    /// committed `seed_slot` so `settle_draw` can verify the revealed value
+    /// on-chain. Idempotent retries are allowed only from `NotRequested` or
+    /// `Failed`.
+    pub fn request_draw(ctx: Context<RequestDraw>) -> Result<()> {
         let config = &ctx.accounts.global_config;
         require!(!config.paused, IdealerError::ProtocolPaused);
-        require!(
-            randomness_account != Pubkey::default(),
-            IdealerError::InvalidRandomnessAccount
-        );
+
+        let randomness_account = ctx.accounts.randomness.key();
+        let commit_slot =
+            read_committed_randomness(&ctx.accounts.randomness, &config.draw_vrf_config)?;
 
         let clock = Clock::get()?;
         let turn = &mut ctx.accounts.turn_state;
@@ -1087,6 +1193,7 @@ pub mod idealer {
 
         turn.draw_status = DrawStatus::Requested;
         turn.draw_vrf_request = randomness_account;
+        turn.draw_commit_slot = commit_slot;
         turn.draw_requested_at = clock.unix_timestamp;
         turn.draw_failure_code = 0;
 
@@ -1098,40 +1205,43 @@ pub mod idealer {
         Ok(())
     }
 
-    /// Settle a requested draw by consuming the revealed verifiable randomness
-    /// and deterministically deriving the 6 unique drawn numbers (1..=100).
-    pub fn settle_draw(ctx: Context<SettleDraw>, args: SettleDrawArgs) -> Result<()> {
+    /// Settle a requested draw by reading and verifying the revealed Switchboard
+    /// On-Demand randomness on-chain (trustless, PRD §5.6), then deterministically
+    /// deriving the 6 unique drawn numbers (1..=100). The randomness value is no
+    /// longer supplied by the authority; it is read from the bound Switchboard
+    /// account and must be revealed in the current slot.
+    pub fn settle_draw(ctx: Context<SettleDraw>) -> Result<()> {
         let config = &ctx.accounts.global_config;
         require!(!config.paused, IdealerError::ProtocolPaused);
-
-        let clock = Clock::get()?;
-        let turn = &mut ctx.accounts.turn_state;
         require!(
-            turn.draw_status == DrawStatus::Requested,
+            ctx.accounts.turn_state.draw_status == DrawStatus::Requested,
             IdealerError::DrawNotSettleable
         );
-        require!(
-            args.randomness != [0; 32],
-            IdealerError::InvalidRandomnessValue
-        );
-        require!(
-            args.randomness_source == turn.draw_vrf_request,
-            IdealerError::RandomnessSourceMismatch
-        );
 
-        let numbers = derive_draw_numbers(&args.randomness, turn.turn_id);
+        let clock = Clock::get()?;
+        let randomness_source = ctx.accounts.randomness.key();
+        let value = verify_revealed_randomness(
+            &ctx.accounts.randomness,
+            &ctx.accounts.turn_state.draw_vrf_request,
+            &config.draw_vrf_config,
+            ctx.accounts.turn_state.draw_commit_slot,
+            &clock,
+        )?;
+
+        let turn = &mut ctx.accounts.turn_state;
+        let numbers = derive_draw_numbers(&value, turn.turn_id);
         validate_guess(&numbers)?;
 
         turn.draw_result = numbers;
-        turn.draw_randomness = args.randomness;
-        turn.draw_vrf_fulfillment = args.randomness_source;
+        turn.draw_randomness = value;
+        turn.draw_vrf_fulfillment = randomness_source;
         turn.drawn_at = clock.unix_timestamp;
         turn.draw_status = DrawStatus::Fulfilled;
 
         emit!(DrawSettled {
             turn_id: turn.turn_id,
             draw_result: numbers,
-            randomness_source: args.randomness_source,
+            randomness_source,
             drawn_at: turn.drawn_at,
         });
         Ok(())
@@ -1687,26 +1797,6 @@ pub struct PrecompileRuleArgs {
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
-pub struct SettleDrawArgs {
-    /// The revealed verifiable randomness value (e.g. a Switchboard On-Demand
-    /// randomness reveal). Stored on-chain for public reproducibility.
-    pub randomness: [u8; 32],
-    /// The randomness account that produced the value. Must match the account
-    /// recorded by `request_draw`.
-    pub randomness_source: Pubkey,
-}
-
-#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
-pub struct SettleRuleElectionArgs {
-    /// The fulfilled Switchboard election randomness. This value is used for
-    /// both the random finalists and final active-rule selection.
-    pub randomness: [u8; 32],
-    /// The randomness account that produced the value. Must match the account
-    /// recorded by `request_rule_election_vrf`.
-    pub randomness_source: Pubkey,
-}
-
-#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct RecordClaimArgs {
     /// The turn the claim belongs to.
     pub turn_id: u64,
@@ -2147,6 +2237,10 @@ pub struct RequestRuleElectionVrf<'info> {
         bump = turn_state.bump
     )]
     pub turn_state: Box<Account<'info, TurnState>>,
+    /// CHECK: Switchboard On-Demand randomness account, verified in the handler
+    /// (owner is the Switchboard program and queue matches the configured
+    /// election VRF queue).
+    pub randomness: AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
@@ -2164,6 +2258,11 @@ pub struct SettleRuleElection<'info> {
         bump = turn_state.bump
     )]
     pub turn_state: Box<Account<'info, TurnState>>,
+    /// CHECK: Switchboard On-Demand randomness account, verified in the handler
+    /// (bound to the account recorded at request, owner is the Switchboard
+    /// program, queue matches the configured election VRF queue, seed_slot
+    /// matches the recorded commit slot, value freshly revealed this slot).
+    pub randomness: AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
@@ -2198,6 +2297,10 @@ pub struct RequestActiveElectionVrf<'info> {
         bump = turn_state.bump
     )]
     pub turn_state: Box<Account<'info, TurnState>>,
+    /// CHECK: Switchboard On-Demand randomness account, verified in the handler
+    /// (owner is the Switchboard program and queue matches the configured
+    /// election VRF queue).
+    pub randomness: AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
@@ -2215,6 +2318,11 @@ pub struct SettleActiveElection<'info> {
         bump = turn_state.bump
     )]
     pub turn_state: Box<Account<'info, TurnState>>,
+    /// CHECK: Switchboard On-Demand randomness account, verified in the handler
+    /// (bound to the account recorded at request, owner is the Switchboard
+    /// program, queue matches the configured election VRF queue, seed_slot
+    /// matches the recorded commit slot, value freshly revealed this slot).
+    pub randomness: AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
@@ -2281,6 +2389,11 @@ pub struct RequestDraw<'info> {
         bump = turn_state.bump
     )]
     pub turn_state: Box<Account<'info, TurnState>>,
+    /// CHECK: Switchboard On-Demand randomness account, verified in the handler
+    /// (owner is the Switchboard program and queue matches the configured draw
+    /// VRF queue). Owned by the Switchboard program, not this program, so it
+    /// cannot be a typed Anchor account.
+    pub randomness: AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
@@ -2298,6 +2411,11 @@ pub struct SettleDraw<'info> {
         bump = turn_state.bump
     )]
     pub turn_state: Box<Account<'info, TurnState>>,
+    /// CHECK: Switchboard On-Demand randomness account, verified in the handler
+    /// (bound to the account recorded at request, owner is the Switchboard
+    /// program, queue matches the configured draw VRF queue, seed_slot matches
+    /// the recorded commit slot, value freshly revealed this slot).
+    pub randomness: AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
@@ -2477,13 +2595,21 @@ pub struct TurnState {
     pub elimination_window_end_timestamp: i64,
     pub election_vrf_request: Pubkey,
     pub election_vrf_fulfillment: Pubkey,
+    /// Switchboard `seed_slot` of the finalist-election randomness account,
+    /// recorded at `request_rule_election_vrf` and re-checked at settle so a
+    /// re-committed (re-rolled) account is rejected.
+    pub election_commit_slot: u64,
     pub elected_finalist_index: u8,
     pub active_election_vrf_request: Pubkey,
     pub active_election_vrf_fulfillment: Pubkey,
+    /// Switchboard `seed_slot` of the active-election randomness account.
+    pub active_election_commit_slot: u64,
     pub elected_survivor_index: u8,
     pub draw_status: DrawStatus,
     pub draw_vrf_request: Pubkey,
     pub draw_vrf_fulfillment: Pubkey,
+    /// Switchboard `seed_slot` of the draw randomness account.
+    pub draw_commit_slot: u64,
     pub draw_randomness: [u8; 32],
     pub draw_requested_at: i64,
     pub drawn_at: i64,
@@ -2928,6 +3054,14 @@ pub enum IdealerError {
     InvalidRandomnessValue,
     #[msg("The randomness source does not match the requested account.")]
     RandomnessSourceMismatch,
+    #[msg("The randomness account is not owned by the Switchboard On-Demand program.")]
+    InvalidRandomnessOwner,
+    #[msg("The randomness account does not belong to the configured VRF queue.")]
+    RandomnessQueueMismatch,
+    #[msg("The randomness account seed slot does not match the recorded commit slot.")]
+    RandomnessCommitSlotMismatch,
+    #[msg("The Switchboard randomness has not been revealed in the current slot.")]
+    RandomnessNotResolved,
     #[msg("The draw failure code must be non-zero.")]
     InvalidDrawFailureCode,
     #[msg("The compiled rule artifact hash is invalid.")]

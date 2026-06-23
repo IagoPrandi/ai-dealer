@@ -1,6 +1,6 @@
 # Trustless Settlement Pipeline — Action Plan
 
-> **Status:** M5.0 implemented locally; awaiting user confirmation and approved devnet transaction execution before ticking the milestone.
+> **Status:** M5.0 confirmed and ticked (2026-06-23); M5.1 (trustless on-chain randomness verification) implemented and SBF-tested (7/7 green) — devnet upgrade held for user go-ahead before ticking.
 > **Created:** 2026-06-22
 > **Decision:** **Trustless** — `settle_*` instructions must verify Switchboard randomness on-chain (no authority-supplied randomness value).
 > **Scope:** Everything in the post-turn-close settlement pipeline EXCEPT turn open/close (which stays a manual test helper today and the automatic timed loop in production). Goal: validate the real pipeline end-to-end on devnet **without mocks or fallbacks**.
@@ -42,14 +42,20 @@ PRD milestones **M3.1 (VRF Draw), M3.2 (Rule Election), M3.5 (Guess Verification
 Phases map 1:1 to milestones. Each milestone lists Objective, Scope, Deliverables, Acceptance Criteria, Dependencies, and Risks. Tick checkboxes ONLY after user confirmation.
 
 ### M5.0 — Switchboard On-Demand provisioning (devnet)
-- [ ] **M5.0**
+- [x] **M5.0** — confirmed by user 2026-06-23.
 - **Objective:** Have a usable Switchboard On-Demand setup on devnet and the program's VRF config addresses pointing at it.
 - **Scope:** Add `@switchboard-xyz/on-demand` (worker) and the matching Rust crate (contract). Identify/provision the On-Demand queue on devnet. Replace the placeholder `draw_vrf_config`/`election_vrf_config` (currently the program ID after the migration) with the real Switchboard queue/config via an authority-only admin instruction.
 - **Deliverables:** dependency added; documented queue/config addresses in `deployments/<chainId>.json` (or env); an admin `set_vrf_config` path (or reuse migration/reinit) to write the addresses on-chain.
 - **Acceptance:** the worker can create + commit + reveal a Switchboard randomness account on devnet and read a non-zero 32-byte value (proof-of-life script, no game state involved).
 - **Dependencies:** funded deployer (`4bY5krt2VnnSNB1R4c1bhiWdQYkTc1FvFTN1LaV5JxCH`), Docker SBF toolchain.
 - **Risks:** external dependency (Switchboard queue availability, cranking, SOL); SDK version compatibility with `@solana/kit`.
-- **Implementation note (2026-06-23):** Added worker and Rust Switchboard dependencies, documented the public devnet On-Demand queue in `deployments/solana-devnet.json` and `.env.example`, added authority-only `set_vrf_config`, and added manual worker scripts for `switchboard:set-vrf-config` and `switchboard:proof`. The milestone checkbox remains open until user confirmation; no live devnet transaction was broadcast during implementation.
+- **Implementation note (2026-06-23):** Added worker and Rust Switchboard dependencies, documented the public devnet On-Demand queue in `deployments/solana-devnet.json` and `.env.example`, added authority-only `set_vrf_config`, and added manual worker scripts for `switchboard:set-vrf-config` and `switchboard:proof`.
+- **Live devnet execution (2026-06-23, user-approved):**
+  - **Program upgrade** (adds `set_vrf_config`; built with `devnet-test`): extended program data account +10240 bytes, then `solana program deploy` sig `2wBW45vY4sBkCsi7i1yAPw4e2nhWiXYgvMtQD3XkCghnr1E75gKNw3e1Gkn4mgimamJ2uxDmZqPMwDCWygDnDiQe` (slot 471325647, data length 741384 B).
+  - **`set_vrf_config`**: sig `2WnXP3n5Q9JQfzzkvdUMvSJQhmrhRzJfaRytJ33X4NF1YMmX3TG7nc423bbCJb8bxzy9eYoSfssPcEc1H89WULt9`. On-chain `GlobalConfig.draw_vrf_config` and `election_vrf_config` now both equal the Switchboard queue `EYiAmGSdsQTuCw413V5BzaruWuCCSDgTPtBGvLkXHbe7` (verified by reading the account).
+  - **Switchboard proof-of-life** (acceptance criterion): randomness account `FWBa3Ubjyv7niKs3cxQkccmBvym3yoH9bYCXmUB5W1oq`, commit `5RzraoM7uymx9LMwXLi3U5YudYGFBroY6tEjnRGxC9KKqZjenvUxDJHcjPWsDXHdv3XkW4kDKvG9JztHk2Mg9GzN`, reveal `5ucEUGVQccnLoa7bWZde8yEeBnH4XJuoutvi5UHuBDLeXxgZ1B8akWozsUNLNVzLW8fGiMEVbBXMSTn6cBYHuo5j`, revealed value `b979191a6f9f56a14a910d075eeda5378283967ee347f1e6378a809b4b07dbc6` (non-zero 32 bytes).
+  - **Note:** the deployed build still carries the test-only `devnet-test` feature (`reinitialize_global_config_for_migration`); per §5 it must be rebuilt without `devnet-test` before production. This is intentional for the devnet validation phase, not a defect.
+  - The milestone checkbox remains open until user confirmation.
 
 ### M5.1 — Trustless on-chain randomness verification (contract)
 - [ ] **M5.1**
@@ -59,6 +65,13 @@ Phases map 1:1 to milestones. Each milestone lists Objective, Scope, Deliverable
 - **Acceptance:** `settle_draw` rejects a value that does not match the on-chain Switchboard account; succeeds only with the genuine revealed randomness; SBF suite green; devnet upgrade verified.
 - **Dependencies:** M5.0.
 - **Risks:** Switchboard account layout/CPI specifics; compute-unit budget; another irreversible program upgrade.
+- **Implementation note (2026-06-23):** Contract rewritten to verify Switchboard On-Demand randomness **on-chain**, removing the authority-supplied `args.randomness` (and the `SettleDrawArgs`/`SettleRuleElectionArgs` structs) entirely. Design:
+  - The three `settle_*` instructions now take the Switchboard randomness **account** and run `verify_revealed_randomness`: bind to the account recorded at request (`require_keys_eq`), verify owner == Switchboard program (build-time constant — `sb-devnet` → devnet PID `Aio4ga…`, else mainnet `SBond…`), `RandomnessAccountData::parse`, verify `queue == config.*_vrf_config` and `seed_slot == recorded commit slot`, then `get_value(clock.slot)` (succeeds only if revealed in the current slot → forces atomic reveal+settle, one shot per request). The verified 32-byte value feeds the unchanged deterministic `derive_draw_numbers` / `run_rule_election` / `derive_active_survivor_index`.
+  - The three `request_*` instructions became the commit step (`read_committed_randomness`: owner + queue check, record `seed_slot`). Added `draw_commit_slot` / `election_commit_slot` / `active_election_commit_slot` to `TurnState`, the `randomness` account to all six Accounts structs, four error variants (`InvalidRandomnessOwner`, `RandomnessQueueMismatch`, `RandomnessCommitSlotMismatch`, `RandomnessNotResolved`), and a `sb-devnet` cargo feature.
+  - SBF tests rewritten to inject genuine-format `RandomnessAccountData` accounts (correct discriminator/layout, owned by the Switchboard devnet program), pre-registered at genesis and slot-controlled — no mocks, no production bypass.
+  - **Verification:** `clippy -D warnings` green for both `sb-devnet` and production (default) feature sets; Docker SBF build with `devnet-test,sb-devnet` succeeds; full ignored SBF instruction suite **7/7 green**.
+  - **Held:** the devnet program upgrade is NOT broadcast — awaiting user go-ahead (per the M5.0 pattern). The deploy must build the `.so` from current source with `SBF_FEATURES=devnet-test,sb-devnet`.
+  - The milestone checkbox remains open until user confirmation.
 
 ### M5.2 — Worker randomness client + production settlement senders
 - [ ] **M5.2**
@@ -118,8 +131,8 @@ M5.0–M5.3 are the critical path (the missing machinery). M5.4–M5.5 validate.
 
 | Milestone | Title | Status | Notes |
 | --- | --- | --- | --- |
-| M5.0 | Switchboard On-Demand provisioning (devnet) | In review | Local implementation and validation complete; live `set_vrf_config` and proof-of-life transaction require explicit user approval before broadcast. |
-| M5.1 | Trustless on-chain randomness verification (contract) | Planned | — |
+| M5.0 | Switchboard On-Demand provisioning (devnet) | ✅ Done | Confirmed by user 2026-06-23. `set_vrf_config` + proof-of-life broadcast on devnet; on-chain VRF config addresses verified. |
+| M5.1 | Trustless on-chain randomness verification (contract) | In review | Implemented 2026-06-23; clippy clean (both feature sets); SBF suite 7/7 green. Devnet upgrade held for user go-ahead; checkbox open pending confirmation. |
 | M5.2 | Worker randomness client + production settlement senders | Planned | — |
 | M5.3 | Settlement scheduler + state machine + worker→API bridge | Planned | — |
 | M5.4 | Real player inputs (no mocks) | Planned | — |

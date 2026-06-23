@@ -5,7 +5,7 @@ use anchor_lang::{
 use idealer::{
     accounts, instruction, DrawStatus, GlobalConfig, InitializeGlobalConfigArgs, PlayerGuess,
     PrecompilationStatus, PrecompileRuleArgs, ProposeRuleArgs, RuleProposal, RuleState, RuleVote,
-    SetVrfConfigArgs, SettleDrawArgs, SettleRuleElectionArgs, TurnState, TurnStatus,
+    SetVrfConfigArgs, TurnState, TurnStatus,
 };
 use solana_account_info::AccountInfo;
 use solana_program_error::ProgramResult;
@@ -20,8 +20,84 @@ use solana_system_interface::{instruction as system_instruction, program as syst
 
 const PLAYER_BALANCE: u64 = 2_000_000_000;
 
+// Switchboard On-Demand devnet program id (`ON_DEMAND_DEVNET_PID`). The program
+// is built with `sb-devnet`, so its trustless owner check accepts randomness
+// accounts owned by this program. Tests inject accounts with this owner.
+const SWITCHBOARD_DEVNET_PID: &str = "Aio4gaXjXzJNVLtzwtNVmSqGKpANtXhybbkhtAC94ji2";
+
+// Anchor `Discriminator` for `RandomnessAccountData` in switchboard-on-demand.
+const RANDOMNESS_DISCRIMINATOR: [u8; 8] = [10, 66, 229, 135, 220, 239, 217, 114];
+
 fn pda(seeds: &[&[u8]]) -> Pubkey {
     Pubkey::find_program_address(seeds, &idealer::ID).0
+}
+
+fn switchboard_program_id() -> Pubkey {
+    SWITCHBOARD_DEVNET_PID.parse().unwrap()
+}
+
+// Deterministic VRF queue pubkeys used by the test config. Fixed (not random)
+// so randomness accounts can be pre-registered at genesis with a matching queue.
+fn draw_queue() -> Pubkey {
+    Pubkey::new_from_array([7u8; 32])
+}
+
+fn election_queue() -> Pubkey {
+    Pubkey::new_from_array([8u8; 32])
+}
+
+fn idealer_program_test() -> ProgramTest {
+    ProgramTest::new(
+        "idealer",
+        idealer::ID,
+        processor!(process_idealer_instruction),
+    )
+}
+
+/// Pre-register a Switchboard randomness account at genesis (counted in the bank
+/// capitalization) so later `warp_to_slot` calls do not trip the accounts-hash
+/// verification. Owned by the Switchboard program so the owner check passes.
+fn add_randomness_account(program_test: &mut ProgramTest, pubkey: Pubkey, data: Vec<u8>) {
+    program_test.add_account(
+        pubkey,
+        solana_sdk::account::Account {
+            lamports: 10_000_000,
+            data,
+            owner: switchboard_program_id(),
+            executable: false,
+            rent_epoch: 0,
+        },
+    );
+}
+
+/// Build raw account bytes for a Switchboard On-Demand `RandomnessAccountData`
+/// in the exact `#[repr(C)]`/bytemuck layout the program parses on-chain:
+/// discriminator(8) ++ authority(32) ++ queue(32) ++ seed_slothash(32) ++
+/// seed_slot(8) ++ oracle(32) ++ reveal_slot(8) ++ value(32) ++ pad(224).
+fn randomness_account_data(
+    queue: Pubkey,
+    seed_slot: u64,
+    reveal_slot: u64,
+    value: [u8; 32],
+) -> Vec<u8> {
+    let mut data = vec![0u8; 8 + 400];
+    data[0..8].copy_from_slice(&RANDOMNESS_DISCRIMINATOR);
+    data[8 + 32..8 + 64].copy_from_slice(queue.as_ref());
+    data[8 + 96..8 + 104].copy_from_slice(&seed_slot.to_le_bytes());
+    data[8 + 136..8 + 144].copy_from_slice(&reveal_slot.to_le_bytes());
+    data[8 + 144..8 + 176].copy_from_slice(&value);
+    data
+}
+
+/// Warp to a real bank slot (so `RandomnessAccountData::get_value` succeeds, as
+/// it requires the current slot to equal the account's reveal slot) while
+/// overriding the clock's unix timestamp (so turn-window gates still pass). The
+/// warp fixes the slot; the follow-up `set_sysvar` only adjusts the timestamp.
+async fn warp_with_timestamp(context: &mut ProgramTestContext, slot: u64, unix_timestamp: i64) {
+    context.warp_to_slot(slot).unwrap();
+    let mut clock: Clock = context.banks_client.get_sysvar().await.unwrap();
+    clock.unix_timestamp = unix_timestamp;
+    context.set_sysvar(&clock);
 }
 
 fn process_idealer_instruction<'a, 'b, 'c, 'info>(
@@ -39,8 +115,8 @@ fn process_idealer_instruction<'a, 'b, 'c, 'info>(
 fn test_config_args() -> InitializeGlobalConfigArgs {
     InitializeGlobalConfigArgs {
         treasury_address: Pubkey::new_unique(),
-        draw_vrf_config: Pubkey::new_unique(),
-        election_vrf_config: Pubkey::new_unique(),
+        draw_vrf_config: draw_queue(),
+        election_vrf_config: election_queue(),
         guess_submission_fee_lamports: 10_000_000,
         rule_proposal_fee_lamports: 20_000_000,
         rule_removal_fee_lamports: 50_000_000,
@@ -581,23 +657,43 @@ fn request_draw_instruction(
             authority,
             global_config: pda(&[b"global_config"]),
             turn_state: pda(&[b"turn", &turn_id.to_le_bytes()]),
+            randomness: randomness_account,
         }
         .to_account_metas(None),
-        data: instruction::RequestDraw { randomness_account }.data(),
+        data: instruction::RequestDraw {}.data(),
     }
 }
 
 #[tokio::test]
 #[ignore = "requires an SBF build and SBF_OUT_DIR; run the explicit SBF integration suite"]
 async fn rule_election_locks_requests_and_settles_active_rule() {
-    let mut context = ProgramTest::new(
-        "idealer",
-        idealer::ID,
-        processor!(process_idealer_instruction),
-    )
-    .start_with_context()
-    .await;
     let turn_id = 1_u64;
+    // Pre-register the finalist-election and active-election Switchboard accounts
+    // at genesis, each revealed at its settle slot, so warps do not trip the
+    // accounts-hash verification.
+    let election_randomness_account = Pubkey::new_unique();
+    let election_seed_slot = 60u64;
+    let election_reveal_slot = 100u64;
+    let active_randomness_account = Pubkey::new_unique();
+    let active_seed_slot = 70u64;
+    let active_reveal_slot = 200u64;
+    let mut program_test = idealer_program_test();
+    add_randomness_account(
+        &mut program_test,
+        election_randomness_account,
+        randomness_account_data(
+            election_queue(),
+            election_seed_slot,
+            election_reveal_slot,
+            [9; 32],
+        ),
+    );
+    add_randomness_account(
+        &mut program_test,
+        active_randomness_account,
+        randomness_account_data(election_queue(), active_seed_slot, active_reveal_slot, [11; 32]),
+    );
+    let mut context = program_test.start_with_context().await;
     initialize_and_open_turn(&mut context, turn_id).await;
 
     let player = Keypair::new();
@@ -678,6 +774,12 @@ async fn rule_election_locks_requests_and_settles_active_rule() {
     advance_clock_to_election_cutoff(&mut context, turn_id).await;
     let authority = context.payer.pubkey();
     let turn_address = pda(&[b"turn", &turn_id.to_le_bytes()]);
+    let election_cutoff_ts = context
+        .banks_client
+        .get_sysvar::<Clock>()
+        .await
+        .unwrap()
+        .unix_timestamp;
 
     let mut lock_accounts = accounts::LockRuleElectionPool {
         authority,
@@ -700,7 +802,9 @@ async fn rule_election_locks_requests_and_settles_active_rule() {
     let turn: TurnState = read_anchor_account(&mut context, turn_address).await;
     assert_ne!(turn.eligible_rule_pool_hash, [0; 32]);
 
-    let election_randomness_account = Pubkey::new_unique();
+    // Finalist-election VRF commit using the genesis-registered Switchboard
+    // account from the configured election queue. Its committed seed slot is
+    // recorded for the trustless settle.
     process(
         &mut context,
         Instruction {
@@ -709,22 +813,24 @@ async fn rule_election_locks_requests_and_settles_active_rule() {
                 authority,
                 global_config: pda(&[b"global_config"]),
                 turn_state: turn_address,
+                randomness: election_randomness_account,
             }
             .to_account_metas(None),
-            data: instruction::RequestRuleElectionVrf {
-                randomness_account: election_randomness_account,
-            }
-            .data(),
+            data: instruction::RequestRuleElectionVrf {}.data(),
         },
         &[],
     )
     .await
     .unwrap();
 
+    // Warp to the reveal slot (keeping the election cutoff timestamp) and settle
+    // the finalist election from the verified Switchboard value.
+    warp_with_timestamp(&mut context, election_reveal_slot, election_cutoff_ts).await;
     let mut settle_accounts = accounts::SettleRuleElection {
         authority,
         global_config: pda(&[b"global_config"]),
         turn_state: turn_address,
+        randomness: election_randomness_account,
     }
     .to_account_metas(None);
     settle_accounts.push(AccountMeta::new_readonly(rule_address, false));
@@ -733,13 +839,7 @@ async fn rule_election_locks_requests_and_settles_active_rule() {
         Instruction {
             program_id: idealer::ID,
             accounts: settle_accounts,
-            data: instruction::SettleRuleElection {
-                args: SettleRuleElectionArgs {
-                    randomness: [9; 32],
-                    randomness_source: election_randomness_account,
-                },
-            }
-            .data(),
+            data: instruction::SettleRuleElection {}.data(),
         },
         &[],
     )
@@ -784,8 +884,8 @@ async fn rule_election_locks_requests_and_settles_active_rule() {
     let proposal: RuleProposal = read_anchor_account(&mut context, rule_address).await;
     assert_eq!(proposal.state, RuleState::SurvivedElimination);
 
-    // Request and settle the active-rule election over the surviving finalist.
-    let active_randomness_account = Pubkey::new_unique();
+    // Request the active-rule election over the surviving finalist using the
+    // genesis-registered Switchboard account from the configured election queue.
     process(
         &mut context,
         Instruction {
@@ -794,22 +894,24 @@ async fn rule_election_locks_requests_and_settles_active_rule() {
                 authority,
                 global_config: pda(&[b"global_config"]),
                 turn_state: turn_address,
+                randomness: active_randomness_account,
             }
             .to_account_metas(None),
-            data: instruction::RequestActiveElectionVrf {
-                randomness_account: active_randomness_account,
-            }
-            .data(),
+            data: instruction::RequestActiveElectionVrf {}.data(),
         },
         &[],
     )
     .await
     .unwrap();
 
+    // Warp to the reveal slot and settle the active election from the verified
+    // randomness. The turn is still Open, so live-turn validation passes.
+    context.warp_to_slot(active_reveal_slot).unwrap();
     let mut active_settle_accounts = accounts::SettleActiveElection {
         authority,
         global_config: pda(&[b"global_config"]),
         turn_state: turn_address,
+        randomness: active_randomness_account,
     }
     .to_account_metas(None);
     active_settle_accounts.push(AccountMeta::new_readonly(rule_address, false));
@@ -818,13 +920,7 @@ async fn rule_election_locks_requests_and_settles_active_rule() {
         Instruction {
             program_id: idealer::ID,
             accounts: active_settle_accounts,
-            data: instruction::SettleActiveElection {
-                args: SettleRuleElectionArgs {
-                    randomness: [11; 32],
-                    randomness_source: active_randomness_account,
-                },
-            }
-            .data(),
+            data: instruction::SettleActiveElection {}.data(),
         },
         &[],
     )
@@ -844,7 +940,6 @@ async fn rule_election_locks_requests_and_settles_active_rule() {
 fn settle_draw_instruction(
     turn_id: u64,
     authority: Pubkey,
-    randomness: [u8; 32],
     randomness_source: Pubkey,
 ) -> Instruction {
     Instruction {
@@ -853,37 +948,56 @@ fn settle_draw_instruction(
             authority,
             global_config: pda(&[b"global_config"]),
             turn_state: pda(&[b"turn", &turn_id.to_le_bytes()]),
+            randomness: randomness_source,
         }
         .to_account_metas(None),
-        data: instruction::SettleDraw {
-            args: SettleDrawArgs {
-                randomness,
-                randomness_source,
-            },
-        }
-        .data(),
+        data: instruction::SettleDraw {}.data(),
     }
 }
 
 #[tokio::test]
 #[ignore = "requires an SBF build and SBF_OUT_DIR; run the explicit SBF integration suite"]
 async fn draw_request_settle_and_failure_flow_persist_state() {
-    let mut context = ProgramTest::new(
-        "idealer",
-        idealer::ID,
-        processor!(process_idealer_instruction),
-    )
-    .start_with_context()
-    .await;
     let turn_id = 1_u64;
+    // Pre-register the Switchboard randomness accounts at genesis so the later
+    // `warp_to_slot` does not trip the accounts-hash verification. The retry
+    // account is revealed at the settle slot (100); the initial and wrong-queue
+    // accounts are only used at request time.
+    let randomness_account = Pubkey::new_unique();
+    let first_seed_slot = 40u64;
+    let wrong_queue_account = Pubkey::new_unique();
+    let retry_account = Pubkey::new_unique();
+    let retry_seed_slot = 50u64;
+    let reveal_slot = 100u64;
+    let reveal_value = [3u8; 32];
+    let mut program_test = idealer_program_test();
+    add_randomness_account(
+        &mut program_test,
+        randomness_account,
+        randomness_account_data(draw_queue(), first_seed_slot, 0, [0; 32]),
+    );
+    add_randomness_account(
+        &mut program_test,
+        wrong_queue_account,
+        randomness_account_data(Pubkey::new_unique(), 41, 0, [0; 32]),
+    );
+    add_randomness_account(
+        &mut program_test,
+        retry_account,
+        randomness_account_data(draw_queue(), retry_seed_slot, reveal_slot, reveal_value),
+    );
+    let mut context = program_test.start_with_context().await;
     initialize_and_open_turn(&mut context, turn_id).await;
     let authority = context.payer.pubkey();
     let turn_address = pda(&[b"turn", &turn_id.to_le_bytes()]);
-    let randomness_account = Pubkey::new_unique();
+    let global_config = pda(&[b"global_config"]);
 
     advance_clock_to_turn_end(&mut context, turn_id).await;
 
-    // Request the draw; it stays in `Requested` (delayed VRF) until settled.
+    // Request the draw (Switchboard commit step). The randomness account is a
+    // genuine-format Switchboard account from the configured draw queue; its
+    // committed `seed_slot` is recorded for the trustless settle. It stays in
+    // `Requested` until the revealed value is settled.
     process(
         &mut context,
         request_draw_instruction(turn_id, authority, randomness_account),
@@ -894,7 +1008,17 @@ async fn draw_request_settle_and_failure_flow_persist_state() {
     let turn: TurnState = read_anchor_account(&mut context, turn_address).await;
     assert_eq!(turn.draw_status, DrawStatus::Requested);
     assert_eq!(turn.draw_vrf_request, randomness_account);
+    assert_eq!(turn.draw_commit_slot, first_seed_slot);
     assert_eq!(turn.draw_result, [0; 6]);
+
+    // A randomness account from a different queue is rejected at request time.
+    assert!(process(
+        &mut context,
+        request_draw_instruction(turn_id, authority, wrong_queue_account),
+        &[],
+    )
+    .await
+    .is_err());
 
     // Failure path: a requested draw can fail without corrupting turn state,
     // then be retried with a fresh randomness account.
@@ -904,7 +1028,7 @@ async fn draw_request_settle_and_failure_flow_persist_state() {
             program_id: idealer::ID,
             accounts: accounts::FailDraw {
                 authority,
-                global_config: pda(&[b"global_config"]),
+                global_config,
                 turn_state: turn_address,
             }
             .to_account_metas(None),
@@ -919,7 +1043,6 @@ async fn draw_request_settle_and_failure_flow_persist_state() {
     assert_eq!(turn.draw_failure_code, 1);
 
     // Retry the draw with a new randomness account.
-    let retry_account = Pubkey::new_unique();
     process(
         &mut context,
         request_draw_instruction(turn_id, authority, retry_account),
@@ -930,27 +1053,33 @@ async fn draw_request_settle_and_failure_flow_persist_state() {
     let turn: TurnState = read_anchor_account(&mut context, turn_address).await;
     assert_eq!(turn.draw_status, DrawStatus::Requested);
     assert_eq!(turn.draw_vrf_request, retry_account);
+    assert_eq!(turn.draw_commit_slot, retry_seed_slot);
 
-    // A source mismatch is rejected.
+    // A source mismatch (an account that is not the one recorded at request) is
+    // rejected before any value is read.
     assert!(process(
         &mut context,
-        settle_draw_instruction(turn_id, authority, [3u8; 32], Pubkey::new_unique()),
+        settle_draw_instruction(turn_id, authority, Pubkey::new_unique()),
         &[],
     )
     .await
     .is_err());
 
-    // Settle with the matching source and a revealed randomness value.
+    // Warp to the reveal slot and settle. The program reads the value directly
+    // from the Switchboard account (no authority-supplied value); `get_value`
+    // only succeeds because the reveal slot equals the slot the settle executes
+    // in.
+    context.warp_to_slot(reveal_slot).unwrap();
     process(
         &mut context,
-        settle_draw_instruction(turn_id, authority, [3u8; 32], retry_account),
+        settle_draw_instruction(turn_id, authority, retry_account),
         &[],
     )
     .await
     .unwrap();
     let turn: TurnState = read_anchor_account(&mut context, turn_address).await;
     assert_eq!(turn.draw_status, DrawStatus::Fulfilled);
-    assert_eq!(turn.draw_randomness, [3u8; 32]);
+    assert_eq!(turn.draw_randomness, reveal_value);
     assert_eq!(turn.draw_vrf_fulfillment, retry_account);
     let mut seen = std::collections::HashSet::new();
     for number in turn.draw_result {
@@ -958,10 +1087,12 @@ async fn draw_request_settle_and_failure_flow_persist_state() {
         assert!(seen.insert(number));
     }
 
-    // Re-settling an already fulfilled draw is rejected.
+    // Re-settling an already fulfilled draw is rejected. Warp to a fresh slot so
+    // the retry is a distinct transaction rather than a cached one.
+    context.warp_to_slot(reveal_slot + 1).unwrap();
     assert!(process(
         &mut context,
-        settle_draw_instruction(turn_id, authority, [4u8; 32], retry_account),
+        settle_draw_instruction(turn_id, authority, retry_account),
         &[],
     )
     .await
@@ -1118,14 +1249,19 @@ async fn lamports_of(context: &mut ProgramTestContext, address: Pubkey) -> u64 {
 #[tokio::test]
 #[ignore = "requires an SBF build and SBF_OUT_DIR; run the explicit SBF integration suite"]
 async fn claim_flow_records_and_pays_winner_and_reward() {
-    let mut context = ProgramTest::new(
-        "idealer",
-        idealer::ID,
-        processor!(process_idealer_instruction),
-    )
-    .start_with_context()
-    .await;
     let turn_id = 1_u64;
+    // Pre-register the draw randomness account at genesis, revealed at the settle
+    // slot, so the warp does not trip the accounts-hash verification.
+    let randomness_account = Pubkey::new_unique();
+    let draw_seed_slot = 40u64;
+    let draw_reveal_slot = 100u64;
+    let mut program_test = idealer_program_test();
+    add_randomness_account(
+        &mut program_test,
+        randomness_account,
+        randomness_account_data(draw_queue(), draw_seed_slot, draw_reveal_slot, [3u8; 32]),
+    );
+    let mut context = program_test.start_with_context().await;
     initialize_and_open_turn(&mut context, turn_id).await;
     let authority = context.payer.pubkey();
 
@@ -1137,7 +1273,6 @@ async fn claim_flow_records_and_pays_winner_and_reward() {
         .await
         .unwrap();
     advance_clock_to_turn_end(&mut context, turn_id).await;
-    let randomness_account = Pubkey::new_unique();
     process(
         &mut context,
         request_draw_instruction(turn_id, authority, randomness_account),
@@ -1145,9 +1280,10 @@ async fn claim_flow_records_and_pays_winner_and_reward() {
     )
     .await
     .unwrap();
+    context.warp_to_slot(draw_reveal_slot).unwrap();
     process(
         &mut context,
-        settle_draw_instruction(turn_id, authority, [3u8; 32], randomness_account),
+        settle_draw_instruction(turn_id, authority, randomness_account),
         &[],
     )
     .await
