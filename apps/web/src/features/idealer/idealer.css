@@ -178,14 +178,14 @@
   max-width: 86%; align-self: flex-start; overflow-wrap: anywhere; word-break: break-word;
   background: var(--surface); border: 1px solid var(--line);
   border-radius: 6px 18px 18px 18px; padding: 13px 15px;
-  font-size: 15px; line-height: 1.5; color: var(--text);
+  font-size: 15px; line-height: 1.5; color: var(--text); white-space: pre-line;
 }
 .ide-bubble-user {
   max-width: 84%; align-self: flex-end; overflow-wrap: anywhere; word-break: break-word;
   background: linear-gradient(120deg, rgba(153,69,255,0.9), rgba(20,241,149,0.85));
   color: #08110C; font-weight: 500;
   border-radius: 18px 18px 6px 18px; padding: 12px 15px;
-  font-size: 15px; line-height: 1.45;
+  font-size: 15px; line-height: 1.45; white-space: pre-line;
 }
 .ide-typing span {
   display: inline-block; width: 7px; height: 7px; border-radius: 4px; margin-right: 4px;

@@ -54,6 +54,30 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-06-22 (Restored healthy API compiler runtime)
+
+- Opened required context before working: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/automation-upkeep/SKILL.md`, `.claude/skills/best-practices/SKILL.md`, `.claude/skills/best-practices/references/agent-principles.md`, `.claude/skills/best-practices/references/web2-backend.md`, and `.claude/skills/best-practices/references/observability.md`.
+- Root cause: port `3002` was occupied by a local `node`/`tsx` API process running without healthy `DATABASE_URL`/`REDIS_URL`, so `/health` returned HTTP 503. The Compose `idealer-api` service existed but was not running on the port.
+- Stopped only the unhealthy local API process on port `3002`, then started the Compose API with `docker compose up -d api`. This kept the existing web dev server intact.
+- Verification passed: `docker compose ps` shows `idealer-api`, `idealer-postgres`, `idealer-redis`, and `idealer-worker` all `healthy`; `GET http://127.0.0.1:3002/health` returns `status:"ok"` with Postgres and Redis `ok`.
+- Compiler verification passed with a real `POST http://127.0.0.1:3002/rule-preflight` for `Win if at least 4 of your numbers appear in the draw.` returning `decision:"VALID"`, `modelUsed:"gemma4:latest"`, `guardianChecked:true`, and `guardianGrounded:true`. API logs show warmup loaded `gemma4:latest`, `gemma4:e2b`, and `granite4.1-guardian:8b`.
+- No source/config files were changed for this runtime repair, and no milestone checkbox or PRD checklist item was ticked.
+
+### 2026-06-22 (Runtime status check for dealer agent)
+
+- Opened required context before checking runtime state: `PRD.md` and `.claude/skills`.
+- Checked the local API runtime after the user asked whether the dealer agent was already configured and working. `GET http://127.0.0.1:3002/health` returned HTTP 503 with `postgres:"error"` and `redis:"error"`.
+- `docker compose ps` showed `idealer-postgres`, `idealer-redis`, and `idealer-worker` running, but no `idealer-api` or `idealer-web` Compose services. Port 3002 is currently served by a local Node/tsx process running `src/index.ts`, not the Compose API container.
+- No configuration file was changed and no process/container was stopped or restarted.
+
+### 2026-06-22 (Dealer chat canned replies for common questions)
+
+- Opened required context before working: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/develop-frontend/SKILL.md`, `.claude/skills/idealer-design-system/SKILL.md`, `.claude/skills/idealer-design-system/references/01-tokens.md`, `.claude/skills/idealer-design-system/references/02-components.md`, `.claude/skills/idealer-design-system/references/03-screens-and-state.md`, `.claude/skills/idealer-ui-coherence/SKILL.md`, `.claude/skills/best-practices/SKILL.md`, and `.claude/skills/best-practices/references/agent-principles.md`.
+- Updated `apps/web/src/features/idealer/screens/Create.tsx` so non-rule chat messages get deterministic dealer replies for pricing/cost, examples, how rule compilation works, and allowed rule inputs. These replies do not call `/rule-preflight`; rule-shaped drafts still go to the compiler, and real compiler outages still surface as infrastructure errors.
+- Updated `apps/web/src/features/idealer/idealer.css` so chat bubbles preserve short multi-line dealer replies, keeping example lists readable on mobile.
+- Verification passed: `pnpm --filter @idealer/web typecheck`, `pnpm --filter @idealer/web lint`, and `GET http://127.0.0.1:3000/play` returned HTTP 200 from the existing local dev server.
+- Verification limitation: `pnpm --filter @idealer/web exec playwright test e2e/rule-proposal.spec.ts` did not start because an existing Next dev server already holds the `apps/web` dev lock on port 3000 while the Playwright config tries to start another server on port 3005. The existing server was left running; no milestone checkbox or PRD checklist item was ticked.
+
 ### 2026-06-22 (Dealer chat avoids compiler calls for greetings)
 
 - Opened required context before working: `PRD.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/develop-frontend/SKILL.md`, `.claude/skills/playwright/SKILL.md`, and `packages/rule-compiler/rule-authoring/SKILL.md`; also followed the investigation workflow for the reported `POST /rule-preflight` HTTP 502.

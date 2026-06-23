@@ -39,7 +39,19 @@ const GREETING_PATTERN =
   /^(hi|hello|hey|yo|oi|ola|olá|bom dia|boa tarde|boa noite|sup|e ai|e aí)[!.? ]*$/i;
 
 const QUESTION_PATTERN =
-  /^(how|what|why|where|when|can|could|should|do|does|is|are|como|o que|qual|por que|porque|quando|posso|pode|devo)\b/i;
+  /^(how|what|why|where|when|can|could|should|do|does|is|are|como|o que|qual|quanto|quantos|quanta|quantas|por que|porque|quando|posso|pode|devo)\b/i;
+
+const COST_TOPIC_PATTERN =
+  /\b(cost|costs|price|fee|fees|payment|pay|paid|submit|submission|quanto|quantos|quanta|quantas|custa|custam|custo|preco|preço|valor|taxa|pagar|pagamento|enviar|submeter)\b/i;
+
+const EXAMPLE_TOPIC_PATTERN =
+  /\b(example|examples|sample|samples|idea|ideas|inspiration|suggestion|suggestions|exemplo|exemplos|ideia|ideias|inspira|sugestao|sugestão|sugestoes|sugestões)\b/i;
+
+const HOW_IT_WORKS_TOPIC_PATTERN =
+  /\b(how does it work|how this works|how rules work|como funciona|como isso funciona|como a regra funciona|funciona)\b/i;
+
+const ALLOWED_TOPIC_PATTERN =
+  /\b(allowed|valid|invalid|can i use|what can|only use|permitido|valido|válido|invalido|inválido|posso usar|pode usar|usar na regra|regras validas|regras válidas)\b/i;
 
 function isLikelyRuleDraft(text: string) {
   const trimmed = text.trim();
@@ -53,10 +65,25 @@ function isLikelyRuleDraft(text: string) {
   );
 }
 
-function getDealerChatReply(text: string) {
+function getDealerChatReply(
+  text: string,
+  fees: { play: number; remove: number; rule: number; vote: number },
+) {
   const trimmed = text.trim();
   if (GREETING_PATTERN.test(trimmed)) {
     return "Hey. Send me one winner condition based on the guess and the official draw.";
+  }
+  if (COST_TOPIC_PATTERN.test(trimmed)) {
+    return `Submitting a rule costs ${fmtSol(fees.rule)} SOL. Chat and preflight are free; payment only happens after the compiler returns a valid rule and you confirm submission.`;
+  }
+  if (EXAMPLE_TOPIC_PATTERN.test(trimmed)) {
+    return "Try one of these:\nWin if at least 4 of your numbers appear in the draw.\nWin if the sum of your numbers equals the sum of the drawn numbers.\nWin if the player matches more numbers than anyone else.";
+  }
+  if (HOW_IT_WORKS_TOPIC_PATTERN.test(trimmed)) {
+    return "Write one winner condition. I check that it only uses the player's guess and the official draw, compile it into a deterministic rule, then you review it before paying.";
+  }
+  if (ALLOWED_TOPIC_PATTERN.test(trimmed)) {
+    return "A valid rule can compare the player's guess with the official draw: matches, misses, sums, order, positions, parity, ranges, digits, or closest/highest/lowest scores. It cannot use wallet history, time, randomness outside the draw, or off-chain events.";
   }
   if (QUESTION_PATTERN.test(trimmed) || trimmed.endsWith("?")) {
     return "A valid rule can only use the player's guess and the official draw. Write the condition in one sentence, and I will compile it before payment.";
@@ -170,7 +197,7 @@ function CreateChat({ client, fees, go, played, reloadAll, seed, turnId, wallet,
     setRule(null);
     try {
       if (!isLikelyRuleDraft(t)) {
-        setMsgs((m) => [...m, { text: getDealerChatReply(t), who: "ai" }]);
+        setMsgs((m) => [...m, { text: getDealerChatReply(t, fees), who: "ai" }]);
         return;
       }
 
