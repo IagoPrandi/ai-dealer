@@ -1,6 +1,6 @@
 # Trustless Settlement Pipeline — Action Plan
 
-> **Status:** M5.0 confirmed and ticked (2026-06-23); M5.1 (trustless on-chain randomness verification) implemented and SBF-tested (7/7 green) — devnet upgrade held for user go-ahead before ticking.
+> **Status:** M5.0, M5.1 and M5.2 confirmed and ticked (2026-06-23). Next: M5.3 (settlement scheduler + state machine + worker→API bridge).
 > **Created:** 2026-06-22
 > **Decision:** **Trustless** — `settle_*` instructions must verify Switchboard randomness on-chain (no authority-supplied randomness value).
 > **Scope:** Everything in the post-turn-close settlement pipeline EXCEPT turn open/close (which stays a manual test helper today and the automatic timed loop in production). Goal: validate the real pipeline end-to-end on devnet **without mocks or fallbacks**.
@@ -58,7 +58,7 @@ Phases map 1:1 to milestones. Each milestone lists Objective, Scope, Deliverable
   - The milestone checkbox remains open until user confirmation.
 
 ### M5.1 — Trustless on-chain randomness verification (contract)
-- [ ] **M5.1**
+- [x] **M5.1** — confirmed by user 2026-06-23.
 - **Objective:** Make the draw and both election settlements verify Switchboard randomness on-chain.
 - **Scope:** Change `settle_draw`, `settle_rule_election`, `settle_active_election` to take the Switchboard randomness **account** and deserialize/verify the revealed value + slot/queue, replacing `args.randomness`. Keep deterministic derivation (`derive_draw_numbers`, `run_rule_election`) reading the verified value. Preserve `randomness_source` binding to the account recorded at request time. Update SBF instruction tests to use a real/managed randomness account.
 - **Deliverables:** updated handlers + Accounts structs (Switchboard account type); `switchboard-on-demand` crate dep; SBF build (Docker) + devnet program upgrade; updated `core.rs`/`instructions.rs` tests.
@@ -70,17 +70,35 @@ Phases map 1:1 to milestones. Each milestone lists Objective, Scope, Deliverable
   - The three `request_*` instructions became the commit step (`read_committed_randomness`: owner + queue check, record `seed_slot`). Added `draw_commit_slot` / `election_commit_slot` / `active_election_commit_slot` to `TurnState`, the `randomness` account to all six Accounts structs, four error variants (`InvalidRandomnessOwner`, `RandomnessQueueMismatch`, `RandomnessCommitSlotMismatch`, `RandomnessNotResolved`), and a `sb-devnet` cargo feature.
   - SBF tests rewritten to inject genuine-format `RandomnessAccountData` accounts (correct discriminator/layout, owned by the Switchboard devnet program), pre-registered at genesis and slot-controlled — no mocks, no production bypass.
   - **Verification:** `clippy -D warnings` green for both `sb-devnet` and production (default) feature sets; Docker SBF build with `devnet-test,sb-devnet` succeeds; full ignored SBF instruction suite **7/7 green**.
-  - **Held:** the devnet program upgrade is NOT broadcast — awaiting user go-ahead (per the M5.0 pattern). The deploy must build the `.so` from current source with `SBF_FEATURES=devnet-test,sb-devnet`.
   - The milestone checkbox remains open until user confirmation.
+- **Live devnet execution (2026-06-23, user-approved):**
+  - `.so` built from clean source with `SBF_FEATURES=devnet-test,sb-devnet` (750544 B).
+  - **Program account extended** +10240 bytes (`solana program extend`) so the larger trustless program fits; program data length is now 751624 B.
+  - **Program upgrade** (trustless `settle_*` verification) `solana program deploy` sig `2YwwwjmWVMdoDfCzFjaYh8eZ4TqyVdezTCM8phAnE4hhdLz14QQxgkHjwdTyHtZ98ri7PqAjmH2iB6B9Md9dVWFb` (slot 471472365, data length 751624 B). On-chain verification: owner `BPFLoaderUpgradeab1e…`, authority `4bY5krt2…` (unchanged).
+  - **Note:** the deployed build still carries `devnet-test` and `sb-devnet`; per §5 it must be rebuilt without them (mainnet Switchboard program id) before production.
 
 ### M5.2 — Worker randomness client + production settlement senders
-- [ ] **M5.2**
+- [x] **M5.2** — confirmed by user 2026-06-23 (live devnet acceptance executed).
 - **Objective:** Real production implementations of the previously-mocked settlement dependencies.
 - **Scope:** Implement the production `DrawCycleDeps` / `RuleElectionCycleDeps` (`fetchRandomness`, `randomnessAccountFor`, `requestDraw`, `settleDraw`, `failDraw`, `requestElectionVrf`, `settleElection`) using the Switchboard client and real on-chain instruction builders for `request_draw`/`settle_draw`/`fail_draw` and the two election VRF steps. Reuse the existing `simulateAndSend` + instruction-building patterns.
 - **Deliverables:** new worker module(s) wiring real deps; instruction builders for the draw/election instructions (discriminators + accounts + arg serialization).
 - **Acceptance:** with a closed turn on devnet, the worker drives a real `request_draw` → Switchboard reveal → `settle_draw`, and the on-chain turn reaches `DrawStatus::Fulfilled` with verified numbers.
 - **Dependencies:** M5.1.
 - **Risks:** VRF reveal latency (commit→reveal slots) requires a wait/retry loop; idempotency across retries.
+- **Implementation note (2026-06-23):** Local worker implementation is complete and awaiting live devnet execution/confirmation before ticking the milestone.
+  - Opened required context before implementation: `PRD.md`, `SETTLEMENT_TRUSTLESS_PLAN.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/solana-dev/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/references/kit-web3-interop.md`, `.claude/skills/solana-dev/ext/sendai/skills/switchboard/SKILL.md`, `.claude/skills/solana-dev/backend-async.md`, `.claude/skills/automation-upkeep/SKILL.md`, `.claude/skills/best-practices/SKILL.md`, `.claude/skills/best-practices/references/agent-principles.md`, `.claude/skills/best-practices/references/code-quality.md`, `.claude/skills/best-practices/references/web2-backend.md`, `.claude/skills/best-practices/references/web3-contracts.md`, and `.claude/skills/best-practices/references/testing.md`.
+  - Added `apps/worker/src/settlement.ts` with production Switchboard-backed settlement senders: fresh randomness create+commit, committed-account polling, `request_draw`, atomic Switchboard `revealIx` + `settle_draw`, `fail_draw`, eligible-pool lock, finalist-election request/atomic settle, and active-election request/atomic settle helpers.
+  - Added web3 instruction builders for `request_draw`, `settle_draw`, `fail_draw`, `lock_rule_election_pool`, `request_rule_election_vrf`, `settle_rule_election`, `request_active_election_vrf`, and `settle_active_election` using Anchor discriminators and PDA-derived accounts.
+  - Updated `DrawCycleDeps` and `RuleElectionCycleDeps` so trustless production senders can return the verified randomness value after the reveal+settle transaction; this avoids reintroducing authority-supplied randomness into the on-chain settle path while preserving deterministic worker/API projection.
+  - Added unit coverage for trustless settle-return randomness and instruction serialization (`apps/worker/src/settlement.test.ts`).
+  - Verification passed locally: `pnpm --filter @idealer/worker typecheck`, `pnpm --filter @idealer/worker test` (58/58), `pnpm --filter @idealer/worker lint`, and `pnpm --filter @idealer/worker build`.
+  - Not executed: live devnet `request_draw` → Switchboard `reveal` → `settle_draw` broadcast, because sending signed devnet transactions requires explicit broadcast confirmation. The milestone checkbox remains open until user confirmation.
+- **Live devnet execution (2026-06-23, user-approved):**
+  - Added a gated manual operator driver `apps/worker/src/switchboard-settle-draw.ts` (`switchboard:settle-draw`) that drives `request_draw` → reveal → `settle_draw` for one turn (dry-run by default; broadcasts only with `IDEALER_SETTLE_BROADCAST=1`), and a gated devnet staging helper `apps/worker/src/devnet-stage-turn.ts` (`devnet:stage-turn`).
+  - **Authority discovery:** every turn/draw instruction is `has_one = authority`-gated against the on-chain `GlobalConfig.authority`, which is the Docker deployer keypair `EAoZrh8TtZCYtUdKpkuMaNSrConsQoUQvzjZ7cuQGqdW` (kept only in the `idealer-solana-home` volume at `/solana-home/.config/idealer/devnet/idealer-deployer-keypair.json`), **not** the inline `.env` `4bY5krt2…`. The acceptance must therefore run inside the worker container, which mounts that keypair. (The worker image was rebuilt to include the new `@switchboard-xyz/on-demand` dependency.)
+  - **Legacy turn:** the pre-existing active turn 30 used an older `TurnState` layout the trustless program can no longer deserialize (`AccountDidNotDeserialize`). The staging helper force-skipped it and opened a fresh current-layout turn: skip-30 sig `2bXeKhx6MX4s2np61LAj21r63rtPDUy85ArRP4YHxJ3RUSGP4Z6VVqmQ96dJ5paPS7rFUzpCy3DXKCbPYMfQia2S`, open-31 sig `deDsE597m4Da67WihP6vPtmoZ1Aw2aV5kqoMa4g37ZoBHQLBRCFwqRfvpoN48azcaUGRkhK8bKrcVsj1EiSUECL`, shrink-31 sig `3YT5bMtaAviaXn8nVpFL8h5iysqqQY6x6hUksSV71CdX6sN6LSR3XWG7jZfA4u3qSVcEsYZfbiXZuyQePBEDSXj5`, close-31 sig `2YZcCjGrtbPgNkCjsABatUapmrAvRZGC5PyAwP6m4kXqsVmZQ5s8REgSM7KjThCYq5rwqMnaMtunqacLmESGqm7t` (turn 31 `status=closed`, `dataLength=788`).
+  - **Acceptance (turn 31):** `request_draw` committed Switchboard randomness account `7VNoSfNjARkYDyscswedpK3uZ6FQqjy8xZr6xdHjaM7E`; the atomic reveal + `settle_draw` transaction `5n5aCsz84JsbPacCdtyXGtM2RBkR14vcXkMHLwPHzNo21z8KrF1LDJzr6qQmxgaypvrM5gi8YmJPyha1uXHye1rY` is **finalized** (`err: null`) at slot 471498242. On-chain verified randomness `c7a74184754a5ed99124e10c951aa79ac344895e297f0a493be920f81f5b86bc`, derived draw result `[17, 56, 47, 28, 14, 8]`, turn 31 reached `DrawStatus::Fulfilled`.
+  - **Known follow-up (M5.3 scope, not M5.2):** the existing `runTurnAutomationOnce` evaluates the `set_turn_duration_cycle` branch before the close/force-skip branch and has no legacy-deserialization fallback there, so a legacy active turn permanently wedges the production automation loop (this is why turn 30 never advanced). The staging helper works around it; the loop itself should be reordered/guarded when M5.3 wires the settlement scheduler.
 
 ### M5.3 — Settlement scheduler + state machine + worker→API bridge
 - [ ] **M5.3**
@@ -132,8 +150,8 @@ M5.0–M5.3 are the critical path (the missing machinery). M5.4–M5.5 validate.
 | Milestone | Title | Status | Notes |
 | --- | --- | --- | --- |
 | M5.0 | Switchboard On-Demand provisioning (devnet) | ✅ Done | Confirmed by user 2026-06-23. `set_vrf_config` + proof-of-life broadcast on devnet; on-chain VRF config addresses verified. |
-| M5.1 | Trustless on-chain randomness verification (contract) | In review | Implemented 2026-06-23; clippy clean (both feature sets); SBF suite 7/7 green. Devnet upgrade held for user go-ahead; checkbox open pending confirmation. |
-| M5.2 | Worker randomness client + production settlement senders | Planned | — |
+| M5.1 | Trustless on-chain randomness verification (contract) | ✅ Done | Confirmed by user 2026-06-23. Clippy clean (both feature sets); SBF suite 7/7 green; devnet upgrade verified (sig `2Ywwwjm…dVWFb`, slot 471472365). |
+| M5.2 | Worker randomness client + production settlement senders | ✅ Done | Confirmed by user 2026-06-23. Live devnet `request_draw` → reveal → `settle_draw` on turn 31; settle sig `5n5aCsz8…` finalized (slot 471498242); `DrawStatus::Fulfilled`, draw `[17,56,47,28,14,8]`, verified randomness `c7a7…86bc`. |
 | M5.3 | Settlement scheduler + state machine + worker→API bridge | Planned | — |
 | M5.4 | Real player inputs (no mocks) | Planned | — |
 | M5.5 | End-to-end verification & reconciliation | Planned | — |

@@ -199,7 +199,8 @@ function baseDeps(
     randomnessAccountFor: async () =>
       "Rand1111111111111111111111111111111111111",
     requestElectionVrf: async () => undefined,
-    settleElection: async () => undefined,
+    settleElection: async (_turnId, _source, randomness) =>
+      randomness ? { randomness } : undefined,
     ...overrides,
   };
   return { deps, published };
@@ -216,6 +217,32 @@ test("runRuleElectionCycle locks and publishes the eligible pool", async () => {
   assert.equal(result.action, "lock");
   assert.equal(published[0]?.status, "locked");
   assert.deepEqual(published[0]?.eligibleRuleIds, [1]);
+});
+
+test("runRuleElectionCycle accepts randomness returned by trustless settle", async () => {
+  const settledRandomness = new Uint8Array(32).fill(10);
+  const { deps, published } = baseDeps({
+    fetchRandomness: async () => ({
+      randomness: null,
+      source: "Rand1111111111111111111111111111111111111",
+      status: "ready",
+    }),
+    fetchTurn: async () => ({
+      ...BASE_TURN,
+      electionVrfRequest: "Rand1111111111111111111111111111111111111",
+      eligibleRulePoolHash: hex(1),
+    }),
+    settleElection: async () => ({ randomness: settledRandomness }),
+  });
+
+  const result = await runRuleElectionCycle(
+    3,
+    { randomFinalistCount: 7, topVotedFinalistCount: 3 },
+    deps,
+  );
+
+  assert.equal(result.action, "settle");
+  assert.equal(published[0]?.randomnessValue, hex(10));
 });
 
 test("runRuleElectionCycle settles and publishes the elected active rule", async () => {

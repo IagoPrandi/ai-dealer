@@ -29,7 +29,7 @@ export interface DrawTurn {
 export type RandomnessState =
   | { status: "failed" }
   | { status: "pending" }
-  | { randomness: Uint8Array; source: string; status: "ready" };
+  | { randomness: Uint8Array | null; source: string; status: "ready" };
 
 const DRAW_COUNT = 6;
 const UPPER_BOUND = 100;
@@ -138,9 +138,9 @@ export interface DrawCycleDeps {
   requestDraw: (turnId: number, randomnessAccount: string) => Promise<void>;
   settleDraw: (
     turnId: number,
-    randomness: Uint8Array,
     source: string,
-  ) => Promise<string>;
+    randomness: Uint8Array | null,
+  ) => Promise<string | { randomness: Uint8Array; signature: string }>;
 }
 
 export interface DrawCycleResult {
@@ -185,21 +185,30 @@ export async function runDrawCycle(
   }
 
   if (action === "settle" && randomness && randomness.status === "ready") {
-    const drawResult = deriveDrawNumbers(randomness.randomness, turnId);
-    const signature = await deps.settleDraw(
+    const settleResult = await deps.settleDraw(
       turnId,
-      randomness.randomness,
       randomness.source,
+      randomness.randomness,
     );
+    const signature =
+      typeof settleResult === "string" ? settleResult : settleResult.signature;
+    const settledRandomness =
+      typeof settleResult === "string"
+        ? randomness.randomness
+        : settleResult.randomness;
+    if (!settledRandomness) {
+      throw new Error("Settled draw did not return a randomness value.");
+    }
+    const drawResult = deriveDrawNumbers(settledRandomness, turnId);
     await deps.publishDraw({
       drawResult,
       drawnAt: deps.nowIso(),
       failureCode: null,
       randomnessAccount: randomness.source,
       randomnessSource: randomness.source,
-      randomnessValue: Buffer.from(randomness.randomness).toString("hex"),
+      randomnessValue: Buffer.from(settledRandomness).toString("hex"),
       requestedAt: deps.nowIso(),
-      settleSignature: signature,
+      settleSignature: signature.toString(),
       status: "fulfilled",
       turnId,
     });

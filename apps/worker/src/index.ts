@@ -22,6 +22,7 @@ export * from "./draw.js";
 export * from "./guess-verification.js";
 export * from "./manual-control.js";
 export * from "./rule-validation.js";
+export * from "./settlement.js";
 export * from "./switchboard.js";
 export * from "./turn-automation.js";
 

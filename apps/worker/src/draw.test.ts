@@ -96,7 +96,15 @@ function baseDeps(overrides: Partial<DrawCycleDeps> = {}): {
     randomnessAccountFor: async () =>
       "Acct11111111111111111111111111111111111111",
     requestDraw: async () => undefined,
-    settleDraw: async () => "Sig1111111111111111111111111111111111111111",
+    settleDraw: async (_turnId, _source, randomness) => {
+      if (!randomness) {
+        throw new Error("test randomness missing");
+      }
+      return {
+        randomness,
+        signature: "Sig1111111111111111111111111111111111111111",
+      };
+    },
     ...overrides,
   };
   return { deps, published };
@@ -110,6 +118,35 @@ test("runDrawCycle requests and publishes a requested draw", async () => {
   assert.equal(published.length, 1);
   assert.equal(published[0]?.status, "requested");
   assert.equal(published[0]?.drawResult, null);
+});
+
+test("runDrawCycle accepts randomness returned by trustless settle", async () => {
+  const settledRandomness = new Uint8Array(32).fill(4);
+  const { deps, published } = baseDeps({
+    fetchRandomness: async () => ({
+      randomness: null,
+      source: "Source1111111111111111111111111111111111111",
+      status: "ready",
+    }),
+    fetchTurn: async () => ({
+      drawStatus: "requested",
+      endTimestampSeconds: 1_000,
+      turnId: 5,
+    }),
+    settleDraw: async () => ({
+      randomness: settledRandomness,
+      signature: "Sig2222222222222222222222222222222222222222",
+    }),
+  });
+
+  const result = await runDrawCycle(5, deps);
+
+  assert.equal(result.action, "settle");
+  assert.deepEqual(result.drawResult, deriveDrawNumbers(settledRandomness, 5));
+  assert.equal(
+    published[0]?.randomnessValue,
+    Buffer.from(settledRandomness).toString("hex"),
+  );
 });
 
 test("runDrawCycle settles and publishes a fulfilled draw", async () => {

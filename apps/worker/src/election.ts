@@ -75,7 +75,7 @@ export interface ElectionTurn {
 export type ElectionRandomnessState =
   | { status: "failed" }
   | { status: "pending" }
-  | { randomness: Uint8Array; source: string; status: "ready" };
+  | { randomness: Uint8Array | null; source: string; status: "ready" };
 
 export interface PublishedRuleElection extends RuleElectionResult {
   randomnessAccount: string | null;
@@ -531,10 +531,10 @@ export interface RuleElectionCycleDeps {
   requestElectionVrf: (turnId: number, randomnessAccount: string) => Promise<void>;
   settleElection: (
     turnId: number,
-    randomness: Uint8Array,
     source: string,
+    randomness: Uint8Array | null,
     candidates: ElectionCandidate[],
-  ) => Promise<void>;
+  ) => Promise<void | { randomness: Uint8Array }>;
 }
 
 export async function runRuleElectionCycle(
@@ -575,13 +575,22 @@ export async function runRuleElectionCycle(
 
   if (action === "settle" && randomness?.status === "ready") {
     const candidates = await deps.fetchCandidates(turnId);
-    const result = runRuleElection(candidates, randomness.randomness, turnId, config);
-    await deps.settleElection(turnId, randomness.randomness, randomness.source, candidates);
+    const settleResult = await deps.settleElection(
+      turnId,
+      randomness.source,
+      randomness.randomness,
+      candidates,
+    );
+    const settledRandomness = settleResult?.randomness ?? randomness.randomness;
+    if (!settledRandomness) {
+      throw new Error("Settled rule election did not return a randomness value.");
+    }
+    const result = runRuleElection(candidates, settledRandomness, turnId, config);
     await deps.publishElection({
       ...result,
       randomnessAccount: turn.electionVrfRequest,
       randomnessSource: randomness.source,
-      randomnessValue: Buffer.from(randomness.randomness).toString("hex"),
+      randomnessValue: Buffer.from(settledRandomness).toString("hex"),
       requestedAt: null,
       settledAt: deps.nowIso(),
       status: result.activeRuleId === null ? "original_only" : "settled",
