@@ -18,7 +18,7 @@ import {
 const DEFAULT_DEVNET_RPC_URL = "https://api.devnet.solana.com";
 const DEFAULT_IDEALER_PROGRAM_ID =
   "6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4";
-const SYSTEM_PROGRAM_ID = address("11111111111111111111111111111111");
+export const SYSTEM_PROGRAM_ID = address("11111111111111111111111111111111");
 const OPEN_TURN_DISCRIMINATOR = new Uint8Array([
   78, 206, 19, 149, 237, 34, 191, 82,
 ]);
@@ -38,7 +38,7 @@ const PRODUCTION_TURN_DURATION_CYCLE_SECONDS = [
 const CURRENT_TURN_STATE_DATA_LENGTH = 448;
 const addressDecoder = getAddressDecoder();
 
-type SolanaAddress = ReturnType<typeof address>;
+export type SolanaAddress = ReturnType<typeof address>;
 
 export interface GlobalConfigSnapshot {
   activeTurnId: number;
@@ -171,7 +171,7 @@ function u64Le(value: number) {
   return bytes;
 }
 
-function u64LeArray(value: number) {
+export function u64LeArray(value: number) {
   return Array.from(u64Le(value));
 }
 
@@ -317,8 +317,29 @@ function createAccountReader(data: Uint8Array) {
   };
 }
 
-export function decodeGlobalConfigAccount(
+function isPlausibleGlobalConfig(snapshot: GlobalConfigSnapshot) {
+  if (
+    snapshot.turnDurationCycle.some(
+      (duration) => duration <= 0 || duration > 31_536_000,
+    )
+  ) {
+    return false;
+  }
+
+  if (!snapshot.hasActiveTurn) {
+    return snapshot.activeTurnId === 0;
+  }
+
+  return (
+    snapshot.activeTurnId > 0 &&
+    snapshot.nextTurnId >= snapshot.activeTurnId &&
+    snapshot.nextTurnId - snapshot.activeTurnId < 10_000
+  );
+}
+
+function decodeGlobalConfigAccountWithLayout(
   data: Uint8Array,
+  hasRuleRemovalFee: boolean,
 ): GlobalConfigSnapshot {
   const reader = createAccountReader(data);
   reader.skip(32);
@@ -331,7 +352,8 @@ export function decodeGlobalConfigAccount(
   }
 
   reader.skip(32 * 3);
-  reader.skip(8 + 8 + 8);
+  // guess_submission + rule_proposal + [rule_removal] + vote fees.
+  reader.skip(8 + 8 + (hasRuleRemovalFee ? 8 : 0) + 8);
   reader.skip(2);
   const turnDurationCycle = [
     reader.readU32(),
@@ -355,6 +377,26 @@ export function decodeGlobalConfigAccount(
     paused,
     turnDurationCycle,
   };
+}
+
+// The current program adds `rule_removal_fee_lamports` to `GlobalConfig`; older
+// devnet accounts predate it. Decode with the current layout first and fall
+// back to the legacy layout, mirroring the web decoder, so the worker reads the
+// account correctly both before and after a migration.
+export function decodeGlobalConfigAccount(
+  data: Uint8Array,
+): GlobalConfigSnapshot {
+  const current = decodeGlobalConfigAccountWithLayout(data, true);
+  if (isPlausibleGlobalConfig(current)) {
+    return current;
+  }
+
+  const legacy = decodeGlobalConfigAccountWithLayout(data, false);
+  if (isPlausibleGlobalConfig(legacy)) {
+    return legacy;
+  }
+
+  throw new Error("GlobalConfig layout could not be decoded safely.");
 }
 
 export function decodeTurnStateAccount(data: Uint8Array): TurnStateSnapshot {
@@ -396,7 +438,7 @@ async function derivePda({
   return pda;
 }
 
-async function getGlobalConfigPda(programId: SolanaAddress) {
+export async function getGlobalConfigPda(programId: SolanaAddress) {
   return derivePda({ programId, seeds: ["global_config"] });
 }
 
@@ -420,7 +462,11 @@ async function getPrizeVaultPda({
   return derivePda({ programId, seeds: ["prize_vault", u64Le(turnId)] });
 }
 
-async function fetchGlobalConfig({
+export function deriveAuthorityAddress(authorityKeypairBytes: Uint8Array) {
+  return addressDecoder.decode(authorityKeypairBytes.slice(32, 64));
+}
+
+export async function fetchGlobalConfig({
   programId,
   rpc,
 }: {
@@ -439,7 +485,7 @@ async function fetchGlobalConfig({
   };
 }
 
-async function fetchTurnState({
+export async function fetchTurnState({
   programId,
   rpc,
   turnId,
@@ -481,7 +527,7 @@ function turnDurationCyclesEqual(
   return left.every((duration, index) => duration === right[index]);
 }
 
-async function createOpenTurnInstruction({
+export async function createOpenTurnInstruction({
   authority,
   programId,
   turnId,
@@ -509,7 +555,7 @@ async function createOpenTurnInstruction({
   };
 }
 
-async function createSetTurnDurationCycleInstruction({
+export async function createSetTurnDurationCycleInstruction({
   authority,
   programId,
   turnDurationCycle,
@@ -533,7 +579,7 @@ async function createSetTurnDurationCycleInstruction({
   };
 }
 
-async function createCloseTurnInstruction({
+export async function createCloseTurnInstruction({
   authority,
   programId,
   turnState,
@@ -555,7 +601,7 @@ async function createCloseTurnInstruction({
   };
 }
 
-async function createForceSkipLegacyActiveTurnInstruction({
+export async function createForceSkipLegacyActiveTurnInstruction({
   authority,
   programId,
   turnState,

@@ -12,6 +12,11 @@ name = "idealer"
 default = []
 cpi = ["no-entrypoint"]
 custom-heap = []
+# TEST-ONLY (devnet): enables `reinitialize_global_config_for_migration`, used to
+# repair a stale `global_config` whose layout predates the current program. OFF
+# by default and MUST stay off for production builds so the instruction is
+# excluded from the program entirely.
+devnet-test = []
 custom-panic = []
 idl-build = ["anchor-lang/idl-build"]
 no-entrypoint = []

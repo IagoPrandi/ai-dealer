@@ -1277,6 +1277,122 @@ pub mod idealer {
         });
         Ok(())
     }
+
+    /// TEST-ONLY (devnet): repair a `global_config` account whose on-chain
+    /// layout predates the current `GlobalConfig`. Such an account wedges every
+    /// authority turn instruction because the stored `bump` no longer matches
+    /// the canonical PDA, so `bump = global_config.bump` fails `ConstraintSeeds`.
+    ///
+    /// Compiled ONLY under the `devnet-test` feature and excluded from
+    /// production builds. Even when present it is authority-gated: it
+    /// authenticates against the two layout-stable regions of every GlobalConfig
+    /// version — the 8-byte account discriminator and the `authority` pubkey
+    /// (the first field) — then reallocs the account to the current layout and
+    /// rewrites it with the canonical devnet test configuration (mirrors
+    /// `examples/devnet_bootstrap`). `next_turn_id` lets the caller skip past
+    /// any pre-existing turn PDAs.
+    #[cfg(feature = "devnet-test")]
+    pub fn reinitialize_global_config_for_migration(
+        ctx: Context<ReinitializeGlobalConfigForMigration>,
+        next_turn_id: u64,
+    ) -> Result<()> {
+        use anchor_lang::Discriminator;
+
+        require!(next_turn_id >= 1, IdealerError::InvalidTurnId);
+
+        let info = ctx.accounts.global_config.to_account_info();
+        require_keys_eq!(
+            *info.owner,
+            crate::ID,
+            IdealerError::InvalidGlobalConfigAccount
+        );
+
+        // Authenticate using only layout-stable bytes: the 8-byte discriminator
+        // (offset 0) and the `authority` pubkey, which is the first field
+        // (offset 8..40) in every GlobalConfig version.
+        {
+            let data = info.try_borrow_data()?;
+            require!(
+                data.len() >= 40 && &data[0..8] == GlobalConfig::DISCRIMINATOR,
+                IdealerError::InvalidGlobalConfigAccount
+            );
+            let stored_authority = Pubkey::try_from(&data[8..40])
+                .map_err(|_| error!(IdealerError::InvalidGlobalConfigAccount))?;
+            require_keys_eq!(
+                stored_authority,
+                ctx.accounts.authority.key(),
+                IdealerError::Unauthorized
+            );
+        }
+
+        // Grow the account to the current layout and keep it rent-exempt,
+        // funding any shortfall from the authority.
+        let needed = 8 + GlobalConfig::INIT_SPACE;
+        let min_balance = Rent::get()?.minimum_balance(needed);
+        let current = info.lamports();
+        if current < min_balance {
+            anchor_lang::system_program::transfer(
+                CpiContext::new(
+                    ctx.accounts.system_program.to_account_info(),
+                    anchor_lang::system_program::Transfer {
+                        from: ctx.accounts.authority.to_account_info(),
+                        to: info.clone(),
+                    },
+                ),
+                min_balance - current,
+            )?;
+        }
+        // `realloc` is deprecated in favor of `resize` in newer toolchains, but
+        // `realloc` remains available across the pinned versions; keep it and
+        // silence the lint to avoid a toolchain-version-dependent API.
+        #[allow(deprecated)]
+        {
+            info.realloc(needed, true)?;
+        }
+
+        let config = GlobalConfig {
+            authority: ctx.accounts.authority.key(),
+            pending_authority: None,
+            treasury_address: ctx.accounts.authority.key(),
+            draw_vrf_config: crate::ID,
+            election_vrf_config: crate::ID,
+            guess_submission_fee_lamports: 10_000_000,
+            rule_proposal_fee_lamports: 20_000_000,
+            rule_removal_fee_lamports: 50_000_000,
+            vote_fee_lamports: 5_000_000,
+            treasury_fee_bps: 500,
+            turn_duration_cycle: [7_200, 7_200, 28_800, 28_800],
+            active_turn_duration_index: 0,
+            rule_election_cutoff_bps: 7_500,
+            guess_cutoff_bps: 9_670,
+            max_rule_tokens: 1_000,
+            top_voted_finalist_count: 3,
+            random_finalist_count: 7,
+            max_rule_proposals_per_wallet_per_turn: 5,
+            max_votes_per_wallet_per_turn: 100,
+            minimum_claim_threshold_lamports: 5_000,
+            claim_window_turns: 4,
+            claim_window_days: 7,
+            creator_reward_cap_lamports: 250_000_000,
+            min_votes_creator_self_remove: 5,
+            min_votes_third_party_remove: 15,
+            next_turn_id,
+            active_turn_id: 0,
+            has_active_turn: false,
+            paused: false,
+            bump: ctx.bumps.global_config,
+        };
+
+        let mut data = info.try_borrow_mut_data()?;
+        let mut cursor: &mut [u8] = &mut data;
+        config.try_serialize(&mut cursor)?;
+
+        emit!(GlobalConfigInitialized {
+            authority: config.authority,
+            treasury_address: config.treasury_address,
+        });
+        Ok(())
+    }
 }
 
 fn validate_live_turn(config: &GlobalConfig, turn: &TurnState) -> Result<()> {
@@ -2094,6 +2210,21 @@ pub struct ForceSkipLegacyActiveTurn<'info> {
     pub turn_state: UncheckedAccount<'info>,
 }
 
+#[cfg(feature = "devnet-test")]
+#[derive(Accounts)]
+pub struct ReinitializeGlobalConfigForMigration<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    /// CHECK: Loaded unchecked because the on-chain layout predates the current
+    /// GlobalConfig and cannot be deserialized as the typed account. The handler
+    /// validates the discriminator and the stable `authority` field; the
+    /// canonical PDA is enforced by the seeds/bump constraint here (note: `bump`
+    /// re-derives the canonical bump rather than trusting the stale stored one).
+    #[account(mut, seeds = [b"global_config"], bump)]
+    pub global_config: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
+}
+
 #[derive(Accounts)]
 pub struct RequestDraw<'info> {
     pub authority: Signer<'info>,
@@ -2697,6 +2828,8 @@ pub enum IdealerError {
     InvalidTurnDuration,
     #[msg("The active turn account is not a legacy undersized account.")]
     ActiveTurnStateNotLegacy,
+    #[msg("The global config account is not a recognizable GlobalConfig.")]
+    InvalidGlobalConfigAccount,
     #[msg("Basis points must be between 0 and 10,000.")]
     InvalidBasisPoints,
     #[msg("Election and guess cutoffs are invalid.")]

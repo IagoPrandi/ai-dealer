@@ -31,8 +31,15 @@ ensure_toolchain() {
 cmd_build() {
   ensure_toolchain
   cd /workspace/contracts/solana
+  local feature_args=()
+  if [ -n "${SBF_FEATURES:-}" ]; then
+    # Optional cargo features (e.g. SBF_FEATURES=devnet-test). Defaults to none
+    # so production builds never include test-only instructions.
+    echo "[build] features: ${SBF_FEATURES}"
+    feature_args=(--features "${SBF_FEATURES}")
+  fi
   echo "[build] cargo build-sbf..."
-  cargo-build-sbf --sbf-out-dir "${SBF_OUT_DIR}"
+  cargo-build-sbf --sbf-out-dir "${SBF_OUT_DIR}" "${feature_args[@]}"
   ls -la "${SO_PATH}"
 }
 

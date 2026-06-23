@@ -1,7 +1,15 @@
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { getTurnDurationHours } from "@idealer/game-engine";
 import pg from "pg";
 import { createClient } from "redis";
+import {
+  closeTurnManually,
+  createManualControlConfig,
+  cycleTurnManually,
+  migrateGlobalConfigManually,
+  openTurnManually,
+  type ManualControlConfig,
+} from "./manual-control.js";
 import {
   createTurnAutomationConfig,
   startTurnAutomationLoop,
@@ -11,6 +19,7 @@ import {
 export * from "./claims.js";
 export * from "./draw.js";
 export * from "./guess-verification.js";
+export * from "./manual-control.js";
 export * from "./rule-validation.js";
 export * from "./turn-automation.js";
 
@@ -24,6 +33,7 @@ export interface WorkerStatus {
   postgres: "ok" | "error";
   redis: "ok" | "error";
   turnAutomation: "disabled" | "enabled" | "error";
+  manualControl: "disabled" | "enabled" | "error";
 }
 
 async function checkPostgres(databaseUrl: string): Promise<"ok" | "error"> {
@@ -55,6 +65,7 @@ export async function getWorkerStatus(): Promise<WorkerStatus> {
   const databaseUrl = process.env.DATABASE_URL;
   const redisUrl = process.env.REDIS_URL;
   const turnAutomation = await createTurnAutomationConfig().catch(() => null);
+  const manualControl = await createManualControlConfig().catch(() => null);
 
   if (!databaseUrl || !redisUrl) {
     const firstTurnDurationSeconds =
@@ -64,6 +75,7 @@ export async function getWorkerStatus(): Promise<WorkerStatus> {
       status: "error",
       firstTurnDurationHours: firstTurnDurationSeconds / 3_600,
       firstTurnDurationSeconds,
+      manualControl: getManualControlStatus(manualControl),
       postgres: databaseUrl ? "ok" : "error",
       redis: redisUrl ? "ok" : "error",
       turnAutomation: getTurnAutomationStatus(turnAutomation),
@@ -81,10 +93,25 @@ export async function getWorkerStatus(): Promise<WorkerStatus> {
     status: postgres === "ok" && redis === "ok" ? "ok" : "error",
     firstTurnDurationHours: firstTurnDurationSeconds / 3_600,
     firstTurnDurationSeconds,
+    manualControl: getManualControlStatus(manualControl),
     postgres,
     redis,
     turnAutomation: getTurnAutomationStatus(turnAutomation),
   };
+}
+
+function getManualControlStatus(
+  config: null | ManualControlConfig,
+): WorkerStatus["manualControl"] {
+  if (!config) {
+    return "error";
+  }
+
+  if (!config.enabled) {
+    return "disabled";
+  }
+
+  return config.authorityKeypairBytes ? "enabled" : "error";
 }
 
 function getFirstTurnDurationSeconds(config: null | TurnAutomationConfig) {
@@ -105,23 +132,97 @@ function getTurnAutomationStatus(
   return config.authorityKeypairBytes ? "enabled" : "error";
 }
 
+function sendJson(
+  response: ServerResponse,
+  statusCode: number,
+  body: unknown,
+) {
+  response.writeHead(statusCode, { "content-type": "application/json" });
+  response.end(JSON.stringify(body));
+}
+
+const MANUAL_CONTROL_ACTIONS = {
+  "/manual/close": closeTurnManually,
+  "/manual/cycle": cycleTurnManually,
+  "/manual/migrate": migrateGlobalConfigManually,
+  "/manual/open": openTurnManually,
+} as const;
+
+type ManualControlPath = keyof typeof MANUAL_CONTROL_ACTIONS;
+
+function isManualControlPath(value: string): value is ManualControlPath {
+  return value in MANUAL_CONTROL_ACTIONS;
+}
+
+/**
+ * Routes the TEST-ONLY manual turn-control endpoints. Returns `true` once it
+ * has handled the request. When manual control is disabled the paths report
+ * 404 so they stay invisible outside testing.
+ */
+function handleManualControlRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  manualConfig: ManualControlConfig,
+): boolean {
+  const path = (request.url ?? "").split("?")[0] ?? "";
+  if (!isManualControlPath(path)) {
+    return false;
+  }
+
+  if (!manualConfig.enabled) {
+    sendJson(response, 404, { error: "manual_control_disabled" });
+    return true;
+  }
+
+  if (request.method !== "POST") {
+    sendJson(response, 405, { error: "method_not_allowed" });
+    return true;
+  }
+
+  const action = MANUAL_CONTROL_ACTIONS[path];
+  void action(manualConfig)
+    .then((result) => {
+      console.log(`manual turn control ${path}`, result);
+      sendJson(response, 200, { result });
+    })
+    .catch((error: unknown) => {
+      console.error(`manual turn control ${path} failed`, error);
+      sendJson(response, 500, {
+        error: "manual_control_failed",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    });
+  return true;
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   const port = Number(process.env.PORT ?? 3003);
   const host = process.env.HOST ?? "0.0.0.0";
+  const manualConfigPromise = createManualControlConfig();
 
   const server = createServer((request, response) => {
-    if (request.url !== "/health") {
-      response.writeHead(404, { "content-type": "application/json" });
-      response.end(JSON.stringify({ error: "not_found" }));
+    const path = (request.url ?? "").split("?")[0] ?? "";
+
+    if (path === "/health") {
+      void getWorkerStatus().then((health) => {
+        sendJson(response, health.status === "ok" ? 200 : 503, health);
+      });
       return;
     }
 
-    void getWorkerStatus().then((health) => {
-      response.writeHead(health.status === "ok" ? 200 : 503, {
-        "content-type": "application/json",
+    void manualConfigPromise
+      .then((manualConfig) => {
+        if (handleManualControlRequest(request, response, manualConfig)) {
+          return;
+        }
+        sendJson(response, 404, { error: "not_found" });
+      })
+      .catch((error: unknown) => {
+        sendJson(response, 500, {
+          error: "manual_control_config_error",
+          message: error instanceof Error ? error.message : String(error),
+        });
       });
-      response.end(JSON.stringify(health));
-    });
   });
 
   server.listen(port, host, () => {
