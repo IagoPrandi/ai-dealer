@@ -16,13 +16,21 @@ import {
   startTurnAutomationLoop,
   type TurnAutomationConfig,
 } from "./turn-automation.js";
+import {
+  createSettlementSchedulerConfig,
+  runSettlementSchedulerOnce,
+  startSettlementLoop,
+} from "./settlement-loop.js";
 
+export * from "./api-bridge.js";
 export * from "./claims.js";
 export * from "./draw.js";
 export * from "./guess-verification.js";
 export * from "./manual-control.js";
 export * from "./rule-validation.js";
 export * from "./settlement.js";
+export * from "./settlement-loop.js";
+export * from "./settlement-scheduler.js";
 export * from "./switchboard.js";
 export * from "./turn-automation.js";
 
@@ -198,6 +206,48 @@ function handleManualControlRequest(
   return true;
 }
 
+/**
+ * TEST-ONLY manual settlement trigger. Runs one settlement scheduler pass for
+ * the current settlement turn, stepping the PRD §5.5 pipeline as far as it can
+ * right now. Gated behind manual control (same flag as the other `/manual/*`
+ * paths); the manual invocation itself authorizes the run, so the loop's
+ * `enabled` flag is forced on for this single pass.
+ */
+function handleSettlementManualRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  manualConfig: ManualControlConfig,
+): boolean {
+  const path = (request.url ?? "").split("?")[0] ?? "";
+  if (path !== "/manual/settle") {
+    return false;
+  }
+
+  if (!manualConfig.enabled) {
+    sendJson(response, 404, { error: "manual_control_disabled" });
+    return true;
+  }
+  if (request.method !== "POST") {
+    sendJson(response, 405, { error: "method_not_allowed" });
+    return true;
+  }
+
+  void createSettlementSchedulerConfig()
+    .then((config) => runSettlementSchedulerOnce({ ...config, enabled: true }))
+    .then((result) => {
+      console.log("manual settlement", JSON.stringify(result));
+      sendJson(response, 200, { result });
+    })
+    .catch((error: unknown) => {
+      console.error("manual settlement failed", error);
+      sendJson(response, 500, {
+        error: "manual_settlement_failed",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    });
+  return true;
+}
+
 if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(process.argv[1]).href
@@ -219,6 +269,9 @@ if (
     void manualConfigPromise
       .then((manualConfig) => {
         if (handleManualControlRequest(request, response, manualConfig)) {
+          return;
+        }
+        if (handleSettlementManualRequest(request, response, manualConfig)) {
           return;
         }
         sendJson(response, 404, { error: "not_found" });
@@ -245,6 +298,21 @@ if (
     const stop = () => {
       clearInterval(timer);
       server.close();
+    };
+
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+  });
+
+  void createSettlementSchedulerConfig().then((settlementConfig) => {
+    const timer = startSettlementLoop(settlementConfig);
+
+    if (!timer) {
+      return;
+    }
+
+    const stop = () => {
+      clearInterval(timer);
     };
 
     process.once("SIGINT", stop);

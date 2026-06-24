@@ -10,6 +10,7 @@
     "switchboard:proof": "tsx src/switchboard-proof.ts",
     "switchboard:set-vrf-config": "tsx src/switchboard-set-vrf-config.ts",
     "switchboard:settle-draw": "tsx src/switchboard-settle-draw.ts",
+    "settlement:run": "tsx src/settlement-run.ts",
     "devnet:stage-turn": "tsx src/devnet-stage-turn.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test --import tsx \"src/**/*.test.ts\""

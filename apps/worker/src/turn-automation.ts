@@ -39,7 +39,11 @@ const BASIS_POINTS_DENOMINATOR = 10_000;
 const PRODUCTION_TURN_DURATION_CYCLE_SECONDS = [
   7_200, 7_200, 28_800, 28_800,
 ] as const;
-const CURRENT_TURN_STATE_DATA_LENGTH = 448;
+// Byte length of a current-layout `TurnState` account (8-byte discriminator +
+// trustless settlement fields; matches the 788-byte live devnet turn from
+// M5.2). Turns smaller than this predate the trustless layout and cannot be
+// settled by the current program, so they are force-skipped instead.
+const CURRENT_TURN_STATE_DATA_LENGTH = 788;
 const addressDecoder = getAddressDecoder();
 const addressEncoder = getAddressEncoder();
 
@@ -66,6 +70,11 @@ export interface TurnStateSnapshot {
 
 export interface TurnAutomationConfig {
   authorityKeypairBytes: null | Uint8Array;
+  // When true (settlement automation owns the close), the automation loop opens
+  // turns and updates durations but does NOT close ended turns — the settlement
+  // scheduler closes them only after the election pipeline + draw complete, so
+  // the pipeline (which needs the turn `Open`) is never wedged (M5.2 follow-up).
+  deferCloseToSettlement: boolean;
   desiredTurnDurationCycle: null | readonly [number, number, number, number];
   enabled: boolean;
   intervalMs: number;
@@ -92,6 +101,7 @@ export type TurnAutomationResult =
   | {
       action:
         | "active_turn_not_expired"
+        | "close_deferred_to_settlement"
         | "disabled"
         | "paused"
         | "turn_already_closed";
@@ -226,6 +236,7 @@ export async function createTurnAutomationConfig(
 ): Promise<TurnAutomationConfig> {
   return {
     authorityKeypairBytes: await loadAuthorityKeypairBytesFromEnv(env),
+    deferCloseToSettlement: envFlag(env.IDEALER_SETTLEMENT_AUTOMATION_ENABLED),
     desiredTurnDurationCycle: resolveDesiredTurnDurationCycle(env),
     enabled: envFlag(env.IDEALER_TURN_AUTOMATION_ENABLED),
     intervalMs: envNumber(env.IDEALER_TURN_AUTOMATION_INTERVAL_MS, 30_000),
@@ -823,6 +834,28 @@ export async function runTurnAutomationOnce(
     turnId: globalConfig.snapshot.activeTurnId,
   });
 
+  // A turn whose account predates the trustless layout cannot be closed or
+  // settled by the current program (it fails to deserialize on-chain), so it
+  // would otherwise wedge the loop forever. Force-skip it up front — before the
+  // duration-cycle and close branches — regardless of expiry (M5.2 follow-up).
+  if (activeTurn.dataLength < CURRENT_TURN_STATE_DATA_LENGTH) {
+    const recoveryInstruction = await createForceSkipLegacyActiveTurnInstruction({
+      authority,
+      programId: config.programId,
+      turnState: activeTurn.address,
+    });
+    const recoverySignature = await simulateAndSend({
+      authorityKeypairBytes: config.authorityKeypairBytes,
+      instruction: recoveryInstruction,
+      rpc,
+    });
+    return {
+      action: "skipped_legacy_turn",
+      signature: recoverySignature.toString(),
+      turnId: activeTurn.snapshot.turnId,
+    };
+  }
+
   if (
     config.desiredTurnDurationCycle &&
     activeTurn.dataLength >= CURRENT_TURN_STATE_DATA_LENGTH &&
@@ -860,6 +893,16 @@ export async function runTurnAutomationOnce(
   if (nowSeconds < activeTurn.snapshot.endTimestamp) {
     return {
       action: "active_turn_not_expired",
+      turnId: activeTurn.snapshot.turnId,
+    };
+  }
+
+  // The settlement scheduler owns the close so the election pipeline (which
+  // requires the turn to stay `Open`) completes first. Leave the ended turn
+  // open for it (M5.2 follow-up).
+  if (config.deferCloseToSettlement) {
+    return {
+      action: "close_deferred_to_settlement",
       turnId: activeTurn.snapshot.turnId,
     };
   }

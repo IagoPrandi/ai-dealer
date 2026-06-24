@@ -33,6 +33,8 @@ import {
   listVoterRewardRecords,
   listWinnerRecords,
   listAuditLogs,
+  recordSettlementTransition,
+  listSettlementTransitions,
   removeRule,
   RuleRemovalRejectedError,
   resetApiStateForTests,
@@ -1488,4 +1490,44 @@ test("removing an unknown rule is rejected and combined activity feed includes r
   assert.equal(events.length, 1);
   assert.equal(events[0]?.ruleId, 1);
   assert.equal(getActivityEvents(turnId).length, 1);
+});
+
+test("settlement transitions are idempotent and chained into the audit log", () => {
+  resetApiStateForTests();
+  const turnId = 5301;
+  const input = {
+    fromState: "DRAWN",
+    idempotencyKey: `${turnId}:TURN_CLOSED`,
+    inputHash: "11".repeat(32),
+    outputHash: "22".repeat(32),
+    recordedAt: "2026-06-23T00:00:00.000Z",
+    signature: "sig-1",
+    toState: "TURN_CLOSED",
+    transitionReason: "close_turn",
+    turnId,
+  };
+
+  const first = recordSettlementTransition(input);
+  // A replayed worker step (same idempotencyKey) returns the original record
+  // and must NOT append a second audit-log entry or change the signature.
+  const replay = recordSettlementTransition({ ...input, signature: "sig-2" });
+
+  assert.equal(first.auditLogHash, replay.auditLogHash);
+  assert.equal(replay.signature, "sig-1");
+  assert.equal(listSettlementTransitions(turnId).length, 1);
+
+  const log = getAuditLog(first.auditLogHash);
+  assert.ok(log);
+  assert.equal(log?.kind, "settlement.transition");
+  assert.equal(verifyAuditLogIntegrity(log as AuditLogRecord), true);
+
+  // A distinct transition appends a new chained entry.
+  recordSettlementTransition({
+    ...input,
+    fromState: "TURN_CLOSED",
+    idempotencyKey: `${turnId}:VERIFYING`,
+    toState: "VERIFYING",
+    transitionReason: "project_verification",
+  });
+  assert.equal(listSettlementTransitions(turnId).length, 2);
 });

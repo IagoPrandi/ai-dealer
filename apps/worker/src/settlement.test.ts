@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { PublicKey } from "@solana/web3.js";
 import {
+  createCloseEliminationWindowInstruction,
   createFailDrawInstruction,
   createLockRuleElectionPoolInstruction,
   createRequestDrawInstruction,
@@ -9,6 +10,9 @@ import {
   createSettleActiveElectionInstruction,
   createSettleDrawInstruction,
   createSettleRuleElectionInstruction,
+  createSettlementCloseTurnInstruction,
+  decodeRuleProposalCandidate,
+  decodeSettlementTurnState,
 } from "./settlement.js";
 import type { ElectionCandidate } from "./election.js";
 
@@ -152,4 +156,130 @@ test("rule election builders include derived rule proposal accounts", () => {
     settle.keys[5]?.pubkey.toBase58(),
     pda(Buffer.from("rule"), u64Le(9), u64Le(12)).toBase58(),
   );
+});
+
+test("close_elimination_window passes finalist rule accounts as writable", () => {
+  const finalists = [candidate(11), candidate(12)];
+  const instruction = createCloseEliminationWindowInstruction({
+    authority: AUTHORITY,
+    finalists,
+    programId: PROGRAM_ID,
+    turnId: 9,
+  });
+
+  assert.deepEqual(
+    [...instruction.data],
+    [177, 162, 145, 148, 132, 146, 226, 83],
+  );
+  assert.equal(instruction.keys.length, 5);
+  assert.equal(
+    instruction.keys[3]?.pubkey.toBase58(),
+    pda(Buffer.from("rule"), u64Le(9), u64Le(11)).toBase58(),
+  );
+  assert.equal(instruction.keys[3]?.isWritable, true);
+  assert.equal(instruction.keys[4]?.isWritable, true);
+});
+
+test("settlement close_turn writes global config and turn state", () => {
+  const instruction = createSettlementCloseTurnInstruction({
+    authority: AUTHORITY,
+    programId: PROGRAM_ID,
+    turnId: 9,
+  });
+
+  assert.deepEqual([...instruction.data], [100, 243, 10, 218, 116, 61, 49, 153]);
+  assert.equal(instruction.keys.length, 3);
+  assert.equal(instruction.keys[0]?.isSigner, true);
+  assert.equal(instruction.keys[1]?.isWritable, true);
+  assert.equal(instruction.keys[2]?.isWritable, true);
+});
+
+function buildTurnStateBuffer(): Uint8Array {
+  const data = Buffer.alloc(788);
+  data.writeBigUInt64LE(42n, 8); // turn_id
+  data.writeBigInt64LE(1_000n, 24); // end_timestamp
+  data.writeUInt8(1, 32); // status = closed
+  Buffer.from([1, 2, 3, 4, 5, 6]).copy(data, 46); // draw_result
+  data.writeBigUInt64LE(7n, 52); // active_rule_id
+  Buffer.alloc(32, 0xaa).copy(data, 60); // active_rule_hash
+  Buffer.alloc(32, 0xbb).copy(data, 92); // frozen_rule_artifact_hash
+  Buffer.alloc(32, 0xcc).copy(data, 124); // eligible_rule_pool_hash
+  Buffer.alloc(32, 0xdd).copy(data, 156); // top_voted_finalist_hash
+  Buffer.alloc(32, 0xee).copy(data, 188); // random_finalist_hash
+  Buffer.alloc(32, 0x11).copy(data, 220); // finalist_set_hash
+  data.writeUInt8(2, 252); // finalist_count
+  data.writeBigUInt64LE(7n, 253); // finalist_rule_ids[0]
+  data.writeBigUInt64LE(8n, 261); // finalist_rule_ids[1]
+  data.writeUInt8(0, 413); // finalist_eliminated[0]
+  data.writeUInt8(1, 414); // finalist_eliminated[1]
+  Buffer.alloc(32, 0x22).copy(data, 423); // eliminated_finalist_hash
+  Buffer.alloc(32, 0x33).copy(data, 455); // survivor_finalist_hash
+  data.writeBigInt64LE(900n, 487); // elimination_window_start
+  data.writeBigInt64LE(4_500n, 495); // elimination_window_end
+  data.writeUInt8(2, 649); // draw_status = fulfilled
+  data.writeBigInt64LE(1_234n, 762); // drawn_at
+  return data;
+}
+
+test("decodeSettlementTurnState reads the trustless TurnState layout", () => {
+  const state = decodeSettlementTurnState(buildTurnStateBuffer());
+
+  assert.equal(state.turnId, 42);
+  assert.equal(state.status, "closed");
+  assert.equal(state.endTimestampSeconds, 1_000);
+  assert.equal(state.drawStatus, "fulfilled");
+  assert.deepEqual(state.drawResult, [1, 2, 3, 4, 5, 6]);
+  assert.equal(state.activeRuleId, 7);
+  assert.equal(state.activeRuleHash, "aa".repeat(32));
+  assert.equal(state.activeRuleArtifactHash, "bb".repeat(32));
+  assert.equal(state.eligibleRulePoolHash, "cc".repeat(32));
+  assert.equal(state.finalistSetHash, "11".repeat(32));
+  assert.equal(state.finalistCount, 2);
+  assert.deepEqual(state.finalistRuleIds, [7, 8]);
+  assert.deepEqual(state.finalistEliminated, [false, true]);
+  assert.equal(state.eliminatedFinalistHash, "22".repeat(32));
+  assert.equal(state.survivorFinalistHash, "33".repeat(32));
+  assert.equal(state.eliminationWindowEndSeconds, 4_500);
+  assert.equal(state.drawnAtSeconds, 1_234);
+});
+
+test("decodeSettlementTurnState reports all-zero hashes as null", () => {
+  const data = Buffer.alloc(788);
+  data.writeBigUInt64LE(1n, 8);
+  const state = decodeSettlementTurnState(data);
+
+  assert.equal(state.status, "open");
+  assert.equal(state.drawStatus, "not_requested");
+  assert.equal(state.drawResult, null);
+  assert.equal(state.activeRuleId, null);
+  assert.equal(state.eligibleRulePoolHash, null);
+  assert.equal(state.finalistSetHash, null);
+  assert.equal(state.survivorFinalistHash, null);
+  assert.equal(state.finalistCount, 0);
+});
+
+test("decodeRuleProposalCandidate handles the variable-length text prefix", () => {
+  const data = Buffer.alloc(300);
+  data.writeBigUInt64LE(5n, 8); // rule_id
+  data.writeBigUInt64LE(3n, 16); // turn_id
+  Buffer.alloc(32, 0xab).copy(data, 56); // sanitized_text_hash
+  data.writeUInt32LE(4, 88); // text length
+  Buffer.from("abcd").copy(data, 92);
+  const base = 92 + 4;
+  Buffer.alloc(32, 0xcd).copy(data, base + 64); // compiled_artifact_hash
+  data.writeUInt32LE(9, base + 98); // vote_count
+  data.writeUInt32LE(0, base + 102); // report_count
+  data.writeUInt8(1, base + 106); // state = Eligible
+  data.writeUInt8(1, base + 139); // precompilation_status = Passed
+  data.writeBigInt64LE(777n, base + 140); // created_at
+
+  const decoded = decodeRuleProposalCandidate(data);
+  assert.equal(decoded.ruleId, 5);
+  assert.equal(decoded.sanitizedTextHash, "ab".repeat(32));
+  assert.equal(decoded.compiledArtifactHash, "cd".repeat(32));
+  assert.equal(decoded.voteCount, 9);
+  assert.equal(decoded.reportCount, 0);
+  assert.equal(decoded.isEligibleState, true);
+  assert.equal(decoded.isPrecompiledValid, true);
+  assert.equal(decoded.createdAtSeconds, 777);
 });

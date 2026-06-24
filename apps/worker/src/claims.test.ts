@@ -19,6 +19,7 @@ const addressEncoder = getAddressEncoder();
 function fakeConfig(): TurnAutomationConfig {
   return {
     authorityKeypairBytes: new Uint8Array(64).fill(7),
+    deferCloseToSettlement: false,
     desiredTurnDurationCycle: null,
     enabled: true,
     intervalMs: 30_000,

@@ -607,11 +607,13 @@ export interface ConversationDraftRecord {
 export type AuditLogKind =
   | "compiler.validation"
   | "guess.verification"
-  | "rule.removal";
+  | "rule.removal"
+  | "settlement.transition";
 export type AuditPublicStateType =
   | "guess_verification_result"
   | "rule_removal"
-  | "rule_validation";
+  | "rule_validation"
+  | "settlement_transition";
 
 export interface AuditPublicStateRef {
   key: string;
@@ -732,6 +734,26 @@ export interface RuleElectionRecord {
   turnId: number;
 }
 
+/**
+ * A single PRD §5.5 settlement state-machine transition projected by the worker.
+ * Persisting `inputHash`/`outputHash`/`transitionReason` and chaining each
+ * transition into the M3.7 hash-chained audit log makes the settlement pipeline
+ * auditable (PRD §5.5, §10.13). `idempotencyKey` guarantees a replayed worker
+ * step does not append a duplicate transition.
+ */
+export interface SettlementTransitionRecord {
+  auditLogHash: string;
+  fromState: string;
+  idempotencyKey: string;
+  inputHash: string;
+  outputHash: string;
+  recordedAt: string;
+  signature: string | null;
+  toState: string;
+  transitionReason: string;
+  turnId: number;
+}
+
 const IDEALER_ACTIVE_TURN_ID = Number(
   process.env.IDEALER_ACTIVE_TURN_ID ?? "1",
 );
@@ -745,6 +767,8 @@ const turnRollovers = new Map<number, TurnRolloverRecord>();
 const turnRolloverSettlements = new Map<number, TurnRolloverSettlement>();
 const draws = new Map<number, DrawRecord>();
 const elections = new Map<number, RuleElectionRecord>();
+const settlementTransitions = new Map<string, SettlementTransitionRecord>();
+const settlementTransitionOrder: string[] = [];
 const ruleValidations = new Map<string, RuleValidationRecord>();
 const verificationJobs = new Map<string, GuessVerificationJobRecord>();
 const verificationResults = new Map<string, GuessVerificationResultRecord>();
@@ -787,6 +811,7 @@ const CORS_PATHS = new Set([
   "/claim-records/complete",
   "/claim-records/create-turn",
   "/claim-records/request",
+  "/settlement-transitions",
 ]);
 
 function getGuessReceiptKey(turnId: number, player: string) {
@@ -1063,6 +1088,8 @@ export function resetApiStateForTests() {
   turnRolloverSettlements.clear();
   draws.clear();
   elections.clear();
+  settlementTransitions.clear();
+  settlementTransitionOrder.length = 0;
   ruleValidations.clear();
   verificationJobs.clear();
   verificationResults.clear();
@@ -1671,6 +1698,52 @@ function isValidClaimCreateRequest(
     (request.availableAt === undefined ||
       (typeof request.availableAt === "string" &&
         !Number.isNaN(Date.parse(request.availableAt))))
+  );
+}
+
+export interface SettlementTransitionRequest {
+  fromState: string;
+  idempotencyKey: string;
+  inputHash: string;
+  outputHash: string;
+  recordedAt?: string;
+  signature?: string | null;
+  toState: string;
+  transitionReason: string;
+  turnId: number;
+}
+
+function isValidSettlementTransitionRequest(
+  value: unknown,
+): value is SettlementTransitionRequest {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const request = value as Partial<SettlementTransitionRequest>;
+  return (
+    Number.isInteger(request.turnId) &&
+    Number(request.turnId) > 0 &&
+    typeof request.fromState === "string" &&
+    request.fromState.length > 0 &&
+    request.fromState.length <= 64 &&
+    typeof request.toState === "string" &&
+    request.toState.length > 0 &&
+    request.toState.length <= 64 &&
+    typeof request.idempotencyKey === "string" &&
+    request.idempotencyKey.length > 0 &&
+    request.idempotencyKey.length <= 256 &&
+    isHexHash(request.inputHash) &&
+    isHexHash(request.outputHash) &&
+    typeof request.transitionReason === "string" &&
+    request.transitionReason.length > 0 &&
+    request.transitionReason.length <= 256 &&
+    (request.signature === undefined ||
+      request.signature === null ||
+      (typeof request.signature === "string" && request.signature.length <= 128)) &&
+    (request.recordedAt === undefined ||
+      (typeof request.recordedAt === "string" &&
+        !Number.isNaN(Date.parse(request.recordedAt))))
   );
 }
 
@@ -3629,6 +3702,73 @@ export function getRuleElection(turnId: number) {
   return elections.get(turnId) ?? null;
 }
 
+/**
+ * Idempotently record a settlement state-machine transition (PRD §5.5). A
+ * repeated `idempotencyKey` is a no-op that returns the original record, so a
+ * worker retry never appends a duplicate audit-chain entry. The first time a
+ * key is seen the transition is chained into the M3.7 hash-chained audit log
+ * with its `inputHash`/`outputHash`/`transitionReason` preserved.
+ */
+export function recordSettlementTransition(
+  request: SettlementTransitionRequest,
+): SettlementTransitionRecord {
+  const existing = settlementTransitions.get(request.idempotencyKey);
+  if (existing) {
+    return existing;
+  }
+
+  const recordedAt = request.recordedAt ?? new Date().toISOString();
+  const signature = request.signature ?? null;
+  const auditLog = appendAuditLog({
+    createdAt: recordedAt,
+    input: {
+      fromState: request.fromState,
+      idempotencyKey: request.idempotencyKey,
+      inputHash: request.inputHash,
+      turnId: request.turnId,
+    },
+    jobId: null,
+    kind: "settlement.transition",
+    output: {
+      outputHash: request.outputHash,
+      signature,
+      toState: request.toState,
+      transitionReason: request.transitionReason,
+    },
+    publicStateRef: { key: request.idempotencyKey, type: "settlement_transition" },
+    reason: request.transitionReason,
+    result: request.toState,
+    turnId: request.turnId,
+  });
+
+  const record: SettlementTransitionRecord = {
+    auditLogHash: auditLog.logHash,
+    fromState: request.fromState,
+    idempotencyKey: request.idempotencyKey,
+    inputHash: request.inputHash,
+    outputHash: request.outputHash,
+    recordedAt,
+    signature,
+    toState: request.toState,
+    transitionReason: request.transitionReason,
+    turnId: request.turnId,
+  };
+  settlementTransitions.set(record.idempotencyKey, record);
+  settlementTransitionOrder.push(record.idempotencyKey);
+  return record;
+}
+
+export function listSettlementTransitions(
+  turnId: number,
+): SettlementTransitionRecord[] {
+  return settlementTransitionOrder
+    .map((key) => settlementTransitions.get(key))
+    .filter(
+      (record): record is SettlementTransitionRecord =>
+        record !== undefined && record.turnId === turnId,
+    );
+}
+
 function hashRuleIdsForAudit(domain: string, ruleIds: number[]) {
   return createHash("sha256")
     .update(
@@ -5348,6 +5488,43 @@ if (isMainModule()) {
             message: error instanceof Error ? error.message : String(error),
           });
         });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/settlement-transitions") {
+      void readJsonBody(request)
+        .then((body) => {
+          if (!isValidSettlementTransitionRequest(body)) {
+            sendJson(request, response, 400, {
+              error: "invalid_settlement_transition",
+            });
+            return;
+          }
+
+          sendJson(request, response, 201, {
+            transition: recordSettlementTransition(body),
+          });
+        })
+        .catch((error: unknown) => {
+          sendJson(request, response, 400, {
+            error: "invalid_json",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/settlement-transitions") {
+      const turnId = Number(url.searchParams.get("turnId"));
+
+      if (!Number.isInteger(turnId) || turnId <= 0) {
+        sendJson(request, response, 400, { error: "invalid_query" });
+        return;
+      }
+
+      sendJson(request, response, 200, {
+        transitions: listSettlementTransitions(turnId),
+      });
       return;
     }
 

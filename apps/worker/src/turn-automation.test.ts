@@ -37,6 +37,15 @@ test("turn automation is disabled unless explicitly enabled", async () => {
   assert.equal(config.authorityKeypairBytes, null);
   assert.equal(config.desiredTurnDurationCycle, null);
   assert.equal(config.intervalMs, 30_000);
+  assert.equal(config.deferCloseToSettlement, false);
+});
+
+test("turn automation defers the close when settlement automation is enabled", async () => {
+  const config = await createTurnAutomationConfig({
+    IDEALER_SETTLEMENT_AUTOMATION_ENABLED: "true",
+  });
+
+  assert.equal(config.deferCloseToSettlement, true);
 });
 
 test("turn automation can be explicitly enabled for the worker loop", async () => {
@@ -129,6 +138,7 @@ test("turn automation detects legacy active turn deserialization failures", () =
 test("turn automation disabled check has no RPC side effects", async () => {
   const result = await runTurnAutomationOnce({
     authorityKeypairBytes: null,
+    deferCloseToSettlement: false,
     desiredTurnDurationCycle: null,
     enabled: false,
     intervalMs: 30_000,
@@ -199,7 +209,8 @@ test("enabled turn automation requires an authority keypair", async () => {
   await assert.rejects(
     runTurnAutomationOnce({
       authorityKeypairBytes: null,
-      desiredTurnDurationCycle: null,
+      deferCloseToSettlement: false,
+    desiredTurnDurationCycle: null,
       enabled: true,
       intervalMs: 10_000,
       programId: address("6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4"),

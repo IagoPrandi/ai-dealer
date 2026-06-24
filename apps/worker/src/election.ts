@@ -78,12 +78,23 @@ export type ElectionRandomnessState =
   | { randomness: Uint8Array | null; source: string; status: "ready" };
 
 export interface PublishedRuleElection extends RuleElectionResult {
+  // Active-election (second VRF) + decision-window fields, populated once the
+  // two-step election (M5.3) reaches those phases. Optional so the legacy
+  // single-shot election cycle can omit them.
+  activeElectionRandomnessAccount?: string | null;
+  activeElectionRandomnessSource?: string | null;
+  activeElectionRandomnessValue?: string | null;
+  electedSurvivorIndex?: number | null;
+  eliminatedFinalistHash?: string | null;
+  eliminatedRuleIds?: number[];
   randomnessAccount: string | null;
   randomnessSource: string | null;
   randomnessValue: string | null;
   requestedAt: string | null;
   settledAt: string | null;
   status: "locked" | "original_only" | "requested" | "settled";
+  survivorFinalistHash?: string | null;
+  survivorRuleIds?: number[];
   turnId: number;
 }
 

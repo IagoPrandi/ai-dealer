@@ -1,3 +1,4 @@
+import bs58 from "bs58";
 import {
   AnchorUtils,
   asV0Tx,
@@ -63,6 +64,12 @@ const REQUEST_ACTIVE_ELECTION_VRF_DISCRIMINATOR = Buffer.from([
 ]);
 const SETTLE_ACTIVE_ELECTION_DISCRIMINATOR = Buffer.from([
   138, 80, 52, 3, 102, 170, 20, 97,
+]);
+const CLOSE_ELIMINATION_WINDOW_DISCRIMINATOR = Buffer.from([
+  177, 162, 145, 148, 132, 146, 226, 83,
+]);
+const CLOSE_TURN_DISCRIMINATOR = Buffer.from([
+  100, 243, 10, 218, 116, 61, 49, 153,
 ]);
 
 type SignableTransaction = Transaction | VersionedTransaction;
@@ -383,6 +390,64 @@ export function createSettleActiveElectionInstruction({
   });
 }
 
+/**
+ * `close_turn` flips the turn to `Closed` and advances the global cycle. The
+ * settlement scheduler issues this only after the draw is fulfilled (and, when
+ * rules exist, the active rule is frozen) so the election pipeline — which
+ * requires the turn to stay `Open` (`validate_live_turn`) — has completed. It
+ * needs no duration shrink because the play window has genuinely ended by then.
+ */
+export function createSettlementCloseTurnInstruction({
+  authority,
+  programId,
+  turnId,
+}: {
+  authority: PublicKey;
+  programId: PublicKey;
+  turnId: number;
+}) {
+  return new TransactionInstruction({
+    data: CLOSE_TURN_DISCRIMINATOR,
+    keys: [
+      { isSigner: true, isWritable: false, pubkey: authority },
+      { isSigner: false, isWritable: true, pubkey: globalConfigPda(programId) },
+      { isSigner: false, isWritable: true, pubkey: turnStatePda(programId, turnId) },
+    ],
+    programId,
+  });
+}
+
+/**
+ * `close_elimination_window` applies the elimination decision and flips each
+ * finalist rule proposal to `Eliminated`/`SurvivedElimination`, so the finalist
+ * rule PDAs are passed as WRITABLE remaining accounts (unlike the read-only
+ * candidate lists used by the VRF settle instructions).
+ */
+export function createCloseEliminationWindowInstruction({
+  authority,
+  finalists,
+  programId,
+  turnId,
+}: {
+  authority: PublicKey;
+  finalists: readonly ElectionCandidate[];
+  programId: PublicKey;
+  turnId: number;
+}) {
+  return new TransactionInstruction({
+    data: CLOSE_ELIMINATION_WINDOW_DISCRIMINATOR,
+    keys: [
+      ...accountKeysForAuthorityTurn({ authority, programId, turnId }),
+      ...finalists.map((finalist) => ({
+        isSigner: false,
+        isWritable: true,
+        pubkey: ruleProposalPda(programId, turnId, finalist.ruleId),
+      })),
+    ],
+    programId,
+  });
+}
+
 async function createSettlementContext(
   config: TurnAutomationConfig,
   options: SettlementSenderOptions = {},
@@ -529,27 +594,106 @@ function decodeDrawStatus(value: number): DrawTurn["drawStatus"] {
   throw new Error("TurnState draw_status is invalid.");
 }
 
-function decodeSettlementTurnState(data: Uint8Array) {
+const ZERO_HASH_HEX = "00".repeat(32);
+
+/**
+ * Full on-chain settlement view of a `TurnState`, decoded from the current
+ * program layout (788-byte account; offsets verified against the live devnet
+ * turn from M5.2). Drives the M5.3 settlement state machine: every PRD §5.5
+ * phase boundary is derivable from these fields (status, election pipeline
+ * hashes/slots, elimination window timestamps, active-election freeze, draw
+ * status). A hash/pubkey that is all-zero means "not set yet".
+ */
+export interface SettlementTurnState {
+  activeElectionVrfFulfillment: PublicKey;
+  activeElectionVrfRequest: PublicKey;
+  activeRuleArtifactHash: string | null;
+  activeRuleHash: string | null;
+  activeRuleId: number | null;
+  drawResult: number[] | null;
+  drawStatus: DrawTurn["drawStatus"];
+  drawVrfRequest: PublicKey;
+  drawnAtSeconds: number;
+  electionCutoffTimestampSeconds: number;
+  electionVrfFulfillment: PublicKey;
+  electionVrfRequest: PublicKey;
+  eligibleRulePoolHash: string | null;
+  eliminationWindowEndSeconds: number;
+  eliminationWindowStartSeconds: number;
+  eliminatedFinalistHash: string | null;
+  endTimestampSeconds: number;
+  finalistCount: number;
+  finalistEliminated: boolean[];
+  finalistRuleIds: number[];
+  finalistSetHash: string | null;
+  randomFinalistHash: string | null;
+  status: "closed" | "open";
+  survivorFinalistHash: string | null;
+  topVotedFinalistHash: string | null;
+  turnId: number;
+}
+
+export function decodeSettlementTurnState(data: Uint8Array): SettlementTurnState {
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const turnId = u64Number(view, 8);
   const endTimestampSeconds = i64Number(view, 24);
+  const status = view.getUint8(32) === 0 ? "open" : "closed";
+  const drawResult = Array.from(data.slice(46, 52));
   const activeRuleId = u64Number(view, 52);
+  const activeRuleHash = hex32At(data, 60);
+  const activeRuleArtifactHash = hex32At(data, 92);
   const eligibleRulePoolHash = hex32At(data, 124);
+  const topVotedFinalistHash = hex32At(data, 156);
+  const randomFinalistHash = hex32At(data, 188);
+  const finalistSetHash = hex32At(data, 220);
+  const finalistCount = view.getUint8(252);
+  const finalistRuleIds: number[] = [];
+  const finalistEliminated: boolean[] = [];
+  for (let index = 0; index < finalistCount; index += 1) {
+    finalistRuleIds.push(u64Number(view, 253 + index * 8));
+    finalistEliminated.push(view.getUint8(413 + index) !== 0);
+  }
+  const eliminatedFinalistHash = hex32At(data, 423);
+  const survivorFinalistHash = hex32At(data, 455);
+  const eliminationWindowStartSeconds = i64Number(view, 487);
+  const eliminationWindowEndSeconds = i64Number(view, 495);
   const electionVrfRequest = readPubkey(data, 503);
+  const electionVrfFulfillment = readPubkey(data, 535);
   const activeElectionVrfRequest = readPubkey(data, 576);
+  const activeElectionVrfFulfillment = readPubkey(data, 608);
   const drawStatus = decodeDrawStatus(view.getUint8(649));
   const drawVrfRequest = readPubkey(data, 650);
+  const drawnAtSeconds = i64Number(view, 762);
+
+  const hashOrNull = (value: string) =>
+    value === ZERO_HASH_HEX ? null : value;
 
   return {
+    activeElectionVrfFulfillment,
     activeElectionVrfRequest,
+    activeRuleArtifactHash: hashOrNull(activeRuleArtifactHash),
+    activeRuleHash: hashOrNull(activeRuleHash),
     activeRuleId: activeRuleId === 0 ? null : activeRuleId,
+    drawResult: drawStatus === "fulfilled" ? drawResult : null,
     drawStatus,
     drawVrfRequest,
+    drawnAtSeconds,
     electionCutoffTimestampSeconds: endTimestampSeconds,
+    electionVrfFulfillment,
     electionVrfRequest,
-    eligibleRulePoolHash:
-      eligibleRulePoolHash === "00".repeat(32) ? null : eligibleRulePoolHash,
+    eligibleRulePoolHash: hashOrNull(eligibleRulePoolHash),
+    eliminationWindowEndSeconds,
+    eliminationWindowStartSeconds,
+    eliminatedFinalistHash: hashOrNull(eliminatedFinalistHash),
     endTimestampSeconds,
+    finalistCount,
+    finalistEliminated,
+    finalistRuleIds,
+    finalistSetHash: hashOrNull(finalistSetHash),
+    randomFinalistHash: hashOrNull(randomFinalistHash),
+    status,
+    survivorFinalistHash: hashOrNull(survivorFinalistHash),
+    topVotedFinalistHash: hashOrNull(topVotedFinalistHash),
     turnId,
   };
 }
@@ -934,5 +1078,315 @@ export function createProductionRuleElectionCycleDeps(
     randomnessAccountFor: senders.randomnessAccountFor,
     requestElectionVrf: senders.requestElectionVrf,
     settleElection: senders.settleElection,
+  };
+}
+
+const RULE_PROPOSAL_DISCRIMINATOR = Buffer.from([
+  233, 212, 161, 38, 30, 217, 172, 177,
+]);
+// RuleState enum order: Proposed=0, Eligible=1, ... ; PrecompilationStatus:
+// Pending=0, Passed=1, Failed=2. Mirrors the on-chain candidate eligibility
+// (`is_eligible_state = state == Eligible`, `is_precompiled_valid = Passed`).
+const RULE_STATE_ELIGIBLE = 1;
+const PRECOMPILATION_STATUS_PASSED = 1;
+
+/**
+ * Decode the fixed-prefix + variable-`sanitized_text` `RuleProposal` layout into
+ * the `ElectionCandidate` shape the election logic and the on-chain settle
+ * instructions consume. Offsets after the Borsh `String` are computed from its
+ * 4-byte length prefix.
+ */
+export function decodeRuleProposalCandidate(data: Uint8Array): ElectionCandidate {
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const ruleId = u64Number(view, 8);
+  const sanitizedTextHash = hex32At(data, 56);
+  const textLength = view.getUint32(88, true);
+  const base = 92 + textLength;
+  const compiledArtifactHash = hex32At(data, base + 64);
+  const voteCount = view.getUint32(base + 98, true);
+  const reportCount = view.getUint32(base + 102, true);
+  const state = view.getUint8(base + 106);
+  const precompilationStatus = view.getUint8(base + 139);
+  const createdAtSeconds = i64Number(view, base + 140);
+
+  return {
+    compiledArtifactHash,
+    createdAtSeconds,
+    isEligibleState: state === RULE_STATE_ELIGIBLE,
+    isPrecompiledValid: precompilationStatus === PRECOMPILATION_STATUS_PASSED,
+    reportCount,
+    ruleId,
+    sanitizedTextHash,
+    voteCount,
+  };
+}
+
+/**
+ * Enumerate the turn's on-chain `RuleProposal` accounts (the trustless election
+ * candidate source). Returns the full set sorted by `ruleId` so the eligible
+ * pool hash is deterministic across `lock`/`settle`; returns `[]` when the turn
+ * has no rules (the original-rule-only settlement path, PRD §6.12). The election
+ * logic and the program both filter eligibility internally.
+ */
+export async function fetchOnChainElectionCandidates(
+  config: TurnAutomationConfig,
+  turnId: number,
+  options: SettlementSenderOptions = {},
+): Promise<ElectionCandidate[]> {
+  const context = await createSettlementContext(config, options);
+  const accounts = await context.connection.getProgramAccounts(
+    context.programId,
+    {
+      commitment: context.commitment,
+      filters: [
+        { memcmp: { bytes: bs58.encode(RULE_PROPOSAL_DISCRIMINATOR), offset: 0 } },
+        { memcmp: { bytes: bs58.encode(u64Le(turnId)), offset: 16 } },
+      ],
+    },
+  );
+  return accounts
+    .map(({ account }) => decodeRuleProposalCandidate(account.data))
+    .filter((candidate) => candidate.ruleId > 0)
+    .sort((left, right) => left.ruleId - right.ruleId);
+}
+
+export interface SettleVrfResult {
+  randomness: Uint8Array;
+  signature: string;
+}
+
+/**
+ * Granular, single-context on-chain settlement operations used by the M5.3
+ * settlement scheduler. Unlike the per-cycle dep factories above (which each
+ * spin up their own context and only read a single VRF account), these share
+ * one Switchboard/RPC context and let the scheduler read the full settlement
+ * state and drive each of the three VRF accounts independently. Every step is
+ * the real trustless on-chain instruction — no mocks, no fallbacks.
+ */
+export interface SettlementSenders {
+  closeEliminationWindow: (
+    turnId: number,
+    finalists: readonly ElectionCandidate[],
+  ) => Promise<string>;
+  closeTurn: (turnId: number) => Promise<string>;
+  createCommittedRandomness: () => Promise<{
+    randomnessAccount: string;
+    signature: string;
+  }>;
+  failDraw: (turnId: number, failureCode: number) => Promise<string>;
+  fetchRandomnessFor: (
+    randomnessAccount: PublicKey,
+    staleReveal: "failed" | "throw",
+  ) => Promise<ElectionRandomnessState | RandomnessState | null>;
+  fetchState: (turnId: number) => Promise<SettlementTurnState | null>;
+  lockEligiblePool: (
+    turnId: number,
+    candidates: readonly ElectionCandidate[],
+  ) => Promise<string>;
+  requestActiveElectionVrf: (
+    turnId: number,
+    randomnessAccount: string,
+  ) => Promise<string>;
+  requestDraw: (turnId: number, randomnessAccount: string) => Promise<string>;
+  requestElectionVrf: (
+    turnId: number,
+    randomnessAccount: string,
+  ) => Promise<string>;
+  settleActiveElection: (
+    turnId: number,
+    randomnessAccount: string,
+    candidates: readonly ElectionCandidate[],
+  ) => Promise<SettleVrfResult>;
+  settleDraw: (
+    turnId: number,
+    randomnessAccount: string,
+  ) => Promise<SettleVrfResult>;
+  settleElection: (
+    turnId: number,
+    randomnessAccount: string,
+    candidates: readonly ElectionCandidate[],
+  ) => Promise<SettleVrfResult>;
+}
+
+export function createSettlementSenders(
+  config: TurnAutomationConfig,
+  options: SettlementSenderOptions = {},
+): SettlementSenders {
+  let contextPromise: Promise<SettlementContext> | null = null;
+  const getContext = () => {
+    contextPromise ??= createSettlementContext(config, options);
+    return contextPromise;
+  };
+
+  return {
+    async closeEliminationWindow(turnId, finalists) {
+      const context = await getContext();
+      return sendInstructions({
+        context,
+        instructions: [
+          createCloseEliminationWindowInstruction({
+            authority: context.authority.publicKey,
+            finalists,
+            programId: context.programId,
+            turnId,
+          }),
+        ],
+        label: "close_elimination_window",
+      });
+    },
+    async closeTurn(turnId) {
+      const context = await getContext();
+      return sendInstructions({
+        context,
+        instructions: [
+          createSettlementCloseTurnInstruction({
+            authority: context.authority.publicKey,
+            programId: context.programId,
+            turnId,
+          }),
+        ],
+        label: "close_turn",
+      });
+    },
+    async createCommittedRandomness() {
+      return createAndCommitRandomness(await getContext());
+    },
+    async failDraw(turnId, failureCode) {
+      const context = await getContext();
+      return sendInstructions({
+        context,
+        instructions: [
+          createFailDrawInstruction({
+            authority: context.authority.publicKey,
+            failureCode,
+            programId: context.programId,
+            turnId,
+          }),
+        ],
+        label: "fail_draw",
+      });
+    },
+    async fetchRandomnessFor(randomnessAccount, staleReveal) {
+      return fetchCommittedRandomness({
+        context: await getContext(),
+        randomnessAccount,
+        staleReveal,
+      });
+    },
+    async fetchState(turnId) {
+      const context = await getContext();
+      const data = await fetchTurnAccountData(context, turnId);
+      return data ? decodeSettlementTurnState(data) : null;
+    },
+    async lockEligiblePool(turnId, candidates) {
+      const context = await getContext();
+      return sendInstructions({
+        context,
+        instructions: [
+          createLockRuleElectionPoolInstruction({
+            authority: context.authority.publicKey,
+            candidates,
+            programId: context.programId,
+            turnId,
+          }),
+        ],
+        label: "lock_rule_election_pool",
+      });
+    },
+    async requestActiveElectionVrf(turnId, randomnessAccount) {
+      const context = await getContext();
+      return sendInstructions({
+        context,
+        instructions: [
+          createRequestActiveElectionVrfInstruction({
+            authority: context.authority.publicKey,
+            programId: context.programId,
+            randomnessAccount: new PublicKey(randomnessAccount),
+            turnId,
+          }),
+        ],
+        label: "request_active_election_vrf",
+      });
+    },
+    async requestDraw(turnId, randomnessAccount) {
+      const context = await getContext();
+      return sendInstructions({
+        context,
+        instructions: [
+          createRequestDrawInstruction({
+            authority: context.authority.publicKey,
+            programId: context.programId,
+            randomnessAccount: new PublicKey(randomnessAccount),
+            turnId,
+          }),
+        ],
+        label: "request_draw",
+      });
+    },
+    async requestElectionVrf(turnId, randomnessAccount) {
+      const context = await getContext();
+      return sendInstructions({
+        context,
+        instructions: [
+          createRequestRuleElectionVrfInstruction({
+            authority: context.authority.publicKey,
+            programId: context.programId,
+            randomnessAccount: new PublicKey(randomnessAccount),
+            turnId,
+          }),
+        ],
+        label: "request_rule_election_vrf",
+      });
+    },
+    async settleActiveElection(turnId, randomnessAccount, candidates) {
+      const context = await getContext();
+      return revealAndSendCallback({
+        callbackInstructions: [
+          createSettleActiveElectionInstruction({
+            authority: context.authority.publicKey,
+            candidates,
+            programId: context.programId,
+            randomnessAccount: new PublicKey(randomnessAccount),
+            turnId,
+          }),
+        ],
+        context,
+        label: "settle_active_election",
+        randomnessAccount: new PublicKey(randomnessAccount),
+      });
+    },
+    async settleDraw(turnId, randomnessAccount) {
+      const context = await getContext();
+      return revealAndSendCallback({
+        callbackInstructions: [
+          createSettleDrawInstruction({
+            authority: context.authority.publicKey,
+            programId: context.programId,
+            randomnessAccount: new PublicKey(randomnessAccount),
+            turnId,
+          }),
+        ],
+        context,
+        label: "settle_draw",
+        randomnessAccount: new PublicKey(randomnessAccount),
+      });
+    },
+    async settleElection(turnId, randomnessAccount, candidates) {
+      const context = await getContext();
+      return revealAndSendCallback({
+        callbackInstructions: [
+          createSettleRuleElectionInstruction({
+            authority: context.authority.publicKey,
+            candidates,
+            programId: context.programId,
+            randomnessAccount: new PublicKey(randomnessAccount),
+            turnId,
+          }),
+        ],
+        context,
+        label: "settle_rule_election",
+        randomnessAccount: new PublicKey(randomnessAccount),
+      });
+    },
   };
 }
