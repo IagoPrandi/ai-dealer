@@ -1,6 +1,6 @@
 # Trustless Settlement Pipeline — Action Plan
 
-> **Status:** M5.0, M5.1 and M5.2 confirmed and ticked (2026-06-23). M5.3 local implementation complete and verified (typecheck/test/lint/build) — awaiting user confirmation + live devnet execution before ticking. Next: M5.4 (real player inputs).
+> **Status:** M5.0–M5.3 confirmed and ticked (M5.0–M5.2 on 2026-06-23; M5.3 on 2026-06-24, live devnet acceptance on staged turn 32). Next: M5.4 (real player inputs).
 > **Created:** 2026-06-22
 > **Decision:** **Trustless** — `settle_*` instructions must verify Switchboard randomness on-chain (no authority-supplied randomness value).
 > **Scope:** Everything in the post-turn-close settlement pipeline EXCEPT turn open/close (which stays a manual test helper today and the automatic timed loop in production). Goal: validate the real pipeline end-to-end on devnet **without mocks or fallbacks**.
@@ -101,7 +101,7 @@ Phases map 1:1 to milestones. Each milestone lists Objective, Scope, Deliverable
   - **Known follow-up (M5.3 scope, not M5.2):** the existing `runTurnAutomationOnce` evaluates the `set_turn_duration_cycle` branch before the close/force-skip branch and has no legacy-deserialization fallback there, so a legacy active turn permanently wedges the production automation loop (this is why turn 30 never advanced). The staging helper works around it; the loop itself should be reordered/guarded when M5.3 wires the settlement scheduler.
 
 ### M5.3 — Settlement scheduler + state machine + worker→API bridge
-- [ ] **M5.3**
+- [x] **M5.3** — confirmed by user 2026-06-24 (live devnet acceptance on staged turn 32).
 - **Objective:** Automate the full post-close pipeline as a scheduled, idempotent, state-machine-driven loop, and project results to the API so the UI populates.
 - **Scope:** Add a settlement loop to `apps/worker/src/index.ts` that, per closed play window, advances PRD §5.5 states in PRD order: eligible rule pool lock → finalist-election VRF → finalist set → elimination window → active-election VRF → rule elected/frozen → `DRAW_PENDING → DRAWN` (draw cycle) → `VERIFYING` (guess verification cycle) → `FINALIZED` (winners + rewards) → `CLAIMABLE` (`record_claim` on-chain) → `CLOSED`. If zero eligible rules exist, skip the decision/election branch and continue to draw/original-only settlement. Enforce idempotency (PRD §10.13: `idempotency_key`, `input_hash`, `output_hash`, no duplicate payouts/rewards). POST projections to the existing API endpoints (`/draws`, `/elections`, `/verification-jobs/create-turn`, `/verification-results`, `/winner-records/calculate-turn`, `/reward-records/calculate-turn`, `/claim-records/create-turn`).
 - **Deliverables:** scheduler wiring; state-transition records with hashes; worker→API client calls; gated test-only manual triggers (`/manual/settle/*`) for stepping the pipeline during testing.
@@ -168,6 +168,6 @@ M5.0–M5.3 are the critical path (the missing machinery). M5.4–M5.5 validate.
 | M5.0 | Switchboard On-Demand provisioning (devnet) | ✅ Done | Confirmed by user 2026-06-23. `set_vrf_config` + proof-of-life broadcast on devnet; on-chain VRF config addresses verified. |
 | M5.1 | Trustless on-chain randomness verification (contract) | ✅ Done | Confirmed by user 2026-06-23. Clippy clean (both feature sets); SBF suite 7/7 green; devnet upgrade verified (sig `2Ywwwjm…dVWFb`, slot 471472365). |
 | M5.2 | Worker randomness client + production settlement senders | ✅ Done | Confirmed by user 2026-06-23. Live devnet `request_draw` → reveal → `settle_draw` on turn 31; settle sig `5n5aCsz8…` finalized (slot 471498242); `DrawStatus::Fulfilled`, draw `[17,56,47,28,14,8]`, verified randomness `c7a7…86bc`. |
-| M5.3 | Settlement scheduler + state machine + worker→API bridge | 🟠 Done — awaiting confirmation | Verified (worker 74/74, api 37/37, lint, build) + live devnet run on staged turn 32: full pipeline (draw `[25,35,10,40,4,77]`, close, projections, 8-step §5.5 audit chain) finalized; settle sig `3c3Mr1kM…`, close sig `4WtrurQH…`; second pass idempotent (`already_closed`). Awaiting user confirmation before ticking. |
+| M5.3 | Settlement scheduler + state machine + worker→API bridge | ✅ Done | Confirmed by user 2026-06-24. Verified (worker 74/74, api 37/37, lint, build) + live devnet run on staged turn 32: full pipeline (draw `[25,35,10,40,4,77]`, close, projections, 8-step §5.5 audit chain) finalized; settle sig `3c3Mr1kM…`, close sig `4WtrurQH…`; second pass idempotent (`already_closed`). |
 | M5.4 | Real player inputs (no mocks) | Planned | — |
 | M5.5 | End-to-end verification & reconciliation | Planned | — |
