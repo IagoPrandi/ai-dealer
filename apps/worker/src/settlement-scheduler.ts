@@ -135,9 +135,21 @@ export function planSettlementAction(
   }
 
   // ---- On-chain pipeline (turn still Open) ------------------------------
-  // Election pipeline only runs when eligible rules exist (PRD §6.12: zero
-  // eligible rules skips the decision/election branch entirely).
-  if (hasEligible && s.activeRuleId === null) {
+  // Election pipeline. It runs while no active rule is elected AND the active
+  // election has not yet been settled, AND either the pool is already locked
+  // (election in progress) or eligible rules exist (PRD §6.12: zero eligible
+  // rules at the start skips the decision/election branch entirely). Keying the
+  // "in progress" case on `eligibleRulePoolHash` rather than a live eligibility
+  // recount is essential: `close_elimination_window` flips the survivor's rule
+  // state from `Eligible` to `SurvivedElimination`, so a recount would wrongly
+  // drop to zero eligible and skip the active election.
+  const electionInProgress = s.eligibleRulePoolHash !== null;
+  const activeElectionSettled = isSetPubkey(s.activeElectionVrfFulfillment);
+  if (
+    s.activeRuleId === null &&
+    !activeElectionSettled &&
+    (electionInProgress || hasEligible)
+  ) {
     if (!s.eligibleRulePoolHash) {
       return now >= s.electionCutoffTimestampSeconds
         ? plan("VOTING_CLOSED", "lock_pool", SETTLEMENT_STATES.ELIGIBLE_RULE_POOL_LOCKED)
@@ -179,7 +191,11 @@ export function planSettlementAction(
     return waitPlan("RULE_FROZEN", "before_play_window_end");
   }
   if (s.drawStatus === "not_requested" || s.drawStatus === "failed") {
-    if (!hasEligible && !recorded.has(SETTLEMENT_STATES.RULE_ELECTED)) {
+    // No alternative rule was elected (none eligible, or the active election
+    // produced no valid rule): project the original-rule-only election once,
+    // then draw. When an alternative IS frozen, the settled-election projection
+    // was already published by the active-election step, so go straight to draw.
+    if (s.activeRuleId === null && !recorded.has(SETTLEMENT_STATES.RULE_ELECTED)) {
       return plan(
         "RULE_ELECTED",
         "project_original_only_election",

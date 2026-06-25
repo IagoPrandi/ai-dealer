@@ -23,6 +23,13 @@ declare_id!("6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4");
 
 pub const TURN_DURATION_CYCLE_LEN: usize = 4;
 pub const MAX_FINALISTS: usize = 10;
+/// Fixed 1-hour decision/elimination window (PRD §5.4/§6.14a). Under the
+/// test-only `devnet-test` feature it collapses to a few seconds so the full
+/// election → elimination → active-election pipeline can be validated end-to-end
+/// on devnet without a real 1-hour wait; production builds keep the full hour.
+#[cfg(feature = "devnet-test")]
+pub const ELIMINATION_WINDOW_SECONDS: i64 = 5;
+#[cfg(not(feature = "devnet-test"))]
 pub const ELIMINATION_WINDOW_SECONDS: i64 = 3_600;
 pub const MAX_RULE_TEXT_BYTES: usize = 6000;
 pub const BASIS_POINTS_DENOMINATOR: u16 = 10_000;

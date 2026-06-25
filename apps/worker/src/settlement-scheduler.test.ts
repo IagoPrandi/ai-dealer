@@ -153,6 +153,40 @@ test("planner walks the two-step election pipeline in order", () => {
   );
 });
 
+test("planner still runs the active election after elimination drops the live eligible recount to 0", () => {
+  // `close_elimination_window` flips the survivor's rule state Eligible ->
+  // SurvivedElimination, so a live eligibility recount returns 0. The pipeline
+  // must keep going (pool is locked) and not fall back to original-only.
+  const plan = planSettlementAction(
+    snapshot(
+      makeState({
+        eligibleRulePoolHash: HASH,
+        finalistSetHash: HASH,
+        survivorFinalistHash: HASH,
+      }),
+      { eligibleCandidateCount: 0, nowSeconds: 2_000 },
+    ),
+  );
+  assert.equal(plan.kind, "request_active_vrf");
+});
+
+test("planner treats a settled active election with no elected rule as no-alternative", () => {
+  const plan = planSettlementAction(
+    snapshot(
+      makeState({
+        activeElectionVrfFulfillment: SET,
+        activeElectionVrfRequest: SET,
+        eligibleRulePoolHash: HASH,
+        finalistSetHash: HASH,
+        survivorFinalistHash: HASH,
+      }),
+      { eligibleCandidateCount: 0, nowSeconds: 2_000 },
+    ),
+  );
+  // Active election settled but activeRuleId still null -> fall through to draw.
+  assert.equal(plan.kind, "project_original_only_election");
+});
+
 test("planner skips the election branch when no rules are eligible", () => {
   const plan = planSettlementAction(
     snapshot(makeState(), { eligibleCandidateCount: 0, nowSeconds: 2_000 }),

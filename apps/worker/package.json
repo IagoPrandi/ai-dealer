@@ -12,6 +12,7 @@
     "switchboard:settle-draw": "tsx src/switchboard-settle-draw.ts",
     "settlement:run": "tsx src/settlement-run.ts",
     "devnet:stage-turn": "tsx src/devnet-stage-turn.ts",
+    "devnet:seed-real-inputs": "tsx src/devnet-seed-real-inputs.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test --import tsx \"src/**/*.test.ts\""
   },
