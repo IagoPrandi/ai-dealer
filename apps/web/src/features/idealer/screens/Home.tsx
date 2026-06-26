@@ -51,7 +51,7 @@ function PromptInput() {
 export function HomeScreen() {
   const {
     endSeconds, fees, go, guessCutoffEndsAt, openDetail, played, players, prizeSol, rules, turnId,
-    turnReadyToPlay, turnStatusMessage,
+    resultTurnId, round, turnReadyToPlay, turnStatusMessage,
   } = useIdealer();
 
   const [h, m, s] = useCountdownTo(endSeconds);
@@ -59,6 +59,12 @@ export function HomeScreen() {
   const nowSec = Math.floor(Date.now() / 1000);
   const showCutoff =
     turnReadyToPlay && !played && guessCutoffEndsAt !== null && guessCutoffEndsAt > nowSec;
+  const showResultLink =
+    resultTurnId > 0 &&
+    (resultTurnId < turnId ||
+      round?.status === "completed" ||
+      round?.draw?.status === "fulfilled" ||
+      Boolean(round?.winners?.records.length));
   const prize = useLivePrize(prizeSol);
   const top = rules.rules.slice(0, 3);
   const intStr = Math.floor(prize).toString();
@@ -128,7 +134,7 @@ export function HomeScreen() {
         )}
 
         {/* PREVIOUS ROUND RESULT */}
-        {turnId > 1 ? (
+        {showResultLink ? (
           <button onClick={() => go("result")} className="ide-tap" style={{
             width: "100%", textAlign: "left", marginBottom: 22, padding: "13px 16px", borderRadius: 16, cursor: "pointer", color: "var(--text)",
             border: "1px solid rgba(255,210,63,0.4)", background: "linear-gradient(110deg, rgba(255,210,63,0.13), var(--surface))",
@@ -136,7 +142,7 @@ export function HomeScreen() {
           }} type="button">
             <span style={{ width: 38, height: 38, borderRadius: 12, background: "var(--gold)", color: "#0B0910", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.trophy style={{ color: "#0B0910" }} /></span>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 14.5, fontWeight: 700 }}>Result of round {fmtTurnId(turnId - 1)}</div>
+              <div style={{ fontSize: 14.5, fontWeight: 700 }}>Result of round {fmtTurnId(resultTurnId)}</div>
               <div style={{ fontSize: 12.5, color: "var(--muted)" }}>See the drawn numbers and the elected rule</div>
             </div>
             <Ico.arrow style={{ color: "var(--gold)", flexShrink: 0 }} />

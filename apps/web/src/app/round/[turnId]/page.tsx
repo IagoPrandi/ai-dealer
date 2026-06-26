@@ -1,4 +1,6 @@
-import { RoundPage } from "../../../features/round-page/RoundPage";
+import { notFound } from "next/navigation";
+
+import { IdealerApp } from "../../../features/idealer/IdealerApp";
 import { SolanaProviders } from "../../../solana/SolanaProviders";
 
 export default async function Round({
@@ -7,10 +9,15 @@ export default async function Round({
   params: Promise<{ turnId: string }>;
 }) {
   const { turnId } = await params;
+  const parsedTurnId = Number(turnId);
+
+  if (!Number.isInteger(parsedTurnId) || parsedTurnId <= 0) {
+    notFound();
+  }
 
   return (
     <SolanaProviders>
-      <RoundPage turnId={turnId} />
+      <IdealerApp initialScreen="result" initialResultTurnId={parsedTurnId} />
     </SolanaProviders>
   );
 }

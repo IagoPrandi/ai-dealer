@@ -26,10 +26,9 @@ function EligItem({ label, ok }: { label: string; ok: boolean }) {
 }
 
 export function ResultScreen() {
-  const { go, turnId, walletAddress } = useIdealer();
-  const prevId = turnId > 1 ? turnId - 1 : turnId;
-  const { round, loading } = useRound(prevId);
-  const { receipt } = usePlayerGuess(prevId, walletAddress);
+  const { go, resultTurnId, walletAddress } = useIdealer();
+  const { round, loading } = useRound(resultTurnId);
+  const { receipt } = usePlayerGuess(resultTurnId, walletAddress);
   const [votedElected, setVotedElected] = useState(false);
 
   const draw = round?.draw?.drawResult ?? [];
@@ -43,7 +42,7 @@ export function ResultScreen() {
       return;
     }
     const controller = new AbortController();
-    getRuleVotes(prevId, controller.signal)
+    getRuleVotes(resultTurnId, controller.signal)
       .then((body) => {
         const mine = (body?.votes ?? []).some(
           (v) => v.voter === walletAddress && v.ruleId === activeRuleId,
@@ -52,7 +51,7 @@ export function ResultScreen() {
       })
       .catch(() => undefined);
     return () => controller.abort();
-  }, [prevId, walletAddress, activeRuleId]);
+  }, [resultTurnId, walletAddress, activeRuleId]);
 
   const myWins = useMemo(
     () => (round?.winners?.records ?? []).filter((r) => r.player === walletAddress),
@@ -104,7 +103,12 @@ export function ResultScreen() {
           }
         />
 
-        {youWon ? (
+        {!walletAddress ? (
+          <div className="ide-card" style={{ padding: 18, marginBottom: 16, textAlign: "center" }}>
+            <div style={{ fontSize: 15.5, fontWeight: 700 }}>Round settled</div>
+            <div style={{ fontSize: 13.5, color: "var(--muted)", marginTop: 4 }}>Draw, rule, and payout results are available on-chain.</div>
+          </div>
+        ) : youWon ? (
           <div className="ide-card" style={{ padding: 20, marginBottom: 16, textAlign: "center", borderColor: "rgba(255,210,63,0.4)", background: "linear-gradient(160deg, rgba(255,210,63,0.16), var(--surface))", boxShadow: "0 0 36px -14px rgba(255,210,63,0.6)" }}>
             <div style={{ fontSize: 40, marginBottom: 4 }}>🏆</div>
             <div style={{ fontSize: 13, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--gold)", fontWeight: 800 }}>You won!</div>
@@ -120,7 +124,7 @@ export function ResultScreen() {
         )}
 
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "4px 4px 12px" }}>
-          <span className="ide-num" style={{ fontSize: 13, letterSpacing: "0.12em", color: "var(--purple-soft)", fontWeight: 700 }}>{fmtTurnId(prevId)}</span>
+          <span className="ide-num" style={{ fontSize: 13, letterSpacing: "0.12em", color: "var(--purple-soft)", fontWeight: 700 }}>{fmtTurnId(resultTurnId)}</span>
           <span style={{ fontSize: 13, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 6 }}><Ico.users style={{ color: "var(--dim)" }} /> <span className="ide-num">{fmtInt(round?.pool.guesses ?? 0)}</span> players</span>
         </div>
 

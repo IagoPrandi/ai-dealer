@@ -63,8 +63,9 @@ function PhoneChrome() {
 
 export function IdealerApp({
   initialConnect = false,
+  initialResultTurnId,
   initialScreen = "home",
-}: { initialConnect?: boolean; initialScreen?: Screen } = {}) {
+}: { initialConnect?: boolean; initialResultTurnId?: number; initialScreen?: Screen } = {}) {
   const client = useSolanaClient();
   const { connect, connecting, connected, connectors, wallet } = useWalletConnection();
   const walletAddress = wallet?.account.address.toString();
@@ -207,6 +208,18 @@ export function IdealerApp({
     };
   }, [activeTurn.snapshot]);
 
+  const resultTurnId = useMemo(() => {
+    if (initialResultTurnId && Number.isInteger(initialResultTurnId) && initialResultTurnId > 0) {
+      return initialResultTurnId;
+    }
+    const currentTurnHasResult =
+      round?.turnId === turnId &&
+      (round.status === "completed" ||
+        round.draw?.status === "fulfilled" ||
+        Boolean(round.winners?.records.length));
+    return currentTurnHasResult ? turnId : Math.max(1, turnId - 1);
+  }, [initialResultTurnId, round, turnId]);
+
   // When does guess submission close? (guessCutoffBps into the turn window.)
   const guessCutoffEndsAt = useMemo(() => {
     const snap = activeTurn.snapshot;
@@ -249,6 +262,7 @@ export function IdealerApp({
     rules,
     screen,
     seed,
+    resultTurnId,
     turnId,
     turnReadyToPlay: activeTurn.state === "open",
     turnStatusMessage: activeTurn.message,

@@ -56,6 +56,7 @@ export interface IdealerContextValue {
   rules: RulesView;
   screen: Screen;
   seed: string;
+  resultTurnId: number;
   turnId: number;
   turnReadyToPlay: boolean;
   turnStatusMessage: string;
