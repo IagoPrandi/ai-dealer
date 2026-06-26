@@ -418,6 +418,16 @@ test("round summary exposes tracked accounting sources and visible pool", () => 
   assert.equal(summary.pool.treasurySol, 0.0043);
 });
 
+test("round summary marks fulfilled settlement turns as completed", () => {
+  resetApiStateForTests();
+  saveFulfilledDraw(152);
+
+  const summary = getRoundSummary(152, 1);
+
+  assert.equal(summary.status, "completed");
+  assert.equal(summary.draw?.status, "fulfilled");
+});
+
 test("winner calculation handles zero winners with full bucket rollover remainder", () => {
   resetApiStateForTests();
   saveReceiptForWallet(220, wallet, [1, 2, 3, 4, 5, 6]);

@@ -4303,6 +4303,10 @@ export function getRoundSummary(
   ).length;
   const removals = listPaidRuleRemovals(turnId).length;
   const accounting = getPrizePoolAccounting(turnId);
+  const draw = getDraw(turnId);
+  const hasClosedSettlement = listSettlementTransitions(turnId).some(
+    (transition) => transition.toState === "CLOSED",
+  );
 
   const cycleLength = TURN_DURATION_CYCLE_HOURS.length;
   const stepIndex = (turnId - 1) % cycleLength;
@@ -4326,7 +4330,7 @@ export function getRoundSummary(
   const treasurySol = lamportsToSol(accounting.treasuryLamports);
 
   const status =
-    turnId < activeTurnId
+    hasClosedSettlement || draw?.status === "fulfilled" || turnId < activeTurnId
       ? "completed"
       : turnId > activeTurnId
         ? "upcoming"
@@ -4341,7 +4345,7 @@ export function getRoundSummary(
       stepIndex,
     },
     claims: getClaimSummary({ turnId }),
-    draw: getDraw(turnId),
+    draw,
     election: getRuleElection(turnId),
     elimination: getRuleElimination(turnId),
     pool: {

@@ -28,6 +28,17 @@ const BROADCAST = process.env.IDEALER_SETTLE_BROADCAST === "1";
 const TIMEOUT_MS = 15 * 60_000;
 const POLL_INTERVAL_MS = 8_000;
 
+export function isTerminalSettlementStep(step: {
+  action: string;
+  reason?: string;
+  toState?: string;
+}) {
+  return (
+    step.action === "done" &&
+    (step.toState === "CLOSED" || step.reason === "already_closed")
+  );
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -132,7 +143,7 @@ export async function runManualSettlement() {
       if (step.action !== "wait") {
         onlyWaits = false;
       }
-      if (step.action === "done" && step.toState === "CLOSED") {
+      if (isTerminalSettlementStep(step)) {
         closed = true;
       }
     }

@@ -34,6 +34,7 @@ const BROADCAST = process.env.IDEALER_M5_INPUTS_BROADCAST === "1";
 const OPEN_TURN_IF_MISSING = process.env.IDEALER_M5_INPUTS_OPEN_TURN === "1";
 const DEFAULT_API_BASE_URL = "http://127.0.0.1:3002";
 const DEFAULT_PLAYER_COUNT = 3;
+const MAX_PLAYER_COUNT = 17;
 const DEFAULT_FUND_LAMPORTS = 120_000_000;
 const COMMITMENT: Commitment = "confirmed";
 const SYSTEM_PROGRAM_ID = new PublicKey("11111111111111111111111111111111");
@@ -113,10 +114,12 @@ interface SeededInputSummary {
   turnId: number;
 }
 
-function readSeedConfig(env = process.env): SeedConfig {
+export function readSeedConfig(env = process.env): SeedConfig {
   const playerCount = Number(env.IDEALER_M5_INPUTS_PLAYER_COUNT ?? DEFAULT_PLAYER_COUNT);
-  if (!Number.isInteger(playerCount) || playerCount < 1 || playerCount > 10) {
-    throw new Error("IDEALER_M5_INPUTS_PLAYER_COUNT must be an integer from 1 to 10.");
+  if (!Number.isInteger(playerCount) || playerCount < 1 || playerCount > MAX_PLAYER_COUNT) {
+    throw new Error(
+      `IDEALER_M5_INPUTS_PLAYER_COUNT must be an integer from 1 to ${MAX_PLAYER_COUNT}.`,
+    );
   }
 
   const fundLamportsPerPlayer = Number(
@@ -225,7 +228,10 @@ function deterministicPlayer(turnId: number, index: number) {
   return Keypair.fromSeed(seed);
 }
 
-function deterministicGuess(index: number) {
+export function deterministicGuess(index: number) {
+  if (index === 16) {
+    return [95, 96, 97, 98, 99, 100];
+  }
   const base = 1 + index * 6;
   return [base, base + 1, base + 2, base + 3, base + 4, base + 5];
 }
