@@ -56,9 +56,24 @@ Opened before starting `M0.1`:
 | M5.2      | Worker randomness client + settlement senders | Completed | Confirmed 2026-06-23 | Confirmed and ticked in `SETTLEMENT_TRUSTLESS_PLAN.md`. Production Switchboard settlement senders + web3 instruction builders; worker typecheck/test (58/58)/lint/build pass. Live devnet acceptance on turn 31: `request_draw` → atomic reveal + `settle_draw` (sig `5n5aCsz8…`, finalized, slot 471498242) → `DrawStatus::Fulfilled`, draw `[17,56,47,28,14,8]`, verified randomness `c7a7…86bc`. |
 | M5.3      | Settlement scheduler + state machine + API bridge | Completed | Confirmed 2026-06-24 | Confirmed and ticked in `SETTLEMENT_TRUSTLESS_PLAN.md`. Live devnet staged turn 32 ran the no-player original-only settlement path through `CLOSED`, populated `/rounds/32`, and wrote the 8-step §5.5 audit chain. |
 | M5.4      | Real player inputs (no mocks)                 | Completed | Confirmed 2026-06-25 | Confirmed and ticked in `SETTLEMENT_TRUSTLESS_PLAN.md`. Live devnet acceptance on turn 36: 3 real guesses, 1 eligible LLM-compiled rule, 3 votes, active alternative-rule election/freeze, draw, and verification completed with real results. |
-| M5.5      | End-to-end trustless verification             | Done — awaiting confirmation | Pending | Live devnet turn 37 completed the full trustless settlement path with 17 real guesses, 1 eligible LLM-compiled rule, 17 votes, active rule freeze, draw, verification, winners, rewards, claims, on-chain/API/audit reconciliation, idempotent replay, and current Idealer UI verification. Checkbox remains unticked until user confirmation. |
+| M5.5      | End-to-end trustless verification             | Completed | Confirmed 2026-06-26 | Live devnet turn 37 completed the full trustless settlement path with 17 real guesses, 1 eligible LLM-compiled rule, 17 votes, active rule freeze, draw, verification, winners, rewards, claims, on-chain/API/audit reconciliation, idempotent replay, and current Idealer UI verification. Checkbox marked after explicit user confirmation. |
 
 ## Maintenance Work Log
+
+### 2026-06-26 (M5.5 confirmed and marked done)
+
+- Opened required documents before marking: `PRD.md`, `AGENTS.md`, `SETTLEMENT_TRUSTLESS_PLAN.md`, `PROGRESS_TRACKER.md`, and `.claude/skills`.
+- User explicitly confirmed M5.5 and asked to mark the checkbox.
+- Marked `M5.5` complete in `SETTLEMENT_TRUSTLESS_PLAN.md` and updated the settlement progress sub-tracker to `Done`.
+- Updated the main milestone table in this Progress Tracker from `Done — awaiting confirmation` to `Completed` with confirmation date `2026-06-26`.
+- Did not tick the PRD `M5.5` checkbox because PRD `M5.5` refers to a separate milestone, `Creator & Reward Insights`, not this trustless settlement plan milestone.
+
+### 2026-06-26 (PRD launch-readiness status audit)
+
+- Opened required documents/context before the audit: `PRD.md`, `PROGRESS_TRACKER.md`, `SETTLEMENT_TRUSTLESS_PLAN.md`, and `.claude/skills`.
+- Compared PRD milestone checkboxes, the progress tracker status table, the settlement trustless plan, and the current admin surface.
+- Findings at audit time: PRD `M4.7` and `M4.8` are implemented/verified in the tracker but remain unticked in `PRD.md` pending user confirmation. PRD `M4 Approval` also remains unticked because those submilestones are not yet approved. The separate `SETTLEMENT_TRUSTLESS_PLAN.md` `M5.5` was awaiting confirmation at the time of this audit and was later confirmed in the M5.5 worklog above; it is not the same as PRD `M5.5` (`Creator & Reward Insights`), which remains unimplemented. PRD `M5` admin console, `M9` readiness gates, `M6` beta, and `M7` public launch readiness remain open.
+- Did not change any milestone status or PRD checkbox.
 
 ### 2026-06-25 (M5.5 current UI verification corrected)
 
