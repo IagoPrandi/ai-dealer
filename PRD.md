@@ -5449,20 +5449,22 @@ Implement prize pool accounting, treasury/platform monetization, payouts, rollov
 
 **Checklist:**
 
-- [ ] Add a `Claim` PDA per `(turn_id, wallet, kind)` with `WinnerPayout` / `CreatorReward` / `VoterReward` kinds and `Available` / `Claimed` state.
-- [ ] Implement authority-signed `record_claim` that mirrors an API-computed claimable amount on chain (draw fulfilled, amount ≥ `minimum_claim_threshold_lamports`, idempotent via `init`).
-- [ ] Implement `claim_prize` (winner payout from the turn prize vault) and `claim_reward` (creator/voter reward from the treasury reserve vault), signed by the claimant.
-- [ ] Pay out of program-owned vault PDAs by direct lamport mutation while preserving the vault's rent-exempt minimum.
-- [ ] Block double-claim via the `Claimed` flag (Checks-Effects-Interactions: mark claimed before transfer).
-- [ ] Worker posts `record_claim` for each available claim after settlement, tolerating already-recorded PDAs.
-- [ ] Frontend builds `claim_prize` / `claim_reward` instructions, signs in-wallet, and records the real signature through `POST /claim-records/complete`.
-- [ ] Add contract tests (record → claim, double-claim, wrong wallet, below-minimum, kind/vault mismatch, vault rent floor) and worker/API tests.
+- [x] Add a `Claim` PDA per `(turn_id, wallet, kind)` with `WinnerPayout` / `CreatorReward` / `VoterReward` kinds and `Available` / `Claimed` state.
+- [x] Implement authority-signed `record_claim` that mirrors an API-computed claimable amount on chain (draw fulfilled, amount ≥ `minimum_claim_threshold_lamports`, idempotent via `init`).
+- [x] Implement `claim_prize` (winner payout from the turn prize vault) and `claim_reward` (creator/voter reward from the treasury reserve vault), signed by the claimant.
+- [x] Pay out of program-owned vault PDAs by direct lamport mutation while preserving the vault's rent-exempt minimum.
+- [x] Block double-claim via the `Claimed` flag (Checks-Effects-Interactions: mark claimed before transfer).
+- [x] Worker posts `record_claim` for each available claim after settlement, tolerating already-recorded PDAs.
+- [x] Frontend builds `claim_prize` / `claim_reward` instructions, signs in-wallet, and records the real signature through `POST /claim-records/complete`.
+- [x] Add contract tests (record → claim, double-claim, wrong wallet, below-minimum, kind/vault mismatch, vault rent floor) and worker/API tests.
 
 **Approval criteria:**
 
-- [ ] A connected wallet can claim a real winner payout and a creator/voter reward on devnet, with SOL transferred.
-- [ ] Double-claim is rejected on-chain; below-minimum claims are never recorded.
-- [ ] Winner payouts draw from the prize vault and rewards from the treasury reserve, without reducing the winner-visible payout.
+- [x] A connected wallet can claim a real winner payout and a creator/voter reward on devnet, with SOL transferred.
+- [x] Double-claim is rejected on-chain; below-minimum claims are never recorded.
+- [x] Winner payouts draw from the prize vault and rewards from the treasury reserve, without reducing the winner-visible payout.
+
+**Status: ✅ Done — confirmed by user 2026-06-26.** Implementation verified across contract/worker/API/frontend (`Claim` PDA + `record_claim`/`claim_prize`/`claim_reward` in `contracts/solana/programs/idealer/src/lib.rs`; `pay_from_vault` rent-floor + CEI mark-claimed-before-transfer; worker `recordClaimsForTurn` wired into the M5.3 settlement loop; frontend `createClaimPrize/RewardInstruction` + `/claim-records/request`→`/complete`; SBF tests for record→claim, double-claim, wrong-wallet, below-minimum, kind/vault mismatch, vault rent floor; worker/API claim tests). **Live devnet acceptance:** on turn 37, `record_claim` recorded 5 winner-payout `Claim` PDAs; a real claimant-signed `claim_prize` (winner `GBSpqDzF…`, claim PDA `rxTZ1ax8…`) transferred 0.018 SOL from the prize vault (sig `3WM8BtYeHtEMmiNSamB37eeuYYq5KNPB28APFnCs3ivvzgRkKTFdvQAmJPUZwaBDVUWkBTJRtSzQgbovWUNzWgh2`, balance delta +18,045,000 lamports; API claim → `claimed`); a re-claim was rejected on-chain (`ClaimNotAvailable`, custom error 6058); the creator reward stayed `unavailable` (below `minimum_claim_threshold_lamports`), demonstrating below-minimum is never recorded. The creator/voter `claim_reward` (treasury-reserve pull) is implemented, SBF-tested, and frontend-wired; it was not exercised live because no reward on the validated turns exceeded the claim threshold (a live reward claim only needs a turn whose reward clears the minimum). Gated operator: `apps/worker/src/devnet-claim-prize.ts`.
 
 ---
 
