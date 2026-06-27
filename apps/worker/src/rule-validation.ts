@@ -2,6 +2,7 @@ import {
   validateAndPrecompileRule,
   type AgentModelIdentity,
   type AgentProviderAttemptLog,
+  type RuleCompiledArtifact,
   type RuleValidationResult,
 } from "@idealer/rule-compiler";
 
@@ -13,6 +14,7 @@ export interface PendingRuleValidation {
 }
 
 export interface PublishedRuleValidation {
+  compiledArtifact: RuleCompiledArtifact | null;
   compiledArtifactHash: string | null;
   confidence: RuleValidationResult["log"]["confidence"];
   confidenceAction: RuleValidationResult["log"]["confidenceAction"];
@@ -69,6 +71,7 @@ export async function runRuleValidationCycle(
     }
 
     await deps.publishValidation({
+      compiledArtifact: result.artifact,
       compiledArtifactHash: result.artifactHash,
       confidence: result.log.confidence,
       confidenceAction: result.log.confidenceAction,

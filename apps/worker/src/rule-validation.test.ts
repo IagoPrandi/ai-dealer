@@ -31,8 +31,17 @@ test("runRuleValidationCycle publishes valid and invalid validation logs", async
   assert.deepEqual(result, { invalid: 1, processed: 2, valid: 1 });
   assert.equal(published[0]?.decision, "VALID");
   assert.equal(published[0]?.confidenceAction, "ACCEPT");
+  assert.ok(published[0]?.compiledArtifact);
+  assert.equal(
+    published[0]?.compiledArtifact?.originalText,
+    "Win if at least 4 of your numbers appear in the draw.",
+  );
+  assert.ok(
+    (published[0]?.compiledArtifact?.evaluatedTestCases.length ?? 0) > 0,
+  );
   assert.match(published[0]?.compiledArtifactHash ?? "", /^[0-9a-f]{64}$/);
   assert.equal(published[1]?.decision, "INVALID");
+  assert.equal(published[1]?.compiledArtifact, null);
   assert.equal(published[1]?.confidenceAction, "REJECT");
   assert.ok(published[1]?.reasonCodes.includes("AMBIGUOUS_RULE"));
 });

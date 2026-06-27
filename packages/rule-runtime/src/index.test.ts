@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import type { PredicateNode, RuleAst } from "@idealer/rule-schema";
@@ -7,6 +8,7 @@ import {
   evaluatePredicate,
   evaluateRule,
   resolveRankingWinners,
+  RULE_RUNTIME_LIMITS,
   RuleRuntimeError,
   scoreGuess,
 } from "./index.js";
@@ -183,4 +185,165 @@ test("scoreGuess rejects non-ranking rules", () => {
     (err: unknown) =>
       err instanceof RuleRuntimeError && err.code === "NOT_A_RANKING_RULE",
   );
+});
+
+test("security gate exposes fail-closed sandbox policy limits", () => {
+  assert.equal(RULE_RUNTIME_LIMITS.timeoutMs > 0, true);
+  assert.equal(RULE_RUNTIME_LIMITS.maxOperations > 0, true);
+  assert.equal(RULE_RUNTIME_LIMITS.maxInputArraySize > 0, true);
+  assert.equal(RULE_RUNTIME_LIMITS.maxIntermediateArraySize > 0, true);
+  assert.equal(RULE_RUNTIME_LIMITS.memoryMb > 0, true);
+  assert.equal(RULE_RUNTIME_LIMITS.allowNetwork, false);
+  assert.equal(RULE_RUNTIME_LIMITS.allowFilesystem, false);
+  assert.equal(RULE_RUNTIME_LIMITS.allowImports, false);
+  assert.equal(RULE_RUNTIME_LIMITS.allowRandomness, false);
+  assert.equal(RULE_RUNTIME_LIMITS.allowClock, false);
+});
+
+test("sandbox source has no network, filesystem, dynamic import, RNG, or clock sinks", () => {
+  const source = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+  const forbidden: Array<[string, RegExp]> = [
+    ["network fetch", /\bfetch\s*\(/],
+    ["network module", /from\s+["'](?:node:)?(?:http|https|net|tls|dgram)["']/],
+    ["filesystem module", /from\s+["'](?:node:)?fs(?:\/promises)?["']/],
+    ["child process module", /from\s+["'](?:node:)?child_process["']/],
+    ["dynamic import", /\bimport\s*\(/],
+    ["CommonJS require", /\brequire\s*\(/],
+    ["eval", /\beval\s*\(/],
+    ["Function constructor", /\bFunction\s*\(/],
+    ["randomness", /\bMath\.random\s*\(/],
+    ["clock", /\b(?:Date|performance)\s*\./],
+  ];
+
+  for (const [label, pattern] of forbidden) {
+    assert.equal(pattern.test(source), false, `${label} sink is forbidden`);
+  }
+});
+
+test("sandbox rejects malicious DSL fixtures safely", () => {
+  const input = {
+    guess: [1, 2, 3, 4, 5, 6],
+    draw: [1, 2, 3, 4, 5, 6],
+  };
+
+  assert.throws(
+    () =>
+      evaluatePredicate(
+        {
+          schemaVersion: 2,
+          result: {
+            type: "predicate",
+            predicate: { kind: "fetch", url: "https://example.invalid" },
+          },
+        } as unknown as RuleAst,
+        input,
+      ),
+    (err: unknown) => err instanceof RuleRuntimeError && err.code === "INVALID_NODE",
+  );
+
+  assert.throws(
+    () =>
+      evaluatePredicate(
+        { schemaVersion: 1, node: { kind: "sum_equals" } },
+        { guess: Array.from({ length: 101 }, (_, index) => index), draw: [] },
+      ),
+    (err: unknown) => err instanceof RuleRuntimeError && err.code === "MAX_ARRAY_SIZE",
+  );
+
+  assert.throws(
+    () =>
+      scoreGuess(
+        {
+          schemaVersion: 2,
+          result: {
+            type: "ranking",
+            direction: "max",
+            tieBreak: "share_pool",
+            score: {
+              kind: "arith",
+              op: "mul",
+              left: { kind: "lit", value: Number.MAX_SAFE_INTEGER },
+              right: { kind: "lit", value: 2 },
+            },
+          },
+        },
+        input,
+      ),
+    (err: unknown) =>
+      err instanceof RuleRuntimeError && err.code === "MAX_SCALAR_ABS",
+  );
+});
+
+test("sandbox operation budget rejects expansive ASTs", () => {
+  const leaf: PredicateNode = {
+    kind: "compare",
+    op: "eq",
+    left: { kind: "lit", value: 1 },
+    right: { kind: "lit", value: 1 },
+  };
+  const expand = (depth: number): PredicateNode =>
+    depth === 0
+      ? leaf
+      : {
+          kind: "and",
+          clauses: Array.from({ length: 8 }, () => expand(depth - 1)),
+        };
+  const ast: RuleAst = {
+    schemaVersion: 2,
+    result: { type: "predicate", predicate: expand(4) },
+  };
+
+  assert.throws(
+    () =>
+      evaluatePredicate(ast, {
+        guess: [1, 2, 3, 4, 5, 6],
+        draw: [1, 2, 3, 4, 5, 6],
+      }),
+    (err: unknown) =>
+      err instanceof RuleRuntimeError && err.code === "MAX_OPERATIONS",
+  );
+});
+
+test("runtime fuzz: generated ASTs fail safely and deterministic rules repeat", () => {
+  let seed = 0x5eed;
+  const next = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed;
+  };
+  const int = (max: number) => next() % max;
+  const draw = [5, 12, 23, 34, 45, 56];
+
+  for (let i = 0; i < 80; i += 1) {
+    const guess = Array.from({ length: 6 }, () => int(100) + 1);
+    const place = int(2) === 0 ? "units" : "tens";
+    const threshold = int(7);
+    const ast: RuleAst = {
+      schemaVersion: 2,
+      result: {
+        type: "predicate",
+        predicate: {
+          kind: "count_at_least",
+          value: threshold,
+          of: {
+            kind: "intersection",
+            left: {
+              kind: "digits",
+              place,
+              of: { kind: "source", source: "guess" },
+            },
+            right: {
+              kind: "digits",
+              place,
+              of: { kind: "source", source: "draw" },
+            },
+          },
+        },
+      },
+    };
+
+    const first = evaluatePredicate(ast, { guess, draw });
+    const second = evaluatePredicate(ast, { guess, draw });
+    assert.deepEqual(second, first);
+    assert.ok(first.runtimeSteps <= RULE_RUNTIME_LIMITS.maxOperations);
+  }
 });

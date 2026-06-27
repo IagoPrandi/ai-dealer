@@ -140,7 +140,11 @@ function settledElection(turnId: number, activeRuleId: number) {
   };
 }
 
-function saveReceiptForWallet(turnId: number, player: string, numbers: number[]) {
+function saveReceiptForWallet(
+  turnId: number,
+  player: string,
+  numbers: number[],
+) {
   return saveGuessReceipt({
     gameToken: base58,
     numbers,
@@ -430,7 +434,10 @@ test("round summary exposes tracked accounting sources and visible pool", () => 
   assert.equal(accounting.sources.paidRuleRemovals.count, 1);
   assert.equal(accounting.buckets.original.rolloverLamports, 3_000_000);
   assert.equal(accounting.buckets.alternative.rolloverLamports, 4_000_000);
-  assert.equal(summary.pool.accounting.totalVisiblePrizePoolLamports, 87_750_000);
+  assert.equal(
+    summary.pool.accounting.totalVisiblePrizePoolLamports,
+    87_750_000,
+  );
   assert.equal(summary.pool.guesses, 1);
   assert.equal(summary.pool.proposals, 1);
   assert.equal(summary.pool.paidRemovals, 1);
@@ -607,7 +614,10 @@ test("rollover settlement carries no-winner buckets forward and accumulates acro
   assert.equal(settlement301.original.rolloverLamports, 9_500_000);
   assert.equal(settlement301.alternative.rolloverLamports, 9_500_000);
   assert.equal(settlement301.totalRolloverLamports, 19_000_000);
-  assert.equal(getPrizePoolAccounting(302).buckets.original.rolloverLamports, 9_500_000);
+  assert.equal(
+    getPrizePoolAccounting(302).buckets.original.rolloverLamports,
+    9_500_000,
+  );
 });
 
 test("rollover settlement pays accumulated pool to a winner after rollover without rolling that bucket again", () => {
@@ -648,7 +658,10 @@ test("rollover settlement pays accumulated pool to a winner after rollover witho
     }),
   );
 
-  const winners = calculateAndStoreWinnerRecords(311, "2026-06-12T14:18:00.000Z");
+  const winners = calculateAndStoreWinnerRecords(
+    311,
+    "2026-06-12T14:18:00.000Z",
+  );
 
   // Current pool for 2 guesses is 9,500,000 per bucket; the 4,750,000 inbound
   // rollover lifts each bucket total — and the single winner's payout — to
@@ -713,7 +726,10 @@ test("ranking alternative rule picks the best-score guesses as winners (ties sha
   saveRanking(walletTwo, byPlayer.get(walletTwo)!.id, "c", 5);
   saveRanking(walletThree, byPlayer.get(walletThree)!.id, "d", 2);
 
-  const winners = calculateAndStoreWinnerRecords(240, "2026-06-12T12:18:00.000Z");
+  const winners = calculateAndStoreWinnerRecords(
+    240,
+    "2026-06-12T12:18:00.000Z",
+  );
   const altPlayers = listWinnerRecords(240)
     .filter((record) => record.category === "alternative")
     .map((record) => record.player)
@@ -824,7 +840,10 @@ test("creator and voter reward records are stored without reducing winner payout
   assert.equal(voterRecords.length, 2);
   assert.equal(voterRecords[0]?.finalRewardLamports, 0);
   assert.equal(creatorRecords.length, 1);
-  assert.equal(summary.winners.alternative.individualPayoutLamports, 11_875_000);
+  assert.equal(
+    summary.winners.alternative.individualPayoutLamports,
+    11_875_000,
+  );
   assert.equal(summary.rewards.creator?.finalRewardLamports, 500_000);
 });
 
@@ -903,10 +922,7 @@ test("claim flow creates winner and creator claims and blocks double claim", () 
     }),
   );
 
-  const { claims } = createClaimRecordsForTurn(
-    240,
-    "2026-06-12T12:20:00.000Z",
-  );
+  const { claims } = createClaimRecordsForTurn(240, "2026-06-12T12:20:00.000Z");
   const winnerClaim = claims.find(
     (claim) => claim.kind === "winner_payout" && claim.wallet === wallet,
   );
@@ -916,7 +932,10 @@ test("claim flow creates winner and creator claims and blocks double claim", () 
   assert.equal(winnerClaim.status, "available");
   assert.equal(creatorClaim.status, "available");
   assert.equal(winnerClaim.walletApproval.state, "not_requested");
-  assert.equal(getClaimSummary({ turnId: 240, wallet }).availableLamports > 0, true);
+  assert.equal(
+    getClaimSummary({ turnId: 240, wallet }).availableLamports > 0,
+    true,
+  );
 
   const pending = requestClaimApproval({
     claimId: winnerClaim.claimId,
@@ -996,7 +1015,8 @@ test("player claims summary aggregates a wallet's claims across turns", () => {
   assert.equal(after.claimedLamports, winnerClaim.amountLamports);
   assert.equal(
     after.records.some(
-      (claim) => claim.claimId === winnerClaim.claimId && claim.status === "claimed",
+      (claim) =>
+        claim.claimId === winnerClaim.claimId && claim.status === "claimed",
     ),
     true,
   );
@@ -1042,9 +1062,11 @@ test("player history aggregates guesses, proposals, votes, and claims", () => {
   assert.equal(page.nextCursor, "3");
   assert.equal(page.events[0]?.type, "claim");
   assert.equal(
-    listPlayerHistory({ cursor: page.nextCursor, limit: 10, wallet }).events.some(
-      (event) => event.type === "guess",
-    ),
+    listPlayerHistory({
+      cursor: page.nextCursor,
+      limit: 10,
+      wallet,
+    }).events.some((event) => event.type === "guess"),
     true,
   );
 });
@@ -1109,10 +1131,7 @@ test("claim flow exposes failed wallet approval and below-threshold unavailable 
     }),
   );
 
-  const { claims } = createClaimRecordsForTurn(
-    241,
-    "2026-06-12T12:20:00.000Z",
-  );
+  const { claims } = createClaimRecordsForTurn(241, "2026-06-12T12:20:00.000Z");
   const creatorClaim = claims.find((claim) => claim.kind === "creator_reward");
   const winnerClaim = claims.find((claim) => claim.kind === "winner_payout");
   assert.ok(creatorClaim);
@@ -1183,13 +1202,13 @@ test("claim flow supports elected-rule voter reward claims", () => {
     }),
   );
 
-  const { claims } = createClaimRecordsForTurn(
-    242,
-    "2026-06-12T12:20:00.000Z",
-  );
+  const { claims } = createClaimRecordsForTurn(242, "2026-06-12T12:20:00.000Z");
   const voterClaims = claims.filter((claim) => claim.kind === "voter_reward");
   assert.equal(voterClaims.length, 2);
-  assert.equal(voterClaims.every((claim) => claim.status === "available"), true);
+  assert.equal(
+    voterClaims.every((claim) => claim.status === "available"),
+    true,
+  );
   assert.equal(voterClaims[0]?.amountLamports, 25_200_000);
   assert.equal(
     listClaimRecords({ turnId: 242, wallet: walletTwo })[0]?.kind,
@@ -1203,7 +1222,9 @@ test("rule validation creates a traceable compiler audit log", () => {
 
   const validation = runRuleValidationForProposal({ ruleId: 11, turnId: 3607 });
   const logs = listAuditLogs({ kind: "compiler.validation", turnId: 3607 });
-  const log = validation.auditLogHash ? getAuditLog(validation.auditLogHash) : null;
+  const log = validation.auditLogHash
+    ? getAuditLog(validation.auditLogHash)
+    : null;
 
   assert.equal(validation.decision, "VALID");
   assert.match(validation.auditLogHash ?? "", /^[0-9a-f]{64}$/);
@@ -1214,6 +1235,71 @@ test("rule validation creates a traceable compiler audit log", () => {
   assert.equal(verifyAuditLogIntegrity(log as AuditLogRecord), true);
   assert.match(log?.inputHash ?? "", /^[0-9a-f]{64}$/);
   assert.match(log?.outputHash ?? "", /^[0-9a-f]{64}$/);
+  assert.equal(
+    validation.compiledArtifact?.originalText,
+    proposal(3607, 11).sanitizedText,
+  );
+  assert.equal(
+    validation.compiledArtifact?.officialInterpretation,
+    proposal(3607, 11).officialInterpretation,
+  );
+  assert.equal(validation.compiledArtifact?.createdAt, validation.validatedAt);
+  assert.ok((validation.compiledArtifact?.evaluatedTestCases.length ?? 0) > 0);
+});
+
+test("active alternative verification requires a frozen compiled artifact hash", () => {
+  resetApiStateForTests();
+  const turnId = 3610;
+  saveRuleProposal(proposal(turnId, 7));
+  const validation = runRuleValidationForProposal({ ruleId: 7, turnId });
+  assert.ok(validation.compiledArtifactHash);
+  saveRuleElection({
+    ...settledElection(turnId, 7),
+    activeRuleArtifactHash: validation.compiledArtifactHash,
+  });
+  saveReceiptForWallet(turnId, wallet, [1, 2, 3, 4, 5, 6]);
+  saveFulfilledDraw(turnId);
+
+  const { jobs } = createGuessVerificationJobsForTurn(turnId);
+  const job = jobs[0];
+
+  assert.ok(job?.activeRuleArtifact);
+  assert.equal(
+    job?.payload.compiled_artifact_hash,
+    validation.compiledArtifactHash,
+  );
+  assert.equal(job?.activeRuleArtifact?.createdAt, validation.validatedAt);
+});
+
+test("active alternative verification rejects missing or mismatched frozen artifact hashes", () => {
+  resetApiStateForTests();
+  const missingTurnId = 3611;
+  saveRuleProposal(proposal(missingTurnId, 7));
+  runRuleValidationForProposal({ ruleId: 7, turnId: missingTurnId });
+  saveRuleElection(settledElection(missingTurnId, 7));
+  saveReceiptForWallet(missingTurnId, wallet, [1, 2, 3, 4, 5, 6]);
+  saveFulfilledDraw(missingTurnId);
+
+  assert.throws(
+    () => createGuessVerificationJobsForTurn(missingTurnId),
+    /ACTIVE_RULE_ARTIFACT_NOT_FROZEN/,
+  );
+
+  resetApiStateForTests();
+  const mismatchTurnId = 3612;
+  saveRuleProposal(proposal(mismatchTurnId, 7));
+  runRuleValidationForProposal({ ruleId: 7, turnId: mismatchTurnId });
+  saveRuleElection({
+    ...settledElection(mismatchTurnId, 7),
+    activeRuleArtifactHash: "f".repeat(64),
+  });
+  saveReceiptForWallet(mismatchTurnId, wallet, [1, 2, 3, 4, 5, 6]);
+  saveFulfilledDraw(mismatchTurnId);
+
+  assert.throws(
+    () => createGuessVerificationJobsForTurn(mismatchTurnId),
+    /ACTIVE_RULE_ARTIFACT_HASH_MISMATCH/,
+  );
 });
 
 test("ruleSignature canonicalizes trivial wrappers and commutative operands", () => {
@@ -1234,7 +1320,10 @@ test("ruleSignature canonicalizes trivial wrappers and commutative operands", ()
   const Y = { kind: "count_at_least", value: 1, of: intGD };
 
   // and[X] === X (single-clause wrapper dropped)
-  assert.equal(ruleSignature(base({ kind: "and", clauses: [X] })), ruleSignature(base(X)));
+  assert.equal(
+    ruleSignature(base({ kind: "and", clauses: [X] })),
+    ruleSignature(base(X)),
+  );
   // not[not[X]] === X (double negation)
   assert.equal(
     ruleSignature(base({ kind: "not", clause: { kind: "not", clause: X } })),
@@ -1360,7 +1449,10 @@ test("audit hashes detect tampering and map to PostgreSQL rows", async () => {
   assert.equal(verifyAuditLogIntegrity(tampered), false);
   assert.equal(row.log_id, log.logHash);
   assert.equal(row.commitment_hash, log.commitmentHash);
-  assert.match(M3_7_POSTGRES_AUDIT_SCHEMA, /CREATE TABLE IF NOT EXISTS audit_logs/);
+  assert.match(
+    M3_7_POSTGRES_AUDIT_SCHEMA,
+    /CREATE TABLE IF NOT EXISTS audit_logs/,
+  );
   assert.equal(queries.length, 1);
   assert.match(queries[0]?.text ?? "", /INSERT INTO audit_logs/);
 });
@@ -1425,9 +1517,7 @@ test("paid removal by a third party routes fee to the prize pool and records an 
   // The removal fee follows normal treasury/prize accounting (PRD §2.5/§6.11):
   // 0.05 SOL with the 5% treasury fee leaves the prize-pool share intact.
   assert.equal(summary.pool.accounting.sources.paidRuleRemovals.count, 1);
-  assert.ok(
-    summary.pool.accounting.sources.paidRuleRemovals.prizeLamports > 0,
-  );
+  assert.ok(summary.pool.accounting.sources.paidRuleRemovals.prizeLamports > 0);
 });
 
 test("creator self-removal is allowed below the threshold and blocked once supported", () => {
@@ -1437,7 +1527,9 @@ test("creator self-removal is allowed below the threshold and blocked once suppo
 
   // 4 votes: below the creator self-remove threshold of 5.
   addVotes(turnId, 1, 4);
-  const { removal } = removeRule(removalInput(turnId, 1, wallet, "creator_self"));
+  const { removal } = removeRule(
+    removalInput(turnId, 1, wallet, "creator_self"),
+  );
   assert.equal(removal.removalKind, "creator_self");
   assert.equal(removal.voteCountAtRemoval, 4);
 
@@ -1583,15 +1675,24 @@ test("settled rule election creates a public M9.0 proof audit log", () => {
     noDeterministicFallback: boolean;
   };
   const output = log.output as { activeRuleId: number | null };
-  assert.equal(input.finalistElection.randomnessValue, election.randomnessValue);
+  assert.equal(
+    input.finalistElection.randomnessValue,
+    election.randomnessValue,
+  );
   assert.equal(
     input.activeElection.randomnessValue,
     election.activeElectionRandomnessValue,
   );
-  assert.deepEqual(input.candidateCommitments.map((candidate) => candidate.ruleId), [7]);
+  assert.deepEqual(
+    input.candidateCommitments.map((candidate) => candidate.ruleId),
+    [7],
+  );
   assert.equal(input.noDeterministicFallback, true);
   assert.equal(output.activeRuleId, 7);
 
   saveRuleElection(settledElection(turnId, 7));
-  assert.equal(listAuditLogs({ kind: "rule.election.proof", turnId }).length, 1);
+  assert.equal(
+    listAuditLogs({ kind: "rule.election.proof", turnId }).length,
+    1,
+  );
 });

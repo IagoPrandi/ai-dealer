@@ -25,6 +25,7 @@ import {
   generateAndRunTests,
   RULE_TEST_HARNESS_VERSION,
   type RuleDifficultyClass,
+  type RuleTestCaseResult,
 } from "@idealer/rule-test-harness";
 import { RULE_COMPILER_SKILL_VERSION } from "./skill.js";
 
@@ -70,6 +71,7 @@ export type RuleValidationReasonCode =
   | "PROVIDER_DISAGREEMENT"
   | "PROVIDER_MALFORMED_RESPONSE"
   | "PROVIDER_SCHEMA_UNCONSTRAINED"
+  | "REVIEWER_MISMATCH"
   | "PROVIDER_TIMEOUT"
   | "RUNTIME_TEST_FAILED"
   | "SCHEMA_INVALID"
@@ -88,10 +90,16 @@ export type RuleAstProvider = (params: {
 
 export interface RuleCompilationRequest {
   model?: string;
+  officialInterpretation?: string;
+  originalText?: string;
   prompt: string;
-  providerConfidenceActionByPriority?: Partial<Record<AgentProviderPriority, RuleConfidenceAction>>;
+  providerConfidenceActionByPriority?: Partial<
+    Record<AgentProviderPriority, RuleConfidenceAction>
+  >;
   provider?: string;
-  providerFailureModeByPriority?: Partial<Record<AgentProviderPriority, ProviderFailureMode>>;
+  providerFailureModeByPriority?: Partial<
+    Record<AgentProviderPriority, ProviderFailureMode>
+  >;
   providerRouting?: AgentProviderRoutingPolicy;
   ruleId?: number;
   timestamp?: string;
@@ -153,14 +161,21 @@ export interface RuleCompiledArtifact {
   ast: RuleAst;
   complexityScore: number;
   constrainedDecodingUsed: boolean;
+  createdAt: string;
   difficultyClass: RuleDifficultyClass;
+  evaluatedTestCases: RuleValidationTestResult[];
+  generatedTestCases: RuleValidationTestCase[];
+  harnessCases: RuleTestCaseResult[];
   modelIdentity: AgentModelIdentity;
   normalizedText: string;
+  officialInterpretation: string;
+  originalText: string;
   promptContractVersion: string;
   providerPath: AgentProviderAttemptLog[];
   ruleMode: "predicate" | "ranking";
   schemaVersion: 1 | 2;
   skillVersion: string;
+  testCoverageScore: number;
   testHarnessVersion: string;
 }
 
@@ -227,7 +242,9 @@ export function getRuleValidationPromptContract(): RuleValidationPromptContract 
   return PROMPT_CONTRACT;
 }
 
-export function createCompilerPlaceholder(request: RuleCompilationRequest): RuleCompilationResult {
+export function createCompilerPlaceholder(
+  request: RuleCompilationRequest,
+): RuleCompilationResult {
   const result = validateAndPrecompileRule(request);
   if (!result.artifact) {
     throw new Error(result.log.reasonSummary);
@@ -241,7 +258,11 @@ export function createCompilerPlaceholder(request: RuleCompilationRequest): Rule
 function shouldContinueAfterAttempt(attempts: ProviderEvaluation[]): boolean {
   // Re-ask another provider when the current one disagrees with the first
   // completed opinion (PRD §7.4 escalation), up to the tertiary tiebreaker.
-  return attempts.length >= 2 && hasProviderDisagreement(attempts) && attempts.length < 3;
+  return (
+    attempts.length >= 2 &&
+    hasProviderDisagreement(attempts) &&
+    attempts.length < 3
+  );
 }
 
 // Turns the collected per-provider attempts into the final validation result
@@ -258,7 +279,10 @@ function finalizeValidation(
     if (evaluation.status === "accepted") {
       finalEvaluation = evaluation;
     }
-    if (evaluation.status === "rejected" && evaluation.confidenceAction === "REJECT") {
+    if (
+      evaluation.status === "rejected" &&
+      evaluation.confidenceAction === "REJECT"
+    ) {
       finalEvaluation = evaluation;
       break;
     }
@@ -267,9 +291,13 @@ function finalizeValidation(
 
   const providerPath = resolveProviderPath(attempts);
   const fallbackTriggered = providerPath.length > 1;
-  const providerDisagreementRateSample = hasProviderDisagreement(attempts) ? 1 : 0;
+  const providerDisagreementRateSample = hasProviderDisagreement(attempts)
+    ? 1
+    : 0;
   const disagreementResolution =
-    providerDisagreementRateSample === 1 ? resolveProviderDisagreement(attempts) : null;
+    providerDisagreementRateSample === 1
+      ? resolveProviderDisagreement(attempts)
+      : null;
   const selectedAttempt =
     providerDisagreementRateSample === 1
       ? (disagreementResolution ?? {
@@ -354,12 +382,22 @@ export function validateAndPrecompileRule(
   const attempts: ProviderEvaluation[] = [];
 
   for (const providerConfig of providerRouting.providers) {
-    const evaluation = evaluateProviderAttempt(request, timestamp, providerConfig);
+    const evaluation = evaluateProviderAttempt(
+      request,
+      timestamp,
+      providerConfig,
+    );
     attempts.push(evaluation);
-    if (evaluation.status === "accepted" && !shouldContinueAfterAttempt(attempts)) {
+    if (
+      evaluation.status === "accepted" &&
+      !shouldContinueAfterAttempt(attempts)
+    ) {
       break;
     }
-    if (evaluation.status === "rejected" && evaluation.confidenceAction === "REJECT") {
+    if (
+      evaluation.status === "rejected" &&
+      evaluation.confidenceAction === "REJECT"
+    ) {
       break;
     }
   }
@@ -395,10 +433,16 @@ export async function compileRuleArtifact(
       options.astProvider,
     );
     attempts.push(evaluation);
-    if (evaluation.status === "accepted" && !shouldContinueAfterAttempt(attempts)) {
+    if (
+      evaluation.status === "accepted" &&
+      !shouldContinueAfterAttempt(attempts)
+    ) {
       break;
     }
-    if (evaluation.status === "rejected" && evaluation.confidenceAction === "REJECT") {
+    if (
+      evaluation.status === "rejected" &&
+      evaluation.confidenceAction === "REJECT"
+    ) {
       break;
     }
   }
@@ -444,7 +488,8 @@ function buildAttemptContext(
   request: RuleCompilationRequest,
   providerConfig: AgentProviderConfig,
 ): AttemptContext {
-  const forcedFailure = request.providerFailureModeByPriority?.[providerConfig.priority];
+  const forcedFailure =
+    request.providerFailureModeByPriority?.[providerConfig.priority];
   const modelIdentity = {
     ...providerConfig.identity,
     model:
@@ -489,6 +534,7 @@ function buildAttemptContext(
 // confidence score, and produce a decision + artifact. Pure and synchronous.
 function validateResolvedAst(
   request: RuleCompilationRequest,
+  timestamp: string,
   providerConfig: AgentProviderConfig,
   ctx: AttemptContext,
   rawAst: unknown,
@@ -508,6 +554,12 @@ function validateResolvedAst(
   if (rawAst != null && !forcedFailure && !parsed?.success) {
     reasonCodes.add("SCHEMA_INVALID");
   }
+  if (ast && !forcedFailure) {
+    const reviewerAst = compileSupportedRule(normalizedText);
+    if (reviewerAst && !knownAstSemanticsMatch(reviewerAst, ast)) {
+      reasonCodes.add("REVIEWER_MISMATCH");
+    }
+  }
 
   const bounds = ast && !forcedFailure ? validateRuntimeBounds(ast) : null;
   const hasSafeRuntimeBounds = bounds?.safe === true;
@@ -519,8 +571,7 @@ function validateResolvedAst(
   }
 
   // Deterministic test harness + bounded Monte-Carlo difficulty (PRD §6.8, §7.8).
-  const harness =
-    ast && hasSafeRuntimeBounds ? generateAndRunTests(ast) : null;
+  const harness = ast && hasSafeRuntimeBounds ? generateAndRunTests(ast) : null;
   const difficultyClass: RuleDifficultyClass =
     harness?.difficulty.difficultyClass ?? "IMPOSSIBLE";
   const estimatedWinRate = harness?.difficulty.estimatedWinRate ?? 0;
@@ -554,6 +605,7 @@ function validateResolvedAst(
     evaluatedTestCases,
     hasAmbiguity: reasonCodes.has("AMBIGUOUS_RULE"),
     hasExternalDependency: reasonCodes.has("EXTERNAL_DEPENDENCY"),
+    hasReviewerMismatch: reasonCodes.has("REVIEWER_MISMATCH"),
     hasSafeRuntimeBounds,
     hasSupportedRule: ast !== null,
     schemaValid: parsed?.success === true,
@@ -585,14 +637,22 @@ function validateResolvedAst(
           ast,
           complexityScore: bounds?.complexity ?? 0,
           constrainedDecodingUsed,
+          createdAt: timestamp,
           difficultyClass,
+          evaluatedTestCases,
+          generatedTestCases,
+          harnessCases: harness?.cases ?? [],
           modelIdentity,
           normalizedText,
+          officialInterpretation:
+            request.officialInterpretation?.trim() || normalizedText,
+          originalText: request.originalText?.trim() || request.prompt,
           promptContractVersion: PROMPT_CONTRACT.version,
           providerPath: [],
           ruleMode,
           schemaVersion: ast.schemaVersion,
           skillVersion: RULE_COMPILER_SKILL_VERSION,
+          testCoverageScore: harness?.coverageScore ?? 0,
           testHarnessVersion: RULE_TEST_HARNESS_VERSION,
         }
       : null;
@@ -623,18 +683,20 @@ function validateResolvedAst(
 // the fallback when no LLM provider is injected and by the deterministic tests.
 function evaluateProviderAttempt(
   request: RuleCompilationRequest,
-  _timestamp: string,
+  timestamp: string,
   providerConfig: AgentProviderConfig,
 ): ProviderEvaluation {
   const ctx = buildAttemptContext(request, providerConfig);
-  const rawAst = ctx.forcedFailure ? null : compileSupportedRule(ctx.normalizedText);
-  return validateResolvedAst(request, providerConfig, ctx, rawAst);
+  const rawAst = ctx.forcedFailure
+    ? null
+    : compileSupportedRule(ctx.normalizedText);
+  return validateResolvedAst(request, timestamp, providerConfig, ctx, rawAst);
 }
 
 // LLM attempt: AST is emitted by the injected provider (constrained decoding).
 async function evaluateProviderAttemptAsync(
   request: RuleCompilationRequest,
-  _timestamp: string,
+  timestamp: string,
   providerConfig: AgentProviderConfig,
   astProvider: RuleAstProvider,
 ): Promise<ProviderEvaluation> {
@@ -652,7 +714,7 @@ async function evaluateProviderAttemptAsync(
       rawAst = null;
     }
   }
-  return validateResolvedAst(request, providerConfig, ctx, rawAst);
+  return validateResolvedAst(request, timestamp, providerConfig, ctx, rawAst);
 }
 
 function normalizeProviderRouting(
@@ -663,7 +725,8 @@ function normalizeProviderRouting(
   }
 
   if (request.provider || request.model) {
-    const [primary, secondary, tertiary] = createDefaultProviderRoutingPolicy().providers;
+    const [primary, secondary, tertiary] =
+      createDefaultProviderRoutingPolicy().providers;
     if (!primary || !secondary || !tertiary) {
       return createDefaultProviderRoutingPolicy();
     }
@@ -678,7 +741,10 @@ function normalizeProviderRouting(
           },
           model_by_role: {
             ...primary.model_by_role,
-            compile: request.model ?? primary.model_by_role.compile ?? primary.identity.model,
+            compile:
+              request.model ??
+              primary.model_by_role.compile ??
+              primary.identity.model,
           },
         },
         secondary,
@@ -713,7 +779,9 @@ function determineAttemptStatus(
   return "rejected";
 }
 
-function resolveProviderPath(attempts: ProviderEvaluation[]): AgentProviderAttemptLog[] {
+function resolveProviderPath(
+  attempts: ProviderEvaluation[],
+): AgentProviderAttemptLog[] {
   return attempts.map((attempt) => ({
     capability_flags: attempt.capabilityFlags,
     confidence_action: attempt.confidenceAction,
@@ -739,7 +807,9 @@ function hasProviderDisagreement(attempts: ProviderEvaluation[]) {
   }
   const rest = completedAttempts.slice(1);
   const firstSignature = providerDecisionSignature(first);
-  return rest.some((attempt) => providerDecisionSignature(attempt) !== firstSignature);
+  return rest.some(
+    (attempt) => providerDecisionSignature(attempt) !== firstSignature,
+  );
 }
 
 function resolveProviderDisagreement(attempts: ProviderEvaluation[]) {
@@ -747,7 +817,9 @@ function resolveProviderDisagreement(attempts: ProviderEvaluation[]) {
     return null;
   }
 
-  const secondary = attempts.find((attempt) => attempt.priority === "secondary");
+  const secondary = attempts.find(
+    (attempt) => attempt.priority === "secondary",
+  );
   const tertiary = attempts.find((attempt) => attempt.priority === "tertiary");
   if (!secondary || !tertiary) {
     return null;
@@ -755,7 +827,10 @@ function resolveProviderDisagreement(attempts: ProviderEvaluation[]) {
 
   const secondarySignature = providerDecisionSignature(secondary);
   const tertiarySignature = providerDecisionSignature(tertiary);
-  if (secondarySignature !== tertiarySignature || tertiary.decision !== "VALID") {
+  if (
+    secondarySignature !== tertiarySignature ||
+    tertiary.decision !== "VALID"
+  ) {
     return null;
   }
 
@@ -885,12 +960,15 @@ function computeConfidenceBreakdown(input: {
   evaluatedTestCases: RuleValidationTestResult[];
   hasAmbiguity: boolean;
   hasExternalDependency: boolean;
+  hasReviewerMismatch: boolean;
   hasSafeRuntimeBounds: boolean;
   hasSupportedRule: boolean;
   schemaValid: boolean;
   tokenCount: number;
 }): CompilerConfidenceBreakdown {
-  const passedTests = input.evaluatedTestCases.filter((testCase) => testCase.passed).length;
+  const passedTests = input.evaluatedTestCases.filter(
+    (testCase) => testCase.passed,
+  ).length;
   const testCoverageScore =
     input.evaluatedTestCases.length === 0
       ? 0
@@ -900,12 +978,21 @@ function computeConfidenceBreakdown(input: {
   );
   const compiler_confidence = roundScore(input.hasSupportedRule ? 0.9 : 0.2);
   const model_confidence = roundScore(
-    input.hasSupportedRule && !input.hasAmbiguity && !input.hasExternalDependency ? 0.86 : 0.35,
+    input.hasSupportedRule &&
+      !input.hasAmbiguity &&
+      !input.hasExternalDependency
+      ? 0.86
+      : 0.35,
   );
   const runtime_safety_score = input.hasSafeRuntimeBounds ? 1 : 0;
   const schema_score = input.schemaValid ? 1 : 0;
   const reviewer_agreement_score =
-    input.hasSupportedRule && !input.hasAmbiguity && !input.hasExternalDependency ? 1 : 0.55;
+    input.hasSupportedRule &&
+    !input.hasAmbiguity &&
+    !input.hasExternalDependency &&
+    !input.hasReviewerMismatch
+      ? 1
+      : 0.55;
 
   return calculateCompilerConfidence({
     compiler_confidence,
@@ -923,7 +1010,92 @@ function roundScore(value: number) {
 }
 
 function hashJson(value: unknown) {
-  return createHash("sha256").update(JSON.stringify(value), "utf8").digest("hex");
+  return createHash("sha256")
+    .update(JSON.stringify(value), "utf8")
+    .digest("hex");
+}
+
+function knownAstSemanticsMatch(expected: RuleAst, actual: RuleAst) {
+  return knownAstSignature(expected) === knownAstSignature(actual);
+}
+
+function knownAstSignature(ast: RuleAst): string {
+  if (ast.schemaVersion === 1) {
+    if (ast.node.kind === "match_count_at_least") {
+      return `match_count_at_least:${ast.node.value}`;
+    }
+    return ast.node.kind;
+  }
+
+  if (ast.result.type !== "predicate") {
+    return "unknown";
+  }
+
+  const predicate = ast.result.predicate;
+  if (
+    predicate.kind === "count_at_least" &&
+    isGuessDrawIntersection(predicate.of)
+  ) {
+    return `match_count_at_least:${predicate.value}`;
+  }
+  if (
+    predicate.kind === "all_equal_ordered" &&
+    isSource(predicate.left, "guess") &&
+    isSource(predicate.right, "draw")
+  ) {
+    return "ordered_exact";
+  }
+  if (predicate.kind === "compare" && predicate.op === "eq") {
+    if (
+      isSourceReduce(predicate.left, "guess", "sum") &&
+      isSourceReduce(predicate.right, "draw", "sum")
+    ) {
+      return "sum_equals";
+    }
+    if (
+      isSourceReduce(predicate.left, "draw", "sum") &&
+      isSourceReduce(predicate.right, "guess", "sum")
+    ) {
+      return "sum_equals";
+    }
+  }
+  return "unknown";
+}
+
+function isGuessDrawIntersection(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const node = value as {
+    kind?: unknown;
+    left?: unknown;
+    right?: unknown;
+  };
+  return (
+    node.kind === "intersection" &&
+    ((isSource(node.left, "guess") && isSource(node.right, "draw")) ||
+      (isSource(node.left, "draw") && isSource(node.right, "guess")))
+  );
+}
+
+function isSource(value: unknown, source: "draw" | "guess") {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    (value as { kind?: unknown; source?: unknown }).kind === "source" &&
+    (value as { source?: unknown }).source === source
+  );
+}
+
+function isSourceReduce(value: unknown, source: "draw" | "guess", op: "sum") {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    (value as { kind?: unknown; of?: unknown; op?: unknown }).kind ===
+      "reduce" &&
+    (value as { op?: unknown }).op === op &&
+    isSource((value as { of?: unknown }).of, source)
+  );
 }
 
 function summarizeReasons(

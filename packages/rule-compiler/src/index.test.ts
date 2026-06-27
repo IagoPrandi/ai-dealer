@@ -31,17 +31,34 @@ test("validates and precompiles a clear match-count rule", () => {
 
   assert.equal(result.decision, "VALID");
   const ast = result.artifact?.ast;
-  assert.ok(ast?.schemaVersion === 1 && ast.node.kind === "match_count_at_least");
+  assert.ok(
+    ast?.schemaVersion === 1 && ast.node.kind === "match_count_at_least",
+  );
   assert.equal(ast.node.value, 4);
   assert.match(result.artifactHash ?? "", /^[0-9a-f]{64}$/);
   assert.equal(result.log.confidenceAction, "ACCEPT");
   assert.ok(result.log.confidence.final_confidence >= 0.85);
   assert.ok(result.log.evaluatedTestCases.every((testCase) => testCase.passed));
+  assert.equal(
+    result.artifact?.originalText,
+    "Win if at least 4 of your numbers appear in the draw.",
+  );
+  assert.equal(
+    result.artifact?.officialInterpretation,
+    result.artifact?.normalizedText,
+  );
+  assert.equal(result.artifact?.createdAt, "2026-06-11T00:00:00.000Z");
+  assert.ok((result.artifact?.generatedTestCases.length ?? 0) > 0);
+  assert.ok((result.artifact?.evaluatedTestCases.length ?? 0) > 0);
+  assert.ok((result.artifact?.harnessCases.length ?? 0) > 0);
+  assert.equal(result.artifact?.skillVersion, RULE_COMPILER_SKILL_VERSION);
+  assert.equal(result.artifact?.testHarnessVersion, "2.0.0");
 });
 
 test("validates supported sum and exact-order rules", () => {
   const sum = validateAndPrecompileRule({
-    prompt: "Win if the sum of your numbers equals the sum of the drawn numbers.",
+    prompt:
+      "Win if the sum of your numbers equals the sum of the drawn numbers.",
     tokenCount: 14,
   });
   const exact = validateAndPrecompileRule({
@@ -54,7 +71,9 @@ test("validates supported sum and exact-order rules", () => {
   assert.ok(sumAst?.schemaVersion === 1 && sumAst.node.kind === "sum_equals");
   assert.equal(exact.decision, "VALID");
   const exactAst = exact.artifact?.ast;
-  assert.ok(exactAst?.schemaVersion === 1 && exactAst.node.kind === "ordered_exact");
+  assert.ok(
+    exactAst?.schemaVersion === 1 && exactAst.node.kind === "ordered_exact",
+  );
 });
 
 test("fails ambiguous or external-dependent rules closed", () => {
@@ -119,7 +138,8 @@ test("keeps the legacy compiler placeholder backed by validation", () => {
   });
 
   assert.ok(
-    result.ast.schemaVersion === 1 && result.ast.node.kind === "match_count_at_least",
+    result.ast.schemaVersion === 1 &&
+      result.ast.node.kind === "match_count_at_least",
   );
 });
 
@@ -135,15 +155,24 @@ test("compiles an LLM-emitted v2 ranking AST (digit rule) to a VALID artifact", 
         op: "count",
         of: {
           kind: "intersection",
-          left: { kind: "digits", place: "units", of: { kind: "source", source: "guess" } },
-          right: { kind: "digits", place: "units", of: { kind: "source", source: "draw" } },
+          left: {
+            kind: "digits",
+            place: "units",
+            of: { kind: "source", source: "guess" },
+          },
+          right: {
+            kind: "digits",
+            place: "units",
+            of: { kind: "source", source: "draw" },
+          },
         },
       },
     },
   };
   const result = await compileRuleArtifact(
     {
-      prompt: "The winner is whoever matches the most units digits of the draw.",
+      prompt:
+        "The winner is whoever matches the most units digits of the draw.",
       tokenCount: 14,
     },
     { astProvider: async () => rankingAst },
@@ -154,6 +183,80 @@ test("compiles an LLM-emitted v2 ranking AST (digit rule) to a VALID artifact", 
   assert.equal(result.artifact?.schemaVersion, 2);
   assert.ok(result.artifact?.constrainedDecodingUsed);
   assert.match(result.artifactHash ?? "", /^[0-9a-f]{64}$/);
+});
+
+test("accepts a semantically equivalent LLM v2 AST for a known threshold rule", async () => {
+  const v2MatchCount = {
+    schemaVersion: 2,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "count_at_least",
+        value: 4,
+        of: {
+          kind: "intersection",
+          left: { kind: "source", source: "guess" },
+          right: { kind: "source", source: "draw" },
+        },
+      },
+    },
+  };
+  const result = await compileRuleArtifact(
+    {
+      officialInterpretation:
+        "Win when at least four guessed numbers appear in the draw.",
+      originalText: "Win if at least 4 of your numbers appear in the draw.",
+      prompt: "Win if at least 4 of your numbers appear in the draw.",
+      timestamp: "2026-06-11T00:00:00.000Z",
+      tokenCount: 12,
+    },
+    { astProvider: async () => v2MatchCount },
+  );
+
+  assert.equal(result.decision, "VALID");
+  assert.equal(result.artifact?.schemaVersion, 2);
+  assert.equal(
+    result.artifact?.officialInterpretation,
+    "Win when at least four guessed numbers appear in the draw.",
+  );
+  assert.equal(
+    result.artifact?.originalText,
+    "Win if at least 4 of your numbers appear in the draw.",
+  );
+});
+
+test("rejects a text-to-AST reviewer mismatch from an LLM provider", async () => {
+  const wrongAst = {
+    schemaVersion: 2,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "compare",
+        left: {
+          kind: "reduce",
+          op: "sum",
+          of: { kind: "source", source: "guess" },
+        },
+        op: "eq",
+        right: {
+          kind: "reduce",
+          op: "sum",
+          of: { kind: "source", source: "draw" },
+        },
+      },
+    },
+  };
+  const result = await compileRuleArtifact(
+    {
+      prompt: "Win if at least 4 of your numbers appear in the draw.",
+      tokenCount: 12,
+    },
+    { astProvider: async () => wrongAst },
+  );
+
+  assert.equal(result.decision, "INVALID");
+  assert.equal(result.artifactHash, null);
+  assert.ok(result.log.reasonCodes.includes("REVIEWER_MISMATCH"));
 });
 
 test("rejects an LLM response that is not a valid AST and escalates", async () => {
@@ -173,7 +276,11 @@ test("allows an LLM-emitted ALWAYS_TRUE rule but labels its difficulty", async (
     schemaVersion: 2,
     result: {
       type: "predicate",
-      predicate: { kind: "count_at_least", value: 0, of: { kind: "source", source: "guess" } },
+      predicate: {
+        kind: "count_at_least",
+        value: 0,
+        of: { kind: "source", source: "guess" },
+      },
     },
   };
   const result = await compileRuleArtifact(
@@ -268,21 +375,32 @@ test("escalates timeout, malformed, and schema failures through provider path", 
 
   assert.equal(timeout.log.providerPath[0]?.status, "timeout");
   assert.equal(malformed.log.providerPath[0]?.status, "malformed_response");
-  assert.equal(schemaFailure.log.providerPath[0]?.status, "schema_validation_failed");
+  assert.equal(
+    schemaFailure.log.providerPath[0]?.status,
+    "schema_validation_failed",
+  );
 });
 
 test("supports local-only OpenAI-compatible routing with Ollama request shape", () => {
   const result = validateAndPrecompileRule({
     prompt: "Win if at least 4 of your numbers appear in the draw.",
-    providerRouting: createLocalOnlyProviderRoutingPolicy("http://localhost:11434/v1"),
+    providerRouting: createLocalOnlyProviderRoutingPolicy(
+      "http://localhost:11434/v1",
+    ),
     tokenCount: 12,
   });
 
   assert.equal(result.decision, "VALID");
   assert.equal(result.log.providerPath.length, 1);
   assert.equal(result.log.providerPath[0]?.request_shape, "ollama_format");
-  assert.equal(result.log.providerPath[0]?.capability_flags.openai_compatible, true);
-  assert.equal(result.log.providerPath[0]?.capability_flags.grammar_constrained_decoding, true);
+  assert.equal(
+    result.log.providerPath[0]?.capability_flags.openai_compatible,
+    true,
+  );
+  assert.equal(
+    result.log.providerPath[0]?.capability_flags.grammar_constrained_decoding,
+    true,
+  );
   assert.equal(result.log.modelIdentity.serving_engine, "ollama");
 });
 

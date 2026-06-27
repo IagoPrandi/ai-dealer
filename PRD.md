@@ -5695,39 +5695,39 @@ M5 is approved only if all M5 submilestones are approved and:
 
 ##### Checklist
 
-- [ ] All supported natural-language examples compile into DSL/AST.
-- [ ] Unsupported operations are rejected.
-- [ ] Vague rules require clarification or are rejected.
-- [ ] Compiler outputs are versioned and hashable.
-- [ ] Rule Reviewer detects mismatches between text and DSL/AST.
-- [ ] Frozen artifact includes original text, interpretation, AST, tests, versions and timestamp.
+- [x] All supported natural-language examples compile into DSL/AST.
+- [x] Unsupported operations are rejected.
+- [x] Vague rules require clarification or are rejected.
+- [x] Compiler outputs are versioned and hashable.
+- [x] Rule Reviewer detects mismatches between text and DSL/AST.
+- [x] Frozen artifact includes original text, interpretation, AST, tests, versions and timestamp.
 
 ##### Approval Criteria
 
-- [ ] 100% of critical compiler tests pass.
-- [ ] No rule can be activated without a frozen artifact.
-- [ ] No post-draw recompilation path exists.
+- [x] 100% of critical compiler tests pass.
+- [x] No rule can be activated without a frozen artifact.
+- [x] No post-draw recompilation path exists.
 
 #### M9.2 — Runtime Security Gate
 
 ##### Checklist
 
-- [ ] Timeout limit implemented.
-- [ ] Memory limit implemented.
-- [ ] Operation limit implemented.
-- [ ] Network access blocked.
-- [ ] Filesystem access blocked.
-- [ ] Imports blocked.
-- [ ] Randomness blocked.
-- [ ] Clock/time access blocked.
-- [ ] Unknown AST nodes rejected.
-- [ ] Runtime fuzz tests added.
+- [x] Timeout limit implemented.
+- [x] Memory limit implemented.
+- [x] Operation limit implemented.
+- [x] Network access blocked.
+- [x] Filesystem access blocked.
+- [x] Imports blocked.
+- [x] Randomness blocked.
+- [x] Clock/time access blocked.
+- [x] Unknown AST nodes rejected.
+- [x] Runtime fuzz tests added.
 
 ##### Approval Criteria
 
-- [ ] Runtime sandbox tests pass in CI.
-- [ ] Malicious DSL fixtures fail safely.
-- [ ] Runtime output is deterministic across repeated runs.
+- [x] Runtime sandbox tests pass in CI.
+- [x] Malicious DSL fixtures fail safely.
+- [x] Runtime output is deterministic across repeated runs.
 
 #### M9.3 — Accounting Gate
 

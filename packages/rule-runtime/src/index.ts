@@ -1,3 +1,4 @@
+import { ruleAstSchema } from "@idealer/rule-schema";
 import type {
   ArrayExpr,
   ArithOp,
@@ -20,6 +21,8 @@ export const RULE_RUNTIME_LIMITS = {
   maxOperations: 10_000,
   maxAstDepth: 16,
   maxIntermediateArraySize: 100,
+  maxInputArraySize: 100,
+  maxScalarAbs: Number.MAX_SAFE_INTEGER,
   memoryMb: 32,
   allowNetwork: false,
   allowFilesystem: false,
@@ -32,6 +35,7 @@ export type RuleRuntimeErrorCode =
   | "MAX_OPERATIONS"
   | "MAX_DEPTH"
   | "MAX_ARRAY_SIZE"
+  | "MAX_SCALAR_ABS"
   | "INVALID_NODE"
   | "NOT_A_RANKING_RULE";
 
@@ -89,21 +93,62 @@ function guardArray(values: number[]): number[] {
   return values;
 }
 
+function guardScalar(value: number): number {
+  if (
+    !Number.isSafeInteger(value) ||
+    Math.abs(value) > RULE_RUNTIME_LIMITS.maxScalarAbs
+  ) {
+    throw new RuleRuntimeError(
+      "MAX_SCALAR_ABS",
+      `scalar value exceeded ${RULE_RUNTIME_LIMITS.maxScalarAbs}`,
+    );
+  }
+  return value;
+}
+
+function normalizeInput(input: RuleRuntimeInput): RuleRuntimeInput {
+  const guardInputArray = (
+    name: "guess" | "draw",
+    values: readonly number[],
+  ): readonly number[] => {
+    if (values.length > RULE_RUNTIME_LIMITS.maxInputArraySize) {
+      throw new RuleRuntimeError(
+        "MAX_ARRAY_SIZE",
+        `${name} exceeded ${RULE_RUNTIME_LIMITS.maxInputArraySize} values`,
+      );
+    }
+    return values.map((value) => guardScalar(value));
+  };
+
+  return {
+    guess: guardInputArray("guess", input.guess),
+    draw: guardInputArray("draw", input.draw),
+  };
+}
+
+function parseRuntimeAst(ast: RuleAst): RuleAst {
+  const parsed = ruleAstSchema.safeParse(ast);
+  if (!parsed.success) {
+    throw new RuleRuntimeError("INVALID_NODE", "invalid rule AST");
+  }
+  return parsed.data;
+}
+
 // Deterministic, defined arithmetic. Division is integer (truncated); division
 // or modulo by zero returns a defined 0 (never NaN/Infinity) per the runtime
 // safety contract (PRD §6.7 no-op fallback for invalid values).
 function applyArith(op: ArithOp, a: number, b: number): number {
   switch (op) {
     case "add":
-      return a + b;
+      return guardScalar(a + b);
     case "sub":
-      return a - b;
+      return guardScalar(a - b);
     case "mul":
-      return a * b;
+      return guardScalar(a * b);
     case "div":
-      return b === 0 ? 0 : Math.trunc(a / b);
+      return b === 0 ? 0 : guardScalar(Math.trunc(a / b));
     case "mod":
-      return b <= 0 ? 0 : ((a % b) + b) % b;
+      return b <= 0 ? 0 : guardScalar(((a % b) + b) % b);
     default:
       throw new RuleRuntimeError("INVALID_NODE", `unknown arith op`);
   }
@@ -249,14 +294,18 @@ function evalScalar(
   try {
     switch (node.kind) {
       case "lit":
-        return node.value;
+        return guardScalar(node.value);
       case "reduce": {
         const values = evalArray(node.of, input, budget);
         switch (node.op) {
           case "sum":
-            return values.reduce((total, value) => total + value, 0);
+            return guardScalar(
+              values.reduce((total, value) => total + value, 0),
+            );
           case "product":
-            return values.reduce((total, value) => total * value, 1);
+            return guardScalar(
+              values.reduce((total, value) => total * value, 1),
+            );
           case "count":
             return values.length;
           case "min":
@@ -392,26 +441,28 @@ export function evaluatePredicate(
   ast: RuleAst,
   input: RuleRuntimeInput,
 ): PredicateEvaluation {
+  const safeAst = parseRuntimeAst(ast);
+  const safeInput = normalizeInput(input);
   const budget: Budget = { ops: 0, depth: 0 };
-  if (ast.schemaVersion === 1) {
-    const win = evaluateLegacy(ast, input);
+  if (safeAst.schemaVersion === 1) {
+    const win = evaluateLegacy(safeAst, safeInput);
     return {
       result: win ? "WIN" : "LOSE",
       runtimeSteps: budget.ops,
-      matchedRuleBranch: `legacy:${ast.node.kind}`,
+      matchedRuleBranch: `legacy:${safeAst.node.kind}`,
     };
   }
-  if (ast.result.type !== "predicate") {
+  if (safeAst.result.type !== "predicate") {
     throw new RuleRuntimeError(
       "NOT_A_RANKING_RULE",
       "evaluatePredicate called on a ranking rule",
     );
   }
-  const win = evalPredicate(ast.result.predicate, input, budget);
+  const win = evalPredicate(safeAst.result.predicate, safeInput, budget);
   return {
     result: win ? "WIN" : "LOSE",
     runtimeSteps: budget.ops,
-    matchedRuleBranch: `predicate:${ast.result.predicate.kind}`,
+    matchedRuleBranch: `predicate:${safeAst.result.predicate.kind}`,
   };
 }
 
@@ -420,14 +471,16 @@ export function evaluatePredicate(
  * independent of other players; the comparative step is {@link resolveRankingWinners}.
  */
 export function scoreGuess(ast: RuleAst, input: RuleRuntimeInput): number {
-  if (ast.schemaVersion !== 2 || ast.result.type !== "ranking") {
+  const safeAst = parseRuntimeAst(ast);
+  const safeInput = normalizeInput(input);
+  if (safeAst.schemaVersion !== 2 || safeAst.result.type !== "ranking") {
     throw new RuleRuntimeError(
       "NOT_A_RANKING_RULE",
       "scoreGuess requires a v2 ranking rule",
     );
   }
   const budget: Budget = { ops: 0, depth: 0 };
-  return evalScalar(ast.result.score, input, budget);
+  return evalScalar(safeAst.result.score, safeInput, budget);
 }
 
 export interface RankingEntry<T = string> {

@@ -59,19 +59,37 @@ interface RuleCompilationResult {
 
 ```ts
 interface CompiledRuleArtifact {
-  schema_version: 1;
-  artifact_hash: string;
+  schema_version: 1 | 2;
+  original_text: string;
+  normalized_text: string;
+  official_interpretation: string;
   ast: Record<string, unknown>;
-  allowed_nodes_version: string;
-  deterministic: true;
-  requires_order: boolean;
-  uses_sum: boolean;
-  uses_parity: boolean;
-  uses_position: boolean;
   model_identity: ModelIdentity;
   provider_path: ProviderAttemptLog[];
+  prompt_contract_version: string;
+  skill_version: string;
+  test_harness_version: string;
+  generated_test_cases: RuleValidationTestCase[];
+  evaluated_test_cases: RuleValidationTestResult[];
+  harness_cases: RuleTestCaseResult[];
+  test_coverage_score: number;
+  complexity_score: number;
+  difficulty_class:
+    | "IMPOSSIBLE"
+    | "ALWAYS_TRUE"
+    | "TOO_EASY"
+    | "BALANCED"
+    | "HARD"
+    | "EXTREME";
+  constrained_decoding_used: boolean;
+  rule_mode: "predicate" | "ranking";
+  created_at: string;
 }
 ```
+
+The compiled artifact hash is `sha256(JSON.stringify(compiled_artifact))`.
+Activation and guess verification must use the saved artifact plus its frozen hash;
+they must not recompile the natural-language rule after draw fulfillment.
 
 ## Provider Routing & Fallback
 
@@ -88,7 +106,10 @@ interface ProviderAttemptLog {
   priority: "primary" | "secondary" | "tertiary";
   provider: string;
   model_identity: ModelIdentity;
-  request_shape: "deterministic_json_schema" | "ollama_format" | "openai_response_format";
+  request_shape:
+    | "deterministic_json_schema"
+    | "ollama_format"
+    | "openai_response_format";
   capability_flags: {
     grammar_constrained_decoding: boolean;
     json_schema_response: boolean;
@@ -153,7 +174,12 @@ interface GateCheckLog {
   id: string;
   turn_id: string;
   player_wallet: string;
-  gate_type: "game_token" | "token_count" | "prohibited_reference" | "prompt_injection" | "dedup";
+  gate_type:
+    | "game_token"
+    | "token_count"
+    | "prohibited_reference"
+    | "prompt_injection"
+    | "dedup";
   result: "PASS" | "WARN" | "BLOCK";
   reason: string;
   input_hash: string;
@@ -165,7 +191,13 @@ interface CompilerAgentLog {
   id: string;
   rule_id: string;
   turn_id: string;
-  agent_name: "interpreter" | "normalizer" | "compiler" | "reviewer" | "adversarial_tester" | "final_validator";
+  agent_name:
+    | "interpreter"
+    | "normalizer"
+    | "compiler"
+    | "reviewer"
+    | "adversarial_tester"
+    | "final_validator";
   provider: string;
   model: string;
   input_hash: string;

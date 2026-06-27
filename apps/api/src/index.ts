@@ -23,6 +23,7 @@ import {
 } from "@idealer/constants";
 import {
   compileRuleArtifact,
+  ruleAstSchema,
   resolveRankingWinners,
   validateAndPrecompileRule,
   type AgentModelIdentity,
@@ -856,11 +857,19 @@ function getRuleEliminationVoteKey(
   return `${turnId}:${ruleId}:${voter}`;
 }
 
-function getPaidRuleRemovalKey(turnId: number, ruleId: number, remover: string) {
+function getPaidRuleRemovalKey(
+  turnId: number,
+  ruleId: number,
+  remover: string,
+) {
   return `${turnId}:${ruleId}:${remover}`;
 }
 
-function getConversationDraftKey(wallet: string, turnId: number, prompt: string) {
+function getConversationDraftKey(
+  wallet: string,
+  turnId: number,
+  prompt: string,
+) {
   return hashJson({
     prompt: sanitizeRuleText(prompt).toLowerCase(),
     turnId,
@@ -899,7 +908,9 @@ function hashBytes(value: string) {
 }
 
 function hashJson(value: unknown) {
-  return createHash("sha256").update(JSON.stringify(value), "utf8").digest("hex");
+  return createHash("sha256")
+    .update(JSON.stringify(value), "utf8")
+    .digest("hex");
 }
 
 function appendAuditLog(args: {
@@ -1003,7 +1014,9 @@ export function verifyAuditLogIntegrity(record: AuditLogRecord) {
   );
 }
 
-export function toPostgresAuditLogRow(record: AuditLogRecord): PostgresAuditLogRow {
+export function toPostgresAuditLogRow(
+  record: AuditLogRecord,
+): PostgresAuditLogRow {
   return {
     commitment_hash: record.commitmentHash,
     commitment_mechanism: record.commitmentMechanism,
@@ -1078,10 +1091,12 @@ export async function storeAuditLogInPostgres(
   );
 }
 
-export function listAuditLogs(args: {
-  kind?: AuditLogKind;
-  turnId?: number;
-} = {}) {
+export function listAuditLogs(
+  args: {
+    kind?: AuditLogKind;
+    turnId?: number;
+  } = {},
+) {
   return auditLogOrder
     .map((logHash) => auditLogs.get(logHash))
     .filter((record): record is AuditLogRecord => {
@@ -1224,11 +1239,21 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
   // AST from the rule text (skill-guided), and check groundedness.
   const dealerPass = async (model: string) => {
     const passConfig = { ...agentConfig, model };
-    const interpretation = await interpretRuleWithAgent(compileText, passConfig);
+    const interpretation = await interpretRuleWithAgent(
+      compileText,
+      passConfig,
+    );
     const astProvider: RuleAstProvider = async ({ prompt }) =>
       compileRuleToAst(prompt, passConfig);
     const validation = await compileRuleArtifact(
-      { model, prompt: compileText, ruleId, tokenCount },
+      {
+        model,
+        officialInterpretation: interpretation.officialInterpretation,
+        originalText: sanitizedText,
+        prompt: compileText,
+        ruleId,
+        tokenCount,
+      },
       { astProvider },
     );
     let grounded: boolean | undefined;
@@ -1268,11 +1293,7 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
   let escalated = firstModel !== agentConfig.model;
   const needsEscalation =
     pass.validation.decision !== "VALID" || pass.grounded === false;
-  if (
-    needsEscalation &&
-    escalationModel &&
-    pass.model !== escalationModel
-  ) {
+  if (needsEscalation && escalationModel && pass.model !== escalationModel) {
     // The escalation attempt must never break the preflight: if the stronger
     // model is unavailable/slow, keep the primary result and surface the note.
     try {
@@ -1504,7 +1525,9 @@ function isValidRuleEliminationVote(
   );
 }
 
-function isValidPaidRuleRemoval(value: unknown): value is PaidRuleRemovalRecord {
+function isValidPaidRuleRemoval(
+  value: unknown,
+): value is PaidRuleRemovalRecord {
   if (!value || typeof value !== "object") {
     return false;
   }
@@ -1572,12 +1595,16 @@ function isValidRulePrecompilation(
   );
 }
 
-function isValidConfidenceBreakdown(value: unknown): value is CompilerConfidenceBreakdown {
+function isValidConfidenceBreakdown(
+  value: unknown,
+): value is CompilerConfidenceBreakdown {
   if (!value || typeof value !== "object") {
     return false;
   }
 
-  const confidence = value as Partial<Record<keyof CompilerConfidenceBreakdown, unknown>>;
+  const confidence = value as Partial<
+    Record<keyof CompilerConfidenceBreakdown, unknown>
+  >;
   return [
     confidence.compiler_confidence,
     confidence.final_confidence,
@@ -1590,33 +1617,19 @@ function isValidConfidenceBreakdown(value: unknown): value is CompilerConfidence
   ].every((score) => typeof score === "number" && score >= 0 && score <= 1);
 }
 
-function isValidConfidenceAction(value: unknown): value is RuleConfidenceAction {
+function isValidConfidenceAction(
+  value: unknown,
+): value is RuleConfidenceAction {
   return value === "ACCEPT" || value === "ESCALATE" || value === "REJECT";
 }
 
 function isValidRuleAst(value: unknown) {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
-  const ast = value as {
-    node?: { kind?: unknown; value?: unknown };
-    schemaVersion?: unknown;
-  };
-
-  return (
-    ast.schemaVersion === 1 &&
-    ast.node !== undefined &&
-    (ast.node.kind === "ordered_exact" ||
-      ast.node.kind === "sum_equals" ||
-      (ast.node.kind === "match_count_at_least" &&
-        Number.isInteger(ast.node.value) &&
-        Number(ast.node.value) >= 1 &&
-        Number(ast.node.value) <= 6))
-  );
+  return ruleAstSchema.safeParse(value).success;
 }
 
-function isValidCompiledArtifact(value: unknown): value is RuleCompiledArtifact {
+function isValidCompiledArtifact(
+  value: unknown,
+): value is RuleCompiledArtifact {
   if (!value || typeof value !== "object") {
     return false;
   }
@@ -1624,12 +1637,28 @@ function isValidCompiledArtifact(value: unknown): value is RuleCompiledArtifact 
   const artifact = value as Partial<RuleCompiledArtifact>;
 
   return (
-    artifact.schemaVersion === 1 &&
+    (artifact.schemaVersion === 1 || artifact.schemaVersion === 2) &&
     isValidRuleAst(artifact.ast) &&
+    typeof artifact.originalText === "string" &&
+    artifact.originalText.length > 0 &&
     typeof artifact.normalizedText === "string" &&
     artifact.normalizedText.length > 0 &&
+    typeof artifact.officialInterpretation === "string" &&
+    artifact.officialInterpretation.length > 0 &&
+    typeof artifact.createdAt === "string" &&
+    !Number.isNaN(Date.parse(artifact.createdAt)) &&
     typeof artifact.promptContractVersion === "string" &&
-    artifact.promptContractVersion.length > 0
+    artifact.promptContractVersion.length > 0 &&
+    typeof artifact.skillVersion === "string" &&
+    artifact.skillVersion.length > 0 &&
+    typeof artifact.testHarnessVersion === "string" &&
+    artifact.testHarnessVersion.length > 0 &&
+    Array.isArray(artifact.generatedTestCases) &&
+    Array.isArray(artifact.evaluatedTestCases) &&
+    Array.isArray(artifact.harnessCases) &&
+    typeof artifact.testCoverageScore === "number" &&
+    artifact.testCoverageScore >= 0 &&
+    artifact.testCoverageScore <= 1
   );
 }
 
@@ -1639,7 +1668,8 @@ function isValidRuleValidation(value: unknown): value is RuleValidationRecord {
   }
 
   const record = value as Partial<RuleValidationRecord>;
-  const validDecision = record.decision === "VALID" || record.decision === "INVALID";
+  const validDecision =
+    record.decision === "VALID" || record.decision === "INVALID";
 
   return (
     Number.isInteger(record.turnId) &&
@@ -1672,8 +1702,13 @@ function isValidRuleValidation(value: unknown): value is RuleValidationRecord {
     record.finalConfidence >= 0 &&
     record.finalConfidence <= 1 &&
     isValidConfidenceBreakdown(record.confidence) &&
-    (record.compiledArtifactHash === null || isHexHash(record.compiledArtifactHash)) &&
-    (record.compiledArtifact == null || isValidCompiledArtifact(record.compiledArtifact)) &&
+    (record.compiledArtifactHash === null ||
+      isHexHash(record.compiledArtifactHash)) &&
+    (record.compiledArtifact == null ||
+      isValidCompiledArtifact(record.compiledArtifact)) &&
+    (record.compiledArtifact && record.compiledArtifactHash
+      ? hashJson(record.compiledArtifact) === record.compiledArtifactHash
+      : true) &&
     (record.decision === "VALID" ? record.compiledArtifact != null : true) &&
     Array.isArray(record.evaluatedTestCases)
   );
@@ -1691,13 +1726,16 @@ function isValidModelIdentity(value: unknown): value is AgentModelIdentity {
     typeof identity.model === "string" &&
     identity.model.length > 0 &&
     (identity.digest === null || typeof identity.digest === "string") &&
-    (identity.quantization === null || typeof identity.quantization === "string") &&
+    (identity.quantization === null ||
+      typeof identity.quantization === "string") &&
     typeof identity.serving_engine === "string" &&
     identity.serving_engine.length > 0
   );
 }
 
-function isValidProviderAttemptLog(value: unknown): value is AgentProviderAttemptLog {
+function isValidProviderAttemptLog(
+  value: unknown,
+): value is AgentProviderAttemptLog {
   if (!value || typeof value !== "object") {
     return false;
   }
@@ -1786,7 +1824,8 @@ function isValidSettlementTransitionRequest(
     request.transitionReason.length <= 256 &&
     (request.signature === undefined ||
       request.signature === null ||
-      (typeof request.signature === "string" && request.signature.length <= 128)) &&
+      (typeof request.signature === "string" &&
+        request.signature.length <= 128)) &&
     (request.recordedAt === undefined ||
       (typeof request.recordedAt === "string" &&
         !Number.isNaN(Date.parse(request.recordedAt))))
@@ -1814,9 +1853,7 @@ function isValidClaimRequest(
   );
 }
 
-function isValidClaimCompleteRequest(
-  value: unknown,
-): value is {
+function isValidClaimCompleteRequest(value: unknown): value is {
   claimId: string;
   completedAt?: string;
   failureReason?: string;
@@ -1849,9 +1886,10 @@ function isValidClaimCompleteRequest(
   );
 }
 
-function isValidConversationDraft(
-  value: unknown,
-): value is Omit<ConversationDraftRecord, "createdAt" | "draftId" | "updatedAt"> & {
+function isValidConversationDraft(value: unknown): value is Omit<
+  ConversationDraftRecord,
+  "createdAt" | "draftId" | "updatedAt"
+> & {
   createdAt?: string;
   draftId?: string;
   updatedAt?: string;
@@ -1880,7 +1918,8 @@ function isValidConversationDraft(
     (draft.status === "draft" || draft.status === "submitted") &&
     (draft.ruleId === null ||
       (Number.isInteger(draft.ruleId) && Number(draft.ruleId) > 0)) &&
-    (draft.normalizedText === null || typeof draft.normalizedText === "string") &&
+    (draft.normalizedText === null ||
+      typeof draft.normalizedText === "string") &&
     (draft.officialInterpretation === null ||
       typeof draft.officialInterpretation === "string") &&
     typeof draft.lastMessage === "string" &&
@@ -1894,7 +1933,9 @@ function isValidConversationDraft(
   );
 }
 
-function isValidVerificationOutcome(value: unknown): value is VerificationOutcome {
+function isValidVerificationOutcome(
+  value: unknown,
+): value is VerificationOutcome {
   return value === "LOSE" || value === "WIN";
 }
 
@@ -1939,9 +1980,11 @@ function isValidGuessVerificationResult(
     typeof result.resultId === "string" &&
     isHexHash(result.resultId) &&
     (result.activeRuleId === null ||
-      (Number.isInteger(result.activeRuleId) && Number(result.activeRuleId) > 0)) &&
+      (Number.isInteger(result.activeRuleId) &&
+        Number(result.activeRuleId) > 0)) &&
     isValidRuleVerificationResult(result.original) &&
-    (result.alternative === null || isValidRuleVerificationResult(result.alternative)) &&
+    (result.alternative === null ||
+      isValidRuleVerificationResult(result.alternative)) &&
     typeof result.completedAt === "string" &&
     !Number.isNaN(Date.parse(result.completedAt))
   );
@@ -1949,7 +1992,12 @@ function isValidGuessVerificationResult(
 
 function isValidRuleValidationRunRequest(
   value: unknown,
-): value is { model?: string; provider?: string; ruleId: number; turnId: number } {
+): value is {
+  model?: string;
+  provider?: string;
+  ruleId: number;
+  turnId: number;
+} {
   if (!value || typeof value !== "object") {
     return false;
   }
@@ -1988,7 +2036,8 @@ function isValidRuleElection(value: unknown): value is RuleElectionRecord {
     Number(record.turnId) > 0 &&
     statusIsValid &&
     (record.activeRuleId === null ||
-      (Number.isInteger(record.activeRuleId) && Number(record.activeRuleId) > 0)) &&
+      (Number.isInteger(record.activeRuleId) &&
+        Number(record.activeRuleId) > 0)) &&
     (record.eligibleCandidateCommitments === undefined ||
       (Array.isArray(record.eligibleCandidateCommitments) &&
         record.eligibleCandidateCommitments.every(
@@ -2021,8 +2070,10 @@ function isValidRuleElection(value: unknown): value is RuleElectionRecord {
     (record.activeRuleHash === null || isHexHash(record.activeRuleHash)) &&
     (record.activeRuleArtifactHash === null ||
       isHexHash(record.activeRuleArtifactHash)) &&
-    (record.randomnessAccount === null || isBase58Like(record.randomnessAccount)) &&
-    (record.randomnessSource === null || isBase58Like(record.randomnessSource)) &&
+    (record.randomnessAccount === null ||
+      isBase58Like(record.randomnessAccount)) &&
+    (record.randomnessSource === null ||
+      isBase58Like(record.randomnessSource)) &&
     (record.randomnessValue === null || isHexHash(record.randomnessValue)) &&
     (record.activeElectionRandomnessAccount === undefined ||
       record.activeElectionRandomnessAccount === null ||
@@ -2225,7 +2276,8 @@ export function removeRule(input: PaidRuleRemovalRecord): {
   }
 
   // Differentiated vote-threshold protection.
-  const voteCount = listRuleVotes(input.turnId).counts[String(input.ruleId)] ?? 0;
+  const voteCount =
+    listRuleVotes(input.turnId).counts[String(input.ruleId)] ?? 0;
   const isCreator = proposal.proposer === input.remover;
   const removalKind: PaidRuleRemovalRecord["removalKind"] = isCreator
     ? "creator_self"
@@ -2438,7 +2490,10 @@ function stableStringify(value: unknown): string {
   if (value && typeof value === "object") {
     return `{${Object.keys(value as AstRecord)
       .sort()
-      .map((key) => `${JSON.stringify(key)}:${stableStringify((value as AstRecord)[key])}`)
+      .map(
+        (key) =>
+          `${JSON.stringify(key)}:${stableStringify((value as AstRecord)[key])}`,
+      )
       .join(",")}}`;
   }
   return JSON.stringify(value);
@@ -2453,12 +2508,12 @@ function canonicalizeNode(value: unknown): unknown {
 
   if (kind === "and" || kind === "or") {
     const raw = Array.isArray(node.clauses) ? node.clauses : [];
-    const flattened = raw
-      .map(canonicalizeNode)
-      .flatMap((clause) => {
-        const c = clause as AstRecord;
-        return c && c.kind === kind && Array.isArray(c.clauses) ? c.clauses : [clause];
-      });
+    const flattened = raw.map(canonicalizeNode).flatMap((clause) => {
+      const c = clause as AstRecord;
+      return c && c.kind === kind && Array.isArray(c.clauses)
+        ? c.clauses
+        : [clause];
+    });
     const seen = new Set<string>();
     const unique: unknown[] = [];
     for (const clause of flattened) {
@@ -2485,14 +2540,23 @@ function canonicalizeNode(value: unknown): unknown {
     kind === "intersection" ||
     (kind === "arith" && (node.op === "add" || node.op === "mul"))
   ) {
-    const operands = [canonicalizeNode(node.left), canonicalizeNode(node.right)].sort(
-      (a, b) => stableStringify(a).localeCompare(stableStringify(b)),
-    );
+    const operands = [
+      canonicalizeNode(node.left),
+      canonicalizeNode(node.right),
+    ].sort((a, b) => stableStringify(a).localeCompare(stableStringify(b)));
     return { ...node, left: operands[0], right: operands[1] };
   }
 
   const out: AstRecord = { ...node };
-  for (const field of ["of", "left", "right", "clause", "predicate", "score", "guard"]) {
+  for (const field of [
+    "of",
+    "left",
+    "right",
+    "clause",
+    "predicate",
+    "score",
+    "guard",
+  ]) {
     if (out[field] !== undefined) {
       out[field] = canonicalizeNode(out[field]);
     }
@@ -2508,7 +2572,9 @@ export function ruleSignature(ast: RuleAst): string {
     ast.schemaVersion === 2
       ? { result: canonicalizeNode(ast.result), v: 2 }
       : { node: ast.node, v: 1 };
-  return createHash("sha256").update(stableStringify(canonical), "utf8").digest("hex");
+  return createHash("sha256")
+    .update(stableStringify(canonical), "utf8")
+    .digest("hex");
 }
 
 // Signatures of every rule that has held a mandate (was the elected active rule
@@ -2519,7 +2585,10 @@ export function getMandatedRuleSignatures(): Set<string> {
     if (election.status !== "settled" || election.activeRuleId === null) {
       continue;
     }
-    const validation = getRuleValidation(election.turnId, election.activeRuleId);
+    const validation = getRuleValidation(
+      election.turnId,
+      election.activeRuleId,
+    );
     const ast = validation?.compiledArtifact?.ast;
     if (ast) {
       signatures.add(ruleSignature(ast));
@@ -2533,7 +2602,9 @@ function getVerificationResultKey(turnId: number, player: string) {
 }
 
 function listGuessReceipts(turnId: number) {
-  return [...guessReceipts.values()].filter((receipt) => receipt.turnId === turnId);
+  return [...guessReceipts.values()].filter(
+    (receipt) => receipt.turnId === turnId,
+  );
 }
 
 function listVerificationJobs(turnId: number) {
@@ -2541,7 +2612,9 @@ function listVerificationJobs(turnId: number) {
 }
 
 function listVerificationResults(turnId: number) {
-  return [...verificationResults.values()].filter((result) => result.turnId === turnId);
+  return [...verificationResults.values()].filter(
+    (result) => result.turnId === turnId,
+  );
 }
 
 function getWinnerRecordKey(
@@ -2607,7 +2680,8 @@ function calculateCategoryWinnerRecords(args: {
     winnerCount === 0 ? 0 : Math.floor(args.bucketLamports / winnerCount);
   const records = winningResults.map(
     (result): WinnerRecord => ({
-      activeRuleId: args.category === "alternative" ? result.activeRuleId : null,
+      activeRuleId:
+        args.category === "alternative" ? result.activeRuleId : null,
       bucketLamports: args.bucketLamports,
       calculatedAt: args.calculatedAt,
       category: args.category,
@@ -2825,7 +2899,9 @@ export function calculateRewardDistribution(args: {
       ? 0
       : Math.min(cappedVoterPoolLamports, remainingAfterCreatorLamports);
   const individualVoterRewardLamports =
-    voters.length === 0 ? 0 : Math.floor(finalVoterPoolLamports / voters.length);
+    voters.length === 0
+      ? 0
+      : Math.floor(finalVoterPoolLamports / voters.length);
   const voterRemainderLamports =
     finalVoterPoolLamports - individualVoterRewardLamports * voters.length;
   const creatorRecord: CreatorRewardRecord = {
@@ -2853,7 +2929,8 @@ export function calculateRewardDistribution(args: {
       individualAltPayoutLamports: args.individualAltPayoutLamports,
       rewardPoolLamports: finalVoterPoolLamports,
       rewardRateBps: VOTER_REWARD_RATE_BPS,
-      status: individualVoterRewardLamports > 0 ? "calculated" : "not_available",
+      status:
+        individualVoterRewardLamports > 0 ? "calculated" : "not_available",
       turnId: args.turnId,
       voter,
       voterCount: voters.length,
@@ -2977,7 +3054,8 @@ export function getRewardSummary(turnId: number): RewardCalculationSummary {
   const creator = listCreatorRewardRecords(turnId)[0] ?? null;
   const voters = listVoterRewardRecords(turnId);
   if (creator || voters.length > 0) {
-    const activeRuleId = creator?.activeRuleId ?? voters[0]?.activeRuleId ?? null;
+    const activeRuleId =
+      creator?.activeRuleId ?? voters[0]?.activeRuleId ?? null;
     const reserveLamports = getRewardReserveLamports(turnId);
     const finalVoterPoolLamports = voters[0]?.rewardPoolLamports ?? 0;
     const calculatedVoterPoolLamports =
@@ -3088,9 +3166,7 @@ function createClaimRecord(args: {
   const minimumClaimThresholdLamports = getMinimumClaimThresholdLamports();
   const isClaimable = args.amountLamports >= minimumClaimThresholdLamports;
   const status: ClaimRecordStatus = isClaimable ? "available" : "unavailable";
-  const statusReason = isClaimable
-    ? "CLAIM_AVAILABLE"
-    : "PAYOUT_BELOW_MINIMUM";
+  const statusReason = isClaimable ? "CLAIM_AVAILABLE" : "PAYOUT_BELOW_MINIMUM";
 
   return {
     activeRuleId: args.activeRuleId,
@@ -3183,10 +3259,12 @@ export function createClaimRecordsForTurn(
   };
 }
 
-export function listClaimRecords(args: {
-  turnId?: number;
-  wallet?: string;
-} = {}) {
+export function listClaimRecords(
+  args: {
+    turnId?: number;
+    wallet?: string;
+  } = {},
+) {
   return [...claimRecords.values()]
     .filter((record) => {
       if (args.turnId !== undefined && record.turnId !== args.turnId) {
@@ -3270,7 +3348,10 @@ function getClaimTitle(kind: ClaimKind) {
   return "Voter reward";
 }
 
-function compareHistoryEvents(left: PlayerHistoryEvent, right: PlayerHistoryEvent) {
+function compareHistoryEvents(
+  left: PlayerHistoryEvent,
+  right: PlayerHistoryEvent,
+) {
   const timeDelta = Date.parse(right.createdAt) - Date.parse(left.createdAt);
   return timeDelta !== 0 ? timeDelta : right.id.localeCompare(left.id);
 }
@@ -3286,51 +3367,59 @@ export function listPlayerHistory(args: {
   const events: PlayerHistoryEvent[] = [
     ...[...guessReceipts.values()]
       .filter((receipt) => receipt.player === args.wallet)
-      .map((receipt): PlayerHistoryEvent => ({
-        createdAt: receipt.submittedAt,
-        id: `guess:${receipt.turnId}:${receipt.player}`,
-        status: "submitted",
-        summary: `Numbers ${receipt.numbers.join(", ")}`,
-        title: "Guess submitted",
-        turnId: receipt.turnId,
-        type: "guess",
-      })),
+      .map(
+        (receipt): PlayerHistoryEvent => ({
+          createdAt: receipt.submittedAt,
+          id: `guess:${receipt.turnId}:${receipt.player}`,
+          status: "submitted",
+          summary: `Numbers ${receipt.numbers.join(", ")}`,
+          title: "Guess submitted",
+          turnId: receipt.turnId,
+          type: "guess",
+        }),
+      ),
     ...[...ruleProposals.values()]
       .filter((proposal) => proposal.proposer === args.wallet)
-      .map((proposal): PlayerHistoryEvent => ({
-        createdAt: proposal.submittedAt,
-        id: `rule:${proposal.turnId}:${proposal.ruleId}`,
-        ruleId: proposal.ruleId,
-        status: proposal.state ?? "proposed",
-        summary: proposal.sanitizedText,
-        title: proposal.title,
-        turnId: proposal.turnId,
-        type: "rule_proposal",
-      })),
+      .map(
+        (proposal): PlayerHistoryEvent => ({
+          createdAt: proposal.submittedAt,
+          id: `rule:${proposal.turnId}:${proposal.ruleId}`,
+          ruleId: proposal.ruleId,
+          status: proposal.state ?? "proposed",
+          summary: proposal.sanitizedText,
+          title: proposal.title,
+          turnId: proposal.turnId,
+          type: "rule_proposal",
+        }),
+      ),
     ...[...ruleVotes.values()]
       .filter((vote) => vote.voter === args.wallet)
-      .map((vote): PlayerHistoryEvent => ({
-        createdAt: vote.submittedAt,
-        id: `vote:${vote.turnId}:${vote.ruleId}:${vote.voter}`,
-        ruleId: vote.ruleId,
-        status: "cast",
-        summary: `Voted for rule #${vote.ruleId}.`,
-        title: "Rule vote",
-        turnId: vote.turnId,
-        type: "vote",
-      })),
+      .map(
+        (vote): PlayerHistoryEvent => ({
+          createdAt: vote.submittedAt,
+          id: `vote:${vote.turnId}:${vote.ruleId}:${vote.voter}`,
+          ruleId: vote.ruleId,
+          status: "cast",
+          summary: `Voted for rule #${vote.ruleId}.`,
+          title: "Rule vote",
+          turnId: vote.turnId,
+          type: "vote",
+        }),
+      ),
     ...[...ruleEliminationVotes.values()]
       .filter((vote) => vote.voter === args.wallet)
-      .map((vote): PlayerHistoryEvent => ({
-        createdAt: vote.submittedAt,
-        id: `elimination:${vote.turnId}:${vote.ruleId}:${vote.voter}`,
-        ruleId: vote.ruleId,
-        status: "cast",
-        summary: `Voted to eliminate rule #${vote.ruleId}.`,
-        title: "Elimination vote",
-        turnId: vote.turnId,
-        type: "elimination_vote",
-      })),
+      .map(
+        (vote): PlayerHistoryEvent => ({
+          createdAt: vote.submittedAt,
+          id: `elimination:${vote.turnId}:${vote.ruleId}:${vote.voter}`,
+          ruleId: vote.ruleId,
+          status: "cast",
+          summary: `Voted to eliminate rule #${vote.ruleId}.`,
+          title: "Elimination vote",
+          turnId: vote.turnId,
+          type: "elimination_vote",
+        }),
+      ),
     ...listClaimRecords({ wallet: args.wallet }).map(
       (claim): PlayerHistoryEvent => ({
         amountLamports: claim.amountLamports,
@@ -3359,13 +3448,18 @@ export function listPlayerHistory(args: {
 }
 
 export function saveConversationDraft(
-  draft: Omit<ConversationDraftRecord, "createdAt" | "draftId" | "updatedAt"> & {
+  draft: Omit<
+    ConversationDraftRecord,
+    "createdAt" | "draftId" | "updatedAt"
+  > & {
     createdAt?: string;
     draftId?: string;
     updatedAt?: string;
   },
 ) {
-  const draftId = draft.draftId ?? getConversationDraftKey(draft.wallet, draft.turnId, draft.prompt);
+  const draftId =
+    draft.draftId ??
+    getConversationDraftKey(draft.wallet, draft.turnId, draft.prompt);
   const existing = conversationDrafts.get(draftId);
   const updatedAt = draft.updatedAt ?? new Date().toISOString();
   const record: ConversationDraftRecord = {
@@ -3457,7 +3551,7 @@ export function completeClaimApproval(args: {
       ...record.walletApproval,
       completedAt,
       failureReason: failed ? (args.failureReason ?? "CLAIM_FAILED") : null,
-      signature: failed ? null : args.signature ?? null,
+      signature: failed ? null : (args.signature ?? null),
       state: failed ? "failed" : "approved",
     },
   };
@@ -3473,6 +3567,9 @@ function getActiveRuleArtifact(turnId: number): {
 
   if (!election || election.activeRuleId === null) {
     return null;
+  }
+  if (!election.activeRuleArtifactHash) {
+    throw new Error("ACTIVE_RULE_ARTIFACT_NOT_FROZEN");
   }
 
   const validation = getRuleValidation(turnId, election.activeRuleId);
@@ -3591,8 +3688,12 @@ export function createGuessVerificationJobsForTurn(
   };
 }
 
-export function saveGuessVerificationResult(result: GuessVerificationResultRecord) {
-  const job = [...verificationJobs.values()].find((candidate) => candidate.id === result.jobId);
+export function saveGuessVerificationResult(
+  result: GuessVerificationResultRecord,
+) {
+  const job = [...verificationJobs.values()].find(
+    (candidate) => candidate.id === result.jobId,
+  );
   if (!job) {
     throw new Error("VERIFICATION_JOB_NOT_FOUND");
   }
@@ -3660,9 +3761,10 @@ function appendGuessVerificationAuditLog(
       `original:${result.original.result}`,
       `alternative:${result.alternative?.result ?? "NONE"}`,
     ].join(";"),
-    result: result.alternative?.result === "WIN" || result.original.result === "WIN"
-      ? "WIN"
-      : "LOSE",
+    result:
+      result.alternative?.result === "WIN" || result.original.result === "WIN"
+        ? "WIN"
+        : "LOSE",
     resultId: result.resultId,
     ruleId: result.activeRuleId,
     turnId: result.turnId,
@@ -3702,7 +3804,9 @@ export function runRuleValidationForProposal(args: {
   ruleId: number;
   turnId: number;
 }) {
-  const proposal = ruleProposals.get(getRuleProposalKey(args.turnId, args.ruleId));
+  const proposal = ruleProposals.get(
+    getRuleProposalKey(args.turnId, args.ruleId),
+  );
   if (!proposal) {
     throw new Error("RULE_PROPOSAL_NOT_FOUND");
   }
@@ -3715,6 +3819,8 @@ export function runRuleValidationForProposal(args: {
   const result = validateAndPrecompileRule({
     ...request,
     ...(args.model ? { model: args.model } : {}),
+    officialInterpretation: proposal.officialInterpretation,
+    originalText: proposal.sanitizedText,
     ...(args.provider ? { provider: args.provider } : {}),
   });
   const record: RuleValidationRecord = {
@@ -3764,9 +3870,12 @@ export function saveRuleElection(election: RuleElectionRecord) {
       election.eligibleCandidateCommitments ??
       existing?.eligibleCandidateCommitments ??
       [],
-    randomnessAccount: election.randomnessAccount ?? existing?.randomnessAccount ?? null,
-    randomnessSource: election.randomnessSource ?? existing?.randomnessSource ?? null,
-    randomnessValue: election.randomnessValue ?? existing?.randomnessValue ?? null,
+    randomnessAccount:
+      election.randomnessAccount ?? existing?.randomnessAccount ?? null,
+    randomnessSource:
+      election.randomnessSource ?? existing?.randomnessSource ?? null,
+    randomnessValue:
+      election.randomnessValue ?? existing?.randomnessValue ?? null,
   };
   elections.set(normalized.turnId, normalized);
   appendRuleElectionProofAuditLog(normalized);
@@ -3790,7 +3899,10 @@ function appendRuleElectionProofAuditLog(
   const existingLogHash = ruleElectionProofAuditLogs.get(election.turnId);
   if (existingLogHash) {
     const existing = getAuditLog(existingLogHash);
-    if (existing?.inputHash === inputHash && existing.outputHash === outputHash) {
+    if (
+      existing?.inputHash === inputHash &&
+      existing.outputHash === outputHash
+    ) {
       return existing;
     }
     throw new Error("RULE_ELECTION_PROOF_ALREADY_RECORDED");
@@ -3823,8 +3935,14 @@ function buildRuleElectionProof(election: RuleElectionRecord) {
       ["randomnessAccount", election.randomnessAccount],
       ["randomnessSource", election.randomnessSource],
       ["randomnessValue", election.randomnessValue],
-      ["activeElectionRandomnessAccount", election.activeElectionRandomnessAccount],
-      ["activeElectionRandomnessSource", election.activeElectionRandomnessSource],
+      [
+        "activeElectionRandomnessAccount",
+        election.activeElectionRandomnessAccount,
+      ],
+      [
+        "activeElectionRandomnessSource",
+        election.activeElectionRandomnessSource,
+      ],
       ["activeElectionRandomnessValue", election.activeElectionRandomnessValue],
     ]
       .filter(([, value]) => !value)
@@ -3923,7 +4041,10 @@ export function recordSettlementTransition(
       toState: request.toState,
       transitionReason: request.transitionReason,
     },
-    publicStateRef: { key: request.idempotencyKey, type: "settlement_transition" },
+    publicStateRef: {
+      key: request.idempotencyKey,
+      type: "settlement_transition",
+    },
     reason: request.transitionReason,
     result: request.toState,
     turnId: request.turnId,
@@ -4002,7 +4123,10 @@ export function getRuleElimination(turnId: number): RuleEliminationRecord {
     eliminatedFinalistHash: hashRuleIdsForAudit("eliminated_finalists_v1", []),
     eliminatedRuleIds: [],
     finalists,
-    status: finalistRuleIds.length > 0 && !election?.activeRuleId ? "open" : "not_started",
+    status:
+      finalistRuleIds.length > 0 && !election?.activeRuleId
+        ? "open"
+        : "not_started",
     survivorFinalistHash: hashRuleIdsForAudit(
       "survivor_finalists_v1",
       finalistRuleIds,
@@ -4169,7 +4293,9 @@ function splitFeeLamports(amountLamports: number, treasuryFeeBps: number) {
     throw new Error("INVALID_TREASURY_FEE_BPS");
   }
 
-  const treasuryLamports = Math.floor((amountLamports * treasuryFeeBps) / 10_000);
+  const treasuryLamports = Math.floor(
+    (amountLamports * treasuryFeeBps) / 10_000,
+  );
   const prizeLamports = amountLamports - treasuryLamports;
   return { prizeLamports, treasuryLamports };
 }
@@ -4287,7 +4413,10 @@ export function calculatePrizePoolAccounting(args: {
     currentTurnPoolLamports - originalCurrentTurnLamports;
   const originalRolloverLamports = args.originalRolloverLamports ?? 0;
   const alternativeRolloverLamports = args.alternativeRolloverLamports ?? 0;
-  assertNonNegativeSafeInteger(originalRolloverLamports, "original_rollover_lamports");
+  assertNonNegativeSafeInteger(
+    originalRolloverLamports,
+    "original_rollover_lamports",
+  );
   assertNonNegativeSafeInteger(
     alternativeRolloverLamports,
     "alternative_rollover_lamports",
@@ -4444,7 +4573,9 @@ export function getRuleRemovalActivityEvents(
   );
   return listPaidRuleRemovals(turnId)
     .slice()
-    .sort((left, right) => Date.parse(left.removedAt) - Date.parse(right.removedAt))
+    .sort(
+      (left, right) => Date.parse(left.removedAt) - Date.parse(right.removedAt),
+    )
     .map((removal) => ({
       removalKind: removal.removalKind,
       ruleId: removal.ruleId,
@@ -4930,13 +5061,23 @@ if (isMainModule()) {
       return;
     }
 
-    if (request.method === "GET" && url.pathname.startsWith("/rule-validations/")) {
+    if (
+      request.method === "GET" &&
+      url.pathname.startsWith("/rule-validations/")
+    ) {
       const parts = url.pathname.slice("/rule-validations/".length).split("/");
       const turnId = Number(parts[0]);
       const ruleId = Number(parts[1]);
 
-      if (!Number.isInteger(turnId) || turnId <= 0 || !Number.isInteger(ruleId) || ruleId <= 0) {
-        sendJson(request, response, 400, { error: "invalid_rule_validation_id" });
+      if (
+        !Number.isInteger(turnId) ||
+        turnId <= 0 ||
+        !Number.isInteger(ruleId) ||
+        ruleId <= 0
+      ) {
+        sendJson(request, response, 400, {
+          error: "invalid_rule_validation_id",
+        });
         return;
       }
 
@@ -4992,7 +5133,10 @@ if (isMainModule()) {
       return;
     }
 
-    if (request.method === "POST" && url.pathname === "/rule-elimination-votes") {
+    if (
+      request.method === "POST" &&
+      url.pathname === "/rule-elimination-votes"
+    ) {
       void readJsonBody(request)
         .then((body) => {
           if (!isValidRuleEliminationVote(body)) {
@@ -5026,7 +5170,10 @@ if (isMainModule()) {
       return;
     }
 
-    if (request.method === "GET" && url.pathname === "/rule-elimination-votes") {
+    if (
+      request.method === "GET" &&
+      url.pathname === "/rule-elimination-votes"
+    ) {
       const turnId = Number(url.searchParams.get("turnId"));
 
       if (!Number.isInteger(turnId) || turnId <= 0) {
@@ -5160,7 +5307,10 @@ if (isMainModule()) {
       return;
     }
 
-    if (request.method === "POST" && url.pathname === "/turn-rollovers/settle") {
+    if (
+      request.method === "POST" &&
+      url.pathname === "/turn-rollovers/settle"
+    ) {
       void readJsonBody(request)
         .then((body) => {
           if (!isValidGuessVerificationCreateRequest(body)) {
@@ -5183,7 +5333,10 @@ if (isMainModule()) {
       return;
     }
 
-    if (request.method === "GET" && url.pathname === "/turn-rollovers/settlement") {
+    if (
+      request.method === "GET" &&
+      url.pathname === "/turn-rollovers/settlement"
+    ) {
       const turnId = Number(url.searchParams.get("turnId"));
 
       if (!Number.isInteger(turnId) || turnId <= 0) {
@@ -5198,8 +5351,13 @@ if (isMainModule()) {
       return;
     }
 
-    if (request.method === "GET" && url.pathname.startsWith("/prize-pool-accounting/")) {
-      const turnId = Number(url.pathname.slice("/prize-pool-accounting/".length));
+    if (
+      request.method === "GET" &&
+      url.pathname.startsWith("/prize-pool-accounting/")
+    ) {
+      const turnId = Number(
+        url.pathname.slice("/prize-pool-accounting/".length),
+      );
 
       if (!Number.isInteger(turnId) || turnId <= 0) {
         sendJson(request, response, 400, { error: "invalid_turn_id" });
@@ -5290,7 +5448,10 @@ if (isMainModule()) {
       return;
     }
 
-    if (request.method === "POST" && url.pathname === "/verification-jobs/create-turn") {
+    if (
+      request.method === "POST" &&
+      url.pathname === "/verification-jobs/create-turn"
+    ) {
       void readJsonBody(request)
         .then((body) => {
           if (!isValidGuessVerificationCreateRequest(body)) {
@@ -5305,7 +5466,9 @@ if (isMainModule()) {
             sendJson(request, response, 201, result);
           } catch (error) {
             const code =
-              error instanceof Error ? error.message : "VERIFICATION_JOB_FAILED";
+              error instanceof Error
+                ? error.message
+                : "VERIFICATION_JOB_FAILED";
             sendJson(request, response, 409, {
               error: code,
               message: "Verification jobs could not be created for this turn.",
@@ -5353,7 +5516,9 @@ if (isMainModule()) {
             });
           } catch (error) {
             const code =
-              error instanceof Error ? error.message : "VERIFICATION_RESULT_FAILED";
+              error instanceof Error
+                ? error.message
+                : "VERIFICATION_RESULT_FAILED";
             sendJson(request, response, 404, {
               error: code,
               message: "Verification job not found for result update.",
@@ -5384,7 +5549,10 @@ if (isMainModule()) {
       return;
     }
 
-    if (request.method === "POST" && url.pathname === "/winner-records/calculate-turn") {
+    if (
+      request.method === "POST" &&
+      url.pathname === "/winner-records/calculate-turn"
+    ) {
       void readJsonBody(request)
         .then((body) => {
           if (!isValidGuessVerificationCreateRequest(body)) {
@@ -5421,7 +5589,10 @@ if (isMainModule()) {
       return;
     }
 
-    if (request.method === "POST" && url.pathname === "/reward-records/calculate-turn") {
+    if (
+      request.method === "POST" &&
+      url.pathname === "/reward-records/calculate-turn"
+    ) {
       void readJsonBody(request)
         .then((body) => {
           if (!isValidGuessVerificationCreateRequest(body)) {
@@ -5437,7 +5608,9 @@ if (isMainModule()) {
             });
           } catch (error) {
             const code =
-              error instanceof Error ? error.message : "REWARD_CALCULATION_FAILED";
+              error instanceof Error
+                ? error.message
+                : "REWARD_CALCULATION_FAILED";
             sendJson(request, response, 404, {
               error: code,
             });
@@ -5466,7 +5639,10 @@ if (isMainModule()) {
       return;
     }
 
-    if (request.method === "POST" && url.pathname === "/claim-records/create-turn") {
+    if (
+      request.method === "POST" &&
+      url.pathname === "/claim-records/create-turn"
+    ) {
       void readJsonBody(request)
         .then((body) => {
           if (!isValidClaimCreateRequest(body)) {
@@ -5627,7 +5803,10 @@ if (isMainModule()) {
       return;
     }
 
-    if (request.method === "POST" && url.pathname === "/claim-records/request") {
+    if (
+      request.method === "POST" &&
+      url.pathname === "/claim-records/request"
+    ) {
       void readJsonBody(request)
         .then((body) => {
           if (!isValidClaimRequest(body)) {
@@ -5642,7 +5821,8 @@ if (isMainModule()) {
               claim: requestClaimApproval(body),
             });
           } catch (error) {
-            const code = error instanceof Error ? error.message : "CLAIM_FAILED";
+            const code =
+              error instanceof Error ? error.message : "CLAIM_FAILED";
             sendJson(request, response, 409, { error: code });
           }
         })
@@ -5655,7 +5835,10 @@ if (isMainModule()) {
       return;
     }
 
-    if (request.method === "POST" && url.pathname === "/claim-records/complete") {
+    if (
+      request.method === "POST" &&
+      url.pathname === "/claim-records/complete"
+    ) {
       void readJsonBody(request)
         .then((body) => {
           if (!isValidClaimCompleteRequest(body)) {
@@ -5670,7 +5853,8 @@ if (isMainModule()) {
               claim: completeClaimApproval(body),
             });
           } catch (error) {
-            const code = error instanceof Error ? error.message : "CLAIM_FAILED";
+            const code =
+              error instanceof Error ? error.message : "CLAIM_FAILED";
             sendJson(request, response, 409, { error: code });
           }
         })
@@ -5683,7 +5867,10 @@ if (isMainModule()) {
       return;
     }
 
-    if (request.method === "POST" && url.pathname === "/settlement-transitions") {
+    if (
+      request.method === "POST" &&
+      url.pathname === "/settlement-transitions"
+    ) {
       void readJsonBody(request)
         .then((body) => {
           if (!isValidSettlementTransitionRequest(body)) {
@@ -5706,7 +5893,10 @@ if (isMainModule()) {
       return;
     }
 
-    if (request.method === "GET" && url.pathname === "/settlement-transitions") {
+    if (
+      request.method === "GET" &&
+      url.pathname === "/settlement-transitions"
+    ) {
       const turnId = Number(url.searchParams.get("turnId"));
 
       if (!Number.isInteger(turnId) || turnId <= 0) {
@@ -5729,7 +5919,10 @@ if (isMainModule()) {
           ? (rawKind as AuditLogKind)
           : undefined;
 
-      if (rawTurnId !== null && (!Number.isInteger(turnId) || Number(turnId) <= 0)) {
+      if (
+        rawTurnId !== null &&
+        (!Number.isInteger(turnId) || Number(turnId) <= 0)
+      ) {
         sendJson(request, response, 400, { error: "invalid_query" });
         return;
       }
@@ -5846,7 +6039,9 @@ async function warmDealerModels() {
     } else if (result.loaded) {
       console.log(`[warmup] ${model}: loaded and ready`);
     } else {
-      console.log(`[warmup] ${model}: could not load (${result.note ?? "unknown"})`);
+      console.log(
+        `[warmup] ${model}: could not load (${result.note ?? "unknown"})`,
+      );
     }
   }
 }
