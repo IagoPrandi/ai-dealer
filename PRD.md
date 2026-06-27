@@ -5733,21 +5733,21 @@ M5 is approved only if all M5 submilestones are approved and:
 
 ##### Checklist
 
-- [ ] No alternative rule case tested.
-- [ ] Invalidated alternative rule case tested.
-- [ ] No winners case tested.
-- [ ] Multiple winners case tested.
-- [ ] Rounding case tested.
-- [ ] Minimum payout case tested.
-- [ ] Unclaimed claim case tested.
-- [ ] Creator reward reserve/cap case tested.
-- [ ] Rollover partial and total cases tested.
+- [x] No alternative rule case tested.
+- [x] Invalidated alternative rule case tested.
+- [x] No winners case tested.
+- [x] Multiple winners case tested.
+- [x] Rounding case tested.
+- [x] Minimum payout case tested.
+- [x] Unclaimed claim case tested.
+- [x] Creator reward reserve/cap case tested.
+- [x] Rollover partial and total cases tested.
 
 ##### Approval Criteria
 
-- [ ] Backend, game engine and contract accounting match.
-- [ ] No duplicate payout possible under retry.
-- [ ] Creator reward cannot exceed reserve or cap.
+- [x] Backend, game engine and contract accounting match.
+- [x] No duplicate payout possible under retry.
+- [x] Creator reward cannot exceed reserve or cap.
 
 #### M9.4 — Mobile Reliability Gate
 

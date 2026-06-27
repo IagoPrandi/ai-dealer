@@ -348,6 +348,7 @@ Current local API compatibility endpoints for M4.4 claim flow:
 
 - `POST /claim-records/create-turn`
 - `GET /claim-records?turnId={turn_id}&wallet={wallet}`
+- `POST /claim-records/expire-unclaimed`
 - `POST /claim-records/request`
 - `POST /claim-records/complete`
 
@@ -385,6 +386,21 @@ interface ClaimRecord {
     signature: string | null;
     failureReason: string | null;
   };
+}
+
+interface ExpiredUnclaimedClaimSettlement {
+  sourceTurnId: number;
+  currentTurnId: number;
+  settledAt: string;
+  originalRolloverLamports: number;
+  alternativeRolloverLamports: number;
+  totalRolloverLamports: number;
+  expiredClaims: Array<{
+    claimId: string;
+    wallet: string;
+    category: "original" | "alternative";
+    amountLamports: number;
+  }>;
 }
 
 interface ClaimSummary {

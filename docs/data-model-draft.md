@@ -268,7 +268,7 @@ created_at timestamptz not null,
 updated_at timestamptz not null
 ```
 
-Claims below the configured minimum threshold are created with `unavailable` status and `PAYOUT_BELOW_MINIMUM`. A claim must transition through `pending_wallet_approval` before it can become `claimed` or `failed`; a claimed record cannot be requested again.
+Claims below the configured minimum threshold are created with `unavailable` status and `PAYOUT_BELOW_MINIMUM`. A claim must transition through `pending_wallet_approval` before it can become `claimed` or `failed`; a claimed record cannot be requested again. Expired unclaimed winner-payout claims are marked `unavailable` with `CLAIM_WINDOW_EXPIRED` and their amount is added to the same-category rollover bucket for the current settlement turn.
 
 ## pgvector HNSW Migration
 

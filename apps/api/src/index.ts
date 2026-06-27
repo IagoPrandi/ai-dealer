@@ -561,6 +561,23 @@ export interface ClaimSummary {
   wallet: string | null;
 }
 
+export interface ExpiredUnclaimedClaimRollover {
+  amountLamports: number;
+  category: WinnerCategory;
+  claimId: string;
+  wallet: string;
+}
+
+export interface ExpiredUnclaimedClaimSettlement {
+  alternativeRolloverLamports: number;
+  currentTurnId: number;
+  expiredClaims: ExpiredUnclaimedClaimRollover[];
+  originalRolloverLamports: number;
+  settledAt: string;
+  sourceTurnId: number;
+  totalRolloverLamports: number;
+}
+
 export type PlayerHistoryEventType =
   | "claim"
   | "elimination_vote"
@@ -833,6 +850,7 @@ const CORS_PATHS = new Set([
   "/claim-records",
   "/claim-records/complete",
   "/claim-records/create-turn",
+  "/claim-records/expire-unclaimed",
   "/claim-records/request",
   "/settlement-transitions",
 ]);
@@ -1782,6 +1800,31 @@ function isValidClaimCreateRequest(
     (request.availableAt === undefined ||
       (typeof request.availableAt === "string" &&
         !Number.isNaN(Date.parse(request.availableAt))))
+  );
+}
+
+function isValidExpiredUnclaimedClaimRequest(value: unknown): value is {
+  currentTurnId: number;
+  settledAt?: string;
+  sourceTurnId: number;
+} {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const request = value as {
+    currentTurnId?: unknown;
+    settledAt?: unknown;
+    sourceTurnId?: unknown;
+  };
+  return (
+    Number.isInteger(request.sourceTurnId) &&
+    Number(request.sourceTurnId) > 0 &&
+    Number.isInteger(request.currentTurnId) &&
+    Number(request.currentTurnId) > Number(request.sourceTurnId) &&
+    (request.settledAt === undefined ||
+      (typeof request.settledAt === "string" &&
+        !Number.isNaN(Date.parse(request.settledAt))))
   );
 }
 
@@ -3335,6 +3378,105 @@ export function getPlayerClaimsSummary(wallet: string): PlayerClaimsSummary {
     ),
     unavailableLamports: sumByStatus("unavailable"),
     wallet,
+  };
+}
+
+function isClaimWindowExpired(
+  record: ClaimRecord,
+  args: { currentTurnId: number; settledAt: string },
+) {
+  return (
+    args.currentTurnId >= record.turnId + record.claimWindowTurns ||
+    Date.parse(args.settledAt) >= Date.parse(record.claimWindowExpiresAt)
+  );
+}
+
+export function settleExpiredUnclaimedClaims(args: {
+  currentTurnId: number;
+  settledAt?: string;
+  sourceTurnId: number;
+}): ExpiredUnclaimedClaimSettlement {
+  assertNonNegativeSafeInteger(args.sourceTurnId, "source_turn_id");
+  assertNonNegativeSafeInteger(args.currentTurnId, "current_turn_id");
+  if (args.sourceTurnId <= 0 || args.currentTurnId <= args.sourceTurnId) {
+    throw new Error("INVALID_CLAIM_EXPIRY_TURN");
+  }
+
+  const settledAt = args.settledAt ?? new Date().toISOString();
+  const expirableStatuses = new Set<ClaimRecordStatus>([
+    "available",
+    "failed",
+    "pending_wallet_approval",
+  ]);
+  const expiredClaims = listClaimRecords({ turnId: args.sourceTurnId })
+    .filter(
+      (record) =>
+        record.kind === "winner_payout" &&
+        record.category !== null &&
+        expirableStatuses.has(record.status) &&
+        isClaimWindowExpired(record, {
+          currentTurnId: args.currentTurnId,
+          settledAt,
+        }),
+    )
+    .map((record): ExpiredUnclaimedClaimRollover => {
+      const walletApprovalPending = record.walletApproval.state === "pending";
+      const updated: ClaimRecord = {
+        ...record,
+        status: "unavailable",
+        statusReason: "CLAIM_WINDOW_EXPIRED",
+        updatedAt: settledAt,
+        walletApproval: {
+          ...record.walletApproval,
+          completedAt: walletApprovalPending
+            ? settledAt
+            : record.walletApproval.completedAt,
+          failureReason: walletApprovalPending
+            ? "CLAIM_WINDOW_EXPIRED"
+            : record.walletApproval.failureReason,
+          state: walletApprovalPending ? "failed" : record.walletApproval.state,
+        },
+      };
+      saveClaimRecord(updated);
+      return {
+        amountLamports: record.amountLamports,
+        category: record.category as WinnerCategory,
+        claimId: record.claimId,
+        wallet: record.wallet,
+      };
+    });
+
+  const originalRolloverLamports = expiredClaims
+    .filter((claim) => claim.category === "original")
+    .reduce((total, claim) => total + claim.amountLamports, 0);
+  const alternativeRolloverLamports = expiredClaims
+    .filter((claim) => claim.category === "alternative")
+    .reduce((total, claim) => total + claim.amountLamports, 0);
+  const existingRollover = getTurnRollover(args.currentTurnId);
+
+  if (originalRolloverLamports > 0 || alternativeRolloverLamports > 0) {
+    saveTurnRollover({
+      alternativeRolloverLamports:
+        (existingRollover?.alternativeRolloverLamports ?? 0) +
+        alternativeRolloverLamports,
+      originalRolloverLamports:
+        (existingRollover?.originalRolloverLamports ?? 0) +
+        originalRolloverLamports,
+      recordedAt: settledAt,
+      sourceTurnId: args.sourceTurnId,
+      turnId: args.currentTurnId,
+    });
+  }
+
+  return {
+    alternativeRolloverLamports,
+    currentTurnId: args.currentTurnId,
+    expiredClaims,
+    originalRolloverLamports,
+    settledAt,
+    sourceTurnId: args.sourceTurnId,
+    totalRolloverLamports:
+      originalRolloverLamports + alternativeRolloverLamports,
   };
 }
 
@@ -5681,6 +5823,32 @@ if (isMainModule()) {
       sendJson(request, response, 200, {
         claims: getClaimSummary({ turnId, ...(wallet ? { wallet } : {}) }),
       });
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      url.pathname === "/claim-records/expire-unclaimed"
+    ) {
+      void readJsonBody(request)
+        .then((body) => {
+          if (!isValidExpiredUnclaimedClaimRequest(body)) {
+            sendJson(request, response, 400, {
+              error: "invalid_claim_expiry_request",
+            });
+            return;
+          }
+
+          sendJson(request, response, 201, {
+            settlement: settleExpiredUnclaimedClaims(body),
+          });
+        })
+        .catch((error: unknown) => {
+          sendJson(request, response, 400, {
+            error: "invalid_json",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
       return;
     }
 

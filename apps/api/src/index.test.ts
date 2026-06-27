@@ -50,6 +50,7 @@ import {
   saveRuleVote,
   saveConversationDraft,
   saveTurnRollover,
+  settleExpiredUnclaimedClaims,
   settleTurnRollover,
   requestClaimApproval,
   storeAuditLogInPostgres,
@@ -258,6 +259,54 @@ test("prize pool accounting tracks every source and bucket deterministically", (
     alternative: 55_100_009,
     original: 55_100_007,
   });
+});
+
+test("M9.3 backend accounting matches the contract domain vector", () => {
+  const accounting = calculatePrizePoolAccounting({
+    alternativeRolloverLamports: 9,
+    config: {
+      voteFeeLamports: 2_000_000,
+    },
+    guessCount: 2,
+    originalRolloverLamports: 7,
+    paidRuleRemovalCount: 1,
+    ruleProposalCount: 2,
+    turnId: 150,
+    voteCount: 3,
+  });
+
+  // Mirrors `prize_pool_accounting_tracks_sources_buckets_and_rollover` in
+  // `contracts/solana/programs/idealer/tests/core.rs`.
+  assert.deepEqual(
+    {
+      alternativeBucketCurrent: accounting.buckets.alternative.currentTurnLamports,
+      alternativeBucketTotal: accounting.buckets.alternative.totalLamports,
+      currentTurnPool: accounting.currentTurnPoolLamports,
+      grossFees: accounting.grossFeesLamports,
+      originalBucketCurrent: accounting.buckets.original.currentTurnLamports,
+      originalBucketTotal: accounting.buckets.original.totalLamports,
+      paidRuleRemovalGross: accounting.sources.paidRuleRemovals.grossLamports,
+      ruleProposalGross: accounting.sources.ruleProposals.grossLamports,
+      totalVisiblePrizePool: accounting.totalVisiblePrizePoolLamports,
+      treasury: accounting.treasuryLamports,
+      voteFeeActive: accounting.sources.votes.feeActive,
+      voteGross: accounting.sources.votes.grossLamports,
+    },
+    {
+      alternativeBucketCurrent: 55_100_000,
+      alternativeBucketTotal: 55_100_009,
+      currentTurnPool: 110_200_000,
+      grossFees: 116_000_000,
+      originalBucketCurrent: 55_100_000,
+      originalBucketTotal: 55_100_007,
+      paidRuleRemovalGross: 50_000_000,
+      ruleProposalGross: 40_000_000,
+      totalVisiblePrizePool: 110_200_016,
+      treasury: 5_800_000,
+      voteFeeActive: true,
+      voteGross: 6_000_000,
+    },
+  );
 });
 
 test("vote fees are free before turn 100 and counted from turn 100 onward", () => {
@@ -487,6 +536,102 @@ test("winner calculation handles zero winners with full bucket rollover remainde
   assert.equal(winners.records.length, 0);
 });
 
+test("M9.3 no alternative rule pays only original winners and creates no rewards", () => {
+  resetApiStateForTests();
+  saveRuleElection({
+    ...settledElection(222, 7),
+    activeRuleArtifactHash: null,
+    activeRuleHash: null,
+    activeRuleId: null,
+    survivorRuleIds: [],
+  });
+  saveReceiptForWallet(222, wallet, [1, 2, 3, 4, 5, 6]);
+  saveFulfilledDraw(222);
+
+  const { jobs } = createGuessVerificationJobsForTurn(222);
+  const job = jobs[0];
+  assert.ok(job);
+  assert.equal(job.activeRuleId, null);
+  assert.equal(job.activeRuleArtifact, null);
+  saveGuessVerificationResult(
+    resultForJob({
+      alternative: "NONE",
+      jobId: job.id,
+      original: "WIN",
+      player: wallet,
+      resultByte: "1",
+      turnId: 222,
+    }),
+  );
+
+  const winners = calculateAndStoreWinnerRecords(
+    222,
+    "2026-06-12T12:18:00.000Z",
+  );
+  const rewards = calculateAndStoreRewardRecords(
+    222,
+    "2026-06-12T12:18:00.000Z",
+  );
+
+  assert.equal(winners.original.winnerCount, 1);
+  assert.equal(winners.alternative.winnerCount, 0);
+  assert.equal(winners.records.length, 1);
+  assert.equal(winners.records[0]?.category, "original");
+  assert.equal(rewards.activeRuleId, null);
+  assert.equal(rewards.creator, null);
+  assert.equal(rewards.voters.length, 0);
+});
+
+test("M9.3 invalidated alternative rule behaves as no active alternative", () => {
+  resetApiStateForTests();
+  saveRuleProposal({
+    ...proposal(223, 7),
+    precompilationStatus: "failed",
+    state: "invalidated",
+  });
+  saveRuleVote({
+    ruleId: 7,
+    ruleProposal: base58,
+    ruleVote: base58,
+    signature: base58,
+    submittedAt: "2026-06-12T12:06:00.000Z",
+    turnId: 223,
+    voter: walletTwo,
+  });
+  saveReceiptForWallet(223, wallet, [1, 2, 3, 4, 5, 6]);
+  saveFulfilledDraw(223);
+
+  const { jobs } = createGuessVerificationJobsForTurn(223);
+  const job = jobs[0];
+  assert.ok(job);
+  assert.equal(job.activeRuleId, null);
+  assert.equal(job.payload.compiled_artifact_hash, undefined);
+  saveGuessVerificationResult(
+    resultForJob({
+      alternative: "NONE",
+      jobId: job.id,
+      original: "LOSE",
+      player: wallet,
+      resultByte: "2",
+      turnId: 223,
+    }),
+  );
+
+  const winners = calculateAndStoreWinnerRecords(
+    223,
+    "2026-06-12T12:18:00.000Z",
+  );
+  const settlement = settleTurnRollover(223, "2026-06-12T12:19:00.000Z");
+
+  assert.equal(winners.alternative.winnerCount, 0);
+  assert.equal(settlement.alternative.reason, "no_winner");
+  assert.equal(
+    settlement.alternative.rolloverLamports,
+    getPrizePoolAccounting(223).buckets.alternative.totalLamports,
+  );
+  assert.equal(getRewardSummary(223).creator, null);
+});
+
 test("winner calculation stores original and alternative winners with per-bucket payouts", () => {
   resetApiStateForTests();
   saveReceiptForWallet(221, wallet, [1, 2, 3, 4, 5, 6]);
@@ -688,6 +833,60 @@ test("rollover settlement pays accumulated pool to a winner after rollover witho
   const rewardsAfter = getRewardSummary(311);
   assert.deepEqual(rewardsAfter, rewardsBefore);
   assert.equal(getTurnRolloverSettlement(311)?.totalRolloverLamports, 0);
+});
+
+test("M9.3 rounding dust rolls over partially while no-winner bucket rolls over totally", () => {
+  resetApiStateForTests();
+  saveTurnRollover({
+    alternativeRolloverLamports: 0,
+    originalRolloverLamports: 1,
+    recordedAt: "2026-06-12T10:00:00.000Z",
+    sourceTurnId: 319,
+    turnId: 320,
+  });
+  saveReceiptForWallet(320, wallet, [1, 2, 3, 4, 5, 6]);
+  saveReceiptForWallet(320, walletTwo, [1, 2, 3, 4, 5, 7]);
+  saveFulfilledDraw(320);
+
+  const { jobs } = createGuessVerificationJobsForTurn(320);
+  const byPlayer = new Map(jobs.map((job) => [job.payload.wallet, job]));
+  saveGuessVerificationResult(
+    resultForJob({
+      alternative: "NONE",
+      jobId: byPlayer.get(wallet)!.id,
+      original: "WIN",
+      player: wallet,
+      resultByte: "3",
+      turnId: 320,
+    }),
+  );
+  saveGuessVerificationResult(
+    resultForJob({
+      alternative: "NONE",
+      jobId: byPlayer.get(walletTwo)!.id,
+      original: "WIN",
+      player: walletTwo,
+      resultByte: "4",
+      turnId: 320,
+    }),
+  );
+
+  const winners = calculateAndStoreWinnerRecords(
+    320,
+    "2026-06-12T12:18:00.000Z",
+  );
+  const settlement = settleTurnRollover(320, "2026-06-12T12:19:00.000Z");
+  const nextAccounting = getPrizePoolAccounting(321);
+
+  assert.equal(winners.original.bucketLamports, 9_500_001);
+  assert.equal(winners.original.individualPayoutLamports, 4_750_000);
+  assert.equal(winners.original.remainderLamports, 1);
+  assert.equal(settlement.original.reason, "dust_remainder");
+  assert.equal(settlement.original.rolloverLamports, 1);
+  assert.equal(settlement.alternative.reason, "no_winner");
+  assert.equal(settlement.alternative.rolloverLamports, 9_500_000);
+  assert.equal(nextAccounting.buckets.original.rolloverLamports, 1);
+  assert.equal(nextAccounting.buckets.alternative.rolloverLamports, 9_500_000);
 });
 
 test("ranking alternative rule picks the best-score guesses as winners (ties share)", () => {
@@ -962,6 +1161,94 @@ test("claim flow creates winner and creator claims and blocks double claim", () 
         wallet,
       }),
     /PAYOUT_ALREADY_CLAIMED/,
+  );
+});
+
+test("M9.3 minimum payout and expired unclaimed winner claims roll over safely", () => {
+  resetApiStateForTests();
+  saveReceiptForWallet(620, wallet, [1, 2, 3, 4, 5, 6]);
+  saveFulfilledDraw(620);
+  let jobs = createGuessVerificationJobsForTurn(620).jobs;
+  let job = jobs[0];
+  assert.ok(job);
+  saveGuessVerificationResult(
+    resultForJob({
+      alternative: "NONE",
+      jobId: job.id,
+      original: "WIN",
+      player: wallet,
+      resultByte: "5",
+      turnId: 620,
+    }),
+  );
+
+  let created = createClaimRecordsForTurn(
+    620,
+    "2026-06-12T12:20:00.000Z",
+  );
+  const belowMinimumWinner = created.claims.find(
+    (claim) => claim.kind === "winner_payout" && claim.wallet === wallet,
+  );
+  assert.ok(belowMinimumWinner);
+  assert.equal(belowMinimumWinner.amountLamports, 4_750_000);
+  assert.equal(belowMinimumWinner.status, "unavailable");
+  assert.equal(belowMinimumWinner.statusReason, "PAYOUT_BELOW_MINIMUM");
+
+  resetApiStateForTests();
+  savePaidRemovals(621, 2);
+  saveReceiptForWallet(621, wallet, [1, 2, 3, 4, 5, 6]);
+  saveFulfilledDraw(621);
+  jobs = createGuessVerificationJobsForTurn(621).jobs;
+  job = jobs[0];
+  assert.ok(job);
+  saveGuessVerificationResult(
+    resultForJob({
+      alternative: "NONE",
+      jobId: job.id,
+      original: "WIN",
+      player: wallet,
+      resultByte: "6",
+      turnId: 621,
+    }),
+  );
+  created = createClaimRecordsForTurn(621, "2026-06-12T12:20:00.000Z");
+  const unclaimedWinner = created.claims.find(
+    (claim) => claim.kind === "winner_payout" && claim.wallet === wallet,
+  );
+  assert.ok(unclaimedWinner);
+  assert.equal(unclaimedWinner.status, "available");
+
+  const expired = settleExpiredUnclaimedClaims({
+    currentTurnId: 633,
+    settledAt: "2026-06-13T12:20:00.000Z",
+    sourceTurnId: 621,
+  });
+  const retry = settleExpiredUnclaimedClaims({
+    currentTurnId: 633,
+    settledAt: "2026-06-13T12:21:00.000Z",
+    sourceTurnId: 621,
+  });
+  const expiredClaim = listClaimRecords({ turnId: 621 }).find(
+    (claim) => claim.claimId === unclaimedWinner.claimId,
+  );
+
+  assert.equal(expired.expiredClaims.length, 1);
+  assert.equal(expired.originalRolloverLamports, unclaimedWinner.amountLamports);
+  assert.equal(expired.alternativeRolloverLamports, 0);
+  assert.equal(retry.totalRolloverLamports, 0);
+  assert.equal(expiredClaim?.status, "unavailable");
+  assert.equal(expiredClaim?.statusReason, "CLAIM_WINDOW_EXPIRED");
+  assert.equal(
+    getPrizePoolAccounting(633).buckets.original.rolloverLamports,
+    unclaimedWinner.amountLamports,
+  );
+  assert.throws(
+    () =>
+      requestClaimApproval({
+        claimId: unclaimedWinner.claimId,
+        wallet,
+      }),
+    /CLAIM_WINDOW_EXPIRED/,
   );
 });
 
