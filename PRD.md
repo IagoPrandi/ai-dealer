@@ -5474,16 +5474,18 @@ Implement prize pool accounting, treasury/platform monetization, payouts, rollov
 
 **Checklist:**
 
-- [ ] Add `GET /players/{wallet}/claims` aggregating every claim record for a wallet across turns with per-status totals.
-- [ ] Implement a claims surface (`/play/results`) that lists claimable / pending / claimed payouts and rewards and triggers the on-chain claim flow.
-- [ ] Implement a read-only reward history screen (`/play/rewards`) grouped by turn, linking to each round's detail.
-- [ ] Surface the rewards entry point from the player account/hub navigation.
-- [ ] Add API and E2E coverage for the aggregation endpoint and the wallet-gated screens.
+- [x] Add `GET /players/{wallet}/claims` aggregating every claim record for a wallet across turns with per-status totals.
+- [x] Implement a claims surface (`/play/results`) that lists claimable / pending / claimed payouts and rewards and triggers the on-chain claim flow.
+- [x] Implement a read-only reward history screen (`/play/rewards`) grouped by turn, linking to each round's detail.
+- [x] Surface the rewards entry point from the player account/hub navigation.
+- [x] Add API and E2E coverage for the aggregation endpoint and the wallet-gated screens.
 
 **Approval criteria:**
 
-- [ ] A player can see all their rewards by turn and status, and reach the claim flow for available items.
-- [ ] The history reflects the real on-chain claim state (claimed / pending / available).
+- [x] A player can see all their rewards by turn and status, and reach the claim flow for available items.
+- [x] The history reflects the real on-chain claim state (claimed / pending / available).
+
+**Status: ✅ Done — confirmed by user 2026-06-26.** Wallet-scoped claim aggregation is implemented through `GET /players/{wallet}/claims` (`getPlayerClaimsSummary`); `/play/results` now renders the wallet-gated claims surface with claimable, pending, and claimed items plus on-chain claim execution; `/play/rewards` shows read-only rewards grouped by turn with round-detail links; and the account screen links to reward history. Verification: API tests 38/38 including player claim aggregation; web typecheck/lint/test; webpack production build; manual Playwright smoke for `/play/results`, `/play/rewards`, and `/round/37`. The normal Playwright `test:e2e` command could not start its configured dev server because an existing Next dev server for the same app was already running, so the M4.8 browser assertions were run directly against that live local server.
 
 ---
 

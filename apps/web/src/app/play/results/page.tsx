@@ -4,7 +4,7 @@ import { SolanaProviders } from "../../../solana/SolanaProviders";
 export default function PlayResultsPage() {
   return (
     <SolanaProviders>
-      <IdealerApp initialScreen="result" />
+      <IdealerApp initialScreen="claims" />
     </SolanaProviders>
   );
 }

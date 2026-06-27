@@ -12,6 +12,7 @@ import type { RulesView } from "./data/hooks";
 import type { RoundSummaryApi } from "./data/types";
 
 export type Screen =
+  | "claims"
   | "create"
   | "home"
   | "play"

@@ -114,7 +114,7 @@ export function ResultScreen() {
             <div style={{ fontSize: 13, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--gold)", fontWeight: 800 }}>You won!</div>
             <div className="ide-num" style={{ fontSize: 38, fontWeight: 800, margin: "4px 0 2px" }}>+{fmtSol(lamportsToSol(youWonLamports))} <span style={{ fontSize: 17, color: "var(--purple-soft)" }}>SOL</span></div>
             <div style={{ fontSize: 13.5, color: "var(--muted)" }}>available to claim in your account</div>
-            <button onClick={() => go("profile")} className="ide-btn" style={{ width: "100%", marginTop: 16, padding: 14 }} type="button"><Ico.withdraw style={{ color: "#08110C" }} /> Go to claims</button>
+            <button onClick={() => go("claims")} className="ide-btn" style={{ width: "100%", marginTop: 16, padding: 14 }} type="button"><Ico.withdraw style={{ color: "#08110C" }} /> Go to claims</button>
           </div>
         ) : (
           <div className="ide-card" style={{ padding: 18, marginBottom: 16, textAlign: "center" }}>

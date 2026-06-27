@@ -46,7 +46,7 @@ function groupByTurn(records: ClaimRecordApi[]) {
 }
 
 export function RewardsScreen() {
-  const { connect, connected, go, walletAddress } = useIdealer();
+  const { connected, go, walletAddress } = useIdealer();
   const { claims, error, loading, reload } = usePlayerClaims(walletAddress);
 
   const grouped = useMemo(
@@ -62,7 +62,7 @@ export function RewardsScreen() {
           <Dealer size={60} />
           <h2 style={{ fontSize: 23, fontWeight: 800, margin: "16px 0 8px" }}>Connect your wallet</h2>
           <p style={{ color: "var(--muted)", fontSize: 15, margin: "0 0 24px" }}>Reward history is tied to your wallet address.</p>
-          <button onClick={() => connect()} className="ide-btn" style={{ width: "100%", padding: 16 }} type="button"><Ico.wallet style={{ color: "#08110C" }} /> Connect wallet</button>
+          <a href="/play/wallet" className="ide-btn" style={{ width: "100%", padding: 16, justifyContent: "center", textDecoration: "none" }}><Ico.wallet style={{ color: "#08110C" }} /> Connect wallet</a>
         </div>
       </div>
     );
@@ -123,7 +123,10 @@ export function RewardsScreen() {
           <div style={{ display: "grid", gap: 14 }}>
             {grouped.map(([turn, records]) => (
               <section key={turn}>
-                <SectionLabel>Turn #{turn.toString().padStart(4, "0")}</SectionLabel>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <SectionLabel>Turn #{turn.toString().padStart(4, "0")}</SectionLabel>
+                  <a href={`/round/${turn}`} style={{ color: "var(--purple-soft)", fontSize: 12.5, textDecoration: "none" }}>Round detail</a>
+                </div>
                 <div style={{ display: "grid", gap: 8, marginTop: 9 }}>
                   {records.map((record) => (
                     <div key={record.claimId} className="ide-card" style={{ padding: "13px 14px" }}>

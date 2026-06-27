@@ -39,6 +39,7 @@ import { PlayScreen } from "./screens/Play";
 import { VoteScreen } from "./screens/Vote";
 import { CreateScreen } from "./screens/Create";
 import { ProfileScreen } from "./screens/Profile";
+import { ClaimsScreen } from "./screens/Claims";
 import { RewardsScreen } from "./screens/Rewards";
 import { ResultScreen } from "./screens/Result";
 import { ShareScreen } from "./screens/Share";
@@ -304,6 +305,7 @@ export function IdealerApp({
             {screen === "vote" ? <VoteScreen /> : null}
             {screen === "create" ? <CreateScreen /> : null}
             {screen === "profile" ? <ProfileScreen /> : null}
+            {screen === "claims" ? <ClaimsScreen /> : null}
             {screen === "rewards" ? <RewardsScreen /> : null}
             {screen === "result" ? <ResultScreen /> : null}
             {screen === "share" ? <ShareScreen /> : null}
