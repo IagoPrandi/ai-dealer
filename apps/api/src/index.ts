@@ -607,10 +607,12 @@ export interface ConversationDraftRecord {
 export type AuditLogKind =
   | "compiler.validation"
   | "guess.verification"
+  | "rule.election.proof"
   | "rule.removal"
   | "settlement.transition";
 export type AuditPublicStateType =
   | "guess_verification_result"
+  | "rule_election"
   | "rule_removal"
   | "rule_validation"
   | "settlement_transition";
@@ -711,6 +713,7 @@ export interface RuleElectionRecord {
   activeRuleArtifactHash: string | null;
   activeRuleHash: string | null;
   activeRuleId: number | null;
+  eligibleCandidateCommitments?: RuleElectionCandidateCommitment[];
   electedFinalistIndex: number;
   electedSurvivorIndex?: number | null;
   eligibleRuleIds: number[];
@@ -732,6 +735,17 @@ export interface RuleElectionRecord {
   topVotedFinalistHash: string;
   topVotedRuleIds: number[];
   turnId: number;
+}
+
+export interface RuleElectionCandidateCommitment {
+  compiledArtifactHash: string;
+  createdAtSeconds: number;
+  isEligibleState: boolean;
+  isPrecompiledValid: boolean;
+  reportCount: number;
+  ruleId: number;
+  sanitizedTextHash: string;
+  voteCount: number;
 }
 
 /**
@@ -767,6 +781,7 @@ const turnRollovers = new Map<number, TurnRolloverRecord>();
 const turnRolloverSettlements = new Map<number, TurnRolloverSettlement>();
 const draws = new Map<number, DrawRecord>();
 const elections = new Map<number, RuleElectionRecord>();
+const ruleElectionProofAuditLogs = new Map<number, string>();
 const settlementTransitions = new Map<string, SettlementTransitionRecord>();
 const settlementTransitionOrder: string[] = [];
 const ruleValidations = new Map<string, RuleValidationRecord>();
@@ -780,6 +795,13 @@ const conversationDrafts = new Map<string, ConversationDraftRecord>();
 const auditLogs = new Map<string, AuditLogRecord>();
 const auditLogOrder: string[] = [];
 let lastAuditLogHash: string | null = null;
+const AUDIT_LOG_KINDS = new Set<AuditLogKind>([
+  "compiler.validation",
+  "guess.verification",
+  "rule.election.proof",
+  "rule.removal",
+  "settlement.transition",
+]);
 const LOCAL_WEB_ORIGIN_PATTERN =
   /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 const CORS_PATHS = new Set([
@@ -1088,6 +1110,7 @@ export function resetApiStateForTests() {
   turnRolloverSettlements.clear();
   draws.clear();
   elections.clear();
+  ruleElectionProofAuditLogs.clear();
   settlementTransitions.clear();
   settlementTransitionOrder.length = 0;
   ruleValidations.clear();
@@ -1382,6 +1405,29 @@ function isPositiveIntegerArray(value: unknown) {
   return (
     Array.isArray(value) &&
     value.every((item) => Number.isInteger(item) && Number(item) > 0)
+  );
+}
+
+function isValidRuleElectionCandidateCommitment(
+  value: unknown,
+): value is RuleElectionCandidateCommitment {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<RuleElectionCandidateCommitment>;
+  return (
+    Number.isInteger(candidate.ruleId) &&
+    Number(candidate.ruleId) > 0 &&
+    Number.isInteger(candidate.voteCount) &&
+    Number(candidate.voteCount) >= 0 &&
+    Number.isInteger(candidate.reportCount) &&
+    Number(candidate.reportCount) >= 0 &&
+    Number.isInteger(candidate.createdAtSeconds) &&
+    isHexHash(candidate.sanitizedTextHash) &&
+    isHexHash(candidate.compiledArtifactHash) &&
+    typeof candidate.isEligibleState === "boolean" &&
+    typeof candidate.isPrecompiledValid === "boolean"
   );
 }
 
@@ -1943,6 +1989,11 @@ function isValidRuleElection(value: unknown): value is RuleElectionRecord {
     statusIsValid &&
     (record.activeRuleId === null ||
       (Number.isInteger(record.activeRuleId) && Number(record.activeRuleId) > 0)) &&
+    (record.eligibleCandidateCommitments === undefined ||
+      (Array.isArray(record.eligibleCandidateCommitments) &&
+        record.eligibleCandidateCommitments.every(
+          isValidRuleElectionCandidateCommitment,
+        ))) &&
     Number.isInteger(record.electedFinalistIndex) &&
     Number(record.electedFinalistIndex) >= 0 &&
     (record.electedSurvivorIndex === undefined ||
@@ -3694,12 +3745,149 @@ export function runRuleValidationForProposal(args: {
 }
 
 export function saveRuleElection(election: RuleElectionRecord) {
-  elections.set(election.turnId, election);
-  return election;
+  const existing = elections.get(election.turnId);
+  const normalized: RuleElectionRecord = {
+    ...election,
+    activeElectionRandomnessAccount:
+      election.activeElectionRandomnessAccount ??
+      existing?.activeElectionRandomnessAccount ??
+      null,
+    activeElectionRandomnessSource:
+      election.activeElectionRandomnessSource ??
+      existing?.activeElectionRandomnessSource ??
+      null,
+    activeElectionRandomnessValue:
+      election.activeElectionRandomnessValue ??
+      existing?.activeElectionRandomnessValue ??
+      null,
+    eligibleCandidateCommitments:
+      election.eligibleCandidateCommitments ??
+      existing?.eligibleCandidateCommitments ??
+      [],
+    randomnessAccount: election.randomnessAccount ?? existing?.randomnessAccount ?? null,
+    randomnessSource: election.randomnessSource ?? existing?.randomnessSource ?? null,
+    randomnessValue: election.randomnessValue ?? existing?.randomnessValue ?? null,
+  };
+  elections.set(normalized.turnId, normalized);
+  appendRuleElectionProofAuditLog(normalized);
+  return normalized;
 }
 
 export function getRuleElection(turnId: number) {
   return elections.get(turnId) ?? null;
+}
+
+function appendRuleElectionProofAuditLog(
+  election: RuleElectionRecord,
+): AuditLogRecord | null {
+  if (election.status !== "settled" && election.status !== "original_only") {
+    return null;
+  }
+
+  const proof = buildRuleElectionProof(election);
+  const inputHash = hashJson(proof.input);
+  const outputHash = hashJson(proof.output);
+  const existingLogHash = ruleElectionProofAuditLogs.get(election.turnId);
+  if (existingLogHash) {
+    const existing = getAuditLog(existingLogHash);
+    if (existing?.inputHash === inputHash && existing.outputHash === outputHash) {
+      return existing;
+    }
+    throw new Error("RULE_ELECTION_PROOF_ALREADY_RECORDED");
+  }
+
+  const auditLog = appendAuditLog({
+    createdAt: election.settledAt ?? new Date().toISOString(),
+    input: proof.input,
+    kind: "rule.election.proof",
+    output: proof.output,
+    publicStateRef: {
+      key: String(election.turnId),
+      type: "rule_election",
+    },
+    reason:
+      election.status === "original_only"
+        ? "No eligible alternative rule existed for this turn."
+        : "Finalist and active-rule election proof is publicly recomputable from commitments and Switchboard VRF fulfillment.",
+    result: election.status,
+    ruleId: election.activeRuleId,
+    turnId: election.turnId,
+  });
+  ruleElectionProofAuditLogs.set(election.turnId, auditLog.logHash);
+  return auditLog;
+}
+
+function buildRuleElectionProof(election: RuleElectionRecord) {
+  if (election.status === "settled" && election.activeRuleId !== null) {
+    const missing = [
+      ["randomnessAccount", election.randomnessAccount],
+      ["randomnessSource", election.randomnessSource],
+      ["randomnessValue", election.randomnessValue],
+      ["activeElectionRandomnessAccount", election.activeElectionRandomnessAccount],
+      ["activeElectionRandomnessSource", election.activeElectionRandomnessSource],
+      ["activeElectionRandomnessValue", election.activeElectionRandomnessValue],
+    ]
+      .filter(([, value]) => !value)
+      .map(([field]) => field);
+
+    if (missing.length > 0) {
+      throw new Error(`RULE_ELECTION_PROOF_INCOMPLETE:${missing.join(",")}`);
+    }
+  }
+
+  return {
+    input: {
+      algorithms: {
+        activeSurvivorSelection:
+          "sha256(randomness || turn_id_le_u64 || counter_le_u64 || 'active_survivor_v1'), read u64 chunks little-endian, reject values outside the largest unbiased u64 range, choose value % survivor_count",
+        eligiblePoolHash:
+          "sha256('eligible_pool_v1' || len_le_u64 || repeated(rule_id_le_u64, vote_count_le_u32, created_at_le_i64, sanitized_text_hash_32, compiled_artifact_hash_32))",
+        finalistSetHash:
+          "sha256('<domain>' || len_le_u64 || repeated(rule_id_le_u64)) for top_finalists_v1, random_finalists_v1, finalist_set_v1, survivor_finalists_v1",
+        randomFinalistSelection:
+          "sha256(randomness || turn_id_le_u64 || counter_le_u64 || 'random_finalists_v1'), read u64 chunks little-endian, reject values outside the largest unbiased u64 range, skip top-voted indices and already selected indices",
+      },
+      commitments: {
+        eligibleRulePoolHash: election.eligibleRulePoolHash,
+        eliminatedFinalistHash: election.eliminatedFinalistHash ?? null,
+        finalistSetHash: election.finalistSetHash,
+        randomFinalistHash: election.randomFinalistHash,
+        survivorFinalistHash: election.survivorFinalistHash ?? null,
+        topVotedFinalistHash: election.topVotedFinalistHash,
+      },
+      finalistElection: {
+        randomnessAccount: election.randomnessAccount,
+        randomnessSource: election.randomnessSource,
+        randomnessValue: election.randomnessValue,
+      },
+      activeElection: {
+        randomnessAccount: election.activeElectionRandomnessAccount ?? null,
+        randomnessSource: election.activeElectionRandomnessSource ?? null,
+        randomnessValue: election.activeElectionRandomnessValue ?? null,
+      },
+      noDeterministicFallback: true,
+      candidateCommitments: election.eligibleCandidateCommitments ?? [],
+      ruleSets: {
+        eligibleRuleIds: election.eligibleRuleIds,
+        eliminatedRuleIds: election.eliminatedRuleIds ?? [],
+        finalistRuleIds: election.finalistRuleIds,
+        randomRuleIds: election.randomRuleIds,
+        survivorRuleIds: election.survivorRuleIds ?? [],
+        topVotedRuleIds: election.topVotedRuleIds,
+      },
+      schema: "m9_0_rule_election_proof_v1",
+      status: election.status,
+      turnId: election.turnId,
+    },
+    output: {
+      activeRuleArtifactHash: election.activeRuleArtifactHash,
+      activeRuleHash: election.activeRuleHash,
+      activeRuleId: election.activeRuleId,
+      electedFinalistIndex: election.electedFinalistIndex,
+      electedSurvivorIndex: election.electedSurvivorIndex ?? null,
+      recomputableFromPublicProof: true,
+    },
+  };
 }
 
 /**
@@ -5537,8 +5725,8 @@ if (isMainModule()) {
       const rawKind = url.searchParams.get("kind");
       const turnId = rawTurnId === null ? undefined : Number(rawTurnId);
       const kind =
-        rawKind === "compiler.validation" || rawKind === "guess.verification"
-          ? rawKind
+        rawKind !== null && AUDIT_LOG_KINDS.has(rawKind as AuditLogKind)
+          ? (rawKind as AuditLogKind)
           : undefined;
 
       if (rawTurnId !== null && (!Number.isInteger(turnId) || Number(turnId) <= 0)) {

@@ -57,8 +57,40 @@ Opened before starting `M0.1`:
 | M5.3      | Settlement scheduler + state machine + API bridge | Completed | Confirmed 2026-06-24 | Confirmed and ticked in `SETTLEMENT_TRUSTLESS_PLAN.md`. Live devnet staged turn 32 ran the no-player original-only settlement path through `CLOSED`, populated `/rounds/32`, and wrote the 8-step §5.5 audit chain. |
 | M5.4      | Real player inputs (no mocks)                 | Completed | Confirmed 2026-06-25 | Confirmed and ticked in `SETTLEMENT_TRUSTLESS_PLAN.md`. Live devnet acceptance on turn 36: 3 real guesses, 1 eligible LLM-compiled rule, 3 votes, active alternative-rule election/freeze, draw, and verification completed with real results. |
 | M5.5      | End-to-end trustless verification             | Completed | Confirmed 2026-06-26 | Live devnet turn 37 completed the full trustless settlement path with 17 real guesses, 1 eligible LLM-compiled rule, 17 votes, active rule freeze, draw, verification, winners, rewards, claims, on-chain/API/audit reconciliation, idempotent replay, and current Idealer UI verification. Checkbox marked after explicit user confirmation. |
+| M9.0      | Election Randomness Gate                      | Completed | Confirmed 2026-06-27 | Confirmed by explicit user request and ticked in `PRD.md`. Trustless Switchboard election flow is implemented; finalist/active election VRF values, eligible candidate commitments, and public `rule.election.proof` audit logs let auditors recompute election outcomes from public commitments and fulfilled randomness. |
 
 ## Maintenance Work Log
+
+### 2026-06-27 (M9.0 verified and marked complete)
+
+- Opened required documents/context before marking completion: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, and `.claude/skills/idealer-test-and-verify/SKILL.md`.
+- User explicitly confirmed the action by requesting: verify whether `M9.0` is done; if done, mark it complete; otherwise implement and then mark it complete.
+- Verified `M9.0` implementation evidence: worker projections publish finalist and active-election VRF values plus eligible candidate commitments; API persists those proof fields, rejects incomplete settled proof material, and publishes idempotent public `rule.election.proof` audit logs; API contracts/data-model docs describe the public proof endpoint.
+- Marked all `PRD.md` `M9.0 — Election Randomness Gate` checklist and approval criteria items complete, and updated the tracker row to `Completed`.
+- Verification passed: `pnpm --filter @idealer/api typecheck`, `pnpm --filter @idealer/api test` (39/39), `pnpm --filter @idealer/api lint`, `pnpm --filter @idealer/api build`, `pnpm --filter @idealer/worker typecheck`, `pnpm --filter @idealer/worker test` (80/80), `pnpm --filter @idealer/worker lint`, and `pnpm --filter @idealer/worker build`.
+
+### 2026-06-27 (M9.0 implementation)
+
+- Opened required documents/context before implementation: `PRD.md`, `AGENTS.md`, `SETTLEMENT_TRUSTLESS_PLAN.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/best-practices/SKILL.md`, `.claude/skills/best-practices/references/agent-principles.md`, `.claude/skills/solana-dev/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/references/programs/anchor.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/references/security.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/references/testing.md`, `.claude/skills/solana-dev/ext/sendai/skills/switchboard/SKILL.md`, `.claude/skills/security-best-practices/SKILL.md`, `.claude/skills/idealer-test-and-verify/SKILL.md`, and `.claude/skills/best-practices/references/testing.md`.
+- M9.0 audit before edits: the Solana program already used Switchboard On-Demand for finalist and active rule election, committed the eligible pool hash before VRF fulfillment, stored top/random/finalist/survivor hashes, derived random finalists and active survivors from fulfilled VRF randomness using rejection sampling, and had no deterministic fallback finalist activation.
+- Remaining gap implemented: worker election projections now publish finalist-election `randomnessValue`, active-election `activeElectionRandomnessValue`, and exact eligible candidate commitments; API election saves preserve prior VRF proof fields across phase updates; settled elections now append an idempotent public `rule.election.proof` hash-chained audit log with commitments, rule sets, Switchboard randomness accounts/sources/values, selection/hash algorithm descriptions, and elected active-rule output.
+- Public audit endpoint updated to accept `kind=rule.election.proof` and `kind=settlement.transition`; API/data-model docs updated accordingly.
+- Verification passed: `pnpm --filter @idealer/api typecheck`, `pnpm --filter @idealer/api test` (39/39), `pnpm --filter @idealer/api lint`, `pnpm --filter @idealer/api build`, `pnpm --filter @idealer/worker typecheck`, `pnpm --filter @idealer/worker test` (80/80), `pnpm --filter @idealer/worker lint`, and `pnpm --filter @idealer/worker build`.
+- At implementation time, no PRD checkbox was ticked and M9.0 remained `In Review` pending explicit user confirmation.
+
+### 2026-06-27 (M9 implementation status audit)
+
+- Opened required documents/context before the audit: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/best-practices/SKILL.md`, and `.claude/skills/best-practices/references/agent-principles.md`.
+- Reviewed `PROGRESS_TRACKER.md` against PRD §15.7 `M9 — Mainnet Readiness Gates`.
+- Finding: `M9` itself remains open/not approved. Several prerequisite implementations already exist through `M3`, `M4`, and the devnet trustless `M5.0-M5.5` plan, especially Switchboard-backed randomness, public audit logs, compiler validation/precompilation, accounting, claims, paid rule removal, and end-to-end devnet settlement evidence.
+- No PRD checkbox or milestone status was changed because M9 approval requires explicit user confirmation and the remaining mainnet-readiness gates still need dedicated verification.
+
+### 2026-06-27 (Settlement plan to M9 mapping audit)
+
+- Opened required documents/context before the audit: `PRD.md`, `SETTLEMENT_TRUSTLESS_PLAN.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, and `.claude/skills/best-practices/references/agent-principles.md`.
+- Mapped `SETTLEMENT_TRUSTLESS_PLAN.md` `M5.0-M5.5` against PRD §15.7 `M9 — Mainnet Readiness Gates`.
+- Finding: the settlement plan materially supports `M9.0` and part of `M9.3`, and provides evidence for parts of `M9.1`, `M9.4`, and `M9.6`, but it does not replace the formal M9 gate verification. `M9.2` runtime sandboxing and `M9.5` abuse/admin visibility are mostly outside the settlement-plan scope.
+- No PRD checkbox or milestone status was changed.
 
 ### 2026-06-26 (M4.8 implementation re-verification)
 

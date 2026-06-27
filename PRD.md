@@ -5677,19 +5677,19 @@ M5 is approved only if all M5 submilestones are approved and:
 
 ##### Checklist
 
-- [ ] Switchboard VRF is used for rule election.
-- [ ] Eligible pool hash is committed before VRF fulfillment.
-- [ ] Top-voted finalist hash is committed before VRF fulfillment.
-- [ ] Random finalists are derived from fulfilled VRF randomness, not request entropy.
-- [ ] Final active rule is selected with ranged output or rejection sampling.
-- [ ] Deterministic fallback to next finalist is impossible.
-- [ ] Election proof is visible in public audit endpoint.
+- [x] Switchboard VRF is used for rule election.
+- [x] Eligible pool hash is committed before VRF fulfillment.
+- [x] Top-voted finalist hash is committed before VRF fulfillment.
+- [x] Random finalists are derived from fulfilled VRF randomness, not request entropy.
+- [x] Final active rule is selected with ranged output or rejection sampling.
+- [x] Deterministic fallback to next finalist is impossible.
+- [x] Election proof is visible in public audit endpoint.
 
 ##### Approval Criteria
 
-- [ ] No Chainlink/EVM VRF dependency exists in Solana MVP.
-- [ ] No backend-generated randomness can affect rule election.
-- [ ] An auditor can recompute finalist selection and elected rule from public commitments and VRF fulfillment.
+- [x] No Chainlink/EVM VRF dependency exists in Solana MVP.
+- [x] No backend-generated randomness can affect rule election.
+- [x] An auditor can recompute finalist selection and elected rule from public commitments and VRF fulfillment.
 
 #### M9.1 — Rule Compiler Gate
 

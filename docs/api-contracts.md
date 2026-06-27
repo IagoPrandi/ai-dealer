@@ -485,19 +485,31 @@ Current local API compatibility endpoints:
 
 - `GET /audit?turnId={turn_id}&kind=compiler.validation`
 - `GET /audit?turnId={turn_id}&kind=guess.verification`
+- `GET /audit?turnId={turn_id}&kind=rule.election.proof`
+- `GET /audit?turnId={turn_id}&kind=settlement.transition`
 - `GET /audit/{log_hash}`
 
 ```ts
 interface PublicAuditLog {
   schemaVersion: 1;
-  kind: "compiler.validation" | "guess.verification";
+  kind:
+    | "compiler.validation"
+    | "guess.verification"
+    | "rule.election.proof"
+    | "rule.removal"
+    | "settlement.transition";
   turnId: number;
   ruleId: number | null;
   player: string | null;
   validationLogId: string | null;
   resultId: string | null;
   publicStateRef: {
-    type: "rule_validation" | "guess_verification_result";
+    type:
+      | "rule_validation"
+      | "guess_verification_result"
+      | "rule_election"
+      | "rule_removal"
+      | "settlement_transition";
     key: string;
   };
   inputHash: string;
@@ -510,3 +522,10 @@ interface PublicAuditLog {
   reason: string;
 }
 ```
+
+`rule.election.proof` records expose the M9.0 recomputation material: eligible
+candidate commitments, finalist and survivor rule id sets, Switchboard
+randomness accounts/sources/values for finalist and active election, hash domain
+names, rejection-sampling algorithm descriptions, and the final active rule id
+plus artifact hashes. A settled election with an active alternative rule must not
+publish this proof unless both VRF fulfillment values are present.

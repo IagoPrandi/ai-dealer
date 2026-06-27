@@ -28,7 +28,7 @@ This is the M0.4 PostgreSQL model draft. On-chain accounts remain the source of 
 | `rule_preflight_tokens` | Short-lived token issuance audit. | Unique `token_hash`; expires quickly. |
 | `rule_precompilation_cache` | Background compilation cache. | Unique `(rule_id, original_text_hash)`. |
 | `agent_logs` | Compiler agent logs, separate from gate checks. | Indexed `rule_id`, `agent_name`, `result`. |
-| `audit_logs` | Public validation and verification audit trail with hash-chain commitments. | Unique `log_hash`; indexed `turn_id`, `log_kind`, public state ref. |
+| `audit_logs` | Public validation, election-proof, settlement-transition, and verification audit trail with hash-chain commitments. | Unique `log_hash`; indexed `turn_id`, `log_kind`, public state ref. |
 | `verification_jobs` | Guess and payout verification orchestration. | Unique idempotency key. |
 | `compiled_rule_artifacts` | Hashable DSL/AST artifacts and version metadata. | Unique `artifact_hash`. |
 | `election_vrf_records` | Switchboard election request/fulfillment projection. | Unique `turn_id`. |
@@ -174,7 +174,7 @@ last_error_code text
 
 ### `audit_logs`
 
-Compiler validation and deterministic guess verification both append audit records. The API keeps the canonical storage contract in `M3_7_POSTGRES_AUDIT_SCHEMA`; each row stores input/output hashes, a hash-chain commitment, and a public-state reference that links the log to either a rule validation record or a guess verification result.
+Compiler validation, deterministic guess verification, paid rule removal, settlement transitions, and M9.0 rule-election proofs append audit records. The API keeps the canonical storage contract in `M3_7_POSTGRES_AUDIT_SCHEMA`; each row stores input/output hashes, a hash-chain commitment, and a public-state reference that links the log to rule validation, rule election, rule removal, settlement transition, or guess verification public state.
 
 ```sql
 log_id text primary key,

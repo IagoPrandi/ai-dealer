@@ -322,7 +322,13 @@ async function executeAction(args: ExecuteArgs): Promise<string | null> {
     case "lock_pool": {
       const signature = await senders.lockEligiblePool(turnId, candidates);
       await deps.bridge.publishElection(
-        buildElectionProjection(onChain, eligible, deps.electionConfig, "locked", deps.nowIso()),
+        buildElectionProjection({
+          config: deps.electionConfig,
+          eligible,
+          nowIso: deps.nowIso(),
+          state: onChain,
+          status: "locked",
+        }),
       );
       return signature;
     }
@@ -342,13 +348,14 @@ async function executeAction(args: ExecuteArgs): Promise<string | null> {
       );
       const next = await senders.fetchState(turnId);
       await deps.bridge.publishElection(
-        buildElectionProjection(
-          next ?? onChain,
+        buildElectionProjection({
+          config: deps.electionConfig,
           eligible,
-          deps.electionConfig,
-          "requested",
-          deps.nowIso(),
-        ),
+          finalistRandomness: result.randomness,
+          nowIso: deps.nowIso(),
+          state: next ?? onChain,
+          status: "requested",
+        }),
       );
       return result.signature;
     }
@@ -377,13 +384,14 @@ async function executeAction(args: ExecuteArgs): Promise<string | null> {
       );
       const next = await senders.fetchState(turnId);
       await deps.bridge.publishElection(
-        buildElectionProjection(
-          next ?? onChain,
+        buildElectionProjection({
+          activeRandomness: result.randomness,
+          config: deps.electionConfig,
           eligible,
-          deps.electionConfig,
-          "settled",
-          deps.nowIso(),
-        ),
+          nowIso: deps.nowIso(),
+          state: next ?? onChain,
+          status: "settled",
+        }),
       );
       return result.signature;
     }
@@ -518,13 +526,16 @@ async function recordTransition(
   });
 }
 
-function buildElectionProjection(
-  state: SettlementTurnState,
-  eligible: ElectionCandidate[],
-  config: RuleElectionConfig,
-  status: PublishedRuleElection["status"],
-  nowIso: string,
-): PublishedRuleElection {
+function buildElectionProjection(args: {
+  activeRandomness?: Uint8Array;
+  config: RuleElectionConfig;
+  eligible: ElectionCandidate[];
+  finalistRandomness?: Uint8Array;
+  nowIso: string;
+  state: SettlementTurnState;
+  status: PublishedRuleElection["status"];
+}): PublishedRuleElection {
+  const { activeRandomness, config, eligible, finalistRandomness, nowIso, state, status } = args;
   const finalistRuleIds = state.finalistRuleIds;
   const topCount = Math.min(config.topVotedFinalistCount, finalistRuleIds.length);
   const topVotedRuleIds = finalistRuleIds.slice(0, topCount);
@@ -540,7 +551,7 @@ function buildElectionProjection(
       ? Math.max(0, finalistRuleIds.indexOf(state.activeRuleId))
       : 0;
 
-  return {
+  const election: PublishedRuleElection = {
     activeElectionRandomnessAccount: isSetPubkey(state.activeElectionVrfRequest)
       ? state.activeElectionVrfRequest.toBase58()
       : null,
@@ -548,6 +559,9 @@ function buildElectionProjection(
       ? state.activeElectionVrfFulfillment.toBase58()
       : null,
     activeElectionRandomnessValue: null,
+    eligibleCandidateCommitments: eligible
+      .map((candidate) => ({ ...candidate }))
+      .sort((left, right) => left.ruleId - right.ruleId),
     activeRuleArtifactHash: state.activeRuleArtifactHash,
     activeRuleHash: state.activeRuleHash,
     activeRuleId: state.activeRuleId,
@@ -567,7 +581,9 @@ function buildElectionProjection(
     randomnessSource: isSetPubkey(state.electionVrfFulfillment)
       ? state.electionVrfFulfillment.toBase58()
       : null,
-    randomnessValue: null,
+    randomnessValue: finalistRandomness
+      ? Buffer.from(finalistRandomness).toString("hex")
+      : null,
     requestedAt: null,
     settledAt: status === "settled" ? nowIso : null,
     status,
@@ -577,6 +593,13 @@ function buildElectionProjection(
     topVotedRuleIds,
     turnId: state.turnId,
   };
+
+  if (activeRandomness) {
+    election.activeElectionRandomnessValue =
+      Buffer.from(activeRandomness).toString("hex");
+  }
+
+  return election;
 }
 
 function buildOriginalOnlyElection(

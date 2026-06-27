@@ -98,22 +98,42 @@ function proposal(turnId: number, ruleId: number): RuleProposalRecord {
 
 function settledElection(turnId: number, activeRuleId: number) {
   return {
+    activeElectionRandomnessAccount: base58,
+    activeElectionRandomnessSource: base58,
+    activeElectionRandomnessValue: "7".repeat(64),
     activeRuleArtifactHash: null,
     activeRuleHash: "1".repeat(64),
     activeRuleId,
+    eligibleCandidateCommitments: [
+      {
+        compiledArtifactHash: "6".repeat(64),
+        createdAtSeconds: 1_800_000_000,
+        isEligibleState: true,
+        isPrecompiledValid: true,
+        reportCount: 0,
+        ruleId: activeRuleId,
+        sanitizedTextHash: "1".repeat(64),
+        voteCount: 1,
+      },
+    ],
     electedFinalistIndex: 0,
+    electedSurvivorIndex: 0,
     eligibleRuleIds: [activeRuleId],
+    eliminatedFinalistHash: "8".repeat(64),
+    eliminatedRuleIds: [],
     eligibleRulePoolHash: "2".repeat(64),
     finalistRuleIds: [activeRuleId],
     finalistSetHash: "3".repeat(64),
     randomFinalistHash: "4".repeat(64),
     randomRuleIds: [],
-    randomnessAccount: null,
-    randomnessSource: null,
-    randomnessValue: null,
+    randomnessAccount: base58,
+    randomnessSource: base58,
+    randomnessValue: "9".repeat(64),
     requestedAt: "2026-06-12T12:10:00.000Z",
     settledAt: "2026-06-12T12:16:00.000Z",
     status: "settled" as const,
+    survivorFinalistHash: "a".repeat(64),
+    survivorRuleIds: [activeRuleId],
     topVotedFinalistHash: "5".repeat(64),
     topVotedRuleIds: [activeRuleId],
     turnId,
@@ -1540,4 +1560,38 @@ test("settlement transitions are idempotent and chained into the audit log", () 
     transitionReason: "project_verification",
   });
   assert.equal(listSettlementTransitions(turnId).length, 2);
+});
+
+test("settled rule election creates a public M9.0 proof audit log", () => {
+  resetApiStateForTests();
+  const turnId = 5302;
+
+  const election = saveRuleElection(settledElection(turnId, 7));
+  const logs = listAuditLogs({ kind: "rule.election.proof", turnId });
+
+  assert.equal(logs.length, 1);
+  const log = logs[0] as AuditLogRecord;
+  assert.equal(log.publicStateRef.type, "rule_election");
+  assert.equal(log.publicStateRef.key, String(turnId));
+  assert.equal(log.result, "settled");
+  assert.equal(verifyAuditLogIntegrity(log), true);
+
+  const input = log.input as {
+    activeElection: { randomnessValue: string | null };
+    candidateCommitments: Array<{ ruleId: number }>;
+    finalistElection: { randomnessValue: string | null };
+    noDeterministicFallback: boolean;
+  };
+  const output = log.output as { activeRuleId: number | null };
+  assert.equal(input.finalistElection.randomnessValue, election.randomnessValue);
+  assert.equal(
+    input.activeElection.randomnessValue,
+    election.activeElectionRandomnessValue,
+  );
+  assert.deepEqual(input.candidateCommitments.map((candidate) => candidate.ruleId), [7]);
+  assert.equal(input.noDeterministicFallback, true);
+  assert.equal(output.activeRuleId, 7);
+
+  saveRuleElection(settledElection(turnId, 7));
+  assert.equal(listAuditLogs({ kind: "rule.election.proof", turnId }).length, 1);
 });

@@ -84,6 +84,7 @@ export interface PublishedRuleElection extends RuleElectionResult {
   activeElectionRandomnessAccount?: string | null;
   activeElectionRandomnessSource?: string | null;
   activeElectionRandomnessValue?: string | null;
+  eligibleCandidateCommitments?: ElectionCandidate[];
   electedSurvivorIndex?: number | null;
   eliminatedFinalistHash?: string | null;
   eliminatedRuleIds?: number[];

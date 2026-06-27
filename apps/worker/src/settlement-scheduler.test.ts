@@ -267,6 +267,17 @@ const electionConfig: RuleElectionConfig = {
   topVotedFinalistCount: 3,
 };
 
+const candidate: ElectionCandidate = {
+  compiledArtifactHash: "bb".repeat(32),
+  createdAtSeconds: 1_800_000_000,
+  isEligibleState: true,
+  isPrecompiledValid: true,
+  reportCount: 0,
+  ruleId: 7,
+  sanitizedTextHash: "aa".repeat(32),
+  voteCount: 3,
+};
+
 function fakeBridge() {
   const recorded = new Set<string>();
   const calls: string[] = [];
@@ -303,6 +314,102 @@ function fakeBridge() {
   };
   return { bridge: bridge as unknown as ApiBridge, calls, recorded };
 }
+
+test("orchestrator publishes finalist and active election proof randomness", async () => {
+  const finalistRandomness = new Uint8Array(32).fill(0x0a);
+  const activeRandomness = new Uint8Array(32).fill(0x0b);
+  const published: Array<{
+    activeElectionRandomnessValue?: string | null;
+    eligibleCandidateCommitments?: ElectionCandidate[];
+    randomnessValue: string | null;
+  }> = [];
+  const bridge = {
+    async fetchRecordedStates() {
+      return new Set<string>();
+    },
+    async publishElection(election: (typeof published)[number]) {
+      published.push(election);
+    },
+    async recordSettlementTransition() {},
+  } as unknown as ApiBridge;
+
+  let state = makeState({
+    eligibleRulePoolHash: HASH,
+    electionVrfRequest: SET,
+  });
+  const finalistSettled = makeState({
+    eligibleRulePoolHash: HASH,
+    electionVrfFulfillment: SET,
+    electionVrfRequest: SET,
+    eliminationWindowEndSeconds: 3_000,
+    eliminationWindowStartSeconds: 2_000,
+    finalistCount: 1,
+    finalistRuleIds: [7],
+    finalistSetHash: "11".repeat(32),
+    randomFinalistHash: "22".repeat(32),
+    topVotedFinalistHash: "33".repeat(32),
+  });
+  const activeSettled = makeState({
+    activeElectionVrfFulfillment: SET,
+    activeElectionVrfRequest: SET,
+    activeRuleArtifactHash: candidate.compiledArtifactHash,
+    activeRuleHash: candidate.sanitizedTextHash,
+    activeRuleId: 7,
+    eligibleRulePoolHash: HASH,
+    finalistCount: 1,
+    finalistRuleIds: [7],
+    finalistSetHash: "11".repeat(32),
+    randomFinalistHash: "22".repeat(32),
+    survivorFinalistHash: "44".repeat(32),
+    topVotedFinalistHash: "33".repeat(32),
+  });
+  const senders = {
+    async fetchRandomnessFor() {
+      return { randomness: finalistRandomness, source: SET.toBase58(), status: "ready" };
+    },
+    async fetchState() {
+      return state;
+    },
+    async settleActiveElection() {
+      state = activeSettled;
+      return { randomness: activeRandomness, signature: "active-sig" };
+    },
+    async settleElection() {
+      state = finalistSettled;
+      return { randomness: finalistRandomness, signature: "finalist-sig" };
+    },
+  } as unknown as SettlementSenders;
+  const deps: SettlementCycleDeps = {
+    bridge,
+    electionConfig,
+    fetchCandidates: async () => [candidate],
+    nowIso: () => "2026-06-23T00:00:00.000Z",
+    nowSeconds: () => 2_000,
+    recordClaims: async () => 0,
+    senders,
+  };
+
+  await runSettlementCycle(1, deps);
+  assert.equal(
+    published[0]?.randomnessValue,
+    Buffer.from(finalistRandomness).toString("hex"),
+  );
+  assert.deepEqual(published[0]?.eligibleCandidateCommitments, [candidate]);
+
+  state = makeState({
+    activeElectionVrfRequest: SET,
+    eligibleRulePoolHash: HASH,
+    finalistCount: 1,
+    finalistRuleIds: [7],
+    finalistSetHash: "11".repeat(32),
+    survivorFinalistHash: "44".repeat(32),
+  });
+  await runSettlementCycle(1, deps);
+  assert.equal(
+    published[1]?.activeElectionRandomnessValue,
+    Buffer.from(activeRandomness).toString("hex"),
+  );
+});
 
 test("orchestrator drives a closed no-rule turn through CLOSED idempotently", async () => {
   const { bridge, calls, recorded } = fakeBridge();
