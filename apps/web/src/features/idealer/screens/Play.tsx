@@ -5,7 +5,7 @@
  * per turn. Ported from app-play.jsx; submission salvaged from the original
  * NumberPicker (createSubmitGuessInstruction → send → POST /guess-receipts).
  */
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { address } from "@solana/kit";
 
 import {
@@ -15,10 +15,20 @@ import {
   validateGuessNumbers,
   type GuessReceipt,
 } from "../../../solana/idealerProgram";
+import { fetchActiveTurnSnapshotFromWorker } from "../../../solana/activeTurnApi";
 import { useIdealer } from "../context";
 import { postGuessReceipt } from "../data/apiClient";
 import { fmtSol, fmtTurnId } from "../data/format";
-import { describeTxError, sendInstruction } from "../data/tx";
+import {
+  clearPendingWalletAction,
+  describeTxError,
+  isBlockingWalletAction,
+  readPendingWalletAction,
+  sendInstruction,
+  txErrorCode,
+  type WalletPendingAction,
+  writePendingWalletAction,
+} from "../data/tx";
 import { Confetti, Dealer, Ico, ScreenHead, SectionLabel } from "../shared";
 
 const PICK = 6;
@@ -29,6 +39,130 @@ function ReviewRow({ label, last, mono, value }: { label: string; last?: boolean
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 0", borderBottom: last ? "none" : "1px solid var(--line)" }}>
       <span style={{ fontSize: 14, color: "var(--muted)" }}>{label}</span>
       <span className={mono ? "ide-num" : ""} style={{ fontSize: 14.5, fontWeight: 700, color: "var(--text)" }}>{value}</span>
+    </div>
+  );
+}
+
+function isSubmitGuessAction(action: WalletPendingAction | null, walletAddress: string | undefined) {
+  return (
+    action?.action === "submit_guess" &&
+    (!action.walletAddress || !walletAddress || action.walletAddress === walletAddress)
+  );
+}
+
+function walletActionCopy(action: WalletPendingAction) {
+  if (action.status === "awaiting_approval") {
+    return {
+      tone: "var(--purple-soft)",
+      title: "Awaiting wallet approval",
+      message: "The approval request opened in your wallet. Return here after signing, or retry if the wallet app closed it.",
+    };
+  }
+  if (action.status === "pending_confirmation") {
+    return {
+      tone: "var(--yellow)",
+      title: "Transaction pending",
+      message: "The wallet signed the transaction. Idealer is waiting for confirmed network status before allowing another submit.",
+    };
+  }
+  if (action.status === "delayed_confirmation") {
+    return {
+      tone: "var(--yellow)",
+      title: "Transaction delayed",
+      message: "Confirmation is taking longer than usual. Keep this action pending so a retry cannot create a duplicate guess.",
+    };
+  }
+  if (action.status === "duplicate") {
+    return {
+      tone: "var(--green)",
+      title: "Guess already recorded",
+      message: "This wallet already has a guess for this round. Refreshing the round state will show the confirmed entry.",
+    };
+  }
+  if (action.status === "turn_changed") {
+    return {
+      tone: "var(--yellow)",
+      title: "Round changed during approval",
+      message: `The wallet action targeted round ${fmtTurnId(action.turnId ?? 0)}. Idealer refreshed the live round before allowing another submit.`,
+    };
+  }
+  if (action.status === "confirmed") {
+    return {
+      tone: "var(--green)",
+      title: "Guess confirmed",
+      message: "The guess was recorded and the local wallet action can be cleared.",
+    };
+  }
+  return {
+    tone: "var(--red)",
+    title: "Transaction failed",
+    message: action.errorMessage ?? "The wallet action failed. Nothing was recorded unless the receipt is visible below.",
+  };
+}
+
+function WalletActionStatus({
+  action,
+  onClear,
+}: {
+  action: WalletPendingAction;
+  onClear: () => void;
+}) {
+  const copy = walletActionCopy(action);
+  const showClear = action.status === "failed" || action.status === "turn_changed" || action.status === "confirmed";
+
+  return (
+    <div
+      className="ide-card"
+      data-testid="wallet-action-status"
+      style={{
+        borderColor: "rgba(255,255,255,0.13)",
+        display: "grid",
+        gap: 10,
+        marginBottom: 14,
+        padding: 14,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span
+          style={{
+            alignItems: "center",
+            background: "var(--surface-2)",
+            border: "1px solid var(--line)",
+            borderRadius: 12,
+            color: copy.tone,
+            display: "grid",
+            flexShrink: 0,
+            height: 34,
+            placeItems: "center",
+            width: 34,
+          }}
+        >
+          {action.status === "confirmed" || action.status === "duplicate" ? (
+            <Ico.check style={{ color: "currentColor" }} />
+          ) : (
+            <Ico.clock style={{ color: "currentColor", height: 17, width: 17 }} />
+          )}
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ color: "var(--text)", fontSize: 15, fontWeight: 800 }}>{copy.title}</div>
+          <div style={{ color: "var(--muted)", fontSize: 12.5, lineHeight: 1.4 }}>{copy.message}</div>
+        </div>
+      </div>
+      {action.errorCode ? (
+        <div className="ide-pill" style={{ color: copy.tone, justifySelf: "start" }}>
+          <span className="ide-num">{action.errorCode}</span>
+        </div>
+      ) : null}
+      {action.signature ? (
+        <div style={{ color: "var(--dim)", fontSize: 12, overflowWrap: "anywhere" }}>
+          Signature <span className="ide-num">{action.signature}</span>
+        </div>
+      ) : null}
+      {showClear ? (
+        <button className="ide-votebtn" onClick={onClear} style={{ justifySelf: "start", padding: "8px 12px" }} type="button">
+          Retry
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -102,7 +236,36 @@ function PlayFlow() {
   const [sel, setSel] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<null | string>(null);
+  const [pendingAction, setPendingAction] = useState<WalletPendingAction | null>(null);
   const complete = sel.length === PICK;
+  const visiblePendingAction = useMemo(
+    () => (isSubmitGuessAction(pendingAction, walletAddress) ? pendingAction : null),
+    [pendingAction, walletAddress],
+  );
+  const submitBlocked = isBlockingWalletAction(visiblePendingAction);
+
+  useEffect(() => {
+    const sync = () => setPendingAction(readPendingWalletAction());
+    sync();
+    window.addEventListener("focus", sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener("focus", sync);
+      window.removeEventListener("storage", sync);
+    };
+  }, []);
+
+  function saveAction(next: Omit<WalletPendingAction, "updatedAt" | "version">) {
+    const saved = writePendingWalletAction(next);
+    setPendingAction(saved);
+    return saved;
+  }
+
+  function clearAction() {
+    clearPendingWalletAction();
+    setPendingAction(null);
+    setError(null);
+  }
 
   const toggle = (n: number) =>
     setSel((cur) => (cur.includes(n) ? cur.filter((x) => x !== n) : cur.length < PICK ? [...cur, n].sort((a, b) => a - b) : cur));
@@ -116,6 +279,10 @@ function PlayFlow() {
 
   async function confirm() {
     setError(null);
+    if (submitBlocked) {
+      setError("A wallet action is still pending. Wait for it to resolve before retrying.");
+      return;
+    }
     if (!validateGuessNumbers(sel)) {
       setError("Pick exactly six unique numbers from 1 to 100.");
       return;
@@ -125,6 +292,8 @@ function PlayFlow() {
       return;
     }
     setBusy(true);
+    const startedAt = new Date().toISOString();
+    let delayTimer: number | null = null;
     try {
       const player = address(walletAddress);
       if (!turnReadyToPlay) {
@@ -132,8 +301,73 @@ function PlayFlow() {
         return;
       }
       const accounts = await deriveSubmitGuessAccounts({ player, turnId });
+      saveAction({
+        action: "submit_guess",
+        createdAt: startedAt,
+        numbers: sel,
+        status: "awaiting_approval",
+        turnId,
+        walletAddress,
+      });
+      const [freshTurn, existingGuess] = await Promise.all([
+        fetchActiveTurnSnapshotFromWorker(),
+        client.runtime.rpc
+          .getAccountInfo(accounts.playerGuess, {
+            commitment: "confirmed",
+            encoding: "base64",
+          })
+          .send(),
+      ]);
+      if (freshTurn.globalConfig.activeTurnId !== turnId) {
+        saveAction({
+          action: "submit_guess",
+          createdAt: startedAt,
+          errorCode: "TURN_CHANGED",
+          errorMessage: "The active round changed before wallet approval.",
+          numbers: sel,
+          status: "turn_changed",
+          turnId,
+          walletAddress,
+        });
+        reloadAll();
+        setError("The active round changed before wallet approval. Review the new round before submitting.");
+        return;
+      }
+      if (existingGuess.value) {
+        saveAction({
+          action: "submit_guess",
+          createdAt: startedAt,
+          errorCode: "DUPLICATE_ACTION",
+          errorMessage: "This wallet already has a guess for the current turn.",
+          numbers: sel,
+          status: "duplicate",
+          turnId,
+          walletAddress,
+        });
+        reloadAll();
+        return;
+      }
+      delayTimer = window.setTimeout(() => {
+        saveAction({
+          action: "submit_guess",
+          createdAt: startedAt,
+          numbers: sel,
+          status: "delayed_confirmation",
+          turnId,
+          walletAddress,
+        });
+      }, 15_000);
       const instruction = await createSubmitGuessInstruction({ numbers: sel, player, turnId });
       const signature = await sendInstruction(client, wallet, instruction);
+      saveAction({
+        action: "submit_guess",
+        createdAt: startedAt,
+        numbers: sel,
+        signature,
+        status: "pending_confirmation",
+        turnId,
+        walletAddress,
+      });
 
       const receipt: GuessReceipt = {
         gameToken: accounts.gameToken.toString(),
@@ -146,11 +380,63 @@ function PlayFlow() {
         turnId,
       };
       await postGuessReceipt(receipt);
+      let latestTurn: Awaited<ReturnType<typeof fetchActiveTurnSnapshotFromWorker>>;
+      try {
+        latestTurn = await fetchActiveTurnSnapshotFromWorker();
+      } catch {
+        saveAction({
+          action: "submit_guess",
+          createdAt: startedAt,
+          errorCode: "TURN_RECOVERY_UNVERIFIED",
+          errorMessage: "The receipt was recorded, but Idealer could not verify the live round after wallet return.",
+          numbers: sel,
+          signature,
+          status: "delayed_confirmation",
+          turnId,
+          walletAddress,
+        });
+        reloadAll();
+        setError("The receipt was recorded, but live round recovery could not be verified. Refresh status before retrying.");
+        return;
+      }
+      if (latestTurn.globalConfig.activeTurnId !== turnId) {
+        saveAction({
+          action: "submit_guess",
+          createdAt: startedAt,
+          errorCode: "TURN_CHANGED_AFTER_SIGNATURE",
+          errorMessage: "The round changed while the wallet signature was being processed.",
+          numbers: sel,
+          signature,
+          status: "turn_changed",
+          turnId,
+          walletAddress,
+        });
+        reloadAll();
+        setError("The round changed while the wallet signature was being processed. The signed receipt was recorded for the previous round.");
+        return;
+      }
       reloadAll();
+      clearPendingWalletAction();
+      setPendingAction(null);
       setStep("done");
     } catch (cause) {
-      setError(describeTxError(cause));
+      const message = describeTxError(cause);
+      const code = txErrorCode(cause);
+      saveAction({
+        action: "submit_guess",
+        createdAt: startedAt,
+        errorCode: code,
+        errorMessage: message,
+        numbers: sel,
+        status: code === "DUPLICATE_ACTION" ? "duplicate" : "failed",
+        turnId,
+        walletAddress,
+      });
+      setError(message);
     } finally {
+      if (delayTimer) {
+        window.clearTimeout(delayTimer);
+      }
       setBusy(false);
     }
   }
@@ -182,6 +468,9 @@ function PlayFlow() {
             <ReviewRow label="Entry fee" value={`${fmtSol(fees.play)} SOL`} mono />
             <ReviewRow label="Account rent + network fee" value="shown by wallet" last />
           </div>
+          {visiblePendingAction ? (
+            <WalletActionStatus action={visiblePendingAction} onClear={clearAction} />
+          ) : null}
           {error ? (
             <div className="ide-card" style={{ padding: "11px 14px", marginBottom: 14, borderColor: "rgba(255,107,107,0.3)", color: "var(--red)", fontSize: 13 }}>{error}</div>
           ) : (
@@ -192,8 +481,9 @@ function PlayFlow() {
           )}
         </div>
         <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 30, padding: "16px 18px calc(20px + env(safe-area-inset-bottom,0px))", background: "linear-gradient(180deg, transparent, var(--bg) 36%)" }}>
-          <button onClick={confirm} disabled={busy} className="ide-btn" style={{ width: "100%", padding: 17, fontSize: 17, opacity: busy ? 0.7 : 1 }} type="button">
+          <button onClick={confirm} disabled={busy || submitBlocked} className="ide-btn" style={{ width: "100%", padding: 17, fontSize: 17, opacity: busy || submitBlocked ? 0.7 : 1 }} type="button">
             {busy ? <><span className="ide-spin" style={{ width: 18, height: 18, border: "2px solid #08110C", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block" }} /> Submitting…</>
+              : submitBlocked ? <><Ico.clock style={{ color: "#08110C" }} /> Wallet action pending</>
               : connected ? <><Ico.check style={{ color: "#08110C" }} /> Confirm and submit</>
               : <><Ico.wallet style={{ color: "#08110C" }} /> Connect and submit</>}
           </button>
@@ -214,6 +504,10 @@ function PlayFlow() {
           <div style={{ fontSize: 15, color: "var(--muted)" }}>Pick <b style={{ color: "var(--text)" }}>{PICK} numbers</b> from 1 to {MAXN}</div>
           <div className="ide-num" style={{ marginTop: 6, fontSize: 14, color: complete ? "var(--green)" : "var(--dim)", fontWeight: 700 }}>{sel.length}/{PICK} selected</div>
         </div>
+
+        {visiblePendingAction ? (
+          <WalletActionStatus action={visiblePendingAction} onClear={clearAction} />
+        ) : null}
 
         <button onClick={quickPick} className="ide-votebtn" style={{ width: "100%", justifyContent: "center", padding: "12px", fontSize: 14.5, marginBottom: 16 }} type="button">
           <Ico.dice style={{ color: "var(--purple-soft)" }} /> Lucky pick (choose for me)
