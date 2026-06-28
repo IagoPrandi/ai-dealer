@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { address } from "@solana/kit";
 import { RULE_MAX_TOKENS } from "@idealer/constants";
 import { useSolanaClient, useWalletConnection } from "@solana/react-hooks";
+import { getApiBaseUrl } from "../../lib/apiBase";
 import {
   deriveRoundAccounts,
   deriveSubmitGuessAccounts,
@@ -154,8 +155,6 @@ type GuessState =
   | { status: "found"; numbers: number[]; signature: string }
   | { status: "error"; message: string };
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_IDEALER_API_URL ?? "http://localhost:3002";
 const EXPLORER_BASE = "https://explorer.solana.com/address";
 const STATUS_COPY: Record<RoundSummary["status"], string> = {
   completed: "This round is closed. Its rules, votes, and audit links stay available after rollover.",
@@ -225,7 +224,7 @@ export function RoundPage({ turnId: rawTurnId }: { turnId: string }) {
     const controller = new AbortController();
     setLoadState("loading");
 
-    void fetch(`${API_BASE_URL}/rounds/${turnId}`, {
+    void fetch(`${getApiBaseUrl()}/rounds/${turnId}`, {
       signal: controller.signal,
     })
       .then(async (response) => {
@@ -319,7 +318,7 @@ export function RoundPage({ turnId: rawTurnId }: { turnId: string }) {
           .send();
 
         const response = await fetch(
-          `${API_BASE_URL}/guess-receipts?turnId=${turnId}&player=${walletAddress}`,
+          `${getApiBaseUrl()}/guess-receipts?turnId=${turnId}&player=${walletAddress}`,
           { signal: controller.signal },
         );
 

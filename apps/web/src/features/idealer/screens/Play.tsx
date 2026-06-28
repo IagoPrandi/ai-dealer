@@ -11,8 +11,6 @@ import { address } from "@solana/kit";
 import {
   createSubmitGuessInstruction,
   deriveSubmitGuessAccounts,
-  fetchActiveTurnSnapshot,
-  getTurnActionReadiness,
   IDEALER_PROGRAM_ID,
   validateGuessNumbers,
   type GuessReceipt,
@@ -99,7 +97,7 @@ export function PlayScreen() {
 }
 
 function PlayFlow() {
-  const { client, connect, connected, fees, go, reloadAll, turnReadyToPlay, wallet, walletAddress } = useIdealer();
+  const { client, connect, connected, fees, go, reloadAll, turnId, turnReadyToPlay, turnStatusMessage, wallet, walletAddress } = useIdealer();
   const [step, setStep] = useState<"pick" | "review" | "done">("pick");
   const [sel, setSel] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
@@ -129,17 +127,10 @@ function PlayFlow() {
     setBusy(true);
     try {
       const player = address(walletAddress);
-      const snapshot = await fetchActiveTurnSnapshot(client);
-      const readiness = getTurnActionReadiness({
-        cutoffBps: snapshot.globalConfig.guessCutoffBps,
-        globalConfig: snapshot.globalConfig,
-        turn: snapshot.turnState,
-      });
-      if (!readiness.ok) {
-        setError(readiness.message);
+      if (!turnReadyToPlay) {
+        setError(turnStatusMessage);
         return;
       }
-      const turnId = snapshot.globalConfig.activeTurnId;
       const accounts = await deriveSubmitGuessAccounts({ player, turnId });
       const instruction = await createSubmitGuessInstruction({ numbers: sel, player, turnId });
       const signature = await sendInstruction(client, wallet, instruction);

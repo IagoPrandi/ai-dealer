@@ -64,6 +64,55 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-06-28 (mobile local function recovery and installability)
+
+- Reopened required documents/context before implementation: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/develop-frontend/SKILL.md`, `.claude/skills/idealer-test-and-verify/SKILL.md`, and the Vercel investigation-mode instructions for the broken-app triage.
+- Diagnosed the local mobile failure path: stale host API processes had previously shadowed Docker API health, the browser could not reliably discover the active turn from direct Solana RPC, and local cross-origin API/worker requests from `http://192.168.0.68:3000` needed LAN-safe CORS.
+- Implemented local-mobile runtime fixes: dynamic API/worker base URL resolution for private LAN hosts, worker `GET /turn/active` backed by on-chain global/turn state, worker CORS/`OPTIONS`, API LAN CORS, and frontend active-turn polling through the worker while keeping wallet-signed transactions on-chain.
+- Added PWA installability assets: web manifest, service worker registration, standalone/mobile metadata, and app icons. Service worker registration intentionally requires HTTPS or localhost because full PWA installability is not available on `http://192.168.x.x`.
+- Recovered the local devnet session: restarted API/worker, switched the web server to production `next start` on `0.0.0.0:3000` after `next dev --webpack` failed to hydrate, and manually cycled the devnet turn from expired turn 38 to open turn 39.
+- Verification passed: `pnpm --filter @idealer/web typecheck`, `pnpm --filter @idealer/web test`, `pnpm --filter @idealer/web lint`, `pnpm --filter @idealer/web exec next build --webpack`, `pnpm --filter @idealer/worker typecheck`, `pnpm --filter @idealer/worker test`, `pnpm --filter @idealer/worker lint`, `pnpm --filter @idealer/worker build`, `pnpm --filter @idealer/api typecheck`, `pnpm --filter @idealer/api lint`, and `pnpm --filter @idealer/api build`.
+- Browser/mobile smoke passed against `http://192.168.0.68:3000/play` with Pixel 5 emulation: hydrated UI, `GET /turn/active` 200, API round/rule endpoints 200, active countdown visible, and CTA `Play now · 0.01 SOL` visible. Console still reports expected local limitations: MWA secure context requires HTTPS, and PWA service worker is skipped on LAN HTTP.
+- No milestone row, approval status, or PRD checkbox was changed; milestone checkboxes still require explicit user confirmation.
+
+### 2026-06-27 (mobile device debugging setup check)
+
+- Opened required documents/context before guidance: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, and `.claude/skills/develop-frontend/SKILL.md`.
+- Checked official Android device debugging documentation and Chrome DevTools remote Android debugging documentation for the recommended physical-device workflow.
+- Confirmed the public DApp is a Next.js mobile-first web app, not a native Android APK flow. The web dev script already binds to `0.0.0.0:3000`, and the local machine Wi-Fi address is `192.168.0.68`.
+- Verified `http://192.168.0.68:3000` responds from the host and is the URL to open on a phone connected to the same Wi-Fi.
+- Found an unresolved local API exposure issue: the Docker `idealer-api` container health check is healthy internally, but host access to `192.168.0.68:3002/health` reaches a separate local Node API process and returns `503` for Postgres/Redis. No process was stopped and no milestone/PRD checkbox was marked.
+
+### 2026-06-27 (mobile DApp wallet handoff clarification)
+
+- Reopened required documents/context after user clarification: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/solana-dev/SKILL.md`, `.claude/skills/solana-dev/ext/solana-mobile/mwa/mwa-setup/SKILL.md`, `.claude/skills/solana-dev/ext/solana-mobile/mwa/mwa-connection/SKILL.md`, and `.claude/skills/solana-dev/ext/solana-mobile/mwa/mwa-transactions/SKILL.md`.
+- Confirmed the intended target is a mobile DApp wallet handoff flow: open DApp on Android Chrome or an in-wallet browser, choose a Solana wallet, approve in the wallet app, and return to the DApp.
+- Verified the current web code already registers `@solana-mobile/wallet-standard-mobile` in `apps/web/src/solana/SolanaProviders.tsx` with app identity, authorization cache, devnet chain, chain selector, wallet-not-found handler, and `remoteHostAuthority`.
+- Noted that the MWA hub path `.claude/skills/solana-dev/ext/solana-mobile/mwa/SKILL.md` does not exist; the relevant sub-skills are present and were opened instead.
+- No code changes, milestone status changes, or PRD checkbox updates were made.
+
+### 2026-06-27 (Mobile Wallet Adapter status check)
+
+- Reopened required documents/context before answering status: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/solana-dev/SKILL.md`, and the relevant local MWA sub-skills.
+- Checked the current implementation: `apps/web/package.json` includes `@solana-mobile/wallet-standard-mobile`; `apps/web/src/solana/SolanaProviders.tsx` calls `registerMwa`, uses Wallet Standard auto-discovery, sets `defaultChain` to `solana:devnet`, persists wallet sessions, and uses `remoteHostAuthority`.
+- Checked current wallet UI and transaction path: `/play/wallet` now renders `IdealerApp initialConnect`; `ConnectOverlay` lists discovered wallet connectors; wallet write actions use `createWalletTransactionSigner` and `client.transaction.prepareAndSend`.
+- Verification: `pnpm --filter @idealer/web typecheck` passed. A direct Pixel 5 Playwright smoke against the already-running `http://127.0.0.1:3000/play/wallet` loaded the current connection overlay and correctly showed no compatible wallet in desktop/headless Chromium.
+- Limitation found: the historical `apps/web/e2e/wallet-flow.spec.ts` still targets the older dedicated wallet page copy and named handoff links. The configured E2E command could not start because an existing Next dev server for the same app was already running; no process was stopped.
+- Status conclusion: MWA is implemented in code and was historically marked complete under `M2.1`, but current physical-device wallet handoff with Phantom/Backpack/Solflare was not revalidated in this check and remains the evidence needed to say it is working on a real phone.
+
+### 2026-06-27 (real-device MWA test plan)
+
+- Reopened required documents/context before drafting the test plan: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/solana-dev/ext/solana-mobile/mwa/mwa-connection/SKILL.md`, and `.claude/skills/solana-dev/ext/solana-mobile/mwa/mwa-transactions/SKILL.md`.
+- Checked local test prerequisites: host Wi-Fi IP is `192.168.0.68`; `http://192.168.0.68:3000/play/wallet` returns HTTP 200; `adb` is not installed on the workstation; host API health at `http://192.168.0.68:3002/health` currently returns API status `error` with Postgres/Redis errors.
+- Checked official Solana Mobile web docs for MWA testing expectations: `@solana-mobile/wallet-standard-mobile` registers MWA as a web wallet option and must run in a browser-only Next.js context; once registered, MWA appears on Android Chrome and uses Android Intents.
+- No code changes, milestone status changes, or PRD checkbox updates were made.
+
+### 2026-06-27 (public insights console risk review)
+
+- Opened required documents/context before analysis: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, and `.claude/skills/security-threat-model/SKILL.md`.
+- Reviewed the product/security implications of making the current Restricted Admin Insights Console public to connected wallets, with no admin role.
+- No milestone was marked complete and no PRD checkbox was ticked, because this was a design/risk review and requires user confirmation before implementation.
+
 ### 2026-06-27 (M9.3 verified and marked complete)
 
 - Opened required documents/context before marking completion: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/idealer-test-and-verify/SKILL.md`, `.claude/skills/best-practices/SKILL.md`, `.claude/skills/best-practices/references/agent-principles.md`, `.claude/skills/best-practices/references/testing.md`, `.claude/skills/best-practices/references/web2-backend.md`, `.claude/skills/best-practices/references/web3-contracts.md`, `.claude/skills/solana-dev/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/SKILL.md`, and `.claude/skills/solana-dev/backend-async.md`.

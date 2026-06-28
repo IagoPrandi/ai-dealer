@@ -53,10 +53,16 @@ export interface GlobalConfigSnapshot {
   activeTurnId: number;
   drawVrfConfig: SolanaAddress;
   electionVrfConfig: SolanaAddress;
+  guessCutoffBps: number;
+  guessSubmissionFeeLamports: bigint;
   hasActiveTurn: boolean;
   nextTurnId: number;
   paused: boolean;
+  ruleElectionCutoffBps: number;
+  ruleProposalFeeLamports: bigint;
+  ruleRemovalFeeLamports: bigint | null;
   turnDurationCycle: readonly [number, number, number, number];
+  voteFeeLamports: bigint;
 }
 
 export interface TurnStateSnapshot {
@@ -324,6 +330,11 @@ function createAccountReader(data: Uint8Array) {
       offset += 4;
       return value;
     },
+    readU64BigInt() {
+      const value = view.getBigUint64(offset, true);
+      offset += 8;
+      return value;
+    },
     readU64Number() {
       const value = Number(view.getBigUint64(offset, true));
       offset += 8;
@@ -379,8 +390,12 @@ function decodeGlobalConfigAccountWithLayout(
   reader.skip(32);
   const drawVrfConfig = reader.readAddress();
   const electionVrfConfig = reader.readAddress();
-  // guess_submission + rule_proposal + [rule_removal] + vote fees.
-  reader.skip(8 + 8 + (hasRuleRemovalFee ? 8 : 0) + 8);
+  const guessSubmissionFeeLamports = reader.readU64BigInt();
+  const ruleProposalFeeLamports = reader.readU64BigInt();
+  const ruleRemovalFeeLamports = hasRuleRemovalFee
+    ? reader.readU64BigInt()
+    : null;
+  const voteFeeLamports = reader.readU64BigInt();
   reader.skip(2);
   const turnDurationCycle = [
     reader.readU32(),
@@ -389,8 +404,8 @@ function decodeGlobalConfigAccountWithLayout(
     reader.readU32(),
   ] as const;
   reader.skip(1);
-  reader.readU16();
-  reader.readU16();
+  const ruleElectionCutoffBps = reader.readU16();
+  const guessCutoffBps = reader.readU16();
   reader.skip(2 + 1 + 1 + 2 + 2 + 8 + 2 + 2 + 8 + 4 + 4);
   const nextTurnId = reader.readU64Number();
   const activeTurnId = reader.readU64Number();
@@ -401,10 +416,16 @@ function decodeGlobalConfigAccountWithLayout(
     activeTurnId,
     drawVrfConfig,
     electionVrfConfig,
+    guessCutoffBps,
+    guessSubmissionFeeLamports,
     hasActiveTurn,
     nextTurnId,
     paused,
+    ruleElectionCutoffBps,
+    ruleProposalFeeLamports,
+    ruleRemovalFeeLamports,
     turnDurationCycle,
+    voteFeeLamports,
   };
 }
 

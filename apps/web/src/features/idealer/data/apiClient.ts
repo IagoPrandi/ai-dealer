@@ -15,15 +15,15 @@ import type {
   RuleProposalApi,
   RuleVotesApi,
 } from "./types";
+import { getApiBaseUrl } from "../../../lib/apiBase";
 
-export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_IDEALER_API_URL ?? "http://localhost:3002";
+export const API_BASE_URL = getApiBaseUrl;
 
 async function getJson<T>(
   path: string,
   options: { allow404?: boolean; signal?: AbortSignal } = {},
 ): Promise<T | null> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
     ...(options.signal ? { signal: options.signal } : {}),
   });
 
@@ -39,7 +39,7 @@ async function getJson<T>(
 }
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
     body: JSON.stringify(body),
     headers: { "content-type": "application/json" },
     method: "POST",
@@ -70,7 +70,7 @@ function apiErrorMessage(path: string, status: number, detail: unknown) {
 }
 
 async function postStrictJson<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
     body: JSON.stringify(body),
     headers: { "content-type": "application/json" },
     method: "POST",

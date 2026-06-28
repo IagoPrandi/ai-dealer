@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { pathToFileURL } from "node:url";
 import { getTurnDurationHours } from "@idealer/game-engine";
+import { createSolanaRpc } from "@solana/kit";
 import pg from "pg";
 import { createClient } from "redis";
 import {
@@ -12,6 +13,8 @@ import {
   type ManualControlConfig,
 } from "./manual-control.js";
 import {
+  fetchGlobalConfig,
+  fetchTurnState,
   createTurnAutomationConfig,
   startTurnAutomationLoop,
   type TurnAutomationConfig,
@@ -143,13 +146,106 @@ function getTurnAutomationStatus(
   return config.authorityKeypairBytes ? "enabled" : "error";
 }
 
+const LOCAL_WEB_ORIGIN_PATTERN = /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3})(:\d+)?$/;
+
+function getAllowedCorsOrigin(origin: string | undefined) {
+  if (!origin) {
+    return null;
+  }
+
+  const configuredOrigins = (process.env.IDEALER_WORKER_CORS_ORIGINS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  if (
+    configuredOrigins.includes(origin) ||
+    LOCAL_WEB_ORIGIN_PATTERN.test(origin)
+  ) {
+    return origin;
+  }
+
+  return null;
+}
+
+function getCorsHeaders(request: IncomingMessage) {
+  const allowedOrigin = getAllowedCorsOrigin(request.headers.origin);
+  if (!allowedOrigin) {
+    return {};
+  }
+
+  return {
+    "access-control-allow-headers": "content-type",
+    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-origin": allowedOrigin,
+    "access-control-max-age": "600",
+    vary: "Origin",
+  };
+}
+
 function sendJson(
+  request: IncomingMessage,
   response: ServerResponse,
   statusCode: number,
   body: unknown,
 ) {
-  response.writeHead(statusCode, { "content-type": "application/json" });
+  response.writeHead(statusCode, {
+    "content-type": "application/json",
+    ...getCorsHeaders(request),
+  });
   response.end(JSON.stringify(body));
+}
+
+function sendNoContent(request: IncomingMessage, response: ServerResponse) {
+  response.writeHead(204, getCorsHeaders(request));
+  response.end();
+}
+
+async function getActiveTurnStatus() {
+  const config = await createTurnAutomationConfig();
+  const rpc = createSolanaRpc(config.rpcUrl);
+  const globalConfig = await fetchGlobalConfig({
+    programId: config.programId,
+    rpc,
+  });
+
+  let turnState: null | Awaited<ReturnType<typeof fetchTurnState>> = null;
+  if (
+    globalConfig.snapshot.hasActiveTurn &&
+    globalConfig.snapshot.activeTurnId > 0
+  ) {
+    turnState = await fetchTurnState({
+      programId: config.programId,
+      rpc,
+      turnId: globalConfig.snapshot.activeTurnId,
+    });
+  }
+
+  return {
+    globalConfig: {
+      activeTurnId: globalConfig.snapshot.activeTurnId,
+      guessCutoffBps: globalConfig.snapshot.guessCutoffBps,
+      guessSubmissionFeeLamports:
+        globalConfig.snapshot.guessSubmissionFeeLamports.toString(),
+      hasActiveTurn: globalConfig.snapshot.hasActiveTurn,
+      nextTurnId: globalConfig.snapshot.nextTurnId,
+      paused: globalConfig.snapshot.paused,
+      ruleElectionCutoffBps: globalConfig.snapshot.ruleElectionCutoffBps,
+      ruleRemovalFeeLamports:
+        globalConfig.snapshot.ruleRemovalFeeLamports?.toString() ?? null,
+      voteFeeLamports: globalConfig.snapshot.voteFeeLamports.toString(),
+    },
+    globalConfigAddress: globalConfig.address.toString(),
+    turnState: turnState
+      ? {
+          endTimestamp: turnState.snapshot.endTimestamp,
+          startTimestamp: turnState.snapshot.startTimestamp,
+          status: turnState.snapshot.status,
+          turnId: turnState.snapshot.turnId,
+        }
+      : null,
+    turnStateAddress: turnState?.address.toString() ?? null,
+  };
 }
 
 const MANUAL_CONTROL_ACTIONS = {
@@ -181,12 +277,12 @@ function handleManualControlRequest(
   }
 
   if (!manualConfig.enabled) {
-    sendJson(response, 404, { error: "manual_control_disabled" });
+    sendJson(request, response, 404, { error: "manual_control_disabled" });
     return true;
   }
 
   if (request.method !== "POST") {
-    sendJson(response, 405, { error: "method_not_allowed" });
+    sendJson(request, response, 405, { error: "method_not_allowed" });
     return true;
   }
 
@@ -194,11 +290,11 @@ function handleManualControlRequest(
   void action(manualConfig)
     .then((result) => {
       console.log(`manual turn control ${path}`, result);
-      sendJson(response, 200, { result });
+      sendJson(request, response, 200, { result });
     })
     .catch((error: unknown) => {
       console.error(`manual turn control ${path} failed`, error);
-      sendJson(response, 500, {
+      sendJson(request, response, 500, {
         error: "manual_control_failed",
         message: error instanceof Error ? error.message : String(error),
       });
@@ -224,11 +320,11 @@ function handleSettlementManualRequest(
   }
 
   if (!manualConfig.enabled) {
-    sendJson(response, 404, { error: "manual_control_disabled" });
+    sendJson(request, response, 404, { error: "manual_control_disabled" });
     return true;
   }
   if (request.method !== "POST") {
-    sendJson(response, 405, { error: "method_not_allowed" });
+    sendJson(request, response, 405, { error: "method_not_allowed" });
     return true;
   }
 
@@ -236,11 +332,11 @@ function handleSettlementManualRequest(
     .then((config) => runSettlementSchedulerOnce({ ...config, enabled: true }))
     .then((result) => {
       console.log("manual settlement", JSON.stringify(result));
-      sendJson(response, 200, { result });
+      sendJson(request, response, 200, { result });
     })
     .catch((error: unknown) => {
       console.error("manual settlement failed", error);
-      sendJson(response, 500, {
+      sendJson(request, response, 500, {
         error: "manual_settlement_failed",
         message: error instanceof Error ? error.message : String(error),
       });
@@ -259,10 +355,28 @@ if (
   const server = createServer((request, response) => {
     const path = (request.url ?? "").split("?")[0] ?? "";
 
+    if (request.method === "OPTIONS") {
+      sendNoContent(request, response);
+      return;
+    }
+
     if (path === "/health") {
       void getWorkerStatus().then((health) => {
-        sendJson(response, health.status === "ok" ? 200 : 503, health);
+        sendJson(request, response, health.status === "ok" ? 200 : 503, health);
       });
+      return;
+    }
+
+    if (request.method === "GET" && path === "/turn/active") {
+      void getActiveTurnStatus()
+        .then((status) => sendJson(request, response, 200, status))
+        .catch((error: unknown) => {
+          console.error("active turn status failed", error);
+          sendJson(request, response, 500, {
+            error: "active_turn_status_failed",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
       return;
     }
 
@@ -274,10 +388,10 @@ if (
         if (handleSettlementManualRequest(request, response, manualConfig)) {
           return;
         }
-        sendJson(response, 404, { error: "not_found" });
+        sendJson(request, response, 404, { error: "not_found" });
       })
       .catch((error: unknown) => {
-        sendJson(response, 500, {
+        sendJson(request, response, 500, {
           error: "manual_control_config_error",
           message: error instanceof Error ? error.message : String(error),
         });

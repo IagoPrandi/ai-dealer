@@ -1,0 +1,27 @@
+{
+  "name": "Idealer",
+  "short_name": "Idealer",
+  "description": "Mobile-first Solana DApp for community-elected lottery rules.",
+  "id": "/play",
+  "start_url": "/play",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b0910",
+  "theme_color": "#0b0910",
+  "orientation": "portrait",
+  "categories": ["games", "finance"],
+  "icons": [
+    {
+      "src": "/icons/icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

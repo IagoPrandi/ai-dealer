@@ -1,9 +1,31 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
+import { PwaRegistrar } from "./PwaRegistrar";
 import "./globals.css";
 
 export const metadata: Metadata = {
+  applicationName: "Idealer",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Idealer",
+  },
   title: "Idealer",
-  description: "Mobile-first Solana DApp for community-elected lottery rules."
+  description: "Mobile-first Solana DApp for community-elected lottery rules.",
+  icons: {
+    apple: "/icons/icon-192.svg",
+    icon: [
+      { rel: "icon", url: "/icons/icon-192.svg" },
+      { rel: "icon", sizes: "512x512", url: "/icons/icon-512.svg" },
+    ],
+  },
+  manifest: "/manifest.webmanifest",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0b0910",
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
@@ -18,6 +40,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         />
       </head>
       <body>
+        <PwaRegistrar />
         {children}
       </body>
     </html>

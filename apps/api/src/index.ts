@@ -821,7 +821,7 @@ const AUDIT_LOG_KINDS = new Set<AuditLogKind>([
   "settlement.transition",
 ]);
 const LOCAL_WEB_ORIGIN_PATTERN =
-  /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+  /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3})(:\d+)?$/;
 const CORS_PATHS = new Set([
   "/draws",
   "/elections",

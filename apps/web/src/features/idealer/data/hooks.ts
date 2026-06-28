@@ -5,14 +5,14 @@
  * (idealerProgram) with the HTTP API (apiClient) into the screen-facing shapes.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSolanaClient, useWalletConnection } from "@solana/react-hooks";
+import { useWalletConnection } from "@solana/react-hooks";
 
 import {
-  fetchActiveTurnSnapshot,
   getTurnActionReadiness,
   IDEALER_ACTIVE_TURN_ID,
   type ActiveTurnSnapshot,
 } from "../../../solana/idealerProgram";
+import { fetchActiveTurnSnapshotFromWorker } from "../../../solana/activeTurnApi";
 import {
   getConversationDrafts,
   getGuessReceipt,
@@ -48,7 +48,6 @@ export interface ActiveTurnView {
 
 /** Polls the on-chain GlobalConfig + active TurnState every 10s (and on focus). */
 export function useActiveTurn(): ActiveTurnView {
-  const client = useSolanaClient();
   const [view, setView] = useState<Omit<ActiveTurnView, "refresh">>({
     activeTurnId: IDEALER_ACTIVE_TURN_ID,
     endTimestamp: null,
@@ -59,7 +58,7 @@ export function useActiveTurn(): ActiveTurnView {
 
   const load = useCallback(async () => {
     try {
-      const snapshot = await fetchActiveTurnSnapshot(client);
+      const snapshot = await fetchActiveTurnSnapshotFromWorker();
       const readiness = getTurnActionReadiness({
         cutoffBps: snapshot.globalConfig.guessCutoffBps,
         globalConfig: snapshot.globalConfig,
@@ -84,7 +83,7 @@ export function useActiveTurn(): ActiveTurnView {
         state: "unavailable",
       });
     }
-  }, [client]);
+  }, []);
 
   useEffect(() => {
     let mounted = true;
