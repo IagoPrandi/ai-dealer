@@ -4,7 +4,7 @@ This Anchor workspace contains the Idealer core devnet program introduced in M2.
 
 ## Implemented Core
 
-- `GlobalConfig`, `TurnState`, `GameToken`, `PlayerGuess`, `RuleProposal`, `RuleVote`, `TreasuryVault`, and `PrizeVault`.
+- `GlobalConfig`, `TurnState`, `GameToken`, `PlayerGuess`, `RuleProposal`, sequenced `RuleVote`, `TreasuryVault`, and `PrizeVault`.
 - `initialize_global_config`, `open_turn`, `submit_guess`, `propose_rule`, `vote_rule`, and `close_turn`.
 - Isolated PDA constraints, checked fee accounting, turn lifecycle validation, and invalid-input tests.
 
@@ -60,7 +60,7 @@ The complete instruction suite requires an authorized SBF build environment. Bui
 SBF_OUT_DIR=/absolute/path/to/temporary/deploy pnpm --filter @idealer/solana-programs test:sbf
 ```
 
-The SBF suite executes initialization, turn opening, guess/Game Token creation, rule proposal, vote uniqueness, invalid-input rejection, and turn closing.
+The SBF suite executes initialization, turn opening, guess/Game Token creation, rule proposal, sequenced vote idempotency, invalid-input rejection, and turn closing.
 
 ## Devnet Deployment Gate
 

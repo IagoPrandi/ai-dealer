@@ -69,7 +69,7 @@ Paid rule removal is included in MVP. The removal fee destination is fixed to th
 - Default MVP/testnet rule proposal fee: `0.02 SOL`.
 - Default MVP/testnet paid rule removal fee: `0.05 SOL`.
 - Vote fee: `0 SOL` before turn 100; `0.005 SOL` from turn 100 onward, paid into the current turn prize pool.
-- Elimination vote fee: 2x the effective vote fee, therefore free before turn 100 and `0.01 SOL` from turn 100 onward.
+- Elimination vote fee: same side-specific `2^n * VOTE_FEE` schedule as approval votes, therefore free for the first vote-out before turn 100 and `0.005 SOL` for the first vote-out from turn 100 onward.
 - Report fee: `0 SOL`.
 - Default treasury fee: `500 bps`.
 - Active rule creator reward: 15% of each individual alternative-rule winner payout.

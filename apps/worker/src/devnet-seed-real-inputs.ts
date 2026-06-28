@@ -214,12 +214,14 @@ function ruleVotePda(
   turnId: number,
   ruleId: number,
   voter: PublicKey,
+  sequence: number,
 ) {
   return derivePda(programId, [
     VOTE_SEED,
     u64Le(turnId),
     u64Le(ruleId),
     voter.toBuffer(),
+    u16Le(sequence),
   ]);
 }
 
@@ -355,18 +357,20 @@ function createVoteRuleInstruction({
   player,
   programId,
   ruleId,
+  sequence,
   turnId,
 }: {
   player: PublicKey;
   programId: PublicKey;
   ruleId: number;
+  sequence: number;
   turnId: number;
 }) {
   const ruleProposal = ruleProposalPda(programId, turnId, ruleId);
-  const ruleVote = ruleVotePda(programId, turnId, ruleId, player);
+  const ruleVote = ruleVotePda(programId, turnId, ruleId, player, sequence);
   return {
     instruction: {
-      data: VOTE_RULE_DISCRIMINATOR,
+      data: Buffer.concat([VOTE_RULE_DISCRIMINATOR, u16Le(sequence)]),
       keys: [
         { isSigner: true, isWritable: true, pubkey: player },
         { isSigner: false, isWritable: false, pubkey: globalConfigPda(programId) },
@@ -775,6 +779,7 @@ export async function seedRealInputs(): Promise<SeededInputSummary> {
       player: player.publicKey,
       programId,
       ruleId: preflight.ruleId,
+      sequence: 1,
       turnId,
     });
     const voteAlreadyExists = await accountExists(connection, voteBuilder.ruleVote);
@@ -793,6 +798,7 @@ export async function seedRealInputs(): Promise<SeededInputSummary> {
         ruleId: preflight.ruleId,
         ruleProposal: voteBuilder.ruleProposal.toBase58(),
         ruleVote: voteBuilder.ruleVote.toBase58(),
+        sequence: 1,
         signature: voteSignature,
         submittedAt: new Date().toISOString(),
         turnId,

@@ -5,6 +5,7 @@ import {
   calculateAndStoreRewardRecords,
   calculateAndStoreWinnerRecords,
   calculatePrizePoolAccounting,
+  calculateRepeatedVoteFeeLamports,
   calculateRewardDistribution,
   completeClaimApproval,
   createClaimRecordsForTurn,
@@ -244,20 +245,20 @@ test("prize pool accounting tracks every source and bucket deterministically", (
   assert.equal(accounting.sources.guessSubmissions.grossLamports, 20_000_000);
   assert.equal(accounting.sources.ruleProposals.grossLamports, 40_000_000);
   assert.equal(accounting.sources.paidRuleRemovals.grossLamports, 50_000_000);
-  assert.equal(accounting.sources.votes.grossLamports, 6_000_000);
+  assert.equal(accounting.sources.votes.grossLamports, 14_000_000);
   assert.equal(accounting.sources.votes.feeActive, true);
-  assert.equal(accounting.grossFeesLamports, 116_000_000);
-  assert.equal(accounting.treasuryLamports, 5_800_000);
-  assert.equal(accounting.platformMonetizationLamports, 5_800_000);
-  assert.equal(accounting.currentTurnPoolLamports, 110_200_000);
-  assert.equal(accounting.buckets.original.currentTurnLamports, 55_100_000);
-  assert.equal(accounting.buckets.alternative.currentTurnLamports, 55_100_000);
-  assert.equal(accounting.buckets.original.totalLamports, 55_100_007);
-  assert.equal(accounting.buckets.alternative.totalLamports, 55_100_009);
-  assert.equal(accounting.totalVisiblePrizePoolLamports, 110_200_016);
+  assert.equal(accounting.grossFeesLamports, 124_000_000);
+  assert.equal(accounting.treasuryLamports, 6_200_000);
+  assert.equal(accounting.platformMonetizationLamports, 6_200_000);
+  assert.equal(accounting.currentTurnPoolLamports, 117_800_000);
+  assert.equal(accounting.buckets.original.currentTurnLamports, 58_900_000);
+  assert.equal(accounting.buckets.alternative.currentTurnLamports, 58_900_000);
+  assert.equal(accounting.buckets.original.totalLamports, 58_900_007);
+  assert.equal(accounting.buckets.alternative.totalLamports, 58_900_009);
+  assert.equal(accounting.totalVisiblePrizePoolLamports, 117_800_016);
   assert.deepEqual(accounting.nextRolloverIfNoWinnersLamports, {
-    alternative: 55_100_009,
-    original: 55_100_007,
+    alternative: 58_900_009,
+    original: 58_900_007,
   });
 });
 
@@ -293,23 +294,46 @@ test("M9.3 backend accounting matches the contract domain vector", () => {
       voteGross: accounting.sources.votes.grossLamports,
     },
     {
-      alternativeBucketCurrent: 55_100_000,
-      alternativeBucketTotal: 55_100_009,
-      currentTurnPool: 110_200_000,
-      grossFees: 116_000_000,
-      originalBucketCurrent: 55_100_000,
-      originalBucketTotal: 55_100_007,
+      alternativeBucketCurrent: 58_900_000,
+      alternativeBucketTotal: 58_900_009,
+      currentTurnPool: 117_800_000,
+      grossFees: 124_000_000,
+      originalBucketCurrent: 58_900_000,
+      originalBucketTotal: 58_900_007,
       paidRuleRemovalGross: 50_000_000,
       ruleProposalGross: 40_000_000,
-      totalVisiblePrizePool: 110_200_016,
-      treasury: 5_800_000,
+      totalVisiblePrizePool: 117_800_016,
+      treasury: 6_200_000,
       voteFeeActive: true,
-      voteGross: 6_000_000,
+      voteGross: 14_000_000,
     },
   );
 });
 
-test("vote fees are free before turn 100 and counted from turn 100 onward", () => {
+test("repeated approval vote fee sequence matches PRD before and after turn 100", () => {
+  assert.deepEqual(
+    [1, 2, 3, 4].map((sequence) =>
+      calculateRepeatedVoteFeeLamports({
+        baseFeeLamports: 2_000_000,
+        sequence,
+        turnId: 99,
+      }),
+    ),
+    [0, 4_000_000, 8_000_000, 16_000_000],
+  );
+  assert.deepEqual(
+    [1, 2, 3, 4].map((sequence) =>
+      calculateRepeatedVoteFeeLamports({
+        baseFeeLamports: 2_000_000,
+        sequence,
+        turnId: 100,
+      }),
+    ),
+    [2_000_000, 4_000_000, 8_000_000, 16_000_000],
+  );
+});
+
+test("vote fee accounting sums repeated approval vote fee sequences", () => {
   const beforeGate = calculatePrizePoolAccounting({
     config: {
       voteFeeLamports: 2_000_000,
@@ -331,15 +355,15 @@ test("vote fees are free before turn 100 and counted from turn 100 onward", () =
     voteCount: 10,
   });
 
-  assert.equal(beforeGate.sources.votes.count, 0);
-  assert.equal(beforeGate.sources.votes.grossLamports, 0);
-  assert.equal(beforeGate.sources.votes.feeActive, false);
+  assert.equal(beforeGate.sources.votes.count, 10);
+  assert.equal(beforeGate.sources.votes.grossLamports, 2_044_000_000);
+  assert.equal(beforeGate.sources.votes.feeActive, true);
   assert.equal(afterGate.sources.votes.count, 10);
-  assert.equal(afterGate.sources.votes.grossLamports, 20_000_000);
+  assert.equal(afterGate.sources.votes.grossLamports, 2_046_000_000);
   assert.equal(afterGate.sources.votes.feeActive, true);
 });
 
-test("elimination vote fees use twice the effective vote fee from turn 100", () => {
+test("elimination vote fees use same-side repeat escalation", () => {
   const beforeGate = calculatePrizePoolAccounting({
     config: {
       voteFeeLamports: 5_000_000,
@@ -363,11 +387,11 @@ test("elimination vote fees use twice the effective vote fee from turn 100", () 
     voteCount: 0,
   });
 
-  assert.equal(beforeGate.sources.eliminationVotes.count, 0);
-  assert.equal(beforeGate.sources.eliminationVotes.grossLamports, 0);
+  assert.equal(beforeGate.sources.eliminationVotes.count, 3);
+  assert.equal(beforeGate.sources.eliminationVotes.grossLamports, 30_000_000);
   assert.equal(afterGate.sources.eliminationVotes.count, 3);
-  assert.equal(afterGate.sources.eliminationVotes.feeLamports, 10_000_000);
-  assert.equal(afterGate.sources.eliminationVotes.grossLamports, 30_000_000);
+  assert.equal(afterGate.sources.eliminationVotes.feeLamports, 5_000_000);
+  assert.equal(afterGate.sources.eliminationVotes.grossLamports, 35_000_000);
 });
 
 test("rule elimination votes and closed decision state are projected for audit", () => {
@@ -977,6 +1001,16 @@ test("creator and voter reward records are stored without reducing winner payout
   saveRuleVote({
     ruleId: 7,
     ruleProposal: base58,
+    ruleVote: walletTwo,
+    sequence: 2,
+    signature: walletTwo,
+    submittedAt: "2026-06-12T12:06:30.000Z",
+    turnId: 231,
+    voter: wallet,
+  });
+  saveRuleVote({
+    ruleId: 7,
+    ruleProposal: base58,
     ruleVote: base58,
     signature: base58,
     submittedAt: "2026-06-12T12:07:00.000Z",
@@ -1029,21 +1063,22 @@ test("creator and voter reward records are stored without reducing winner payout
   const summary = getRoundSummary(231, 231);
 
   assert.equal(winners.alternative.winnerCount, 2);
-  assert.equal(winners.alternative.individualPayoutLamports, 11_875_000);
-  assert.equal(rewards.creatorRewardReserveLamports, 500_000);
+  assert.equal(winners.alternative.individualPayoutLamports, 14_250_000);
+  assert.equal(rewards.creatorRewardReserveLamports, 600_000);
   assert.equal(rewards.creator?.creatorWallet, wallet);
-  assert.equal(rewards.creator?.calculatedRewardLamports, 3_562_500);
-  assert.equal(rewards.creator?.finalRewardLamports, 500_000);
-  assert.equal(rewards.voterRewardPool.calculatedPoolLamports, 1_781_250);
+  assert.equal(rewards.creator?.calculatedRewardLamports, 4_275_000);
+  assert.equal(rewards.creator?.finalRewardLamports, 600_000);
+  assert.equal(rewards.voterRewardPool.calculatedPoolLamports, 2_137_500);
   assert.equal(rewards.voterRewardPool.finalPoolLamports, 0);
+  assert.equal(rewards.voters.length, 2);
   assert.equal(voterRecords.length, 2);
   assert.equal(voterRecords[0]?.finalRewardLamports, 0);
   assert.equal(creatorRecords.length, 1);
   assert.equal(
     summary.winners.alternative.individualPayoutLamports,
-    11_875_000,
+    14_250_000,
   );
-  assert.equal(summary.rewards.creator?.finalRewardLamports, 500_000);
+  assert.equal(summary.rewards.creator?.finalRewardLamports, 600_000);
 });
 
 test("reward calculation handles no alternative winners and zero elected-rule voters", () => {

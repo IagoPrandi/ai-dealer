@@ -11,7 +11,7 @@ This is the Solana account and instruction contract draft for M0.4. Program impl
 | `GameToken` | `[b"game_token", turn_id, player_wallet]` | Turn-scoped participation credential issued by `submit_guess`. |
 | `PlayerGuess` | `[b"guess", turn_id, player_wallet]` | One guess per wallet per turn. |
 | `RuleProposal` | `[b"rule", turn_id, rule_id]` | Rule text, hashes, token count, state, vote/report counts. |
-| `RuleVote` | `[b"vote", turn_id, rule_id, voter_wallet]` | One vote record per wallet/rule/turn. |
+| `RuleVote` | `[b"vote", turn_id, rule_id, voter_wallet, sequence]` | Sequenced vote record per wallet/rule/turn; same wallet may cast repeated votes with escalating fees. |
 | `RuleRemovalRecord` | `[b"remove_rule", turn_id, rule_id, remover_wallet]` | Paid rule removal audit. |
 | `ElectionVrfRequestRecord` | `[b"election_vrf", turn_id]` | Switchboard election request and fulfillment reference. |
 | `RuleFinalistSetRecord` | `[b"finalists", turn_id]` | Locked finalist set and hashes. |
@@ -46,7 +46,7 @@ Instructions that require a current-turn Game Token must verify:
 | `open_turn` | Authority/automation | Previous turn finalized or first turn; cycle index valid. |
 | `submit_guess` | Player | Turn open, unique wallet guess, valid six unique numbers, fee paid; creates `GameToken`. |
 | `propose_rule` | Player | Game Token valid, token count valid, preflight commitment valid, proposal fee paid. |
-| `vote_rule` | Player | Game Token valid, rule proposed/eligible, one vote per wallet/rule/turn. |
+| `vote_rule` | Player | Game Token valid, rule proposed/eligible, sequence valid and unique for that wallet/rule/turn, repeated-vote fee paid when required. |
 | `remove_rule` | Player | Game Token valid, removal threshold passed, removal fee paid to prize pool, before eligible pool lock. |
 | `report_rule` | Player/API commitment | Game Token valid, report rate limit observed off-chain. |
 | `lock_eligible_rule_pool` | Automation | Election cutoff reached, eligible pool hash committed. |

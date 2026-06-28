@@ -120,17 +120,47 @@ export function IdealerApp({
       try {
         const player = address(walletAddress);
         const ruleProposal = (await deriveRuleProposalAddress({ ruleId, turnId })).toString();
+        const rule = rules.rules.find((candidate) => candidate.ruleId === ruleId);
+        const sequence =
+          kind === "approve"
+            ? (rule?.myApproveCount ?? 0) + 1
+            : (rule?.myAgainstCount ?? 0) + 1;
         const submittedAt = new Date().toISOString();
         if (kind === "approve") {
-          const instruction = await createVoteRuleInstruction({ player, ruleId, turnId });
+          const instruction = await createVoteRuleInstruction({ player, ruleId, sequence, turnId });
           const signature = await sendInstruction(client, wallet, instruction);
-          const ruleVote = (await deriveRuleVoteAddress({ player, ruleId, turnId })).toString();
-          await postRuleVote({ ruleId, ruleProposal, ruleVote, signature, submittedAt, turnId, voter: walletAddress });
+          const ruleVote = (await deriveRuleVoteAddress({ player, ruleId, sequence, turnId })).toString();
+          await postRuleVote({
+            feeLamports: Math.round((rule?.nextApproveFeeSol ?? 0) * 1_000_000_000),
+            ruleId,
+            ruleProposal,
+            ruleVote,
+            sequence,
+            signature,
+            submittedAt,
+            turnId,
+            voter: walletAddress,
+          });
         } else {
-          const instruction = await createEliminateVoteRuleInstruction({ player, ruleId, turnId });
+          const instruction = await createEliminateVoteRuleInstruction({ player, ruleId, sequence, turnId });
           const signature = await sendInstruction(client, wallet, instruction);
-          const eliminationVote = (await deriveRuleEliminationVoteAddress({ player, ruleId, turnId })).toString();
-          await postRuleEliminationVote({ eliminationVote, ruleId, ruleProposal, signature, submittedAt, turnId, voter: walletAddress });
+          const eliminationVote = (await deriveRuleEliminationVoteAddress({
+            player,
+            ruleId,
+            sequence,
+            turnId,
+          })).toString();
+          await postRuleEliminationVote({
+            eliminationVote,
+            feeLamports: Math.round((rule?.nextAgainstFeeSol ?? 0) * 1_000_000_000),
+            ruleId,
+            ruleProposal,
+            sequence,
+            signature,
+            submittedAt,
+            turnId,
+            voter: walletAddress,
+          });
         }
         rules.reload();
       } catch (error) {

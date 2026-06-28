@@ -20,7 +20,9 @@ export interface RuleProposalApi {
 }
 
 export interface RuleVoteApi {
+  feeLamports?: number;
   ruleId: number;
+  sequence?: number;
   signature: string;
   submittedAt?: string;
   turnId: number;
@@ -203,6 +205,10 @@ export interface UiRule {
   how: string;
   id: string;
   mine: boolean;
+  myAgainstCount: number;
+  myApproveCount: number;
+  nextAgainstFeeSol: number;
+  nextApproveFeeSol: number;
   removed: boolean;
   ruleId: number;
   ruleProposal: string | undefined;

@@ -16,7 +16,7 @@ This is the M0.4 PostgreSQL model draft. On-chain accounts remain the source of 
 |---|---|---|
 | `turns` | Turn projection and lifecycle state. | Unique `turn_number`; indexed `status`, `starts_at`, `ends_at`. |
 | `rules` | Proposed rules and public rule state. | Unique `rule_id`; indexed `turn_id`, `creator_wallet`, `state`. |
-| `rule_votes` | On-chain vote projection. | Unique `(turn_id, rule_id, wallet)`. |
+| `rule_votes` | On-chain vote projection. | Unique `(turn_id, rule_id, wallet, sequence)`; rewards deduplicate by wallet. |
 | `rule_removal_records` | Paid removal records. | Unique `(turn_id, rule_id, remover_wallet)`. |
 | `conversation_drafts` | Wallet-scoped AI dealer draft projection for resumable rule conversations. | Unique `draft_id`; indexed `wallet`, `updated_at`. |
 | `prize_pool_rollovers` | Per-bucket rollover input for the next turn. | Unique `turn_id`; non-negative original and alternative rollover lamports. |

@@ -10,8 +10,11 @@ import {
   CREATOR_REWARD_RESERVE_SHARE_BPS,
   ELIMINATION_VOTE_FEE_MULTIPLIER,
   LAMPORTS_PER_SOL,
+  MAX_ELIMINATION_VOTES_PER_WALLET_RULE_TURN,
+  MAX_VOTES_PER_WALLET_RULE_TURN,
   MINIMUM_CLAIM_THRESHOLD_SOL,
   MVP_FEES_SOL,
+  REPEATED_VOTE_FEE_MULTIPLIER,
   RULE_MAX_TOKENS,
   RULE_REMOVAL_CONFIG,
   TREASURY_FEE_BPS,
@@ -133,9 +136,11 @@ export interface RuleProposalRecord extends RulePreflightResult {
 }
 
 export interface RuleVoteRecord {
+  feeLamports?: number;
   ruleId: number;
   ruleProposal: string;
   ruleVote: string;
+  sequence?: number;
   signature: string;
   submittedAt: string;
   turnId: number;
@@ -144,8 +149,10 @@ export interface RuleVoteRecord {
 
 export interface RuleEliminationVoteRecord {
   eliminationVote: string;
+  feeLamports?: number;
   ruleId: number;
   ruleProposal: string;
+  sequence?: number;
   signature: string;
   submittedAt: string;
   turnId: number;
@@ -263,6 +270,7 @@ export interface PrizePoolAccountingConfig {
   treasuryFeeBps: number;
   voteFeeLamports: number;
   voteFeeStartTurn: number;
+  repeatedVoteFeeMultiplier: number;
 }
 
 export interface PrizePoolFeeSourceAccounting {
@@ -863,16 +871,22 @@ function getRuleProposalKey(turnId: number, ruleId: number) {
   return `${turnId}:${ruleId}`;
 }
 
-function getRuleVoteKey(turnId: number, ruleId: number, voter: string) {
-  return `${turnId}:${ruleId}:${voter}`;
+function getRuleVoteKey(
+  turnId: number,
+  ruleId: number,
+  voter: string,
+  sequence: number,
+) {
+  return `${turnId}:${ruleId}:${voter}:${sequence}`;
 }
 
 function getRuleEliminationVoteKey(
   turnId: number,
   ruleId: number,
   voter: string,
+  sequence: number,
 ) {
-  return `${turnId}:${ruleId}:${voter}`;
+  return `${turnId}:${ruleId}:${voter}:${sequence}`;
 }
 
 function getPaidRuleRemovalKey(
@@ -1512,6 +1526,11 @@ function isValidRuleVote(value: unknown): value is RuleVoteRecord {
     Number(vote.turnId) > 0 &&
     Number.isInteger(vote.ruleId) &&
     Number(vote.ruleId) > 0 &&
+    Number.isInteger(vote.sequence) &&
+    Number(vote.sequence) > 0 &&
+    Number(vote.sequence) <= MAX_VOTES_PER_WALLET_RULE_TURN &&
+    (vote.feeLamports === undefined ||
+      (Number.isInteger(vote.feeLamports) && Number(vote.feeLamports) >= 0)) &&
     isBase58Like(vote.voter) &&
     isBase58Like(vote.ruleProposal) &&
     isBase58Like(vote.ruleVote) &&
@@ -1534,6 +1553,11 @@ function isValidRuleEliminationVote(
     Number(vote.turnId) > 0 &&
     Number.isInteger(vote.ruleId) &&
     Number(vote.ruleId) > 0 &&
+    Number.isInteger(vote.sequence) &&
+    Number(vote.sequence) > 0 &&
+    Number(vote.sequence) <= MAX_ELIMINATION_VOTES_PER_WALLET_RULE_TURN &&
+    (vote.feeLamports === undefined ||
+      (Number.isInteger(vote.feeLamports) && Number(vote.feeLamports) >= 0)) &&
     isBase58Like(vote.voter) &&
     isBase58Like(vote.ruleProposal) &&
     isBase58Like(vote.eliminationVote) &&
@@ -2238,16 +2262,63 @@ export function listRuleProposals(turnId: number) {
 }
 
 export function saveRuleVote(vote: RuleVoteRecord) {
-  ruleVotes.set(getRuleVoteKey(vote.turnId, vote.ruleId, vote.voter), vote);
-  return vote;
+  const sequence =
+    vote.sequence ??
+    [...ruleVotes.values()].filter(
+      (candidate) =>
+        candidate.turnId === vote.turnId &&
+        candidate.ruleId === vote.ruleId &&
+        candidate.voter === vote.voter,
+    ).length + 1;
+  const saved = {
+    ...vote,
+    sequence,
+    feeLamports:
+      vote.feeLamports ??
+      calculateRepeatedVoteFeeLamports({
+        baseFeeLamports: solToLamports(MVP_FEES_SOL.vote),
+        sequence,
+        turnId: vote.turnId,
+      }),
+  };
+  ruleVotes.set(
+    getRuleVoteKey(saved.turnId, saved.ruleId, saved.voter, saved.sequence),
+    saved,
+  );
+  return saved;
 }
 
 export function saveRuleEliminationVote(vote: RuleEliminationVoteRecord) {
+  const sequence =
+    vote.sequence ??
+    [...ruleEliminationVotes.values()].filter(
+      (candidate) =>
+        candidate.turnId === vote.turnId &&
+        candidate.ruleId === vote.ruleId &&
+        candidate.voter === vote.voter,
+    ).length + 1;
+  const saved = {
+    ...vote,
+    sequence,
+    feeLamports:
+      vote.feeLamports ??
+      calculateRepeatedVoteFeeLamports({
+        baseFeeLamports:
+          solToLamports(MVP_FEES_SOL.vote) * ELIMINATION_VOTE_FEE_MULTIPLIER,
+        sequence,
+        turnId: vote.turnId,
+      }),
+  };
   ruleEliminationVotes.set(
-    getRuleEliminationVoteKey(vote.turnId, vote.ruleId, vote.voter),
-    vote,
+    getRuleEliminationVoteKey(
+      saved.turnId,
+      saved.ruleId,
+      saved.voter,
+      saved.sequence,
+    ),
+    saved,
   );
-  return vote;
+  return saved;
 }
 
 export function saveRuleElimination(record: RuleEliminationRecord) {
@@ -4428,6 +4499,31 @@ function assertNonNegativeSafeInteger(value: number, label: string) {
   }
 }
 
+export function calculateRepeatedVoteFeeLamports(args: {
+  baseFeeLamports: number;
+  sequence: number;
+  turnId: number;
+}) {
+  assertNonNegativeSafeInteger(args.baseFeeLamports, "base_fee_lamports");
+  assertNonNegativeSafeInteger(args.sequence, "sequence");
+  assertNonNegativeSafeInteger(args.turnId, "turn_id");
+  if (args.sequence <= 0 || args.turnId <= 0) {
+    throw new Error("INVALID_REPEATED_VOTE_FEE_INPUT");
+  }
+
+  if (args.turnId < VOTE_FEE_START_TURN && args.sequence === 1) {
+    return 0;
+  }
+
+  const paidIndex = args.sequence - 1;
+  let feeLamports = args.baseFeeLamports;
+  for (let index = 0; index < paidIndex; index += 1) {
+    feeLamports *= REPEATED_VOTE_FEE_MULTIPLIER;
+    assertNonNegativeSafeInteger(feeLamports, "fee_lamports");
+  }
+  return feeLamports;
+}
+
 function splitFeeLamports(amountLamports: number, treasuryFeeBps: number) {
   assertNonNegativeSafeInteger(amountLamports, "fee_lamports");
   assertNonNegativeSafeInteger(treasuryFeeBps, "treasury_fee_bps");
@@ -4466,6 +4562,33 @@ function accountFeeSource(
   };
 }
 
+function accountVariableFeeSource(
+  feeAmountsLamports: number[],
+  baseFeeLamports: number,
+  treasuryFeeBps: number,
+): PrizePoolFeeSourceAccounting {
+  for (const feeLamports of feeAmountsLamports) {
+    assertNonNegativeSafeInteger(feeLamports, "fee_lamports");
+  }
+  const grossLamports = feeAmountsLamports.reduce(
+    (total, feeLamports) => total + feeLamports,
+    0,
+  );
+  assertNonNegativeSafeInteger(grossLamports, "gross_lamports");
+  const { prizeLamports, treasuryLamports } = splitFeeLamports(
+    grossLamports,
+    treasuryFeeBps,
+  );
+
+  return {
+    count: feeAmountsLamports.length,
+    feeLamports: baseFeeLamports,
+    grossLamports,
+    prizeLamports,
+    treasuryLamports,
+  };
+}
+
 function defaultAccountingConfig(): PrizePoolAccountingConfig {
   return {
     eliminationVoteFeeMultiplier: ELIMINATION_VOTE_FEE_MULTIPLIER,
@@ -4475,6 +4598,7 @@ function defaultAccountingConfig(): PrizePoolAccountingConfig {
     treasuryFeeBps: TREASURY_FEE_BPS,
     voteFeeLamports: solToLamports(MVP_FEES_SOL.vote),
     voteFeeStartTurn: VOTE_FEE_START_TURN,
+    repeatedVoteFeeMultiplier: REPEATED_VOTE_FEE_MULTIPLIER,
   };
 }
 
@@ -4482,12 +4606,14 @@ export function calculatePrizePoolAccounting(args: {
   alternativeRolloverLamports?: number;
   config?: Partial<PrizePoolAccountingConfig>;
   eliminationVoteCount?: number;
+  eliminationVoteFeeLamports?: number[];
   guessCount: number;
   originalRolloverLamports?: number;
   paidRuleRemovalCount: number;
   ruleProposalCount: number;
   turnId: number;
   voteCount: number;
+  voteFeeLamports?: number[];
 }): PrizePoolAccounting {
   assertNonNegativeSafeInteger(args.turnId, "turn_id");
   if (args.turnId <= 0) {
@@ -4498,7 +4624,6 @@ export function calculatePrizePoolAccounting(args: {
     ...defaultAccountingConfig(),
     ...args.config,
   };
-  const voteFeeActive = args.turnId >= config.voteFeeStartTurn;
   const guessSubmissions = accountFeeSource(
     args.guessCount,
     config.guessSubmissionFeeLamports,
@@ -4514,21 +4639,40 @@ export function calculatePrizePoolAccounting(args: {
     config.paidRuleRemovalFeeLamports,
     config.treasuryFeeBps,
   );
+  const eliminationVoteFees =
+    args.eliminationVoteFeeLamports ??
+    Array.from({ length: args.eliminationVoteCount ?? 0 }, (_, index) =>
+      calculateRepeatedVoteFeeLamports({
+        baseFeeLamports:
+          config.voteFeeLamports * config.eliminationVoteFeeMultiplier,
+        sequence: index + 1,
+        turnId: args.turnId,
+      }),
+    );
+  const approvalVoteFees =
+    args.voteFeeLamports ??
+    Array.from({ length: args.voteCount }, (_, index) =>
+      calculateRepeatedVoteFeeLamports({
+        baseFeeLamports: config.voteFeeLamports,
+        sequence: index + 1,
+        turnId: args.turnId,
+      }),
+    );
   const eliminationVotes = {
-    ...accountFeeSource(
-      voteFeeActive ? (args.eliminationVoteCount ?? 0) : 0,
+    ...accountVariableFeeSource(
+      eliminationVoteFees,
       config.voteFeeLamports * config.eliminationVoteFeeMultiplier,
       config.treasuryFeeBps,
     ),
-    feeActive: voteFeeActive,
+    feeActive: eliminationVoteFees.some((feeLamports) => feeLamports > 0),
   };
   const votes = {
-    ...accountFeeSource(
-      voteFeeActive ? args.voteCount : 0,
+    ...accountVariableFeeSource(
+      approvalVoteFees,
       config.voteFeeLamports,
       config.treasuryFeeBps,
     ),
-    feeActive: voteFeeActive,
+    feeActive: approvalVoteFees.some((feeLamports) => feeLamports > 0),
   };
 
   const grossFeesLamports =
@@ -4744,12 +4888,16 @@ export function getPrizePoolAccounting(turnId: number) {
   return calculatePrizePoolAccounting({
     alternativeRolloverLamports: rollover?.alternativeRolloverLamports ?? 0,
     eliminationVoteCount: eliminationVotes.length,
+    eliminationVoteFeeLamports: eliminationVotes.map(
+      (vote) => vote.feeLamports ?? 0,
+    ),
     guessCount: listGuessReceipts(turnId).length,
     originalRolloverLamports: rollover?.originalRolloverLamports ?? 0,
     paidRuleRemovalCount: listPaidRuleRemovals(turnId).length,
     ruleProposalCount: proposals.length,
     turnId,
     voteCount: votes.length,
+    voteFeeLamports: votes.map((vote) => vote.feeLamports ?? 0),
   });
 }
 
@@ -5242,7 +5390,12 @@ if (isMainModule()) {
           }
 
           const existing = ruleVotes.get(
-            getRuleVoteKey(body.turnId, body.ruleId, body.voter),
+            getRuleVoteKey(
+              body.turnId,
+              body.ruleId,
+              body.voter,
+              body.sequence ?? 0,
+            ),
           );
           if (existing && existing.signature !== body.signature) {
             sendJson(request, response, 409, {
@@ -5289,7 +5442,12 @@ if (isMainModule()) {
           }
 
           const existing = ruleEliminationVotes.get(
-            getRuleEliminationVoteKey(body.turnId, body.ruleId, body.voter),
+            getRuleEliminationVoteKey(
+              body.turnId,
+              body.ruleId,
+              body.voter,
+              body.sequence ?? 0,
+            ),
           );
           if (existing && existing.signature !== body.signature) {
             sendJson(request, response, 409, {

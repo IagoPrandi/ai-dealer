@@ -8,7 +8,7 @@ use std::{
 use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
 use idealer::{
     accounts, instruction, GlobalConfig, InitializeGlobalConfigArgs, PlayerGuess, ProposeRuleArgs,
-    RuleProposal, RuleVote, TurnState, TurnStatus,
+    RuleProposal, RuleVote, TurnState, TurnStatus, VoteRuleArgs,
 };
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
@@ -285,6 +285,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         &turn_id.to_le_bytes(),
         &rule_id.to_le_bytes(),
         payer.pubkey().as_ref(),
+        &1u16.to_le_bytes(),
     ]);
     if read_account::<RuleVote>(&rpc, &rule_vote)?.is_none() {
         let vote_ix = Instruction {
@@ -299,7 +300,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                 system_program: system_program::ID,
             }
             .to_account_metas(None),
-            data: instruction::VoteRule {}.data(),
+            data: instruction::VoteRule {
+                args: VoteRuleArgs { sequence: 1 },
+            }
+            .data(),
             program_id: idealer::ID,
         };
         println!("vote_rule {}", send(&rpc, &payer, vote_ix)?);

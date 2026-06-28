@@ -23,6 +23,10 @@ declare_id!("6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4");
 
 pub const TURN_DURATION_CYCLE_LEN: usize = 4;
 pub const MAX_FINALISTS: usize = 10;
+pub const REPEATED_VOTE_FEE_MULTIPLIER: u64 = 2;
+pub const ELIMINATION_VOTE_FEE_MULTIPLIER: u64 = 1;
+pub const MAX_VOTES_PER_WALLET_RULE_TURN: u16 = 20;
+pub const MAX_ELIMINATION_VOTES_PER_WALLET_RULE_TURN: u16 = 20;
 /// Fixed 1-hour decision/elimination window (PRD §5.4/§6.14a). Under the
 /// test-only `devnet-test` feature it collapses to a few seconds so the full
 /// election → elimination → active-election pipeline can be validated end-to-end
@@ -516,7 +520,7 @@ pub mod idealer {
         Ok(())
     }
 
-    pub fn vote_rule(ctx: Context<VoteRule>) -> Result<()> {
+    pub fn vote_rule(ctx: Context<VoteRule>, args: VoteRuleArgs) -> Result<()> {
         let clock = Clock::get()?;
         let config = &ctx.accounts.global_config;
         validate_live_turn(config, &ctx.accounts.turn_state)?;
@@ -542,8 +546,16 @@ pub mod idealer {
             ctx.accounts.game_token.used_for_vote_count < config.max_votes_per_wallet_per_turn,
             IdealerError::VoteLimitReached
         );
+        require!(
+            args.sequence > 0 && args.sequence <= MAX_VOTES_PER_WALLET_RULE_TURN,
+            IdealerError::VoteLimitReached
+        );
 
-        let vote_fee = effective_vote_fee_lamports(config, ctx.accounts.turn_state.turn_id);
+        let vote_fee = repeated_vote_fee_lamports(
+            config.vote_fee_lamports,
+            ctx.accounts.turn_state.turn_id,
+            args.sequence,
+        )?;
         collect_prize_pool_fee(
             &ctx.accounts.voter,
             &ctx.accounts.prize_vault,
@@ -555,6 +567,8 @@ pub mod idealer {
         vote.turn_id = ctx.accounts.turn_state.turn_id;
         vote.rule_id = ctx.accounts.rule_proposal.rule_id;
         vote.voter = ctx.accounts.voter.key();
+        vote.sequence = args.sequence;
+        vote.fee_lamports = vote_fee;
         vote.created_at = clock.unix_timestamp;
         vote.bump = ctx.bumps.rule_vote;
 
@@ -587,6 +601,8 @@ pub mod idealer {
             turn_id: vote.turn_id,
             rule_id: vote.rule_id,
             voter: vote.voter,
+            sequence: vote.sequence,
+            fee_lamports: vote.fee_lamports,
         });
         Ok(())
     }
@@ -861,7 +877,10 @@ pub mod idealer {
         Ok(())
     }
 
-    pub fn eliminate_vote_rule(ctx: Context<EliminateVoteRule>) -> Result<()> {
+    pub fn eliminate_vote_rule(
+        ctx: Context<EliminateVoteRule>,
+        args: EliminateVoteRuleArgs,
+    ) -> Result<()> {
         let clock = Clock::get()?;
         let config = &ctx.accounts.global_config;
         validate_live_turn(config, &ctx.accounts.turn_state)?;
@@ -886,10 +905,20 @@ pub mod idealer {
             !ctx.accounts.turn_state.finalist_eliminated[index],
             IdealerError::RuleAlreadyEliminated
         );
+        require!(
+            args.sequence > 0 && args.sequence <= MAX_ELIMINATION_VOTES_PER_WALLET_RULE_TURN,
+            IdealerError::VoteLimitReached
+        );
 
-        let fee = effective_vote_fee_lamports(config, ctx.accounts.turn_state.turn_id)
-            .checked_mul(2)
+        let base_elimination_fee = config
+            .vote_fee_lamports
+            .checked_mul(ELIMINATION_VOTE_FEE_MULTIPLIER)
             .ok_or(IdealerError::ArithmeticOverflow)?;
+        let fee = repeated_vote_fee_lamports(
+            base_elimination_fee,
+            ctx.accounts.turn_state.turn_id,
+            args.sequence,
+        )?;
         collect_prize_pool_fee(
             &ctx.accounts.voter,
             &ctx.accounts.prize_vault,
@@ -901,6 +930,8 @@ pub mod idealer {
         vote.turn_id = ctx.accounts.turn_state.turn_id;
         vote.rule_id = ctx.accounts.rule_proposal.rule_id;
         vote.voter = ctx.accounts.voter.key();
+        vote.sequence = args.sequence;
+        vote.fee_lamports = fee;
         vote.created_at = clock.unix_timestamp;
         vote.bump = ctx.bumps.rule_elimination_vote;
 
@@ -923,6 +954,7 @@ pub mod idealer {
             turn_id: vote.turn_id,
             rule_id: vote.rule_id,
             voter: vote.voter,
+            sequence: vote.sequence,
             fee_lamports: fee,
         });
         Ok(())
@@ -1557,12 +1589,21 @@ fn validate_game_token(game_token: &GameToken, turn_id: u64, player: Pubkey) -> 
     Ok(())
 }
 
-fn effective_vote_fee_lamports(config: &GlobalConfig, turn_id: u64) -> u64 {
-    if turn_id >= VOTE_FEE_START_TURN {
-        config.vote_fee_lamports
-    } else {
-        0
+fn repeated_vote_fee_lamports(base_fee_lamports: u64, turn_id: u64, sequence: u16) -> Result<u64> {
+    require!(sequence > 0, IdealerError::VoteLimitReached);
+
+    if turn_id < VOTE_FEE_START_TURN && sequence == 1 {
+        return Ok(0);
     }
+
+    let paid_index = sequence - 1;
+    let mut fee = base_fee_lamports;
+    for _ in 0..paid_index {
+        fee = fee
+            .checked_mul(REPEATED_VOTE_FEE_MULTIPLIER)
+            .ok_or(IdealerError::ArithmeticOverflow)?;
+    }
+    Ok(fee)
 }
 
 fn collect_prize_pool_fee<'info>(
@@ -2007,7 +2048,18 @@ pub struct ProposeRule<'info> {
     pub system_program: Program<'info, System>,
 }
 
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq)]
+pub struct VoteRuleArgs {
+    pub sequence: u16,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq)]
+pub struct EliminateVoteRuleArgs {
+    pub sequence: u16,
+}
+
 #[derive(Accounts)]
+#[instruction(args: VoteRuleArgs)]
 pub struct VoteRule<'info> {
     #[account(mut)]
     pub voter: Signer<'info>,
@@ -2050,7 +2102,8 @@ pub struct VoteRule<'info> {
             b"vote".as_ref(),
             turn_state.turn_id.to_le_bytes().as_ref(),
             rule_proposal.rule_id.to_le_bytes().as_ref(),
-            voter.key().as_ref()
+            voter.key().as_ref(),
+            args.sequence.to_le_bytes().as_ref()
         ],
         bump
     )]
@@ -2127,6 +2180,7 @@ pub struct RemoveRule<'info> {
 }
 
 #[derive(Accounts)]
+#[instruction(args: EliminateVoteRuleArgs)]
 pub struct EliminateVoteRule<'info> {
     #[account(mut)]
     pub voter: Signer<'info>,
@@ -2167,7 +2221,8 @@ pub struct EliminateVoteRule<'info> {
             b"elimination_vote".as_ref(),
             turn_state.turn_id.to_le_bytes().as_ref(),
             rule_proposal.rule_id.to_le_bytes().as_ref(),
-            voter.key().as_ref()
+            voter.key().as_ref(),
+            args.sequence.to_le_bytes().as_ref()
         ],
         bump
     )]
@@ -2683,6 +2738,8 @@ pub struct RuleVote {
     pub turn_id: u64,
     pub rule_id: u64,
     pub voter: Pubkey,
+    pub sequence: u16,
+    pub fee_lamports: u64,
     pub created_at: i64,
     pub bump: u8,
 }
@@ -2693,6 +2750,8 @@ pub struct RuleEliminationVote {
     pub turn_id: u64,
     pub rule_id: u64,
     pub voter: Pubkey,
+    pub sequence: u16,
+    pub fee_lamports: u64,
     pub created_at: i64,
     pub bump: u8,
 }
@@ -2863,6 +2922,8 @@ pub struct RuleVoteCast {
     pub turn_id: u64,
     pub rule_id: u64,
     pub voter: Pubkey,
+    pub sequence: u16,
+    pub fee_lamports: u64,
 }
 
 #[event]
@@ -2880,6 +2941,7 @@ pub struct RuleEliminationVoteCast {
     pub turn_id: u64,
     pub rule_id: u64,
     pub voter: Pubkey,
+    pub sequence: u16,
     pub fee_lamports: u64,
 }
 

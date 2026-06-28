@@ -6,6 +6,9 @@ export const TURN_DURATION_CYCLE_HOURS = [2, 2, 8, 8] as const;
 export const TURN_DURATION_CYCLE_SECONDS = [7_200, 7_200, 28_800, 28_800] as const;
 export const TEST_TURN_DURATION_SCALE_BPS = 1_500;
 export const VOTE_FEE_START_TURN = 100;
+export const REPEATED_VOTE_FEE_MULTIPLIER = 2;
+export const MAX_VOTES_PER_WALLET_RULE_TURN = 20;
+export const MAX_ELIMINATION_VOTES_PER_WALLET_RULE_TURN = 20;
 
 export const MVP_FEES_SOL = {
   guessSubmission: 0.01,
@@ -14,7 +17,7 @@ export const MVP_FEES_SOL = {
   vote: 0.005,
   report: 0
 } as const;
-export const ELIMINATION_VOTE_FEE_MULTIPLIER = 2;
+export const ELIMINATION_VOTE_FEE_MULTIPLIER = 1;
 
 // Paid rule removal protections (PRD §6.11 RULE_REMOVAL_CONFIG). A rule with
 // community momentum cannot be removed by paid player action: the creator may

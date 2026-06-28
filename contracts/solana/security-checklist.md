@@ -12,7 +12,7 @@
 - Trust boundaries: wallet to program, authority to program, program to System Program, future oracle integrations.
 - Top threats:
   - Fake or cross-turn accounts -> typed Anchor accounts, isolated PDA seeds, stored canonical bumps, relationship constraints.
-  - Duplicate guesses or votes -> deterministic `init` PDAs scoped by turn, player, and rule.
+  - Duplicate guesses or vote sequences -> deterministic `init` PDAs scoped by turn, player, rule, and vote sequence.
   - Invalid guesses or rules -> on-chain range, uniqueness, token-count, byte-length, hash, and preflight commitment validation.
   - Unauthorized lifecycle changes -> signer plus `has_one = authority` constraints.
   - Fee/accounting drift -> checked arithmetic and explicit treasury/prize split invariant.
@@ -29,7 +29,7 @@
 - [x] System Program CPI target is typed and fixed.
 - [x] Guess values are range checked and unique.
 - [x] Rule text, token count, text hash, and preflight commitment are validated on-chain.
-- [x] One guess and one vote per deterministic PDA scope are enforced.
+- [x] One guess and one vote per deterministic sequence PDA scope are enforced.
 - [x] Turn action windows use the canonical Clock sysvar and seconds consistently.
 - [x] Protocol pause state fails closed.
 - [x] Release overflow checks are enabled.

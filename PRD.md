@@ -1,8 +1,8 @@
-# Idealer — Product Requirements Document
+﻿# Idealer — Product Requirements Document
 
-> **Version:** 1.5.0  
-> **Status:** Implementation Baseline — MVP defaults integrated; local/self-hosted LLM support added; rule elimination decision phase added  
-> **Last Updated:** 2026-06-14  
+> **Version:** 1.5.1
+> **Status:** Implementation Baseline — MVP defaults integrated; local/self-hosted LLM support added; rule elimination decision phase added; repeated vote fee escalation specified
+> **Last Updated:** 2026-06-28
 > **Primary Product Surface:** Mobile-first DApp  
 > **Language:** Portuguese / English technical terms where useful
 
@@ -180,8 +180,7 @@ Sources:
 - guess submission fees;
 - rule proposal fees;
 - paid rule removal fees included in MVP;
-- vote fees, charged only from turn 100 onward;
-- rule elimination vote fees, charged only from turn 100 onward (the elimination vote costs 2× the effective vote fee for the turn; see section 6.14a and section 8.2);
+- side-specific vote fees, charged as `2^n * VOTE_FEE` where `n` is the number of previous votes by that wallet on the same rule and same side (`in favor` or `vote out`) in the same turn; before turn 100, the first same-wallet/same-rule/same-side vote is free, and the next vote on that same side starts at `2^1 * VOTE_FEE`;
 - optional future game actions.
 
 A protocol treasury fee is retained before distribution.
@@ -477,13 +476,17 @@ Voting should be treated as a lightweight engagement loop.
 
 Requirements:
 
-- voting is free before turn 100, given a valid turn Game Token; from turn 100 onward, voting requires a `VOTE_FEE` paid to the prize pool, and the fee must be shown before wallet confirmation;
+- each wallet may vote for the same rule multiple times, given a valid turn Game Token;
+- vote cost is side-specific: `2^n * VOTE_FEE`, where `n` is the number of previous votes by that wallet on the same rule and same side in the same turn;
+- before turn 100, the first approval vote by a wallet on a rule is free; if that same wallet votes for the same rule again in the same turn, the second approval vote costs `2^1 * VOTE_FEE`, and later votes continue the same exponent sequence;
+- from turn 100 onward, the first approval vote by a wallet on a rule costs `2^0 * VOTE_FEE`, and later votes continue the same exponent sequence;
+- the next vote fee must be shown before wallet confirmation;
 - spectators may browse rules, but the vote CTA asks them to play first;
 - voting is visually quick;
 - users see current top rules;
 - users understand that voting influences the rule finalist set, but VRF still selects the active rule from the survivors;
 - users understand that voting for the elected rule can earn a reward when that rule produces winners;
-- vote state is obvious: voted, not voted, vote changed;
+- vote state is obvious: not voted, voted once, repeated votes cast, and next vote cost;
 - voting close time is visible.
 
 UX copy example:
@@ -503,8 +506,8 @@ Requirements:
 
 - elimination voting only appears while the decision window is open and only for finalist rules;
 - the elimination CTA is visually distinct from the approval vote, so users do not confuse "support" with "vote out";
-- the elimination vote fee (2× the effective vote fee for the turn) must be shown before wallet confirmation;
-- each rule card shows its approval votes vs elimination votes and whether it is currently above the elimination threshold;
+- the next elimination vote fee must be shown before wallet confirmation;
+- each rule card shows its approval votes vs elimination votes, the connected wallet's own vote counts for each side, the next repeat-vote fee where applicable, and whether the rule is currently above the elimination threshold;
 - the UI explains, in plain language, that a finalist is eliminated when its elimination votes pass its approval votes, that up to 5 of the 10 can be eliminated, and that the active rule is then drawn from the survivors;
 - the decision-window close time and the resulting Eliminated / Survived Elimination states are visible.
 
@@ -513,7 +516,7 @@ UX copy example:
 ```text
 These 10 rules are finalists. You have 1 hour to vote some out.
 A rule is eliminated if its "vote out" count passes its support count — up to 5 of the 10 can go.
-Voting out costs 2× a normal vote. One surviving rule is then drawn as the Rule of the Hour.
+Your first vote out may be free before turn 100. Repeat votes cost more each time. One surviving rule is then drawn as the Rule of the Hour.
 ```
 
 ### 4.7 Retention Loops
@@ -664,8 +667,8 @@ Each player may perform the following actions per turn.
 | -------------- | ------------------------------------------------------------: | ----------------: | -------------------------------: |
 | Submit a guess |                                                            1x |               Yes | No; this action issues the token |
 | Propose a rule |                             5x per wallet per turn by default | Yes, per proposal |                              Yes |
-| Vote on a rule | 1 vote per rule; max 100 votes per wallet per turn by default | No before turn 100; Yes from turn 100 |                              Yes |
-| Vote to eliminate a rule | 1 elimination vote per finalist rule; only during the 1-hour decision window | Yes, 2× the effective vote fee for the turn (free before turn 100) |                              Yes |
+| Vote on a rule | Multiple votes per rule; max 100 approval votes per wallet per turn and max 20 per wallet/rule by default | `2^n * VOTE_FEE`, where `n` is prior same-side votes by that wallet/rule/turn; first approval vote is free before turn 100 |                              Yes |
+| Vote to eliminate a rule | Multiple elimination votes per finalist rule; only during the 1-hour decision window; max 100 elimination votes per wallet per turn and max 20 per wallet/finalist by default | Same `2^n * VOTE_FEE` schedule on the `vote out` side; first elimination vote is free before turn 100 |                              Yes |
 | Remove a rule  |  2x per wallet per turn by default; only before election lock |  Yes, removal fee |                              Yes |
 | Report a rule  |                            20x per wallet per turn by default |                No |                              Yes |
 
@@ -834,8 +837,8 @@ Turn N begins
 │       └── Finalist set is formed: 3 top-voted + 7 VRF-random = 10 by default
 │
 ├── DECISION / ELIMINATION WINDOW (fixed 60 minutes)
-│   ├── Game Token holders may cast paid elimination votes against finalists
-│   │   └── elimination vote fee = 2× the effective vote fee for the turn → prize pool
+│   ├── Game Token holders may cast elimination votes against finalists
+│   │   └── first vote may be free before turn 100; repeated votes use escalating paid fees → prize pool
 │   ├── A finalist qualifies for elimination when elimination_votes > approval_votes
 │   ├── At window close, up to 5 finalists are eliminated
 │   │   ├── if more than 5 qualify, the 5 with the most elimination votes are eliminated
@@ -1494,9 +1497,13 @@ const RULE_ELIMINATION_CONFIG = {
   minSurvivors: 1,                                    // never eliminate the last surviving finalist
   effectiveMaxEliminated: "min(maxEliminatedRules, finalistCount - minSurvivors)",
   approvalVoteCountLockedAt: "finalist_set_lock",     // positive-vote count frozen when the 10 finalists lock
-  eliminationVoteFeeMultiplier: 2,                    // × the effective vote fee for the turn
+  eliminationVoteBaseFeeMultiplier: 1,                // elimination vote side uses the same VOTE_FEE base
+  repeatedEliminationVoteFeeMultiplier: 2,            // same-wallet/same-finalist same-side exponent multiplier
   eliminationVoteFeeDestination: "prize_pool",
   requireGameToken: true,
+  allowRepeatedEliminationVotesPerFinalist: true,
+  firstEliminationVoteFreeBeforeTurnIndex: true,
+  maxEliminationVotesPerWalletFinalistTurn: 20,
   activeRuleSelectedFromSurvivorsOnly: true,
 };
 ```
@@ -1580,25 +1587,41 @@ The gate runs in the free preflight: when the compiled rule's signature is alrea
 
 Voting rules:
 
-- voting is free for turns before index 100; from turn 100 onward, voting requires a `VOTE_FEE` paid to the prize pool;
+- voting is free for a wallet's first approval vote on a given rule in turns before index 100; from turn 100 onward, that first approval vote requires a `VOTE_FEE` paid to the prize pool;
+- a wallet may cast repeated approval votes for the same rule in the same turn;
+- the approval vote fee is `2^n * VOTE_FEE`, where `n` is the number of previous approval votes by the same wallet on the same rule in the same turn;
+- before turn 100, the first approval vote by the same wallet on the same rule is free; the second costs `2^1 * VOTE_FEE`;
+- from turn 100 onward, the first approval vote by the same wallet on the same rule costs `2^0 * VOTE_FEE`;
 - a current-turn Game Token is always required to vote, regardless of the fee;
 - each wallet must hold a valid Turn Game Token PDA for the current turn to vote;
-- each wallet gets one vote per rule per turn;
-- votes are recorded on-chain through the `RuleVote` account/instruction path;
+- each successful approval vote counts as one additional approval vote for that rule;
+- approval votes are recorded on-chain through the `RuleVote` account/instruction path with a per-wallet/rule sequence or equivalent idempotent repeated-vote model;
 - votes do not carry over;
 - users can see top rules and vote count;
-- voter reward eligibility (section 8.4) is derived from the `RuleVote` records cast for the elected rule.
+- voter reward eligibility (section 8.4) is wallet-unique and derived from whether the wallet has at least one recorded `RuleVote` for the elected rule; repeated votes do not multiply the wallet's reward share.
 
 Vote fee configuration:
 
 ```typescript
 const VOTE_FEE_CONFIG = {
   freeBeforeTurnIndex: 100,       // turns with index < 100 vote for free
-  feeAppliesFromTurnIndex: 100,   // from turn 100 onward, voting requires VOTE_FEE
+  feeAppliesFromTurnIndex: 100,   // from turn 100 onward, the first same-wallet/same-rule vote requires VOTE_FEE
   voteFeeLamports: 5_000_000,     // 0.005 SOL (MVP/devnet default, configurable per environment)
   feeDestination: "prize_pool",   // same destination as the paid rule removal fee
   requireGameToken: true,         // Game Token gate applies to every turn
+  allowRepeatedVotesPerRule: true,
+  firstVoteFreeBeforeTurnIndex: true,
+  repeatedVoteStartsPaidBeforeTurnIndex: true,
+  repeatedVoteFeeMultiplier: 2,
+  maxApprovalVotesPerWalletRuleTurn: 20,
 };
+```
+
+Approval vote fee sequence for the same `(turn, wallet, rule)`:
+
+```text
+turn_index < 100  → vote #1 = 0; vote #2 = 2 × VOTE_FEE; vote #3 = 4 × VOTE_FEE; vote #4 = 8 × VOTE_FEE; ...
+turn_index >= 100 → vote #1 = VOTE_FEE; vote #2 = 2 × VOTE_FEE; vote #3 = 4 × VOTE_FEE; ...
 ```
 
 Because free voting by wallet is easy to manipulate, MVP must include basic anti-Sybil controls and monitoring.
@@ -1626,11 +1649,21 @@ Elimination voting rules:
 - the decision window lasts a fixed 60 minutes and is separate from the play window (it does not consume turn-cycle duration);
 - only wallets holding a valid current-turn Game Token may cast elimination votes;
 - elimination votes may only target rules in the current finalist set, and only while the window is open;
-- each wallet may cast **one elimination vote per finalist rule** per turn;
-- an elimination vote costs **2× the effective vote fee for the turn** (free before turn 100, `2 × VOTE_FEE = 0.01 SOL` from turn 100 onward), paid to the prize pool (section 8.2);
-- elimination votes are recorded on-chain through a dedicated `RuleEliminationVote` account/instruction path, distinct from the approval `RuleVote` path;
+- each wallet may cast repeated elimination votes against the same finalist rule in the same turn;
+- the elimination vote fee is `2^n * VOTE_FEE`, where `n` is the number of previous elimination votes by the same wallet against the same finalist in the same turn;
+- before turn 100, the first elimination vote by a wallet against a finalist is free; the second costs `2^1 * VOTE_FEE`;
+- from turn 100 onward, the first elimination vote by a wallet against a finalist costs `2^0 * VOTE_FEE`;
+- each successful elimination vote counts as one additional elimination vote against that finalist;
+- elimination votes are recorded on-chain through a dedicated `RuleEliminationVote` account/instruction path with a per-wallet/rule sequence or equivalent idempotent repeated-vote model, distinct from the approval `RuleVote` path;
 - elimination votes do not carry over to other turns;
 - approval (positive) vote counts used by the elimination criterion are frozen when the finalist set locks; elimination votes accrue during the window and are compared at window close.
+
+Elimination vote fee sequence for the same `(turn, wallet, finalist_rule)`:
+
+```text
+turn_index < 100  → vote #1 = 0; vote #2 = 2 × VOTE_FEE; vote #3 = 4 × VOTE_FEE; vote #4 = 8 × VOTE_FEE; ...
+turn_index >= 100 → vote #1 = VOTE_FEE; vote #2 = 2 × VOTE_FEE; vote #3 = 4 × VOTE_FEE; ...
+```
 
 Elimination resolution at window close:
 
@@ -1643,7 +1676,7 @@ Elimination resolution at window close:
 
 Anti-abuse and integrity:
 
-- the paid 2× fee and the Game Token gate make coordinated elimination costlier than creating fresh wallets;
+- the escalating repeat-vote fee and the Game Token gate make coordinated elimination costlier than creating fresh wallets;
 - elimination votes feed the same vote-concentration monitoring and suspicious-activity alerts as approval votes;
 - elimination tallies, the qualifying set, the eliminated set, and `eliminated_finalist_hash` are persisted for auditability.
 
@@ -2506,8 +2539,9 @@ Default fee model:
 - fixed fee for guess submission;
 - fixed fee for rule proposal;
 - paid rule removal fee;
-- voting is free before turn 100; a fixed vote fee applies from turn 100 onward, paid to the prize pool;
-- elimination voting (decision window) costs 2× the effective vote fee for the turn, paid to the prize pool (free before turn 100, since the support vote is free then);
+- approval and elimination voting use the same side-specific fee rule: `2^n * VOTE_FEE`, where `n` is the number of previous votes by the same wallet on the same rule and same side in the same turn;
+- before turn 100, the first vote on a side is free; the next same-side vote starts at `2^1 * VOTE_FEE`;
+- from turn 100 onward, the first vote on a side costs `2^0 * VOTE_FEE`;
 - rule reporting is free but rate-limited and requires a current-turn Game Token.
 
 Default MVP value-flow mode:
@@ -2526,9 +2560,10 @@ const MVP_FEE_CONFIG = {
   guessSubmissionFeeLamports: 10_000_000, // 0.01 SOL
   ruleProposalFeeLamports: 20_000_000, // 0.02 SOL
   ruleRemovalFeeLamports: 50_000_000, // 0.05 SOL
-  voteFeeLamports: 5_000_000, // 0.005 SOL; applies only from turn 100 onward (see VOTE_FEE_CONFIG). 0 for turns before 100
-  eliminationVoteFeeLamports: 10_000_000, // 2 × voteFeeLamports = 0.01 SOL from turn 100 onward; 0 for turns before 100 (see RULE_ELIMINATION_CONFIG)
-  eliminationVoteFeeMultiplier: 2, // elimination vote = 2× the effective vote fee for the turn
+  voteFeeLamports: 5_000_000, // 0.005 SOL base fee for paid approval votes (see VOTE_FEE_CONFIG)
+  eliminationVoteFeeLamports: 5_000_000, // same VOTE_FEE base; side-specific exponent controls escalation
+  eliminationVoteFeeMultiplier: 1, // elimination vote side uses the approval vote base fee
+  repeatedVoteFeeMultiplier: 2, // exponent base for repeated same-wallet/same-rule/same-side votes
   ruleReportFeeLamports: 0,
   treasuryFeeBps: 500, // 5%
 };
@@ -2546,23 +2581,24 @@ The rule removal fee is not configurable to treasury in MVP. This keeps product 
 MVP vote fee policy:
 
 ```text
-turn_index < 100  → voting is free
-turn_index >= 100 → VOTE_FEE → current turn prize pool
+For approval votes on the same (turn, wallet, rule):
+turn_index < 100  → vote #1 = 0; vote #2 = 2 × VOTE_FEE; vote #3 = 4 × VOTE_FEE; vote #4 = 8 × VOTE_FEE; ...
+turn_index >= 100 → vote #1 = VOTE_FEE; vote #2 = 2 × VOTE_FEE; vote #3 = 4 × VOTE_FEE; ...
 fee_destination = prize_pool only
 ```
 
-The vote fee follows the same prize-pool accounting as the rule removal fee and is not configurable to treasury in MVP. The current-turn Game Token requirement applies in every turn, with or without the fee.
+The vote fee follows the same prize-pool accounting as the rule removal fee and is not configurable to treasury in MVP. The current-turn Game Token requirement applies in every turn, with or without the fee. The first free vote before turn 100 is limited to one vote per wallet/rule/side; any repeat vote by the same wallet on the same rule and side starts paid voting immediately at `2^1 * VOTE_FEE`.
 
 MVP elimination vote fee policy:
 
 ```text
-elimination_vote_fee = 2 × effective_vote_fee_for_turn
-turn_index < 100  → elimination voting is free (effective vote fee is 0)
-turn_index >= 100 → 2 × VOTE_FEE = 0.01 SOL → current turn prize pool
+For elimination votes on the same (turn, wallet, finalist_rule):
+turn_index < 100  → vote #1 = 0; vote #2 = 2 × VOTE_FEE; vote #3 = 4 × VOTE_FEE; vote #4 = 8 × VOTE_FEE; ...
+turn_index >= 100 → vote #1 = VOTE_FEE; vote #2 = 2 × VOTE_FEE; vote #3 = 4 × VOTE_FEE; ...
 fee_destination = prize_pool only
 ```
 
-The elimination vote fee follows the same prize-pool accounting as the vote and removal fees and is not configurable to treasury in MVP. The current-turn Game Token requirement applies to elimination voting in every turn, with or without the fee (section 6.14a).
+The elimination vote fee follows the same prize-pool accounting as the vote and removal fees and is not configurable to treasury in MVP. The current-turn Game Token requirement applies to elimination voting in every turn, with or without the fee (section 6.14a). The first free elimination vote before turn 100 is limited to one vote per wallet/finalist on the vote-out side; any repeat vote by the same wallet against the same finalist starts paid elimination voting immediately at `2^1 * VOTE_FEE`.
 
 ### 8.3 Prize Distribution
 
@@ -2584,7 +2620,8 @@ This reward is calculated from the individual payout but funded from the creator
 In addition to the creator reward, the wallets that voted for the elected rule share an **elected-rule voter reward**:
 
 - the voter reward pool equals **15% of a single individual alternative-rule winner payout** (a fixed amount that does not scale with the number of winners);
-- the pool is split **equally** among the wallets that hold a recorded `RuleVote` for the elected rule: `per_voter = voter_reward_pool / elected_rule_voter_count`;
+- the pool is split **equally** among the unique wallets that hold at least one recorded `RuleVote` for the elected rule: `per_voter = voter_reward_pool / elected_rule_voter_wallet_count`;
+- repeated approval votes by the same wallet help the elected rule's vote count, but do not create additional voter-reward shares for that wallet;
 - the voter reward is funded from the **same creator reward reserve** sourced from platform monetization;
 - it is paid **only when the elected rule produces winners**, and it must not reduce any winner's individual payout;
 - if the elected rule has zero recorded voters, no voter reward is distributed.
@@ -2657,8 +2694,8 @@ const VOTER_REWARD_CONFIG = {
   capPerTurnLamports: 250_000_000, // 0.25 SOL maximum voter reward pool per turn
   reserveSource: "platform_monetization", // same creator reward reserve
   reserveDrawOrder: "creator_first_then_voter",
-  splitMethod: "equal_among_elected_rule_voters",
-  eligibleVoters: "wallets_with_recorded_RuleVote_for_elected_rule",
+  splitMethod: "equal_among_unique_elected_rule_voter_wallets",
+  eligibleVoters: "unique_wallets_with_at_least_one_recorded_RuleVote_for_elected_rule",
   payOnlyWhenAlternativeRuleProducesWinners: true,
   unpaidShortfallCreatesDebt: false,
 };
@@ -2817,7 +2854,7 @@ interface CreatorRewardRecord {
 
 #### 8.7.9 Voter Reward Accounting
 
-Voter reward is calculated after the individual alternative-rule winner payout is known, and is funded from the creator reward reserve after the creator reward has been deducted (see section 8.5). The eligible voter set is derived from the `RuleVote` records cast for the elected rule.
+Voter reward is calculated after the individual alternative-rule winner payout is known, and is funded from the creator reward reserve after the creator reward has been deducted (see section 8.5). The eligible voter set is derived from unique wallets with at least one `RuleVote` record for the elected rule. Repeated approval votes by the same wallet do not multiply voter reward eligibility or per-wallet reward shares.
 
 Voter reward must be idempotent and must not be recalculated differently after finalization. Per-voter rounding follows the same deterministic integer-lamport policy as payouts (section 8.7.5); any rounding remainder is sent to the same-category rollover bucket.
 
@@ -2872,11 +2909,11 @@ const MVP_RATE_LIMIT_CONFIG = {
 
   votesPerWalletPerTurn: 100,
   votesPerWalletPerMinute: 30,
-  votesPerRulePerWalletPerTurn: 1,
+  votesPerRulePerWalletPerTurn: 20,
 
-  eliminationVotesPerWalletPerTurn: 10, // at most one per finalist; the finalist set holds up to 10 rules
+  eliminationVotesPerWalletPerTurn: 100,
   eliminationVotesPerWalletPerMinute: 30,
-  eliminationVotesPerRulePerWalletPerTurn: 1,
+  eliminationVotesPerRulePerWalletPerTurn: 20,
 
   ruleRemovalsPerWalletPerTurn: 2,
   ruleRemovalAttemptsPerWalletPerMinute: 3,
@@ -2892,7 +2929,7 @@ const MVP_RATE_LIMIT_CONFIG = {
 Rate-limit requirements:
 
 - limits must be enforced server-side;
-- on-chain uniqueness constraints remain the source of truth for one-guess-per-wallet, one-vote-per-rule-per-wallet, one-elimination-vote-per-finalist-per-wallet, and paid removal idempotency;
+- on-chain constraints remain the source of truth for one-guess-per-wallet, per-vote sequence/idempotency for repeated approval and elimination votes, and paid removal idempotency;
 - rate-limit rejections must be user-readable;
 - suspicious rate-limit events must be visible in the admin abuse dashboard;
 - changing default rate limits requires updating `packages/constants`, backend config, admin documentation, and tests.
@@ -2940,7 +2977,8 @@ Stores:
 - guess cutoff ratio (within the play window);
 - decision/elimination window duration minutes (fixed, default 60);
 - max eliminated rules per turn (default 5);
-- elimination vote fee multiplier (default 2× the effective vote fee);
+- elimination vote base fee multiplier (default `1× VOTE_FEE`; escalation is per side);
+- repeated vote fee multiplier (default exponent base `2`, applied as `2^n * VOTE_FEE`);
 - max rule tokens;
 - Switchboard VRF configuration for draw;
 - Switchboard VRF configuration for finalist election;
@@ -3074,7 +3112,7 @@ open_turn
 submit_guess                  # also creates GameToken PDA
 propose_rule                  # requires GameToken PDA + valid preflight commitment
 vote_rule                     # requires GameToken PDA
-eliminate_vote_rule           # requires GameToken PDA + 2× vote fee; only during decision window; fee goes to prize pool
+eliminate_vote_rule           # requires GameToken PDA + escalating elimination vote fee when non-free; only during decision window; fee goes to prize pool
 remove_rule                   # requires GameToken PDA + removal fee; fee goes to prize pool
 report_rule                   # requires GameToken PDA, may be off-chain with commitment
 lock_eligible_rule_pool
@@ -3098,7 +3136,9 @@ update_config
 
 `remove_rule` is included in MVP as a paid player action. It must verify the remover role, vote-count thresholds, current-turn GameToken PDA, pre-election-lock timing, removal fee payment, and prize-pool fee destination. Rule invalidation remains a separate formal/security path handled by validation, reporting, abuse scoring, and restricted admin review.
 
-`eliminate_vote_rule` is the decision-window elimination vote. It must verify the current-turn GameToken PDA, that the target is a current finalist, that the decision window is open, one-elimination-vote-per-finalist-per-wallet uniqueness, the 2× vote-fee payment, and the prize-pool fee destination. `close_elimination_window` tallies the recorded `RuleEliminationVote` accounts, applies the elimination criterion and the cap of 5 (with the deterministic tie-break), persists the eliminated set hash, and must run before `request_active_election_vrf`.
+`vote_rule` is the approval vote instruction. It must verify the current-turn GameToken PDA, that the target rule is vote-eligible, that the voting window is open, the repeated-vote sequence/idempotency key for `(turn, wallet, rule)`, the required escalating vote fee when non-free, and the prize-pool fee destination.
+
+`eliminate_vote_rule` is the decision-window elimination vote. It must verify the current-turn GameToken PDA, that the target is a current finalist, that the decision window is open, the repeated-vote sequence/idempotency key for `(turn, wallet, finalist_rule)`, the required escalating elimination vote fee when non-free, and the prize-pool fee destination. `close_elimination_window` tallies the recorded `RuleEliminationVote` accounts, applies the elimination criterion and the cap of 5 (with the deterministic tie-break), persists the eliminated set hash, and must run before `request_active_election_vrf`.
 
 ### 9.9 On-Chain vs Off-Chain Split
 
@@ -3110,8 +3150,8 @@ On-chain:
 - GameToken PDA existence and ownership;
 - rule hashes;
 - full sanitized original rule text in `RuleProposal`;
-- `RuleVote` accounts and vote counts;
-- `RuleEliminationVote` accounts, elimination vote counts, and 2× vote-fee transfers to prize pool;
+- `RuleVote` accounts or sequenced records, approval vote counts, and escalating vote-fee transfers to prize pool;
+- `RuleEliminationVote` accounts or sequenced records, elimination vote counts, and escalating elimination vote-fee transfers to prize pool;
 - paid rule removal records and removal fee transfers to prize pool;
 - eligible pool hash;
 - finalist set hash;
@@ -4286,10 +4326,10 @@ The project must not launch with real payouts or any real SOL flows until the M9
 | Rule Compiler Gate            | Natural-language rules compile into valid DSL/AST or are rejected with clear reasons.                                      |
 | Election Randomness Gate      | Switchboard election VRF, fulfilled-randomness finalist derivation, ranged output, and no deterministic fallback verified. |
 | Runtime Security Gate         | Sandbox limits verified; network/filesystem/imports/randomness blocked.                                                    |
-| Accounting Gate               | Payout, rollover, rounding, minimum payout, unclaimed claims, and creator reward cases tested.                             |
+| Accounting Gate               | Payout, rollover, rounding, minimum payout, unclaimed claims, creator reward, voter reward, and repeated vote fee cases tested. |
 | Mobile Reliability Gate       | Wallet deep-link, pending, rejected, duplicate, delayed, and turn-changed flows tested.                                    |
-| Abuse Resistance Gate         | Vote concentration, rate limits, reports, and suspicious wallet clusters visible in admin.                                 |
-| Observability & Incident Gate | Alerts, dashboards, logs, rollback/runbooks and pause procedures validated.                                                |
+| Abuse Resistance Gate         | Vote concentration, repeated-vote concentration, rate limits, reports, and suspicious wallet clusters visible in admin.    |
+| Observability & Incident Gate | Alerts, dashboards, repeated-vote fee metrics, logs, rollback/runbooks and pause procedures validated.                    |
 
 ### 13.6 Operational Security
 
@@ -4449,14 +4489,15 @@ Establish the product baseline, architecture baseline, monorepo structure, Docke
 - [x] Confirm two winning conditions: original rule and active alternative rule.
 - [x] Confirm current-turn Game Token requirement for proposing, voting, removing, and reporting rules.
 - [x] Confirm rule election policy: exactly 10 finalists, composed of 3 top-voted eligible + 7 VRF-random eligible, formed by a finalist-election VRF at the end of the play window.
-- [x] Confirm rule elimination decision phase: a fixed 1-hour decision window after the finalist set is locked, in which Game-Token holders cast paid elimination votes (2× the effective vote fee → prize pool); a finalist is eliminated when its elimination votes exceed its frozen approval votes; up to 5 of the 10 may be eliminated (when more than 5 qualify, the 5 with the most elimination votes are eliminated, ties broken by fewest approval votes then lowest rule_id); the active rule is then VRF-selected from the survivors.
+- [x] Confirm rule elimination decision phase: a fixed 1-hour decision window after the finalist set is locked, in which Game-Token holders cast paid elimination votes (2× the effective vote fee → prize pool); a finalist is eliminated when its elimination votes exceed its frozen approval votes; up to 5 of the 10 may be eliminated (when more than 5 qualify, the 5 with the most elimination votes are eliminated, ties broken by fewest approval votes then lowest rule_id); the active rule is then VRF-selected from the survivors. Historical baseline; superseded only for repeated elimination-vote fee handling by PRD v1.5.1 sections 6.14a and 8.2.
 - [x] Confirm Switchboard VRF is used for the draw, the finalist election, and the active election.
 - [x] Confirm no deterministic fallback finalist activation.
 - [x] Confirm paid rule removal is included in MVP with fixed prize-pool fee destination.
 - [x] Confirm active rule creator reward: 15% of each individual alternative-rule winner payout.
 - [x] Confirm creator reward is funded from the creator reward reserve sourced from platform monetization, not deducted from the winner-visible payout.
 - [x] Confirm elected-rule voter reward: 15% of a single individual payout, split equally among the elected rule's voters, funded from the same reserve with its own per-turn cap.
-- [x] Confirm vote fee from turn 100 onward, destination prize pool, with the current-turn Game Token requirement retained.
+- [x] Confirm vote fee from turn 100 onward, destination prize pool, with the current-turn Game Token requirement retained. Historical baseline; superseded by PRD v1.5.1 repeated approval-vote fee handling in sections 6.14 and 8.2.
+- [x] Confirm PRD v1.5.1 repeated vote policy: same wallet may repeatedly vote for or against the same rule; fee is `2^n * VOTE_FEE` where `n` is previous votes by that wallet on the same rule and same side; first same-side vote is free before turn 100 only; voter rewards remain unique per wallet.
 - [x] Confirm admin console is separate from the public DApp.
 - [x] Confirm admin console is for insights, not direct game manipulation.
 - [x] Confirm monorepo and Docker Compose are required implementation constraints.
@@ -4982,18 +5023,24 @@ Implement a working mobile DApp on Solana devnet with wallet flows, devnet trans
 **Checklist:**
 
 - [x] Implement `RuleVote` account/instruction submission flow.
-- [x] Enforce one `RuleVote` per wallet per rule per turn.
+- [x] Enforce one `RuleVote` per wallet per rule per turn. Historical baseline; superseded by PRD v1.5.1 repeated approval-vote requirements in section 6.14.
+- [x] Implement repeated approval votes for the same `(turn, wallet, rule)` with sequenced/idempotent vote records.
+- [x] Implement escalating approval vote fees: fee is `2^n * VOTE_FEE` by prior same-wallet/same-rule approval count; first vote free before turn 100, from turn 100 first vote costs `VOTE_FEE`.
 - [x] Update vote count in backend/API from indexed on-chain `RuleVote` state.
 - [x] Update vote state in UI.
+- [x] Update vote state in UI to show the connected wallet's vote count and next repeat-vote cost.
 - [x] Show leading rules.
 - [x] Handle voting after cutoff.
-- [x] Handle duplicate vote.
+- [x] Handle duplicate vote. Historical baseline; superseded by repeated-vote idempotency requirements in PRD v1.5.1.
+- [x] Handle repeated-vote retry/idempotency without creating duplicate sequence records.
 - [x] Add vote event to activity feed.
 
 **Approval criteria:**
 
 - [x] Vote is recorded through the on-chain `RuleVote` account/instruction path.
+- [x] Repeated approval votes are recorded through sequenced `RuleVote` records or an equivalent auditable on-chain model.
 - [x] UI vote counts match backend/indexed state.
+- [x] UI next-vote cost matches backend/indexed repeated-vote fee calculation.
 - [x] Voting closes correctly at cutoff.
 
 ---
@@ -5253,8 +5300,10 @@ Implement draw generation, rule election, AI rule validation, guess verification
 - [x] Split rule election into finalist-election VRF (forms the 10) and active-election VRF (selects from survivors).
 - [x] Lock each finalist's approval (positive) vote count when the finalist set is formed.
 - [x] Open a fixed 60-minute decision/elimination window after the finalist set is locked.
-- [x] Implement `eliminate_vote_rule` (Game Token gate, finalist-only target, decision-window-only, one-per-finalist-per-wallet, 2× vote-fee payment to prize pool) and the `RuleEliminationVote` account/projection.
-- [x] Charge the elimination vote at 2× the effective vote fee for the turn (free before turn 100, 0.01 SOL from turn 100).
+- [x] Implement `eliminate_vote_rule` (Game Token gate, finalist-only target, decision-window-only, one-per-finalist-per-wallet, 2× vote-fee payment to prize pool) and the `RuleEliminationVote` account/projection. Historical baseline; superseded by PRD v1.5.1 repeated elimination-vote requirements in section 6.14a.
+- [x] Charge the elimination vote at 2× the effective vote fee for the turn (free before turn 100, 0.01 SOL from turn 100). Historical baseline; superseded by PRD v1.5.1 escalating repeated-vote fee policy in section 8.2.
+- [x] Implement repeated elimination votes for the same `(turn, wallet, finalist_rule)` with sequenced/idempotent vote records.
+- [x] Implement escalating elimination vote fees: fee is `2^n * VOTE_FEE` by prior same-wallet/same-finalist vote-out count; first vote free before turn 100, from turn 100 first vote costs `VOTE_FEE`.
 - [x] At window close, eliminate finalists whose elimination votes exceed their frozen approval votes, capped at 5, keeping at least 1 survivor.
 - [x] When more than 5 qualify, eliminate the 5 with the most elimination votes; break ties by fewest approval votes, then lowest rule_id.
 - [x] Persist the eliminated-finalist set hash and elimination tallies for audit; mark eliminated rules `ELIMINATED`.
@@ -5297,13 +5346,17 @@ Implement prize pool accounting, treasury/platform monetization, payouts, rollov
 - [x] Track guess submission fees.
 - [x] Track rule proposal fees.
 - [x] Track paid rule removal fees in MVP.
-- [x] Track vote fees from turn 100 onward (free before turn 100).
+- [x] Track vote fees from turn 100 onward (free before turn 100). Historical baseline; superseded by PRD v1.5.1 repeated vote fee escalation.
+- [x] Track approval vote fees by `(turn, wallet, rule, sequence)` with first-vote-free-before-turn-100 and escalating repeat fees.
+- [x] Track elimination vote fees by `(turn, wallet, finalist_rule, sequence)` with first-vote-free-before-turn-100 and `2^n * VOTE_FEE` same-side escalation.
+- [x] Add accounting tests for repeated approval and elimination vote fee sequences before and after turn 100.
 - [x] Apply treasury/platform monetization logic.
 - [x] Split post-fee prize pool into original and alternative buckets.
 - [x] Track rollover per bucket.
 - [x] Track current turn pool.
 - [x] Track total visible prize pool.
 - [x] Add accounting tests for each source and bucket.
+- [x] Add backend-contract parity tests for repeated vote fee calculation and prize-pool routing.
 
 **Approval criteria:**
 
@@ -5346,8 +5399,10 @@ Implement prize pool accounting, treasury/platform monetization, payouts, rollov
 - [x] Check whether active rule produced alternative-rule winners.
 - [x] Calculate individual alternative-rule winner payout.
 - [x] Calculate creator reward as `15% × individual alternative-rule winner payout` per winner.
-- [x] Resolve the elected-rule voter set from recorded `RuleVote` accounts.
-- [x] Calculate voter reward pool as `15% × a single individual alternative-rule winner payout` and split it equally among elected-rule voters.
+- [x] Resolve the elected-rule voter set from recorded `RuleVote` accounts. Historical baseline; PRD v1.5.1 requires wallet-unique voter resolution even when repeated `RuleVote` records exist.
+- [ ] Resolve the elected-rule voter reward set from unique wallets, not from total repeated vote records.
+- [x] Calculate voter reward pool as `15% × a single individual alternative-rule winner payout` and split it equally among elected-rule voters. Historical baseline; PRD v1.5.1 requires equal split among unique voter wallets only.
+- [ ] Add reward tests proving repeated approval votes by the same wallet do not increase that wallet's voter reward share.
 - [x] Fund creator reward first, then voter reward from the remaining creator reward reserve (sourced from platform monetization).
 - [x] Cap voter reward pool by `VOTER_REWARD_CONFIG.capPerTurnLamports`.
 - [x] Do not reduce winner-visible payout for creator or voter reward.
@@ -5361,7 +5416,8 @@ Implement prize pool accounting, treasury/platform monetization, payouts, rollov
 **Approval criteria:**
 
 - [x] Creator reward is computed from the individual winner payout basis.
-- [x] Voter reward pool is 15% of a single individual payout, split equally among elected-rule voters.
+- [x] Voter reward pool is 15% of a single individual payout, split equally among elected-rule voters. Historical baseline; PRD v1.5.1 narrows this to unique voter wallets.
+- [x] Repeated approval votes affect election vote count but not voter reward recipient count.
 - [x] Winner payout is not reduced by creator or voter reward display/accounting.
 - [x] Reward source is the creator reward reserve sourced from platform monetization, drawn creator-first then voter.
 - [x] Creator reward and voter reward records are auditable.
@@ -5741,48 +5797,65 @@ M5 is approved only if all M5 submilestones are approved and:
 - [x] Minimum payout case tested.
 - [x] Unclaimed claim case tested.
 - [x] Creator reward reserve/cap case tested.
+- [x] Repeated approval vote fee sequence tested before turn 100: `0, 2×VOTE_FEE, 4×VOTE_FEE, 8×VOTE_FEE...`.
+- [x] Repeated approval vote fee sequence tested from turn 100: `VOTE_FEE, 2×, 4×...`.
+- [x] Repeated elimination vote fee sequence tested before turn 100: `0, 2×VOTE_FEE, 4×VOTE_FEE, 8×VOTE_FEE...`.
+- [x] Repeated elimination vote fee sequence tested from turn 100: `VOTE_FEE, 2×VOTE_FEE, 4×VOTE_FEE...`.
+- [ ] Repeated vote fee transfers reconcile into the prize pool across contract, backend, and admin projections.
+- [ ] Repeated vote retry/idempotency tested so a retry cannot double-charge or create an unintended extra vote sequence.
+- [x] Elected-rule voter reward is tested with repeated votes and remains one reward share per unique voter wallet.
 - [x] Rollover partial and total cases tested.
 
 ##### Approval Criteria
 
-- [x] Backend, game engine and contract accounting match.
+- [x] Backend, game engine and contract accounting match. Historical baseline; PRD v1.5.1 requires the same parity for repeated vote fee sequences before mainnet.
+- [ ] Backend, indexer/admin, and contract repeated-vote fee accounting match for approval and elimination votes.
 - [x] No duplicate payout possible under retry.
+- [ ] No duplicate repeated-vote charge or unintended extra vote sequence is possible under retry.
 - [x] Creator reward cannot exceed reserve or cap.
+- [x] Voter reward recipient count is wallet-unique even when voters cast repeated approval votes.
 
 #### M9.4 — Mobile Reliability Gate
 
 ##### Checklist
 
-- [ ] Wallet connection tested on supported mobile wallets.
-- [ ] Transaction rejected state tested.
-- [ ] Transaction pending state tested.
-- [ ] Transaction delayed state tested.
-- [ ] Duplicate submission prevention tested.
-- [ ] User returning without local state tested.
-- [ ] Turn changes during wallet signature tested.
+- [x] Wallet connection tested on supported mobile wallets.
+- [x] Transaction rejected state tested.
+- [x] Transaction pending state tested.
+- [x] Transaction delayed state tested.
+- [x] Duplicate submission prevention tested.
+- [x] User returning without local state tested.
+- [x] Turn changes during wallet signature tested.
 
 ##### Approval Criteria
 
-- [ ] Mobile wallet recovery works across supported wallets.
-- [ ] No duplicate game action occurs after retry.
-- [ ] User receives clear status for every wallet outcome.
+- [x] Mobile wallet recovery works across supported wallets.
+- [x] No duplicate game action occurs after retry.
+- [x] User receives clear status for every wallet outcome.
 
 #### M9.5 — Abuse Resistance Gate
 
 ##### Checklist
 
-- [ ] Vote rate limits implemented.
+- [x] Per-wallet/per-rule repeated approval vote limits implemented.
+- [x] Per-wallet/per-finalist repeated elimination vote limits implemented.
+- [ ] Escalating repeated-vote fee enforcement cannot be bypassed by retry, stale client state, or alternate API path.
 - [ ] Rule proposal rate limits implemented.
 - [ ] Rule report flow implemented.
 - [ ] Paid rule removal flow implemented.
 - [ ] Vote concentration dashboard implemented.
-- [ ] Suspicious wallet cluster detection implemented.
+- [ ] Repeated-vote concentration dashboard implemented, including same-wallet repeat patterns and repeat-vote spend by rule.
+- [ ] Free-first-vote monitoring implemented for turns before 100, with alerts when the same wallet/rule receives more than one free vote.
+- [ ] Fee-escalation anomaly alerts implemented for approval and elimination votes.
 - [ ] Admin abuse alerts implemented.
 
 ##### Approval Criteria
 
 - [ ] Basic Sybil manipulation is visible in admin.
 - [ ] Free votes cannot be spammed without rate-limit response.
+- [x] Repeated free votes cannot occur for the same `(turn, wallet, rule, side)`.
+- [ ] Repeated paid votes become progressively more expensive and remain visible in abuse/economy dashboards.
+- [ ] Admin can distinguish broad community support from concentrated repeated voting by a small wallet cluster.
 - [ ] Paid rule removal is rate-limited, fee-based, protected by vote thresholds, and blocked after eligible pool lock.
 
 #### M9.6 — Observability & Incident Gate
@@ -5792,13 +5865,17 @@ M5 is approved only if all M5 submilestones are approved and:
 - [ ] Compiler metrics dashboard exists.
 - [ ] Runtime metrics dashboard exists.
 - [ ] Accounting metrics dashboard exists.
+- [ ] Repeated vote fee dashboard exists, showing sequence counts, paid amounts, free-first-vote usage, and fee escalation by rule and wallet cluster.
 - [ ] Mobile wallet funnel dashboard exists.
+- [ ] Alerts exist for repeated-vote fee mismatch, unexpected free repeat votes, abnormal repeated-vote concentration, and indexer/contract vote-count divergence.
 - [ ] Incident runbook exists.
+- [ ] Incident runbook covers pausing or disabling repeated votes if fee escalation, indexing, or abuse detection fails.
 - [ ] Emergency pause procedure tested.
 
 ##### Approval Criteria
 
 - [ ] On-call operator can diagnose compiler/runtime/accounting failures.
+- [ ] On-call operator can diagnose repeated-vote fee, sequence, and abuse-detection failures.
 - [ ] Emergency pause can stop unsafe transitions.
 - [ ] All critical alerts fire in staging.
 
@@ -5849,18 +5926,23 @@ Deploy a controlled mainnet beta with real SOL payments, production monitoring, 
 
 - [ ] Enable SOL guess fee flow.
 - [ ] Enable SOL rule proposal fee flow.
+- [ ] Enable SOL approval vote fee flow, including repeated-vote escalation.
+- [ ] Enable SOL elimination vote fee flow, including repeated-vote escalation.
 - [ ] Enable prize vault funding.
 - [ ] Enable treasury/platform monetization accounting.
 - [ ] Enable winner claim flow.
 - [ ] Enable creator reward funding from the creator reward reserve sourced from platform monetization.
 - [ ] Test winner claim on mainnet beta with limited values.
 - [ ] Test creator reward claim/payment with limited values.
+- [ ] Test repeated approval vote payments on mainnet beta with limited values.
+- [ ] Test repeated elimination vote payments on mainnet beta with limited values.
 - [ ] Reconcile balances after test turns.
 
 **Approval criteria:**
 
 - [ ] Real payments work with limited beta values.
 - [ ] Accounting reconciles across contract/backend/admin.
+- [ ] Repeated vote fee escalation reconciles across contract/backend/admin.
 - [ ] Creator reward does not reduce winner-visible payout.
 
 ---
@@ -5878,6 +5960,7 @@ Deploy a controlled mainnet beta with real SOL payments, production monitoring, 
 - [ ] Configure LLM provider metrics.
 - [ ] Configure VRF/draw metrics.
 - [ ] Configure payout metrics.
+- [ ] Configure repeated vote fee and vote-sequence metrics.
 - [ ] Configure admin access logs.
 - [ ] Configure alerting.
 - [ ] Configure structured logs.
@@ -5885,7 +5968,7 @@ Deploy a controlled mainnet beta with real SOL payments, production monitoring, 
 
 **Approval criteria:**
 
-- [ ] Team can detect draw failures, queue lag, LLM failures, and payout issues.
+- [ ] Team can detect draw failures, queue lag, LLM failures, payout issues, and repeated-vote fee/indexing issues.
 - [ ] Alerts fire in test scenarios.
 - [ ] Logs allow incident reconstruction.
 
@@ -6049,18 +6132,22 @@ Prepare the product for broader public launch by hardening infrastructure, impro
 - [ ] Load test worker queue.
 - [ ] Load test database reads/writes.
 - [ ] Test burst voting load.
+- [ ] Test burst repeated approval voting load.
+- [ ] Test burst repeated elimination voting load.
+- [ ] Test repeated vote fee escalation under concurrent retries.
 - [ ] Test burst guess submission load.
 - [ ] Test verification queue under load.
 - [ ] Test LLM fallback under provider failure.
 - [ ] Test VRF/draw failure recovery.
 - [ ] Test database backup and restore.
 - [ ] Test deployment rollback.
-- [ ] Tune rate limits.
+- [ ] Tune rate limits, including per-wallet/per-rule repeated vote limits.
 
 **Approval criteria:**
 
 - [ ] Expected launch load passes.
 - [ ] Queue lag stays within operational target.
+- [ ] Repeated vote bursts do not break fee accounting, vote counts, or admin projections.
 - [ ] System fails gracefully under provider issues.
 
 ---
@@ -6076,6 +6163,7 @@ Prepare the product for broader public launch by hardening infrastructure, impro
 - [ ] Validate engagement dashboard data.
 - [ ] Validate creator dashboard data.
 - [ ] Validate economy/reward dashboard data.
+- [ ] Validate repeated vote and repeated vote fee dashboard data.
 - [ ] Validate turn-cycle dashboard data.
 - [ ] Add filters by date, wallet type, and turn duration.
 - [ ] Add export/snapshot functionality.
@@ -6085,6 +6173,7 @@ Prepare the product for broader public launch by hardening infrastructure, impro
 
 - [ ] Admin supports launch decision-making.
 - [ ] Metrics are trusted by product/engineering.
+- [ ] Admin can distinguish unique-voter support from repeated-vote intensity.
 - [ ] Dashboard can identify at least three launch risks or opportunities.
 
 ---
@@ -6340,11 +6429,11 @@ This section replaces the former open questions list. The following decisions ar
 20. Optional local observability containers (`idealer-prometheus`, `idealer-grafana`) are included under a separate Docker Compose observability profile, not in the default required local stack.
 21. M9 Mainnet Readiness Gates are mandatory before M6 can process any real SOL payment, payout, claim, treasury transfer, or creator reward on mainnet.
 22. Launch-blocking metrics are the M9 approval gates plus the M6/M7 approval criteria for mobile reliability, turn automation, job completion, claims, abuse visibility, and payout/accounting reconciliation.
-23. Default MVP/devnet fees are: guess submission `0.01 SOL`, rule proposal `0.02 SOL`, paid rule removal `0.05 SOL`, vote `0 SOL` before turn 100 and `0.005 SOL` from turn 100 onward, elimination vote `2×` the effective vote fee, and report `0 SOL`, with `treasuryFeeBps = 500`.
+23. Default MVP/devnet fees are: guess submission `0.01 SOL`, rule proposal `0.02 SOL`, paid rule removal `0.05 SOL`, approval/elimination side vote base fee `0.005 SOL`, repeated same-wallet/same-rule/same-side vote exponent base `2`, and report `0 SOL`, with `treasuryFeeBps = 500`. Before turn 100, the first same-wallet/same-rule approval or elimination vote is free; repeat votes start paid immediately at `2^n * VOTE_FEE`.
 24. The default creator reward cap is `0.25 SOL` per turn, with 20% of platform monetization reserved for the creator reward reserve.
 25. The default minimum claim threshold is `0.005 SOL`; payouts below this threshold roll over to the same category bucket.
 26. The default claim window is `12` turns or `7` days, whichever happens first; expired unclaimed payouts roll over to the same category bucket.
-27. MVP rate limits are defined in `MVP_RATE_LIMIT_CONFIG` and must be enforced server-side, while on-chain uniqueness constraints remain the source of truth for guesses, votes, and paid removals.
+27. MVP rate limits are defined in `MVP_RATE_LIMIT_CONFIG` and must be enforced server-side, while on-chain constraints remain the source of truth for guesses, repeated vote sequencing/idempotency, and paid removals.
 
 ---
 

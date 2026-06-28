@@ -81,6 +81,7 @@ pub struct PrizePoolAccounting {
 }
 
 pub const VOTE_FEE_START_TURN: u64 = 100;
+const REPEATED_VOTE_FEE_MULTIPLIER: u64 = 2;
 
 pub struct ConfigValidation<'a> {
     pub treasury_fee_bps: u16,
@@ -229,6 +230,55 @@ fn account_fee_source(
     })
 }
 
+pub fn repeated_vote_fee_lamports(
+    turn_id: u64,
+    sequence: u64,
+    base_fee_lamports: u64,
+) -> Result<u64> {
+    require!(turn_id > 0 && sequence > 0, IdealerError::InvalidTurnId);
+    if turn_id < VOTE_FEE_START_TURN && sequence == 1 {
+        return Ok(0);
+    }
+
+    let paid_index = sequence
+        .checked_sub(1)
+        .ok_or(IdealerError::ArithmeticOverflow)?;
+    let mut fee_lamports = base_fee_lamports;
+    for _ in 0..paid_index {
+        fee_lamports = fee_lamports
+            .checked_mul(REPEATED_VOTE_FEE_MULTIPLIER)
+            .ok_or(IdealerError::ArithmeticOverflow)?;
+    }
+    Ok(fee_lamports)
+}
+
+fn account_repeated_vote_fee_source(
+    turn_id: u64,
+    count: u64,
+    base_fee_lamports: u64,
+    treasury_fee_bps: u16,
+) -> Result<FeeSourceAccounting> {
+    let mut gross_lamports = 0u64;
+    for sequence in 1..=count {
+        gross_lamports = gross_lamports
+            .checked_add(repeated_vote_fee_lamports(
+                turn_id,
+                sequence,
+                base_fee_lamports,
+            )?)
+            .ok_or(IdealerError::ArithmeticOverflow)?;
+    }
+    let (treasury_lamports, prize_lamports) = split_fee(gross_lamports, treasury_fee_bps)?;
+
+    Ok(FeeSourceAccounting {
+        count,
+        fee_lamports: base_fee_lamports,
+        gross_lamports,
+        treasury_lamports,
+        prize_lamports,
+    })
+}
+
 pub fn calculate_prize_pool_accounting(
     input: &PrizePoolAccountingInput,
 ) -> Result<PrizePoolAccounting> {
@@ -249,12 +299,13 @@ pub fn calculate_prize_pool_accounting(
         input.paid_rule_removal_fee_lamports,
         input.treasury_fee_bps,
     )?;
-    let vote_fee_active = input.turn_id >= VOTE_FEE_START_TURN;
-    let votes = account_fee_source(
-        if vote_fee_active { input.vote_count } else { 0 },
+    let votes = account_repeated_vote_fee_source(
+        input.turn_id,
+        input.vote_count,
         input.vote_fee_lamports,
         input.treasury_fee_bps,
     )?;
+    let vote_fee_active = votes.gross_lamports > 0;
 
     let gross_fees_lamports = guess_submissions
         .gross_lamports

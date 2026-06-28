@@ -161,13 +161,15 @@ interface RuleProposalResponse {
 
 `POST /api/v1/rules/{rule_id}/vote`
 
-Requires current-turn Game Token PDA. Votes are ultimately recorded on-chain through `RuleVote` accounts or equivalent on-chain account model.
+Requires current-turn Game Token PDA. Votes are ultimately recorded on-chain through sequenced `RuleVote` accounts or equivalent on-chain account model. The same wallet may vote the same rule again by using the next sequence and paying the configured repeated-vote fee.
 
 ```ts
 interface VoteRequest {
   turn_id: string;
   player_wallet: string;
   vote_transaction_signature: string;
+  sequence: number;
+  fee_lamports: string;
 }
 
 interface VoteResponse {

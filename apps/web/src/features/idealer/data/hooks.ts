@@ -6,6 +6,12 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useWalletConnection } from "@solana/react-hooks";
+import {
+  ELIMINATION_VOTE_FEE_MULTIPLIER,
+  MVP_FEES_SOL,
+  REPEATED_VOTE_FEE_MULTIPLIER,
+  VOTE_FEE_START_TURN,
+} from "@idealer/constants";
 
 import {
   getTurnActionReadiness,
@@ -150,6 +156,10 @@ function buildUiRule(
   approve: number,
   against: number,
   finalist: boolean,
+  myApproveCount: number,
+  myAgainstCount: number,
+  nextApproveFeeSol: number,
+  nextAgainstFeeSol: number,
   src: "top" | "vrf" | null,
   walletAddress: string | undefined,
 ): UiRule {
@@ -163,6 +173,10 @@ function buildUiRule(
     how: "The dealer evaluates every guess against this rule and the best one wins the round. The house applies it automatically after the draw (VRF).",
     id: `r${proposal.ruleId}`,
     mine: Boolean(walletAddress && proposal.proposer === walletAddress),
+    myAgainstCount,
+    myApproveCount,
+    nextAgainstFeeSol,
+    nextApproveFeeSol,
     removed: state === "removed_paid",
     ruleId: proposal.ruleId,
     ruleProposal: proposal.ruleProposal,
@@ -174,6 +188,18 @@ function buildUiRule(
     tokens: proposal.tokenCount ?? 0,
     wallet: truncateAddress(proposal.proposer),
   };
+}
+
+function repeatedVoteFeeSol(turnId: number, sequence: number, baseFeeSol: number) {
+  if (turnId < VOTE_FEE_START_TURN && sequence === 1) {
+    return 0;
+  }
+  const paidIndex = sequence - 1;
+  let feeSol = baseFeeSol;
+  for (let index = 0; index < paidIndex; index += 1) {
+    feeSol *= REPEATED_VOTE_FEE_MULTIPLIER;
+  }
+  return feeSol;
 }
 
 export interface RulesView {
@@ -197,6 +223,8 @@ export function useRules(turnId: number, round: RoundSummaryApi | null): RulesVi
   const [proposals, setProposals] = useState<RuleProposalApi[]>([]);
   const [approveCounts, setApproveCounts] = useState<Record<string, number>>({});
   const [againstCounts, setAgainstCounts] = useState<Record<string, number>>({});
+  const [myApproveCounts, setMyApproveCounts] = useState<Record<string, number>>({});
+  const [myAgainstCounts, setMyAgainstCounts] = useState<Record<string, number>>({});
   const [approvedIds, setApprovedIds] = useState<number[]>([]);
   const [eliminatedIds, setEliminatedIds] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
@@ -219,16 +247,35 @@ export function useRules(turnId: number, round: RoundSummaryApi | null): RulesVi
           setApproveCounts(votesBody?.counts ?? {});
           setAgainstCounts(elimBody?.counts ?? {});
           if (walletAddress) {
-            setApprovedIds(
-              (votesBody?.votes ?? [])
-                .filter((v) => v.voter === walletAddress)
-                .map((v) => v.ruleId),
+            const approvalVotes = (votesBody?.votes ?? []).filter(
+              (v) => v.voter === walletAddress,
             );
-            setEliminatedIds(
-              (elimBody?.votes ?? [])
-                .filter((v) => v.voter === walletAddress)
-                .map((v) => v.ruleId),
+            const eliminationVotes = (elimBody?.votes ?? []).filter(
+              (v) => v.voter === walletAddress,
             );
+            const approvalCountsByRule = approvalVotes.reduce<Record<string, number>>(
+              (current, vote) => {
+                current[String(vote.ruleId)] = (current[String(vote.ruleId)] ?? 0) + 1;
+                return current;
+              },
+              {},
+            );
+            const eliminationCountsByRule = eliminationVotes.reduce<Record<string, number>>(
+              (current, vote) => {
+                current[String(vote.ruleId)] = (current[String(vote.ruleId)] ?? 0) + 1;
+                return current;
+              },
+              {},
+            );
+            setMyApproveCounts(approvalCountsByRule);
+            setMyAgainstCounts(eliminationCountsByRule);
+            setApprovedIds([...new Set(approvalVotes.map((v) => v.ruleId))]);
+            setEliminatedIds([...new Set(eliminationVotes.map((v) => v.ruleId))]);
+          } else {
+            setMyApproveCounts({});
+            setMyAgainstCounts({});
+            setApprovedIds([]);
+            setEliminatedIds([]);
           }
           setError(null);
         })
@@ -269,16 +316,44 @@ export function useRules(turnId: number, round: RoundSummaryApi | null): RulesVi
         const approve = approveCounts[String(id)] ?? finalState?.approvalVotes ?? 0;
         const against =
           againstCounts[String(id)] ?? finalState?.eliminationVotes ?? 0;
+        const myApproveCount = myApproveCounts[String(id)] ?? 0;
+        const myAgainstCount = myAgainstCounts[String(id)] ?? 0;
+        const nextApproveSequence = myApproveCount + 1;
+        const nextAgainstSequence = myAgainstCount + 1;
         const finalist = finalistIds.has(id);
         const src: "top" | "vrf" | null = topIds.has(id)
           ? "top"
           : randomIds.has(id) || finalist
             ? "vrf"
             : null;
-        return buildUiRule(proposal, approve, against, finalist, src, walletAddress);
+        return buildUiRule(
+          proposal,
+          approve,
+          against,
+          finalist,
+          myApproveCount,
+          myAgainstCount,
+          repeatedVoteFeeSol(turnId, nextApproveSequence, MVP_FEES_SOL.vote),
+          repeatedVoteFeeSol(
+            turnId,
+            nextAgainstSequence,
+            MVP_FEES_SOL.vote * ELIMINATION_VOTE_FEE_MULTIPLIER,
+          ),
+          src,
+          walletAddress,
+        );
       })
       .sort((a, b) => b.approve - a.approve);
-  }, [proposals, approveCounts, againstCounts, round, walletAddress]);
+  }, [
+    proposals,
+    approveCounts,
+    againstCounts,
+    myApproveCounts,
+    myAgainstCounts,
+    round,
+    turnId,
+    walletAddress,
+  ]);
 
   return {
     approvedIds,

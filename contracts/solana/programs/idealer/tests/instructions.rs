@@ -5,7 +5,7 @@ use anchor_lang::{
 use idealer::{
     accounts, instruction, DrawStatus, GlobalConfig, InitializeGlobalConfigArgs, PlayerGuess,
     PrecompilationStatus, PrecompileRuleArgs, ProposeRuleArgs, RuleProposal, RuleState, RuleVote,
-    SetVrfConfigArgs, TurnState, TurnStatus,
+    SetVrfConfigArgs, TurnState, TurnStatus, VoteRuleArgs,
 };
 use solana_account_info::AccountInfo;
 use solana_program_error::ProgramResult;
@@ -424,6 +424,7 @@ async fn core_instructions_execute_and_persist_state() {
         &turn_id.to_le_bytes(),
         &rule_id.to_le_bytes(),
         player.pubkey().as_ref(),
+        &1u16.to_le_bytes(),
     ]);
     let vote_instruction = Instruction {
         program_id: idealer::ID,
@@ -442,24 +443,67 @@ async fn core_instructions_execute_and_persist_state() {
             system_program: system_program::ID,
         }
         .to_account_metas(None),
-        data: instruction::VoteRule {}.data(),
+        data: instruction::VoteRule {
+            args: VoteRuleArgs { sequence: 1 },
+        }
+        .data(),
     };
     process(&mut context, vote_instruction.clone(), &[&player])
         .await
         .unwrap();
     let vote: RuleVote = read_anchor_account(&mut context, vote_address).await;
     assert_eq!(vote.voter, player.pubkey());
+    assert_eq!(vote.sequence, 1);
+    assert_eq!(vote.fee_lamports, 0);
     let proposal: RuleProposal = read_anchor_account(&mut context, rule_address).await;
     assert_eq!(proposal.vote_count, 1);
 
-    // A repeat vote from the same wallet on the same proposal must fail: the
-    // `rule_vote` PDA is seeded by (turn, rule, voter), so re-`init` is rejected.
+    let second_vote_address = pda(&[
+        b"vote",
+        &turn_id.to_le_bytes(),
+        &rule_id.to_le_bytes(),
+        player.pubkey().as_ref(),
+        &2u16.to_le_bytes(),
+    ]);
+    let second_vote_instruction = Instruction {
+        program_id: idealer::ID,
+        accounts: accounts::VoteRule {
+            voter: player.pubkey(),
+            global_config: pda(&[b"global_config"]),
+            turn_state: pda(&[b"turn", &turn_id.to_le_bytes()]),
+            game_token: pda(&[
+                b"game_token",
+                &turn_id.to_le_bytes(),
+                player.pubkey().as_ref(),
+            ]),
+            rule_proposal: rule_address,
+            rule_vote: second_vote_address,
+            prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+        data: instruction::VoteRule {
+            args: VoteRuleArgs { sequence: 2 },
+        }
+        .data(),
+    };
+    process(&mut context, second_vote_instruction.clone(), &[&player])
+        .await
+        .unwrap();
+    let second_vote: RuleVote = read_anchor_account(&mut context, second_vote_address).await;
+    assert_eq!(second_vote.sequence, 2);
+    assert_eq!(second_vote.fee_lamports, 10_000_000);
+    let proposal: RuleProposal = read_anchor_account(&mut context, rule_address).await;
+    assert_eq!(proposal.vote_count, 2);
+
+    // Reusing the same sequence is idempotently rejected because that PDA is
+    // already initialized; the next repeat must use sequence 3.
     // Warp to a new slot first so the retry is a distinct transaction; otherwise
     // the identical instruction reuses the same blockhash and banks returns the
     // cached success of the first vote instead of re-executing on-chain.
     let warp_clock: Clock = context.banks_client.get_sysvar().await.unwrap();
     context.warp_to_slot(warp_clock.slot + 1).unwrap();
-    assert!(process(&mut context, vote_instruction, &[&player])
+    assert!(process(&mut context, second_vote_instruction, &[&player])
         .await
         .is_err());
 
@@ -1330,6 +1374,8 @@ async fn claim_flow_records_and_pays_winner_and_reward() {
     assert_eq!(claim.amount_lamports, payout);
 
     // Re-recording the same (turn, wallet, kind) tuple fails (idempotent init).
+    let clock: Clock = context.banks_client.get_sysvar().await.unwrap();
+    context.warp_to_slot(clock.slot + 1).unwrap();
     assert!(process(
         &mut context,
         record_claim_instruction(
@@ -1370,6 +1416,8 @@ async fn claim_flow_records_and_pays_winner_and_reward() {
     assert_eq!(claim.status, idealer::ClaimState::Claimed);
 
     // Double-claim is blocked by the Claimed flag.
+    let clock: Clock = context.banks_client.get_sysvar().await.unwrap();
+    context.warp_to_slot(clock.slot + 1).unwrap();
     assert!(process(
         &mut context,
         claim_prize_instruction(turn_id, player.pubkey()),

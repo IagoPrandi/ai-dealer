@@ -1,9 +1,9 @@
 "use client";
 
-/** REGRAS — two-phase voting hub. Ported from app-vote.jsx, wired to live data. */
+/** Rules: two-phase voting hub. Ported from app-vote.jsx, wired to live data. */
 import { useState } from "react";
 
-import { ELIMINATION_VOTE_FEE_MULTIPLIER, VOTE_FEE_START_TURN } from "@idealer/constants";
+import { VOTE_FEE_START_TURN } from "@idealer/constants";
 
 import { useIdealer } from "../context";
 import { fmtSol, fmtTurnId } from "../data/format";
@@ -19,20 +19,21 @@ function VoteGate() {
         <b style={{ fontSize: 15 }}>Play to unlock voting</b>
       </div>
       <p style={{ margin: "0 0 13px", fontSize: 13.5, color: "var(--muted)", lineHeight: 1.5 }}>
-        You can follow everything now. To vote, make a guess this round — it issues your round pass.
+        You can follow everything now. To vote, make a guess this round - it issues your round pass.
       </p>
       <button onClick={() => go("play")} className="ide-btn" style={{ width: "100%", padding: 13 }} type="button">
-        <Ico.bolt style={{ color: "#08110C" }} /> Play now · {fmtSol(fees.play)} SOL
+        <Ico.bolt style={{ color: "#08110C" }} /> Play now - {fmtSol(fees.play)} SOL
       </button>
     </div>
   );
 }
-
 function RuleVoteRow({ rank, rule }: { rank: number; rule: UiRule }) {
   const { approvedIds, openDetail, played, voteApprove, voteBusyRuleId } = useIdealer();
   const approved = approvedIds.includes(rule.ruleId);
   const isTop = rank <= 3;
   const busy = voteBusyRuleId === rule.ruleId;
+  const feeLabel =
+    rule.nextApproveFeeSol === 0 ? "Free" : `${fmtSol(rule.nextApproveFeeSol)} SOL`;
   return (
     <div className="ide-rulerow ide-tap" style={{ borderColor: isTop ? "var(--line-2)" : "var(--line)" }}>
       <div onClick={() => openDetail(rule.ruleId, { canAgainst: false, rank })} style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
@@ -49,12 +50,12 @@ function RuleVoteRow({ rank, rule }: { rank: number; rule: UiRule }) {
         style={{ flexShrink: 0, opacity: played && !busy ? 1 : 0.5 }}
         type="button"
       >
-        <Ico.up style={{ color: "currentColor" }} /> {approved ? "voted" : "in favor"}
+        <Ico.up style={{ color: "currentColor" }} /> {approved ? "again" : "in favor"} -{" "}
+        <span className="ide-num">{feeLabel}</span>
       </button>
     </div>
   );
 }
-
 function FinalistRow({ rule }: { rule: UiRule }) {
   const { eliminatedIds, openDetail, played, voteBusyRuleId, voteEliminate } = useIdealer();
   const eliminated = eliminatedIds.includes(rule.ruleId);
@@ -63,6 +64,8 @@ function FinalistRow({ rule }: { rule: UiRule }) {
   const forPct = total ? Math.round((rule.approve / total) * 100) : 50;
   const dead = st === "eliminada";
   const busy = voteBusyRuleId === rule.ruleId;
+  const feeLabel =
+    rule.nextAgainstFeeSol === 0 ? "Free" : `${fmtSol(rule.nextAgainstFeeSol)} SOL`;
   return (
     <div className="ide-card" style={{
       padding: "13px 15px",
@@ -76,7 +79,7 @@ function FinalistRow({ rule }: { rule: UiRule }) {
             {st === "risco" ? <span style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 3, fontSize: 10, fontWeight: 700, color: "var(--yellow)" }}><Ico.flame style={{ color: "var(--yellow)", width: 11, height: 11 }} /> risk</span> : null}
             {dead ? <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, color: "var(--red)" }}>eliminated</span> : null}
           </div>
-          <div style={{ fontSize: 11, color: "var(--dim)", marginTop: 2 }}>{rule.src === "top" ? "most voted" : "VRF draw"} · {rule.handle}</div>
+          <div style={{ fontSize: 11, color: "var(--dim)", marginTop: 2 }}>{rule.src === "top" ? "most voted" : "VRF draw"} - {rule.handle}</div>
         </div>
         <VoteTally approve={rule.approve} against={rule.against} size="sm" />
       </div>
@@ -92,7 +95,8 @@ function FinalistRow({ rule }: { rule: UiRule }) {
           style={{ opacity: played && !busy ? 1 : 0.5 }}
           type="button"
         >
-          <Ico.down style={{ color: "currentColor" }} /> {eliminated ? "voted against" : "vote against"}
+          <Ico.down style={{ color: "currentColor" }} /> {eliminated ? "again" : "vote against"} -{" "}
+          <span className="ide-num">{feeLabel}</span>
         </button>
       </div>
     </div>
@@ -108,12 +112,12 @@ export function VoteScreen() {
   const finalists = all.filter((r) => r.finalist);
   const eliminatedCount = finalists.filter((r) => finalistStatus(r) === "eliminada").length;
   const gated = !played;
-  // Voting is free before turn 100; paid (and 2× for down-votes) from then on.
-  const feeFree = turnId < VOTE_FEE_START_TURN;
-  const voteFeeLabel = feeFree ? "Free this turn" : `${fmtSol(fees.vote)} SOL`;
-  const elimFeeLabel = feeFree
-    ? "Free this turn"
-    : `${fmtSol(fees.vote * ELIMINATION_VOTE_FEE_MULTIPLIER)} SOL · 2×`;
+  // Before turn 100, only the first same-wallet/same-rule vote is free.
+  const firstVoteFree = turnId < VOTE_FEE_START_TURN;
+  const voteFeeLabel = firstVoteFree ? "First vote free" : `${fmtSol(fees.vote)} SOL`;
+  const displayedElimFeeLabel = firstVoteFree
+    ? "First vote out free"
+    : `${fmtSol(fees.vote)} SOL`;
 
   return (
     <div className="ide-app ide-screen" style={{ height: "100%", position: "relative", overflow: "hidden" }}>
@@ -126,8 +130,8 @@ export function VoteScreen() {
         </div>
 
         <div className="ide-seg" style={{ marginBottom: 16 }}>
-          <button className={tab === "abertas" ? "on" : ""} onClick={() => setTab("abertas")} type="button">Voting · {all.length}</button>
-          <button className={tab === "finalistas" ? "on" : ""} onClick={() => setTab("finalistas")} type="button">Finalists · {finalists.length}</button>
+          <button className={tab === "abertas" ? "on" : ""} onClick={() => setTab("abertas")} type="button">Voting - {all.length}</button>
+          <button className={tab === "finalistas" ? "on" : ""} onClick={() => setTab("finalistas")} type="button">Finalists - {finalists.length}</button>
         </div>
 
         {gated ? <VoteGate /> : null}
@@ -138,11 +142,11 @@ export function VoteScreen() {
         {tab === "abertas" ? (
           <>
             <p style={{ margin: "0 0 10px", fontSize: 13.5, color: "var(--muted)", lineHeight: 1.5 }}>
-              Vote <b style={{ color: "var(--green)" }}>in favor</b> of the rules you want in this round. The most voted become finalists.
+              Vote <b style={{ color: "var(--green)" }}>in favor</b> of the rules you want in this round. Repeat votes are allowed and each paid repeat doubles.
             </p>
             <div style={{ marginBottom: 14 }}>
-              <span className="ide-pill" style={{ padding: "4px 11px", fontSize: 11.5, color: feeFree ? "var(--green)" : "var(--muted)" }}>
-                <Ico.up style={{ color: feeFree ? "var(--green)" : "var(--purple-soft)", width: 12, height: 12 }} /> Vote · <span className="ide-num">{voteFeeLabel}</span>
+              <span className="ide-pill" style={{ padding: "4px 11px", fontSize: 11.5, color: firstVoteFree ? "var(--green)" : "var(--muted)" }}>
+                <Ico.up style={{ color: firstVoteFree ? "var(--green)" : "var(--purple-soft)", width: 12, height: 12 }} /> Vote - <span className="ide-num">{voteFeeLabel}</span>
               </span>
             </div>
             {all.length === 0 ? (
@@ -165,12 +169,12 @@ export function VoteScreen() {
                 ) : null}
               </div>
               <p style={{ margin: "10px 0 0", fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5 }}>
-                10 finalists · 3 most voted + 7 by VRF. Vote <b style={{ color: "var(--red)" }}>against</b> to eliminate (max 5). A rule falls when down-votes overtake up-votes. Survivors go to the <b style={{ color: "var(--text)" }}>active rule</b> draw.
+                10 finalists - 3 most voted + 7 by VRF. Vote <b style={{ color: "var(--red)" }}>against</b> to eliminate (max 5). A rule falls when down-votes overtake up-votes. Survivors go to the <b style={{ color: "var(--text)" }}>active rule</b> draw.
               </p>
               <div style={{ marginTop: 11, display: "flex", gap: 7, flexWrap: "wrap" }}>
-                <span className="ide-pill" style={{ padding: "4px 10px", fontSize: 11 }}>{eliminatedCount} eliminated · {Math.max(0, 5 - eliminatedCount)} left</span>
+                <span className="ide-pill" style={{ padding: "4px 10px", fontSize: 11 }}>{eliminatedCount} eliminated - {Math.max(0, 5 - eliminatedCount)} left</span>
                 <span className="ide-pill" style={{ padding: "4px 10px", fontSize: 11, color: "var(--green)" }}>{finalists.length - eliminatedCount} survivors</span>
-                <span className="ide-pill" style={{ padding: "4px 10px", fontSize: 11, color: feeFree ? "var(--green)" : "var(--red)" }}><Ico.down style={{ color: "currentColor", width: 12, height: 12 }} /> Down-vote · <span className="ide-num">{elimFeeLabel}</span></span>
+                <span className="ide-pill" style={{ padding: "4px 10px", fontSize: 11, color: firstVoteFree ? "var(--green)" : "var(--red)" }}><Ico.down style={{ color: "currentColor", width: 12, height: 12 }} /> Down-vote - <span className="ide-num">{displayedElimFeeLabel}</span></span>
               </div>
             </div>
 

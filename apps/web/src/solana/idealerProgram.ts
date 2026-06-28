@@ -50,6 +50,12 @@ const CLAIM_KIND_BYTE: Readonly<Record<ClaimKindLabel, number>> = {
 const addressEncoder = getAddressEncoder();
 const textEncoder = new TextEncoder();
 
+function u16Le(value: number) {
+  const bytes = new Uint8Array(2);
+  new DataView(bytes.buffer).setUint16(0, value, true);
+  return bytes;
+}
+
 export interface SubmitGuessAccounts {
   gameToken: ReturnType<typeof address>;
   globalConfig: ReturnType<typeof address>;
@@ -130,9 +136,11 @@ export interface RuleProposalReceipt extends RulePreflightResult {
 }
 
 export interface RuleVoteReceipt {
+  feeLamports?: number;
   ruleId: number;
   ruleProposal: string;
   ruleVote: string;
+  sequence: number;
   signature: string;
   submittedAt: string;
   turnId: number;
@@ -141,8 +149,10 @@ export interface RuleVoteReceipt {
 
 export interface RuleEliminationVoteReceipt {
   eliminationVote: string;
+  feeLamports?: number;
   ruleId: number;
   ruleProposal: string;
+  sequence: number;
   signature: string;
   submittedAt: string;
   turnId: number;
@@ -584,10 +594,12 @@ export async function deriveRuleProposalAddress({
 export async function deriveRuleVoteAddress({
   player,
   ruleId,
+  sequence,
   turnId,
 }: {
   player: ReturnType<typeof address>;
   ruleId: number;
+  sequence: number;
   turnId: number;
 }) {
   return derivePda([
@@ -595,16 +607,19 @@ export async function deriveRuleVoteAddress({
     u64Le(turnId),
     u64Le(ruleId),
     addressEncoder.encode(player),
+    u16Le(sequence),
   ]);
 }
 
 export async function deriveRuleEliminationVoteAddress({
   player,
   ruleId,
+  sequence,
   turnId,
 }: {
   player: ReturnType<typeof address>;
   ruleId: number;
+  sequence: number;
   turnId: number;
 }) {
   return derivePda([
@@ -612,6 +627,7 @@ export async function deriveRuleEliminationVoteAddress({
     u64Le(turnId),
     u64Le(ruleId),
     addressEncoder.encode(player),
+    u16Le(sequence),
   ]);
 }
 
@@ -715,15 +731,20 @@ export async function createProposeRuleInstruction({
 export async function createVoteRuleInstruction({
   player,
   ruleId,
+  sequence,
   turnId,
 }: {
   player: ReturnType<typeof address>;
   ruleId: number;
+  sequence: number;
   turnId: number;
 }) {
   const accounts = await deriveSubmitGuessAccounts({ player, turnId });
   const ruleProposal = await deriveRuleProposalAddress({ ruleId, turnId });
-  const ruleVote = await deriveRuleVoteAddress({ player, ruleId, turnId });
+  const ruleVote = await deriveRuleVoteAddress({ player, ruleId, sequence, turnId });
+  const data = new Uint8Array(VOTE_RULE_DISCRIMINATOR.length + 2);
+  data.set(VOTE_RULE_DISCRIMINATOR);
+  data.set(u16Le(sequence), VOTE_RULE_DISCRIMINATOR.length);
 
   return {
     accounts: [
@@ -736,7 +757,7 @@ export async function createVoteRuleInstruction({
       { address: accounts.prizeVault, role: AccountRole.WRITABLE },
       { address: SYSTEM_PROGRAM_ID, role: AccountRole.READONLY },
     ],
-    data: VOTE_RULE_DISCRIMINATOR,
+    data,
     programAddress: IDEALER_PROGRAM_ID,
   };
 }
@@ -744,10 +765,12 @@ export async function createVoteRuleInstruction({
 export async function createEliminateVoteRuleInstruction({
   player,
   ruleId,
+  sequence,
   turnId,
 }: {
   player: ReturnType<typeof address>;
   ruleId: number;
+  sequence: number;
   turnId: number;
 }) {
   const accounts = await deriveSubmitGuessAccounts({ player, turnId });
@@ -755,8 +778,12 @@ export async function createEliminateVoteRuleInstruction({
   const ruleEliminationVote = await deriveRuleEliminationVoteAddress({
     player,
     ruleId,
+    sequence,
     turnId,
   });
+  const data = new Uint8Array(ELIMINATE_VOTE_RULE_DISCRIMINATOR.length + 2);
+  data.set(ELIMINATE_VOTE_RULE_DISCRIMINATOR);
+  data.set(u16Le(sequence), ELIMINATE_VOTE_RULE_DISCRIMINATOR.length);
 
   return {
     accounts: [
@@ -769,7 +796,7 @@ export async function createEliminateVoteRuleInstruction({
       { address: accounts.prizeVault, role: AccountRole.WRITABLE },
       { address: SYSTEM_PROGRAM_ID, role: AccountRole.READONLY },
     ],
-    data: ELIMINATE_VOTE_RULE_DISCRIMINATOR,
+    data,
     programAddress: IDEALER_PROGRAM_ID,
   };
 }

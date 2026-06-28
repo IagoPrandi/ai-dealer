@@ -108,31 +108,31 @@ fn prize_pool_accounting_tracks_sources_buckets_and_rollover() {
     assert_eq!(accounting.guess_submissions.gross_lamports, 20_000_000);
     assert_eq!(accounting.rule_proposals.gross_lamports, 40_000_000);
     assert_eq!(accounting.paid_rule_removals.gross_lamports, 50_000_000);
-    assert_eq!(accounting.votes.gross_lamports, 6_000_000);
+    assert_eq!(accounting.votes.gross_lamports, 14_000_000);
     assert!(accounting.vote_fee_active);
-    assert_eq!(accounting.gross_fees_lamports, 116_000_000);
-    assert_eq!(accounting.treasury_lamports, 5_800_000);
-    assert_eq!(accounting.current_turn_pool_lamports, 110_200_000);
-    assert_eq!(accounting.original_bucket.current_turn_lamports, 55_100_000);
+    assert_eq!(accounting.gross_fees_lamports, 124_000_000);
+    assert_eq!(accounting.treasury_lamports, 6_200_000);
+    assert_eq!(accounting.current_turn_pool_lamports, 117_800_000);
+    assert_eq!(accounting.original_bucket.current_turn_lamports, 58_900_000);
     assert_eq!(
         accounting.alternative_bucket.current_turn_lamports,
-        55_100_000
+        58_900_000
     );
-    assert_eq!(accounting.original_bucket.total_lamports, 55_100_007);
-    assert_eq!(accounting.alternative_bucket.total_lamports, 55_100_009);
-    assert_eq!(accounting.total_visible_prize_pool_lamports, 110_200_016);
+    assert_eq!(accounting.original_bucket.total_lamports, 58_900_007);
+    assert_eq!(accounting.alternative_bucket.total_lamports, 58_900_009);
+    assert_eq!(accounting.total_visible_prize_pool_lamports, 117_800_016);
     assert_eq!(
         accounting.next_original_rollover_if_no_winners_lamports,
-        55_100_007
+        58_900_007
     );
     assert_eq!(
         accounting.next_alternative_rollover_if_no_winners_lamports,
-        55_100_009
+        58_900_009
     );
 }
 
 #[test]
-fn prize_pool_accounting_gates_vote_fees_at_turn_100() {
+fn prize_pool_accounting_sums_repeated_vote_fee_sequences() {
     let before_gate = calculate_prize_pool_accounting(&PrizePoolAccountingInput {
         turn_id: 99,
         guess_submission_count: 0,
@@ -164,12 +164,12 @@ fn prize_pool_accounting_gates_vote_fees_at_turn_100() {
     })
     .unwrap();
 
-    assert!(!before_gate.vote_fee_active);
-    assert_eq!(before_gate.votes.count, 0);
-    assert_eq!(before_gate.votes.gross_lamports, 0);
+    assert!(before_gate.vote_fee_active);
+    assert_eq!(before_gate.votes.count, 10);
+    assert_eq!(before_gate.votes.gross_lamports, 2_044_000_000);
     assert!(after_gate.vote_fee_active);
     assert_eq!(after_gate.votes.count, 10);
-    assert_eq!(after_gate.votes.gross_lamports, 20_000_000);
+    assert_eq!(after_gate.votes.gross_lamports, 2_046_000_000);
 }
 
 #[test]
