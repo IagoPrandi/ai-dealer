@@ -180,11 +180,64 @@ interface OperatorAiOperationsSnapshot {
     readOnly: true;
     role: "ai_operator";
   };
-  generatedAt: string;
-  modelRouting: Array<{
-    fallbackTriggered: number;
+  agentCallVolumeByRole: Array<{
+    calls: number;
+    role: string;
+    source: string;
+  }>;
+  auditLinks: Array<{
+    artifactHash: string | null;
+    auditEndpoint: string;
+    auditLogHash: string | null;
+    role: string;
+    ruleId: number;
+    turnId: number;
+    validationLogId: string;
+  }>;
+  confidenceDistributions: {
+    compilerConfidenceBuckets: Record<string, number>;
+    finalConfidenceBuckets: Record<string, number>;
+    modelConfidenceBuckets: Record<string, number>;
+  };
+  estimatedCost: {
+    costPerThousandTokensUsd: number;
+    estimatedUsd: number;
+    source: "configured_rate" | "not_configured";
+    totalTokens: number;
+  };
+  failureCounts: Array<{
+    count: number;
     model: string;
     provider: string;
+    role: string;
+    status: string;
+  }>;
+  generatedAt: string;
+  latencyPercentiles: Array<{
+    count: number;
+    model: string;
+    p50Ms: number;
+    p95Ms: number;
+    provider: string;
+    role: string;
+    source: string;
+  }>;
+  localModelHealth: Array<{
+    configuredModel: string;
+    digest: string | null;
+    lastHealthCheckResult: string;
+    provider: string;
+    quantization: string | null;
+    servingEngine: string;
+  }>;
+  modelRouting: Array<{
+    escalationCount: number;
+    fallbackTriggered: number;
+    local: boolean;
+    model: string;
+    provider: string;
+    role: string;
+    statuses: Record<string, number>;
     validationCalls: number;
   }>;
   operationCounts: {
@@ -194,6 +247,7 @@ interface OperatorAiOperationsSnapshot {
     verificationJobs: number;
   };
   queue: {
+    backlogJobs: number;
     deadLetterJobs: number;
     statusCounts: Record<string, number>;
   };
@@ -201,11 +255,22 @@ interface OperatorAiOperationsSnapshot {
     exportedFieldsOnly: string[];
     excludedFields: string[];
   };
+  redactedIncidents: Array<{
+    artifactHash: string | null;
+    auditEndpoint: string | null;
+    auditLogHash: string | null;
+    model: string;
+    provider: string;
+    reasonCodes: string[];
+    role: string;
+    ruleId: number | null;
+    status: string;
+    turnId: number | null;
+  }>;
   ruleCompiler: {
     confidenceActionCounts: Record<string, number>;
     decisionCounts: Record<string, number>;
     fallbackRate: number;
-    finalConfidenceBuckets: Record<string, number>;
     providerDisagreementAverage: number;
     reasonCodeCounts: Record<string, number>;
   };
@@ -283,6 +348,28 @@ function percentLabel(value: number) {
     maximumFractionDigits: 1,
     minimumFractionDigits: 1,
   })}%`;
+}
+
+function millisecondsLabel(value: number) {
+  if (value >= 1_000) {
+    return `${(value / 1_000).toLocaleString("en-US", {
+      maximumFractionDigits: 1,
+    })}s`;
+  }
+  return `${Math.round(value).toLocaleString("en-US")}ms`;
+}
+
+function usdLabel(value: number) {
+  return value.toLocaleString("en-US", {
+    currency: "USD",
+    maximumFractionDigits: 4,
+    minimumFractionDigits: 4,
+    style: "currency",
+  });
+}
+
+function bucketLabel(value: string) {
+  return value.replace("_", "-");
 }
 
 function buildQuery(filters: {
@@ -815,11 +902,34 @@ export default function AdminPage() {
                       source="Verification queue"
                       value={metricLabel(operatorSnapshot.queue.deadLetterJobs)}
                     />
+                    <StatCard
+                      label="Token volume"
+                      source="Rule proposal tokens"
+                      value={metricLabel(operatorSnapshot.estimatedCost.totalTokens)}
+                    />
+                    <StatCard
+                      label="Estimated cost"
+                      source={formatScope(operatorSnapshot.estimatedCost.source)}
+                      value={usdLabel(operatorSnapshot.estimatedCost.estimatedUsd)}
+                    />
                   </div>
 
                   <div className="operator-grid">
                     <div>
-                      <h3>Model routing</h3>
+                      <h3>Call volume by role</h3>
+                      <ul className="stack-list">
+                        {operatorSnapshot.agentCallVolumeByRole.map((record) => (
+                          <li key={record.role}>
+                            <span>{formatScope(record.role)}</span>
+                            <strong>
+                              {record.calls} calls / {record.source}
+                            </strong>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div>
+                      <h3>Provider routing by role</h3>
                       <ul className="stack-list">
                         {operatorSnapshot.modelRouting.length === 0 ? (
                           <li>
@@ -828,12 +938,13 @@ export default function AdminPage() {
                           </li>
                         ) : (
                           operatorSnapshot.modelRouting.map((route) => (
-                            <li key={`${route.provider}:${route.model}`}>
+                            <li key={`${route.role}:${route.provider}:${route.model}`}>
                               <span>
-                                {route.provider} / {route.model}
+                                {formatScope(route.role)} / {route.provider} / {route.model}
                               </span>
                               <strong>
-                                {route.validationCalls} calls / {route.fallbackTriggered} fallback
+                                {route.validationCalls} calls / {route.fallbackTriggered} fallback /{" "}
+                                {route.escalationCount} escalated
                               </strong>
                             </li>
                           ))
@@ -841,8 +952,80 @@ export default function AdminPage() {
                       </ul>
                     </div>
                     <div>
+                      <h3>Latency percentiles</h3>
+                      <ul className="stack-list">
+                        {operatorSnapshot.latencyPercentiles.length === 0 ? (
+                          <li>
+                            <span>No latency samples</span>
+                            <strong>0ms</strong>
+                          </li>
+                        ) : (
+                          operatorSnapshot.latencyPercentiles.map((latency) => (
+                            <li
+                              key={`${latency.source}:${latency.role}:${latency.provider}:${latency.model}`}
+                            >
+                              <span>
+                                {formatScope(latency.role)} / {latency.provider}
+                              </span>
+                              <strong>
+                                p50 {millisecondsLabel(latency.p50Ms)} / p95{" "}
+                                {millisecondsLabel(latency.p95Ms)}
+                              </strong>
+                            </li>
+                          ))
+                        )}
+                      </ul>
+                    </div>
+                    <div>
+                      <h3>Failure counters</h3>
+                      <ul className="stack-list">
+                        {operatorSnapshot.failureCounts.length === 0 ? (
+                          <li>
+                            <span>No failures recorded</span>
+                            <strong>0</strong>
+                          </li>
+                        ) : (
+                          operatorSnapshot.failureCounts.map((failure) => (
+                            <li
+                              key={`${failure.role}:${failure.provider}:${failure.model}:${failure.status}`}
+                            >
+                              <span>
+                                {formatScope(failure.status)} / {formatScope(failure.role)}
+                              </span>
+                              <strong>{failure.count}</strong>
+                            </li>
+                          ))
+                        )}
+                      </ul>
+                    </div>
+                    <div>
+                      <h3>Confidence distributions</h3>
+                      <ul className="stack-list compact">
+                        {Object.entries(
+                          operatorSnapshot.confidenceDistributions.finalConfidenceBuckets,
+                        ).map(([bucket, count]) => (
+                          <li key={`final-${bucket}`}>
+                            <span>Final {bucketLabel(bucket)}</span>
+                            <strong>{count}</strong>
+                          </li>
+                        ))}
+                        {Object.entries(
+                          operatorSnapshot.confidenceDistributions.modelConfidenceBuckets,
+                        ).map(([bucket, count]) => (
+                          <li key={`model-${bucket}`}>
+                            <span>Model {bucketLabel(bucket)}</span>
+                            <strong>{count}</strong>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div>
                       <h3>Queue status</h3>
                       <ul className="stack-list">
+                        <li>
+                          <span>Backlog</span>
+                          <strong className="numeric">{operatorSnapshot.queue.backlogJobs}</strong>
+                        </li>
                         {Object.entries(operatorSnapshot.queue.statusCounts).map(
                           ([status, count]) => (
                             <li key={status}>
@@ -851,6 +1034,75 @@ export default function AdminPage() {
                             </li>
                           ),
                         )}
+                      </ul>
+                    </div>
+                    <div>
+                      <h3>Local model health</h3>
+                      <ul className="stack-list">
+                        {operatorSnapshot.localModelHealth.map((model) => (
+                          <li key={`${model.provider}:${model.configuredModel}`}>
+                            <span>
+                              {model.servingEngine} / {model.configuredModel}
+                            </span>
+                            <strong>
+                              {formatScope(model.lastHealthCheckResult)} /{" "}
+                              {model.digest ? shortHash(model.digest) : "No digest"}
+                            </strong>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div>
+                      <h3>Redacted incidents</h3>
+                      <ul className="stack-list">
+                        {operatorSnapshot.redactedIncidents.length === 0 ? (
+                          <li>
+                            <span>No incidents recorded</span>
+                            <strong>0</strong>
+                          </li>
+                        ) : (
+                          operatorSnapshot.redactedIncidents.slice(0, 6).map((incident) => (
+                            <li
+                              key={`${incident.turnId}:${incident.ruleId}:${incident.status}:${incident.provider}`}
+                            >
+                              <span>
+                                {formatScope(incident.status)} / turn {incident.turnId ?? "n/a"}
+                              </span>
+                              <strong>
+                                {incident.auditEndpoint ? (
+                                  <a href={`${apiBaseUrl}${incident.auditEndpoint}`}>
+                                    {shortHash(incident.auditLogHash)}
+                                  </a>
+                                ) : (
+                                  "No audit link"
+                                )}
+                              </strong>
+                            </li>
+                          ))
+                        )}
+                      </ul>
+                    </div>
+                    <div>
+                      <h3>Audit links</h3>
+                      <ul className="stack-list">
+                        {operatorSnapshot.auditLinks.slice(0, 6).map((link) => (
+                          <li key={link.validationLogId}>
+                            <span>
+                              Turn {link.turnId} / rule {link.ruleId}
+                            </span>
+                            <strong>
+                              <a href={`${apiBaseUrl}${link.auditEndpoint}`}>
+                                {shortHash(link.auditLogHash)}
+                              </a>
+                            </strong>
+                          </li>
+                        ))}
+                        {operatorSnapshot.auditLinks.length === 0 ? (
+                          <li>
+                            <span>No audit links</span>
+                            <strong>0</strong>
+                          </li>
+                        ) : null}
                       </ul>
                     </div>
                     <div>

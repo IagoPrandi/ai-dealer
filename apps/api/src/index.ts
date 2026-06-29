@@ -4851,11 +4851,69 @@ export interface OperatorAiOperationsSnapshot {
     readOnly: true;
     role: "ai_operator";
   };
-  generatedAt: string;
-  modelRouting: Array<{
-    fallbackTriggered: number;
+  agentCallVolumeByRole: Array<{
+    calls: number;
+    role: AiOperationRole;
+    source: string;
+  }>;
+  auditLinks: Array<{
+    artifactHash: string | null;
+    auditEndpoint: string;
+    auditLogHash: string | null;
+    role: AiOperationRole;
+    ruleId: number;
+    turnId: number;
+    validationLogId: string;
+  }>;
+  confidenceDistributions: {
+    compilerConfidenceBuckets: ConfidenceBucketCounts;
+    finalConfidenceBuckets: ConfidenceBucketCounts;
+    modelConfidenceBuckets: ConfidenceBucketCounts;
+  };
+  estimatedCost: {
+    costPerThousandTokensUsd: number;
+    estimatedUsd: number;
+    source: "configured_rate" | "not_configured";
+    totalTokens: number;
+  };
+  failureCounts: Array<{
+    count: number;
     model: string;
     provider: string;
+    role: AiOperationRole;
+    status:
+      | "guardrail_rejection"
+      | "malformed_response"
+      | "provider_error"
+      | "schema_validation_failed"
+      | "timeout";
+  }>;
+  generatedAt: string;
+  latencyPercentiles: Array<{
+    count: number;
+    model: string;
+    p50Ms: number;
+    p95Ms: number;
+    provider: string;
+    role: AiOperationRole;
+    source: "end_to_end_rule_validation_projection" | "guess_verification_queue_projection";
+  }>;
+  localModelHealth: Array<{
+    configuredModel: string;
+    digest: string | null;
+    lastHealthCheckResult: "available_from_validation" | "not_recorded";
+    provider: string;
+    quantization: string | null;
+    servingEngine: string;
+  }>;
+  modelRouting: Array<{
+    escalationCount: number;
+    fallbackTriggered: number;
+    local: boolean;
+    model: string;
+    provider: string;
+    role: AiOperationRole;
+    statuses: Record<string, number>;
     validationCalls: number;
   }>;
   operationCounts: {
@@ -4865,6 +4923,7 @@ export interface OperatorAiOperationsSnapshot {
     verificationJobs: number;
   };
   queue: {
+    backlogJobs: number;
     deadLetterJobs: number;
     statusCounts: Record<GuessVerificationJobStatus, number>;
   };
@@ -4872,11 +4931,22 @@ export interface OperatorAiOperationsSnapshot {
     exportedFieldsOnly: string[];
     excludedFields: string[];
   };
+  redactedIncidents: Array<{
+    artifactHash: string | null;
+    auditEndpoint: string | null;
+    auditLogHash: string | null;
+    model: string;
+    provider: string;
+    reasonCodes: string[];
+    role: AiOperationRole;
+    ruleId: number | null;
+    status: string;
+    turnId: number | null;
+  }>;
   ruleCompiler: {
     confidenceActionCounts: Record<string, number>;
     decisionCounts: Record<string, number>;
     fallbackRate: number;
-    finalConfidenceBuckets: Record<"0_50" | "50_70" | "70_90" | "90_100", number>;
     providerDisagreementAverage: number;
     reasonCodeCounts: Record<string, number>;
   };
@@ -4887,6 +4957,17 @@ export interface OperatorAiOperationsSnapshot {
     status: "available" | "not_recorded";
   }>;
 }
+
+type AiOperationRole =
+  | "adversarial_testing"
+  | "compilation"
+  | "final_validation"
+  | "interpretation"
+  | "normalization"
+  | "review";
+
+type ConfidenceBucket = "0_50" | "50_70" | "70_90" | "90_100";
+type ConfidenceBucketCounts = Record<ConfidenceBucket, number>;
 
 function cycleDurationHours(stepIndex: number): number {
   const value = TURN_DURATION_CYCLE_HOURS[stepIndex];
@@ -6024,7 +6105,7 @@ function incrementCount<T extends string>(
 
 function getConfidenceBucket(
   confidence: number,
-): keyof OperatorAiOperationsSnapshot["ruleCompiler"]["finalConfidenceBuckets"] {
+): ConfidenceBucket {
   if (confidence < 0.5) {
     return "0_50";
   }
@@ -6037,8 +6118,82 @@ function getConfidenceBucket(
   return "90_100";
 }
 
+function emptyConfidenceBuckets(): ConfidenceBucketCounts {
+  return {
+    "0_50": 0,
+    "50_70": 0,
+    "70_90": 0,
+    "90_100": 0,
+  };
+}
+
+function percentile(values: number[], percentileValue: number) {
+  if (values.length === 0) {
+    return 0;
+  }
+  const sorted = [...values].sort((left, right) => left - right);
+  const index = Math.ceil((percentileValue / 100) * sorted.length) - 1;
+  return sorted[Math.max(0, Math.min(index, sorted.length - 1))] ?? 0;
+}
+
+function parseOptionalTimestamp(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function getValidationLatencyMs(validation: RuleValidationRecord) {
+  const proposal = ruleProposals.get(
+    getRuleProposalKey(validation.turnId, validation.ruleId),
+  );
+  const startedAt = parseOptionalTimestamp(proposal?.submittedAt);
+  const finishedAt = parseOptionalTimestamp(validation.validatedAt);
+  if (startedAt === null || finishedAt === null || finishedAt < startedAt) {
+    return null;
+  }
+  return finishedAt - startedAt;
+}
+
+function getJobLatencyMs(job: GuessVerificationJobRecord) {
+  const startedAt = parseOptionalTimestamp(job.createdAt);
+  const finishedAt = parseOptionalTimestamp(job.completedAt ?? job.updatedAt);
+  if (startedAt === null || finishedAt === null || finishedAt < startedAt) {
+    return null;
+  }
+  return finishedAt - startedAt;
+}
+
+function isGuardrailReason(reason: string) {
+  return [
+    "AMBIGUOUS_RULE",
+    "COMPLEXITY_EXCEEDED",
+    "EXTERNAL_DEPENDENCY",
+    "REVIEWER_MISMATCH",
+    "RUNTIME_TEST_FAILED",
+    "SCHEMA_INVALID",
+    "UNSAFE_RUNTIME_BOUNDS",
+    "UNSUPPORTED_RULE",
+  ].includes(reason);
+}
+
+function getConfiguredCostPerThousandTokensUsd() {
+  const value = Number(process.env.LLM_ESTIMATED_COST_PER_1K_TOKENS_USD ?? "0");
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function getModelName(identity: AgentModelIdentity) {
+  return identity.model || "not_recorded";
+}
+
+function getProviderName(identity: AgentModelIdentity, provider: string) {
+  return provider || identity.provider || "not_recorded";
+}
+
 export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot {
   const validations = [...ruleValidations.values()];
+  const proposals = [...ruleProposals.values()];
   const jobs = [...verificationJobs.values()];
   const validationLogs = [...auditLogs.values()].filter(
     (log) => log.kind === "compiler.validation",
@@ -6050,6 +6205,18 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
     string,
     OperatorAiOperationsSnapshot["modelRouting"][number]
   >();
+  const latencyMap = new Map<
+    string,
+    {
+      model: string;
+      provider: string;
+      role: AiOperationRole;
+      source: OperatorAiOperationsSnapshot["latencyPercentiles"][number]["source"];
+      values: number[];
+    }
+  >();
+  const failureMap = new Map<string, OperatorAiOperationsSnapshot["failureCounts"][number]>();
+  const localModelMap = new Map<string, OperatorAiOperationsSnapshot["localModelHealth"][number]>();
   const queueStatusCounts: Record<GuessVerificationJobStatus, number> = {
     completed: 0,
     dead_letter: 0,
@@ -6060,38 +6227,169 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
   const confidenceActionCounts: Record<string, number> = {};
   const decisionCounts: Record<string, number> = {};
   const reasonCodeCounts: Record<string, number> = {};
-  const finalConfidenceBuckets: OperatorAiOperationsSnapshot["ruleCompiler"]["finalConfidenceBuckets"] =
-    {
-      "0_50": 0,
-      "50_70": 0,
-      "70_90": 0,
-      "90_100": 0,
-    };
+  const compilerConfidenceBuckets = emptyConfidenceBuckets();
+  const finalConfidenceBuckets = emptyConfidenceBuckets();
+  const modelConfidenceBuckets = emptyConfidenceBuckets();
+  const redactedIncidents: OperatorAiOperationsSnapshot["redactedIncidents"] = [];
+
+  function addLatency(args: {
+    model: string;
+    provider: string;
+    role: AiOperationRole;
+    source: OperatorAiOperationsSnapshot["latencyPercentiles"][number]["source"];
+    valueMs: number | null;
+  }) {
+    if (args.valueMs === null) {
+      return;
+    }
+    const key = `${args.source}:${args.role}:${args.provider}:${args.model}`;
+    const row =
+      latencyMap.get(key) ??
+      {
+        model: args.model,
+        provider: args.provider,
+        role: args.role,
+        source: args.source,
+        values: [],
+      };
+    row.values.push(args.valueMs);
+    latencyMap.set(key, row);
+  }
+
+  function addFailure(args: {
+    model: string;
+    provider: string;
+    role: AiOperationRole;
+    status: OperatorAiOperationsSnapshot["failureCounts"][number]["status"];
+  }) {
+    const key = `${args.role}:${args.provider}:${args.model}:${args.status}`;
+    const row =
+      failureMap.get(key) ??
+      {
+        count: 0,
+        model: args.model,
+        provider: args.provider,
+        role: args.role,
+        status: args.status,
+      };
+    row.count += 1;
+    failureMap.set(key, row);
+  }
 
   for (const validation of validations) {
-    const routingKey = `${validation.provider}:${validation.model}`;
-    const routing =
-      modelRoutingMap.get(routingKey) ??
-      {
-        fallbackTriggered: 0,
+    const latencyMs = getValidationLatencyMs(validation);
+    const auditEndpoint = validation.auditLogHash
+      ? `/audit/${validation.auditLogHash}`
+      : null;
+
+    for (const role of ["compilation", "review", "final_validation"] as const) {
+      addLatency({
         model: validation.model,
         provider: validation.provider,
-        validationCalls: 0,
-      };
-    routing.validationCalls += 1;
-    routing.fallbackTriggered += validation.fallbackTriggered ? 1 : 0;
-    modelRoutingMap.set(routingKey, routing);
+        role,
+        source: "end_to_end_rule_validation_projection",
+        valueMs: latencyMs,
+      });
+    }
+
+    for (const attempt of validation.providerPath) {
+      const model = getModelName(attempt.model_identity);
+      const provider = getProviderName(attempt.model_identity, attempt.provider);
+      const role: AiOperationRole = "compilation";
+      const routingKey = `${role}:${provider}:${model}`;
+      const routing =
+        modelRoutingMap.get(routingKey) ??
+        {
+          escalationCount: 0,
+          fallbackTriggered: 0,
+          local: attempt.capability_flags.local,
+          model,
+          provider,
+          role,
+          statuses: {},
+          validationCalls: 0,
+        };
+      routing.validationCalls += 1;
+      routing.fallbackTriggered += validation.providerPath.length > 1 ? 1 : 0;
+      routing.escalationCount += attempt.status === "escalated" ? 1 : 0;
+      incrementCount(routing.statuses, attempt.status);
+      modelRoutingMap.set(routingKey, routing);
+
+      if (attempt.capability_flags.local) {
+        localModelMap.set(`${provider}:${model}`, {
+          configuredModel: model,
+          digest: attempt.model_identity.digest,
+          lastHealthCheckResult: "available_from_validation",
+          provider,
+          quantization: attempt.model_identity.quantization,
+          servingEngine: attempt.model_identity.serving_engine,
+        });
+      }
+
+      if (attempt.status === "timeout") {
+        addFailure({ model, provider, role, status: "timeout" });
+      } else if (attempt.status === "malformed_response") {
+        addFailure({ model, provider, role, status: "malformed_response" });
+      } else if (attempt.status === "schema_validation_failed") {
+        addFailure({ model, provider, role, status: "schema_validation_failed" });
+      } else if (attempt.status === "provider_disagreement") {
+        addFailure({ model, provider, role, status: "provider_error" });
+      }
+
+      if (
+        attempt.status === "timeout" ||
+        attempt.status === "malformed_response" ||
+        attempt.status === "schema_validation_failed" ||
+        attempt.status === "provider_disagreement"
+      ) {
+        redactedIncidents.push({
+          artifactHash: validation.compiledArtifactHash,
+          auditEndpoint,
+          auditLogHash: validation.auditLogHash ?? null,
+          model,
+          provider,
+          reasonCodes: validation.reasonCodes,
+          role,
+          ruleId: validation.ruleId,
+          status: attempt.status,
+          turnId: validation.turnId,
+        });
+      }
+    }
 
     incrementCount(confidenceActionCounts, validation.confidenceAction);
     incrementCount(decisionCounts, validation.decision);
+    incrementCount(
+      compilerConfidenceBuckets,
+      getConfidenceBucket(validation.confidence.compiler_confidence),
+    );
     incrementCount(finalConfidenceBuckets, getConfidenceBucket(validation.finalConfidence));
+    incrementCount(
+      modelConfidenceBuckets,
+      getConfidenceBucket(validation.confidence.model_confidence),
+    );
     for (const code of validation.reasonCodes) {
       incrementCount(reasonCodeCounts, code);
+      if (isGuardrailReason(code)) {
+        addFailure({
+          model: validation.model,
+          provider: validation.provider,
+          role: "review",
+          status: "guardrail_rejection",
+        });
+      }
     }
   }
 
   for (const job of jobs) {
     incrementCount(queueStatusCounts, job.status);
+    addLatency({
+      model: job.activeRuleArtifact ? "rule-runtime" : "original-rule-runtime",
+      provider: "idealer-worker",
+      role: "final_validation",
+      source: "guess_verification_queue_projection",
+      valueMs: getJobLatencyMs(job),
+    });
   }
 
   const fallbackCount = validations.filter(
@@ -6101,6 +6399,11 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
     (total, validation) => total + validation.providerDisagreementRateSample,
     0,
   );
+  const totalTokens = proposals.reduce(
+    (total, proposal) => total + proposal.tokenCount,
+    0,
+  );
+  const costPerThousandTokensUsd = getConfiguredCostPerThousandTokensUsd();
 
   return {
     access: {
@@ -6108,9 +6411,98 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
       readOnly: true,
       role: "ai_operator",
     },
+    agentCallVolumeByRole: [
+      {
+        calls: proposals.length,
+        role: "interpretation",
+        source: "rule proposal preflight projection",
+      },
+      {
+        calls: proposals.length,
+        role: "normalization",
+        source: "rule proposal preflight projection",
+      },
+      {
+        calls: validations.length,
+        role: "compilation",
+        source: "compiler validation audit logs",
+      },
+      {
+        calls: validations.length,
+        role: "review",
+        source: "compiler confidence and reason-code review",
+      },
+      {
+        calls: validations.reduce(
+          (total, validation) => total + validation.evaluatedTestCases.length,
+          0,
+        ),
+        role: "adversarial_testing",
+        source: "compiler evaluated test cases",
+      },
+      {
+        calls: validations.length + jobs.length,
+        role: "final_validation",
+        source: "compiler decisions plus verification queue",
+      },
+    ],
+    auditLinks: validations.slice(0, 20).map((validation) => ({
+      artifactHash: validation.compiledArtifactHash,
+      auditEndpoint: validation.auditLogHash
+        ? `/audit/${validation.auditLogHash}`
+        : "/audit",
+      auditLogHash: validation.auditLogHash ?? null,
+      role: "compilation",
+      ruleId: validation.ruleId,
+      turnId: validation.turnId,
+      validationLogId: validation.validationLogId,
+    })),
+    confidenceDistributions: {
+      compilerConfidenceBuckets,
+      finalConfidenceBuckets,
+      modelConfidenceBuckets,
+    },
+    estimatedCost: {
+      costPerThousandTokensUsd,
+      estimatedUsd: (totalTokens / 1_000) * costPerThousandTokensUsd,
+      source: costPerThousandTokensUsd > 0 ? "configured_rate" : "not_configured",
+      totalTokens,
+    },
+    failureCounts: [...failureMap.values()].sort(
+      (left, right) => right.count - left.count,
+    ),
     generatedAt: new Date().toISOString(),
+    latencyPercentiles: [...latencyMap.values()]
+      .map((row) => ({
+        count: row.values.length,
+        model: row.model,
+        p50Ms: percentile(row.values, 50),
+        p95Ms: percentile(row.values, 95),
+        provider: row.provider,
+        role: row.role,
+        source: row.source,
+      }))
+      .sort(
+        (left, right) =>
+          left.role.localeCompare(right.role) ||
+          left.provider.localeCompare(right.provider),
+      ),
+    localModelHealth:
+      localModelMap.size === 0
+        ? [
+            {
+              configuredModel: "not_recorded",
+              digest: null,
+              lastHealthCheckResult: "not_recorded",
+              provider: "not_recorded",
+              quantization: null,
+              servingEngine: "not_recorded",
+            },
+          ]
+        : [...localModelMap.values()],
     modelRouting: [...modelRoutingMap.values()].sort(
       (left, right) =>
+        left.role.localeCompare(right.role) ||
         right.validationCalls - left.validationCalls ||
         left.provider.localeCompare(right.provider),
     ),
@@ -6121,6 +6513,10 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
       verificationJobs: jobs.length,
     },
     queue: {
+      backlogJobs:
+        queueStatusCounts.pending +
+        queueStatusCounts.processing +
+        queueStatusCounts.retry_scheduled,
       deadLetterJobs: queueStatusCounts.dead_letter,
       statusCounts: queueStatusCounts,
     },
@@ -6128,12 +6524,19 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
       exportedFieldsOnly: [
         "provider",
         "model",
+        "role",
         "validation_counts",
         "fallback_counts",
+        "escalation_counts",
         "confidence_buckets",
         "reason_code_counts",
         "queue_status_counts",
         "audit_log_counts",
+        "latency_percentiles",
+        "token_counts",
+        "estimated_cost",
+        "local_model_identity",
+        "redacted_incident_status",
       ],
       excludedFields: [
         "raw_prompt",
@@ -6151,11 +6554,11 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
         "unredacted_stack_trace",
       ],
     },
+    redactedIncidents: redactedIncidents.slice(0, 20),
     ruleCompiler: {
       confidenceActionCounts,
       decisionCounts,
       fallbackRate: validations.length === 0 ? 0 : fallbackCount / validations.length,
-      finalConfidenceBuckets,
       providerDisagreementAverage:
         validations.length === 0 ? 0 : disagreementTotal / validations.length,
       reasonCodeCounts,
@@ -6186,16 +6589,16 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
         status: "available",
       },
       {
-        endpoint: "llm_latency_metric",
-        label: "Provider latency time series",
+        endpoint: "rule_proposals.submittedAt -> rule_validations.validatedAt",
+        label: "Provider latency percentiles",
         source: "internal_projection",
-        status: "not_recorded",
+        status: "available",
       },
       {
-        endpoint: "llm_cost_metric",
+        endpoint: "LLM_ESTIMATED_COST_PER_1K_TOKENS_USD",
         label: "Token usage and estimated LLM cost",
         source: "internal_projection",
-        status: "not_recorded",
+        status: costPerThousandTokensUsd > 0 ? "available" : "not_recorded",
       },
     ],
   };
@@ -6205,13 +6608,20 @@ export function exportOperatorAiOperationsCsv(
   snapshot: OperatorAiOperationsSnapshot,
 ) {
   const columns = [
+    "role",
     "provider",
     "model",
     "validation_calls",
     "fallback_triggered",
+    "escalation_count",
     "fallback_rate",
     "provider_disagreement_average",
+    "p50_latency_ms",
+    "p95_latency_ms",
+    "total_tokens",
+    "estimated_cost_usd",
     "verification_jobs",
+    "backlog_jobs",
     "dead_letter_jobs",
     "redaction_note",
   ];
@@ -6223,23 +6633,47 @@ export function exportOperatorAiOperationsCsv(
           [
             "",
             "",
+            "",
+            0,
             0,
             0,
             snapshot.ruleCompiler.fallbackRate,
             snapshot.ruleCompiler.providerDisagreementAverage,
+            0,
+            0,
+            snapshot.estimatedCost.totalTokens,
+            snapshot.estimatedCost.estimatedUsd,
             snapshot.operationCounts.verificationJobs,
+            snapshot.queue.backlogJobs,
             snapshot.queue.deadLetterJobs,
             redactionNote,
           ],
         ]
       : snapshot.modelRouting.map((routing) => [
+          routing.role,
           routing.provider,
           routing.model,
           routing.validationCalls,
           routing.fallbackTriggered,
+          routing.escalationCount,
           snapshot.ruleCompiler.fallbackRate,
           snapshot.ruleCompiler.providerDisagreementAverage,
+          snapshot.latencyPercentiles.find(
+            (latency) =>
+              latency.role === routing.role &&
+              latency.provider === routing.provider &&
+              latency.model === routing.model,
+          )?.p50Ms ?? 0,
+          snapshot.latencyPercentiles.find(
+            (latency) =>
+              latency.role === routing.role &&
+              latency.provider === routing.provider &&
+              latency.model === routing.model,
+          )?.p95Ms ?? 0,
+          snapshot.estimatedCost.totalTokens,
+          snapshot.estimatedCost.estimatedUsd,
           snapshot.operationCounts.verificationJobs,
+          snapshot.queue.backlogJobs,
           snapshot.queue.deadLetterJobs,
           redactionNote,
         ]);

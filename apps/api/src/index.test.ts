@@ -804,7 +804,21 @@ test("restricted AI operations snapshot is role-gated and redacted", () => {
   assert.equal(snapshot.operationCounts.validationCalls, 1);
   assert.equal(snapshot.operationCounts.verificationJobs, 1);
   assert.equal(snapshot.modelRouting.length > 0, true);
+  assert.equal(
+    snapshot.agentCallVolumeByRole.some(
+      (record) => record.role === "adversarial_testing" && record.calls > 0,
+    ),
+    true,
+  );
+  assert.equal(snapshot.latencyPercentiles.length > 0, true);
+  assert.equal(snapshot.estimatedCost.totalTokens > 0, true);
+  assert.equal(snapshot.confidenceDistributions.finalConfidenceBuckets["90_100"], 1);
+  assert.equal(snapshot.localModelHealth.length > 0, true);
+  assert.equal(snapshot.auditLinks.length, 1);
+  assert.equal(snapshot.queue.backlogJobs, 1);
   assert.match(csv, /redaction_note/);
+  assert.match(csv, /p95_latency_ms/);
+  assert.match(csv, /estimated_cost_usd/);
   assert.doesNotMatch(
     serialized,
     /"compiledartifact"|"normalizedtext"|"providerpath"|"providerapikey"|win if at least 4/,

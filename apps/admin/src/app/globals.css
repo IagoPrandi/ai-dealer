@@ -348,6 +348,16 @@ td a {
   text-align: right;
 }
 
+.stack-list.compact li {
+  min-height: 38px;
+  padding: 8px 10px;
+}
+
+.stack-list a {
+  color: var(--green);
+  text-decoration: none;
+}
+
 .proof-grid,
 .source-grid {
   display: grid;
