@@ -812,6 +812,17 @@ test("restricted AI operations snapshot is role-gated and redacted", () => {
   );
   assert.equal(snapshot.latencyPercentiles.length > 0, true);
   assert.equal(snapshot.estimatedCost.totalTokens > 0, true);
+  assert.equal(snapshot.tokenUsageByProviderModelRole.length > 0, true);
+  assert.equal(
+    snapshot.tokenUsageByProviderModelRole.some(
+      (record) =>
+        record.role === "compilation" &&
+        record.provider !== "not_recorded" &&
+        record.model !== "not_recorded" &&
+        record.totalTokens > 0,
+    ),
+    true,
+  );
   assert.equal(snapshot.confidenceDistributions.finalConfidenceBuckets["90_100"], 1);
   assert.equal(snapshot.localModelHealth.length > 0, true);
   assert.equal(snapshot.auditLinks.length, 1);

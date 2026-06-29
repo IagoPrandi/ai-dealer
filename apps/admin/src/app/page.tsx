@@ -280,6 +280,15 @@ interface OperatorAiOperationsSnapshot {
     source: string;
     status: "available" | "not_recorded";
   }>;
+  tokenUsageByProviderModelRole: Array<{
+    estimatedUsd: number;
+    model: string;
+    provider: string;
+    role: string;
+    source: string;
+    totalTokens: number;
+    validationCalls: number;
+  }>;
 }
 
 const CONFIGURED_API_BASE_URL = process.env.NEXT_PUBLIC_IDEALER_API_URL?.trim();
@@ -1002,6 +1011,14 @@ export default function AdminPage() {
                       <h3>Confidence distributions</h3>
                       <ul className="stack-list compact">
                         {Object.entries(
+                          operatorSnapshot.confidenceDistributions.compilerConfidenceBuckets,
+                        ).map(([bucket, count]) => (
+                          <li key={`compiler-${bucket}`}>
+                            <span>Compiler {bucketLabel(bucket)}</span>
+                            <strong>{count}</strong>
+                          </li>
+                        ))}
+                        {Object.entries(
                           operatorSnapshot.confidenceDistributions.finalConfidenceBuckets,
                         ).map(([bucket, count]) => (
                           <li key={`final-${bucket}`}>
@@ -1017,6 +1034,28 @@ export default function AdminPage() {
                             <strong>{count}</strong>
                           </li>
                         ))}
+                      </ul>
+                    </div>
+                    <div>
+                      <h3>Token and cost projection</h3>
+                      <ul className="stack-list">
+                        {operatorSnapshot.tokenUsageByProviderModelRole.length === 0 ? (
+                          <li>
+                            <span>No token records</span>
+                            <strong>0 tokens</strong>
+                          </li>
+                        ) : (
+                          operatorSnapshot.tokenUsageByProviderModelRole.map((usage) => (
+                            <li key={`${usage.role}:${usage.provider}:${usage.model}`}>
+                              <span>
+                                {formatScope(usage.role)} / {usage.provider} / {usage.model}
+                              </span>
+                              <strong>
+                                {metricLabel(usage.totalTokens)} tokens / {usdLabel(usage.estimatedUsd)}
+                              </strong>
+                            </li>
+                          ))
+                        )}
                       </ul>
                     </div>
                     <div>
@@ -1046,6 +1085,7 @@ export default function AdminPage() {
                             </span>
                             <strong>
                               {formatScope(model.lastHealthCheckResult)} /{" "}
+                              {model.quantization ?? "No quantization"} /{" "}
                               {model.digest ? shortHash(model.digest) : "No digest"}
                             </strong>
                           </li>

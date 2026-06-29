@@ -4956,6 +4956,15 @@ export interface OperatorAiOperationsSnapshot {
     source: "audit_log" | "internal_projection" | "operator_config" | "queue_projection";
     status: "available" | "not_recorded";
   }>;
+  tokenUsageByProviderModelRole: Array<{
+    estimatedUsd: number;
+    model: string;
+    provider: string;
+    role: AiOperationRole;
+    source: "rule_proposal_token_projection";
+    totalTokens: number;
+    validationCalls: number;
+  }>;
 }
 
 type AiOperationRole =
@@ -6205,6 +6214,10 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
     string,
     OperatorAiOperationsSnapshot["modelRouting"][number]
   >();
+  const tokenUsageMap = new Map<
+    string,
+    OperatorAiOperationsSnapshot["tokenUsageByProviderModelRole"][number]
+  >();
   const latencyMap = new Map<
     string,
     {
@@ -6276,11 +6289,55 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
     failureMap.set(key, row);
   }
 
+  function addTokenUsage(args: {
+    costPerThousandTokensUsd: number;
+    model: string;
+    provider: string;
+    role: AiOperationRole;
+    tokenCount: number;
+  }) {
+    const key = `${args.role}:${args.provider}:${args.model}`;
+    const row =
+      tokenUsageMap.get(key) ??
+      {
+        estimatedUsd: 0,
+        model: args.model,
+        provider: args.provider,
+        role: args.role,
+        source: "rule_proposal_token_projection" as const,
+        totalTokens: 0,
+        validationCalls: 0,
+      };
+    row.totalTokens += args.tokenCount;
+    row.validationCalls += 1;
+    row.estimatedUsd = (row.totalTokens / 1_000) * args.costPerThousandTokensUsd;
+    tokenUsageMap.set(key, row);
+  }
+
+  const costPerThousandTokensUsd = getConfiguredCostPerThousandTokensUsd();
+
+  for (const proposal of proposals) {
+    const provider = proposal.validation?.provider ?? "not_recorded";
+    const model = proposal.validation?.model ?? "not_recorded";
+    for (const role of ["interpretation", "normalization"] as const) {
+      addTokenUsage({
+        costPerThousandTokensUsd,
+        model,
+        provider,
+        role,
+        tokenCount: proposal.tokenCount,
+      });
+    }
+  }
+
   for (const validation of validations) {
     const latencyMs = getValidationLatencyMs(validation);
     const auditEndpoint = validation.auditLogHash
       ? `/audit/${validation.auditLogHash}`
       : null;
+    const proposalTokenCount =
+      ruleProposals.get(getRuleProposalKey(validation.turnId, validation.ruleId))
+        ?.tokenCount ?? 0;
 
     for (const role of ["compilation", "review", "final_validation"] as const) {
       addLatency({
@@ -6289,6 +6346,15 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
         role,
         source: "end_to_end_rule_validation_projection",
         valueMs: latencyMs,
+      });
+    }
+    for (const role of ["review", "final_validation"] as const) {
+      addTokenUsage({
+        costPerThousandTokensUsd,
+        model: validation.model,
+        provider: validation.provider,
+        role,
+        tokenCount: proposalTokenCount,
       });
     }
 
@@ -6314,6 +6380,13 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
       routing.escalationCount += attempt.status === "escalated" ? 1 : 0;
       incrementCount(routing.statuses, attempt.status);
       modelRoutingMap.set(routingKey, routing);
+      addTokenUsage({
+        costPerThousandTokensUsd,
+        model,
+        provider,
+        role,
+        tokenCount: proposalTokenCount,
+      });
 
       if (attempt.capability_flags.local) {
         localModelMap.set(`${provider}:${model}`, {
@@ -6403,7 +6476,6 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
     (total, proposal) => total + proposal.tokenCount,
     0,
   );
-  const costPerThousandTokensUsd = getConfiguredCostPerThousandTokensUsd();
 
   return {
     access: {
@@ -6601,6 +6673,12 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
         status: costPerThousandTokensUsd > 0 ? "available" : "not_recorded",
       },
     ],
+    tokenUsageByProviderModelRole: [...tokenUsageMap.values()].sort(
+      (left, right) =>
+        left.role.localeCompare(right.role) ||
+        left.provider.localeCompare(right.provider) ||
+        left.model.localeCompare(right.model),
+    ),
   };
 }
 
@@ -6627,8 +6705,29 @@ export function exportOperatorAiOperationsCsv(
   ];
   const redactionNote =
     "Restricted operator export includes redacted aggregates only; raw prompts, completions, compiled artifacts, provider payloads, secrets, private analytics, and unredacted stack traces are excluded.";
+  const keyFor = (role: string, provider: string, model: string) =>
+    JSON.stringify([role, provider, model]);
+  const routingByKey = new Map(
+    snapshot.modelRouting.map((routing) => [
+      keyFor(routing.role, routing.provider, routing.model),
+      routing,
+    ]),
+  );
+  const latencyByKey = new Map(
+    snapshot.latencyPercentiles.map((latency) => [
+      keyFor(latency.role, latency.provider, latency.model),
+      latency,
+    ]),
+  );
+  const tokenUsageByKey = new Map(
+    snapshot.tokenUsageByProviderModelRole.map((usage) => [
+      keyFor(usage.role, usage.provider, usage.model),
+      usage,
+    ]),
+  );
+  const rowKeys = new Set([...routingByKey.keys(), ...tokenUsageByKey.keys()]);
   const rows =
-    snapshot.modelRouting.length === 0
+    rowKeys.size === 0
       ? [
           [
             "",
@@ -6649,34 +6748,31 @@ export function exportOperatorAiOperationsCsv(
             redactionNote,
           ],
         ]
-      : snapshot.modelRouting.map((routing) => [
-          routing.role,
-          routing.provider,
-          routing.model,
-          routing.validationCalls,
-          routing.fallbackTriggered,
-          routing.escalationCount,
-          snapshot.ruleCompiler.fallbackRate,
-          snapshot.ruleCompiler.providerDisagreementAverage,
-          snapshot.latencyPercentiles.find(
-            (latency) =>
-              latency.role === routing.role &&
-              latency.provider === routing.provider &&
-              latency.model === routing.model,
-          )?.p50Ms ?? 0,
-          snapshot.latencyPercentiles.find(
-            (latency) =>
-              latency.role === routing.role &&
-              latency.provider === routing.provider &&
-              latency.model === routing.model,
-          )?.p95Ms ?? 0,
-          snapshot.estimatedCost.totalTokens,
-          snapshot.estimatedCost.estimatedUsd,
-          snapshot.operationCounts.verificationJobs,
-          snapshot.queue.backlogJobs,
-          snapshot.queue.deadLetterJobs,
-          redactionNote,
-        ]);
+      : [...rowKeys].sort().map((key) => {
+          const routing = routingByKey.get(key);
+          const tokenUsage = tokenUsageByKey.get(key);
+          const latency = latencyByKey.get(key);
+          const [role = "", provider = "", model = ""] = JSON.parse(key) as string[];
+
+          return [
+            routing?.role ?? tokenUsage?.role ?? role,
+            routing?.provider ?? tokenUsage?.provider ?? provider,
+            routing?.model ?? tokenUsage?.model ?? model,
+            routing?.validationCalls ?? tokenUsage?.validationCalls ?? 0,
+            routing?.fallbackTriggered ?? 0,
+            routing?.escalationCount ?? 0,
+            snapshot.ruleCompiler.fallbackRate,
+            snapshot.ruleCompiler.providerDisagreementAverage,
+            latency?.p50Ms ?? 0,
+            latency?.p95Ms ?? 0,
+            tokenUsage?.totalTokens ?? 0,
+            tokenUsage?.estimatedUsd ?? 0,
+            snapshot.operationCounts.verificationJobs,
+            snapshot.queue.backlogJobs,
+            snapshot.queue.deadLetterJobs,
+            redactionNote,
+          ];
+        });
 
   return [
     columns.map(csvCell).join(","),

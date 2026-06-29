@@ -5798,25 +5798,25 @@ Build a read-only admin/transparency console that exposes public, on-chain, or p
 
 **Checklist:**
 
-- [ ] Show agent call volume by role: interpretation, normalization, compilation, review, adversarial testing, and final validation.
-- [ ] Show provider/model routing by role, including local/self-hosted provider usage.
-- [ ] Show latency percentiles by provider/model/role.
-- [ ] Show timeout, malformed output, schema-validation failure, guardrail rejection, and provider error counts.
-- [ ] Show fallback and escalation counts by provider/model/role.
-- [ ] Show provider disagreement rate.
-- [ ] Show model confidence, compiler confidence, and final confidence distributions.
-- [ ] Show token usage and estimated cost by provider/model/role.
-- [ ] Show queue backlog and dead-letter jobs for compiler/reviewer/tester tasks.
-- [ ] Show local model health, serving engine, configured model name, model digest, quantization, and last health-check result.
-- [ ] Show redacted incident snapshots for agent/provider failures.
-- [ ] Link restricted operational rows to public-safe audit records using turn id, rule id, artifact hash, or audit hash.
-- [ ] Exclude raw prompts, raw completions, provider API keys, secret values, unrestricted compiler reasoning traces, private request/response bodies, and unredacted stack traces.
+- [x] Show agent call volume by role: interpretation, normalization, compilation, review, adversarial testing, and final validation.
+- [x] Show provider/model routing by role, including local/self-hosted provider usage.
+- [x] Show latency percentiles by provider/model/role.
+- [x] Show timeout, malformed output, schema-validation failure, guardrail rejection, and provider error counts.
+- [x] Show fallback and escalation counts by provider/model/role.
+- [x] Show provider disagreement rate.
+- [x] Show model confidence, compiler confidence, and final confidence distributions.
+- [x] Show token usage and estimated cost by provider/model/role.
+- [x] Show queue backlog and dead-letter jobs for compiler/reviewer/tester tasks.
+- [x] Show local model health, serving engine, configured model name, model digest, quantization, and last health-check result.
+- [x] Show redacted incident snapshots for agent/provider failures.
+- [x] Link restricted operational rows to public-safe audit records using turn id, rule id, artifact hash, or audit hash.
+- [x] Exclude raw prompts, raw completions, provider API keys, secret values, unrestricted compiler reasoning traces, private request/response bodies, and unredacted stack traces.
 
 **Approval criteria:**
 
-- [ ] Operators can diagnose agent/provider latency, cost, fallback, confidence, and failure issues.
-- [ ] The dashboard cannot alter compiler outputs, active rules, draw results, winners, payouts, or claims.
-- [ ] Restricted AI metrics are access-controlled and redacted.
+- [x] Operators can diagnose agent/provider latency, cost, fallback, confidence, and failure issues.
+- [x] The dashboard cannot alter compiler outputs, active rules, draw results, winners, payouts, or claims.
+- [x] Restricted AI metrics are access-controlled and redacted.
 
 ---
 
