@@ -29,7 +29,7 @@
 - [x] System Program CPI target is typed and fixed.
 - [x] Guess values are range checked and unique.
 - [x] Rule text, token count, text hash, and preflight commitment are validated on-chain.
-- [x] One guess and one vote per deterministic sequence PDA scope are enforced.
+- [x] One action per deterministic sequence PDA scope is enforced; repeated guesses, rule proposals, and votes require the next sequence and escalating fee.
 - [x] Turn action windows use the canonical Clock sysvar and seconds consistently.
 - [x] Protocol pause state fails closed.
 - [x] Release overflow checks are enabled.

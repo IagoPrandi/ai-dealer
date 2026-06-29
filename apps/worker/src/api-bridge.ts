@@ -56,6 +56,7 @@ interface ApiVerificationJobRecord {
     compiled_artifact_hash?: string;
     draw_hash: string;
     guess_hash: string;
+    guess_sequence: string;
     turn_id: string;
     wallet: string;
   };
@@ -221,9 +222,9 @@ function toWorkerJob(record: ApiVerificationJobRecord): GuessVerificationJob {
 
 function toApiResult(result: GuessVerificationResult) {
   // The API requires a 32-byte hex `resultId`; derive it deterministically from
-  // (turn, player) so re-posting the same result is idempotent.
+  // (turn, player, guess sequence) so re-posting the same result is idempotent.
   const resultId = createHash("sha256")
-    .update(`${result.turnId}:${result.player}`, "utf8")
+    .update(`${result.turnId}:${result.player}:${result.sequence}`, "utf8")
     .digest("hex");
   return { ...result, resultId };
 }

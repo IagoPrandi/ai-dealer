@@ -11,7 +11,11 @@ import { address } from "@solana/kit";
 
 import "./idealer.css";
 
-import { MVP_FEES_SOL } from "@idealer/constants";
+import {
+  MVP_FEES_SOL,
+  REPEATED_ACTION_FEE_MULTIPLIER,
+  VOTE_FEE_START_TURN,
+} from "@idealer/constants";
 
 import {
   createEliminateVoteRuleInstruction,
@@ -62,6 +66,17 @@ function PhoneChrome() {
   );
 }
 
+function repeatedActionFeeSol(turnId: number, sequence: number, baseFeeSol: number) {
+  if (turnId < VOTE_FEE_START_TURN && sequence === 1) {
+    return 0;
+  }
+  let feeSol = baseFeeSol;
+  for (let index = 0; index < sequence - 1; index += 1) {
+    feeSol *= REPEATED_ACTION_FEE_MULTIPLIER;
+  }
+  return feeSol;
+}
+
 export function IdealerApp({
   initialConnect = false,
   initialResultTurnId,
@@ -75,7 +90,7 @@ export function IdealerApp({
   const turnId = activeTurn.activeTurnId;
   const { reload: reloadRound, round, loading: roundLoading } = useRound(turnId);
   const rules = useRules(turnId, round);
-  const { played, receipt, reload: reloadPlayer } = usePlayerGuess(turnId, walletAddress);
+  const { playCount, played, receipt, reload: reloadPlayer } = usePlayerGuess(turnId, walletAddress);
 
   const [screen, setScreen] = useState<Screen>(initialScreen);
   const [seed, setSeed] = useState("");
@@ -229,15 +244,22 @@ export function IdealerApp({
 
   const fees = useMemo(() => {
     const gc = activeTurn.snapshot?.globalConfig;
+    const basePlayFee = gc
+      ? lamportsToSol(gc.guessSubmissionFeeLamports)
+      : MVP_FEES_SOL.guessSubmission;
+    const baseRuleFee = MVP_FEES_SOL.ruleProposal;
+    const ruleProposalCount = rules.rules.filter((rule) => rule.mine).length;
     return {
-      play: gc ? lamportsToSol(gc.guessSubmissionFeeLamports) : MVP_FEES_SOL.guessSubmission,
+      play: basePlayFee,
+      playNext: repeatedActionFeeSol(turnId, playCount + 1, basePlayFee),
       remove: gc?.ruleRemovalFeeLamports
         ? lamportsToSol(gc.ruleRemovalFeeLamports)
         : MVP_FEES_SOL.paidRuleRemoval,
-      rule: MVP_FEES_SOL.ruleProposal,
+      rule: baseRuleFee,
+      ruleNext: repeatedActionFeeSol(turnId, ruleProposalCount + 1, baseRuleFee),
       vote: gc ? lamportsToSol(gc.voteFeeLamports) : MVP_FEES_SOL.vote,
     };
-  }, [activeTurn.snapshot]);
+  }, [activeTurn.snapshot, playCount, rules.rules, turnId]);
 
   const resultTurnId = useMemo(() => {
     if (initialResultTurnId && Number.isInteger(initialResultTurnId) && initialResultTurnId > 0) {
@@ -282,6 +304,7 @@ export function IdealerApp({
     go,
     openDetail,
     players: round?.pool?.guesses ?? 0,
+    playCount,
     played,
     prizeSol:
       round?.pool?.totalVisiblePrizePoolSol ?? round?.pool?.indicativeSol ?? 0,

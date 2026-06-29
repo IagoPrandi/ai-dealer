@@ -189,8 +189,18 @@ function turnStatePda(programId: PublicKey, turnId: number) {
   return derivePda(programId, [TURN_SEED, u64Le(turnId)]);
 }
 
-function playerGuessPda(programId: PublicKey, turnId: number, player: PublicKey) {
-  return derivePda(programId, [GUESS_SEED, u64Le(turnId), player.toBuffer()]);
+function playerGuessPda(
+  programId: PublicKey,
+  turnId: number,
+  player: PublicKey,
+  sequence: number,
+) {
+  return derivePda(programId, [
+    GUESS_SEED,
+    u64Le(turnId),
+    player.toBuffer(),
+    u64Le(sequence),
+  ]);
 }
 
 function gameTokenPda(programId: PublicKey, turnId: number, player: PublicKey) {
@@ -221,7 +231,7 @@ function ruleVotePda(
     u64Le(turnId),
     u64Le(ruleId),
     voter.toBuffer(),
-    u16Le(sequence),
+    u64Le(sequence),
   ]);
 }
 
@@ -242,21 +252,24 @@ function createSubmitGuessInstruction({
   numbers,
   player,
   programId,
+  sequence,
   turnId,
 }: {
   numbers: readonly number[];
   player: PublicKey;
   programId: PublicKey;
+  sequence: number;
   turnId: number;
 }) {
+  const playerGuess = playerGuessPda(programId, turnId, player, sequence);
   return {
     instruction: {
-      data: Buffer.from([...SUBMIT_GUESS_DISCRIMINATOR, ...numbers]),
+      data: Buffer.concat([SUBMIT_GUESS_DISCRIMINATOR, Buffer.from(numbers), u64Le(sequence)]),
       keys: [
         { isSigner: true, isWritable: true, pubkey: player },
         { isSigner: false, isWritable: false, pubkey: globalConfigPda(programId) },
         { isSigner: false, isWritable: true, pubkey: turnStatePda(programId, turnId) },
-        { isSigner: false, isWritable: true, pubkey: playerGuessPda(programId, turnId, player) },
+        { isSigner: false, isWritable: true, pubkey: playerGuess },
         { isSigner: false, isWritable: true, pubkey: gameTokenPda(programId, turnId, player) },
         { isSigner: false, isWritable: true, pubkey: treasuryVaultPda(programId) },
         { isSigner: false, isWritable: true, pubkey: prizeVaultPda(programId, turnId) },
@@ -266,7 +279,7 @@ function createSubmitGuessInstruction({
     },
     accounts: {
       gameToken: gameTokenPda(programId, turnId, player),
-      playerGuess: playerGuessPda(programId, turnId, player),
+      playerGuess,
     },
   };
 }
@@ -370,7 +383,7 @@ function createVoteRuleInstruction({
   const ruleVote = ruleVotePda(programId, turnId, ruleId, player, sequence);
   return {
     instruction: {
-      data: Buffer.concat([VOTE_RULE_DISCRIMINATOR, u16Le(sequence)]),
+      data: Buffer.concat([VOTE_RULE_DISCRIMINATOR, u64Le(sequence)]),
       keys: [
         { isSigner: true, isWritable: true, pubkey: player },
         { isSigner: false, isWritable: false, pubkey: globalConfigPda(programId) },
@@ -640,6 +653,7 @@ export async function seedRealInputs(): Promise<SeededInputSummary> {
       numbers: guess,
       player: player.publicKey,
       programId,
+      sequence: 1,
       turnId,
     });
     const guessAlreadyExists = await accountExists(
@@ -674,6 +688,7 @@ export async function seedRealInputs(): Promise<SeededInputSummary> {
         player: player.publicKey.toBase58(),
         playerGuess: guessBuilder.accounts.playerGuess.toBase58(),
         programId: programId.toBase58(),
+        sequence: 1,
         signature: guessSignature,
         submittedAt: new Date().toISOString(),
         turnId,

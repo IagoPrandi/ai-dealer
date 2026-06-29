@@ -36,15 +36,15 @@ Instructions that require a current-turn Game Token must verify:
 - Token status is active.
 - Token was issued by `submit_guess`.
 - Token belongs to the same turn as the requested action.
-- Token counters allow the requested action according to protocol limits.
+- Token counters/sequence state price the requested action; paid play/create/vote actions have no fixed protocol cap.
 
 ## Instruction List
 
 | Instruction | Access | Required Checks |
 |---|---|---|
-| `initialize_global_config` | Authority | Initializes fees, VRF config, turn cycle, limits, treasury. |
+| `initialize_global_config` | Authority | Initializes fees, VRF config, turn cycle, legacy config fields, treasury. |
 | `open_turn` | Authority/automation | Previous turn finalized or first turn; cycle index valid. |
-| `submit_guess` | Player | Turn open, unique wallet guess, valid six unique numbers, fee paid; creates `GameToken`. |
+| `submit_guess` | Player | Turn open, valid six unique numbers, sequence valid, fee paid; first successful guess creates `GameToken`. |
 | `propose_rule` | Player | Game Token valid, token count valid, preflight commitment valid, proposal fee paid. |
 | `vote_rule` | Player | Game Token valid, rule proposed/eligible, sequence valid and unique for that wallet/rule/turn, repeated-vote fee paid when required. |
 | `remove_rule` | Player | Game Token valid, removal threshold passed, removal fee paid to prize pool, before eligible pool lock. |

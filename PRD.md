@@ -1,7 +1,7 @@
 ﻿# Idealer — Product Requirements Document
 
 > **Version:** 1.5.1
-> **Status:** Implementation Baseline — MVP defaults integrated; local/self-hosted LLM support added; rule elimination decision phase added; repeated vote fee escalation specified
+> **Status:** Implementation Baseline — MVP defaults integrated; local/self-hosted LLM support added; rule elimination decision phase added; repeated paid action fee escalation specified
 > **Last Updated:** 2026-06-28
 > **Primary Product Surface:** Mobile-first DApp  
 > **Language:** Portuguese / English technical terms where useful
@@ -151,7 +151,7 @@ A guess is a player's chosen sequence of 6 unique numbers between 1 and 100.
 
 Rules:
 
-- each wallet may submit one guess per turn;
+- each wallet may submit any number of guesses per turn, each with its own sequence and fee;
 - each guess is recorded before the draw;
 - the original rule treats the guess as an ordered sequence;
 - the alternative rule may or may not care about order, depending only on the rule text.
@@ -177,10 +177,11 @@ The prize pool is composed of fees paid by players in that turn.
 
 Sources:
 
-- guess submission fees;
-- rule proposal fees;
+- sequenced guess submission fees, charged as `2^n * GUESS_FEE` where `n` is the number of previous guesses by that wallet in the same turn;
+- sequenced rule proposal fees, charged as `2^n * RULE_PROPOSAL_FEE` where `n` is the number of previous rule proposals by that wallet in the same turn;
 - paid rule removal fees included in MVP;
-- side-specific vote fees, charged as `2^n * VOTE_FEE` where `n` is the number of previous votes by that wallet on the same rule and same side (`in favor` or `vote out`) in the same turn; before turn 100, the first same-wallet/same-rule/same-side vote is free, and the next vote on that same side starts at `2^1 * VOTE_FEE`;
+- side-specific vote fees, charged as `2^n * VOTE_FEE` where `n` is the number of previous votes by that wallet on the same rule and same side (`in favor` or `vote out`) in the same turn;
+- before turn 100, the first same-wallet action in each action scope is free: first guess, first rule proposal, and first same-wallet/same-rule/same-side vote. Repeats start paid immediately at `2^1 * BASE_FEE`;
 - optional future game actions.
 
 A protocol treasury fee is retained before distribution.
@@ -665,10 +666,10 @@ Each player may perform the following actions per turn.
 
 | Action         |                                                Limit per Turn |      Fee Required |              Game Token Required |
 | -------------- | ------------------------------------------------------------: | ----------------: | -------------------------------: |
-| Submit a guess |                                                            1x |               Yes | No; this action issues the token |
-| Propose a rule |                             5x per wallet per turn by default | Yes, per proposal |                              Yes |
-| Vote on a rule | Multiple votes per rule; max 100 approval votes per wallet per turn and max 20 per wallet/rule by default | `2^n * VOTE_FEE`, where `n` is prior same-side votes by that wallet/rule/turn; first approval vote is free before turn 100 |                              Yes |
-| Vote to eliminate a rule | Multiple elimination votes per finalist rule; only during the 1-hour decision window; max 100 elimination votes per wallet per turn and max 20 per wallet/finalist by default | Same `2^n * VOTE_FEE` schedule on the `vote out` side; first elimination vote is free before turn 100 |                              Yes |
+| Submit a guess | Unlimited; each guess is sequenced per wallet/turn | `2^n * GUESS_FEE`, where `n` is previous guesses by that wallet/turn; first guess is free before turn 100 | No; the first successful guess issues the token |
+| Propose a rule | Unlimited; each proposal is sequenced per wallet/turn | `2^n * RULE_PROPOSAL_FEE`, where `n` is previous proposals by that wallet/turn; first proposal is free before turn 100 |                              Yes |
+| Vote on a rule | Unlimited; each approval vote is sequenced per wallet/rule/side | `2^n * VOTE_FEE`, where `n` is prior same-side votes by that wallet/rule/turn; first approval vote is free before turn 100 |                              Yes |
+| Vote to eliminate a rule | Unlimited per finalist rule during the 1-hour decision window | Same `2^n * VOTE_FEE` schedule on the `vote out` side; first elimination vote is free before turn 100 |                              Yes |
 | Remove a rule  |  2x per wallet per turn by default; only before election lock |  Yes, removal fee |                              Yes |
 | Report a rule  |                            20x per wallet per turn by default |                No |                              Yes |
 
@@ -679,7 +680,7 @@ Requirements:
 - player selects 6 unique numbers between 1 and 100;
 - order matters for the original rule;
 - order for alternative rule depends only on the elected rule text;
-- only one guess per wallet per turn is accepted;
+- repeated guesses from the same wallet are accepted when submitted with the next wallet/turn sequence and the required escalated fee;
 - guess is recorded before the draw;
 - guesses cannot be changed after the submission window closes.
 
@@ -1613,7 +1614,7 @@ const VOTE_FEE_CONFIG = {
   firstVoteFreeBeforeTurnIndex: true,
   repeatedVoteStartsPaidBeforeTurnIndex: true,
   repeatedVoteFeeMultiplier: 2,
-  maxApprovalVotesPerWalletRuleTurn: 20,
+  maxApprovalVotesPerWalletRuleTurn: null, // no fixed vote cap; sequence fee is the economic control
 };
 ```
 
@@ -1629,8 +1630,7 @@ Because free voting by wallet is easy to manipulate, MVP must include basic anti
 Required controls:
 
 - require a current-turn Game Token for voting and proposing;
-- rate limit vote actions;
-- rate limit rule proposals;
+- do not cap paid vote actions or paid rule proposals; enforce correct sequencing, idempotency, and escalating fees instead;
 - track wallet age or first-seen timestamp;
 - track participation signals;
 - detect vote clusters;
@@ -2562,8 +2562,7 @@ const MVP_FEE_CONFIG = {
   ruleRemovalFeeLamports: 50_000_000, // 0.05 SOL
   voteFeeLamports: 5_000_000, // 0.005 SOL base fee for paid approval votes (see VOTE_FEE_CONFIG)
   eliminationVoteFeeLamports: 5_000_000, // same VOTE_FEE base; side-specific exponent controls escalation
-  eliminationVoteFeeMultiplier: 1, // elimination vote side uses the approval vote base fee
-  repeatedVoteFeeMultiplier: 2, // exponent base for repeated same-wallet/same-rule/same-side votes
+  repeatedActionFeeMultiplier: 2, // exponent base for repeated paid actions
   ruleReportFeeLamports: 0,
   treasuryFeeBps: 500, // 5%
 };
@@ -2890,9 +2889,9 @@ In addition to this financial incentive, MVP should prioritize social recognitio
 - creator reward history;
 - voter reward history for wallets that backed elected rules.
 
-### 8.9 MVP Rate Limits
+### 8.9 MVP Abuse Controls and Non-Economic Rate Limits
 
-Rate limits are required to reduce spam, protect the rule pool, and make abuse visible without turning the MVP into a heavy identity system.
+Fixed rate limits are required only for non-economic or infrastructure-heavy operations. Paid game actions are not capped: a player may keep guessing, proposing, or voting as long as the next sequenced action fee is paid.
 
 Default MVP/devnet rate-limit configuration:
 
@@ -2904,16 +2903,10 @@ const MVP_RATE_LIMIT_CONFIG = {
   rulePreflightRequestsPerWalletPerTurn: 20,
   rulePreflightRequestsPerWalletPerMinute: 5,
 
-  ruleProposalsPerWalletPerTurn: 5,
-  ruleProposalsPerWalletPerMinute: 2,
-
-  votesPerWalletPerTurn: 100,
-  votesPerWalletPerMinute: 30,
-  votesPerRulePerWalletPerTurn: 20,
-
-  eliminationVotesPerWalletPerTurn: 100,
-  eliminationVotesPerWalletPerMinute: 30,
-  eliminationVotesPerRulePerWalletPerTurn: 20,
+  paidGuessSubmissionsPerWalletPerTurn: null,
+  paidRuleProposalsPerWalletPerTurn: null,
+  paidApprovalVotesPerWalletRuleTurn: null,
+  paidEliminationVotesPerWalletFinalistTurn: null,
 
   ruleRemovalsPerWalletPerTurn: 2,
   ruleRemovalAttemptsPerWalletPerMinute: 3,
@@ -2928,11 +2921,11 @@ const MVP_RATE_LIMIT_CONFIG = {
 
 Rate-limit requirements:
 
-- limits must be enforced server-side;
-- on-chain constraints remain the source of truth for one-guess-per-wallet, per-vote sequence/idempotency for repeated approval and elimination votes, and paid removal idempotency;
+- non-economic limits must be enforced server-side;
+- on-chain constraints remain the source of truth for guess sequences, rule-proposal fee sequencing, vote sequence/idempotency for repeated approval and elimination votes, and paid removal idempotency;
 - rate-limit rejections must be user-readable;
 - suspicious rate-limit events must be visible in the admin abuse dashboard;
-- changing default rate limits requires updating `packages/constants`, backend config, admin documentation, and tests.
+- changing default non-economic rate limits requires updating `packages/constants`, backend config, admin documentation, and tests.
 
 ## 9. Smart Contract Architecture
 
@@ -4973,7 +4966,7 @@ Implement a working mobile DApp on Solana devnet with wallet flows, devnet trans
 - [x] Connect number picker to transaction creation.
 - [x] Validate 6 unique numbers before transaction.
 - [x] Submit guess to devnet contract.
-- [x] Prevent multiple guesses per wallet per turn.
+- [x] Prevent duplicate same-sequence guesses per wallet per turn. Historical baseline originally blocked multiple guesses; superseded by sequenced repeated-guess requirements in section 5.1.
 - [x] Save guess state in backend indexer/API.
 - [x] Show transaction status in UI.
 - [x] Show submitted guess receipt.
@@ -4984,7 +4977,7 @@ Implement a working mobile DApp on Solana devnet with wallet flows, devnet trans
 
 - [x] Guess is visible on-chain through the `PlayerGuess` account or equivalent on-chain committed account state.
 - [x] UI reflects submitted guess accurately.
-- [x] Duplicate guess submission is blocked.
+- [x] Duplicate same-sequence guess submission is blocked.
 
 ---
 
@@ -5300,7 +5293,7 @@ Implement draw generation, rule election, AI rule validation, guess verification
 - [x] Split rule election into finalist-election VRF (forms the 10) and active-election VRF (selects from survivors).
 - [x] Lock each finalist's approval (positive) vote count when the finalist set is formed.
 - [x] Open a fixed 60-minute decision/elimination window after the finalist set is locked.
-- [x] Implement `eliminate_vote_rule` (Game Token gate, finalist-only target, decision-window-only, one-per-finalist-per-wallet, 2× vote-fee payment to prize pool) and the `RuleEliminationVote` account/projection. Historical baseline; superseded by PRD v1.5.1 repeated elimination-vote requirements in section 6.14a.
+- [x] Implement `eliminate_vote_rule` (Game Token gate, finalist-only target, decision-window-only, sequenced same-wallet/finalist votes, `VOTE_FEE`-based escalating payment to prize pool) and the `RuleEliminationVote` account/projection. Historical baseline originally used one-per-finalist and 2x fee; superseded by PRD v1.5.1 repeated elimination-vote requirements in section 6.14a.
 - [x] Charge the elimination vote at 2× the effective vote fee for the turn (free before turn 100, 0.01 SOL from turn 100). Historical baseline; superseded by PRD v1.5.1 escalating repeated-vote fee policy in section 8.2.
 - [x] Implement repeated elimination votes for the same `(turn, wallet, finalist_rule)` with sequenced/idempotent vote records.
 - [x] Implement escalating elimination vote fees: fee is `2^n * VOTE_FEE` by prior same-wallet/same-finalist vote-out count; first vote free before turn 100, from turn 100 first vote costs `VOTE_FEE`.
@@ -5837,24 +5830,26 @@ M5 is approved only if all M5 submilestones are approved and:
 
 ##### Checklist
 
-- [x] Per-wallet/per-rule repeated approval vote limits implemented.
-- [x] Per-wallet/per-finalist repeated elimination vote limits implemented.
+- [x] No fixed per-wallet repeated approval vote cap remains; approval repeats are controlled by sequence/idempotency and escalating fees.
+- [x] No fixed per-wallet repeated elimination vote cap remains; elimination repeats are controlled by sequence/idempotency and escalating fees.
+- [x] No fixed per-wallet repeated guess cap remains; guesses are controlled by wallet/turn sequence/idempotency and escalating fees.
+- [x] No fixed per-wallet paid rule-proposal cap remains; proposals are controlled by wallet/turn sequence/idempotency and escalating fees.
 - [ ] Escalating repeated-vote fee enforcement cannot be bypassed by retry, stale client state, or alternate API path.
-- [ ] Rule proposal rate limits implemented.
+- [ ] Escalating repeated guess and rule-proposal fees cannot be bypassed by retry, stale client state, or alternate API path.
 - [ ] Rule report flow implemented.
 - [ ] Paid rule removal flow implemented.
 - [ ] Vote concentration dashboard implemented.
-- [ ] Repeated-vote concentration dashboard implemented, including same-wallet repeat patterns and repeat-vote spend by rule.
-- [ ] Free-first-vote monitoring implemented for turns before 100, with alerts when the same wallet/rule receives more than one free vote.
-- [ ] Fee-escalation anomaly alerts implemented for approval and elimination votes.
+- [ ] Repeated paid-action concentration dashboard implemented, including same-wallet repeat patterns and repeated spend by action scope.
+- [ ] Free-first-action monitoring implemented for turns before 100, with alerts when the same scope receives more than one free action.
+- [ ] Fee-escalation anomaly alerts implemented for guesses, rule proposals, approval votes, and elimination votes.
 - [ ] Admin abuse alerts implemented.
 
 ##### Approval Criteria
 
 - [ ] Basic Sybil manipulation is visible in admin.
-- [ ] Free votes cannot be spammed without rate-limit response.
+- [ ] Free first actions before turn 100 cannot be spammed beyond one free action per action scope.
 - [x] Repeated free votes cannot occur for the same `(turn, wallet, rule, side)`.
-- [ ] Repeated paid votes become progressively more expensive and remain visible in abuse/economy dashboards.
+- [ ] Repeated paid guesses, rule proposals, and votes become progressively more expensive and remain visible in abuse/economy dashboards.
 - [ ] Admin can distinguish broad community support from concentrated repeated voting by a small wallet cluster.
 - [ ] Paid rule removal is rate-limited, fee-based, protected by vote thresholds, and blocked after eligible pool lock.
 
@@ -5865,17 +5860,17 @@ M5 is approved only if all M5 submilestones are approved and:
 - [ ] Compiler metrics dashboard exists.
 - [ ] Runtime metrics dashboard exists.
 - [ ] Accounting metrics dashboard exists.
-- [ ] Repeated vote fee dashboard exists, showing sequence counts, paid amounts, free-first-vote usage, and fee escalation by rule and wallet cluster.
+- [ ] Repeated paid-action fee dashboard exists, showing sequence counts, paid amounts, free-first-action usage, and fee escalation by action scope and wallet cluster.
 - [ ] Mobile wallet funnel dashboard exists.
-- [ ] Alerts exist for repeated-vote fee mismatch, unexpected free repeat votes, abnormal repeated-vote concentration, and indexer/contract vote-count divergence.
+- [ ] Alerts exist for repeated-action fee mismatch, unexpected free repeat actions, abnormal repeated-action concentration, and indexer/contract count divergence.
 - [ ] Incident runbook exists.
-- [ ] Incident runbook covers pausing or disabling repeated votes if fee escalation, indexing, or abuse detection fails.
+- [ ] Incident runbook covers pausing or disabling repeated paid actions if fee escalation, indexing, or abuse detection fails.
 - [ ] Emergency pause procedure tested.
 
 ##### Approval Criteria
 
 - [ ] On-call operator can diagnose compiler/runtime/accounting failures.
-- [ ] On-call operator can diagnose repeated-vote fee, sequence, and abuse-detection failures.
+- [ ] On-call operator can diagnose repeated paid-action fee, sequence, and abuse-detection failures.
 - [ ] Emergency pause can stop unsafe transitions.
 - [ ] All critical alerts fire in staging.
 
@@ -6141,7 +6136,7 @@ Prepare the product for broader public launch by hardening infrastructure, impro
 - [ ] Test VRF/draw failure recovery.
 - [ ] Test database backup and restore.
 - [ ] Test deployment rollback.
-- [ ] Tune rate limits, including per-wallet/per-rule repeated vote limits.
+- [ ] Tune non-economic rate limits and repeated paid-action abuse thresholds; do not introduce fixed caps for paid guesses, rule proposals, or votes.
 
 **Approval criteria:**
 
@@ -6429,11 +6424,11 @@ This section replaces the former open questions list. The following decisions ar
 20. Optional local observability containers (`idealer-prometheus`, `idealer-grafana`) are included under a separate Docker Compose observability profile, not in the default required local stack.
 21. M9 Mainnet Readiness Gates are mandatory before M6 can process any real SOL payment, payout, claim, treasury transfer, or creator reward on mainnet.
 22. Launch-blocking metrics are the M9 approval gates plus the M6/M7 approval criteria for mobile reliability, turn automation, job completion, claims, abuse visibility, and payout/accounting reconciliation.
-23. Default MVP/devnet fees are: guess submission `0.01 SOL`, rule proposal `0.02 SOL`, paid rule removal `0.05 SOL`, approval/elimination side vote base fee `0.005 SOL`, repeated same-wallet/same-rule/same-side vote exponent base `2`, and report `0 SOL`, with `treasuryFeeBps = 500`. Before turn 100, the first same-wallet/same-rule approval or elimination vote is free; repeat votes start paid immediately at `2^n * VOTE_FEE`.
+23. Default MVP/devnet base fees are: guess submission `0.01 SOL`, rule proposal `0.02 SOL`, paid rule removal `0.05 SOL`, approval/elimination side vote base fee `0.005 SOL`, repeated action exponent base `2`, and report `0 SOL`, with `treasuryFeeBps = 500`. Before turn 100, the first same-wallet action in each scope (guess, rule proposal, approval side, elimination side) is free; repeats start paid immediately at `2^n * BASE_FEE`.
 24. The default creator reward cap is `0.25 SOL` per turn, with 20% of platform monetization reserved for the creator reward reserve.
 25. The default minimum claim threshold is `0.005 SOL`; payouts below this threshold roll over to the same category bucket.
 26. The default claim window is `12` turns or `7` days, whichever happens first; expired unclaimed payouts roll over to the same category bucket.
-27. MVP rate limits are defined in `MVP_RATE_LIMIT_CONFIG` and must be enforced server-side, while on-chain constraints remain the source of truth for guesses, repeated vote sequencing/idempotency, and paid removals.
+27. MVP non-economic rate limits are defined in `MVP_RATE_LIMIT_CONFIG` and must be enforced server-side, while on-chain constraints remain the source of truth for repeated guess sequencing, rule-proposal fee sequencing, repeated vote sequencing/idempotency, and paid removals.
 
 ---
 

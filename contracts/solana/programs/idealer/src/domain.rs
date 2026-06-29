@@ -81,7 +81,7 @@ pub struct PrizePoolAccounting {
 }
 
 pub const VOTE_FEE_START_TURN: u64 = 100;
-const REPEATED_VOTE_FEE_MULTIPLIER: u64 = 2;
+const REPEATED_ACTION_FEE_MULTIPLIER: u64 = 2;
 
 pub struct ConfigValidation<'a> {
     pub treasury_fee_bps: u16,
@@ -91,8 +91,6 @@ pub struct ConfigValidation<'a> {
     pub max_rule_tokens: u16,
     pub top_voted_finalist_count: u8,
     pub random_finalist_count: u8,
-    pub max_rule_proposals_per_wallet_per_turn: u16,
-    pub max_votes_per_wallet_per_turn: u16,
 }
 
 pub fn validate_config(config: &ConfigValidation<'_>) -> Result<()> {
@@ -116,11 +114,6 @@ pub fn validate_config(config: &ConfigValidation<'_>) -> Result<()> {
             .ok_or(IdealerError::ArithmeticOverflow)?
             > 0,
         IdealerError::InvalidFinalistCounts
-    );
-    require!(
-        config.max_rule_proposals_per_wallet_per_turn > 0
-            && config.max_votes_per_wallet_per_turn > 0,
-        IdealerError::InvalidRateLimit
     );
     require!(
         config
@@ -230,7 +223,7 @@ fn account_fee_source(
     })
 }
 
-pub fn repeated_vote_fee_lamports(
+pub fn repeated_action_fee_lamports(
     turn_id: u64,
     sequence: u64,
     base_fee_lamports: u64,
@@ -246,7 +239,7 @@ pub fn repeated_vote_fee_lamports(
     let mut fee_lamports = base_fee_lamports;
     for _ in 0..paid_index {
         fee_lamports = fee_lamports
-            .checked_mul(REPEATED_VOTE_FEE_MULTIPLIER)
+            .checked_mul(REPEATED_ACTION_FEE_MULTIPLIER)
             .ok_or(IdealerError::ArithmeticOverflow)?;
     }
     Ok(fee_lamports)
@@ -261,7 +254,7 @@ fn account_repeated_vote_fee_source(
     let mut gross_lamports = 0u64;
     for sequence in 1..=count {
         gross_lamports = gross_lamports
-            .checked_add(repeated_vote_fee_lamports(
+            .checked_add(repeated_action_fee_lamports(
                 turn_id,
                 sequence,
                 base_fee_lamports,
@@ -284,12 +277,14 @@ pub fn calculate_prize_pool_accounting(
 ) -> Result<PrizePoolAccounting> {
     require!(input.turn_id > 0, IdealerError::InvalidTurnId);
 
-    let guess_submissions = account_fee_source(
+    let guess_submissions = account_repeated_vote_fee_source(
+        input.turn_id,
         input.guess_submission_count,
         input.guess_submission_fee_lamports,
         input.treasury_fee_bps,
     )?;
-    let rule_proposals = account_fee_source(
+    let rule_proposals = account_repeated_vote_fee_source(
+        input.turn_id,
         input.rule_proposal_count,
         input.rule_proposal_fee_lamports,
         input.treasury_fee_bps,

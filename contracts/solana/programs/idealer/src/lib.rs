@@ -23,10 +23,7 @@ declare_id!("6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4");
 
 pub const TURN_DURATION_CYCLE_LEN: usize = 4;
 pub const MAX_FINALISTS: usize = 10;
-pub const REPEATED_VOTE_FEE_MULTIPLIER: u64 = 2;
-pub const ELIMINATION_VOTE_FEE_MULTIPLIER: u64 = 1;
-pub const MAX_VOTES_PER_WALLET_RULE_TURN: u16 = 20;
-pub const MAX_ELIMINATION_VOTES_PER_WALLET_RULE_TURN: u16 = 20;
+pub const REPEATED_ACTION_FEE_MULTIPLIER: u64 = 2;
 /// Fixed 1-hour decision/elimination window (PRD §5.4/§6.14a). Under the
 /// test-only `devnet-test` feature it collapses to a few seconds so the full
 /// election → elimination → active-election pipeline can be validated end-to-end
@@ -142,8 +139,6 @@ pub mod idealer {
             max_rule_tokens: args.max_rule_tokens,
             top_voted_finalist_count: args.top_voted_finalist_count,
             random_finalist_count: args.random_finalist_count,
-            max_rule_proposals_per_wallet_per_turn: args.max_rule_proposals_per_wallet_per_turn,
-            max_votes_per_wallet_per_turn: args.max_votes_per_wallet_per_turn,
         })?;
         require!(
             args.treasury_address != Pubkey::default()
@@ -323,8 +318,6 @@ pub mod idealer {
             max_rule_tokens: config.max_rule_tokens,
             top_voted_finalist_count: config.top_voted_finalist_count,
             random_finalist_count: config.random_finalist_count,
-            max_rule_proposals_per_wallet_per_turn: config.max_rule_proposals_per_wallet_per_turn,
-            max_votes_per_wallet_per_turn: config.max_votes_per_wallet_per_turn,
         })?;
 
         let turn = &mut ctx.accounts.turn_state;
@@ -353,7 +346,15 @@ pub mod idealer {
         Ok(())
     }
 
-    pub fn submit_guess(ctx: Context<SubmitGuess>, numbers: [u8; 6]) -> Result<()> {
+    pub fn submit_guess(ctx: Context<SubmitGuess>, args: SubmitGuessArgs) -> Result<()> {
+        require!(args.sequence == 1, IdealerError::InvalidActionSequence);
+        submit_guess_with_game_token_init(ctx, args)
+    }
+
+    pub fn submit_additional_guess(
+        ctx: Context<SubmitAdditionalGuess>,
+        args: SubmitGuessArgs,
+    ) -> Result<()> {
         let clock = Clock::get()?;
         let config = &ctx.accounts.global_config;
         validate_live_turn(config, &ctx.accounts.turn_state)?;
@@ -363,25 +364,44 @@ pub mod idealer {
             ctx.accounts.turn_state.end_timestamp,
             config.guess_cutoff_bps,
         )?;
-        validate_guess(&numbers)?;
+        validate_guess(&args.numbers)?;
+        validate_game_token(
+            &ctx.accounts.game_token,
+            ctx.accounts.turn_state.turn_id,
+            ctx.accounts.player.key(),
+        )?;
+        let expected_sequence = ctx
+            .accounts
+            .game_token
+            .guess_count
+            .checked_add(1)
+            .ok_or(IdealerError::ArithmeticOverflow)?;
+        require!(
+            args.sequence == expected_sequence,
+            IdealerError::InvalidActionSequence
+        );
+        let fee_lamports = repeated_action_fee_lamports(
+            config.guess_submission_fee_lamports,
+            ctx.accounts.turn_state.turn_id,
+            args.sequence,
+        )?;
 
         collect_fee(
             &ctx.accounts.player,
             &ctx.accounts.treasury_vault,
             &ctx.accounts.prize_vault,
             &ctx.accounts.system_program,
-            config.guess_submission_fee_lamports,
+            fee_lamports,
             config.treasury_fee_bps,
         )?;
-        let (treasury_amount, prize_amount) = split_fee(
-            config.guess_submission_fee_lamports,
-            config.treasury_fee_bps,
-        )?;
+        let (treasury_amount, prize_amount) = split_fee(fee_lamports, config.treasury_fee_bps)?;
 
         let guess = &mut ctx.accounts.player_guess;
         guess.turn_id = ctx.accounts.turn_state.turn_id;
         guess.player = ctx.accounts.player.key();
-        guess.numbers = numbers;
+        guess.sequence = args.sequence;
+        guess.fee_lamports = fee_lamports;
+        guess.numbers = args.numbers;
         guess.submitted_at = clock.unix_timestamp;
         guess.game_token = ctx.accounts.game_token.key();
         guess.verification_status = VerificationStatus::Pending;
@@ -390,16 +410,8 @@ pub mod idealer {
         guess.claim_status = ClaimStatus::Unavailable;
         guess.bump = ctx.bumps.player_guess;
 
-        let game_token = &mut ctx.accounts.game_token;
-        game_token.turn_id = ctx.accounts.turn_state.turn_id;
-        game_token.player = ctx.accounts.player.key();
-        game_token.issuing_guess = guess.key();
-        game_token.issued_at = clock.unix_timestamp;
-        game_token.used_for_rule_proposal_count = 0;
-        game_token.used_for_vote_count = 0;
-        game_token.status = GameTokenStatus::Active;
-        game_token.close_authority = ctx.accounts.player.key();
-        game_token.bump = ctx.bumps.game_token;
+        ctx.accounts.game_token.issuing_guess = guess.key();
+        ctx.accounts.game_token.guess_count = args.sequence;
 
         ctx.accounts.treasury_vault.total_collected_lamports = ctx
             .accounts
@@ -423,8 +435,10 @@ pub mod idealer {
         emit!(GuessSubmitted {
             turn_id: guess.turn_id,
             player: guess.player,
-            guess: numbers,
-            game_token: game_token.key(),
+            sequence: guess.sequence,
+            fee_lamports: guess.fee_lamports,
+            guess: args.numbers,
+            game_token: ctx.accounts.game_token.key(),
         });
         Ok(())
     }
@@ -451,22 +465,27 @@ pub mod idealer {
             args.token_count,
             config.max_rule_tokens,
         )?;
-        require!(
-            ctx.accounts.game_token.used_for_rule_proposal_count
-                < config.max_rule_proposals_per_wallet_per_turn,
-            IdealerError::RuleProposalLimitReached
-        );
+        let proposal_sequence = ctx
+            .accounts
+            .game_token
+            .used_for_rule_proposal_count
+            .checked_add(1)
+            .ok_or(IdealerError::ArithmeticOverflow)?;
+        let proposal_fee = repeated_action_fee_lamports(
+            config.rule_proposal_fee_lamports,
+            ctx.accounts.turn_state.turn_id,
+            proposal_sequence,
+        )?;
 
         collect_fee(
             &ctx.accounts.proposer,
             &ctx.accounts.treasury_vault,
             &ctx.accounts.prize_vault,
             &ctx.accounts.system_program,
-            config.rule_proposal_fee_lamports,
+            proposal_fee,
             config.treasury_fee_bps,
         )?;
-        let (treasury_amount, prize_amount) =
-            split_fee(config.rule_proposal_fee_lamports, config.treasury_fee_bps)?;
+        let (treasury_amount, prize_amount) = split_fee(proposal_fee, config.treasury_fee_bps)?;
 
         let proposal = &mut ctx.accounts.rule_proposal;
         proposal.rule_id = args.rule_id;
@@ -542,16 +561,9 @@ pub mod idealer {
             ),
             IdealerError::RuleNotVoteable
         );
-        require!(
-            ctx.accounts.game_token.used_for_vote_count < config.max_votes_per_wallet_per_turn,
-            IdealerError::VoteLimitReached
-        );
-        require!(
-            args.sequence > 0 && args.sequence <= MAX_VOTES_PER_WALLET_RULE_TURN,
-            IdealerError::VoteLimitReached
-        );
+        require!(args.sequence > 0, IdealerError::InvalidActionSequence);
 
-        let vote_fee = repeated_vote_fee_lamports(
+        let vote_fee = repeated_action_fee_lamports(
             config.vote_fee_lamports,
             ctx.accounts.turn_state.turn_id,
             args.sequence,
@@ -905,17 +917,10 @@ pub mod idealer {
             !ctx.accounts.turn_state.finalist_eliminated[index],
             IdealerError::RuleAlreadyEliminated
         );
-        require!(
-            args.sequence > 0 && args.sequence <= MAX_ELIMINATION_VOTES_PER_WALLET_RULE_TURN,
-            IdealerError::VoteLimitReached
-        );
+        require!(args.sequence > 0, IdealerError::InvalidActionSequence);
 
-        let base_elimination_fee = config
-            .vote_fee_lamports
-            .checked_mul(ELIMINATION_VOTE_FEE_MULTIPLIER)
-            .ok_or(IdealerError::ArithmeticOverflow)?;
-        let fee = repeated_vote_fee_lamports(
-            base_elimination_fee,
+        let fee = repeated_action_fee_lamports(
+            config.vote_fee_lamports,
             ctx.accounts.turn_state.turn_id,
             args.sequence,
         )?;
@@ -1540,8 +1545,8 @@ pub mod idealer {
             max_rule_tokens: 1_000,
             top_voted_finalist_count: 3,
             random_finalist_count: 7,
-            max_rule_proposals_per_wallet_per_turn: 5,
-            max_votes_per_wallet_per_turn: 100,
+            max_rule_proposals_per_wallet_per_turn: 0,
+            max_votes_per_wallet_per_turn: 0,
             minimum_claim_threshold_lamports: 5_000,
             claim_window_turns: 4,
             claim_window_days: 7,
@@ -1579,6 +1584,89 @@ fn validate_live_turn(config: &GlobalConfig, turn: &TurnState) -> Result<()> {
     Ok(())
 }
 
+fn submit_guess_with_game_token_init(ctx: Context<SubmitGuess>, args: SubmitGuessArgs) -> Result<()> {
+    let clock = Clock::get()?;
+    let config = &ctx.accounts.global_config;
+    validate_live_turn(config, &ctx.accounts.turn_state)?;
+    validate_action_window(
+        clock.unix_timestamp,
+        ctx.accounts.turn_state.start_timestamp,
+        ctx.accounts.turn_state.end_timestamp,
+        config.guess_cutoff_bps,
+    )?;
+    validate_guess(&args.numbers)?;
+    let fee_lamports = repeated_action_fee_lamports(
+        config.guess_submission_fee_lamports,
+        ctx.accounts.turn_state.turn_id,
+        args.sequence,
+    )?;
+
+    collect_fee(
+        &ctx.accounts.player,
+        &ctx.accounts.treasury_vault,
+        &ctx.accounts.prize_vault,
+        &ctx.accounts.system_program,
+        fee_lamports,
+        config.treasury_fee_bps,
+    )?;
+    let (treasury_amount, prize_amount) = split_fee(fee_lamports, config.treasury_fee_bps)?;
+
+    let guess = &mut ctx.accounts.player_guess;
+    guess.turn_id = ctx.accounts.turn_state.turn_id;
+    guess.player = ctx.accounts.player.key();
+    guess.sequence = args.sequence;
+    guess.fee_lamports = fee_lamports;
+    guess.numbers = args.numbers;
+    guess.submitted_at = clock.unix_timestamp;
+    guess.game_token = ctx.accounts.game_token.key();
+    guess.verification_status = VerificationStatus::Pending;
+    guess.original_rule_result = false;
+    guess.alternative_rule_result = false;
+    guess.claim_status = ClaimStatus::Unavailable;
+    guess.bump = ctx.bumps.player_guess;
+
+    let game_token = &mut ctx.accounts.game_token;
+    game_token.turn_id = ctx.accounts.turn_state.turn_id;
+    game_token.player = ctx.accounts.player.key();
+    game_token.issuing_guess = guess.key();
+    game_token.issued_at = clock.unix_timestamp;
+    game_token.guess_count = args.sequence;
+    game_token.used_for_rule_proposal_count = 0;
+    game_token.used_for_vote_count = 0;
+    game_token.status = GameTokenStatus::Active;
+    game_token.close_authority = ctx.accounts.player.key();
+    game_token.bump = ctx.bumps.game_token;
+
+    ctx.accounts.treasury_vault.total_collected_lamports = ctx
+        .accounts
+        .treasury_vault
+        .total_collected_lamports
+        .checked_add(treasury_amount)
+        .ok_or(IdealerError::ArithmeticOverflow)?;
+    ctx.accounts.prize_vault.total_collected_lamports = ctx
+        .accounts
+        .prize_vault
+        .total_collected_lamports
+        .checked_add(prize_amount)
+        .ok_or(IdealerError::ArithmeticOverflow)?;
+    ctx.accounts.turn_state.prize_pool_amount_lamports = ctx
+        .accounts
+        .turn_state
+        .prize_pool_amount_lamports
+        .checked_add(prize_amount)
+        .ok_or(IdealerError::ArithmeticOverflow)?;
+
+    emit!(GuessSubmitted {
+        turn_id: guess.turn_id,
+        player: guess.player,
+        sequence: guess.sequence,
+        fee_lamports: guess.fee_lamports,
+        guess: args.numbers,
+        game_token: game_token.key(),
+    });
+    Ok(())
+}
+
 fn validate_game_token(game_token: &GameToken, turn_id: u64, player: Pubkey) -> Result<()> {
     require_eq!(game_token.turn_id, turn_id, IdealerError::InvalidGameToken);
     require_keys_eq!(game_token.player, player, IdealerError::InvalidGameToken);
@@ -1589,18 +1677,20 @@ fn validate_game_token(game_token: &GameToken, turn_id: u64, player: Pubkey) -> 
     Ok(())
 }
 
-fn repeated_vote_fee_lamports(base_fee_lamports: u64, turn_id: u64, sequence: u16) -> Result<u64> {
-    require!(sequence > 0, IdealerError::VoteLimitReached);
+fn repeated_action_fee_lamports(base_fee_lamports: u64, turn_id: u64, sequence: u64) -> Result<u64> {
+    require!(sequence > 0, IdealerError::InvalidActionSequence);
 
     if turn_id < VOTE_FEE_START_TURN && sequence == 1 {
         return Ok(0);
     }
 
-    let paid_index = sequence - 1;
+    let paid_index = sequence
+        .checked_sub(1)
+        .ok_or(IdealerError::ArithmeticOverflow)?;
     let mut fee = base_fee_lamports;
     for _ in 0..paid_index {
         fee = fee
-            .checked_mul(REPEATED_VOTE_FEE_MULTIPLIER)
+            .checked_mul(REPEATED_ACTION_FEE_MULTIPLIER)
             .ok_or(IdealerError::ArithmeticOverflow)?;
     }
     Ok(fee)
@@ -1806,7 +1896,11 @@ pub struct InitializeGlobalConfigArgs {
     pub max_rule_tokens: u16,
     pub top_voted_finalist_count: u8,
     pub random_finalist_count: u8,
+    /// Deprecated/inactive. Retained for config layout compatibility; paid
+    /// rule proposals are controlled by sequencing and escalating fees.
     pub max_rule_proposals_per_wallet_per_turn: u16,
+    /// Deprecated/inactive. Retained for config layout compatibility; paid
+    /// votes are controlled by sequencing and escalating fees.
     pub max_votes_per_wallet_per_turn: u16,
     pub minimum_claim_threshold_lamports: u64,
     pub claim_window_turns: u16,
@@ -1941,7 +2035,14 @@ pub struct SetTurnDurationCycle<'info> {
     pub turn_state: Box<Account<'info, TurnState>>,
 }
 
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq)]
+pub struct SubmitGuessArgs {
+    pub numbers: [u8; 6],
+    pub sequence: u64,
+}
+
 #[derive(Accounts)]
+#[instruction(args: SubmitGuessArgs)]
 pub struct SubmitGuess<'info> {
     #[account(mut)]
     pub player: Signer<'info>,
@@ -1960,7 +2061,8 @@ pub struct SubmitGuess<'info> {
         seeds = [
             b"guess".as_ref(),
             turn_state.turn_id.to_le_bytes().as_ref(),
-            player.key().as_ref()
+            player.key().as_ref(),
+            args.sequence.to_le_bytes().as_ref()
         ],
         bump
     )]
@@ -1975,6 +2077,63 @@ pub struct SubmitGuess<'info> {
             player.key().as_ref()
         ],
         bump
+    )]
+    pub game_token: Account<'info, GameToken>,
+    #[account(
+        mut,
+        seeds = [b"treasury_vault"],
+        bump = treasury_vault.bump
+    )]
+    pub treasury_vault: Account<'info, TreasuryVault>,
+    #[account(
+        mut,
+        seeds = [
+            b"prize_vault".as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref()
+        ],
+        bump = prize_vault.bump,
+        constraint = prize_vault.turn_id == turn_state.turn_id @ IdealerError::InvalidTurnId
+    )]
+    pub prize_vault: Account<'info, PrizeVault>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(args: SubmitGuessArgs)]
+pub struct SubmitAdditionalGuess<'info> {
+    #[account(mut)]
+    pub player: Signer<'info>,
+    #[account(seeds = [b"global_config"], bump = global_config.bump)]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        mut,
+        seeds = [b"turn".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
+        bump = turn_state.bump
+    )]
+    pub turn_state: Box<Account<'info, TurnState>>,
+    #[account(
+        init,
+        payer = player,
+        space = 8 + PlayerGuess::INIT_SPACE,
+        seeds = [
+            b"guess".as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref(),
+            player.key().as_ref(),
+            args.sequence.to_le_bytes().as_ref()
+        ],
+        bump
+    )]
+    pub player_guess: Account<'info, PlayerGuess>,
+    #[account(
+        mut,
+        seeds = [
+            b"game_token".as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref(),
+            player.key().as_ref()
+        ],
+        bump = game_token.bump,
+        constraint = game_token.player == player.key() @ IdealerError::InvalidGameToken,
+        constraint = game_token.turn_id == turn_state.turn_id @ IdealerError::InvalidGameToken
     )]
     pub game_token: Account<'info, GameToken>,
     #[account(
@@ -2050,12 +2209,12 @@ pub struct ProposeRule<'info> {
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq)]
 pub struct VoteRuleArgs {
-    pub sequence: u16,
+    pub sequence: u64,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq)]
 pub struct EliminateVoteRuleArgs {
-    pub sequence: u16,
+    pub sequence: u64,
 }
 
 #[derive(Accounts)]
@@ -2613,7 +2772,11 @@ pub struct GlobalConfig {
     pub max_rule_tokens: u16,
     pub top_voted_finalist_count: u8,
     pub random_finalist_count: u8,
+    /// Deprecated/inactive. Retained for config layout compatibility; paid
+    /// rule proposals are controlled by sequencing and escalating fees.
     pub max_rule_proposals_per_wallet_per_turn: u16,
+    /// Deprecated/inactive. Retained for config layout compatibility; paid
+    /// votes are controlled by sequencing and escalating fees.
     pub max_votes_per_wallet_per_turn: u16,
     pub minimum_claim_threshold_lamports: u64,
     pub claim_window_turns: u16,
@@ -2688,8 +2851,9 @@ pub struct GameToken {
     pub player: Pubkey,
     pub issuing_guess: Pubkey,
     pub issued_at: i64,
-    pub used_for_rule_proposal_count: u16,
-    pub used_for_vote_count: u16,
+    pub guess_count: u64,
+    pub used_for_rule_proposal_count: u64,
+    pub used_for_vote_count: u64,
     pub status: GameTokenStatus,
     pub close_authority: Pubkey,
     pub bump: u8,
@@ -2700,6 +2864,8 @@ pub struct GameToken {
 pub struct PlayerGuess {
     pub turn_id: u64,
     pub player: Pubkey,
+    pub sequence: u64,
+    pub fee_lamports: u64,
     pub numbers: [u8; 6],
     pub submitted_at: i64,
     pub game_token: Pubkey,
@@ -2738,7 +2904,7 @@ pub struct RuleVote {
     pub turn_id: u64,
     pub rule_id: u64,
     pub voter: Pubkey,
-    pub sequence: u16,
+    pub sequence: u64,
     pub fee_lamports: u64,
     pub created_at: i64,
     pub bump: u8,
@@ -2750,7 +2916,7 @@ pub struct RuleEliminationVote {
     pub turn_id: u64,
     pub rule_id: u64,
     pub voter: Pubkey,
-    pub sequence: u16,
+    pub sequence: u64,
     pub fee_lamports: u64,
     pub created_at: i64,
     pub bump: u8,
@@ -2905,6 +3071,8 @@ pub struct TurnDurationCycleUpdated {
 pub struct GuessSubmitted {
     pub turn_id: u64,
     pub player: Pubkey,
+    pub sequence: u64,
+    pub fee_lamports: u64,
     pub guess: [u8; 6],
     pub game_token: Pubkey,
 }
@@ -2922,7 +3090,7 @@ pub struct RuleVoteCast {
     pub turn_id: u64,
     pub rule_id: u64,
     pub voter: Pubkey,
-    pub sequence: u16,
+    pub sequence: u64,
     pub fee_lamports: u64,
 }
 
@@ -2941,7 +3109,7 @@ pub struct RuleEliminationVoteCast {
     pub turn_id: u64,
     pub rule_id: u64,
     pub voter: Pubkey,
-    pub sequence: u16,
+    pub sequence: u64,
     pub fee_lamports: u64,
 }
 
@@ -3083,7 +3251,7 @@ pub enum IdealerError {
     InvalidMaxRuleTokens,
     #[msg("At least one finalist slot is required.")]
     InvalidFinalistCounts,
-    #[msg("Rate limits must be positive.")]
+    #[msg("Deprecated legacy rate-limit configuration is invalid.")]
     InvalidRateLimit,
     #[msg("A required configuration address is empty.")]
     InvalidConfigAddress,
@@ -3107,10 +3275,12 @@ pub enum IdealerError {
     InactiveGameToken,
     #[msg("The rule is not eligible for voting.")]
     RuleNotVoteable,
-    #[msg("The Game Token reached the proposal limit for this turn.")]
+    #[msg("Deprecated legacy proposal-limit error; paid proposals use action sequencing.")]
     RuleProposalLimitReached,
-    #[msg("The Game Token reached the vote limit for this turn.")]
+    #[msg("Deprecated legacy vote-limit error; paid votes use action sequencing.")]
     VoteLimitReached,
+    #[msg("The action sequence is invalid for this turn.")]
+    InvalidActionSequence,
     #[msg("Arithmetic overflow or underflow.")]
     ArithmeticOverflow,
     #[msg("The randomness account address is empty.")]

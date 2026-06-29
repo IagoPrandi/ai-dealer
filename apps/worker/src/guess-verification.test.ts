@@ -30,6 +30,7 @@ function job(overrides: Partial<GuessVerificationJob> = {}): GuessVerificationJo
       compiled_artifact_hash: artifactHash,
       draw_hash: "2".repeat(64),
       guess_hash: "3".repeat(64),
+      guess_sequence: "1",
       turn_id: "42",
       wallet: "4bYqf3rJ7m2nQh9sV1xCH8kLpWtD6eZaUg5oNbMcXyTH",
     },
@@ -57,6 +58,7 @@ test("verifyGuessJob supports original-only turns without an active artifact", (
       payload: {
         draw_hash: "2".repeat(64),
         guess_hash: "3".repeat(64),
+        guess_sequence: "1",
         turn_id: "42",
         wallet: "4bYqf3rJ7m2nQh9sV1xCH8kLpWtD6eZaUg5oNbMcXyTH",
       },

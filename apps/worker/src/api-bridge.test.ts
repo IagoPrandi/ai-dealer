@@ -89,6 +89,7 @@ test("projectVerificationResults verifies pending jobs and posts hex resultIds",
           payload: {
             draw_hash: "aa".repeat(32),
             guess_hash: "bb".repeat(32),
+            guess_sequence: "1",
             turn_id: "1",
             wallet: "4bY5krt2VnnSNB1R4c1bhiWdQYkTc1FvFTN1LaV5JxCH",
           },

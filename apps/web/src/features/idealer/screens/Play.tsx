@@ -1,8 +1,8 @@
 "use client";
 
 /**
- * JOGAR — pick 6 numbers (1–100), review, submit on-chain. One guess per wallet
- * per turn. Ported from app-play.jsx; submission salvaged from the original
+ * Play: pick 6 numbers (1-100), review, submit on-chain. Repeated guesses are
+ * allowed with escalating per-wallet fees. Ported from app-play.jsx; submission salvaged from the original
  * NumberPicker (createSubmitGuessInstruction → send → POST /guess-receipts).
  */
 import { useEffect, useMemo, useState } from "react";
@@ -69,14 +69,14 @@ function walletActionCopy(action: WalletPendingAction) {
     return {
       tone: "var(--yellow)",
       title: "Transaction delayed",
-      message: "Confirmation is taking longer than usual. Keep this action pending so a retry cannot create a duplicate guess.",
+      message: "Confirmation is taking longer than usual. Keep this action pending so a retry cannot duplicate the same guess sequence.",
     };
   }
   if (action.status === "duplicate") {
     return {
       tone: "var(--green)",
-      title: "Guess already recorded",
-      message: "This wallet already has a guess for this round. Refreshing the round state will show the confirmed entry.",
+      title: "Guess sequence already recorded",
+      message: "This guess sequence is already recorded. Refreshing the round state will show the confirmed entry.",
     };
   }
   if (action.status === "turn_changed") {
@@ -167,41 +167,6 @@ function WalletActionStatus({
   );
 }
 
-function PlaySubmitted({ bet }: { bet: number[] }) {
-  const { go, turnId } = useIdealer();
-  return (
-    <div className="ide-app ide-screen" style={{ height: "100%", position: "relative", overflow: "hidden" }}>
-      <div className="ide-ambient" />
-      <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", padding: "52px 18px 96px" }}>
-        <ScreenHead onBack={() => go("home")} title="Your guess" />
-        <div className="ide-card" style={{ padding: 18, marginBottom: 14, borderColor: "rgba(20,241,149,0.3)", background: "linear-gradient(120deg, rgba(20,241,149,0.08), var(--surface))" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 14 }}>
-            <span style={{ width: 30, height: 30, borderRadius: 10, background: "var(--green)", color: "#08110C", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.check /></span>
-            <div>
-              <div style={{ fontWeight: 700, fontSize: 15.5 }}>Guess confirmed</div>
-              <div style={{ fontSize: 12.5, color: "var(--muted)" }}>Round {fmtTurnId(turnId)} · good luck!</div>
-            </div>
-            <span className="ide-pill" style={{ marginLeft: "auto", padding: "4px 9px", fontSize: 11, color: "var(--dim)" }}><Ico.lock style={{ color: "var(--dim)", width: 12, height: 12 }} /> locked</span>
-          </div>
-          <div style={{ display: "flex", gap: 9, flexWrap: "wrap", justifyContent: "center" }}>
-            {bet.map((n) => <span key={n} className="ide-chip">{n}</span>)}
-          </div>
-        </div>
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 9, padding: "0 4px 18px", fontSize: 12.5, color: "var(--dim)", lineHeight: 1.5 }}>
-          <Ico.info style={{ color: "var(--purple-soft)", flexShrink: 0, marginTop: 1 }} />
-          <span>Each wallet makes <b style={{ color: "var(--muted)" }}>one guess per round</b>. It cannot be edited once submitted.</span>
-        </div>
-        <button onClick={() => go("vote")} className="ide-btn" style={{ width: "100%", padding: 15, marginBottom: 10 }} type="button">
-          <Ico.vote style={{ color: "#08110C", width: 19, height: 19 }} /> Vote on the rules
-        </button>
-        <button onClick={() => go("create")} className="ide-btn-ghost ide-btn" style={{ width: "100%", padding: 14 }} type="button">
-          <Ico.spark style={{ color: "var(--purple-soft)" }} /> Create a rule
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function PlayDone({ sel }: { sel: number[] }) {
   const { go, turnId } = useIdealer();
   return (
@@ -223,15 +188,11 @@ function PlayDone({ sel }: { sel: number[] }) {
 }
 
 export function PlayScreen() {
-  const ctx = useIdealer();
-  if (ctx.played && ctx.bet && ctx.bet.length) {
-    return <PlaySubmitted bet={ctx.bet} />;
-  }
   return <PlayFlow />;
 }
 
 function PlayFlow() {
-  const { client, connect, connected, fees, go, reloadAll, turnId, turnReadyToPlay, turnStatusMessage, wallet, walletAddress } = useIdealer();
+  const { client, connect, connected, fees, go, playCount, reloadAll, turnId, turnReadyToPlay, turnStatusMessage, wallet, walletAddress } = useIdealer();
   const [step, setStep] = useState<"pick" | "review" | "done">("pick");
   const [sel, setSel] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
@@ -300,7 +261,8 @@ function PlayFlow() {
         setError(turnStatusMessage);
         return;
       }
-      const accounts = await deriveSubmitGuessAccounts({ player, turnId });
+      const sequence = playCount + 1;
+      const accounts = await deriveSubmitGuessAccounts({ player, sequence, turnId });
       saveAction({
         action: "submit_guess",
         createdAt: startedAt,
@@ -338,7 +300,7 @@ function PlayFlow() {
           action: "submit_guess",
           createdAt: startedAt,
           errorCode: "DUPLICATE_ACTION",
-          errorMessage: "This wallet already has a guess for the current turn.",
+          errorMessage: "This guess sequence is already recorded for the current turn.",
           numbers: sel,
           status: "duplicate",
           turnId,
@@ -357,7 +319,7 @@ function PlayFlow() {
           walletAddress,
         });
       }, 15_000);
-      const instruction = await createSubmitGuessInstruction({ numbers: sel, player, turnId });
+      const instruction = await createSubmitGuessInstruction({ numbers: sel, player, sequence, turnId });
       const signature = await sendInstruction(client, wallet, instruction);
       saveAction({
         action: "submit_guess",
@@ -370,11 +332,13 @@ function PlayFlow() {
       });
 
       const receipt: GuessReceipt = {
+        feeLamports: Math.round(fees.playNext * 1_000_000_000),
         gameToken: accounts.gameToken.toString(),
         numbers: sel,
         player: walletAddress,
         playerGuess: accounts.playerGuess.toString(),
         programId: IDEALER_PROGRAM_ID.toString(),
+        sequence,
         signature,
         submittedAt: new Date().toISOString(),
         turnId,
@@ -465,7 +429,7 @@ function PlayFlow() {
           </div>
           <div className="ide-card" style={{ padding: "4px 16px", marginBottom: 14 }}>
             <ReviewRow label="Numbers chosen" value={`${sel.length} of ${PICK}`} mono />
-            <ReviewRow label="Entry fee" value={`${fmtSol(fees.play)} SOL`} mono />
+            <ReviewRow label="Entry fee" value={fees.playNext === 0 ? "Free" : `${fmtSol(fees.playNext)} SOL`} mono />
             <ReviewRow label="Account rent + network fee" value="shown by wallet" last />
           </div>
           {visiblePendingAction ? (

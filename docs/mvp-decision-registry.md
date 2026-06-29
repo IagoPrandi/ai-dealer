@@ -30,7 +30,7 @@ This registry records binding MVP decisions from `PRD.md` version 1.5.0. Changes
 | 24 | The default creator reward cap is `0.25 SOL` per turn, with 20% of platform monetization reserved for the creator reward reserve. | Locked | PRD section 16 |
 | 25 | The default minimum claim threshold is `0.005 SOL`; payouts below this threshold roll over to the same category bucket. | Locked | PRD section 16 |
 | 26 | The default claim window is 12 turns or 7 days, whichever happens first; expired unclaimed payouts roll over to the same category bucket. | Locked | PRD section 16 |
-| 27 | MVP rate limits are defined in `MVP_RATE_LIMIT_CONFIG` and must be enforced server-side, while on-chain uniqueness constraints remain the source of truth for guesses, vote sequences, and paid removals. | Locked | PRD section 16 |
+| 27 | MVP non-economic rate limits are defined in `MVP_RATE_LIMIT_CONFIG` and must be enforced server-side, while on-chain sequence/idempotency constraints remain the source of truth for repeated guesses, rule proposals, vote sequences, and paid removals. | Locked | PRD section 16 |
 | 28 | The rule elimination decision phase is a fixed 1-hour window after finalist locking; Game Token holders may cast sequenced elimination votes per finalist, elimination uses the side-specific repeated vote fee schedule, up to 5 finalists can be eliminated, and active election selects from survivors only. | Locked | PRD sections 6.14a and 15.7 |
 | 29 | Elected-rule voters share a voter reward equal to 15% of a single individual alternative-rule payout, funded from the creator reward reserve under its own per-turn cap. | Locked | PRD sections 2.4 and 8.8 |
 

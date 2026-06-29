@@ -15,8 +15,6 @@ fn valid_config(cycle: &[u32; 4]) -> ConfigValidation<'_> {
         max_rule_tokens: 80,
         top_voted_finalist_count: 3,
         random_finalist_count: 7,
-        max_rule_proposals_per_wallet_per_turn: 5,
-        max_votes_per_wallet_per_turn: 100,
     }
 }
 
@@ -29,7 +27,7 @@ fn account_constraints_use_isolated_canonical_pdas() {
     let rule_id = 11_u64;
 
     let (guess, _) = Pubkey::find_program_address(
-        &[b"guess", &turn_id.to_le_bytes(), player.as_ref()],
+        &[b"guess", &turn_id.to_le_bytes(), player.as_ref(), &1_u64.to_le_bytes()],
         &program_id,
     );
     let (game_token, _) = Pubkey::find_program_address(
@@ -46,6 +44,7 @@ fn account_constraints_use_isolated_canonical_pdas() {
             &turn_id.to_le_bytes(),
             &rule_id.to_le_bytes(),
             player.as_ref(),
+            &1_u64.to_le_bytes(),
         ],
         &program_id,
     );
@@ -55,6 +54,7 @@ fn account_constraints_use_isolated_canonical_pdas() {
             &turn_id.to_le_bytes(),
             &rule_id.to_le_bytes(),
             other_player.as_ref(),
+            &1_u64.to_le_bytes(),
         ],
         &program_id,
     );
@@ -105,29 +105,29 @@ fn prize_pool_accounting_tracks_sources_buckets_and_rollover() {
     })
     .unwrap();
 
-    assert_eq!(accounting.guess_submissions.gross_lamports, 20_000_000);
-    assert_eq!(accounting.rule_proposals.gross_lamports, 40_000_000);
+    assert_eq!(accounting.guess_submissions.gross_lamports, 30_000_000);
+    assert_eq!(accounting.rule_proposals.gross_lamports, 60_000_000);
     assert_eq!(accounting.paid_rule_removals.gross_lamports, 50_000_000);
     assert_eq!(accounting.votes.gross_lamports, 14_000_000);
     assert!(accounting.vote_fee_active);
-    assert_eq!(accounting.gross_fees_lamports, 124_000_000);
-    assert_eq!(accounting.treasury_lamports, 6_200_000);
-    assert_eq!(accounting.current_turn_pool_lamports, 117_800_000);
-    assert_eq!(accounting.original_bucket.current_turn_lamports, 58_900_000);
+    assert_eq!(accounting.gross_fees_lamports, 154_000_000);
+    assert_eq!(accounting.treasury_lamports, 7_700_000);
+    assert_eq!(accounting.current_turn_pool_lamports, 146_300_000);
+    assert_eq!(accounting.original_bucket.current_turn_lamports, 73_150_000);
     assert_eq!(
         accounting.alternative_bucket.current_turn_lamports,
-        58_900_000
+        73_150_000
     );
-    assert_eq!(accounting.original_bucket.total_lamports, 58_900_007);
-    assert_eq!(accounting.alternative_bucket.total_lamports, 58_900_009);
-    assert_eq!(accounting.total_visible_prize_pool_lamports, 117_800_016);
+    assert_eq!(accounting.original_bucket.total_lamports, 73_150_007);
+    assert_eq!(accounting.alternative_bucket.total_lamports, 73_150_009);
+    assert_eq!(accounting.total_visible_prize_pool_lamports, 146_300_016);
     assert_eq!(
         accounting.next_original_rollover_if_no_winners_lamports,
-        58_900_007
+        73_150_007
     );
     assert_eq!(
         accounting.next_alternative_rollover_if_no_winners_lamports,
-        58_900_009
+        73_150_009
     );
 }
 
@@ -244,9 +244,6 @@ fn invalid_config_and_vote_windows_are_rejected() {
 
     assert!(validate_config(&valid_config(&invalid_duration_cycle)).is_err());
 
-    let mut invalid_rate_limit = valid_config(&cycle);
-    invalid_rate_limit.max_rule_proposals_per_wallet_per_turn = 0;
-    assert!(validate_config(&invalid_rate_limit).is_err());
     assert!(validate_action_window(7_500, 0, 10_000, 7_500).is_err());
 }
 

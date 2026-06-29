@@ -67,14 +67,14 @@ function isLikelyRuleDraft(text: string) {
 
 function getDealerChatReply(
   text: string,
-  fees: { play: number; remove: number; rule: number; vote: number },
+  fees: { play: number; playNext: number; remove: number; rule: number; ruleNext: number; vote: number },
 ) {
   const trimmed = text.trim();
   if (GREETING_PATTERN.test(trimmed)) {
     return "Hey. Send me one winner condition based on the guess and the official draw.";
   }
   if (COST_TOPIC_PATTERN.test(trimmed)) {
-    return `Submitting a rule costs ${fmtSol(fees.rule)} SOL. Chat and preflight are free; payment only happens after the compiler returns a valid rule and you confirm submission.`;
+    return `Submitting this rule costs ${fees.ruleNext === 0 ? "Free" : `${fmtSol(fees.ruleNext)} SOL`}. Chat and preflight are free; payment only happens after the compiler returns a valid rule and you confirm submission.`;
   }
   if (EXAMPLE_TOPIC_PATTERN.test(trimmed)) {
     return "Try one of these:\nWin if at least 4 of your numbers appear in the draw.\nWin if the sum of your numbers equals the sum of the drawn numbers.\nWin if the player matches more numbers than anyone else.";
@@ -149,7 +149,7 @@ export function CreateScreen() {
           <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
             <div style={{ animation: "ide-float 4s ease-in-out infinite" }}><Dealer size={64} /></div>
             <h2 style={{ fontSize: 25, fontWeight: 800, margin: "18px 0 8px", letterSpacing: "-0.02em" }}>Connect to create</h2>
-            <p style={{ color: "var(--muted)", fontSize: 15.5, lineHeight: 1.5, margin: "0 0 26px" }}>Chat with the dealer and design your winning rule by prompt. Submitting costs <span className="ide-num" style={{ color: "var(--text)" }}>{fmtSol(fees.rule)} SOL</span>.</p>
+            <p style={{ color: "var(--muted)", fontSize: 15.5, lineHeight: 1.5, margin: "0 0 26px" }}>Chat with the dealer and design your winning rule by prompt. Submitting this rule costs <span className="ide-num" style={{ color: "var(--text)" }}>{fees.ruleNext === 0 ? "Free" : `${fmtSol(fees.ruleNext)} SOL`}</span>.</p>
             <button onClick={() => connect()} className="ide-btn" style={{ width: "100%", padding: 16, fontSize: 16 }} type="button">
               <Ico.wallet style={{ color: "#08110C" }} /> Connect wallet
             </button>
@@ -258,6 +258,7 @@ function CreateChat({ client, fees, go, played, reloadAll, seed, turnId, wallet,
       const ruleProposal = (await deriveRuleProposalAddress({ ruleId: rule.ruleId, turnId })).toString();
       await postRuleProposal({
         ...rule,
+        feeLamports: Math.round(fees.ruleNext * 1_000_000_000),
         proposer: walletAddress,
         ruleProposal,
         signature,
@@ -312,7 +313,7 @@ function CreateChat({ client, fees, go, played, reloadAll, seed, turnId, wallet,
               <div style={{ fontSize: 12, color: "var(--green)", marginTop: 1, whiteSpace: "nowrap" }}>{submitted ? "● rule submitted" : "● crafting your rule"}</div>
             </div>
           </div>
-          <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--dim)" }}>submit <span className="ide-num" style={{ color: "var(--muted)" }}>{fmtSol(fees.rule)}</span></span>
+          <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--dim)" }}>submit <span className="ide-num" style={{ color: "var(--muted)" }}>{fees.ruleNext === 0 ? "Free" : fmtSol(fees.ruleNext)}</span></span>
         </div>
       </div>
 
@@ -339,7 +340,7 @@ function CreateChat({ client, fees, go, played, reloadAll, seed, turnId, wallet,
             </div>
           ) : played ? (
             <button onClick={submit} disabled={busy} className="ide-btn" style={{ padding: 15, fontSize: 15.5, animation: "ide-rise .3s ease both", opacity: busy ? 0.7 : 1 }} type="button">
-              <Ico.check style={{ color: "#08110C" }} /> {busy ? "Submitting…" : `Submit to the round · ${fmtSol(fees.rule)} SOL`}
+              <Ico.check style={{ color: "#08110C" }} /> {busy ? "Submitting…" : `Submit to the round - ${fees.ruleNext === 0 ? "Free" : `${fmtSol(fees.ruleNext)} SOL`}`}
             </button>
           ) : (
             <div className="ide-card" style={{ padding: 16, borderColor: "rgba(255,210,63,0.35)", background: "linear-gradient(120deg, rgba(255,210,63,0.1), var(--surface))", animation: "ide-rise .3s ease both" }}>
@@ -349,7 +350,7 @@ function CreateChat({ client, fees, go, played, reloadAll, seed, turnId, wallet,
               </div>
               <p style={{ margin: "0 0 13px", color: "var(--muted)", fontSize: 13.5, lineHeight: 1.5 }}>Make a guess this round to unlock submitting. Your draft stays here.</p>
               <button onClick={() => go("play")} className="ide-btn" style={{ width: "100%", padding: 13 }} type="button">
-                <Ico.bolt style={{ color: "#08110C" }} /> Play now · {fmtSol(fees.play)} SOL
+                <Ico.bolt style={{ color: "#08110C" }} /> Play now - {fees.playNext === 0 ? "Free" : `${fmtSol(fees.playNext)} SOL`}
               </button>
             </div>
           )

@@ -309,7 +309,7 @@ export function RoundPage({ turnId: rawTurnId }: { turnId: string }) {
     void (async () => {
       try {
         const player = address(walletAddress);
-        const accounts = await deriveSubmitGuessAccounts({ player, turnId });
+        const accounts = await deriveSubmitGuessAccounts({ player, sequence: 1, turnId });
         const onChainGuess = await client.runtime.rpc
           .getAccountInfo(accounts.playerGuess, {
             commitment: "confirmed",

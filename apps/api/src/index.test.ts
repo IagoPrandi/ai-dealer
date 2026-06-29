@@ -5,7 +5,7 @@ import {
   calculateAndStoreRewardRecords,
   calculateAndStoreWinnerRecords,
   calculatePrizePoolAccounting,
-  calculateRepeatedVoteFeeLamports,
+  calculateRepeatedActionFeeLamports,
   calculateRewardDistribution,
   completeClaimApproval,
   createClaimRecordsForTurn,
@@ -196,6 +196,7 @@ function resultForJob(args: {
   original: "LOSE" | "WIN";
   player: string;
   resultByte: string;
+  sequence?: number;
   turnId: number;
 }): GuessVerificationResultRecord {
   return {
@@ -223,6 +224,7 @@ function resultForJob(args: {
     },
     player: args.player,
     resultId: args.resultByte.repeat(64),
+    ...(args.sequence ? { sequence: args.sequence } : {}),
     status: "completed",
     turnId: args.turnId,
   };
@@ -242,23 +244,23 @@ test("prize pool accounting tracks every source and bucket deterministically", (
     voteCount: 3,
   });
 
-  assert.equal(accounting.sources.guessSubmissions.grossLamports, 20_000_000);
-  assert.equal(accounting.sources.ruleProposals.grossLamports, 40_000_000);
+  assert.equal(accounting.sources.guessSubmissions.grossLamports, 30_000_000);
+  assert.equal(accounting.sources.ruleProposals.grossLamports, 60_000_000);
   assert.equal(accounting.sources.paidRuleRemovals.grossLamports, 50_000_000);
   assert.equal(accounting.sources.votes.grossLamports, 14_000_000);
   assert.equal(accounting.sources.votes.feeActive, true);
-  assert.equal(accounting.grossFeesLamports, 124_000_000);
-  assert.equal(accounting.treasuryLamports, 6_200_000);
-  assert.equal(accounting.platformMonetizationLamports, 6_200_000);
-  assert.equal(accounting.currentTurnPoolLamports, 117_800_000);
-  assert.equal(accounting.buckets.original.currentTurnLamports, 58_900_000);
-  assert.equal(accounting.buckets.alternative.currentTurnLamports, 58_900_000);
-  assert.equal(accounting.buckets.original.totalLamports, 58_900_007);
-  assert.equal(accounting.buckets.alternative.totalLamports, 58_900_009);
-  assert.equal(accounting.totalVisiblePrizePoolLamports, 117_800_016);
+  assert.equal(accounting.grossFeesLamports, 154_000_000);
+  assert.equal(accounting.treasuryLamports, 7_700_000);
+  assert.equal(accounting.platformMonetizationLamports, 7_700_000);
+  assert.equal(accounting.currentTurnPoolLamports, 146_300_000);
+  assert.equal(accounting.buckets.original.currentTurnLamports, 73_150_000);
+  assert.equal(accounting.buckets.alternative.currentTurnLamports, 73_150_000);
+  assert.equal(accounting.buckets.original.totalLamports, 73_150_007);
+  assert.equal(accounting.buckets.alternative.totalLamports, 73_150_009);
+  assert.equal(accounting.totalVisiblePrizePoolLamports, 146_300_016);
   assert.deepEqual(accounting.nextRolloverIfNoWinnersLamports, {
-    alternative: 58_900_009,
-    original: 58_900_007,
+    alternative: 73_150_009,
+    original: 73_150_007,
   });
 });
 
@@ -294,16 +296,16 @@ test("M9.3 backend accounting matches the contract domain vector", () => {
       voteGross: accounting.sources.votes.grossLamports,
     },
     {
-      alternativeBucketCurrent: 58_900_000,
-      alternativeBucketTotal: 58_900_009,
-      currentTurnPool: 117_800_000,
-      grossFees: 124_000_000,
-      originalBucketCurrent: 58_900_000,
-      originalBucketTotal: 58_900_007,
+      alternativeBucketCurrent: 73_150_000,
+      alternativeBucketTotal: 73_150_009,
+      currentTurnPool: 146_300_000,
+      grossFees: 154_000_000,
+      originalBucketCurrent: 73_150_000,
+      originalBucketTotal: 73_150_007,
       paidRuleRemovalGross: 50_000_000,
-      ruleProposalGross: 40_000_000,
-      totalVisiblePrizePool: 117_800_016,
-      treasury: 6_200_000,
+      ruleProposalGross: 60_000_000,
+      totalVisiblePrizePool: 146_300_016,
+      treasury: 7_700_000,
       voteFeeActive: true,
       voteGross: 14_000_000,
     },
@@ -313,7 +315,7 @@ test("M9.3 backend accounting matches the contract domain vector", () => {
 test("repeated approval vote fee sequence matches PRD before and after turn 100", () => {
   assert.deepEqual(
     [1, 2, 3, 4].map((sequence) =>
-      calculateRepeatedVoteFeeLamports({
+      calculateRepeatedActionFeeLamports({
         baseFeeLamports: 2_000_000,
         sequence,
         turnId: 99,
@@ -323,7 +325,7 @@ test("repeated approval vote fee sequence matches PRD before and after turn 100"
   );
   assert.deepEqual(
     [1, 2, 3, 4].map((sequence) =>
-      calculateRepeatedVoteFeeLamports({
+      calculateRepeatedActionFeeLamports({
         baseFeeLamports: 2_000_000,
         sequence,
         turnId: 100,
@@ -361,6 +363,36 @@ test("vote fee accounting sums repeated approval vote fee sequences", () => {
   assert.equal(afterGate.sources.votes.count, 10);
   assert.equal(afterGate.sources.votes.grossLamports, 2_046_000_000);
   assert.equal(afterGate.sources.votes.feeActive, true);
+});
+
+test("play and rule proposal fees use repeated action fee sequences", () => {
+  const beforeGate = calculatePrizePoolAccounting({
+    config: {
+      guessSubmissionFeeLamports: 10_000_000,
+      ruleProposalFeeLamports: 20_000_000,
+    },
+    guessCount: 3,
+    paidRuleRemovalCount: 0,
+    ruleProposalCount: 2,
+    turnId: 99,
+    voteCount: 0,
+  });
+  const afterGate = calculatePrizePoolAccounting({
+    config: {
+      guessSubmissionFeeLamports: 10_000_000,
+      ruleProposalFeeLamports: 20_000_000,
+    },
+    guessCount: 3,
+    paidRuleRemovalCount: 0,
+    ruleProposalCount: 2,
+    turnId: 100,
+    voteCount: 0,
+  });
+
+  assert.equal(beforeGate.sources.guessSubmissions.grossLamports, 60_000_000);
+  assert.equal(beforeGate.sources.ruleProposals.grossLamports, 40_000_000);
+  assert.equal(afterGate.sources.guessSubmissions.grossLamports, 70_000_000);
+  assert.equal(afterGate.sources.ruleProposals.grossLamports, 60_000_000);
 });
 
 test("elimination vote fees use same-side repeat escalation", () => {
@@ -558,6 +590,32 @@ test("winner calculation handles zero winners with full bucket rollover remainde
   assert.equal(winners.original.remainderLamports, 4_750_000);
   assert.equal(winners.alternative.remainderLamports, 4_750_000);
   assert.equal(winners.records.length, 0);
+});
+
+test("multiple guesses from the same wallet are projected as separate verification jobs", () => {
+  resetApiStateForTests();
+  saveReceiptForWallet(221, wallet, [1, 2, 3, 4, 5, 6]);
+  saveGuessReceipt({
+    gameToken: base58,
+    numbers: [7, 8, 9, 10, 11, 12],
+    player: wallet,
+    playerGuess: base58,
+    programId: base58,
+    sequence: 2,
+    signature: base58,
+    submittedAt: "2026-06-12T12:01:00.000Z",
+    turnId: 221,
+  });
+  saveFulfilledDraw(221);
+
+  const { jobs } = createGuessVerificationJobsForTurn(221);
+
+  assert.equal(jobs.length, 2);
+  assert.deepEqual(
+    jobs.map((job) => job.payload.guess_sequence).sort(),
+    ["1", "2"],
+  );
+  assert.notEqual(jobs[0]?.id, jobs[1]?.id);
 });
 
 test("M9.3 no alternative rule pays only original winners and creates no rewards", () => {
@@ -1739,7 +1797,7 @@ test("guess verification result creates an audit log matched to public result st
   assert.match(saved.auditLogHash ?? "", /^[0-9a-f]{64}$/);
   assert.equal(log?.kind, "guess.verification");
   assert.equal(log?.publicStateRef.type, "guess_verification_result");
-  assert.equal(log?.publicStateRef.key, `3608:${wallet}`);
+  assert.equal(log?.publicStateRef.key, `3608:${wallet}:1`);
   assert.equal(log?.resultId, result.resultId);
   assert.equal(verifyAuditLogIntegrity(log as AuditLogRecord), true);
 });

@@ -65,6 +65,27 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-06-29 (legacy cleanup after unlimited paid actions)
+
+- Opened required documents/context before and during verification: `PRD.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/idealer-test-and-verify/SKILL.md`, `.claude/skills/solana-dev/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/references/programs/anchor.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/references/frontend-framework-kit.md`, and `.claude/skills/solana-dev/ext/solana-dev/skill/references/testing.md`.
+- Audited the project for legacy one-action-per-wallet language and old vote/elimination fee constants after the unlimited paid play/create/vote change.
+- Removed the neutral legacy elimination vote multiplier from constants, API accounting, web fee calculation, and the Solana program; elimination now uses `vote_fee_lamports` directly with the repeated action fee formula.
+- Renamed general repeated-fee implementation symbols from vote-specific naming to action-specific naming where the rule is shared across guesses, rule proposals, and votes.
+- Left the deprecated `max_rule_proposals_per_wallet_per_turn` and `max_votes_per_wallet_per_turn` account fields in Solana config for layout compatibility only, set new defaults/fixtures to `0`, removed them from `ConfigValidation`, and documented them as inactive.
+- Cleaned stale docs/tests: PRD M2.3/M9.5/M9.6/M7.3 wording, API contract docs, data model uniqueness for guesses/winners, mobile UX vote state, Solana security checklist, and the `rule-voting` Playwright route/expectation.
+- Verification passed: constants typecheck/lint/test/build; API typecheck/test 49/49/lint/build; web typecheck/test/lint/build plus `rule-voting.spec.ts` E2E; Solana typecheck/test/lint; SBF build; explicit SBF instruction suite 7/7; `git diff --check`.
+- No Progress Tracker milestone status was newly changed in this pass.
+
+### 2026-06-28 (unlimited paid play/create/vote actions)
+
+- Opened required documents/context before and during implementation: `PRD.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/solana-dev/SKILL.md`, `.claude/skills/idealer-test-and-verify/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/references/programs/anchor.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/references/frontend-framework-kit.md`, and `.claude/skills/solana-dev/ext/solana-dev/skill/references/testing.md`.
+- Removed fixed protocol caps for paid play/guess, rule proposal, approval vote, and elimination vote repetitions. Players may repeat these actions as long as they pay and use the next valid sequence/idempotency key.
+- Generalized the repeated fee rule across actions: `2^n * BASE_FEE`, where `n` is the number of prior same-wallet actions in the same turn and same action scope; before turn 100, the first action in each scope remains free. Vote scope remains same-wallet/same-rule/same-side; guess and rule proposal scope is same-wallet/same-turn.
+- Updated Solana accounts/instructions/events, API projections/accounting/verification jobs, worker payloads, web transaction builders/UI fee display, constants, seed scripts, and product/contract docs for sequenced repeated guesses, rule proposals, and votes.
+- Adjusted claim-flow SBF coverage after the first pre-turn-100 guess became free: the claim test now adds a second paid sequenced guess to fund the prize vault before testing payout execution.
+- Verification passed: constants typecheck/lint/build; API typecheck/lint/test/build; worker typecheck/lint/test/build; web typecheck/lint/test/build; Solana typecheck/test/lint; SBF build; explicit SBF instruction suite 7/7 with `SBF_FEATURES=devnet-test,sb-devnet`; `git diff --check`.
+- No Progress Tracker milestone status was newly changed in this pass.
+
 ### 2026-06-28 (side-specific repeated vote fee correction and milestone marking)
 
 - Reopened required documents/context before editing: `PRD.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/idealer-test-and-verify/SKILL.md`, `.claude/skills/solana-dev/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/references/programs/anchor.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/references/frontend-framework-kit.md`, and `.claude/skills/solana-dev/ext/solana-dev/skill/references/testing.md`.

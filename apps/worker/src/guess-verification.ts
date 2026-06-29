@@ -24,6 +24,7 @@ export interface GuessVerificationJobPayload {
   compiled_artifact_hash?: string;
   draw_hash: string;
   guess_hash: string;
+  guess_sequence: string;
   turn_id: string;
   wallet: string;
 }
@@ -60,6 +61,7 @@ export interface GuessVerificationResult {
   jobId: string;
   original: RuleVerificationResult;
   player: string;
+  sequence: number;
   status: "completed";
   turnId: number;
 }
@@ -131,6 +133,7 @@ export function verifyGuessJob(
     jobId: job.id,
     original,
     player: job.payload.wallet,
+    sequence: Number(job.payload.guess_sequence),
     status: "completed",
     turnId: Number(job.payload.turn_id),
   };
@@ -249,6 +252,7 @@ function evaluateRuntimeRule(args: {
 function assertVerificationPayload(payload: GuessVerificationJobPayload) {
   if (
     !/^\d+$/.test(payload.turn_id) ||
+    !/^\d+$/.test(payload.guess_sequence) ||
     !payload.wallet ||
     !isHexHash(payload.guess_hash) ||
     !isHexHash(payload.draw_hash) ||

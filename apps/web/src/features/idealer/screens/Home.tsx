@@ -30,7 +30,7 @@ function PromptInput() {
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
         <span style={{ fontSize: 13.5, fontWeight: 700, whiteSpace: "nowrap" }}>Create your rule</span>
         <span className="ide-pill" style={{ padding: "3px 8px", fontSize: 11 }}><Ico.spark style={{ width: 12, height: 12, color: "var(--purple-soft)" }} /> with AI</span>
-        <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--dim)" }}>cost <span className="ide-num" style={{ color: "var(--muted)" }}>{fmtSol(fees.rule)} SOL</span></span>
+        <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--dim)" }}>cost <span className="ide-num" style={{ color: "var(--muted)" }}>{fees.ruleNext === 0 ? "Free" : `${fmtSol(fees.ruleNext)} SOL`}</span></span>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <input
@@ -129,7 +129,7 @@ export function HomeScreen() {
           </div>
         ) : (
           <button onClick={() => go("play")} disabled={!turnReadyToPlay} className="ide-btn" style={{ width: "100%", padding: "17px", fontSize: 17, marginBottom: 14, opacity: turnReadyToPlay ? 1 : 0.5 }} type="button">
-            <Ico.bolt style={{ color: "#08110C" }} /> {turnReadyToPlay ? `Play now · ${fmtSol(fees.play)} SOL` : "Waiting for next turn"}
+            <Ico.bolt style={{ color: "#08110C" }} /> {turnReadyToPlay ? `Play now - ${fees.playNext === 0 ? "Free" : `${fmtSol(fees.playNext)} SOL`}` : "Waiting for next turn"}
           </button>
         )}
 

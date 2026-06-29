@@ -10,7 +10,7 @@ Desktop web is supported as a secondary surface. The primary user experience mus
 
 ## Core Loop
 
-Players pick six unique numbers, submit one guess for the current turn, vote on eligible community-created rules, and watch the draw resolve both the original winning condition and the active alternative rule. The core loop is: pick numbers, vote for the rule, watch the game change.
+Players pick six unique numbers, submit one or more guesses for the current turn, vote on eligible community-created rules, and watch the draw resolve both the original winning condition and the active alternative rule. The core loop is: pick numbers, vote for the rule, watch the game change.
 
 ## Turn Rules
 
@@ -18,7 +18,7 @@ Players pick six unique numbers, submit one guess for the current turn, vote on 
 - The turn duration cycle is fixed for MVP: `2h -> 2h -> 8h -> 8h -> repeat`.
 - Each turn has a new draw, a new alternative rule election opportunity, a new prize pool, and independent winner evaluation.
 - Six unique numbers from 1 to 100 are drawn using Switchboard VRF.
-- Each wallet may submit one guess per turn.
+- Each wallet may submit repeated guesses, create repeated rules, and cast repeated votes in a turn when it pays the required sequenced fee.
 
 ## Winning Conditions
 

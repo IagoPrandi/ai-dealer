@@ -22,7 +22,7 @@ This is the M0.4 PostgreSQL model draft. On-chain accounts remain the source of 
 | `prize_pool_rollovers` | Per-bucket rollover input for the next turn. | Unique `turn_id`; non-negative original and alternative rollover lamports. |
 | `prize_pool_accounting_snapshots` | Deterministic source, treasury, bucket, and visible-pool accounting snapshots. | Unique `(turn_id, accounting_version)`. |
 | `game_tokens_index` | Indexed Game Token PDA metadata. | Unique `(turn_id, wallet)`. |
-| `guesses` | Player guesses and submission metadata. | Unique `(turn_id, wallet)`. |
+| `guesses` | Player guesses and submission metadata. | Unique `(turn_id, wallet, sequence)`. |
 | `gate_check_logs` | Preflight gate logs. | Indexed `turn_id`, `player_wallet`, `gate_type`, `result`. |
 | `rule_dedup_results` | Semantic and canonical dedup outputs. | One result per preflight attempt. |
 | `rule_preflight_tokens` | Short-lived token issuance audit. | Unique `token_hash`; expires quickly. |
@@ -34,7 +34,7 @@ This is the M0.4 PostgreSQL model draft. On-chain accounts remain the source of 
 | `election_vrf_records` | Switchboard election request/fulfillment projection. | Unique `turn_id`. |
 | `rule_finalist_sets` | Locked finalist set and hashes. | Unique `turn_id`. |
 | `payout_records` | Winner payout projection and claim state. | Unique `(turn_id, wallet, category)`. |
-| `winner_records` | M4.2 calculated original and alternative winners before claim records are finalized. | Unique `(turn_id, wallet, category)`. |
+| `winner_records` | M4.2 calculated original and alternative winners before claim records are finalized. | Unique `(turn_id, result_id, category)`; wallet-level claims aggregate compatible payouts before on-chain claim recording. |
 | `creator_reward_records` | Creator reward projection. | Unique `(turn_id, active_rule_id, creator_wallet)`. |
 | `idempotency_records` | API and worker idempotency. | Unique `idempotency_key`. |
 | `creator_profiles` | Creator aggregate profile projection. | Unique `wallet`. |
@@ -75,6 +75,7 @@ guess_submission_count integer not null,
 rule_proposal_count integer not null,
 paid_rule_removal_count integer not null,
 vote_fee_count integer not null,
+elimination_vote_fee_count integer not null default 0,
 gross_fees_lamports numeric(20,0) not null,
 treasury_lamports numeric(20,0) not null,
 current_turn_pool_lamports numeric(20,0) not null,
@@ -104,7 +105,7 @@ winner_count integer not null,
 payout_lamports numeric(20,0) not null,
 status text not null,
 calculated_at timestamptz not null,
-primary key (turn_id, player_wallet, category)
+primary key (turn_id, result_id, category)
 ```
 
 ### `rules`

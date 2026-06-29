@@ -19,6 +19,9 @@ export const SYSTEM_PROGRAM_ID = address("11111111111111111111111111111111");
 const SUBMIT_GUESS_DISCRIMINATOR = new Uint8Array([
   61, 124, 32, 227, 64, 198, 252, 3,
 ]);
+const SUBMIT_ADDITIONAL_GUESS_DISCRIMINATOR = new Uint8Array([
+  141, 186, 105, 183, 228, 255, 164, 47,
+]);
 const PROPOSE_RULE_DISCRIMINATOR = new Uint8Array([
   14, 35, 67, 184, 137, 188, 125, 233,
 ]);
@@ -50,12 +53,6 @@ const CLAIM_KIND_BYTE: Readonly<Record<ClaimKindLabel, number>> = {
 const addressEncoder = getAddressEncoder();
 const textEncoder = new TextEncoder();
 
-function u16Le(value: number) {
-  const bytes = new Uint8Array(2);
-  new DataView(bytes.buffer).setUint16(0, value, true);
-  return bytes;
-}
-
 export interface SubmitGuessAccounts {
   gameToken: ReturnType<typeof address>;
   globalConfig: ReturnType<typeof address>;
@@ -66,11 +63,13 @@ export interface SubmitGuessAccounts {
 }
 
 export interface GuessReceipt {
+  feeLamports?: number;
   gameToken: string;
   numbers: readonly number[];
   player: string;
   playerGuess: string;
   programId: string;
+  sequence: number;
   signature: string;
   submittedAt: string;
   turnId: number;
@@ -537,13 +536,16 @@ export async function fetchActiveTurnSnapshot(
 
 export async function deriveSubmitGuessAccounts({
   player,
+  sequence,
   turnId,
 }: {
   player: ReturnType<typeof address>;
+  sequence: number;
   turnId: number;
 }): Promise<SubmitGuessAccounts> {
   const turnSeed = u64Le(turnId);
   const playerSeed = addressEncoder.encode(player);
+  const sequenceSeed = u64Le(sequence);
 
   const [
     globalConfig,
@@ -555,7 +557,7 @@ export async function deriveSubmitGuessAccounts({
   ] = await Promise.all([
     derivePda(["global_config"]),
     derivePda(["turn", turnSeed]),
-    derivePda(["guess", turnSeed, playerSeed]),
+    derivePda(["guess", turnSeed, playerSeed, sequenceSeed]),
     derivePda(["game_token", turnSeed, playerSeed]),
     derivePda(["treasury_vault"]),
     derivePda(["prize_vault", turnSeed]),
@@ -607,7 +609,7 @@ export async function deriveRuleVoteAddress({
     u64Le(turnId),
     u64Le(ruleId),
     addressEncoder.encode(player),
-    u16Le(sequence),
+    u64Le(sequence),
   ]);
 }
 
@@ -627,7 +629,7 @@ export async function deriveRuleEliminationVoteAddress({
     u64Le(turnId),
     u64Le(ruleId),
     addressEncoder.encode(player),
-    u16Le(sequence),
+    u64Le(sequence),
   ]);
 }
 
@@ -651,16 +653,23 @@ export async function deriveRuleRemovalAddress({
 export async function createSubmitGuessInstruction({
   numbers,
   player,
+  sequence,
   turnId,
 }: {
   numbers: readonly number[];
   player: ReturnType<typeof address>;
+  sequence: number;
   turnId: number;
 }) {
-  const accounts = await deriveSubmitGuessAccounts({ player, turnId });
-  const data = new Uint8Array(SUBMIT_GUESS_DISCRIMINATOR.length + 6);
-  data.set(SUBMIT_GUESS_DISCRIMINATOR);
-  data.set(numbers, SUBMIT_GUESS_DISCRIMINATOR.length);
+  const accounts = await deriveSubmitGuessAccounts({ player, sequence, turnId });
+  const discriminator =
+    sequence === 1
+      ? SUBMIT_GUESS_DISCRIMINATOR
+      : SUBMIT_ADDITIONAL_GUESS_DISCRIMINATOR;
+  const data = new Uint8Array(discriminator.length + 6 + 8);
+  data.set(discriminator);
+  data.set(numbers, discriminator.length);
+  data.set(u64Le(sequence), discriminator.length + 6);
 
   return {
     accounts: [
@@ -695,7 +704,7 @@ export async function createProposeRuleInstruction({
   );
   assertHashBytes("preflightResultHash", preflight.preflightResultHash);
 
-  const accounts = await deriveSubmitGuessAccounts({ player, turnId });
+  const accounts = await deriveSubmitGuessAccounts({ player, sequence: 1, turnId });
   const ruleProposal = await deriveRuleProposalAddress({
     ruleId: preflight.ruleId,
     turnId,
@@ -739,12 +748,12 @@ export async function createVoteRuleInstruction({
   sequence: number;
   turnId: number;
 }) {
-  const accounts = await deriveSubmitGuessAccounts({ player, turnId });
+  const accounts = await deriveSubmitGuessAccounts({ player, sequence: 1, turnId });
   const ruleProposal = await deriveRuleProposalAddress({ ruleId, turnId });
   const ruleVote = await deriveRuleVoteAddress({ player, ruleId, sequence, turnId });
-  const data = new Uint8Array(VOTE_RULE_DISCRIMINATOR.length + 2);
+  const data = new Uint8Array(VOTE_RULE_DISCRIMINATOR.length + 8);
   data.set(VOTE_RULE_DISCRIMINATOR);
-  data.set(u16Le(sequence), VOTE_RULE_DISCRIMINATOR.length);
+  data.set(u64Le(sequence), VOTE_RULE_DISCRIMINATOR.length);
 
   return {
     accounts: [
@@ -773,7 +782,7 @@ export async function createEliminateVoteRuleInstruction({
   sequence: number;
   turnId: number;
 }) {
-  const accounts = await deriveSubmitGuessAccounts({ player, turnId });
+  const accounts = await deriveSubmitGuessAccounts({ player, sequence: 1, turnId });
   const ruleProposal = await deriveRuleProposalAddress({ ruleId, turnId });
   const ruleEliminationVote = await deriveRuleEliminationVoteAddress({
     player,
@@ -781,9 +790,9 @@ export async function createEliminateVoteRuleInstruction({
     sequence,
     turnId,
   });
-  const data = new Uint8Array(ELIMINATE_VOTE_RULE_DISCRIMINATOR.length + 2);
+  const data = new Uint8Array(ELIMINATE_VOTE_RULE_DISCRIMINATOR.length + 8);
   data.set(ELIMINATE_VOTE_RULE_DISCRIMINATOR);
-  data.set(u16Le(sequence), ELIMINATE_VOTE_RULE_DISCRIMINATOR.length);
+  data.set(u64Le(sequence), ELIMINATE_VOTE_RULE_DISCRIMINATOR.length);
 
   return {
     accounts: [
@@ -810,7 +819,7 @@ export async function createRemoveRuleInstruction({
   ruleId: number;
   turnId: number;
 }) {
-  const accounts = await deriveSubmitGuessAccounts({ player, turnId });
+  const accounts = await deriveSubmitGuessAccounts({ player, sequence: 1, turnId });
   const ruleProposal = await deriveRuleProposalAddress({ ruleId, turnId });
   const ruleRemoval = await deriveRuleRemovalAddress({ player, ruleId, turnId });
 

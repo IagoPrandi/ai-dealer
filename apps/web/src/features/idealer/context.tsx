@@ -42,11 +42,12 @@ export interface IdealerContextValue {
   decisionPhase: boolean;
   eliminatedIds: number[];
   endSeconds: null | number;
-  fees: { play: number; remove: number; rule: number; vote: number };
+  fees: { play: number; playNext: number; remove: number; rule: number; ruleNext: number; vote: number };
   guessCutoffEndsAt: null | number;
   go: (screen: Screen, params?: NavParams) => void;
   openDetail: (ruleId: number, opts?: { canAgainst?: boolean; rank?: number | null }) => void;
   players: number;
+  playCount: number;
   played: boolean;
   prizeSol: number;
   reloadAll: () => void;

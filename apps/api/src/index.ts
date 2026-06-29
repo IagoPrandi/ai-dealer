@@ -8,13 +8,10 @@ import {
   CREATOR_REWARD_CAP_SOL,
   CREATOR_REWARD_RATE_BPS,
   CREATOR_REWARD_RESERVE_SHARE_BPS,
-  ELIMINATION_VOTE_FEE_MULTIPLIER,
   LAMPORTS_PER_SOL,
-  MAX_ELIMINATION_VOTES_PER_WALLET_RULE_TURN,
-  MAX_VOTES_PER_WALLET_RULE_TURN,
   MINIMUM_CLAIM_THRESHOLD_SOL,
   MVP_FEES_SOL,
-  REPEATED_VOTE_FEE_MULTIPLIER,
+  REPEATED_ACTION_FEE_MULTIPLIER,
   RULE_MAX_TOKENS,
   RULE_REMOVAL_CONFIG,
   TREASURY_FEE_BPS,
@@ -79,11 +76,13 @@ export interface ServiceHealth {
 }
 
 export interface GuessReceiptRecord {
+  feeLamports?: number;
   gameToken: string;
   numbers: readonly number[];
   player: string;
   playerGuess: string;
   programId: string;
+  sequence?: number;
   signature: string;
   submittedAt: string;
   turnId: number;
@@ -124,10 +123,12 @@ export interface RulePreflightResult {
 
 export interface RuleProposalRecord extends RulePreflightResult {
   compiledArtifactHash?: string | null;
+  feeLamports?: number;
   proposer: string;
   precompilationStatus?: "failed" | "passed" | "pending";
   validation?: RuleValidationSummary | null;
   ruleProposal: string;
+  sequence?: number;
   signature: string;
   state?: "eligible" | "invalidated" | "proposed" | "removed_paid";
   submittedAt: string;
@@ -263,14 +264,13 @@ export interface RuleRemovalActivityEvent {
 export type ActivityEvent = RolloverActivityEvent | RuleRemovalActivityEvent;
 
 export interface PrizePoolAccountingConfig {
-  eliminationVoteFeeMultiplier: number;
   guessSubmissionFeeLamports: number;
   paidRuleRemovalFeeLamports: number;
   ruleProposalFeeLamports: number;
   treasuryFeeBps: number;
   voteFeeLamports: number;
   voteFeeStartTurn: number;
-  repeatedVoteFeeMultiplier: number;
+  repeatedActionFeeMultiplier: number;
 }
 
 export interface PrizePoolFeeSourceAccounting {
@@ -382,6 +382,7 @@ export interface GuessVerificationJobPayload {
   compiled_artifact_hash?: string;
   draw_hash: string;
   guess_hash: string;
+  guess_sequence: string;
   turn_id: string;
   wallet: string;
 }
@@ -434,6 +435,7 @@ export interface GuessVerificationResultRecord {
   original: RuleVerificationResultRecord;
   player: string;
   resultId: string;
+  sequence?: number;
   status: "completed";
   turnId: number;
 }
@@ -863,8 +865,8 @@ const CORS_PATHS = new Set([
   "/settlement-transitions",
 ]);
 
-function getGuessReceiptKey(turnId: number, player: string) {
-  return `${turnId}:${player}`;
+function getGuessReceiptKey(turnId: number, player: string, sequence: number) {
+  return `${turnId}:${player}:${sequence}`;
 }
 
 function getRuleProposalKey(turnId: number, ruleId: number) {
@@ -1432,6 +1434,10 @@ function isValidGuessReceipt(value: unknown): value is GuessReceiptRecord {
     numbers.every(
       (number) => Number.isInteger(number) && number >= 1 && number <= 100,
     ) &&
+    (receipt.sequence === undefined ||
+      (Number.isInteger(receipt.sequence) && Number(receipt.sequence) > 0)) &&
+    (receipt.feeLamports === undefined ||
+      (Number.isInteger(receipt.feeLamports) && Number(receipt.feeLamports) >= 0)) &&
     isBase58Like(receipt.player) &&
     isBase58Like(receipt.playerGuess) &&
     isBase58Like(receipt.gameToken) &&
@@ -1496,6 +1502,10 @@ function isValidRuleProposal(value: unknown): value is RuleProposalRecord {
     Number(proposal.turnId) > 0 &&
     Number.isInteger(proposal.ruleId) &&
     Number(proposal.ruleId) > 0 &&
+    (proposal.sequence === undefined ||
+      (Number.isInteger(proposal.sequence) && Number(proposal.sequence) > 0)) &&
+    (proposal.feeLamports === undefined ||
+      (Number.isInteger(proposal.feeLamports) && Number(proposal.feeLamports) >= 0)) &&
     typeof proposal.sanitizedText === "string" &&
     sanitizeRuleText(proposal.sanitizedText) === proposal.sanitizedText &&
     Number.isInteger(proposal.tokenCount) &&
@@ -1528,7 +1538,6 @@ function isValidRuleVote(value: unknown): value is RuleVoteRecord {
     Number(vote.ruleId) > 0 &&
     Number.isInteger(vote.sequence) &&
     Number(vote.sequence) > 0 &&
-    Number(vote.sequence) <= MAX_VOTES_PER_WALLET_RULE_TURN &&
     (vote.feeLamports === undefined ||
       (Number.isInteger(vote.feeLamports) && Number(vote.feeLamports) >= 0)) &&
     isBase58Like(vote.voter) &&
@@ -1555,7 +1564,6 @@ function isValidRuleEliminationVote(
     Number(vote.ruleId) > 0 &&
     Number.isInteger(vote.sequence) &&
     Number(vote.sequence) > 0 &&
-    Number(vote.sequence) <= MAX_ELIMINATION_VOTES_PER_WALLET_RULE_TURN &&
     (vote.feeLamports === undefined ||
       (Number.isInteger(vote.feeLamports) && Number(vote.feeLamports) >= 0)) &&
     isBase58Like(vote.voter) &&
@@ -2046,6 +2054,8 @@ function isValidGuessVerificationResult(
     result.jobId.length > 0 &&
     typeof result.resultId === "string" &&
     isHexHash(result.resultId) &&
+    (result.sequence === undefined ||
+      (Number.isInteger(result.sequence) && Number(result.sequence) > 0)) &&
     (result.activeRuleId === null ||
       (Number.isInteger(result.activeRuleId) &&
         Number(result.activeRuleId) > 0)) &&
@@ -2231,20 +2241,67 @@ function sendNoContent(
 }
 
 export function saveGuessReceipt(receipt: GuessReceiptRecord) {
-  const key = getGuessReceiptKey(receipt.turnId, receipt.player);
-  guessReceipts.set(key, receipt);
-  return receipt;
+  const sequence =
+    receipt.sequence ??
+    [...guessReceipts.values()].filter(
+      (candidate) =>
+        candidate.turnId === receipt.turnId && candidate.player === receipt.player,
+    ).length + 1;
+  const saved = {
+    ...receipt,
+    sequence,
+    feeLamports:
+      receipt.feeLamports ??
+      calculateRepeatedActionFeeLamports({
+        baseFeeLamports: solToLamports(MVP_FEES_SOL.guessSubmission),
+        sequence,
+        turnId: receipt.turnId,
+      }),
+  };
+  guessReceipts.set(
+    getGuessReceiptKey(saved.turnId, saved.player, saved.sequence),
+    saved,
+  );
+  return saved;
 }
 
 export function getGuessReceipt(turnId: number, player: string) {
-  return guessReceipts.get(getGuessReceiptKey(turnId, player)) ?? null;
+  return (
+    [...guessReceipts.values()]
+      .filter((receipt) => receipt.turnId === turnId && receipt.player === player)
+      .sort((left, right) => (right.sequence ?? 0) - (left.sequence ?? 0))[0] ??
+    null
+  );
+}
+
+function getGuessReceiptBySequence(
+  turnId: number,
+  player: string,
+  sequence: number,
+) {
+  return guessReceipts.get(getGuessReceiptKey(turnId, player, sequence)) ?? null;
 }
 
 export function saveRuleProposal(proposal: RuleProposalRecord) {
+  const sequence =
+    proposal.sequence ??
+    [...ruleProposals.values()].filter(
+      (candidate) =>
+        candidate.turnId === proposal.turnId &&
+        candidate.proposer === proposal.proposer,
+    ).length + 1;
   const normalizedProposal = {
     ...proposal,
     compiledArtifactHash: proposal.compiledArtifactHash ?? null,
+    feeLamports:
+      proposal.feeLamports ??
+      calculateRepeatedActionFeeLamports({
+        baseFeeLamports: solToLamports(MVP_FEES_SOL.ruleProposal),
+        sequence,
+        turnId: proposal.turnId,
+      }),
     precompilationStatus: proposal.precompilationStatus ?? "pending",
+    sequence,
     state: proposal.state ?? "proposed",
     title: getRuleTitle(proposal.sanitizedText),
   };
@@ -2275,7 +2332,7 @@ export function saveRuleVote(vote: RuleVoteRecord) {
     sequence,
     feeLamports:
       vote.feeLamports ??
-      calculateRepeatedVoteFeeLamports({
+      calculateRepeatedActionFeeLamports({
         baseFeeLamports: solToLamports(MVP_FEES_SOL.vote),
         sequence,
         turnId: vote.turnId,
@@ -2302,9 +2359,8 @@ export function saveRuleEliminationVote(vote: RuleEliminationVoteRecord) {
     sequence,
     feeLamports:
       vote.feeLamports ??
-      calculateRepeatedVoteFeeLamports({
-        baseFeeLamports:
-          solToLamports(MVP_FEES_SOL.vote) * ELIMINATION_VOTE_FEE_MULTIPLIER,
+      calculateRepeatedActionFeeLamports({
+        baseFeeLamports: solToLamports(MVP_FEES_SOL.vote),
         sequence,
         turnId: vote.turnId,
       }),
@@ -2711,8 +2767,8 @@ export function getMandatedRuleSignatures(): Set<string> {
   return signatures;
 }
 
-function getVerificationResultKey(turnId: number, player: string) {
-  return `${turnId}:${player}`;
+function getVerificationResultKey(turnId: number, player: string, sequence = 1) {
+  return `${turnId}:${player}:${sequence}`;
 }
 
 function listGuessReceipts(turnId: number) {
@@ -2734,9 +2790,9 @@ function listVerificationResults(turnId: number) {
 function getWinnerRecordKey(
   turnId: number,
   category: WinnerCategory,
-  player: string,
+  resultId: string,
 ) {
-  return `${turnId}:${category}:${player}`;
+  return `${turnId}:${category}:${resultId}`;
 }
 
 function isWinnerForCategory(
@@ -2849,7 +2905,7 @@ export function calculateAndStoreWinnerRecords(
   const records = [...original.records, ...alternative.records];
   for (const record of records) {
     winnerRecords.set(
-      getWinnerRecordKey(record.turnId, record.category, record.player),
+      getWinnerRecordKey(record.turnId, record.category, record.resultId),
       record,
     );
   }
@@ -3323,16 +3379,42 @@ export function createClaimRecordsForTurn(
 ) {
   const winners = getWinnerSummary(turnId);
   const rewards = getRewardSummary(turnId);
-  const claimableRecords = [
-    ...winners.records.map((winner) =>
-      createClaimRecord({
+  const winnerClaimsByWallet = new Map<
+    string,
+    {
+      activeRuleId: number | null;
+      amountLamports: number;
+      category: WinnerCategory | null;
+      wallet: string;
+    }
+  >();
+  for (const winner of winners.records) {
+    const current = winnerClaimsByWallet.get(winner.player);
+    if (!current) {
+      winnerClaimsByWallet.set(winner.player, {
         activeRuleId: winner.activeRuleId,
         amountLamports: winner.payoutLamports,
+        category: winner.category,
+        wallet: winner.player,
+      });
+      continue;
+    }
+    current.amountLamports += winner.payoutLamports;
+    current.category =
+      current.category === winner.category ? current.category : null;
+    current.activeRuleId =
+      current.activeRuleId === winner.activeRuleId ? current.activeRuleId : null;
+  }
+  const claimableRecords = [
+    ...[...winnerClaimsByWallet.values()].map((winner) =>
+      createClaimRecord({
+        activeRuleId: winner.activeRuleId,
+        amountLamports: winner.amountLamports,
         availableAt,
         category: winner.category,
         kind: "winner_payout" as const,
         turnId,
-        wallet: winner.player,
+        wallet: winner.wallet,
       }),
     ),
     ...(rewards.creator && rewards.creator.finalRewardLamports > 0
@@ -3824,6 +3906,7 @@ function createVerificationJobForReceipt(args: {
   const guessHash = hashJson({
     numbers: args.receipt.numbers,
     player: args.receipt.player,
+    sequence: args.receipt.sequence ?? 1,
     turnId: args.receipt.turnId,
   });
   const drawHash = hashJson({
@@ -3834,6 +3917,7 @@ function createVerificationJobForReceipt(args: {
     "guess.verification",
     args.receipt.turnId,
     args.receipt.player,
+    args.receipt.sequence ?? 1,
     drawHash,
     args.activeRule?.compiledArtifactHash ?? "original",
   ].join(":");
@@ -3852,6 +3936,7 @@ function createVerificationJobForReceipt(args: {
       : {}),
     draw_hash: drawHash,
     guess_hash: guessHash,
+    guess_sequence: String(args.receipt.sequence ?? 1),
     turn_id: String(args.receipt.turnId),
     wallet: args.receipt.player,
   };
@@ -3914,6 +3999,7 @@ export function saveGuessVerificationResult(
   if (job.turnId !== result.turnId || job.payload.wallet !== result.player) {
     throw new Error("VERIFICATION_RESULT_JOB_MISMATCH");
   }
+  const sequence = result.sequence ?? Number(job.payload.guess_sequence);
 
   const updatedJob: GuessVerificationJobRecord = {
     ...job,
@@ -3927,12 +4013,13 @@ export function saveGuessVerificationResult(
   const auditLog = appendGuessVerificationAuditLog(job, result);
   const normalizedResult: GuessVerificationResultRecord = {
     ...result,
+    sequence,
     auditLogHash: auditLog.logHash,
   };
 
   verificationJobs.set(job.idempotencyKey, updatedJob);
   verificationResults.set(
-    getVerificationResultKey(result.turnId, result.player),
+    getVerificationResultKey(result.turnId, result.player, sequence),
     normalizedResult,
   );
   calculateAndStoreWinnerRecords(result.turnId, result.completedAt);
@@ -3953,6 +4040,7 @@ function appendGuessVerificationAuditLog(
       drawHash: job.payload.draw_hash,
       guess: job.playerGuess,
       guessHash: job.payload.guess_hash,
+      guessSequence: Number(job.payload.guess_sequence),
       jobId: job.id,
       player: result.player,
       turnId: result.turnId,
@@ -3967,7 +4055,11 @@ function appendGuessVerificationAuditLog(
     },
     player: result.player,
     publicStateRef: {
-      key: getVerificationResultKey(result.turnId, result.player),
+      key: getVerificationResultKey(
+        result.turnId,
+        result.player,
+        result.sequence ?? Number(job.payload.guess_sequence),
+      ),
       type: "guess_verification_result",
     },
     reason: [
@@ -4499,7 +4591,7 @@ function assertNonNegativeSafeInteger(value: number, label: string) {
   }
 }
 
-export function calculateRepeatedVoteFeeLamports(args: {
+export function calculateRepeatedActionFeeLamports(args: {
   baseFeeLamports: number;
   sequence: number;
   turnId: number;
@@ -4518,7 +4610,7 @@ export function calculateRepeatedVoteFeeLamports(args: {
   const paidIndex = args.sequence - 1;
   let feeLamports = args.baseFeeLamports;
   for (let index = 0; index < paidIndex; index += 1) {
-    feeLamports *= REPEATED_VOTE_FEE_MULTIPLIER;
+    feeLamports *= REPEATED_ACTION_FEE_MULTIPLIER;
     assertNonNegativeSafeInteger(feeLamports, "fee_lamports");
   }
   return feeLamports;
@@ -4591,14 +4683,13 @@ function accountVariableFeeSource(
 
 function defaultAccountingConfig(): PrizePoolAccountingConfig {
   return {
-    eliminationVoteFeeMultiplier: ELIMINATION_VOTE_FEE_MULTIPLIER,
     guessSubmissionFeeLamports: solToLamports(MVP_FEES_SOL.guessSubmission),
     paidRuleRemovalFeeLamports: solToLamports(MVP_FEES_SOL.paidRuleRemoval),
     ruleProposalFeeLamports: solToLamports(MVP_FEES_SOL.ruleProposal),
     treasuryFeeBps: TREASURY_FEE_BPS,
     voteFeeLamports: solToLamports(MVP_FEES_SOL.vote),
     voteFeeStartTurn: VOTE_FEE_START_TURN,
-    repeatedVoteFeeMultiplier: REPEATED_VOTE_FEE_MULTIPLIER,
+    repeatedActionFeeMultiplier: REPEATED_ACTION_FEE_MULTIPLIER,
   };
 }
 
@@ -4608,9 +4699,11 @@ export function calculatePrizePoolAccounting(args: {
   eliminationVoteCount?: number;
   eliminationVoteFeeLamports?: number[];
   guessCount: number;
+  guessFeeLamports?: number[];
   originalRolloverLamports?: number;
   paidRuleRemovalCount: number;
   ruleProposalCount: number;
+  ruleProposalFeeLamports?: number[];
   turnId: number;
   voteCount: number;
   voteFeeLamports?: number[];
@@ -4624,13 +4717,31 @@ export function calculatePrizePoolAccounting(args: {
     ...defaultAccountingConfig(),
     ...args.config,
   };
-  const guessSubmissions = accountFeeSource(
-    args.guessCount,
+  const guessFees =
+    args.guessFeeLamports ??
+    Array.from({ length: args.guessCount }, (_, index) =>
+      calculateRepeatedActionFeeLamports({
+        baseFeeLamports: config.guessSubmissionFeeLamports,
+        sequence: index + 1,
+        turnId: args.turnId,
+      }),
+    );
+  const proposalFees =
+    args.ruleProposalFeeLamports ??
+    Array.from({ length: args.ruleProposalCount }, (_, index) =>
+      calculateRepeatedActionFeeLamports({
+        baseFeeLamports: config.ruleProposalFeeLamports,
+        sequence: index + 1,
+        turnId: args.turnId,
+      }),
+    );
+  const guessSubmissions = accountVariableFeeSource(
+    guessFees,
     config.guessSubmissionFeeLamports,
     config.treasuryFeeBps,
   );
-  const ruleProposals = accountFeeSource(
-    args.ruleProposalCount,
+  const ruleProposals = accountVariableFeeSource(
+    proposalFees,
     config.ruleProposalFeeLamports,
     config.treasuryFeeBps,
   );
@@ -4642,9 +4753,8 @@ export function calculatePrizePoolAccounting(args: {
   const eliminationVoteFees =
     args.eliminationVoteFeeLamports ??
     Array.from({ length: args.eliminationVoteCount ?? 0 }, (_, index) =>
-      calculateRepeatedVoteFeeLamports({
-        baseFeeLamports:
-          config.voteFeeLamports * config.eliminationVoteFeeMultiplier,
+      calculateRepeatedActionFeeLamports({
+        baseFeeLamports: config.voteFeeLamports,
         sequence: index + 1,
         turnId: args.turnId,
       }),
@@ -4652,7 +4762,7 @@ export function calculatePrizePoolAccounting(args: {
   const approvalVoteFees =
     args.voteFeeLamports ??
     Array.from({ length: args.voteCount }, (_, index) =>
-      calculateRepeatedVoteFeeLamports({
+      calculateRepeatedActionFeeLamports({
         baseFeeLamports: config.voteFeeLamports,
         sequence: index + 1,
         turnId: args.turnId,
@@ -4661,7 +4771,7 @@ export function calculatePrizePoolAccounting(args: {
   const eliminationVotes = {
     ...accountVariableFeeSource(
       eliminationVoteFees,
-      config.voteFeeLamports * config.eliminationVoteFeeMultiplier,
+      config.voteFeeLamports,
       config.treasuryFeeBps,
     ),
     feeActive: eliminationVoteFees.some((feeLamports) => feeLamports > 0),
@@ -4881,6 +4991,7 @@ export function getActivityEvents(turnId: number): ActivityEvent[] {
 
 export function getPrizePoolAccounting(turnId: number) {
   const proposals = listRuleProposals(turnId);
+  const guesses = listGuessReceipts(turnId);
   const { votes } = listRuleVotes(turnId);
   const { votes: eliminationVotes } = listRuleEliminationVotes(turnId);
   const rollover = getTurnRollover(turnId);
@@ -4891,10 +5002,14 @@ export function getPrizePoolAccounting(turnId: number) {
     eliminationVoteFeeLamports: eliminationVotes.map(
       (vote) => vote.feeLamports ?? 0,
     ),
-    guessCount: listGuessReceipts(turnId).length,
+    guessCount: guesses.length,
+    guessFeeLamports: guesses.map((receipt) => receipt.feeLamports ?? 0),
     originalRolloverLamports: rollover?.originalRolloverLamports ?? 0,
     paidRuleRemovalCount: listPaidRuleRemovals(turnId).length,
     ruleProposalCount: proposals.length,
+    ruleProposalFeeLamports: proposals.map(
+      (proposal) => proposal.feeLamports ?? 0,
+    ),
     turnId,
     voteCount: votes.length,
     voteFeeLamports: votes.map((vote) => vote.feeLamports ?? 0),
@@ -5188,7 +5303,10 @@ if (isMainModule()) {
             return;
           }
 
-          const existing = getGuessReceipt(body.turnId, body.player);
+          const existing =
+            body.sequence === undefined
+              ? null
+              : getGuessReceiptBySequence(body.turnId, body.player, body.sequence);
           if (existing && existing.signature !== body.signature) {
             sendJson(request, response, 409, {
               error: "duplicate_guess_receipt",

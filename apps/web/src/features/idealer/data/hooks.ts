@@ -7,9 +7,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useWalletConnection } from "@solana/react-hooks";
 import {
-  ELIMINATION_VOTE_FEE_MULTIPLIER,
   MVP_FEES_SOL,
-  REPEATED_VOTE_FEE_MULTIPLIER,
+  REPEATED_ACTION_FEE_MULTIPLIER,
   VOTE_FEE_START_TURN,
 } from "@idealer/constants";
 
@@ -190,14 +189,14 @@ function buildUiRule(
   };
 }
 
-function repeatedVoteFeeSol(turnId: number, sequence: number, baseFeeSol: number) {
+function repeatedActionFeeSol(turnId: number, sequence: number, baseFeeSol: number) {
   if (turnId < VOTE_FEE_START_TURN && sequence === 1) {
     return 0;
   }
   const paidIndex = sequence - 1;
   let feeSol = baseFeeSol;
   for (let index = 0; index < paidIndex; index += 1) {
-    feeSol *= REPEATED_VOTE_FEE_MULTIPLIER;
+    feeSol *= REPEATED_ACTION_FEE_MULTIPLIER;
   }
   return feeSol;
 }
@@ -333,11 +332,11 @@ export function useRules(turnId: number, round: RoundSummaryApi | null): RulesVi
           finalist,
           myApproveCount,
           myAgainstCount,
-          repeatedVoteFeeSol(turnId, nextApproveSequence, MVP_FEES_SOL.vote),
-          repeatedVoteFeeSol(
+          repeatedActionFeeSol(turnId, nextApproveSequence, MVP_FEES_SOL.vote),
+          repeatedActionFeeSol(
             turnId,
             nextAgainstSequence,
-            MVP_FEES_SOL.vote * ELIMINATION_VOTE_FEE_MULTIPLIER,
+            MVP_FEES_SOL.vote,
           ),
           src,
           walletAddress,
@@ -398,7 +397,13 @@ export function usePlayerGuess(turnId: number, walletAddress: string | undefined
     return () => controller.abort();
   }, [reload]);
 
-  return { loading, played: receipt !== null, receipt, reload: () => reload() };
+  return {
+    loading,
+    playCount: receipt?.sequence ?? (receipt ? 1 : 0),
+    played: receipt !== null,
+    receipt,
+    reload: () => reload(),
+  };
 }
 
 /** Cross-turn claim ledger for the connected wallet (Profile screen). */

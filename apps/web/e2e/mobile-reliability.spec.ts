@@ -108,7 +108,7 @@ test("mobile play flow shows delayed, rejected, duplicate, and turn-changed outc
       JSON.stringify({
         ...current,
         errorCode: "DUPLICATE_ACTION",
-        errorMessage: "This wallet already has a guess for the current turn.",
+        errorMessage: "This guess sequence is already recorded for the current turn.",
         status: "duplicate",
       }),
     );

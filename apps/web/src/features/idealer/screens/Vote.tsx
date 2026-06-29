@@ -22,7 +22,7 @@ function VoteGate() {
         You can follow everything now. To vote, make a guess this round - it issues your round pass.
       </p>
       <button onClick={() => go("play")} className="ide-btn" style={{ width: "100%", padding: 13 }} type="button">
-        <Ico.bolt style={{ color: "#08110C" }} /> Play now - {fmtSol(fees.play)} SOL
+        <Ico.bolt style={{ color: "#08110C" }} /> Play now - {fees.playNext === 0 ? "Free" : `${fmtSol(fees.playNext)} SOL`}
       </button>
     </div>
   );

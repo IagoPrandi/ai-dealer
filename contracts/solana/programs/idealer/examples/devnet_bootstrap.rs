@@ -8,7 +8,7 @@ use std::{
 use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
 use idealer::{
     accounts, instruction, GlobalConfig, InitializeGlobalConfigArgs, PlayerGuess, ProposeRuleArgs,
-    RuleProposal, RuleVote, TurnState, TurnStatus, VoteRuleArgs,
+    RuleProposal, RuleVote, SubmitGuessArgs, TurnState, TurnStatus, VoteRuleArgs,
 };
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
@@ -132,8 +132,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                     max_rule_tokens: 1000,
                     top_voted_finalist_count: 3,
                     random_finalist_count: 7,
-                    max_rule_proposals_per_wallet_per_turn: 5,
-                    max_votes_per_wallet_per_turn: 100,
+                    max_rule_proposals_per_wallet_per_turn: 0,
+                    max_votes_per_wallet_per_turn: 0,
                     minimum_claim_threshold_lamports: 5_000,
                     claim_window_turns: 4,
                     claim_window_days: 7,
@@ -211,7 +211,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("open_turn skipped");
     }
 
-    let player_guess = pda(&[b"guess", &turn_id.to_le_bytes(), payer.pubkey().as_ref()]);
+    let player_guess = pda(&[
+        b"guess",
+        &turn_id.to_le_bytes(),
+        payer.pubkey().as_ref(),
+        &1_u64.to_le_bytes(),
+    ]);
     let game_token = pda(&[
         b"game_token",
         &turn_id.to_le_bytes(),
@@ -235,7 +240,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
             .to_account_metas(None),
             data: instruction::SubmitGuess {
-                numbers: [1, 2, 3, 4, 5, 6],
+                args: SubmitGuessArgs {
+                    numbers: [1, 2, 3, 4, 5, 6],
+                    sequence: 1,
+                },
             }
             .data(),
             program_id: idealer::ID,
@@ -285,7 +293,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         &turn_id.to_le_bytes(),
         &rule_id.to_le_bytes(),
         payer.pubkey().as_ref(),
-        &1u16.to_le_bytes(),
+        &1_u64.to_le_bytes(),
     ]);
     if read_account::<RuleVote>(&rpc, &rule_vote)?.is_none() {
         let vote_ix = Instruction {

@@ -57,8 +57,8 @@ This state map defines required UX states for M0.5 and the implementation contra
 | `VOTE_LOCKED_NO_TOKEN` | Wallet lacks current-turn Game Token. | Prompt user to submit guess first. |
 | `VOTE_AVAILABLE` | Game Token exists and rule is eligible. | Vote buttons enabled. |
 | `VOTE_PENDING` | Vote transaction pending. | Disable duplicate vote submission. |
-| `VOTE_CONFIRMED` | Vote transaction confirmed. | Show selected vote and updated count. |
-| `VOTE_CHANGED` | Contract/API allows changed vote for same turn. | Show latest selected rule. |
+| `VOTE_CONFIRMED` | Vote transaction confirmed. | Show selected vote sequence, updated count, and next vote cost. |
+| `VOTE_REPEAT_AVAILABLE` | Wallet already voted and can vote again with the next sequence. | Keep vote button enabled and show the escalating repeat fee. |
 | `VOTE_CLOSED` | Election has closed. | Show read-only rule ranking. |
 
 ## Rule Of The Hour States

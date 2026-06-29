@@ -8,11 +8,13 @@
 
 export interface RuleProposalApi {
   compiledArtifactHash?: string | null;
+  feeLamports?: number;
   precompilationStatus?: "failed" | "passed" | "pending";
   proposer: string;
   ruleId: number;
   ruleProposal?: string;
   sanitizedText: string;
+  sequence?: number;
   state?: "eligible" | "invalidated" | "proposed" | "removed_paid";
   title?: string;
   tokenCount?: number;
@@ -187,7 +189,11 @@ export interface ConversationDraftApi {
 }
 
 export interface GuessReceiptApi {
+  feeLamports?: number;
+  gameToken?: string;
   numbers: number[];
+  playerGuess?: string;
+  sequence?: number;
   signature: string;
   submittedAt: string;
 }

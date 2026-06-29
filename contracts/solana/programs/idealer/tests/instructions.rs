@@ -5,7 +5,7 @@ use anchor_lang::{
 use idealer::{
     accounts, instruction, DrawStatus, GlobalConfig, InitializeGlobalConfigArgs, PlayerGuess,
     PrecompilationStatus, PrecompileRuleArgs, ProposeRuleArgs, RuleProposal, RuleState, RuleVote,
-    SetVrfConfigArgs, TurnState, TurnStatus, VoteRuleArgs,
+    SetVrfConfigArgs, SubmitGuessArgs, TurnState, TurnStatus, VoteRuleArgs,
 };
 use solana_account_info::AccountInfo;
 use solana_program_error::ProgramResult;
@@ -128,8 +128,8 @@ fn test_config_args() -> InitializeGlobalConfigArgs {
         max_rule_tokens: 80,
         top_voted_finalist_count: 3,
         random_finalist_count: 7,
-        max_rule_proposals_per_wallet_per_turn: 5,
-        max_votes_per_wallet_per_turn: 100,
+        max_rule_proposals_per_wallet_per_turn: 0,
+        max_votes_per_wallet_per_turn: 0,
         minimum_claim_threshold_lamports: 5_000_000,
         claim_window_turns: 12,
         claim_window_days: 7,
@@ -324,6 +324,51 @@ async fn submit_guess(
     turn_id: u64,
     numbers: [u8; 6],
 ) -> Result<(), BanksClientError> {
+    submit_guess_with_sequence(context, player, turn_id, numbers, 1).await
+}
+
+async fn submit_guess_with_sequence(
+    context: &mut ProgramTestContext,
+    player: &Keypair,
+    turn_id: u64,
+    numbers: [u8; 6],
+    sequence: u64,
+) -> Result<(), BanksClientError> {
+    if sequence > 1 {
+        return process(
+            context,
+            Instruction {
+                program_id: idealer::ID,
+                accounts: accounts::SubmitAdditionalGuess {
+                    player: player.pubkey(),
+                    global_config: pda(&[b"global_config"]),
+                    turn_state: pda(&[b"turn", &turn_id.to_le_bytes()]),
+                    player_guess: pda(&[
+                        b"guess",
+                        &turn_id.to_le_bytes(),
+                        player.pubkey().as_ref(),
+                        &sequence.to_le_bytes(),
+                    ]),
+                    game_token: pda(&[
+                        b"game_token",
+                        &turn_id.to_le_bytes(),
+                        player.pubkey().as_ref(),
+                    ]),
+                    treasury_vault: pda(&[b"treasury_vault"]),
+                    prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
+                    system_program: system_program::ID,
+                }
+                .to_account_metas(None),
+                data: instruction::SubmitAdditionalGuess {
+                    args: SubmitGuessArgs { numbers, sequence },
+                }
+                .data(),
+            },
+            &[player],
+        )
+        .await;
+    }
+
     process(
         context,
         Instruction {
@@ -332,7 +377,12 @@ async fn submit_guess(
                 player: player.pubkey(),
                 global_config: pda(&[b"global_config"]),
                 turn_state: pda(&[b"turn", &turn_id.to_le_bytes()]),
-                player_guess: pda(&[b"guess", &turn_id.to_le_bytes(), player.pubkey().as_ref()]),
+                player_guess: pda(&[
+                    b"guess",
+                    &turn_id.to_le_bytes(),
+                    player.pubkey().as_ref(),
+                    &sequence.to_le_bytes(),
+                ]),
                 game_token: pda(&[
                     b"game_token",
                     &turn_id.to_le_bytes(),
@@ -343,7 +393,10 @@ async fn submit_guess(
                 system_program: system_program::ID,
             }
             .to_account_metas(None),
-            data: instruction::SubmitGuess { numbers }.data(),
+            data: instruction::SubmitGuess {
+                args: SubmitGuessArgs { numbers, sequence },
+            }
+            .data(),
         },
         &[player],
     )
@@ -369,10 +422,16 @@ async fn core_instructions_execute_and_persist_state() {
         .await
         .unwrap();
 
-    let guess_address = pda(&[b"guess", &turn_id.to_le_bytes(), player.pubkey().as_ref()]);
+    let guess_address = pda(&[
+        b"guess",
+        &turn_id.to_le_bytes(),
+        player.pubkey().as_ref(),
+        &1_u64.to_le_bytes(),
+    ]);
     let guess: PlayerGuess = read_anchor_account(&mut context, guess_address).await;
     assert_eq!(guess.turn_id, turn_id);
     assert_eq!(guess.player, player.pubkey());
+    assert_eq!(guess.sequence, 1);
     assert_eq!(guess.numbers, [1, 2, 3, 4, 5, 6]);
 
     let rule_id = 9_u64;
@@ -424,7 +483,7 @@ async fn core_instructions_execute_and_persist_state() {
         &turn_id.to_le_bytes(),
         &rule_id.to_le_bytes(),
         player.pubkey().as_ref(),
-        &1u16.to_le_bytes(),
+        &1_u64.to_le_bytes(),
     ]);
     let vote_instruction = Instruction {
         program_id: idealer::ID,
@@ -463,7 +522,7 @@ async fn core_instructions_execute_and_persist_state() {
         &turn_id.to_le_bytes(),
         &rule_id.to_le_bytes(),
         player.pubkey().as_ref(),
-        &2u16.to_le_bytes(),
+        &2_u64.to_le_bytes(),
     ]);
     let second_vote_instruction = Instruction {
         program_id: idealer::ID,
@@ -1309,11 +1368,14 @@ async fn claim_flow_records_and_pays_winner_and_reward() {
     initialize_and_open_turn(&mut context, turn_id).await;
     let authority = context.payer.pubkey();
 
-    // A guess funds the prize vault, then the draw is settled so claims can be
-    // recorded.
+    // The first pre-turn-100 guess is free; a second sequenced guess funds the
+    // prize vault before the draw is settled so claims can be recorded.
     let player = Keypair::new();
     fund(&mut context, &player.pubkey()).await;
     submit_guess(&mut context, &player, turn_id, [1, 2, 3, 4, 5, 6])
+        .await
+        .unwrap();
+    submit_guess_with_sequence(&mut context, &player, turn_id, [7, 8, 9, 10, 11, 12], 2)
         .await
         .unwrap();
     advance_clock_to_turn_end(&mut context, turn_id).await;

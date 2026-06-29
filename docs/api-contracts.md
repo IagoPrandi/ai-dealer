@@ -138,7 +138,7 @@ interface RulePreflightResult {
 
 `POST /api/v1/rules/propose`
 
-Requires `preflight_token`, current-turn Game Token PDA, signed proposal/payment transaction reference, and idempotency key.
+Requires `preflight_token`, current-turn Game Token PDA, signed proposal/payment transaction reference, action sequence, fee amount, and idempotency key. The same wallet may propose again in the same turn by using the next sequence and paying the configured repeated rule-proposal fee.
 
 ```ts
 interface RuleProposalRequest {
@@ -147,6 +147,8 @@ interface RuleProposalRequest {
   rule_text: string;
   preflight_token: string;
   proposal_transaction_signature: string;
+  sequence: number;
+  fee_lamports: string;
 }
 
 interface RuleProposalResponse {
@@ -154,6 +156,8 @@ interface RuleProposalResponse {
   turn_id: string;
   status: "PROPOSED";
   precompilation_job_id: string;
+  sequence: number;
+  fee_lamports: string;
 }
 ```
 
@@ -177,7 +181,7 @@ interface VoteResponse {
   turn_id: string;
   wallet: string;
   vote_count: number;
-  status: "CAST" | "CHANGED";
+  status: "CAST";
 }
 ```
 
