@@ -2706,7 +2706,7 @@ If the reserve is insufficient:
 - creator reward is capped at the available reserve and by `CREATOR_REWARD_CONFIG.capPerTurnLamports`;
 - voter reward pool is capped at the remaining reserve and by `VOTER_REWARD_CONFIG.capPerTurnLamports`;
 - unpaid creator or voter reward does not become debt unless explicitly configured in a future PRD;
-- admin insights should track capped creator reward and capped voter reward events.
+- transparency/accounting insights should track capped creator reward and capped voter reward events from public accounting records.
 
 ### 8.6 Treasury / Platform Monetization
 
@@ -2924,8 +2924,8 @@ Rate-limit requirements:
 - non-economic limits must be enforced server-side;
 - on-chain constraints remain the source of truth for guess sequences, rule-proposal fee sequencing, vote sequence/idempotency for repeated approval and elimination votes, and paid removal idempotency;
 - rate-limit rejections must be user-readable;
-- suspicious rate-limit events must be visible in the admin abuse dashboard;
-- changing default non-economic rate limits requires updating `packages/constants`, backend config, admin documentation, and tests.
+- suspicious rate-limit events must be visible in restricted operator alerts and, where publicly derivable, in transparency abuse dashboards;
+- changing default non-economic rate limits requires updating `packages/constants`, backend config, operator/transparency documentation, and tests.
 
 ## 9. Smart Contract Architecture
 
@@ -3188,7 +3188,7 @@ Game Engine Service
 Verification Queue Service
 Attestation Service
 Metrics Service
-Admin Service
+Transparency/Admin Service
 ```
 
 Each service should be independently testable, but the initial deployment may package multiple services together when operationally simpler.
@@ -3347,7 +3347,7 @@ Requirements:
 - rate limits per provider;
 - dead-letter queue;
 - progress tracking;
-- admin visibility.
+- transparency/operator visibility.
 
 ### 10.11 Database
 
@@ -3662,7 +3662,7 @@ idealer/
 │   ├── web/                    # Mobile-first Next.js DApp / PWA
 │   ├── api/                    # Backend API service
 │   ├── worker/                 # Verification queue worker
-│   └── admin/                  # Internal admin UI, optional
+│   └── admin/                  # Read-only transparency UI / restricted operator UI, optional
 │
 ├── packages/
 │   ├── config/                 # Shared eslint, tsconfig, prettier, env schemas
@@ -4142,7 +4142,7 @@ Core dashboards:
 | Settlement Proofs          | Can observers verify VRF inputs, draw results, winner calculations, accounting, and audit hashes? |
 | Turn-Cycle Public Trends   | How do public activity totals and fee/prize flows compare across 2h and 8h turns?      |
 
-#### 12.6.2 Required Admin Metrics
+#### 12.6.2 Required Transparency Metrics
 
 Turn and public activity metrics:
 
@@ -4239,7 +4239,7 @@ audit_chain_head_hash
 public_proof_links
 ```
 
-#### 12.6.3 Admin Data Boundaries
+#### 12.6.3 Transparency Data Boundaries
 
 The admin/transparency console must not be used to influence live outcomes and must not expose private analytics.
 
@@ -4267,7 +4267,7 @@ Console users must not be able to:
 - alter prize distribution after finalization;
 - bypass AI rule compilation or verification flows without a clearly logged emergency process.
 
-Allowed admin functions for MVP:
+Allowed transparency functions for MVP:
 
 - view public turn metrics;
 - view public fee and prize-pool metrics;
@@ -4360,7 +4360,7 @@ The project must not launch with real payouts or any real SOL flows until the M9
 | Runtime Security Gate         | Sandbox limits verified; network/filesystem/imports/randomness blocked.                                                    |
 | Accounting Gate               | Payout, rollover, rounding, minimum payout, unclaimed claims, creator reward, voter reward, and repeated vote fee cases tested. |
 | Mobile Reliability Gate       | Wallet deep-link, pending, rejected, duplicate, delayed, and turn-changed flows tested.                                    |
-| Abuse Resistance Gate         | Vote concentration, repeated-vote concentration, rate limits, reports, and suspicious wallet clusters visible in admin.    |
+| Abuse Resistance Gate         | Vote concentration, repeated-vote concentration, rate limits, reports, and suspicious public wallet patterns visible in transparency/operator views. |
 | Observability & Incident Gate | Alerts, dashboards, repeated-vote fee metrics, logs, rollback/runbooks and pause procedures validated.                    |
 
 ### 13.6 Operational Security
@@ -4371,14 +4371,14 @@ Requirements:
 - provider API key isolation;
 - local inference hardening when the `idealer-llm` service is used: keep raw rule text on-prem (no data egress), verify model weights by signature/digest before deploy (supply chain), mount model weights read-only, run the inference container non-root, and network-segment the endpoint (not publicly exposed; mTLS between services);
 - rate limits;
-- admin access controls;
+- restricted operator access controls;
 - audit logs;
 - deploy rollback;
 - incident playbooks;
 - no production secrets committed to the monorepo;
 - Docker images built from pinned base images where possible;
 - separate development, staging, and production environment files;
-- least-privilege service credentials for API, worker, and admin services;
+- least-privilege service credentials for API, worker, transparency, and restricted operator services;
 - read-only transparency console data access;
 - no private analytics, device/session data, or secrets exposed through the transparency console.
 
@@ -5833,7 +5833,7 @@ M5 is approved only if all M5 submilestones are approved and:
 - [x] Repeated approval vote fee sequence tested from turn 100: `VOTE_FEE, 2×, 4×...`.
 - [x] Repeated elimination vote fee sequence tested before turn 100: `0, 2×VOTE_FEE, 4×VOTE_FEE, 8×VOTE_FEE...`.
 - [x] Repeated elimination vote fee sequence tested from turn 100: `VOTE_FEE, 2×VOTE_FEE, 4×VOTE_FEE...`.
-- [x] Repeated vote fee transfers reconcile into the prize pool across contract, backend, and admin projections.
+- [x] Repeated vote fee transfers reconcile into the prize pool across contract, backend, indexer, and transparency projections.
 - [x] Repeated vote retry/idempotency tested so a retry cannot double-charge or create an unintended extra vote sequence.
 - [x] Elected-rule voter reward is tested with repeated votes and remains one reward share per unique voter wallet.
 - [x] Rollover partial and total cases tested.
@@ -5841,7 +5841,7 @@ M5 is approved only if all M5 submilestones are approved and:
 ##### Approval Criteria
 
 - [x] Backend, game engine and contract accounting match. Historical baseline; PRD v1.5.1 requires the same parity for repeated vote fee sequences before mainnet.
-- [x] Backend, indexer/admin, and contract repeated-vote fee accounting match for approval and elimination votes.
+- [x] Backend, indexer/transparency, and contract repeated-vote fee accounting match for approval and elimination votes.
 - [x] No duplicate payout possible under retry.
 - [x] No duplicate repeated-vote charge or unintended extra vote sequence is possible under retry.
 - [x] Creator reward cannot exceed reserve or cap.
@@ -5877,19 +5877,19 @@ M5 is approved only if all M5 submilestones are approved and:
 - [ ] Escalating repeated guess and rule-proposal fees cannot be bypassed by retry, stale client state, or alternate API path.
 - [ ] Rule report flow implemented.
 - [ ] Paid rule removal flow implemented.
-- [ ] Vote concentration dashboard implemented.
-- [ ] Repeated paid-action concentration dashboard implemented, including same-wallet repeat patterns and repeated spend by action scope.
+- [ ] Public vote concentration dashboard implemented from on-chain/indexer data.
+- [ ] Repeated paid-action concentration dashboard implemented from public/on-chain action records, including same-wallet repeat patterns and repeated spend by action scope.
 - [ ] Free-first-action monitoring implemented for turns before 100, with alerts when the same scope receives more than one free action.
 - [ ] Fee-escalation anomaly alerts implemented for guesses, rule proposals, approval votes, and elimination votes.
-- [ ] Admin abuse alerts implemented.
+- [ ] Public-signal abuse alerts implemented without private IP/device/session/funnel telemetry.
 
 ##### Approval Criteria
 
-- [ ] Basic Sybil manipulation is visible in admin.
+- [ ] Basic Sybil manipulation patterns are visible from public/on-chain signals in transparency/operator views.
 - [ ] Free first actions before turn 100 cannot be spammed beyond one free action per action scope.
 - [x] Repeated free votes cannot occur for the same `(turn, wallet, rule, side)`.
-- [ ] Repeated paid guesses, rule proposals, and votes become progressively more expensive and remain visible in abuse/economy dashboards.
-- [ ] Admin can distinguish broad community support from concentrated repeated voting by a small wallet cluster.
+- [ ] Repeated paid guesses, rule proposals, and votes become progressively more expensive and remain visible in public abuse/economy dashboards.
+- [ ] Transparency/operator views can distinguish broad unique-wallet support from concentrated repeated voting by a small public wallet group.
 - [ ] Paid rule removal is rate-limited, fee-based, protected by vote thresholds, and blocked after eligible pool lock.
 
 #### M9.6 — Observability & Incident Gate
@@ -5899,7 +5899,7 @@ M5 is approved only if all M5 submilestones are approved and:
 - [ ] Compiler metrics dashboard exists.
 - [ ] Runtime metrics dashboard exists.
 - [ ] Accounting metrics dashboard exists.
-- [ ] Repeated paid-action fee dashboard exists, showing sequence counts, paid amounts, free-first-action usage, and fee escalation by action scope and wallet cluster.
+- [ ] Repeated paid-action fee dashboard exists, showing sequence counts, paid amounts, free-first-action usage, and fee escalation by action scope and public wallet group.
 - [ ] Public transaction/action status dashboard exists without private wallet funnel telemetry.
 - [ ] Alerts exist for repeated-action fee mismatch, unexpected free repeat actions, abnormal repeated-action concentration, and indexer/contract count divergence.
 - [ ] Incident runbook exists.
@@ -5975,8 +5975,8 @@ Deploy a controlled mainnet beta with real SOL payments, production monitoring, 
 **Approval criteria:**
 
 - [ ] Real payments work with limited beta values.
-- [ ] Accounting reconciles across contract/backend/admin.
-- [ ] Repeated vote fee escalation reconciles across contract/backend/admin.
+- [ ] Accounting reconciles across contract, backend, indexer, and transparency projections.
+- [ ] Repeated vote fee escalation reconciles across contract, backend, indexer, and transparency projections.
 - [ ] Creator reward does not reduce winner-visible payout.
 
 ---
@@ -5995,7 +5995,7 @@ Deploy a controlled mainnet beta with real SOL payments, production monitoring, 
 - [ ] Configure VRF/draw metrics.
 - [ ] Configure payout metrics.
 - [ ] Configure repeated vote fee and vote-sequence metrics.
-- [ ] Configure admin access logs.
+- [ ] Configure access logs only for restricted operator surfaces; public transparency pages must not log private analytics fields.
 - [ ] Configure alerting.
 - [ ] Configure structured logs.
 - [ ] Create operational dashboard.
@@ -6072,7 +6072,7 @@ Deploy a controlled mainnet beta with real SOL payments, production monitoring, 
 - [ ] Test queue recovery.
 - [ ] Test LLM provider outage scenario.
 - [ ] Test VRF delay scenario.
-- [ ] Test admin lockout/recovery.
+- [ ] Test restricted operator lockout/recovery.
 - [ ] Define severity levels.
 - [ ] Define on-call ownership.
 
@@ -6180,7 +6180,7 @@ Prepare the product for broader public launch by hardening infrastructure, impro
 
 - [ ] Expected launch load passes.
 - [ ] Queue lag stays within operational target.
-- [ ] Repeated vote bursts do not break fee accounting, vote counts, or admin projections.
+- [ ] Repeated vote bursts do not break fee accounting, vote counts, indexer projections, or transparency projections.
 - [ ] System fails gracefully under provider issues.
 
 ---
@@ -6206,7 +6206,7 @@ Prepare the product for broader public launch by hardening infrastructure, impro
 
 - [ ] Transparency console supports launch decision-making and community review.
 - [ ] Metrics are trusted by product/engineering and reproducible by third parties.
-- [ ] Admin can distinguish unique-voter support from repeated-vote intensity.
+- [ ] Transparency console can distinguish unique-voter support from repeated-vote intensity using public/on-chain data.
 - [ ] Dashboard can identify at least three launch risks or opportunities.
 
 ---
@@ -6220,7 +6220,7 @@ Prepare the product for broader public launch by hardening infrastructure, impro
 - [ ] Complete product readiness review.
 - [ ] Complete engineering readiness review.
 - [ ] Complete smart contract review.
-- [ ] Complete admin access-control review.
+- [ ] Complete transparency-console data-boundary review and restricted-operator access-control review.
 - [ ] Complete secrets management review.
 - [ ] Complete incident response review.
 - [ ] Complete analytics validation.
@@ -6273,7 +6273,7 @@ Expand the product beyond the core game loop with measurable social, creator, co
 
 - [ ] Creator activity increases without confusing core game loop.
 - [ ] Repeat rule creation improves.
-- [ ] Metrics are visible in admin.
+- [ ] Metrics are visible in appropriate transparency or restricted operator views.
 
 ---
 
@@ -6318,7 +6318,7 @@ Expand the product beyond the core game loop with measurable social, creator, co
 
 - [ ] Spectator mode increases conversion or repeat visits.
 - [ ] Spectator UI does not distract active players.
-- [ ] Metrics are available in admin.
+- [ ] Metrics are available in appropriate transparency or restricted operator views.
 
 ---
 
@@ -6357,7 +6357,7 @@ Expand the product beyond the core game loop with measurable social, creator, co
 - [ ] Define reward/status outcome.
 - [ ] Add tournament leaderboard.
 - [ ] Add tournament page/card.
-- [ ] Add admin tracking.
+- [ ] Add transparency/operator tracking.
 - [ ] Add rollback/disable flag.
 
 **Approval criteria:**
@@ -6407,7 +6407,7 @@ Before any public production release, the following checklist must be complete.
 #### Security
 
 - [ ] Smart contract review complete.
-- [ ] Admin access control verified.
+- [ ] Transparency-console data boundary and restricted-operator access control verified.
 - [ ] Secrets management verified.
 - [ ] Emergency pause tested.
 - [ ] Incident response runbook ready.
@@ -6450,7 +6450,7 @@ This section replaces the former open questions list. The following decisions ar
 8. The alternative rule pool remains 50% of the post-treasury playable prize pool. If no alternative rule is active or no alternative-rule winners exist, the alternative bucket follows the rollover rules.
 9. Creator rewards remain fixed at 15% of each individual alternative-rule winner payout, funded from the creator reward reserve sourced from platform monetization and subject to reserve and cap.
 10. MVP reserves 20% of platform monetization for the creator reward reserve. This is a configurable treasury policy, but winner-visible payouts must never be reduced to fund creator rewards.
-11. Normal users see simple rule explanations, status, difficulty labels, and audit links. Detailed AI/compiler reasoning appears only in expandable audit panels and admin/audit views.
+11. Normal users see simple rule explanations, status, difficulty labels, and audit links. Detailed AI/compiler reasoning appears only in expandable audit panels, public-safe audit views, or restricted operator views when it contains non-public operational detail.
 12. Proposed rules cannot be edited after on-chain submission. A user must submit a new paid proposal if they want a different rule text. Preflight and precompilation artifacts are therefore immutable per proposal.
 13. MVP supports Portuguese and English rule text. The compiler stores a normalized official interpretation suitable for deterministic DSL/AST compilation, and user-facing explanations may be localized.
 14. Rule difficulty shown in the frontend is generated from deterministic analysis where possible and bounded Monte Carlo simulation where needed, not from ungrounded LLM judgment alone.
