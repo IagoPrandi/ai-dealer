@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   M3_7_POSTGRES_AUDIT_SCHEMA,
+  authorizeOperatorAiRequest,
   calculateAndStoreRewardRecords,
   calculateAndStoreWinnerRecords,
   calculatePrizePoolAccounting,
@@ -25,6 +26,7 @@ import {
   getRuleRemovalActivityEvents,
   getRuleValidation,
   getTurnRolloverSettlement,
+  getTransparencySnapshot,
   isRuleRemoved,
   ruleSignature,
   getRuleElimination,
@@ -59,6 +61,9 @@ import {
   storeAuditLogInPostgres,
   toPostgresAuditLogRow,
   verifyAuditLogIntegrity,
+  exportOperatorAiOperationsCsv,
+  exportTransparencySnapshotCsv,
+  getOperatorAiOperationsSnapshot,
   type AuditLogRecord,
   type GuessVerificationResultRecord,
   type RuleProposalRecord,
@@ -642,6 +647,168 @@ test("repeated vote retries without an explicit sequence reuse the original reco
   assert.equal(firstElimination.sequence, 1);
   assert.equal(listRuleVotes(turnId).votes.length, 1);
   assert.equal(listRuleEliminationVotes(turnId).votes.length, 1);
+});
+
+test("public transparency snapshot aggregates M5 turn, economy, rule, proof, trend, and export data", () => {
+  resetApiStateForTests();
+  const turnId = 150;
+  saveRuleProposal({
+    ...proposal(turnId, 7),
+    feeLamports: 20_000_000,
+    precompilationStatus: "passed",
+    state: "eligible",
+  });
+  const validation = runRuleValidationForProposal({ ruleId: 7, turnId });
+  saveRuleVote({
+    feeLamports: 5_000_000,
+    ruleId: 7,
+    ruleProposal: base58,
+    ruleVote: base58,
+    sequence: 1,
+    signature: base58,
+    submittedAt: "2026-06-12T12:06:00.000Z",
+    turnId,
+    voter: walletTwo,
+  });
+  saveRuleVote({
+    feeLamports: 10_000_000,
+    ruleId: 7,
+    ruleProposal: base58,
+    ruleVote: base58,
+    sequence: 2,
+    signature: walletThree,
+    submittedAt: "2026-06-12T12:07:00.000Z",
+    turnId,
+    voter: walletTwo,
+  });
+  saveRuleEliminationVote({
+    eliminationVote: base58,
+    feeLamports: 10_000_000,
+    ruleId: 7,
+    ruleProposal: base58,
+    sequence: 2,
+    signature: wallet,
+    submittedAt: "2026-06-12T12:08:00.000Z",
+    turnId,
+    voter: walletThree,
+  });
+  saveReceiptForWallet(turnId, wallet, [1, 2, 3, 4, 5, 6]);
+  saveFulfilledDraw(turnId);
+  saveRuleElection({
+    ...settledElection(turnId, 7),
+    activeRuleArtifactHash: validation.compiledArtifactHash,
+  });
+  const { jobs } = createGuessVerificationJobsForTurn(turnId);
+  const job = jobs[0];
+  assert.ok(job);
+  saveGuessVerificationResult(
+    resultForJob({
+      alternative: "WIN",
+      jobId: job.id,
+      original: "WIN",
+      player: wallet,
+      resultByte: "9",
+      turnId,
+    }),
+  );
+  calculateAndStoreWinnerRecords(turnId);
+  calculateAndStoreRewardRecords(turnId);
+  createClaimRecordsForTurn(turnId, "2026-06-12T12:20:00.000Z");
+  recordSettlementTransition({
+    fromState: "VERIFYING",
+    idempotencyKey: `${turnId}:CLOSED`,
+    inputHash: "1".repeat(64),
+    outputHash: "2".repeat(64),
+    recordedAt: "2026-06-12T12:30:00.000Z",
+    signature: base58,
+    toState: "CLOSED",
+    transitionReason: "test_close",
+    turnId,
+  });
+
+  const snapshot = getTransparencySnapshot({ fromTurnId: turnId, toTurnId: turnId });
+  const csv = exportTransparencySnapshotCsv(snapshot);
+  const serialized = JSON.stringify(snapshot).toLowerCase();
+
+  assert.equal(snapshot.turns.length, 1);
+  assert.equal(snapshot.totals.guesses, 1);
+  assert.equal(snapshot.totals.proposals, 1);
+  assert.equal(snapshot.totals.approvalVotes, 2);
+  assert.equal(snapshot.totals.eliminationVotes, 1);
+  assert.equal(snapshot.turns[0]?.rules.activeRuleId, 7);
+  assert.equal(snapshot.turns[0]?.rules.finalistRuleIds.includes(7), true);
+  assert.match(snapshot.turns[0]?.proofs.drawResultHash ?? "", /^[0-9a-f]{64}$/);
+  assert.match(
+    snapshot.turns[0]?.proofs.winnerCalculationHash ?? "",
+    /^[0-9a-f]{64}$/,
+  );
+  assert.equal(snapshot.trends.repeatedPaidActions.length, 5);
+  assert.equal(
+    snapshot.trends.repeatedPaidActions.find(
+      (record) => record.scope === "approval_vote",
+    )?.count,
+    1,
+  );
+  assert.equal(snapshot.sourceReferences.length >= 3, true);
+  assert.equal(snapshot.dataBoundary.publicMetricsOnly, true);
+  assert.equal(
+    snapshot.dataBoundary.restrictedAiOperations.status,
+    "access_controlled",
+  );
+  assert.equal(
+    snapshot.dataBoundary.restrictedAiOperations.endpoint,
+    "/operator/ai-operations",
+  );
+  assert.match(csv, /derivation_note/);
+  assert.match(csv, /private retention, funnel, device, session/);
+  assert.doesNotMatch(serialized, /ip_address_value|raw_completion_value/);
+});
+
+test("restricted AI operations snapshot is role-gated and redacted", () => {
+  resetApiStateForTests();
+  const turnId = 151;
+  saveRuleProposal({
+    ...proposal(turnId, 1),
+    feeLamports: 20_000_000,
+    precompilationStatus: "passed",
+    state: "eligible",
+  });
+  runRuleValidationForProposal({ ruleId: 1, turnId });
+  saveReceiptForWallet(turnId, wallet, [1, 2, 3, 4, 5, 6]);
+  saveFulfilledDraw(turnId);
+  createGuessVerificationJobsForTurn(turnId);
+
+  const disabled = authorizeOperatorAiRequest("Bearer token", {});
+  const missing = authorizeOperatorAiRequest(undefined, {
+    OPERATOR_AI_CONSOLE_TOKEN: "token",
+  });
+  const denied = authorizeOperatorAiRequest("Bearer wrong", {
+    OPERATOR_AI_CONSOLE_TOKEN: "token",
+  });
+  const allowed = authorizeOperatorAiRequest("Bearer token", {
+    OPERATOR_AI_CONSOLE_TOKEN: "token",
+  });
+  const snapshot = getOperatorAiOperationsSnapshot();
+  const csv = exportOperatorAiOperationsCsv(snapshot);
+  const serialized = `${JSON.stringify(snapshot)}\n${csv}`.toLowerCase();
+
+  assert.equal(disabled.ok, false);
+  assert.equal(disabled.statusCode, 503);
+  assert.equal(missing.ok, false);
+  assert.equal(missing.statusCode, 401);
+  assert.equal(denied.ok, false);
+  assert.equal(denied.statusCode, 403);
+  assert.equal(allowed.ok, true);
+  assert.equal(snapshot.access.role, "ai_operator");
+  assert.equal(snapshot.access.readOnly, true);
+  assert.equal(snapshot.operationCounts.validationCalls, 1);
+  assert.equal(snapshot.operationCounts.verificationJobs, 1);
+  assert.equal(snapshot.modelRouting.length > 0, true);
+  assert.match(csv, /redaction_note/);
+  assert.doesNotMatch(
+    serialized,
+    /"compiledartifact"|"normalizedtext"|"providerpath"|"providerapikey"|win if at least 4/,
+  );
 });
 
 test("rule elimination votes and closed decision state are projected for audit", () => {

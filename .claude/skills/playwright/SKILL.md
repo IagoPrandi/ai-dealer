@@ -9,6 +9,21 @@ description: "Use when the task requires automating a real browser from the term
 Drive a real browser from the terminal using `playwright-cli`. Prefer the bundled wrapper script so the CLI works even when it is not globally installed.
 Treat this skill as CLI-first automation. Do not pivot to `@playwright/test` unless the user explicitly asks for test files.
 
+## Agent-browser on this Windows workspace
+
+In this Windows workspace, `agent-browser` may not be installed as a PATH-visible global command. That is not a blocker.
+
+When browser verification asks for `agent-browser` and `Get-Command agent-browser` returns nothing, use the npm package through `npx`:
+
+```powershell
+npx -y agent-browser --help
+npx -y agent-browser open http://127.0.0.1:3000
+npx -y agent-browser snapshot -i
+npx -y agent-browser screenshot output/playwright/agent-browser-check.png
+```
+
+Only treat browser verification as blocked if both `npx -y agent-browser ...` and the Playwright wrapper flow below fail. Do not record "agent-browser is not available in PATH" as the final verification result without first trying the `npx` invocation.
+
 ## Prerequisite check (required)
 
 Before proposing commands, check whether `npx` is available (the wrapper depends on it):

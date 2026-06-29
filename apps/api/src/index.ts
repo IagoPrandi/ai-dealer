@@ -1,4 +1,4 @@
-import { createHash, randomInt } from "node:crypto";
+import { createHash, randomInt, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { resolve } from "node:path";
 import { fileURLToPath, URL } from "node:url";
@@ -896,6 +896,10 @@ const CORS_PATHS = new Set([
   "/claim-records/expire-unclaimed",
   "/claim-records/request",
   "/settlement-transitions",
+  "/transparency",
+  "/transparency/export",
+  "/operator/ai-operations",
+  "/operator/ai-operations/export",
 ]);
 
 function getGuessReceiptKey(turnId: number, player: string, sequence: number) {
@@ -2244,7 +2248,7 @@ function getCorsHeaders(request: import("node:http").IncomingMessage) {
   }
 
   return {
-    "access-control-allow-headers": "content-type",
+    "access-control-allow-headers": "authorization, content-type",
     "access-control-allow-methods": "GET,POST,OPTIONS",
     "access-control-allow-origin": allowedOrigin,
     "access-control-max-age": "600",
@@ -2271,6 +2275,21 @@ function sendNoContent(
 ) {
   response.writeHead(204, getCorsHeaders(request));
   response.end();
+}
+
+function sendCsv(
+  request: import("node:http").IncomingMessage,
+  response: import("node:http").ServerResponse,
+  statusCode: number,
+  body: string,
+  filename = "idealer-transparency.csv",
+) {
+  response.writeHead(statusCode, {
+    "content-disposition": `attachment; filename="${filename}"`,
+    "content-type": "text/csv; charset=utf-8",
+    ...getCorsHeaders(request),
+  });
+  response.end(body);
 }
 
 export function saveGuessReceipt(receipt: GuessReceiptRecord) {
@@ -4636,6 +4655,239 @@ export interface RoundSummary {
   winners: WinnerCalculationSummary;
 }
 
+export interface TransparencyFilters {
+  fromDate?: string;
+  fromTurnId?: number;
+  toDate?: string;
+  toTurnId?: number;
+}
+
+export interface TransparencySourceReference {
+  derivation: string;
+  endpoint: string;
+  label: string;
+  source: "audit_log" | "on_chain_account" | "public_api_projection";
+}
+
+export interface TransparencyTurnSummary {
+  activity: {
+    claims: number;
+    eliminationVotes: number;
+    guesses: number;
+    paidRemovals: number;
+    proposals: number;
+    settlementTransitions: number;
+    totalVotes: number;
+  };
+  claims: {
+    availableLamports: number;
+    belowThresholdLamports: number;
+    claimedLamports: number;
+    expiredLamports: number;
+    pendingLamports: number;
+    rolledOverLamports: number;
+    statusCounts: Record<ClaimRecordStatus, number>;
+  };
+  durationHours: number;
+  economy: {
+    alternativeBucketLamports: number;
+    expiredUnclaimedLamports: number;
+    grossFeesLamports: number;
+    originalBucketLamports: number;
+    payoutDustLamports: number;
+    pendingClaimableLamports: number;
+    platformTreasuryLamports: number;
+    prizePoolLamports: number;
+    rolloverInLamports: number;
+    rolloverOutLamports: number;
+    sources: PrizePoolAccounting["sources"];
+  };
+  proofs: {
+    activeRuleId: number | null;
+    auditChainHead: string | null;
+    drawRandomnessAccount: string | null;
+    drawRandomnessSource: string | null;
+    drawResultHash: string | null;
+    eligiblePoolHash: string | null;
+    finalistSetHash: string | null;
+    ruleElectionRandomnessAccount: string | null;
+    ruleElectionRandomnessSource: string | null;
+    settlementAuditEndpoint: string;
+    winnerCalculationHash: string | null;
+  };
+  rewards: {
+    creatorRewardLamports: number;
+    creatorRewardReserveLamports: number;
+    remainingReserveLamports: number;
+    voterRewardLamports: number;
+    voterRewardRecipients: number;
+  };
+  rules: {
+    activeRuleId: number | null;
+    clarityLabelCount: number;
+    difficultyLabelCount: number;
+    eliminated: number;
+    finalistRuleIds: number[];
+    invalidated: number;
+    precompiled: number;
+    proposed: number;
+    randomFinalistRuleIds: number[];
+    removed: number;
+    ruleTokenCountAverage: number;
+    survived: number;
+    topRules: Array<{
+      creator: string;
+      ruleId: number;
+      title: string;
+      totalVotes: number;
+      uniqueApprovalVoters: number;
+    }>;
+    topVotedFinalistRuleIds: number[];
+  };
+  status: RoundSummary["status"];
+  turnId: number;
+  voting: {
+    approvalFeeLamports: number;
+    repeatedApprovalVotes: number;
+    repeatedEliminationVotes: number;
+    totalApprovalVotes: number;
+    totalEliminationVotes: number;
+    uniqueApprovalVoters: number;
+    uniqueEliminationVoters: number;
+    eliminationFeeLamports: number;
+  };
+}
+
+export interface TransparencySnapshot {
+  activeTurnId: number;
+  dataBoundary: {
+    deniedPrivateFields: string[];
+    publicExportFieldsOnly: boolean;
+    publicMetricsOnly: boolean;
+    restrictedAiOperations: {
+      endpoint: "/operator/ai-operations";
+      exportEndpoint: "/operator/ai-operations/export";
+      role: "ai_operator";
+      status: "access_controlled";
+    };
+  };
+  exports: {
+    csvPath: string;
+    excludedPrivateAnalytics: string[];
+    jsonPath: string;
+  };
+  filters: Required<Pick<TransparencyFilters, "fromTurnId" | "toTurnId">> &
+    Pick<TransparencyFilters, "fromDate" | "toDate">;
+  generatedAt: string;
+  sourceReferences: TransparencySourceReference[];
+  totals: {
+    alternativePrizeLamports: number;
+    approvalVotes: number;
+    claims: number;
+    creatorRewardLamports: number;
+    creatorRewardReserveLamports: number;
+    drawProofs: number;
+    eliminationVotes: number;
+    grossFeesLamports: number;
+    guesses: number;
+    paidRemovals: number;
+    platformTreasuryLamports: number;
+    proposals: number;
+    rewardReserveRemainingLamports: number;
+    rolloverInLamports: number;
+    rolloverOutLamports: number;
+    settlementTransitions: number;
+    voterRewardLamports: number;
+    winnerPayoutLamports: number;
+  };
+  trends: {
+    byTurnDuration: Array<{
+      approvalVotes: number;
+      creatorRewardLamports: number;
+      durationHours: number;
+      eliminationVotes: number;
+      grossFeesLamports: number;
+      guesses: number;
+      prizePoolLamports: number;
+      proposals: number;
+      rolloverLamports: number;
+      turns: number;
+      voterRewardLamports: number;
+    }>;
+    repeatedPaidActions: Array<{
+      count: number;
+      feeLamports: number;
+      scope:
+        | "approval_vote"
+        | "elimination_vote"
+        | "guess"
+        | "paid_rule_removal"
+        | "rule_proposal";
+    }>;
+    ruleLifecycle: {
+      active: number;
+      eliminated: number;
+      finalist: number;
+      invalidated: number;
+      proposed: number;
+      removed: number;
+      survived: number;
+    };
+    topCreators: Array<{
+      creator: string;
+      electedRules: number;
+      proposedRules: number;
+      rewardLamports: number;
+      votesReceived: number;
+      winnerProducingRules: number;
+    }>;
+  };
+  turns: TransparencyTurnSummary[];
+}
+
+export interface OperatorAiOperationsSnapshot {
+  access: {
+    permissions: readonly ["ai_ops:read", "ai_ops:export"];
+    readOnly: true;
+    role: "ai_operator";
+  };
+  generatedAt: string;
+  modelRouting: Array<{
+    fallbackTriggered: number;
+    model: string;
+    provider: string;
+    validationCalls: number;
+  }>;
+  operationCounts: {
+    auditCompilerValidationLogs: number;
+    auditGuessVerificationLogs: number;
+    validationCalls: number;
+    verificationJobs: number;
+  };
+  queue: {
+    deadLetterJobs: number;
+    statusCounts: Record<GuessVerificationJobStatus, number>;
+  };
+  redactionPolicy: {
+    exportedFieldsOnly: string[];
+    excludedFields: string[];
+  };
+  ruleCompiler: {
+    confidenceActionCounts: Record<string, number>;
+    decisionCounts: Record<string, number>;
+    fallbackRate: number;
+    finalConfidenceBuckets: Record<"0_50" | "50_70" | "70_90" | "90_100", number>;
+    providerDisagreementAverage: number;
+    reasonCodeCounts: Record<string, number>;
+  };
+  sourceReferences: Array<{
+    endpoint: string;
+    label: string;
+    source: "audit_log" | "internal_projection" | "operator_config" | "queue_projection";
+    status: "available" | "not_recorded";
+  }>;
+}
+
 function cycleDurationHours(stepIndex: number): number {
   const value = TURN_DURATION_CYCLE_HOURS[stepIndex];
   if (value === undefined) {
@@ -5277,6 +5529,1056 @@ export function getRoundSummary(
     verification: getVerificationSummary(turnId),
     rewards: getRewardSummary(turnId),
     winners: getWinnerSummary(turnId),
+  };
+}
+
+function getPublicTurnIds() {
+  const turnIds = new Set<number>([IDEALER_ACTIVE_TURN_ID]);
+
+  for (const receipt of guessReceipts.values()) {
+    turnIds.add(receipt.turnId);
+  }
+  for (const proposal of ruleProposals.values()) {
+    turnIds.add(proposal.turnId);
+  }
+  for (const vote of ruleVotes.values()) {
+    turnIds.add(vote.turnId);
+  }
+  for (const vote of ruleEliminationVotes.values()) {
+    turnIds.add(vote.turnId);
+  }
+  for (const record of paidRuleRemovals.values()) {
+    turnIds.add(record.turnId);
+  }
+  for (const turnId of turnRollovers.keys()) {
+    turnIds.add(turnId);
+  }
+  for (const turnId of turnRolloverSettlements.keys()) {
+    turnIds.add(turnId);
+  }
+  for (const turnId of draws.keys()) {
+    turnIds.add(turnId);
+  }
+  for (const turnId of elections.keys()) {
+    turnIds.add(turnId);
+  }
+  for (const turnId of ruleEliminations.keys()) {
+    turnIds.add(turnId);
+  }
+  for (const transition of settlementTransitions.values()) {
+    turnIds.add(transition.turnId);
+  }
+  for (const validation of ruleValidations.values()) {
+    turnIds.add(validation.turnId);
+  }
+  for (const job of verificationJobs.values()) {
+    turnIds.add(job.turnId);
+  }
+  for (const result of verificationResults.values()) {
+    turnIds.add(result.turnId);
+  }
+  for (const winner of winnerRecords.values()) {
+    turnIds.add(winner.turnId);
+  }
+  for (const reward of creatorRewardRecords.values()) {
+    turnIds.add(reward.turnId);
+  }
+  for (const reward of voterRewardRecords.values()) {
+    turnIds.add(reward.turnId);
+  }
+  for (const claim of claimRecords.values()) {
+    turnIds.add(claim.turnId);
+  }
+  for (const log of auditLogs.values()) {
+    turnIds.add(log.turnId);
+  }
+
+  return [...turnIds].sort((left, right) => left - right);
+}
+
+function addNumber(total: number, value: number | undefined) {
+  return total + (Number.isSafeInteger(value) ? Number(value) : 0);
+}
+
+function hashJsonForTransparency(value: unknown) {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function getTurnPublicTimestamps(turnId: number) {
+  return [
+    ...[...guessReceipts.values()]
+      .filter((record) => record.turnId === turnId)
+      .map((record) => record.submittedAt),
+    ...listRuleProposals(turnId).map((record) => record.submittedAt),
+    ...listRuleVotes(turnId).votes.map((record) => record.submittedAt),
+    ...listRuleEliminationVotes(turnId).votes.map(
+      (record) => record.submittedAt,
+    ),
+    ...listPaidRuleRemovals(turnId).map((record) => record.removedAt),
+    ...listSettlementTransitions(turnId).map((record) => record.recordedAt),
+    ...listAuditLogs({ turnId }).map((record) => record.createdAt),
+    ...listClaimRecords({ turnId }).map((record) => record.createdAt),
+  ].filter((value) => !Number.isNaN(Date.parse(value)));
+}
+
+function turnMatchesDateFilter(
+  turnId: number,
+  filters: Pick<TransparencyFilters, "fromDate" | "toDate">,
+) {
+  if (!filters.fromDate && !filters.toDate) {
+    return true;
+  }
+
+  const fromTime = filters.fromDate ? Date.parse(filters.fromDate) : null;
+  const toTime = filters.toDate ? Date.parse(filters.toDate) : null;
+  if (
+    (fromTime !== null && Number.isNaN(fromTime)) ||
+    (toTime !== null && Number.isNaN(toTime))
+  ) {
+    return false;
+  }
+
+  return getTurnPublicTimestamps(turnId).some((timestamp) => {
+    const time = Date.parse(timestamp);
+    return (
+      (fromTime === null || time >= fromTime) &&
+      (toTime === null || time <= toTime)
+    );
+  });
+}
+
+function countClaimsByStatus(records: ClaimRecord[]) {
+  const counts: Record<ClaimRecordStatus, number> = {
+    available: 0,
+    claimed: 0,
+    failed: 0,
+    pending_wallet_approval: 0,
+    unavailable: 0,
+  };
+  for (const record of records) {
+    counts[record.status] += 1;
+  }
+  return counts;
+}
+
+function getRuleVoteFeeTotal(votes: RuleVoteRecord[]) {
+  return votes.reduce(
+    (total, vote) =>
+      addNumber(
+        total,
+        vote.feeLamports ??
+          calculateRepeatedActionFeeLamports({
+            baseFeeLamports: solToLamports(MVP_FEES_SOL.vote),
+            sequence: vote.sequence ?? 1,
+            turnId: vote.turnId,
+          }),
+      ),
+    0,
+  );
+}
+
+function getEliminationVoteFeeTotal(votes: RuleEliminationVoteRecord[]) {
+  return votes.reduce(
+    (total, vote) =>
+      addNumber(
+        total,
+        vote.feeLamports ??
+          calculateRepeatedActionFeeLamports({
+            baseFeeLamports: solToLamports(MVP_FEES_SOL.vote),
+            sequence: vote.sequence ?? 1,
+            turnId: vote.turnId,
+          }),
+      ),
+    0,
+  );
+}
+
+function getTransparencyTurnSummary(turnId: number): TransparencyTurnSummary {
+  const round = getRoundSummary(turnId);
+  const accounting = round.pool.accounting;
+  const approvalVotes = listRuleVotes(turnId).votes;
+  const eliminationVotes = listRuleEliminationVotes(turnId).votes;
+  const claimRecordsForTurn = listClaimRecords({ turnId });
+  const winnerPayoutDustLamports =
+    round.winners.original.remainderLamports +
+    round.winners.alternative.remainderLamports;
+  const expiredUnclaimedLamports = claimRecordsForTurn
+    .filter((claim) => claim.status === "unavailable")
+    .filter((claim) => claim.statusReason === "CLAIM_WINDOW_EXPIRED")
+    .reduce((total, claim) => total + claim.amountLamports, 0);
+  const belowThresholdLamports = claimRecordsForTurn
+    .filter((claim) => claim.statusReason === "PAYOUT_BELOW_MINIMUM")
+    .reduce((total, claim) => total + claim.amountLamports, 0);
+  const ruleElimination = round.elimination;
+  const ruleStatusCounts = round.rules.reduce(
+    (counts, rule) => {
+      counts[rule.state] += 1;
+      return counts;
+    },
+    { eligible: 0, invalidated: 0, proposed: 0, removed_paid: 0 },
+  );
+  const tokenTotal = round.rules.reduce(
+    (total, rule) => total + rule.tokenCount,
+    0,
+  );
+  const topRules = [...round.rules]
+    .sort((left, right) => right.votes - left.votes || left.ruleId - right.ruleId)
+    .slice(0, 5)
+    .map((rule) => ({
+      creator: rule.proposer,
+      ruleId: rule.ruleId,
+      title: rule.title,
+      totalVotes: rule.votes,
+      uniqueApprovalVoters: new Set(
+        approvalVotes
+          .filter((vote) => vote.ruleId === rule.ruleId)
+          .map((vote) => vote.voter),
+      ).size,
+    }));
+  const claimCounts = countClaimsByStatus(claimRecordsForTurn);
+  const drawResultHash = round.draw?.drawResult
+    ? hashJsonForTransparency(round.draw.drawResult)
+    : null;
+  const winnerCalculationHash =
+    round.winners.records.length > 0
+      ? hashJsonForTransparency(round.winners.records)
+      : null;
+
+  return {
+    activity: {
+      claims: claimRecordsForTurn.length,
+      eliminationVotes: eliminationVotes.length,
+      guesses: round.pool.guesses,
+      paidRemovals: round.pool.paidRemovals,
+      proposals: round.pool.proposals,
+      settlementTransitions: listSettlementTransitions(turnId).length,
+      totalVotes: approvalVotes.length + eliminationVotes.length,
+    },
+    claims: {
+      availableLamports: round.claims.availableLamports,
+      belowThresholdLamports,
+      claimedLamports: round.claims.claimedLamports,
+      expiredLamports: expiredUnclaimedLamports,
+      pendingLamports: round.claims.pendingLamports,
+      rolledOverLamports:
+        getTurnRolloverSettlement(turnId)?.totalRolloverLamports ?? 0,
+      statusCounts: claimCounts,
+    },
+    durationHours: round.cycle.durationHours,
+    economy: {
+      alternativeBucketLamports: accounting.buckets.alternative.totalLamports,
+      expiredUnclaimedLamports,
+      grossFeesLamports: accounting.grossFeesLamports,
+      originalBucketLamports: accounting.buckets.original.totalLamports,
+      payoutDustLamports: winnerPayoutDustLamports,
+      pendingClaimableLamports: round.claims.availableLamports,
+      platformTreasuryLamports: accounting.treasuryLamports,
+      prizePoolLamports: accounting.totalVisiblePrizePoolLamports,
+      rolloverInLamports:
+        accounting.buckets.original.rolloverLamports +
+        accounting.buckets.alternative.rolloverLamports,
+      rolloverOutLamports:
+        getTurnRolloverSettlement(turnId)?.totalRolloverLamports ?? 0,
+      sources: accounting.sources,
+    },
+    proofs: {
+      activeRuleId: round.election?.activeRuleId ?? null,
+      auditChainHead:
+        listAuditLogs({ turnId }).at(-1)?.logHash ??
+        listSettlementTransitions(turnId).at(-1)?.auditLogHash ??
+        null,
+      drawRandomnessAccount: round.draw?.randomnessAccount ?? null,
+      drawRandomnessSource: round.draw?.randomnessSource ?? null,
+      drawResultHash,
+      eligiblePoolHash: round.election?.eligibleRulePoolHash ?? null,
+      finalistSetHash: round.election?.finalistSetHash ?? null,
+      ruleElectionRandomnessAccount: round.election?.randomnessAccount ?? null,
+      ruleElectionRandomnessSource: round.election?.randomnessSource ?? null,
+      settlementAuditEndpoint: `/audit?turnId=${turnId}`,
+      winnerCalculationHash,
+    },
+    rewards: {
+      creatorRewardLamports: round.rewards.creator?.finalRewardLamports ?? 0,
+      creatorRewardReserveLamports: round.rewards.creatorRewardReserveLamports,
+      remainingReserveLamports: round.rewards.remainingReserveLamports,
+      voterRewardLamports: round.rewards.voterRewardPool.finalPoolLamports,
+      voterRewardRecipients: round.rewards.voterRewardPool.voterCount,
+    },
+    rules: {
+      activeRuleId: round.election?.activeRuleId ?? null,
+      clarityLabelCount: round.rules.filter((rule) => rule.validation !== null)
+        .length,
+      difficultyLabelCount: round.rules.filter((rule) => rule.validation !== null)
+        .length,
+      eliminated: ruleElimination.eliminatedRuleIds.length,
+      finalistRuleIds: round.election?.finalistRuleIds ?? [],
+      invalidated: ruleStatusCounts.invalidated,
+      precompiled: round.rules.filter(
+        (rule) => rule.precompilationStatus === "passed",
+      ).length,
+      proposed: round.rules.length,
+      randomFinalistRuleIds: round.election?.randomRuleIds ?? [],
+      removed: ruleStatusCounts.removed_paid,
+      ruleTokenCountAverage:
+        round.rules.length === 0 ? 0 : Math.round(tokenTotal / round.rules.length),
+      survived: ruleElimination.survivorRuleIds.length,
+      topRules,
+      topVotedFinalistRuleIds: round.election?.topVotedRuleIds ?? [],
+    },
+    status: round.status,
+    turnId,
+    voting: {
+      approvalFeeLamports: getRuleVoteFeeTotal(approvalVotes),
+      repeatedApprovalVotes: approvalVotes.filter(
+        (vote) => (vote.sequence ?? 1) > 1,
+      ).length,
+      repeatedEliminationVotes: eliminationVotes.filter(
+        (vote) => (vote.sequence ?? 1) > 1,
+      ).length,
+      totalApprovalVotes: approvalVotes.length,
+      totalEliminationVotes: eliminationVotes.length,
+      uniqueApprovalVoters: new Set(approvalVotes.map((vote) => vote.voter)).size,
+      uniqueEliminationVoters: new Set(
+        eliminationVotes.map((vote) => vote.voter),
+      ).size,
+      eliminationFeeLamports: getEliminationVoteFeeTotal(eliminationVotes),
+    },
+  };
+}
+
+function getTransparencySourceReferences(): TransparencySourceReference[] {
+  return [
+    {
+      derivation:
+        "Turn status, duration, public action counts, fee buckets, rewards, winners, claims, and rollover totals are read from the public round projection.",
+      endpoint: "/rounds/{turnId}",
+      label: "Round projection",
+      source: "public_api_projection",
+    },
+    {
+      derivation:
+        "Rule lifecycle, finalist composition, active election, draw proof fields, and public hashes are derived from indexed public program state and public audit records.",
+      endpoint: "/audit?turnId={turnId}",
+      label: "Audit chain",
+      source: "audit_log",
+    },
+    {
+      derivation:
+        "Repeated approval and elimination vote fee totals are reconciled against PRD fee sequencing and prize-pool accounting.",
+      endpoint: "/admin/repeated-vote-fee-reconciliation/{turnId}",
+      label: "Repeated vote fee reconciliation",
+      source: "public_api_projection",
+    },
+    {
+      derivation:
+        "Prize pool and proof references can be checked against program accounts and devnet transactions exposed by public round pages.",
+      endpoint: "/round/{turnId}",
+      label: "On-chain references",
+      source: "on_chain_account",
+    },
+  ];
+}
+
+function getTopCreators(turns: TransparencyTurnSummary[]) {
+  const creators = new Map<
+    string,
+    {
+      creator: string;
+      electedRules: Set<string>;
+      proposedRules: number;
+      rewardLamports: number;
+      votesReceived: number;
+      winnerProducingRules: Set<string>;
+    }
+  >();
+
+  for (const turn of turns) {
+    for (const proposal of listRuleProposals(turn.turnId)) {
+      const record =
+        creators.get(proposal.proposer) ??
+        {
+          creator: proposal.proposer,
+          electedRules: new Set<string>(),
+          proposedRules: 0,
+          rewardLamports: 0,
+          votesReceived: 0,
+          winnerProducingRules: new Set<string>(),
+        };
+      record.proposedRules += 1;
+      record.votesReceived += listRuleVotes(turn.turnId).votes.filter(
+        (vote) => vote.ruleId === proposal.ruleId,
+      ).length;
+      if (turn.rules.activeRuleId === proposal.ruleId) {
+        record.electedRules.add(`${turn.turnId}:${proposal.ruleId}`);
+      }
+      if (
+        turn.rules.activeRuleId === proposal.ruleId &&
+        getWinnerSummary(turn.turnId).alternative.winnerCount > 0
+      ) {
+        record.winnerProducingRules.add(`${turn.turnId}:${proposal.ruleId}`);
+      }
+      creators.set(proposal.proposer, record);
+    }
+  }
+
+  for (const reward of creatorRewardRecords.values()) {
+    const record =
+      creators.get(reward.creatorWallet) ??
+      {
+        creator: reward.creatorWallet,
+        electedRules: new Set<string>(),
+        proposedRules: 0,
+        rewardLamports: 0,
+        votesReceived: 0,
+        winnerProducingRules: new Set<string>(),
+      };
+    record.rewardLamports += reward.finalRewardLamports;
+    creators.set(reward.creatorWallet, record);
+  }
+
+  return [...creators.values()]
+    .map((creator) => ({
+      creator: creator.creator,
+      electedRules: creator.electedRules.size,
+      proposedRules: creator.proposedRules,
+      rewardLamports: creator.rewardLamports,
+      votesReceived: creator.votesReceived,
+      winnerProducingRules: creator.winnerProducingRules.size,
+    }))
+    .sort(
+      (left, right) =>
+        right.electedRules - left.electedRules ||
+        right.votesReceived - left.votesReceived ||
+        right.proposedRules - left.proposedRules,
+    )
+    .slice(0, 10);
+}
+
+function getRepeatedPaidActionTrends(turnIds: number[]) {
+  const turnIdSet = new Set(turnIds);
+  const guessRecords = [...guessReceipts.values()].filter((record) =>
+    turnIdSet.has(record.turnId),
+  );
+  const proposalRecords = [...ruleProposals.values()].filter((record) =>
+    turnIdSet.has(record.turnId),
+  );
+  const approvalVoteRecords = [...ruleVotes.values()].filter((record) =>
+    turnIdSet.has(record.turnId),
+  );
+  const eliminationVoteRecords = [...ruleEliminationVotes.values()].filter(
+    (record) => turnIdSet.has(record.turnId),
+  );
+  const removalRecords = [...paidRuleRemovals.values()].filter((record) =>
+    turnIdSet.has(record.turnId),
+  );
+
+  return [
+    {
+      count: guessRecords.filter((record) => (record.sequence ?? 1) > 1).length,
+      feeLamports: guessRecords.reduce(
+        (total, record) => addNumber(total, record.feeLamports),
+        0,
+      ),
+      scope: "guess" as const,
+    },
+    {
+      count: proposalRecords.filter((record) => (record.sequence ?? 1) > 1)
+        .length,
+      feeLamports: proposalRecords.reduce(
+        (total, record) => addNumber(total, record.feeLamports),
+        0,
+      ),
+      scope: "rule_proposal" as const,
+    },
+    {
+      count: approvalVoteRecords.filter((record) => (record.sequence ?? 1) > 1)
+        .length,
+      feeLamports: getRuleVoteFeeTotal(approvalVoteRecords),
+      scope: "approval_vote" as const,
+    },
+    {
+      count: eliminationVoteRecords.filter(
+        (record) => (record.sequence ?? 1) > 1,
+      ).length,
+      feeLamports: getEliminationVoteFeeTotal(eliminationVoteRecords),
+      scope: "elimination_vote" as const,
+    },
+    {
+      count: removalRecords.length,
+      feeLamports: removalRecords.reduce(
+        (total, record) => addNumber(total, record.feeLamports),
+        0,
+      ),
+      scope: "paid_rule_removal" as const,
+    },
+  ];
+}
+
+function incrementCount<T extends string>(
+  counts: Record<T, number>,
+  key: T,
+  amount = 1,
+) {
+  counts[key] = (counts[key] ?? 0) + amount;
+}
+
+function getConfidenceBucket(
+  confidence: number,
+): keyof OperatorAiOperationsSnapshot["ruleCompiler"]["finalConfidenceBuckets"] {
+  if (confidence < 0.5) {
+    return "0_50";
+  }
+  if (confidence < 0.7) {
+    return "50_70";
+  }
+  if (confidence < 0.9) {
+    return "70_90";
+  }
+  return "90_100";
+}
+
+export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot {
+  const validations = [...ruleValidations.values()];
+  const jobs = [...verificationJobs.values()];
+  const validationLogs = [...auditLogs.values()].filter(
+    (log) => log.kind === "compiler.validation",
+  );
+  const guessVerificationLogs = [...auditLogs.values()].filter(
+    (log) => log.kind === "guess.verification",
+  );
+  const modelRoutingMap = new Map<
+    string,
+    OperatorAiOperationsSnapshot["modelRouting"][number]
+  >();
+  const queueStatusCounts: Record<GuessVerificationJobStatus, number> = {
+    completed: 0,
+    dead_letter: 0,
+    pending: 0,
+    processing: 0,
+    retry_scheduled: 0,
+  };
+  const confidenceActionCounts: Record<string, number> = {};
+  const decisionCounts: Record<string, number> = {};
+  const reasonCodeCounts: Record<string, number> = {};
+  const finalConfidenceBuckets: OperatorAiOperationsSnapshot["ruleCompiler"]["finalConfidenceBuckets"] =
+    {
+      "0_50": 0,
+      "50_70": 0,
+      "70_90": 0,
+      "90_100": 0,
+    };
+
+  for (const validation of validations) {
+    const routingKey = `${validation.provider}:${validation.model}`;
+    const routing =
+      modelRoutingMap.get(routingKey) ??
+      {
+        fallbackTriggered: 0,
+        model: validation.model,
+        provider: validation.provider,
+        validationCalls: 0,
+      };
+    routing.validationCalls += 1;
+    routing.fallbackTriggered += validation.fallbackTriggered ? 1 : 0;
+    modelRoutingMap.set(routingKey, routing);
+
+    incrementCount(confidenceActionCounts, validation.confidenceAction);
+    incrementCount(decisionCounts, validation.decision);
+    incrementCount(finalConfidenceBuckets, getConfidenceBucket(validation.finalConfidence));
+    for (const code of validation.reasonCodes) {
+      incrementCount(reasonCodeCounts, code);
+    }
+  }
+
+  for (const job of jobs) {
+    incrementCount(queueStatusCounts, job.status);
+  }
+
+  const fallbackCount = validations.filter(
+    (validation) => validation.fallbackTriggered,
+  ).length;
+  const disagreementTotal = validations.reduce(
+    (total, validation) => total + validation.providerDisagreementRateSample,
+    0,
+  );
+
+  return {
+    access: {
+      permissions: ["ai_ops:read", "ai_ops:export"],
+      readOnly: true,
+      role: "ai_operator",
+    },
+    generatedAt: new Date().toISOString(),
+    modelRouting: [...modelRoutingMap.values()].sort(
+      (left, right) =>
+        right.validationCalls - left.validationCalls ||
+        left.provider.localeCompare(right.provider),
+    ),
+    operationCounts: {
+      auditCompilerValidationLogs: validationLogs.length,
+      auditGuessVerificationLogs: guessVerificationLogs.length,
+      validationCalls: validations.length,
+      verificationJobs: jobs.length,
+    },
+    queue: {
+      deadLetterJobs: queueStatusCounts.dead_letter,
+      statusCounts: queueStatusCounts,
+    },
+    redactionPolicy: {
+      exportedFieldsOnly: [
+        "provider",
+        "model",
+        "validation_counts",
+        "fallback_counts",
+        "confidence_buckets",
+        "reason_code_counts",
+        "queue_status_counts",
+        "audit_log_counts",
+      ],
+      excludedFields: [
+        "raw_prompt",
+        "raw_completion",
+        "normalized_text",
+        "compiled_artifact",
+        "provider_request_body",
+        "provider_response_body",
+        "provider_api_key",
+        "secret_value",
+        "private_user_analytics",
+        "ip_address",
+        "device_fingerprint",
+        "session_id",
+        "unredacted_stack_trace",
+      ],
+    },
+    ruleCompiler: {
+      confidenceActionCounts,
+      decisionCounts,
+      fallbackRate: validations.length === 0 ? 0 : fallbackCount / validations.length,
+      finalConfidenceBuckets,
+      providerDisagreementAverage:
+        validations.length === 0 ? 0 : disagreementTotal / validations.length,
+      reasonCodeCounts,
+    },
+    sourceReferences: [
+      {
+        endpoint: "/audit?kind=compiler.validation",
+        label: "Compiler validation audit logs",
+        source: "audit_log",
+        status: "available",
+      },
+      {
+        endpoint: "/verification-jobs",
+        label: "Guess verification queue projection",
+        source: "queue_projection",
+        status: "available",
+      },
+      {
+        endpoint: "/operator/ai-operations",
+        label: "Restricted redacted AI operations aggregate",
+        source: "internal_projection",
+        status: "available",
+      },
+      {
+        endpoint: "OPERATOR_AI_CONSOLE_TOKEN",
+        label: "Operator bearer token gate",
+        source: "operator_config",
+        status: "available",
+      },
+      {
+        endpoint: "llm_latency_metric",
+        label: "Provider latency time series",
+        source: "internal_projection",
+        status: "not_recorded",
+      },
+      {
+        endpoint: "llm_cost_metric",
+        label: "Token usage and estimated LLM cost",
+        source: "internal_projection",
+        status: "not_recorded",
+      },
+    ],
+  };
+}
+
+export function exportOperatorAiOperationsCsv(
+  snapshot: OperatorAiOperationsSnapshot,
+) {
+  const columns = [
+    "provider",
+    "model",
+    "validation_calls",
+    "fallback_triggered",
+    "fallback_rate",
+    "provider_disagreement_average",
+    "verification_jobs",
+    "dead_letter_jobs",
+    "redaction_note",
+  ];
+  const redactionNote =
+    "Restricted operator export includes redacted aggregates only; raw prompts, completions, compiled artifacts, provider payloads, secrets, private analytics, and unredacted stack traces are excluded.";
+  const rows =
+    snapshot.modelRouting.length === 0
+      ? [
+          [
+            "",
+            "",
+            0,
+            0,
+            snapshot.ruleCompiler.fallbackRate,
+            snapshot.ruleCompiler.providerDisagreementAverage,
+            snapshot.operationCounts.verificationJobs,
+            snapshot.queue.deadLetterJobs,
+            redactionNote,
+          ],
+        ]
+      : snapshot.modelRouting.map((routing) => [
+          routing.provider,
+          routing.model,
+          routing.validationCalls,
+          routing.fallbackTriggered,
+          snapshot.ruleCompiler.fallbackRate,
+          snapshot.ruleCompiler.providerDisagreementAverage,
+          snapshot.operationCounts.verificationJobs,
+          snapshot.queue.deadLetterJobs,
+          redactionNote,
+        ]);
+
+  return [
+    columns.map(csvCell).join(","),
+    ...rows.map((row) => row.map(csvCell).join(",")),
+  ].join("\n");
+}
+
+export function authorizeOperatorAiRequest(
+  authorizationHeader: string | undefined,
+  env: Partial<Pick<NodeJS.ProcessEnv, "OPERATOR_AI_CONSOLE_TOKEN">> = process.env,
+) {
+  const configuredToken = env.OPERATOR_AI_CONSOLE_TOKEN?.trim();
+  if (!configuredToken) {
+    return {
+      error: "operator_ai_operations_disabled",
+      ok: false as const,
+      statusCode: 503,
+    };
+  }
+
+  const prefix = "Bearer ";
+  if (!authorizationHeader?.startsWith(prefix)) {
+    return {
+      error: "operator_authorization_required",
+      ok: false as const,
+      statusCode: 401,
+    };
+  }
+
+  const providedToken = authorizationHeader.slice(prefix.length).trim();
+  const configuredHash = createHash("sha256").update(configuredToken).digest();
+  const providedHash = createHash("sha256").update(providedToken).digest();
+  if (!timingSafeEqual(configuredHash, providedHash)) {
+    return {
+      error: "operator_authorization_denied",
+      ok: false as const,
+      statusCode: 403,
+    };
+  }
+
+  return {
+    ok: true as const,
+    permissions: ["ai_ops:read", "ai_ops:export"] as const,
+    role: "ai_operator" as const,
+  };
+}
+
+export function getTransparencySnapshot(
+  filters: TransparencyFilters = {},
+): TransparencySnapshot {
+  const allTurnIds = getPublicTurnIds();
+  const minTurnId = allTurnIds[0] ?? IDEALER_ACTIVE_TURN_ID;
+  const maxTurnId = allTurnIds.at(-1) ?? IDEALER_ACTIVE_TURN_ID;
+  const fromTurnId = filters.fromTurnId ?? minTurnId;
+  const toTurnId = filters.toTurnId ?? maxTurnId;
+  const turnIds = allTurnIds.filter(
+    (turnId) =>
+      turnId >= fromTurnId &&
+      turnId <= toTurnId &&
+      turnMatchesDateFilter(turnId, filters),
+  );
+  const turns = turnIds.map((turnId) => getTransparencyTurnSummary(turnId));
+  const totals = turns.reduce(
+    (summary, turn) => ({
+      alternativePrizeLamports:
+        summary.alternativePrizeLamports + turn.economy.alternativeBucketLamports,
+      approvalVotes: summary.approvalVotes + turn.voting.totalApprovalVotes,
+      claims: summary.claims + turn.activity.claims,
+      creatorRewardLamports:
+        summary.creatorRewardLamports + turn.rewards.creatorRewardLamports,
+      creatorRewardReserveLamports:
+        summary.creatorRewardReserveLamports +
+        turn.rewards.creatorRewardReserveLamports,
+      drawProofs:
+        summary.drawProofs + (turn.proofs.drawRandomnessAccount ? 1 : 0),
+      eliminationVotes:
+        summary.eliminationVotes + turn.voting.totalEliminationVotes,
+      grossFeesLamports: summary.grossFeesLamports + turn.economy.grossFeesLamports,
+      guesses: summary.guesses + turn.activity.guesses,
+      paidRemovals: summary.paidRemovals + turn.activity.paidRemovals,
+      platformTreasuryLamports:
+        summary.platformTreasuryLamports + turn.economy.platformTreasuryLamports,
+      proposals: summary.proposals + turn.activity.proposals,
+      rewardReserveRemainingLamports:
+        summary.rewardReserveRemainingLamports +
+        turn.rewards.remainingReserveLamports,
+      rolloverInLamports:
+        summary.rolloverInLamports + turn.economy.rolloverInLamports,
+      rolloverOutLamports:
+        summary.rolloverOutLamports + turn.economy.rolloverOutLamports,
+      settlementTransitions:
+        summary.settlementTransitions + turn.activity.settlementTransitions,
+      voterRewardLamports:
+        summary.voterRewardLamports + turn.rewards.voterRewardLamports,
+      winnerPayoutLamports:
+        summary.winnerPayoutLamports +
+        getWinnerSummary(turn.turnId).records.reduce(
+          (total, winner) => total + winner.payoutLamports,
+          0,
+        ),
+    }),
+    {
+      alternativePrizeLamports: 0,
+      approvalVotes: 0,
+      claims: 0,
+      creatorRewardLamports: 0,
+      creatorRewardReserveLamports: 0,
+      drawProofs: 0,
+      eliminationVotes: 0,
+      grossFeesLamports: 0,
+      guesses: 0,
+      paidRemovals: 0,
+      platformTreasuryLamports: 0,
+      proposals: 0,
+      rewardReserveRemainingLamports: 0,
+      rolloverInLamports: 0,
+      rolloverOutLamports: 0,
+      settlementTransitions: 0,
+      voterRewardLamports: 0,
+      winnerPayoutLamports: 0,
+    },
+  );
+  const durationMap = new Map<
+    number,
+    TransparencySnapshot["trends"]["byTurnDuration"][number]
+  >();
+  for (const turn of turns) {
+    const current =
+      durationMap.get(turn.durationHours) ??
+      {
+        approvalVotes: 0,
+        creatorRewardLamports: 0,
+        durationHours: turn.durationHours,
+        eliminationVotes: 0,
+        grossFeesLamports: 0,
+        guesses: 0,
+        prizePoolLamports: 0,
+        proposals: 0,
+        rolloverLamports: 0,
+        turns: 0,
+        voterRewardLamports: 0,
+      };
+    current.approvalVotes += turn.voting.totalApprovalVotes;
+    current.creatorRewardLamports += turn.rewards.creatorRewardLamports;
+    current.eliminationVotes += turn.voting.totalEliminationVotes;
+    current.grossFeesLamports += turn.economy.grossFeesLamports;
+    current.guesses += turn.activity.guesses;
+    current.prizePoolLamports += turn.economy.prizePoolLamports;
+    current.proposals += turn.activity.proposals;
+    current.rolloverLamports += turn.economy.rolloverOutLamports;
+    current.turns += 1;
+    current.voterRewardLamports += turn.rewards.voterRewardLamports;
+    durationMap.set(turn.durationHours, current);
+  }
+
+  return {
+    activeTurnId: IDEALER_ACTIVE_TURN_ID,
+    dataBoundary: {
+      deniedPrivateFields: [
+        "ip_address",
+        "device_fingerprint",
+        "session_id",
+        "private_user_agent_record",
+        "wallet_connect_attempt",
+        "wallet_failure",
+        "private_funnel_step",
+        "retention_cohort",
+        "raw_prompt",
+        "raw_completion",
+        "provider_api_key",
+        "secret_value",
+        "unrestricted_compiler_reasoning_trace",
+        "private_provider_request_response_body",
+        "unredacted_stack_trace",
+      ],
+      publicExportFieldsOnly: true,
+      publicMetricsOnly: true,
+      restrictedAiOperations: {
+        endpoint: "/operator/ai-operations",
+        exportEndpoint: "/operator/ai-operations/export",
+        role: "ai_operator",
+        status: "access_controlled",
+      },
+    },
+    exports: {
+      csvPath: "/transparency/export?format=csv",
+      excludedPrivateAnalytics: [
+        "retention",
+        "funnel",
+        "device",
+        "session",
+        "share_acquisition",
+      ],
+      jsonPath: "/transparency/export?format=json",
+    },
+    filters: {
+      fromTurnId,
+      toTurnId,
+      ...(filters.fromDate ? { fromDate: filters.fromDate } : {}),
+      ...(filters.toDate ? { toDate: filters.toDate } : {}),
+    },
+    generatedAt: new Date().toISOString(),
+    sourceReferences: getTransparencySourceReferences(),
+    totals,
+    trends: {
+      byTurnDuration: [...durationMap.values()].sort(
+        (left, right) => left.durationHours - right.durationHours,
+      ),
+      repeatedPaidActions: getRepeatedPaidActionTrends(turnIds),
+      ruleLifecycle: {
+        active: turns.filter((turn) => turn.rules.activeRuleId !== null).length,
+        eliminated: turns.reduce((total, turn) => total + turn.rules.eliminated, 0),
+        finalist: turns.reduce(
+          (total, turn) => total + turn.rules.finalistRuleIds.length,
+          0,
+        ),
+        invalidated: turns.reduce(
+          (total, turn) => total + turn.rules.invalidated,
+          0,
+        ),
+        proposed: turns.reduce((total, turn) => total + turn.rules.proposed, 0),
+        removed: turns.reduce((total, turn) => total + turn.rules.removed, 0),
+        survived: turns.reduce((total, turn) => total + turn.rules.survived, 0),
+      },
+      topCreators: getTopCreators(turns),
+    },
+    turns,
+  };
+}
+
+function csvCell(value: string | number | null) {
+  const text = value === null ? "" : String(value);
+  return `"${text.replaceAll('"', '""')}"`;
+}
+
+export function exportTransparencySnapshotCsv(snapshot: TransparencySnapshot) {
+  const columns = [
+    "turn_id",
+    "status",
+    "duration_hours",
+    "guesses",
+    "proposals",
+    "approval_votes",
+    "elimination_votes",
+    "paid_removals",
+    "gross_fees_lamports",
+    "treasury_lamports",
+    "prize_pool_lamports",
+    "original_bucket_lamports",
+    "alternative_bucket_lamports",
+    "rollover_in_lamports",
+    "rollover_out_lamports",
+    "winner_payout_hash",
+    "draw_result_hash",
+    "eligible_pool_hash",
+    "finalist_set_hash",
+    "creator_reward_lamports",
+    "voter_reward_lamports",
+    "audit_endpoint",
+    "derivation_note",
+  ];
+  const derivationNote =
+    "All fields are public/on-chain, public API projections, or public audit-log derivations; private retention, funnel, device, session, raw prompt, and raw completion fields are excluded.";
+  const rows = snapshot.turns.map((turn) =>
+    [
+      turn.turnId,
+      turn.status,
+      turn.durationHours,
+      turn.activity.guesses,
+      turn.activity.proposals,
+      turn.voting.totalApprovalVotes,
+      turn.voting.totalEliminationVotes,
+      turn.activity.paidRemovals,
+      turn.economy.grossFeesLamports,
+      turn.economy.platformTreasuryLamports,
+      turn.economy.prizePoolLamports,
+      turn.economy.originalBucketLamports,
+      turn.economy.alternativeBucketLamports,
+      turn.economy.rolloverInLamports,
+      turn.economy.rolloverOutLamports,
+      turn.proofs.winnerCalculationHash,
+      turn.proofs.drawResultHash,
+      turn.proofs.eligiblePoolHash,
+      turn.proofs.finalistSetHash,
+      turn.rewards.creatorRewardLamports,
+      turn.rewards.voterRewardLamports,
+      turn.proofs.settlementAuditEndpoint,
+      derivationNote,
+    ]
+      .map(csvCell)
+      .join(","),
+  );
+  return [columns.join(","), ...rows].join("\n");
+}
+
+function parseTransparencyFilters(
+  url: URL,
+): { filters: TransparencyFilters } | { error: string } {
+  const rawFromTurnId = url.searchParams.get("fromTurnId");
+  const rawToTurnId = url.searchParams.get("toTurnId");
+  const fromDate = url.searchParams.get("fromDate") ?? undefined;
+  const toDate = url.searchParams.get("toDate") ?? undefined;
+  const fromTurnId =
+    rawFromTurnId === null ? undefined : Number(rawFromTurnId);
+  const toTurnId = rawToTurnId === null ? undefined : Number(rawToTurnId);
+
+  if (
+    (fromTurnId !== undefined &&
+      (!Number.isInteger(fromTurnId) || fromTurnId <= 0)) ||
+    (toTurnId !== undefined && (!Number.isInteger(toTurnId) || toTurnId <= 0))
+  ) {
+    return { error: "invalid_turn_filter" };
+  }
+
+  if (
+    fromTurnId !== undefined &&
+    toTurnId !== undefined &&
+    fromTurnId > toTurnId
+  ) {
+    return { error: "invalid_turn_range" };
+  }
+
+  if (
+    (fromDate !== undefined && Number.isNaN(Date.parse(fromDate))) ||
+    (toDate !== undefined && Number.isNaN(Date.parse(toDate)))
+  ) {
+    return { error: "invalid_date_filter" };
+  }
+
+  return {
+    filters: {
+      ...(fromDate ? { fromDate } : {}),
+      ...(fromTurnId ? { fromTurnId } : {}),
+      ...(toDate ? { toDate } : {}),
+      ...(toTurnId ? { toTurnId } : {}),
+    },
   };
 }
 
@@ -6609,6 +7911,94 @@ if (isMainModule()) {
       sendJson(request, response, 200, {
         activeTurnId: IDEALER_ACTIVE_TURN_ID,
         round: getRoundSummary(IDEALER_ACTIVE_TURN_ID),
+      });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/transparency") {
+      const parsed = parseTransparencyFilters(url);
+      if ("error" in parsed) {
+        sendJson(request, response, 400, { error: parsed.error });
+        return;
+      }
+
+      sendJson(request, response, 200, {
+        snapshot: getTransparencySnapshot(parsed.filters),
+      });
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      url.pathname === "/transparency/export"
+    ) {
+      const parsed = parseTransparencyFilters(url);
+      if ("error" in parsed) {
+        sendJson(request, response, 400, { error: parsed.error });
+        return;
+      }
+
+      const format = url.searchParams.get("format") ?? "json";
+      if (format !== "json" && format !== "csv") {
+        sendJson(request, response, 400, { error: "invalid_export_format" });
+        return;
+      }
+
+      const snapshot = getTransparencySnapshot(parsed.filters);
+      if (format === "csv") {
+        sendCsv(request, response, 200, exportTransparencySnapshotCsv(snapshot));
+        return;
+      }
+
+      sendJson(request, response, 200, {
+        snapshot,
+      });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/operator/ai-operations") {
+      const auth = authorizeOperatorAiRequest(request.headers.authorization);
+      if (!auth.ok) {
+        sendJson(request, response, auth.statusCode, { error: auth.error });
+        return;
+      }
+
+      sendJson(request, response, 200, {
+        snapshot: getOperatorAiOperationsSnapshot(),
+      });
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      url.pathname === "/operator/ai-operations/export"
+    ) {
+      const auth = authorizeOperatorAiRequest(request.headers.authorization);
+      if (!auth.ok) {
+        sendJson(request, response, auth.statusCode, { error: auth.error });
+        return;
+      }
+
+      const format = url.searchParams.get("format") ?? "json";
+      if (format !== "json" && format !== "csv") {
+        sendJson(request, response, 400, { error: "invalid_export_format" });
+        return;
+      }
+
+      const snapshot = getOperatorAiOperationsSnapshot();
+      if (format === "csv") {
+        sendCsv(
+          request,
+          response,
+          200,
+          exportOperatorAiOperationsCsv(snapshot),
+          "idealer-operator-ai-operations.csv",
+        );
+        return;
+      }
+
+      sendJson(request, response, 200, {
+        snapshot,
       });
       return;
     }

@@ -3772,7 +3772,7 @@ Optional local containers:
 
 | Service      | Container name       | Purpose                                                                                                                                                      | Default port |
 | ------------ | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -----------: |
-| `admin`      | `idealer-admin`      | Optional read-only transparency console for public turn, rule, fee, prize, reward, settlement, and audit metrics derived from public/on-chain data. |       `3001` |
+| `admin`      | `idealer-admin`      | Optional read-only transparency console for public turn/rule/fee/prize/reward/settlement/audit metrics plus restricted AI operations monitoring. |       `3001` |
 | `mcp`        | `idealer-mcp`        | Local bounded MCP tools for rule schema, compiler, runtime, test harness, game engine and audit logging.                                                     |     internal |
 | `llm`        | `idealer-llm`        | Optional local/self-hosted LLM inference (Ollama/vLLM) exposing an OpenAI-compatible endpoint for the rule compiler. GPU recommended; CPU viable for models ≤4B. Not in the default required stack. |      `11434` |
 | `prometheus` | `idealer-prometheus` | Local metrics collection                                                                                                                                     |       `9090` |
@@ -4091,9 +4091,9 @@ Alerts:
 
 ### 12.6 Public Transparency Console
 
-Idealer must include a read-only transparency console for public product, economy, rule, and settlement insights.
+Idealer must include a read-only transparency console for public product, economy, rule, and settlement insights. The same deployment may also include a restricted operator-only area for AI agent operations monitoring.
 
-This console may be deployed separately or exposed as a clearly named transparency surface. It must not depend on private analytics or privileged user-tracking data.
+The public transparency surface may be deployed separately or exposed as a clearly named transparency surface. It must not depend on private analytics or privileged user-tracking data. The restricted AI operations area must require authentication and role-based access control, and must not be exposed through public navigation.
 
 Requirements:
 
@@ -4102,11 +4102,12 @@ Requirements:
 - separate deployment target, subdomain, or clearly separated transparency route;
 - separate container: `idealer-admin`;
 - read-only data loaders;
-- public/on-chain or publicly derivable data only;
-- no IP, device, session, wallet-funnel, private retention, or private behavioral analytics fields;
-- source labels for every metric;
-- export/snapshot outputs limited to public/derivable fields;
-- if deployment authentication is used, it must not reveal additional non-public metrics.
+- public transparency data loaders use public/on-chain or publicly derivable data only;
+- no IP, device, session, wallet-funnel, private retention, or private behavioral analytics fields in either public transparency or restricted AI operations views;
+- source labels for every public metric and redacted operational source labels for restricted AI metrics;
+- public export/snapshot outputs limited to public/derivable fields;
+- if deployment authentication is used for the public transparency surface, it must not reveal additional non-public game/user metrics;
+- restricted AI operations metrics may use internal operational logs, but only for agent health, cost, latency, provider, confidence, fallback, queue, and error monitoring.
 
 Recommended access model:
 
@@ -4121,13 +4122,21 @@ Transparency Console
   → read-only data access
   → public/on-chain metrics only
   → fee, prize, rule, settlement, and audit dashboards
+
+Restricted AI Operations
+  → authenticated operator-only route/surface
+  → read-only operational metrics
+  → no raw prompts, raw completions, secrets, API keys, private user analytics, or unredacted stack traces
+  → agent/provider health, cost, latency, fallback, confidence, and error dashboards
 ```
 
-The transparency console should be used to make public game state, fee flows, prize distribution, rule outcomes, and settlement proofs easier to inspect. It must not expose private behavioral analytics or manually alter outcomes.
+The transparency console should be used to make public game state, fee flows, prize distribution, rule outcomes, and settlement proofs easier to inspect. It must not expose private behavioral analytics or manually alter outcomes. The restricted AI operations area is for operational monitoring only and must not be used to decide winners, alter rules, bypass validation, or manually change game outcomes.
 
-#### 12.6.1 Transparency Insights
+#### 12.6.1 Transparency & Restricted AI Operations Insights
 
-The admin/transparency console should provide insight only from information that is public, on-chain, or derivable from public audit records. It may aggregate and explain public data, but it must not expose private analytics, private funnel data, IP/device/session data, or non-public wallet behavior correlations.
+The public transparency dashboards should provide insight only from information that is public, on-chain, or derivable from public audit records. They may aggregate and explain public data, but must not expose private analytics, private funnel data, IP/device/session data, or non-public wallet behavior correlations.
+
+The restricted AI operations dashboard may use internal operational aggregates from agent logs, provider health checks, queue metrics, and redacted incident snapshots. It must be read-only, access-controlled, and limited to operational health/usage monitoring.
 
 Core dashboards:
 
@@ -4142,7 +4151,13 @@ Core dashboards:
 | Settlement Proofs          | Can observers verify VRF inputs, draw results, winner calculations, accounting, and audit hashes? |
 | Turn-Cycle Public Trends   | How do public activity totals and fee/prize flows compare across 2h and 8h turns?      |
 
-#### 12.6.2 Required Transparency Metrics
+Restricted operator-only dashboard:
+
+| Dashboard              | Key questions answered                                                                 |
+| ---------------------- | -------------------------------------------------------------------------------------- |
+| AI Agent Operations    | Are compiler agents, providers, model routes, fallbacks, confidence checks, and queues healthy? |
+
+#### 12.6.2 Required Transparency & Restricted Operations Metrics
 
 Turn and public activity metrics:
 
@@ -4239,11 +4254,39 @@ audit_chain_head_hash
 public_proof_links
 ```
 
-#### 12.6.3 Transparency Data Boundaries
+Restricted AI operations metrics:
+
+```text
+agent_calls_total
+agent_calls_by_role
+agent_latency_ms_p50_p95_p99
+agent_errors_total
+agent_timeouts_total
+agent_schema_validation_failures_total
+agent_guardrail_rejections_total
+agent_fallback_total
+agent_fallback_by_provider
+provider_disagreement_rate
+model_confidence_avg
+compiler_confidence_avg
+final_confidence_avg
+confidence_escalation_total
+tokens_input_total
+tokens_output_total
+estimated_llm_cost_total
+llm_provider_rate_limit_events_total
+llm_provider_health_status
+local_model_health_status
+local_model_digest
+queue_backlog_by_agent_role
+dead_letter_jobs_by_agent_role
+```
+
+#### 12.6.3 Transparency & Restricted Operations Data Boundaries
 
 The admin/transparency console must not be used to influence live outcomes and must not expose private analytics.
 
-The console must not include:
+The public transparency surface must not include:
 
 - IP addresses;
 - device fingerprints;
@@ -4255,8 +4298,18 @@ The console must not include:
 - retention cohorts by wallet;
 - return-after-loss/win/near-miss analytics;
 - non-public share/acquisition data;
-- private compiler/provider logs that include prompts, secrets, stack traces, or internal failure payloads;
 - any metric that requires non-public tracking beyond public/on-chain events and public audit records.
+
+Restricted AI operations must not include:
+
+- raw user prompt payloads;
+- raw model completions;
+- provider API keys or secret names with values;
+- unredacted stack traces;
+- private provider request/response bodies;
+- unrestricted compiler reasoning traces;
+- wallet/IP/device/session/funnel analytics;
+- any control that can alter compiler output, active rules, draw results, winners, payouts, or claims.
 
 Console users must not be able to:
 
@@ -4276,6 +4329,17 @@ Allowed transparency functions for MVP:
 - view public settlement, accounting, VRF, and audit proof links;
 - export public snapshots whose fields are reproducible from on-chain state, public indexer projections, or public audit logs;
 - view operational health summaries only when they do not expose secrets, private logs, IP/device/session data, or non-public user behavior.
+
+Allowed restricted AI operations functions for MVP:
+
+- view aggregate agent call volume by role and provider;
+- view provider/model routing, fallback, timeout, and error rates;
+- view token usage and estimated cost by provider/model/role;
+- view confidence, disagreement, schema-validation, and escalation rates;
+- view queue backlog and dead-letter counts for compiler/reviewer/tester jobs;
+- view local/self-hosted model health, serving engine, configured model name, digest, and quantization;
+- link to public-safe audit records by turn/rule/artifact hash;
+- export redacted operational snapshots for incident review.
 
 ---
 
@@ -5587,36 +5651,42 @@ M4 is approved only if all M4 submilestones are approved and:
 
 ---
 
-### 15.6 Milestone M5 — Public Transparency Insights Console
+### 15.6 Milestone M5 — Public Transparency & Restricted AI Operations Console
 
 #### Objective
 
-Build a read-only admin/transparency console that exposes only data that is public, on-chain, or derivable from public audit/indexer records. The console is used to make turn metrics, fee flows, prize pools, reward distribution, rule status, settlement proofs, and public audit data easier to inspect.
+Build a read-only admin/transparency console that exposes public, on-chain, or publicly derivable game data for community transparency, plus a restricted operator-only AI operations dashboard for monitoring compiler-agent usage, provider health, cost, latency, fallback, confidence, and error behavior. The public surface is used to make turn metrics, fee flows, prize pools, reward distribution, rule status, settlement proofs, and public audit data easier to inspect. The restricted AI operations surface is not public and must not expose secrets, raw prompts/completions, private user analytics, or controls that can alter game outcomes.
 
 ---
 
-#### M5.1 — Transparency Surface & Data Boundary
+#### M5.1 — Transparency Surface, Restricted Surface & Data Boundary
 
-**Objective:** ensure the console is read-only and limited to public/derivable data.
+**Objective:** ensure public dashboards remain limited to public/derivable data while restricted AI operations dashboards remain read-only, access-controlled, and operational-only.
 
 **Checklist:**
 
-- [ ] Use a separate transparency/admin app surface, such as `apps/admin`, or a clearly separated public transparency route.
-- [ ] Keep the console read-only.
-- [ ] Do not require privileged data sources for displayed metrics.
-- [ ] Every displayed metric identifies its public source: on-chain account, transaction, public API projection, or audit log.
-- [ ] Do not display IP addresses, device fingerprints, private user-agent records, session identifiers, or private funnel events.
-- [ ] Do not display retention cohorts, return-after-loss/win/near-miss analytics, or non-public wallet behavior correlations.
-- [ ] If authentication is used for deployment control, it must not unlock additional non-public metrics.
-- [ ] Add export/snapshot capability only for public/derivable fields.
-- [ ] Add data-boundary tests or review checklist for every dashboard.
-- [ ] Document the public derivation path for each metric.
+- [x] Use a separate transparency/admin app surface, such as `apps/admin`, or a clearly separated public transparency route.
+- [x] Keep the console read-only.
+- [x] Do not require privileged data sources for public transparency metrics.
+- [x] Every public displayed metric identifies its public source: on-chain account, transaction, public API projection, or audit log.
+- [x] Add a restricted operator-only AI operations section for internal agent metrics.
+- [x] Gate the restricted AI operations section with authentication and role-based access control.
+- [x] Restricted AI operations metrics identify their internal source: agent log aggregate, provider health check, queue metric, cost metric, or redacted incident snapshot.
+- [x] Do not display IP addresses, device fingerprints, private user-agent records, session identifiers, or private funnel events.
+- [x] Do not display retention cohorts, return-after-loss/win/near-miss analytics, or non-public wallet behavior correlations.
+- [x] Public transparency authentication, if used for deployment control, must not unlock additional non-public game/user metrics.
+- [x] Restricted AI operations must not display raw prompts, raw completions, provider API keys, secret values, unrestricted compiler reasoning traces, or unredacted stack traces.
+- [x] Add export/snapshot capability only for public/derivable fields.
+- [x] Add restricted AI operations export/snapshot capability only for redacted operational fields.
+- [x] Add data-boundary tests or review checklist for every dashboard.
+- [x] Document the public derivation path for every public metric and the redacted operational source for every restricted AI metric.
 
 **Approval criteria:**
 
-- [ ] Every console metric is reproducible from public/on-chain data or public audit/indexer records.
-- [ ] No private analytics or confidential operational payloads are displayed.
-- [ ] The console cannot mutate game state.
+- [x] Every public console metric is reproducible from public/on-chain data or public audit/indexer records.
+- [x] Restricted AI operations metrics are access-controlled, redacted, and operational-only.
+- [x] No private user analytics, secrets, raw prompts, raw completions, or confidential provider payloads are displayed.
+- [x] The console cannot mutate game state.
 
 ---
 
@@ -5626,24 +5696,24 @@ Build a read-only admin/transparency console that exposes only data that is publ
 
 **Checklist:**
 
-- [ ] Show public turn status, duration, countdown timestamps, and settlement status.
-- [ ] Show guesses, proposals, approval votes, elimination votes, paid removals, and claims per turn.
-- [ ] Show total fees collected per turn.
-- [ ] Show platform treasury fee collected per turn.
-- [ ] Show fee breakdown by action type: guess, rule proposal, approval vote, elimination vote, and paid removal.
-- [ ] Show prize-pool funding by original and alternative buckets.
-- [ ] Show rollover in, rollover out, payout dust, expired unclaimed amounts, and pending claimable amounts.
-- [ ] Show prize distribution by bucket and winner count.
-- [ ] Show creator/voter reward totals funded by the creator reward reserve.
-- [ ] Show reward reserve balance/cap usage where publicly derivable.
-- [ ] Add date filters.
-- [ ] Add public export or snapshot capability.
+- [x] Show public turn status, duration, countdown timestamps, and settlement status.
+- [x] Show guesses, proposals, approval votes, elimination votes, paid removals, and claims per turn.
+- [x] Show total fees collected per turn.
+- [x] Show platform treasury fee collected per turn.
+- [x] Show fee breakdown by action type: guess, rule proposal, approval vote, elimination vote, and paid removal.
+- [x] Show prize-pool funding by original and alternative buckets.
+- [x] Show rollover in, rollover out, payout dust, expired unclaimed amounts, and pending claimable amounts.
+- [x] Show prize distribution by bucket and winner count.
+- [x] Show creator/voter reward totals funded by the creator reward reserve.
+- [x] Show reward reserve balance/cap usage where publicly derivable.
+- [x] Add date filters.
+- [x] Add public export or snapshot capability.
 
 **Approval criteria:**
 
-- [ ] A third party can reconcile displayed fee, prize, rollover, payout, and reward amounts against public sources.
-- [ ] Fee revenue for the platform and prize-pool funding are separated clearly.
-- [ ] Metrics are consistent with settlement/accounting audit records.
+- [x] A third party can reconcile displayed fee, prize, rollover, payout, and reward amounts against public sources.
+- [x] Fee revenue for the platform and prize-pool funding are separated clearly.
+- [x] Metrics are consistent with settlement/accounting audit records.
 
 ---
 
@@ -5653,23 +5723,23 @@ Build a read-only admin/transparency console that exposes only data that is publ
 
 **Checklist:**
 
-- [ ] Show proposed rules per turn.
-- [ ] Show rule status counts: proposed, precompiled, eligible, finalist, eliminated, survived, active, invalidated, expired, and removed.
-- [ ] Show top rules by votes.
-- [ ] Show unique approval voters, total approval votes, repeated approval vote counts, and approval vote fee totals per rule.
-- [ ] Show unique elimination voters, total elimination votes, repeated elimination vote counts, and elimination vote fee totals per finalist.
-- [ ] Show finalist composition: top-voted finalists and VRF-random finalists.
-- [ ] Show active rule election source and public VRF proof link.
-- [ ] Show invalidated rules with public reason codes only.
-- [ ] Show paid rule removals with public remover/action metadata where on-chain/public.
-- [ ] Show rule token count distribution.
-- [ ] Show public difficulty/clarity labels where produced by deterministic/public compiler artifacts.
+- [x] Show proposed rules per turn.
+- [x] Show rule status counts: proposed, precompiled, eligible, finalist, eliminated, survived, active, invalidated, expired, and removed.
+- [x] Show top rules by votes.
+- [x] Show unique approval voters, total approval votes, repeated approval vote counts, and approval vote fee totals per rule.
+- [x] Show unique elimination voters, total elimination votes, repeated elimination vote counts, and elimination vote fee totals per finalist.
+- [x] Show finalist composition: top-voted finalists and VRF-random finalists.
+- [x] Show active rule election source and public VRF proof link.
+- [x] Show invalidated rules with public reason codes only.
+- [x] Show paid rule removals with public remover/action metadata where on-chain/public.
+- [x] Show rule token count distribution.
+- [x] Show public difficulty/clarity labels where produced by deterministic/public compiler artifacts.
 
 **Approval criteria:**
 
-- [ ] Users can inspect how a rule moved through the public lifecycle.
-- [ ] Users can distinguish unique-wallet support from repeated paid-vote intensity.
-- [ ] Public invalidation/removal summaries do not expose private compiler logs or confidential moderation payloads.
+- [x] Users can inspect how a rule moved through the public lifecycle.
+- [x] Users can distinguish unique-wallet support from repeated paid-vote intensity.
+- [x] Public invalidation/removal summaries do not expose private compiler logs or confidential moderation payloads.
 
 ---
 
@@ -5679,21 +5749,21 @@ Build a read-only admin/transparency console that exposes only data that is publ
 
 **Checklist:**
 
-- [ ] Show draw VRF request, fulfillment, randomness proof reference, and draw result.
-- [ ] Show rule election VRF request, fulfillment, randomness proof reference, and selected active rule.
-- [ ] Show eligible pool hash, finalist set hash, draw result hash, winner calculation hash, and audit chain head.
-- [ ] Show original-rule winner count and payout calculation.
-- [ ] Show alternative-rule winner count and payout calculation.
-- [ ] Show creator/voter reward calculation summary.
-- [ ] Show claim records by public status: claimable, claimed, expired, below threshold, and rolled over.
-- [ ] Show accounting reconciliation status between public indexer/API projection and on-chain/accounting records.
-- [ ] Link to public audit endpoints for reproducibility.
+- [x] Show draw VRF request, fulfillment, randomness proof reference, and draw result.
+- [x] Show rule election VRF request, fulfillment, randomness proof reference, and selected active rule.
+- [x] Show eligible pool hash, finalist set hash, draw result hash, winner calculation hash, and audit chain head.
+- [x] Show original-rule winner count and payout calculation.
+- [x] Show alternative-rule winner count and payout calculation.
+- [x] Show creator/voter reward calculation summary.
+- [x] Show claim records by public status: claimable, claimed, expired, below threshold, and rolled over.
+- [x] Show accounting reconciliation status between public indexer/API projection and on-chain/accounting records.
+- [x] Link to public audit endpoints for reproducibility.
 
 **Approval criteria:**
 
-- [ ] A third party can verify draw, election, winner, payout, and claim summaries from public proofs.
-- [ ] Accounting discrepancies are visible without exposing private logs.
-- [ ] No wallet funnel, device, IP, or session telemetry is displayed.
+- [x] A third party can verify draw, election, winner, payout, and claim summaries from public proofs.
+- [x] Accounting discrepancies are visible without exposing private logs.
+- [x] No wallet funnel, device, IP, or session telemetry is displayed.
 
 ---
 
@@ -5703,26 +5773,54 @@ Build a read-only admin/transparency console that exposes only data that is publ
 
 **Checklist:**
 
-- [ ] Show public activity totals by turn duration.
-- [ ] Show fee totals by turn duration.
-- [ ] Show prize and rollover totals by turn duration.
-- [ ] Show public rule proposal, vote, finalist, election, and invalidation trends.
-- [ ] Show creator reward and voter reward totals over time.
-- [ ] Show top public creators by proposed rules, votes, elected rules, and winner-producing rules.
-- [ ] Show repeated paid-action counts and fee escalation totals by public action scope.
-- [ ] Show public CSV/JSON snapshot exports.
-- [ ] Include source references and derivation notes in exports.
-- [ ] Exclude private retention, funnel, device, session, and share/acquisition analytics.
+- [x] Show public activity totals by turn duration.
+- [x] Show fee totals by turn duration.
+- [x] Show prize and rollover totals by turn duration.
+- [x] Show public rule proposal, vote, finalist, election, and invalidation trends.
+- [x] Show creator reward and voter reward totals over time.
+- [x] Show top public creators by proposed rules, votes, elected rules, and winner-producing rules.
+- [x] Show repeated paid-action counts and fee escalation totals by public action scope.
+- [x] Show public CSV/JSON snapshot exports.
+- [x] Include source references and derivation notes in exports.
+- [x] Exclude private retention, funnel, device, session, and share/acquisition analytics.
 
 **Approval criteria:**
 
-- [ ] Trend views are reproducible from public sources.
-- [ ] Exports do not include private analytics.
-- [ ] Dashboard supports transparency without creating a hidden internal analytics surface.
+- [x] Trend views are reproducible from public sources.
+- [x] Exports do not include private analytics.
+- [x] Dashboard supports transparency without creating a hidden internal analytics surface.
 
 ---
 
-#### M5.6 — Console Safety Boundaries
+#### M5.6 — Restricted AI Agent Operations Dashboard
+
+**Objective:** monitor AI Rule Compiler and agent harness usage without exposing sensitive payloads or changing game state.
+
+**Checklist:**
+
+- [ ] Show agent call volume by role: interpretation, normalization, compilation, review, adversarial testing, and final validation.
+- [ ] Show provider/model routing by role, including local/self-hosted provider usage.
+- [ ] Show latency percentiles by provider/model/role.
+- [ ] Show timeout, malformed output, schema-validation failure, guardrail rejection, and provider error counts.
+- [ ] Show fallback and escalation counts by provider/model/role.
+- [ ] Show provider disagreement rate.
+- [ ] Show model confidence, compiler confidence, and final confidence distributions.
+- [ ] Show token usage and estimated cost by provider/model/role.
+- [ ] Show queue backlog and dead-letter jobs for compiler/reviewer/tester tasks.
+- [ ] Show local model health, serving engine, configured model name, model digest, quantization, and last health-check result.
+- [ ] Show redacted incident snapshots for agent/provider failures.
+- [ ] Link restricted operational rows to public-safe audit records using turn id, rule id, artifact hash, or audit hash.
+- [ ] Exclude raw prompts, raw completions, provider API keys, secret values, unrestricted compiler reasoning traces, private request/response bodies, and unredacted stack traces.
+
+**Approval criteria:**
+
+- [ ] Operators can diagnose agent/provider latency, cost, fallback, confidence, and failure issues.
+- [ ] The dashboard cannot alter compiler outputs, active rules, draw results, winners, payouts, or claims.
+- [ ] Restricted AI metrics are access-controlled and redacted.
+
+---
+
+#### M5.7 — Console Safety Boundaries
 
 **Objective:** prevent the console from compromising game integrity or expanding into private analytics.
 
@@ -5737,15 +5835,17 @@ Build a read-only admin/transparency console that exposes only data that is publ
 - [ ] Admin mutations are not available in the transparency console.
 - [ ] Console data loaders are read-only.
 - [ ] Console exports contain only public/derivable fields.
+- [ ] Restricted AI operations exports contain only redacted operational fields.
 - [ ] Console logs do not capture private user analytics.
 - [ ] Add a review checklist for new dashboard fields.
-- [ ] Add a denylist for private telemetry fields: IP, device fingerprint, session id, private user-agent record, wallet connect attempt, wallet failure, and private funnel step.
+- [ ] Add a denylist for private telemetry fields: IP, device fingerprint, session id, private user-agent record, wallet connect attempt, wallet failure, private funnel step, raw prompt, raw completion, provider API key, secret value, unrestricted compiler reasoning trace, private provider request/response body, and unredacted stack trace.
 
 **Approval criteria:**
 
-- [ ] Console is transparency-focused, not outcome-control-focused.
+- [ ] Public console is transparency-focused and restricted AI operations are monitoring-focused, not outcome-control-focused.
 - [ ] Protected game state cannot be mutated through admin.
-- [ ] No private analytics field is required to render the console.
+- [ ] No private user analytics field is required to render the console.
+- [ ] Restricted AI operations can be disabled without affecting public transparency dashboards or game execution.
 
 ---
 
@@ -5754,8 +5854,9 @@ Build a read-only admin/transparency console that exposes only data that is publ
 M5 is approved only if all M5 submilestones are approved and:
 
 - [ ] At least three transparency insights can be derived from public/devnet usage: fee flow, prize distribution, rule lifecycle, settlement proof, or reward distribution.
-- [ ] Every displayed metric has a documented public derivation path.
-- [ ] Console does not expose private analytics and does not compromise game integrity.
+- [ ] Every public displayed metric has a documented public derivation path, and every restricted AI metric has a documented redacted operational source.
+- [ ] Restricted AI operations dashboard provides useful agent/provider usage monitoring without exposing sensitive payloads.
+- [ ] Console does not expose private user analytics, secrets, raw prompts, raw completions, or unredacted operational payloads, and does not compromise game integrity.
 
 ---
 
@@ -5897,6 +5998,7 @@ M5 is approved only if all M5 submilestones are approved and:
 ##### Checklist
 
 - [ ] Compiler metrics dashboard exists.
+- [ ] Restricted AI operations dashboard exists with redacted agent/provider usage metrics.
 - [ ] Runtime metrics dashboard exists.
 - [ ] Accounting metrics dashboard exists.
 - [ ] Repeated paid-action fee dashboard exists, showing sequence counts, paid amounts, free-first-action usage, and fee escalation by action scope and public wallet group.
@@ -5908,7 +6010,7 @@ M5 is approved only if all M5 submilestones are approved and:
 
 ##### Approval Criteria
 
-- [ ] On-call operator can diagnose compiler/runtime/accounting failures.
+- [ ] On-call operator can diagnose compiler/agent/provider/runtime/accounting failures.
 - [ ] On-call operator can diagnose repeated paid-action fee, sequence, and abuse-detection failures.
 - [ ] Emergency pause can stop unsafe transitions.
 - [ ] All critical alerts fire in staging.
@@ -5935,7 +6037,7 @@ Deploy a controlled mainnet beta with real SOL payments, production monitoring, 
 - [ ] Deploy production API.
 - [ ] Deploy production worker.
 - [ ] Deploy production web app.
-- [ ] Deploy read-only transparency console.
+- [ ] Deploy read-only transparency console with restricted AI operations monitoring if enabled.
 - [ ] Configure production environment variables.
 - [ ] Configure secrets management.
 - [ ] Configure production database.
@@ -5992,6 +6094,7 @@ Deploy a controlled mainnet beta with real SOL payments, production monitoring, 
 - [ ] Configure queue metrics.
 - [ ] Configure database metrics.
 - [ ] Configure LLM provider metrics.
+- [ ] Configure restricted AI operations dashboard metrics and redaction.
 - [ ] Configure VRF/draw metrics.
 - [ ] Configure payout metrics.
 - [ ] Configure repeated vote fee and vote-sequence metrics.
@@ -6003,6 +6106,7 @@ Deploy a controlled mainnet beta with real SOL payments, production monitoring, 
 **Approval criteria:**
 
 - [ ] Team can detect draw failures, queue lag, LLM failures, payout issues, and repeated-vote fee/indexing issues.
+- [ ] Team can diagnose AI agent/provider failures without exposing raw prompts, raw completions, secrets, or private user analytics.
 - [ ] Alerts fire in test scenarios.
 - [ ] Logs allow incident reconstruction.
 
@@ -6187,7 +6291,7 @@ Prepare the product for broader public launch by hardening infrastructure, impro
 
 #### M7.4 — Transparency Insights Maturity
 
-**Objective:** ensure the console supports public/derivable turn, rule, fee, prize, reward, settlement, and audit analysis.
+**Objective:** ensure the console supports public/derivable turn, rule, fee, prize, reward, settlement, and audit analysis, plus restricted AI operations monitoring.
 
 **Checklist:**
 
@@ -6198,13 +6302,14 @@ Prepare the product for broader public launch by hardening infrastructure, impro
 - [ ] Validate repeated vote and repeated vote fee dashboard data.
 - [ ] Validate turn-cycle dashboard data.
 - [ ] Validate settlement proof and audit dashboard data.
+- [ ] Validate restricted AI operations dashboard data, access control, and redaction.
 - [ ] Add filters by date, turn duration, rule status, fee type, and public action type.
 - [ ] Add export/snapshot functionality.
 - [ ] Add dashboard documentation.
 
 **Approval criteria:**
 
-- [ ] Transparency console supports launch decision-making and community review.
+- [ ] Transparency console supports launch decision-making and community review, and restricted AI operations supports operator diagnosis.
 - [ ] Metrics are trusted by product/engineering and reproducible by third parties.
 - [ ] Transparency console can distinguish unique-voter support from repeated-vote intensity using public/on-chain data.
 - [ ] Dashboard can identify at least three launch risks or opportunities.
