@@ -314,6 +314,38 @@ export interface PrizePoolAccounting {
   turnId: number;
 }
 
+export interface RepeatedVoteFeeReconciliationRecord {
+  actualFeeLamports: number;
+  expectedFeeLamports: number;
+  matchesExpectedFee: boolean;
+  ruleId: number;
+  sequence: number;
+  turnId: number;
+  voter: string;
+  voteType: "approval" | "elimination";
+}
+
+export interface RepeatedVoteFeeReconciliationSide {
+  count: number;
+  expectedGrossLamports: number;
+  grossLamports: number;
+  matchesExpectedGross: boolean;
+  matchesPrizePoolSource: boolean;
+  prizePoolGrossLamports: number;
+  records: RepeatedVoteFeeReconciliationRecord[];
+}
+
+export interface RepeatedVoteFeeReconciliation {
+  approval: RepeatedVoteFeeReconciliationSide;
+  config: Pick<
+    PrizePoolAccountingConfig,
+    "repeatedActionFeeMultiplier" | "voteFeeLamports" | "voteFeeStartTurn"
+  >;
+  elimination: RepeatedVoteFeeReconciliationSide;
+  matches: boolean;
+  turnId: number;
+}
+
 export type DrawStatus = "failed" | "fulfilled" | "requested";
 
 export interface DrawRecord {
@@ -836,6 +868,7 @@ const CORS_PATHS = new Set([
   "/draws",
   "/elections",
   "/guess-receipts",
+  "/admin/repeated-vote-fee-reconciliation",
   "/prize-pool-accounting",
   "/prize-pool-rollovers",
   "/turn-rollovers/settle",
@@ -2319,6 +2352,18 @@ export function listRuleProposals(turnId: number) {
 }
 
 export function saveRuleVote(vote: RuleVoteRecord) {
+  if (vote.sequence === undefined) {
+    const retry = [...ruleVotes.values()].find(
+      (candidate) =>
+        candidate.turnId === vote.turnId &&
+        candidate.ruleId === vote.ruleId &&
+        candidate.voter === vote.voter &&
+        candidate.signature === vote.signature,
+    );
+    if (retry) {
+      return retry;
+    }
+  }
   const sequence =
     vote.sequence ??
     [...ruleVotes.values()].filter(
@@ -2327,6 +2372,14 @@ export function saveRuleVote(vote: RuleVoteRecord) {
         candidate.ruleId === vote.ruleId &&
         candidate.voter === vote.voter,
     ).length + 1;
+  const key = getRuleVoteKey(vote.turnId, vote.ruleId, vote.voter, sequence);
+  const existing = ruleVotes.get(key);
+  if (existing) {
+    if (existing.signature !== vote.signature) {
+      throw new Error("DUPLICATE_RULE_VOTE");
+    }
+    return existing;
+  }
   const saved = {
     ...vote,
     sequence,
@@ -2338,14 +2391,23 @@ export function saveRuleVote(vote: RuleVoteRecord) {
         turnId: vote.turnId,
       }),
   };
-  ruleVotes.set(
-    getRuleVoteKey(saved.turnId, saved.ruleId, saved.voter, saved.sequence),
-    saved,
-  );
+  ruleVotes.set(key, saved);
   return saved;
 }
 
 export function saveRuleEliminationVote(vote: RuleEliminationVoteRecord) {
+  if (vote.sequence === undefined) {
+    const retry = [...ruleEliminationVotes.values()].find(
+      (candidate) =>
+        candidate.turnId === vote.turnId &&
+        candidate.ruleId === vote.ruleId &&
+        candidate.voter === vote.voter &&
+        candidate.signature === vote.signature,
+    );
+    if (retry) {
+      return retry;
+    }
+  }
   const sequence =
     vote.sequence ??
     [...ruleEliminationVotes.values()].filter(
@@ -2354,6 +2416,19 @@ export function saveRuleEliminationVote(vote: RuleEliminationVoteRecord) {
         candidate.ruleId === vote.ruleId &&
         candidate.voter === vote.voter,
     ).length + 1;
+  const key = getRuleEliminationVoteKey(
+    vote.turnId,
+    vote.ruleId,
+    vote.voter,
+    sequence,
+  );
+  const existing = ruleEliminationVotes.get(key);
+  if (existing) {
+    if (existing.signature !== vote.signature) {
+      throw new Error("DUPLICATE_RULE_ELIMINATION_VOTE");
+    }
+    return existing;
+  }
   const saved = {
     ...vote,
     sequence,
@@ -2365,15 +2440,7 @@ export function saveRuleEliminationVote(vote: RuleEliminationVoteRecord) {
         turnId: vote.turnId,
       }),
   };
-  ruleEliminationVotes.set(
-    getRuleEliminationVoteKey(
-      saved.turnId,
-      saved.ruleId,
-      saved.voter,
-      saved.sequence,
-    ),
-    saved,
-  );
+  ruleEliminationVotes.set(key, saved);
   return saved;
 }
 
@@ -5016,6 +5083,104 @@ export function getPrizePoolAccounting(turnId: number) {
   });
 }
 
+function buildRepeatedVoteFeeReconciliationSide(args: {
+  prizePoolGrossLamports: number;
+  turnId: number;
+  votes: Array<RuleVoteRecord | RuleEliminationVoteRecord>;
+  voteType: "approval" | "elimination";
+}): RepeatedVoteFeeReconciliationSide {
+  const baseFeeLamports = solToLamports(MVP_FEES_SOL.vote);
+  const records = args.votes
+    .map((vote) => {
+      const sequence = vote.sequence ?? 0;
+      const expectedFeeLamports =
+        sequence > 0
+          ? calculateRepeatedActionFeeLamports({
+              baseFeeLamports,
+              sequence,
+              turnId: vote.turnId,
+            })
+          : 0;
+      const actualFeeLamports = vote.feeLamports ?? 0;
+
+      return {
+        actualFeeLamports,
+        expectedFeeLamports,
+        matchesExpectedFee: actualFeeLamports === expectedFeeLamports,
+        ruleId: vote.ruleId,
+        sequence,
+        turnId: vote.turnId,
+        voter: vote.voter,
+        voteType: args.voteType,
+      };
+    })
+    .sort(
+      (left, right) =>
+        left.ruleId - right.ruleId ||
+        left.voter.localeCompare(right.voter) ||
+        left.sequence - right.sequence,
+    );
+  const grossLamports = records.reduce(
+    (total, record) => total + record.actualFeeLamports,
+    0,
+  );
+  const expectedGrossLamports = records.reduce(
+    (total, record) => total + record.expectedFeeLamports,
+    0,
+  );
+
+  return {
+    count: records.length,
+    expectedGrossLamports,
+    grossLamports,
+    matchesExpectedGross: grossLamports === expectedGrossLamports,
+    matchesPrizePoolSource: grossLamports === args.prizePoolGrossLamports,
+    prizePoolGrossLamports: args.prizePoolGrossLamports,
+    records,
+  };
+}
+
+export function getRepeatedVoteFeeReconciliation(
+  turnId: number,
+): RepeatedVoteFeeReconciliation {
+  assertNonNegativeSafeInteger(turnId, "turn_id");
+  if (turnId <= 0) {
+    throw new Error("INVALID_TURN_ID");
+  }
+
+  const accounting = getPrizePoolAccounting(turnId);
+  const approval = buildRepeatedVoteFeeReconciliationSide({
+    prizePoolGrossLamports: accounting.sources.votes.grossLamports,
+    turnId,
+    votes: listRuleVotes(turnId).votes,
+    voteType: "approval",
+  });
+  const elimination = buildRepeatedVoteFeeReconciliationSide({
+    prizePoolGrossLamports: accounting.sources.eliminationVotes.grossLamports,
+    turnId,
+    votes: listRuleEliminationVotes(turnId).votes,
+    voteType: "elimination",
+  });
+
+  return {
+    approval,
+    config: {
+      repeatedActionFeeMultiplier: REPEATED_ACTION_FEE_MULTIPLIER,
+      voteFeeLamports: solToLamports(MVP_FEES_SOL.vote),
+      voteFeeStartTurn: VOTE_FEE_START_TURN,
+    },
+    elimination,
+    matches:
+      approval.matchesExpectedGross &&
+      approval.matchesPrizePoolSource &&
+      approval.records.every((record) => record.matchesExpectedFee) &&
+      elimination.matchesExpectedGross &&
+      elimination.matchesPrizePoolSource &&
+      elimination.records.every((record) => record.matchesExpectedFee),
+    turnId,
+  };
+}
+
 export function getRoundSummary(
   turnId: number,
   activeTurnId: number = IDEALER_ACTIVE_TURN_ID,
@@ -5227,6 +5392,7 @@ if (isMainModule()) {
     if (
       request.method === "OPTIONS" &&
       (CORS_PATHS.has(url.pathname) ||
+        url.pathname.startsWith("/admin/repeated-vote-fee-reconciliation/") ||
         url.pathname.startsWith("/audit/") ||
         url.pathname.startsWith("/api/v1/turns/") ||
         url.pathname.startsWith("/players/") ||
@@ -5765,6 +5931,25 @@ if (isMainModule()) {
       sendJson(request, response, 200, {
         activity: getRolloverActivityEvents(turnId),
         settlement: getTurnRolloverSettlement(turnId),
+      });
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      url.pathname.startsWith("/admin/repeated-vote-fee-reconciliation/")
+    ) {
+      const turnId = Number(
+        url.pathname.slice("/admin/repeated-vote-fee-reconciliation/".length),
+      );
+
+      if (!Number.isInteger(turnId) || turnId <= 0) {
+        sendJson(request, response, 400, { error: "invalid_turn_id" });
+        return;
+      }
+
+      sendJson(request, response, 200, {
+        reconciliation: getRepeatedVoteFeeReconciliation(turnId),
       });
       return;
     }

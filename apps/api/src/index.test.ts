@@ -17,6 +17,7 @@ import {
   listPlayerHistory,
   getMandatedRuleSignatures,
   getPrizePoolAccounting,
+  getRepeatedVoteFeeReconciliation,
   getRewardSummary,
   getActivityEvents,
   getRolloverActivityEvents,
@@ -30,6 +31,7 @@ import {
   listClaimRecords,
   listCreatorRewardRecords,
   listPaidRuleRemovals,
+  listRuleVotes,
   listRuleEliminationVotes,
   listVoterRewardRecords,
   listWinnerRecords,
@@ -424,6 +426,222 @@ test("elimination vote fees use same-side repeat escalation", () => {
   assert.equal(afterGate.sources.eliminationVotes.count, 3);
   assert.equal(afterGate.sources.eliminationVotes.feeLamports, 5_000_000);
   assert.equal(afterGate.sources.eliminationVotes.grossLamports, 35_000_000);
+});
+
+test("repeated vote reconciliation matches prize pool accounting", () => {
+  resetApiStateForTests();
+  const turnId = 99;
+
+  saveRuleVote({
+    ruleId: 1,
+    ruleProposal: base58,
+    ruleVote: base58,
+    sequence: 1,
+    signature: base58,
+    submittedAt: "2026-06-12T12:06:00.000Z",
+    turnId,
+    voter: wallet,
+  });
+  saveRuleVote({
+    ruleId: 1,
+    ruleProposal: base58,
+    ruleVote: base58,
+    sequence: 2,
+    signature: walletTwo,
+    submittedAt: "2026-06-12T12:06:30.000Z",
+    turnId,
+    voter: wallet,
+  });
+  saveRuleVote({
+    ruleId: 1,
+    ruleProposal: base58,
+    ruleVote: base58,
+    sequence: 3,
+    signature: walletThree,
+    submittedAt: "2026-06-12T12:07:00.000Z",
+    turnId,
+    voter: wallet,
+  });
+  saveRuleEliminationVote({
+    eliminationVote: base58,
+    ruleId: 2,
+    ruleProposal: base58,
+    sequence: 1,
+    signature: base58,
+    submittedAt: "2026-06-12T12:08:00.000Z",
+    turnId,
+    voter: walletTwo,
+  });
+  saveRuleEliminationVote({
+    eliminationVote: base58,
+    ruleId: 2,
+    ruleProposal: base58,
+    sequence: 2,
+    signature: wallet,
+    submittedAt: "2026-06-12T12:08:30.000Z",
+    turnId,
+    voter: walletTwo,
+  });
+
+  const accounting = getPrizePoolAccounting(turnId);
+  const reconciliation = getRepeatedVoteFeeReconciliation(turnId);
+
+  assert.equal(reconciliation.matches, true);
+  assert.deepEqual(
+    reconciliation.approval.records.map((record) => record.expectedFeeLamports),
+    [0, 10_000_000, 20_000_000],
+  );
+  assert.deepEqual(
+    reconciliation.elimination.records.map(
+      (record) => record.expectedFeeLamports,
+    ),
+    [0, 10_000_000],
+  );
+  assert.equal(reconciliation.approval.grossLamports, 30_000_000);
+  assert.equal(reconciliation.elimination.grossLamports, 10_000_000);
+  assert.equal(
+    reconciliation.approval.prizePoolGrossLamports,
+    accounting.sources.votes.grossLamports,
+  );
+  assert.equal(
+    reconciliation.elimination.prizePoolGrossLamports,
+    accounting.sources.eliminationVotes.grossLamports,
+  );
+});
+
+test("repeated vote retries are idempotent and conflicting retries are rejected", () => {
+  resetApiStateForTests();
+  const turnId = 100;
+  const firstApproval = saveRuleVote({
+    ruleId: 1,
+    ruleProposal: base58,
+    ruleVote: base58,
+    sequence: 2,
+    signature: base58,
+    submittedAt: "2026-06-12T12:06:00.000Z",
+    turnId,
+    voter: wallet,
+  });
+  const approvalRetry = saveRuleVote({
+    ruleId: 1,
+    ruleProposal: base58,
+    ruleVote: base58,
+    feeLamports: 999_999_999,
+    sequence: 2,
+    signature: base58,
+    submittedAt: "2026-06-12T12:09:00.000Z",
+    turnId,
+    voter: wallet,
+  });
+  const firstElimination = saveRuleEliminationVote({
+    eliminationVote: base58,
+    ruleId: 2,
+    ruleProposal: base58,
+    sequence: 2,
+    signature: walletTwo,
+    submittedAt: "2026-06-12T12:07:00.000Z",
+    turnId,
+    voter: walletTwo,
+  });
+  const eliminationRetry = saveRuleEliminationVote({
+    eliminationVote: base58,
+    feeLamports: 999_999_999,
+    ruleId: 2,
+    ruleProposal: base58,
+    sequence: 2,
+    signature: walletTwo,
+    submittedAt: "2026-06-12T12:10:00.000Z",
+    turnId,
+    voter: walletTwo,
+  });
+
+  assert.deepEqual(approvalRetry, firstApproval);
+  assert.deepEqual(eliminationRetry, firstElimination);
+  assert.equal(listRuleVotes(turnId).votes.length, 1);
+  assert.equal(listRuleEliminationVotes(turnId).votes.length, 1);
+  assert.equal(getPrizePoolAccounting(turnId).sources.votes.grossLamports, 10_000_000);
+  assert.equal(
+    getPrizePoolAccounting(turnId).sources.eliminationVotes.grossLamports,
+    10_000_000,
+  );
+  assert.throws(
+    () =>
+      saveRuleVote({
+        ruleId: 1,
+        ruleProposal: base58,
+        ruleVote: base58,
+        sequence: 2,
+        signature: walletThree,
+        submittedAt: "2026-06-12T12:11:00.000Z",
+        turnId,
+        voter: wallet,
+      }),
+    /DUPLICATE_RULE_VOTE/,
+  );
+  assert.throws(
+    () =>
+      saveRuleEliminationVote({
+        eliminationVote: base58,
+        ruleId: 2,
+        ruleProposal: base58,
+        sequence: 2,
+        signature: walletThree,
+        submittedAt: "2026-06-12T12:12:00.000Z",
+        turnId,
+        voter: walletTwo,
+      }),
+    /DUPLICATE_RULE_ELIMINATION_VOTE/,
+  );
+  assert.equal(listRuleVotes(turnId).votes.length, 1);
+  assert.equal(listRuleEliminationVotes(turnId).votes.length, 1);
+});
+
+test("repeated vote retries without an explicit sequence reuse the original record", () => {
+  resetApiStateForTests();
+  const turnId = 101;
+  const firstApproval = saveRuleVote({
+    ruleId: 1,
+    ruleProposal: base58,
+    ruleVote: base58,
+    signature: base58,
+    submittedAt: "2026-06-12T12:06:00.000Z",
+    turnId,
+    voter: wallet,
+  });
+  const approvalRetry = saveRuleVote({
+    ruleId: 1,
+    ruleProposal: base58,
+    ruleVote: base58,
+    signature: base58,
+    submittedAt: "2026-06-12T12:09:00.000Z",
+    turnId,
+    voter: wallet,
+  });
+  const firstElimination = saveRuleEliminationVote({
+    eliminationVote: base58,
+    ruleId: 2,
+    ruleProposal: base58,
+    signature: walletTwo,
+    submittedAt: "2026-06-12T12:07:00.000Z",
+    turnId,
+    voter: walletTwo,
+  });
+  const eliminationRetry = saveRuleEliminationVote({
+    eliminationVote: base58,
+    ruleId: 2,
+    ruleProposal: base58,
+    signature: walletTwo,
+    submittedAt: "2026-06-12T12:10:00.000Z",
+    turnId,
+    voter: walletTwo,
+  });
+
+  assert.deepEqual(approvalRetry, firstApproval);
+  assert.deepEqual(eliminationRetry, firstElimination);
+  assert.equal(firstApproval.sequence, 1);
+  assert.equal(firstElimination.sequence, 1);
+  assert.equal(listRuleVotes(turnId).votes.length, 1);
+  assert.equal(listRuleEliminationVotes(turnId).votes.length, 1);
 });
 
 test("rule elimination votes and closed decision state are projected for audit", () => {

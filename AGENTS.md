@@ -10,4 +10,6 @@
 - Always open folder .claude/skills to find relevant skill to do the task
 - Always use UTF-8 english language in ui and ux 
 - Always respecting right spelling
+- At the end of each task, always review the result for inconsistencies introduced by the changes.
+
   

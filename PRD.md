@@ -2,7 +2,7 @@
 
 > **Version:** 1.5.1
 > **Status:** Implementation Baseline — MVP defaults integrated; local/self-hosted LLM support added; rule elimination decision phase added; repeated paid action fee escalation specified
-> **Last Updated:** 2026-06-28
+> **Last Updated:** 2026-06-29
 > **Primary Product Surface:** Mobile-first DApp  
 > **Language:** Portuguese / English technical terms where useful
 
@@ -5794,17 +5794,17 @@ M5 is approved only if all M5 submilestones are approved and:
 - [x] Repeated approval vote fee sequence tested from turn 100: `VOTE_FEE, 2×, 4×...`.
 - [x] Repeated elimination vote fee sequence tested before turn 100: `0, 2×VOTE_FEE, 4×VOTE_FEE, 8×VOTE_FEE...`.
 - [x] Repeated elimination vote fee sequence tested from turn 100: `VOTE_FEE, 2×VOTE_FEE, 4×VOTE_FEE...`.
-- [ ] Repeated vote fee transfers reconcile into the prize pool across contract, backend, and admin projections.
-- [ ] Repeated vote retry/idempotency tested so a retry cannot double-charge or create an unintended extra vote sequence.
+- [x] Repeated vote fee transfers reconcile into the prize pool across contract, backend, and admin projections.
+- [x] Repeated vote retry/idempotency tested so a retry cannot double-charge or create an unintended extra vote sequence.
 - [x] Elected-rule voter reward is tested with repeated votes and remains one reward share per unique voter wallet.
 - [x] Rollover partial and total cases tested.
 
 ##### Approval Criteria
 
 - [x] Backend, game engine and contract accounting match. Historical baseline; PRD v1.5.1 requires the same parity for repeated vote fee sequences before mainnet.
-- [ ] Backend, indexer/admin, and contract repeated-vote fee accounting match for approval and elimination votes.
+- [x] Backend, indexer/admin, and contract repeated-vote fee accounting match for approval and elimination votes.
 - [x] No duplicate payout possible under retry.
-- [ ] No duplicate repeated-vote charge or unintended extra vote sequence is possible under retry.
+- [x] No duplicate repeated-vote charge or unintended extra vote sequence is possible under retry.
 - [x] Creator reward cannot exceed reserve or cap.
 - [x] Voter reward recipient count is wallet-unique even when voters cast repeated approval votes.
 
