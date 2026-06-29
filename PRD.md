@@ -1434,7 +1434,7 @@ Removal protection rules:
 
 - the creator cannot remove their own rule once it has at least `MIN_VOTES_CREATOR_SELF_REMOVE` votes;
 - a third party cannot remove another user’s rule once it has at least `MIN_VOTES_THIRD_PARTY_REMOVE` votes;
-- the system may still invalidate a rule for formal/security reasons through validation, abuse scoring, or restricted admin review;
+- the system may still invalidate a rule for formal/security reasons through validation, abuse scoring, or restricted operator/security review;
 - system invalidation is separate from paid player removal and must be logged with a reason.
 
 UX requirements:
@@ -1451,7 +1451,7 @@ The product also supports:
 - report rule;
 - automatic invalidation;
 - abuse scoring;
-- restricted admin review for exceptional cases only;
+- restricted operator/security review for exceptional cases only;
 - audit log for every removal and invalidation.
 
 Rationale:
@@ -1635,7 +1635,7 @@ Required controls:
 - track participation signals;
 - detect vote clusters;
 - detect sudden concentration by newly seen wallets;
-- expose vote concentration dashboard in the restricted admin console;
+- expose public vote concentration and repeated-vote fee metrics in the transparency console;
 - generate suspicious voting alerts.
 
 The MVP does not need perfect Sybil resistance, but it must make manipulation visible and make governance actions costlier than creating fresh wallets.
@@ -3127,7 +3127,7 @@ unpause
 update_config
 ```
 
-`remove_rule` is included in MVP as a paid player action. It must verify the remover role, vote-count thresholds, current-turn GameToken PDA, pre-election-lock timing, removal fee payment, and prize-pool fee destination. Rule invalidation remains a separate formal/security path handled by validation, reporting, abuse scoring, and restricted admin review.
+`remove_rule` is included in MVP as a paid player action. It must verify the remover role, vote-count thresholds, current-turn GameToken PDA, pre-election-lock timing, removal fee payment, and prize-pool fee destination. Rule invalidation remains a separate formal/security path handled by validation, reporting, abuse scoring, and restricted operator/security review.
 
 `vote_rule` is the approval vote instruction. It must verify the current-turn GameToken PDA, that the target rule is vote-eligible, that the voting window is open, the repeated-vote sequence/idempotency key for `(turn, wallet, rule)`, the required escalating vote fee when non-free, and the prize-pool fee destination.
 
@@ -3524,7 +3524,7 @@ Retries must never:
 
 `/play` should be the primary mobile entry point and should load the current Live Round Hub directly.
 
-The public mobile DApp must not expose an `/admin` route or direct navigation to internal administration tools. Admin capabilities must live in a separate, access-restricted admin console.
+The public mobile DApp must not expose a privileged `/admin` route or direct navigation to internal administration tools. Public transparency pages may exist, but they must expose only public/on-chain or publicly derivable data and must not unlock private analytics.
 
 ### 11.3 Core Components
 
@@ -3772,7 +3772,7 @@ Optional local containers:
 
 | Service      | Container name       | Purpose                                                                                                                                                      | Default port |
 | ------------ | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -----------: |
-| `admin`      | `idealer-admin`      | Separate restricted admin console for retention, engagement, operations, compiler health, abuse, and accounting dashboards. Not linked from the public DApp. |       `3001` |
+| `admin`      | `idealer-admin`      | Optional read-only transparency console for public turn, rule, fee, prize, reward, settlement, and audit metrics derived from public/on-chain data. |       `3001` |
 | `mcp`        | `idealer-mcp`        | Local bounded MCP tools for rule schema, compiler, runtime, test harness, game engine and audit logging.                                                     |     internal |
 | `llm`        | `idealer-llm`        | Optional local/self-hosted LLM inference (Ollama/vLLM) exposing an OpenAI-compatible endpoint for the rule compiler. GPU recommended; CPU viable for models ≤4B. Not in the default required stack. |      `11434` |
 | `prometheus` | `idealer-prometheus` | Local metrics collection                                                                                                                                     |       `9090` |
@@ -4089,25 +4089,24 @@ Alerts:
 - oracle wallet low balance;
 - frontend API error spike.
 
-### 12.6 Private Admin Console
+### 12.6 Public Transparency Console
 
-Idealer must include a private admin console for internal product and operations insights.
+Idealer must include a read-only transparency console for public product, economy, rule, and settlement insights.
 
-This admin console is **not part of the public mobile DApp experience** and must have no direct visible association with the app interface.
+This console may be deployed separately or exposed as a clearly named transparency surface. It must not depend on private analytics or privileged user-tracking data.
 
 Requirements:
 
-- no public navigation link from the DApp;
-- no public `/admin` route inside the main mobile app;
-- separate deployment target or subdomain;
+- no privileged `/admin` route inside the main mobile app;
+- optional public navigation link only if the surface is clearly framed as transparency/audit, not as administration;
+- separate deployment target, subdomain, or clearly separated transparency route;
 - separate container: `idealer-admin`;
-- separate authentication layer;
-- role-based access control;
-- mandatory multi-factor authentication;
-- allowlist-based access where possible;
-- audit logs for all admin access and data views;
-- read-only by default for analytics and product insights;
-- write operations must be explicitly separated, permissioned, and logged.
+- read-only data loaders;
+- public/on-chain or publicly derivable data only;
+- no IP, device, session, wallet-funnel, private retention, or private behavioral analytics fields;
+- source labels for every metric;
+- export/snapshot outputs limited to public/derivable fields;
+- if deployment authentication is used, it must not reveal additional non-public metrics.
 
 Recommended access model:
 
@@ -4117,108 +4116,149 @@ Public DApp
   → no admin route
   → no admin bundle shipped to users
 
-Private Admin Console
-  → separate deployment
-  → restricted authentication
-  → retention and engagement dashboards
-  → operational inspection tools
+Transparency Console
+  → separate deployment or public transparency route
+  → read-only data access
+  → public/on-chain metrics only
+  → fee, prize, rule, settlement, and audit dashboards
 ```
 
-The admin console should be used primarily to understand user behavior and game health, not to manually alter outcomes.
+The transparency console should be used to make public game state, fee flows, prize distribution, rule outcomes, and settlement proofs easier to inspect. It must not expose private behavioral analytics or manually alter outcomes.
 
-#### 12.6.1 Admin Insights
+#### 12.6.1 Transparency Insights
 
-The admin console should provide insight into retention and engagement across the game loop.
+The admin/transparency console should provide insight only from information that is public, on-chain, or derivable from public audit records. It may aggregate and explain public data, but it must not expose private analytics, private funnel data, IP/device/session data, or non-public wallet behavior correlations.
 
 Core dashboards:
 
-| Dashboard              | Key questions answered                                                                 |
-| ---------------------- | -------------------------------------------------------------------------------------- |
-| Retention Overview     | Do users return after first play, first loss, first vote, or first near-miss?          |
-| Turn Cycle Performance | Which turn duration retains users best: 2h or 8h?                                      |
-| Rule Engagement        | Are users proposing, voting, sharing, and following rules?                             |
-| Creator Retention      | Do rule creators return after their rule is sampled, elected, or creates winners?      |
-| Wallet Funnel          | Where do mobile users drop: connect, sign, submit, vote, claim, or return from wallet? |
-| Prize & Reward Health  | How do prize size, creator rewards, and rollovers affect participation?                |
-| Near-Miss Impact       | Do near-miss messages increase next-turn participation?                                |
-| Sharing & Acquisition  | Which share moments generate return visits or new wallet connections?                  |
+| Dashboard                  | Key questions answered                                                                 |
+| -------------------------- | -------------------------------------------------------------------------------------- |
+| Turn Metrics               | How many public guesses, rule proposals, votes, removals, draws, and claims occurred?  |
+| Fee Transparency           | How much was collected in platform fees, game fees, vote fees, proposal fees, removal fees, and treasury fees? |
+| Prize Pool Transparency    | How much entered each prize bucket, rolled over, became claimable, was claimed, expired, or remained pending? |
+| Reward Transparency        | How much was distributed or reserved for creator and voter rewards, subject to public cap/reserve rules? |
+| Rule Transparency          | Which rules were proposed, eligible, finalists, eliminated, elected, active, invalidated, or removed? |
+| Vote & Support Transparency | What are the public unique-wallet support counts, repeated-vote counts, elimination counts, and fee totals per rule? |
+| Settlement Proofs          | Can observers verify VRF inputs, draw results, winner calculations, accounting, and audit hashes? |
+| Turn-Cycle Public Trends   | How do public activity totals and fee/prize flows compare across 2h and 8h turns?      |
 
 #### 12.6.2 Required Admin Metrics
 
-Retention metrics:
+Turn and public activity metrics:
 
 ```text
-D1 retention
-D3 retention
-D7 retention
-return_after_loss_rate
-return_after_near_miss_rate
-return_after_rule_elected_rate
-return_after_creator_reward_rate
-consecutive_turn_participation_rate
+turn_id
+turn_status
+turn_duration
+guesses_per_turn
+unique_guessing_wallets_per_turn
+rules_proposed_per_turn
+approval_votes_per_turn
+elimination_votes_per_turn
+unique_voting_wallets_per_turn
+paid_removals_per_turn
+claims_created_per_turn
+claims_completed_per_turn
 ```
 
-Engagement metrics:
+Fee and prize metrics:
 
 ```text
-votes_per_active_wallet
-rules_proposed_per_active_wallet
-guesses_per_active_wallet
-share_events_per_turn
-active_rule_view_rate
-rule_vote_to_guess_conversion
-rule_creator_repeat_rate
-spectator_to_player_conversion
+gross_turn_fees_lamports
+platform_treasury_fee_lamports
+guess_fee_lamports
+rule_proposal_fee_lamports
+approval_vote_fee_lamports
+elimination_vote_fee_lamports
+paid_removal_fee_lamports
+original_prize_bucket_lamports
+alternative_prize_bucket_lamports
+rollover_in_lamports
+rollover_out_lamports
+claimable_prize_lamports
+claimed_prize_lamports
+expired_unclaimed_lamports
 ```
 
-Mobile funnel metrics:
+Rule and voting metrics:
 
 ```text
-mobile_landing_to_wallet_connect
-wallet_connect_to_guess_submit
-guess_submit_to_wallet_confirmation
-wallet_confirmation_return_rate
-transaction_failure_rate
-mobile_session_length
+rules_by_status
+eligible_rules_per_turn
+finalist_rules_per_turn
+active_rule_id
+invalidated_rule_count
+public_invalidation_reason_codes
+rule_token_count_distribution
+rule_difficulty_distribution
+unique_approval_voters_per_rule
+approval_vote_repetitions_per_rule
+unique_elimination_voters_per_rule
+elimination_vote_repetitions_per_rule
+vote_fee_lamports_per_rule
 ```
 
 Turn-cycle metrics:
 
 ```text
-participation_by_turn_duration
+public_activity_by_turn_duration
 rule_proposals_by_turn_duration
 votes_by_turn_duration
 guesses_by_turn_duration
-creator_activity_by_turn_duration
+fees_by_turn_duration
+prize_distribution_by_turn_duration
 rollover_rate_by_turn_duration
-return_rate_by_next_turn_duration
 ```
 
-Creator reward metrics:
+Reward transparency metrics:
 
 ```text
 creator_rewards_paid_total
 creator_reward_recipients_total
 creator_reward_to_platform_monetization_ratio
-creator_reward_retention_lift
-creator_reward_share_events
-```
-
-Voter reward and vote fee metrics:
-
-```text
+creator_reward_cap_usage
+creator_reward_reserve_balance
 voter_rewards_paid_total
 voter_reward_recipients_total
 average_voter_reward_per_voter
 voter_reward_to_platform_monetization_ratio
-vote_fee_revenue_from_turn_100
+```
+
+Settlement and audit metrics:
+
+```text
+draw_vrf_request_status
+draw_vrf_fulfillment_slot
+rule_election_vrf_request_status
+eligible_pool_hash
+finalist_set_hash
+draw_result_hash
+winner_calculation_hash
+accounting_reconciliation_status
+audit_chain_head_hash
+public_proof_links
 ```
 
 #### 12.6.3 Admin Data Boundaries
 
-The admin console must not be used to influence live outcomes.
+The admin/transparency console must not be used to influence live outcomes and must not expose private analytics.
 
-Admin users must not be able to:
+The console must not include:
+
+- IP addresses;
+- device fingerprints;
+- private user-agent records;
+- wallet connect attempts;
+- wallet connect failures;
+- session identifiers;
+- private funnel steps;
+- retention cohorts by wallet;
+- return-after-loss/win/near-miss analytics;
+- non-public share/acquisition data;
+- private compiler/provider logs that include prompts, secrets, stack traces, or internal failure payloads;
+- any metric that requires non-public tracking beyond public/on-chain events and public audit records.
+
+Console users must not be able to:
 
 - change draw results;
 - alter submitted guesses;
@@ -4229,14 +4269,13 @@ Admin users must not be able to:
 
 Allowed admin functions for MVP:
 
-- view retention dashboards;
-- view engagement dashboards;
-- inspect failed jobs;
-- inspect rule invalidation reasons;
-- inspect compiler confidence and disagreement rates;
-- inspect mobile wallet funnel failures;
-- export anonymized aggregated metrics;
-- view operational alerts.
+- view public turn metrics;
+- view public fee and prize-pool metrics;
+- view public reward distribution metrics;
+- view public rule, vote, finalist, election, and invalidation summaries;
+- view public settlement, accounting, VRF, and audit proof links;
+- export public snapshots whose fields are reproducible from on-chain state, public indexer projections, or public audit logs;
+- view operational health summaries only when they do not expose secrets, private logs, IP/device/session data, or non-public user behavior.
 
 ---
 
@@ -4340,8 +4379,8 @@ Requirements:
 - Docker images built from pinned base images where possible;
 - separate development, staging, and production environment files;
 - least-privilege service credentials for API, worker, and admin services;
-- separate admin deployment with no direct association or navigation from the public mobile DApp;
-- mandatory MFA and access logging for the private admin console.
+- read-only transparency console data access;
+- no private analytics, device/session data, or secrets exposed through the transparency console.
 
 ---
 
@@ -4491,8 +4530,8 @@ Establish the product baseline, architecture baseline, monorepo structure, Docke
 - [x] Confirm elected-rule voter reward: 15% of a single individual payout, split equally among the elected rule's voters, funded from the same reserve with its own per-turn cap.
 - [x] Confirm vote fee from turn 100 onward, destination prize pool, with the current-turn Game Token requirement retained. Historical baseline; superseded by PRD v1.5.1 repeated approval-vote fee handling in sections 6.14 and 8.2.
 - [x] Confirm PRD v1.5.1 repeated vote policy: same wallet may repeatedly vote for or against the same rule; fee is `2^n * VOTE_FEE` where `n` is previous votes by that wallet on the same rule and same side; first same-side vote is free before turn 100 only; voter rewards remain unique per wallet.
-- [x] Confirm admin console is separate from the public DApp.
-- [x] Confirm admin console is for insights, not direct game manipulation.
+- [x] Confirm admin/transparency console is separate from privileged game administration.
+- [x] Confirm admin/transparency console is for public insights, not direct game manipulation.
 - [x] Confirm monorepo and Docker Compose are required implementation constraints.
 - [x] Resolve contradictions between economy, rule system, AI verification, Programs, and UX.
 
@@ -4528,7 +4567,7 @@ Establish the product baseline, architecture baseline, monorepo structure, Docke
 - [x] Create `apps/web` for the mobile-first public DApp.
 - [x] Create `apps/api` for backend API.
 - [x] Create `apps/worker` for background jobs and queues.
-- [x] Create `apps/admin` for the restricted admin insights console.
+- [x] Create `apps/admin` for the read-only transparency insights console.
 - [x] Create `packages/config` for shared eslint, tsconfig, prettier, env schemas, and config loading.
 - [x] Create `packages/types` for shared TypeScript types.
 - [x] Create `packages/constants` for game constants, limits, and fee configs.
@@ -4616,7 +4655,7 @@ Establish the product baseline, architecture baseline, monorepo structure, Docke
 - [x] Draft database schema for turns, rules, votes, guesses, logs, jobs, creator rewards, and admin metrics.
 - [x] Draft API contracts for current round, rule proposal, token count, voting, result, history, and audit.
 - [x] Draft event model for turn opened, rule proposed, vote cast, rule elected, draw completed, verification completed, payout available.
-- [x] Draft queue job model for rule validation, guess verification, payout calculation, metric aggregation, and admin analytics snapshots.
+- [x] Draft queue job model for rule validation, guess verification, payout calculation, metric aggregation, and public transparency snapshots.
 - [x] Draft smart contract account model.
 - [x] Draft smart contract instruction list.
 - [x] Draft AI agent input and output schemas.
@@ -5548,147 +5587,144 @@ M4 is approved only if all M4 submilestones are approved and:
 
 ---
 
-### 15.6 Milestone M5 — Restricted Admin Insights Console
+### 15.6 Milestone M5 — Public Transparency Insights Console
 
 #### Objective
 
-Build a private admin console that is not directly associated with the public app and is used only for retention, engagement, operational, and product insights.
+Build a read-only admin/transparency console that exposes only data that is public, on-chain, or derivable from public audit/indexer records. The console is used to make turn metrics, fee flows, prize pools, reward distribution, rule status, settlement proofs, and public audit data easier to inspect.
 
 ---
 
-#### M5.1 — Admin Separation & Access Control
+#### M5.1 — Transparency Surface & Data Boundary
 
-**Objective:** ensure admin is extremely restricted and not discoverable from public navigation.
+**Objective:** ensure the console is read-only and limited to public/derivable data.
 
 **Checklist:**
 
-- [ ] Keep admin outside public DApp navigation.
-- [ ] Use separate app surface, such as `apps/admin`.
-- [ ] Use separate deployment/domain or restricted path strategy.
-- [ ] Add strong authentication.
-- [ ] Add role-based access control.
-- [ ] Add IP allowlist or equivalent restriction if used.
-- [ ] Add session timeout.
-- [ ] Add audit log for admin access.
-- [ ] Block unauthorized access.
-- [ ] Log unauthorized access attempts.
+- [ ] Use a separate transparency/admin app surface, such as `apps/admin`, or a clearly separated public transparency route.
+- [ ] Keep the console read-only.
+- [ ] Do not require privileged data sources for displayed metrics.
+- [ ] Every displayed metric identifies its public source: on-chain account, transaction, public API projection, or audit log.
+- [ ] Do not display IP addresses, device fingerprints, private user-agent records, session identifiers, or private funnel events.
+- [ ] Do not display retention cohorts, return-after-loss/win/near-miss analytics, or non-public wallet behavior correlations.
+- [ ] If authentication is used for deployment control, it must not unlock additional non-public metrics.
+- [ ] Add export/snapshot capability only for public/derivable fields.
+- [ ] Add data-boundary tests or review checklist for every dashboard.
+- [ ] Document the public derivation path for each metric.
 
 **Approval criteria:**
 
-- [ ] Admin is not linked from public DApp.
-- [ ] Unauthorized users cannot access admin.
-- [ ] Every admin access is auditable.
+- [ ] Every console metric is reproducible from public/on-chain data or public audit/indexer records.
+- [ ] No private analytics or confidential operational payloads are displayed.
+- [ ] The console cannot mutate game state.
 
 ---
 
-#### M5.2 — Retention Dashboard
+#### M5.2 — Turn & Economy Transparency
 
-**Objective:** provide insight into whether users return after key moments.
+**Objective:** make public turn activity, platform fee collection, prize-pool funding, rollovers, and distributions easy to verify.
 
 **Checklist:**
 
-- [ ] Show return after first round.
-- [ ] Show return after loss.
-- [ ] Show return after near-miss.
-- [ ] Show return after win.
-- [ ] Show return after creator rule elected.
-- [ ] Show cohort retention by first activity date.
-- [ ] Show retention by wallet type.
-- [ ] Show retention by turn duration.
-- [ ] Show retention by user role: player, voter, creator, spectator.
+- [ ] Show public turn status, duration, countdown timestamps, and settlement status.
+- [ ] Show guesses, proposals, approval votes, elimination votes, paid removals, and claims per turn.
+- [ ] Show total fees collected per turn.
+- [ ] Show platform treasury fee collected per turn.
+- [ ] Show fee breakdown by action type: guess, rule proposal, approval vote, elimination vote, and paid removal.
+- [ ] Show prize-pool funding by original and alternative buckets.
+- [ ] Show rollover in, rollover out, payout dust, expired unclaimed amounts, and pending claimable amounts.
+- [ ] Show prize distribution by bucket and winner count.
+- [ ] Show creator/voter reward totals funded by the creator reward reserve.
+- [ ] Show reward reserve balance/cap usage where publicly derivable.
 - [ ] Add date filters.
-- [ ] Add export or snapshot capability.
+- [ ] Add public export or snapshot capability.
 
 **Approval criteria:**
 
-- [ ] Admin can identify where retention drops.
-- [ ] Dashboard supports at least weekly product decisions.
-- [ ] Metrics are consistent with tracked events.
+- [ ] A third party can reconcile displayed fee, prize, rollover, payout, and reward amounts against public sources.
+- [ ] Fee revenue for the platform and prize-pool funding are separated clearly.
+- [ ] Metrics are consistent with settlement/accounting audit records.
 
 ---
 
-#### M5.3 — Engagement Dashboard
+#### M5.3 — Rule & Voting Transparency
 
-**Objective:** measure participation quality and intensity.
+**Objective:** make public rule lifecycle, vote support, repeated-vote intensity, and rule outcomes auditable.
 
 **Checklist:**
 
-- [ ] Show guesses per turn.
-- [ ] Show votes per turn.
-- [ ] Show rules proposed per turn.
-- [ ] Show spectators per turn if measurable.
-- [ ] Show ratio of voters to guess submitters.
-- [ ] Show ratio of rule creators to active users.
-- [ ] Show share events per turn.
-- [ ] Show activity by turn duration.
+- [ ] Show proposed rules per turn.
+- [ ] Show rule status counts: proposed, precompiled, eligible, finalist, eliminated, survived, active, invalidated, expired, and removed.
 - [ ] Show top rules by votes.
-- [ ] Show invalidated rules.
+- [ ] Show unique approval voters, total approval votes, repeated approval vote counts, and approval vote fee totals per rule.
+- [ ] Show unique elimination voters, total elimination votes, repeated elimination vote counts, and elimination vote fee totals per finalist.
+- [ ] Show finalist composition: top-voted finalists and VRF-random finalists.
+- [ ] Show active rule election source and public VRF proof link.
+- [ ] Show invalidated rules with public reason codes only.
+- [ ] Show paid rule removals with public remover/action metadata where on-chain/public.
 - [ ] Show rule token count distribution.
+- [ ] Show public difficulty/clarity labels where produced by deterministic/public compiler artifacts.
 
 **Approval criteria:**
 
-- [ ] Admin can tell whether users are only playing, voting, creating, or watching.
-- [ ] Admin can compare engagement across turn durations.
-- [ ] Admin can identify low-quality or confusing rule behavior.
+- [ ] Users can inspect how a rule moved through the public lifecycle.
+- [ ] Users can distinguish unique-wallet support from repeated paid-vote intensity.
+- [ ] Public invalidation/removal summaries do not expose private compiler logs or confidential moderation payloads.
 
 ---
 
-#### M5.4 — Mobile Funnel Dashboard
+#### M5.4 — Settlement & Proof Dashboard
 
-**Objective:** reveal where mobile users drop off.
+**Objective:** expose public proof material for draws, elections, winners, accounting, and claims.
 
 **Checklist:**
 
-- [ ] Track landing/open `/play`.
-- [ ] Track wallet connect attempt.
-- [ ] Track wallet connect success.
-- [ ] Track number selection start.
-- [ ] Track guess submit attempt.
-- [ ] Track wallet transaction approval.
-- [ ] Track guess submit success.
-- [ ] Track rule composer open.
-- [ ] Track rule proposal success.
-- [ ] Track vote success.
-- [ ] Track claim success.
-- [ ] Show conversion rates between steps.
-- [ ] Segment by wallet/browser type.
+- [ ] Show draw VRF request, fulfillment, randomness proof reference, and draw result.
+- [ ] Show rule election VRF request, fulfillment, randomness proof reference, and selected active rule.
+- [ ] Show eligible pool hash, finalist set hash, draw result hash, winner calculation hash, and audit chain head.
+- [ ] Show original-rule winner count and payout calculation.
+- [ ] Show alternative-rule winner count and payout calculation.
+- [ ] Show creator/voter reward calculation summary.
+- [ ] Show claim records by public status: claimable, claimed, expired, below threshold, and rolled over.
+- [ ] Show accounting reconciliation status between public indexer/API projection and on-chain/accounting records.
+- [ ] Link to public audit endpoints for reproducibility.
 
 **Approval criteria:**
 
-- [ ] Admin can identify mobile wallet friction.
-- [ ] Funnel shows conversion between each core step.
-- [ ] Funnel supports debugging of wallet/deep-link failures.
+- [ ] A third party can verify draw, election, winner, payout, and claim summaries from public proofs.
+- [ ] Accounting discrepancies are visible without exposing private logs.
+- [ ] No wallet funnel, device, IP, or session telemetry is displayed.
 
 ---
 
-#### M5.5 — Creator & Reward Insights
+#### M5.5 — Public Trends & Exports
 
-**Objective:** evaluate whether creator incentives improve engagement.
+**Objective:** provide transparent aggregate trends without private retention, funnel, device, or session analytics.
 
 **Checklist:**
 
-- [ ] Show number of rule creators.
-- [ ] Show repeat rule creators.
-- [ ] Show creator rules elected.
-- [ ] Show creator rules producing winners.
-- [ ] Show creator reward events.
-- [ ] Show creator reward amount funded by the creator reward reserve.
-- [ ] Show creator return after reward.
-- [ ] Show top creators by votes.
-- [ ] Show top creators by elected rules.
-- [ ] Show creator reward sustainability metrics.
+- [ ] Show public activity totals by turn duration.
+- [ ] Show fee totals by turn duration.
+- [ ] Show prize and rollover totals by turn duration.
+- [ ] Show public rule proposal, vote, finalist, election, and invalidation trends.
+- [ ] Show creator reward and voter reward totals over time.
+- [ ] Show top public creators by proposed rules, votes, elected rules, and winner-producing rules.
+- [ ] Show repeated paid-action counts and fee escalation totals by public action scope.
+- [ ] Show public CSV/JSON snapshot exports.
+- [ ] Include source references and derivation notes in exports.
+- [ ] Exclude private retention, funnel, device, session, and share/acquisition analytics.
 
 **Approval criteria:**
 
-- [ ] Admin can determine whether rewards increase repeat creation.
-- [ ] Admin can assess whether the creator reward reserve supports creator rewards.
-- [ ] Admin can identify creators driving engagement.
+- [ ] Trend views are reproducible from public sources.
+- [ ] Exports do not include private analytics.
+- [ ] Dashboard supports transparency without creating a hidden internal analytics surface.
 
 ---
 
-#### M5.6 — Admin Safety Boundaries
+#### M5.6 — Console Safety Boundaries
 
-**Objective:** prevent admin from compromising game integrity.
+**Objective:** prevent the console from compromising game integrity or expanding into private analytics.
 
 **Checklist:**
 
@@ -5698,15 +5734,18 @@ Build a private admin console that is not directly associated with the public ap
 - [ ] Admin cannot silently modify active rules.
 - [ ] Admin cannot bypass prize accounting.
 - [ ] Admin cannot modify creator reward records after finalization.
-- [ ] Admin mutations, if any, are limited to non-game-content operations.
-- [ ] Add audit log for all admin actions.
-- [ ] Add read-only mode for most users.
+- [ ] Admin mutations are not available in the transparency console.
+- [ ] Console data loaders are read-only.
+- [ ] Console exports contain only public/derivable fields.
+- [ ] Console logs do not capture private user analytics.
+- [ ] Add a review checklist for new dashboard fields.
+- [ ] Add a denylist for private telemetry fields: IP, device fingerprint, session id, private user-agent record, wallet connect attempt, wallet failure, and private funnel step.
 
 **Approval criteria:**
 
-- [ ] Admin is insight-focused, not outcome-control-focused.
+- [ ] Console is transparency-focused, not outcome-control-focused.
 - [ ] Protected game state cannot be mutated through admin.
-- [ ] All admin actions are logged.
+- [ ] No private analytics field is required to render the console.
 
 ---
 
@@ -5714,9 +5753,9 @@ Build a private admin console that is not directly associated with the public ap
 
 M5 is approved only if all M5 submilestones are approved and:
 
-- [ ] At least three actionable retention or engagement insights can be derived from devnet usage.
-- [ ] Admin access restrictions pass review.
-- [ ] Admin does not compromise game integrity.
+- [ ] At least three transparency insights can be derived from public/devnet usage: fee flow, prize distribution, rule lifecycle, settlement proof, or reward distribution.
+- [ ] Every displayed metric has a documented public derivation path.
+- [ ] Console does not expose private analytics and does not compromise game integrity.
 
 ---
 
@@ -5861,7 +5900,7 @@ M5 is approved only if all M5 submilestones are approved and:
 - [ ] Runtime metrics dashboard exists.
 - [ ] Accounting metrics dashboard exists.
 - [ ] Repeated paid-action fee dashboard exists, showing sequence counts, paid amounts, free-first-action usage, and fee escalation by action scope and wallet cluster.
-- [ ] Mobile wallet funnel dashboard exists.
+- [ ] Public transaction/action status dashboard exists without private wallet funnel telemetry.
 - [ ] Alerts exist for repeated-action fee mismatch, unexpected free repeat actions, abnormal repeated-action concentration, and indexer/contract count divergence.
 - [ ] Incident runbook exists.
 - [ ] Incident runbook covers pausing or disabling repeated paid actions if fee escalation, indexing, or abuse detection fails.
@@ -5896,7 +5935,7 @@ Deploy a controlled mainnet beta with real SOL payments, production monitoring, 
 - [ ] Deploy production API.
 - [ ] Deploy production worker.
 - [ ] Deploy production web app.
-- [ ] Deploy restricted admin console.
+- [ ] Deploy read-only transparency console.
 - [ ] Configure production environment variables.
 - [ ] Configure secrets management.
 - [ ] Configure production database.
@@ -5997,26 +6036,25 @@ Deploy a controlled mainnet beta with real SOL payments, production monitoring, 
 
 #### M6.5 — Beta Analytics
 
-**Objective:** collect real usage signals for retention, engagement, economy, and creator behavior.
+**Objective:** collect and publish public/derivable beta transparency signals for economy, rules, rewards, settlement, and turn activity.
 
 **Checklist:**
 
-- [ ] Track activation funnel.
-- [ ] Track retention cohorts.
-- [ ] Track engagement per turn.
+- [ ] Track public activity per turn.
 - [ ] Track turn duration performance.
 - [ ] Track rule proposal quality.
-- [ ] Track voting behavior.
-- [ ] Track near-miss return behavior.
-- [ ] Track creator reward behavior.
+- [ ] Track public voting behavior.
+- [ ] Track public fee collection.
+- [ ] Track public prize-pool funding and distribution.
+- [ ] Track public creator and voter reward behavior.
 - [ ] Track reward sustainability.
 - [ ] Produce beta metrics report.
 
 **Approval criteria:**
 
-- [ ] Admin console shows enough data for product decisions.
-- [ ] Team can assess whether turn cycle improves retention.
-- [ ] Team can assess whether creator reward improves creator activity.
+- [ ] Transparency console shows enough public data for beta operations and community review.
+- [ ] Team can assess turn-cycle public activity and economy effects without private retention telemetry.
+- [ ] Team can assess creator/voter reward sustainability from public accounting data.
 
 ---
 
@@ -6147,27 +6185,27 @@ Prepare the product for broader public launch by hardening infrastructure, impro
 
 ---
 
-#### M7.4 — Admin Insights Maturity
+#### M7.4 — Transparency Insights Maturity
 
-**Objective:** ensure admin supports cohort, funnel, creator, economy, and turn-cycle analysis.
+**Objective:** ensure the console supports public/derivable turn, rule, fee, prize, reward, settlement, and audit analysis.
 
 **Checklist:**
 
-- [ ] Validate activation funnel data.
-- [ ] Validate retention cohort data.
-- [ ] Validate engagement dashboard data.
-- [ ] Validate creator dashboard data.
-- [ ] Validate economy/reward dashboard data.
+- [ ] Validate public turn activity dashboard data.
+- [ ] Validate public rule lifecycle dashboard data.
+- [ ] Validate public fee dashboard data.
+- [ ] Validate public prize/reward dashboard data.
 - [ ] Validate repeated vote and repeated vote fee dashboard data.
 - [ ] Validate turn-cycle dashboard data.
-- [ ] Add filters by date, wallet type, and turn duration.
+- [ ] Validate settlement proof and audit dashboard data.
+- [ ] Add filters by date, turn duration, rule status, fee type, and public action type.
 - [ ] Add export/snapshot functionality.
 - [ ] Add dashboard documentation.
 
 **Approval criteria:**
 
-- [ ] Admin supports launch decision-making.
-- [ ] Metrics are trusted by product/engineering.
+- [ ] Transparency console supports launch decision-making and community review.
+- [ ] Metrics are trusted by product/engineering and reproducible by third parties.
 - [ ] Admin can distinguish unique-voter support from repeated-vote intensity.
 - [ ] Dashboard can identify at least three launch risks or opportunities.
 
@@ -6250,7 +6288,7 @@ Expand the product beyond the core game loop with measurable social, creator, co
 - [ ] Define hosted round copy/visual treatment.
 - [ ] Add hosted round tracking.
 - [ ] Add share link for community round.
-- [ ] Add admin analytics for community rounds.
+- [ ] Add public transparency metrics for community rounds.
 - [ ] Add rollback/disable flag.
 
 **Approval criteria:**
@@ -6337,7 +6375,7 @@ M8 experiments are approved individually. Keep only experiments that:
 - [ ] have a clear target metric;
 - [ ] improve retention, engagement, sharing, or creator activity;
 - [ ] do not make the mobile core loop harder to understand;
-- [ ] are measurable through admin analytics;
+- [ ] are measurable through public transparency metrics where applicable;
 - [ ] have a rollback plan.
 
 ---
@@ -6377,10 +6415,10 @@ Before any public production release, the following checklist must be complete.
 
 #### Analytics
 
-- [ ] Activation funnel is tracked.
-- [ ] Retention cohorts are tracked.
-- [ ] Engagement metrics are tracked.
-- [ ] Creator metrics are tracked.
+- [ ] Public turn activity metrics are tracked.
+- [ ] Public fee and prize metrics are tracked.
+- [ ] Public rule lifecycle metrics are tracked.
+- [ ] Public creator/voter reward metrics are tracked.
 - [ ] Turn-cycle metrics are tracked.
 - [ ] Reward sustainability metrics are tracked.
 
@@ -6393,7 +6431,7 @@ Public release is approved only if:
 - [ ] all required milestones through M7 are approved;
 - [ ] no unresolved critical/high issue remains;
 - [ ] production operations are ready;
-- [ ] admin metrics can guide retention and engagement decisions;
+- [ ] transparency metrics can guide launch decisions and community review;
 - [ ] creator reward economics are sustainable;
 - [ ] mobile wallet flow is reliable;
 - [ ] payout and verification systems are auditable.

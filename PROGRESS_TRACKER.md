@@ -65,6 +65,23 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-06-29 (M5 transparency-console scope update)
+
+- Opened required documents/context before editing: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, and `.claude/skills/security-best-practices/SKILL.md`.
+- Updated `PRD.md` so M5 is now a read-only public transparency insights console, not a private retention/funnel admin dashboard.
+- Replaced M5 private analytics requirements with public/on-chain or publicly derivable dashboards for turn metrics, platform fee collection, prize-pool funding, prize distribution, rule/vote transparency, reward distribution, settlement proofs, accounting reconciliation, and public exports.
+- Added explicit M5 data boundaries forbidding private analytics fields such as IP, device fingerprints, private user-agent records, session ids, wallet funnel events, retention cohorts, return-after-loss/win/near-miss analytics, and non-public wallet behavior correlations.
+- Reconciled related PRD sections for infrastructure, security, M6 beta analytics, M7 transparency maturity, M8 community-round metrics, and global release analytics so they refer to public transparency metrics instead of private admin analytics.
+- Reviewed the result for remaining inconsistent old admin wording; remaining `retention`/`funnel` references in M5 are denylisted fields, while broader retention references outside M5 remain product/experiment language.
+- No milestone row was changed and no PRD checkbox was ticked, because milestone marking requires explicit user confirmation.
+
+### 2026-06-29 (M5 confidential-data classification guidance)
+
+- Opened required documents/context before answering: `PRD.md`, `AGENTS.md` instructions from the prompt, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/security-best-practices/SKILL.md`, and `.claude/skills/security-threat-model/SKILL.md`.
+- Reviewed PRD §15.6 `Milestone M5 — Restricted Admin Insights Console`, including admin separation/access control, retention dashboard, engagement dashboard, mobile funnel dashboard, creator/reward insights, and admin safety boundaries.
+- Provided guidance on which M5 admin-console data should be classified as confidential or sensitive.
+- No milestone row was changed and no PRD checkbox was ticked, because this was guidance only and milestone marking requires explicit user confirmation.
+
 ### 2026-06-29 (M9.3 repeated-vote consistency audit and confirmation)
 
 - Opened required documents/context before verification and marking: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/idealer-test-and-verify/SKILL.md`, `.claude/skills/solana-dev/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/references/programs/anchor.md`, and `.claude/skills/solana-dev/ext/solana-dev/skill/references/testing.md`.
