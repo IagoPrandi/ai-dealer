@@ -14,6 +14,7 @@ import {
   getAuditLog,
   getClaimSummary,
   getAllowedMethodsForPath,
+  getConsoleReadOnlyMethodRejection,
   getPlayerClaimsSummary,
   listConversationDrafts,
   listPlayerHistory,
@@ -779,8 +780,41 @@ test("console safety boundary keeps transparency and operator dashboards read-on
 
   assert.deepEqual(boundary.allowedHttpMethods, ["GET", "OPTIONS"]);
   assert.equal(getAllowedMethodsForPath("/transparency"), "GET,OPTIONS");
+  assert.equal(getAllowedMethodsForPath("/transparency/export"), "GET,OPTIONS");
   assert.equal(getAllowedMethodsForPath("/operator/ai-operations"), "GET,OPTIONS");
+  assert.equal(
+    getAllowedMethodsForPath("/operator/ai-operations/export"),
+    "GET,OPTIONS",
+  );
   assert.equal(getAllowedMethodsForPath("/guess-receipts"), "GET,POST,OPTIONS");
+  assert.equal(
+    getConsoleReadOnlyMethodRejection("/transparency", "GET"),
+    null,
+  );
+  assert.equal(
+    getConsoleReadOnlyMethodRejection("/operator/ai-operations", "OPTIONS"),
+    null,
+  );
+  for (const path of [
+    "/transparency",
+    "/transparency/export",
+    "/operator/ai-operations",
+    "/operator/ai-operations/export",
+  ] as const) {
+    for (const method of ["POST", "PUT", "PATCH", "DELETE"] as const) {
+      assert.deepEqual(getConsoleReadOnlyMethodRejection(path, method), {
+        allowedMethods: "GET,OPTIONS",
+        error: "console_route_read_only",
+        message:
+          "Transparency and restricted AI operations console routes are read-only.",
+        statusCode: 405,
+      });
+    }
+  }
+  assert.equal(
+    getConsoleReadOnlyMethodRejection("/guess-receipts", "POST"),
+    null,
+  );
   assert.equal(boundary.readOnly, true);
   assert.equal(boundary.mutationEndpointsAvailable, false);
   assert.equal(boundary.outcomeControlUnavailable, true);

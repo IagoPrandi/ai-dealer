@@ -975,6 +975,29 @@ export function getAllowedMethodsForPath(pathname: string) {
     : "GET,POST,OPTIONS";
 }
 
+export function getConsoleReadOnlyMethodRejection(
+  pathname: string,
+  method: string | undefined,
+) {
+  if (
+    method === undefined ||
+    !CONSOLE_ROUTE_PATHS.has(pathname) ||
+    CONSOLE_ALLOWED_HTTP_METHODS.includes(
+      method as (typeof CONSOLE_ALLOWED_HTTP_METHODS)[number],
+    )
+  ) {
+    return null;
+  }
+
+  return {
+    allowedMethods: getAllowedMethodsForPath(pathname),
+    error: "console_route_read_only",
+    message:
+      "Transparency and restricted AI operations console routes are read-only.",
+    statusCode: 405,
+  } as const;
+}
+
 function getGuessReceiptKey(turnId: number, player: string, sequence: number) {
   return `${turnId}:${player}:${sequence}`;
 }
@@ -2366,6 +2389,24 @@ function sendCsv(
     ...getCorsHeaders(request),
   });
   response.end(body);
+}
+
+function sendMethodNotAllowed(
+  request: import("node:http").IncomingMessage,
+  response: import("node:http").ServerResponse,
+  rejection: NonNullable<ReturnType<typeof getConsoleReadOnlyMethodRejection>>,
+) {
+  response.writeHead(rejection.statusCode, {
+    allow: rejection.allowedMethods,
+    "content-type": "application/json",
+    ...getCorsHeaders(request),
+  });
+  response.end(
+    JSON.stringify({
+      error: rejection.error,
+      message: rejection.message,
+    }),
+  );
 }
 
 export function saveGuessReceipt(receipt: GuessReceiptRecord) {
@@ -7291,6 +7332,15 @@ if (isMainModule()) {
         url.pathname.startsWith("/prize-pool-accounting/"))
     ) {
       sendNoContent(request, response);
+      return;
+    }
+
+    const consoleMethodRejection = getConsoleReadOnlyMethodRejection(
+      url.pathname,
+      request.method,
+    );
+    if (consoleMethodRejection) {
+      sendMethodNotAllowed(request, response, consoleMethodRejection);
       return;
     }
 
