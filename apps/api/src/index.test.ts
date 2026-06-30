@@ -13,6 +13,7 @@ import {
   createGuessVerificationJobsForTurn,
   getAuditLog,
   getClaimSummary,
+  getAllowedMethodsForPath,
   getPlayerClaimsSummary,
   listConversationDrafts,
   listPlayerHistory,
@@ -27,6 +28,7 @@ import {
   getRuleValidation,
   getTurnRolloverSettlement,
   getTransparencySnapshot,
+  getConsoleSafetyBoundary,
   isRuleRemoved,
   ruleSignature,
   getRuleElimination,
@@ -762,6 +764,74 @@ test("public transparency snapshot aggregates M5 turn, economy, rule, proof, tre
   assert.match(csv, /derivation_note/);
   assert.match(csv, /private retention, funnel, device, session/);
   assert.doesNotMatch(serialized, /ip_address_value|raw_completion_value/);
+});
+
+test("console safety boundary keeps transparency and operator dashboards read-only", () => {
+  resetApiStateForTests();
+  const snapshot = getTransparencySnapshot();
+  const operatorSnapshot = getOperatorAiOperationsSnapshot();
+  const boundary = getConsoleSafetyBoundary();
+  const publicCsv = exportTransparencySnapshotCsv(snapshot).toLowerCase();
+  const operatorCsv = exportOperatorAiOperationsCsv(operatorSnapshot).toLowerCase();
+  const serialized = `${JSON.stringify(snapshot)}\n${JSON.stringify(
+    operatorSnapshot,
+  )}\n${publicCsv}\n${operatorCsv}`.toLowerCase();
+
+  assert.deepEqual(boundary.allowedHttpMethods, ["GET", "OPTIONS"]);
+  assert.equal(getAllowedMethodsForPath("/transparency"), "GET,OPTIONS");
+  assert.equal(getAllowedMethodsForPath("/operator/ai-operations"), "GET,OPTIONS");
+  assert.equal(getAllowedMethodsForPath("/guess-receipts"), "GET,POST,OPTIONS");
+  assert.equal(boundary.readOnly, true);
+  assert.equal(boundary.mutationEndpointsAvailable, false);
+  assert.equal(boundary.outcomeControlUnavailable, true);
+  assert.equal(boundary.noPrivateAnalyticsRequired, true);
+  assert.equal(boundary.logsExcludePrivateUserAnalytics, true);
+  assert.equal(boundary.restrictedAiCanBeDisabledWithoutPublicImpact, true);
+  assert.equal(boundary.publicExportsContainOnlyPublicDerivableFields, true);
+  assert.equal(
+    boundary.restrictedAiExportsContainOnlyRedactedOperationalFields,
+    true,
+  );
+  assert.deepEqual(snapshot.dataBoundary.consoleSafetyBoundary, boundary);
+  assert.deepEqual(operatorSnapshot.consoleSafetyBoundary, boundary);
+
+  for (const field of [
+    "submitted_guesses",
+    "draw_results",
+    "finalized_winners",
+    "active_rules",
+    "prize_accounting",
+    "creator_reward_records",
+  ] as const) {
+    assert.equal(boundary.protectedGameStateMutationDenylist.includes(field), true);
+  }
+  for (const field of [
+    "ip_address",
+    "device_fingerprint",
+    "session_id",
+    "private_user_agent_record",
+    "wallet_connect_attempt",
+    "wallet_failure",
+    "private_funnel_step",
+    "raw_prompt",
+    "raw_completion",
+    "provider_api_key",
+    "secret_value",
+    "unrestricted_compiler_reasoning_trace",
+    "private_provider_request_body",
+    "private_provider_response_body",
+    "private_provider_request_response_body",
+    "unredacted_stack_trace",
+  ] as const) {
+    assert.equal(boundary.privateTelemetryDenylist.includes(field), true);
+  }
+  assert.equal(boundary.dashboardFieldReviewChecklist.length >= 6, true);
+  assert.match(publicCsv, /derivation_note/);
+  assert.match(operatorCsv, /redacted aggregates only/);
+  assert.doesNotMatch(
+    serialized,
+    /ip_address_leak|device_fingerprint_leak|session_id_leak|raw_prompt_leak|raw_completion_leak|provider_api_key_leak|secret_leak|unredacted_stack_trace_leak/,
+  );
 });
 
 test("restricted AI operations snapshot is role-gated and redacted", () => {

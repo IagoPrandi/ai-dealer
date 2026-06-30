@@ -5,9 +5,26 @@ import { CREATOR_REWARD_RESERVE_SHARE_BPS, TREASURY_FEE_BPS } from "@idealer/con
 
 type LoadState = "error" | "loading" | "ready";
 
+interface ConsoleSafetyBoundary {
+  allowedHttpMethods: readonly string[];
+  dashboardFieldReviewChecklist: string[];
+  dataLoaderMode: "read_only";
+  logsExcludePrivateUserAnalytics: boolean;
+  mutationEndpointsAvailable: false;
+  noPrivateAnalyticsRequired: boolean;
+  outcomeControlUnavailable: boolean;
+  privateTelemetryDenylist: string[];
+  protectedGameStateMutationDenylist: string[];
+  publicExportsContainOnlyPublicDerivableFields: boolean;
+  readOnly: true;
+  restrictedAiCanBeDisabledWithoutPublicImpact: boolean;
+  restrictedAiExportsContainOnlyRedactedOperationalFields: boolean;
+}
+
 interface TransparencySnapshot {
   activeTurnId: number;
   dataBoundary: {
+    consoleSafetyBoundary: ConsoleSafetyBoundary;
     deniedPrivateFields: string[];
     publicExportFieldsOnly: boolean;
     publicMetricsOnly: boolean;
@@ -213,6 +230,7 @@ interface OperatorAiOperationsSnapshot {
     status: string;
   }>;
   generatedAt: string;
+  consoleSafetyBoundary: ConsoleSafetyBoundary;
   latencyPercentiles: Array<{
     count: number;
     model: string;
@@ -425,63 +443,13 @@ function StatCard({
   );
 }
 
-export default function AdminPage() {
-  const [filters, setFilters] = useState({
-    fromDate: "",
-    fromTurnId: "",
-    toDate: "",
-    toTurnId: "",
-  });
-  const [appliedFilters, setAppliedFilters] = useState(filters);
-  const [loadState, setLoadState] = useState<LoadState>("loading");
-  const [error, setError] = useState<string | null>(null);
-  const [snapshot, setSnapshot] = useState<TransparencySnapshot | null>(null);
+export function OperatorAiOperationsPage() {
   const [operatorToken, setOperatorToken] = useState("");
   const [operatorLoadState, setOperatorLoadState] = useState<LoadState | "idle">("idle");
   const [operatorError, setOperatorError] = useState<string | null>(null);
   const [operatorSnapshot, setOperatorSnapshot] =
     useState<OperatorAiOperationsSnapshot | null>(null);
-
   const apiBaseUrl = useMemo(() => getApiBaseUrl(), []);
-  const query = useMemo(() => buildQuery(appliedFilters), [appliedFilters]);
-  const exportQuery = query ? `${query}&` : "";
-  const jsonExportUrl = `${apiBaseUrl}/transparency/export?${exportQuery}format=json`;
-  const csvExportUrl = `${apiBaseUrl}/transparency/export?${exportQuery}format=csv`;
-
-  useEffect(() => {
-    const controller = new AbortController();
-    setLoadState("loading");
-    setError(null);
-
-    void fetch(`${apiBaseUrl}/transparency${query ? `?${query}` : ""}`, {
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error(`Transparency API returned HTTP ${response.status}.`);
-        }
-        const body = (await response.json()) as { snapshot?: TransparencySnapshot };
-        if (!body.snapshot) {
-          throw new Error("Transparency API response did not include a snapshot.");
-        }
-        setSnapshot(body.snapshot);
-        setLoadState("ready");
-      })
-      .catch((fetchError: unknown) => {
-        if (fetchError instanceof DOMException && fetchError.name === "AbortError") {
-          return;
-        }
-        setError(fetchError instanceof Error ? fetchError.message : "Could not load transparency data.");
-        setLoadState("error");
-      });
-
-    return () => controller.abort();
-  }, [apiBaseUrl, query]);
-
-  function applyFilters(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setAppliedFilters(filters);
-  }
 
   async function loadOperatorSnapshot(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -554,6 +522,399 @@ export default function AdminPage() {
     <main className="admin-shell">
       <section className="hero-panel">
         <div>
+          <p className="eyebrow">Restricted AI operations</p>
+          <h1>AI Operations Console</h1>
+          <p>
+            Redacted, read-only operational monitoring for AI Rule Compiler
+            providers, latency, fallback, confidence, cost, and queue health.
+          </p>
+        </div>
+        <div className="policy-strip" aria-label="Console policy">
+          <span>Bearer token required</span>
+          <span>Redacted operations only</span>
+          <a href="/">Public transparency</a>
+        </div>
+      </section>
+
+      <section className="dashboard-grid">
+        <article className="panel wide restricted-panel">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">Restricted operator surface</p>
+              <h2>AI operations monitoring</h2>
+            </div>
+            {operatorSnapshot ? (
+              <div className="export-actions">
+                <button type="button" onClick={() => void downloadOperatorExport("json")}>
+                  JSON
+                </button>
+                <button type="button" onClick={() => void downloadOperatorExport("csv")}>
+                  CSV
+                </button>
+              </div>
+            ) : null}
+          </div>
+          <form className="operator-gate" onSubmit={loadOperatorSnapshot}>
+            <label>
+              Operator bearer token
+              <input
+                autoComplete="off"
+                onChange={(event) => setOperatorToken(event.target.value)}
+                placeholder="Restricted token"
+                type="password"
+                value={operatorToken}
+              />
+            </label>
+            <button disabled={!operatorToken || operatorLoadState === "loading"} type="submit">
+              Load AI ops
+            </button>
+          </form>
+
+          {operatorLoadState === "loading" ? (
+            <p className="muted">Loading restricted redacted AI operations metrics.</p>
+          ) : null}
+
+          {operatorLoadState === "error" ? (
+            <p className="operator-error" role="alert">
+              {operatorError}
+            </p>
+          ) : null}
+
+          {operatorSnapshot ? (
+            <>
+              <div className="operator-metrics">
+                <StatCard
+                  label="Validation calls"
+                  source="Compiler audit aggregate"
+                  value={metricLabel(operatorSnapshot.operationCounts.validationCalls)}
+                />
+                <StatCard
+                  label="Fallback rate"
+                  source="Provider routing aggregate"
+                  value={percentLabel(operatorSnapshot.ruleCompiler.fallbackRate)}
+                />
+                <StatCard
+                  label="Provider disagreement"
+                  source="Confidence aggregate"
+                  value={percentLabel(
+                    operatorSnapshot.ruleCompiler.providerDisagreementAverage,
+                  )}
+                />
+                <StatCard
+                  label="Dead letters"
+                  source="Verification queue"
+                  value={metricLabel(operatorSnapshot.queue.deadLetterJobs)}
+                />
+                <StatCard
+                  label="Token volume"
+                  source="Rule proposal tokens"
+                  value={metricLabel(operatorSnapshot.estimatedCost.totalTokens)}
+                />
+                <StatCard
+                  label="Estimated cost"
+                  source={formatScope(operatorSnapshot.estimatedCost.source)}
+                  value={usdLabel(operatorSnapshot.estimatedCost.estimatedUsd)}
+                />
+              </div>
+
+              <div className="operator-grid">
+                <div>
+                  <h3>Call volume by role</h3>
+                  <ul className="stack-list">
+                    {operatorSnapshot.agentCallVolumeByRole.map((record) => (
+                      <li key={record.role}>
+                        <span>{formatScope(record.role)}</span>
+                        <strong>
+                          {record.calls} calls / {record.source}
+                        </strong>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <h3>Provider routing by role</h3>
+                  <ul className="stack-list">
+                    {operatorSnapshot.modelRouting.length === 0 ? (
+                      <li>
+                        <span>No routing records</span>
+                        <strong>0 calls</strong>
+                      </li>
+                    ) : (
+                      operatorSnapshot.modelRouting.map((route) => (
+                        <li key={`${route.role}:${route.provider}:${route.model}`}>
+                          <span>
+                            {formatScope(route.role)} / {route.provider} / {route.model}
+                          </span>
+                          <strong>
+                            {route.validationCalls} calls / {route.fallbackTriggered} fallback /{" "}
+                            {route.escalationCount} escalated
+                          </strong>
+                        </li>
+                      ))
+                    )}
+                  </ul>
+                </div>
+                <div>
+                  <h3>Latency percentiles</h3>
+                  <ul className="stack-list">
+                    {operatorSnapshot.latencyPercentiles.length === 0 ? (
+                      <li>
+                        <span>No latency samples</span>
+                        <strong>0ms</strong>
+                      </li>
+                    ) : (
+                      operatorSnapshot.latencyPercentiles.map((latency) => (
+                        <li
+                          key={`${latency.source}:${latency.role}:${latency.provider}:${latency.model}`}
+                        >
+                          <span>
+                            {formatScope(latency.role)} / {latency.provider}
+                          </span>
+                          <strong>
+                            p50 {millisecondsLabel(latency.p50Ms)} / p95{" "}
+                            {millisecondsLabel(latency.p95Ms)}
+                          </strong>
+                        </li>
+                      ))
+                    )}
+                  </ul>
+                </div>
+                <div>
+                  <h3>Failure counters</h3>
+                  <ul className="stack-list">
+                    {operatorSnapshot.failureCounts.length === 0 ? (
+                      <li>
+                        <span>No failures recorded</span>
+                        <strong>0</strong>
+                      </li>
+                    ) : (
+                      operatorSnapshot.failureCounts.map((failure) => (
+                        <li
+                          key={`${failure.role}:${failure.provider}:${failure.model}:${failure.status}`}
+                        >
+                          <span>
+                            {formatScope(failure.status)} / {formatScope(failure.role)}
+                          </span>
+                          <strong>{failure.count}</strong>
+                        </li>
+                      ))
+                    )}
+                  </ul>
+                </div>
+                <div>
+                  <h3>Confidence distributions</h3>
+                  <ul className="stack-list compact">
+                    {Object.entries(
+                      operatorSnapshot.confidenceDistributions.compilerConfidenceBuckets,
+                    ).map(([bucket, count]) => (
+                      <li key={`compiler-${bucket}`}>
+                        <span>Compiler {bucketLabel(bucket)}</span>
+                        <strong>{count}</strong>
+                      </li>
+                    ))}
+                    {Object.entries(
+                      operatorSnapshot.confidenceDistributions.finalConfidenceBuckets,
+                    ).map(([bucket, count]) => (
+                      <li key={`final-${bucket}`}>
+                        <span>Final {bucketLabel(bucket)}</span>
+                        <strong>{count}</strong>
+                      </li>
+                    ))}
+                    {Object.entries(
+                      operatorSnapshot.confidenceDistributions.modelConfidenceBuckets,
+                    ).map(([bucket, count]) => (
+                      <li key={`model-${bucket}`}>
+                        <span>Model {bucketLabel(bucket)}</span>
+                        <strong>{count}</strong>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <h3>Token and cost projection</h3>
+                  <ul className="stack-list">
+                    {operatorSnapshot.tokenUsageByProviderModelRole.length === 0 ? (
+                      <li>
+                        <span>No token records</span>
+                        <strong>0 tokens</strong>
+                      </li>
+                    ) : (
+                      operatorSnapshot.tokenUsageByProviderModelRole.map((usage) => (
+                        <li key={`${usage.role}:${usage.provider}:${usage.model}`}>
+                          <span>
+                            {formatScope(usage.role)} / {usage.provider} / {usage.model}
+                          </span>
+                          <strong>
+                            {metricLabel(usage.totalTokens)} tokens / {usdLabel(usage.estimatedUsd)}
+                          </strong>
+                        </li>
+                      ))
+                    )}
+                  </ul>
+                </div>
+                <div>
+                  <h3>Queue status</h3>
+                  <ul className="stack-list">
+                    <li>
+                      <span>Backlog</span>
+                      <strong className="numeric">{operatorSnapshot.queue.backlogJobs}</strong>
+                    </li>
+                    {Object.entries(operatorSnapshot.queue.statusCounts).map(
+                      ([status, count]) => (
+                        <li key={status}>
+                          <span>{formatScope(status)}</span>
+                          <strong className="numeric">{count}</strong>
+                        </li>
+                      ),
+                    )}
+                  </ul>
+                </div>
+                <div>
+                  <h3>Local model health</h3>
+                  <ul className="stack-list">
+                    {operatorSnapshot.localModelHealth.map((model) => (
+                      <li key={`${model.provider}:${model.configuredModel}`}>
+                        <span>
+                          {model.servingEngine} / {model.configuredModel}
+                        </span>
+                        <strong>
+                          {formatScope(model.lastHealthCheckResult)} /{" "}
+                          {model.quantization ?? "No quantization"} /{" "}
+                          {model.digest ? shortHash(model.digest) : "No digest"}
+                        </strong>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <h3>Redacted incidents</h3>
+                  <ul className="stack-list">
+                    {operatorSnapshot.redactedIncidents.length === 0 ? (
+                      <li>
+                        <span>No incidents recorded</span>
+                        <strong>0</strong>
+                      </li>
+                    ) : (
+                      operatorSnapshot.redactedIncidents.slice(0, 6).map((incident) => (
+                        <li
+                          key={`${incident.turnId}:${incident.ruleId}:${incident.status}:${incident.provider}`}
+                        >
+                          <span>
+                            {formatScope(incident.status)} / turn {incident.turnId ?? "n/a"}
+                          </span>
+                          <strong>
+                            {incident.auditEndpoint ? (
+                              <a href={`${apiBaseUrl}${incident.auditEndpoint}`}>
+                                {shortHash(incident.auditLogHash)}
+                              </a>
+                            ) : (
+                              "No audit link"
+                            )}
+                          </strong>
+                        </li>
+                      ))
+                    )}
+                  </ul>
+                </div>
+                <div>
+                  <h3>Audit links</h3>
+                  <ul className="stack-list">
+                    {operatorSnapshot.auditLinks.slice(0, 6).map((link) => (
+                      <li key={link.validationLogId}>
+                        <span>
+                          Turn {link.turnId} / rule {link.ruleId}
+                        </span>
+                        <strong>
+                          <a href={`${apiBaseUrl}${link.auditEndpoint}`}>
+                            {shortHash(link.auditLogHash)}
+                          </a>
+                        </strong>
+                      </li>
+                    ))}
+                    {operatorSnapshot.auditLinks.length === 0 ? (
+                      <li>
+                        <span>No audit links</span>
+                        <strong>0</strong>
+                      </li>
+                    ) : null}
+                  </ul>
+                </div>
+                <div>
+                  <h3>Redaction</h3>
+                  <p className="boundary-note">
+                    Exported fields are limited to{" "}
+                    {operatorSnapshot.redactionPolicy.exportedFieldsOnly.join(", ")}.
+                    Excluded fields include{" "}
+                    {operatorSnapshot.redactionPolicy.excludedFields.slice(0, 7).join(", ")}
+                    , and related private telemetry.
+                  </p>
+                </div>
+              </div>
+            </>
+          ) : null}
+        </article>
+      </section>
+    </main>
+  );
+}
+
+export default function AdminPage() {
+  const [filters, setFilters] = useState({
+    fromDate: "",
+    fromTurnId: "",
+    toDate: "",
+    toTurnId: "",
+  });
+  const [appliedFilters, setAppliedFilters] = useState(filters);
+  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [error, setError] = useState<string | null>(null);
+  const [snapshot, setSnapshot] = useState<TransparencySnapshot | null>(null);
+
+  const apiBaseUrl = useMemo(() => getApiBaseUrl(), []);
+  const query = useMemo(() => buildQuery(appliedFilters), [appliedFilters]);
+  const exportQuery = query ? `${query}&` : "";
+  const jsonExportUrl = `${apiBaseUrl}/transparency/export?${exportQuery}format=json`;
+  const csvExportUrl = `${apiBaseUrl}/transparency/export?${exportQuery}format=csv`;
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoadState("loading");
+    setError(null);
+
+    void fetch(`${apiBaseUrl}/transparency${query ? `?${query}` : ""}`, {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Transparency API returned HTTP ${response.status}.`);
+        }
+        const body = (await response.json()) as { snapshot?: TransparencySnapshot };
+        if (!body.snapshot) {
+          throw new Error("Transparency API response did not include a snapshot.");
+        }
+        setSnapshot(body.snapshot);
+        setLoadState("ready");
+      })
+      .catch((fetchError: unknown) => {
+        if (fetchError instanceof DOMException && fetchError.name === "AbortError") {
+          return;
+        }
+        setError(fetchError instanceof Error ? fetchError.message : "Could not load transparency data.");
+        setLoadState("error");
+      });
+
+    return () => controller.abort();
+  }, [apiBaseUrl, query]);
+
+  function applyFilters(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAppliedFilters(filters);
+  }
+
+  return (
+    <main className="admin-shell">
+      <section className="hero-panel">
+        <div>
           <p className="eyebrow">Public transparency</p>
           <h1>Idealer Transparency Console</h1>
           <p>
@@ -564,7 +925,7 @@ export default function AdminPage() {
         <div className="policy-strip" aria-label="Console policy">
           <span>Read-only</span>
           <span>Public data only</span>
-          <span>Restricted AI operations</span>
+          <a href="/operator/ai-operations">Restricted AI operations</a>
         </div>
       </section>
 
@@ -843,323 +1204,6 @@ export default function AdminPage() {
               </div>
             </article>
 
-            <article className="panel wide restricted-panel">
-              <div className="panel-head">
-                <div>
-                  <p className="eyebrow">Restricted operator surface</p>
-                  <h2>AI operations monitoring</h2>
-                </div>
-                {operatorSnapshot ? (
-                  <div className="export-actions">
-                    <button type="button" onClick={() => void downloadOperatorExport("json")}>
-                      JSON
-                    </button>
-                    <button type="button" onClick={() => void downloadOperatorExport("csv")}>
-                      CSV
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-              <form className="operator-gate" onSubmit={loadOperatorSnapshot}>
-                <label>
-                  Operator bearer token
-                  <input
-                    autoComplete="off"
-                    onChange={(event) => setOperatorToken(event.target.value)}
-                    placeholder="Restricted token"
-                    type="password"
-                    value={operatorToken}
-                  />
-                </label>
-                <button disabled={!operatorToken || operatorLoadState === "loading"} type="submit">
-                  Load AI ops
-                </button>
-              </form>
-
-              {operatorLoadState === "loading" ? (
-                <p className="muted">Loading restricted redacted AI operations metrics.</p>
-              ) : null}
-
-              {operatorLoadState === "error" ? (
-                <p className="operator-error" role="alert">
-                  {operatorError}
-                </p>
-              ) : null}
-
-              {operatorSnapshot ? (
-                <>
-                  <div className="operator-metrics">
-                    <StatCard
-                      label="Validation calls"
-                      source="Compiler audit aggregate"
-                      value={metricLabel(operatorSnapshot.operationCounts.validationCalls)}
-                    />
-                    <StatCard
-                      label="Fallback rate"
-                      source="Provider routing aggregate"
-                      value={percentLabel(operatorSnapshot.ruleCompiler.fallbackRate)}
-                    />
-                    <StatCard
-                      label="Provider disagreement"
-                      source="Confidence aggregate"
-                      value={percentLabel(
-                        operatorSnapshot.ruleCompiler.providerDisagreementAverage,
-                      )}
-                    />
-                    <StatCard
-                      label="Dead letters"
-                      source="Verification queue"
-                      value={metricLabel(operatorSnapshot.queue.deadLetterJobs)}
-                    />
-                    <StatCard
-                      label="Token volume"
-                      source="Rule proposal tokens"
-                      value={metricLabel(operatorSnapshot.estimatedCost.totalTokens)}
-                    />
-                    <StatCard
-                      label="Estimated cost"
-                      source={formatScope(operatorSnapshot.estimatedCost.source)}
-                      value={usdLabel(operatorSnapshot.estimatedCost.estimatedUsd)}
-                    />
-                  </div>
-
-                  <div className="operator-grid">
-                    <div>
-                      <h3>Call volume by role</h3>
-                      <ul className="stack-list">
-                        {operatorSnapshot.agentCallVolumeByRole.map((record) => (
-                          <li key={record.role}>
-                            <span>{formatScope(record.role)}</span>
-                            <strong>
-                              {record.calls} calls / {record.source}
-                            </strong>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                    <div>
-                      <h3>Provider routing by role</h3>
-                      <ul className="stack-list">
-                        {operatorSnapshot.modelRouting.length === 0 ? (
-                          <li>
-                            <span>No routing records</span>
-                            <strong>0 calls</strong>
-                          </li>
-                        ) : (
-                          operatorSnapshot.modelRouting.map((route) => (
-                            <li key={`${route.role}:${route.provider}:${route.model}`}>
-                              <span>
-                                {formatScope(route.role)} / {route.provider} / {route.model}
-                              </span>
-                              <strong>
-                                {route.validationCalls} calls / {route.fallbackTriggered} fallback /{" "}
-                                {route.escalationCount} escalated
-                              </strong>
-                            </li>
-                          ))
-                        )}
-                      </ul>
-                    </div>
-                    <div>
-                      <h3>Latency percentiles</h3>
-                      <ul className="stack-list">
-                        {operatorSnapshot.latencyPercentiles.length === 0 ? (
-                          <li>
-                            <span>No latency samples</span>
-                            <strong>0ms</strong>
-                          </li>
-                        ) : (
-                          operatorSnapshot.latencyPercentiles.map((latency) => (
-                            <li
-                              key={`${latency.source}:${latency.role}:${latency.provider}:${latency.model}`}
-                            >
-                              <span>
-                                {formatScope(latency.role)} / {latency.provider}
-                              </span>
-                              <strong>
-                                p50 {millisecondsLabel(latency.p50Ms)} / p95{" "}
-                                {millisecondsLabel(latency.p95Ms)}
-                              </strong>
-                            </li>
-                          ))
-                        )}
-                      </ul>
-                    </div>
-                    <div>
-                      <h3>Failure counters</h3>
-                      <ul className="stack-list">
-                        {operatorSnapshot.failureCounts.length === 0 ? (
-                          <li>
-                            <span>No failures recorded</span>
-                            <strong>0</strong>
-                          </li>
-                        ) : (
-                          operatorSnapshot.failureCounts.map((failure) => (
-                            <li
-                              key={`${failure.role}:${failure.provider}:${failure.model}:${failure.status}`}
-                            >
-                              <span>
-                                {formatScope(failure.status)} / {formatScope(failure.role)}
-                              </span>
-                              <strong>{failure.count}</strong>
-                            </li>
-                          ))
-                        )}
-                      </ul>
-                    </div>
-                    <div>
-                      <h3>Confidence distributions</h3>
-                      <ul className="stack-list compact">
-                        {Object.entries(
-                          operatorSnapshot.confidenceDistributions.compilerConfidenceBuckets,
-                        ).map(([bucket, count]) => (
-                          <li key={`compiler-${bucket}`}>
-                            <span>Compiler {bucketLabel(bucket)}</span>
-                            <strong>{count}</strong>
-                          </li>
-                        ))}
-                        {Object.entries(
-                          operatorSnapshot.confidenceDistributions.finalConfidenceBuckets,
-                        ).map(([bucket, count]) => (
-                          <li key={`final-${bucket}`}>
-                            <span>Final {bucketLabel(bucket)}</span>
-                            <strong>{count}</strong>
-                          </li>
-                        ))}
-                        {Object.entries(
-                          operatorSnapshot.confidenceDistributions.modelConfidenceBuckets,
-                        ).map(([bucket, count]) => (
-                          <li key={`model-${bucket}`}>
-                            <span>Model {bucketLabel(bucket)}</span>
-                            <strong>{count}</strong>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                    <div>
-                      <h3>Token and cost projection</h3>
-                      <ul className="stack-list">
-                        {operatorSnapshot.tokenUsageByProviderModelRole.length === 0 ? (
-                          <li>
-                            <span>No token records</span>
-                            <strong>0 tokens</strong>
-                          </li>
-                        ) : (
-                          operatorSnapshot.tokenUsageByProviderModelRole.map((usage) => (
-                            <li key={`${usage.role}:${usage.provider}:${usage.model}`}>
-                              <span>
-                                {formatScope(usage.role)} / {usage.provider} / {usage.model}
-                              </span>
-                              <strong>
-                                {metricLabel(usage.totalTokens)} tokens / {usdLabel(usage.estimatedUsd)}
-                              </strong>
-                            </li>
-                          ))
-                        )}
-                      </ul>
-                    </div>
-                    <div>
-                      <h3>Queue status</h3>
-                      <ul className="stack-list">
-                        <li>
-                          <span>Backlog</span>
-                          <strong className="numeric">{operatorSnapshot.queue.backlogJobs}</strong>
-                        </li>
-                        {Object.entries(operatorSnapshot.queue.statusCounts).map(
-                          ([status, count]) => (
-                            <li key={status}>
-                              <span>{formatScope(status)}</span>
-                              <strong className="numeric">{count}</strong>
-                            </li>
-                          ),
-                        )}
-                      </ul>
-                    </div>
-                    <div>
-                      <h3>Local model health</h3>
-                      <ul className="stack-list">
-                        {operatorSnapshot.localModelHealth.map((model) => (
-                          <li key={`${model.provider}:${model.configuredModel}`}>
-                            <span>
-                              {model.servingEngine} / {model.configuredModel}
-                            </span>
-                            <strong>
-                              {formatScope(model.lastHealthCheckResult)} /{" "}
-                              {model.quantization ?? "No quantization"} /{" "}
-                              {model.digest ? shortHash(model.digest) : "No digest"}
-                            </strong>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                    <div>
-                      <h3>Redacted incidents</h3>
-                      <ul className="stack-list">
-                        {operatorSnapshot.redactedIncidents.length === 0 ? (
-                          <li>
-                            <span>No incidents recorded</span>
-                            <strong>0</strong>
-                          </li>
-                        ) : (
-                          operatorSnapshot.redactedIncidents.slice(0, 6).map((incident) => (
-                            <li
-                              key={`${incident.turnId}:${incident.ruleId}:${incident.status}:${incident.provider}`}
-                            >
-                              <span>
-                                {formatScope(incident.status)} / turn {incident.turnId ?? "n/a"}
-                              </span>
-                              <strong>
-                                {incident.auditEndpoint ? (
-                                  <a href={`${apiBaseUrl}${incident.auditEndpoint}`}>
-                                    {shortHash(incident.auditLogHash)}
-                                  </a>
-                                ) : (
-                                  "No audit link"
-                                )}
-                              </strong>
-                            </li>
-                          ))
-                        )}
-                      </ul>
-                    </div>
-                    <div>
-                      <h3>Audit links</h3>
-                      <ul className="stack-list">
-                        {operatorSnapshot.auditLinks.slice(0, 6).map((link) => (
-                          <li key={link.validationLogId}>
-                            <span>
-                              Turn {link.turnId} / rule {link.ruleId}
-                            </span>
-                            <strong>
-                              <a href={`${apiBaseUrl}${link.auditEndpoint}`}>
-                                {shortHash(link.auditLogHash)}
-                              </a>
-                            </strong>
-                          </li>
-                        ))}
-                        {operatorSnapshot.auditLinks.length === 0 ? (
-                          <li>
-                            <span>No audit links</span>
-                            <strong>0</strong>
-                          </li>
-                        ) : null}
-                      </ul>
-                    </div>
-                    <div>
-                      <h3>Redaction</h3>
-                      <p className="boundary-note">
-                        Exported fields are limited to{" "}
-                        {operatorSnapshot.redactionPolicy.exportedFieldsOnly.join(", ")}.
-                        Excluded fields include{" "}
-                        {operatorSnapshot.redactionPolicy.excludedFields.slice(0, 7).join(", ")}
-                        , and related private telemetry.
-                      </p>
-                    </div>
-                  </div>
-                </>
-              ) : null}
-            </article>
-
             <article className="panel wide">
               <p className="eyebrow">Data boundary</p>
               <h2>Source references and exclusions</h2>
@@ -1179,6 +1223,38 @@ export default function AdminPage() {
                 Denied fields include {snapshot.dataBoundary.deniedPrivateFields.slice(0, 6).join(", ")}
                 , and related private telemetry.
               </p>
+              <div className="source-grid">
+                <div>
+                  <strong>Console safety</strong>
+                  <span>{formatScope(snapshot.dataBoundary.consoleSafetyBoundary.dataLoaderMode)}</span>
+                  <p>
+                    Methods:{" "}
+                    {snapshot.dataBoundary.consoleSafetyBoundary.allowedHttpMethods.join(", ")}.
+                    Mutations:{" "}
+                    {snapshot.dataBoundary.consoleSafetyBoundary.mutationEndpointsAvailable
+                      ? "available"
+                      : "unavailable"}
+                    .
+                  </p>
+                  <code>
+                    {snapshot.dataBoundary.consoleSafetyBoundary.protectedGameStateMutationDenylist.join(", ")}
+                  </code>
+                </div>
+                <div>
+                  <strong>Field review checklist</strong>
+                  <span>Required for dashboard changes</span>
+                  <ul className="stack-list compact">
+                    {snapshot.dataBoundary.consoleSafetyBoundary.dashboardFieldReviewChecklist.map(
+                      (item) => (
+                        <li key={item}>
+                          <span>{item}</span>
+                          <strong>Required</strong>
+                        </li>
+                      ),
+                    )}
+                  </ul>
+                </div>
+              </div>
             </article>
           </section>
         </>

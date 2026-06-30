@@ -115,6 +115,7 @@ h2 {
 }
 
 .policy-strip span,
+.policy-strip a,
 .export-actions a,
 .export-actions button {
   min-height: 44px;

@@ -901,6 +901,73 @@ const CORS_PATHS = new Set([
   "/operator/ai-operations",
   "/operator/ai-operations/export",
 ]);
+const CONSOLE_ROUTE_PATHS = new Set([
+  "/transparency",
+  "/transparency/export",
+  "/operator/ai-operations",
+  "/operator/ai-operations/export",
+]);
+const CONSOLE_ALLOWED_HTTP_METHODS = ["GET", "OPTIONS"] as const;
+const PRIVATE_TELEMETRY_DENYLIST = [
+  "ip_address",
+  "device_fingerprint",
+  "session_id",
+  "private_user_agent_record",
+  "wallet_connect_attempt",
+  "wallet_failure",
+  "private_funnel_step",
+  "raw_prompt",
+  "raw_completion",
+  "provider_api_key",
+  "secret_value",
+  "unrestricted_compiler_reasoning_trace",
+  "private_provider_request_body",
+  "private_provider_response_body",
+  "private_provider_request_response_body",
+  "unredacted_stack_trace",
+] as const;
+const PROTECTED_GAME_STATE_MUTATION_DENYLIST = [
+  "submitted_guesses",
+  "draw_results",
+  "finalized_winners",
+  "active_rules",
+  "prize_accounting",
+  "creator_reward_records",
+] as const;
+const DASHBOARD_FIELD_REVIEW_CHECKLIST = [
+  "Field is public, on-chain, public API projection, public audit derivation, or redacted operational aggregate.",
+  "Field is not in the private telemetry denylist.",
+  "Field cannot mutate guesses, draw results, winners, active rules, prize accounting, claims, or finalized rewards.",
+  "Field does not require raw prompts, raw completions, provider payloads, secrets, private request bodies, or unredacted stack traces.",
+  "Restricted AI field remains hidden unless operator bearer-token authorization succeeds.",
+  "Exported value is a redacted aggregate, hash, count, public identifier, or public-safe audit link.",
+] as const;
+
+export function getConsoleSafetyBoundary() {
+  return {
+    allowedHttpMethods: CONSOLE_ALLOWED_HTTP_METHODS,
+    dashboardFieldReviewChecklist: [...DASHBOARD_FIELD_REVIEW_CHECKLIST],
+    dataLoaderMode: "read_only" as const,
+    logsExcludePrivateUserAnalytics: true,
+    mutationEndpointsAvailable: false,
+    noPrivateAnalyticsRequired: true,
+    outcomeControlUnavailable: true,
+    privateTelemetryDenylist: [...PRIVATE_TELEMETRY_DENYLIST],
+    protectedGameStateMutationDenylist: [
+      ...PROTECTED_GAME_STATE_MUTATION_DENYLIST,
+    ],
+    publicExportsContainOnlyPublicDerivableFields: true,
+    readOnly: true,
+    restrictedAiCanBeDisabledWithoutPublicImpact: true,
+    restrictedAiExportsContainOnlyRedactedOperationalFields: true,
+  };
+}
+
+export function getAllowedMethodsForPath(pathname: string) {
+  return CONSOLE_ROUTE_PATHS.has(pathname)
+    ? CONSOLE_ALLOWED_HTTP_METHODS.join(",")
+    : "GET,POST,OPTIONS";
+}
 
 function getGuessReceiptKey(turnId: number, player: string, sequence: number) {
   return `${turnId}:${player}:${sequence}`;
@@ -2246,10 +2313,13 @@ function getCorsHeaders(request: import("node:http").IncomingMessage) {
   if (!allowedOrigin) {
     return {};
   }
+  const pathname = request.url
+    ? new URL(request.url, "http://localhost").pathname
+    : "";
 
   return {
     "access-control-allow-headers": "authorization, content-type",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-methods": getAllowedMethodsForPath(pathname),
     "access-control-allow-origin": allowedOrigin,
     "access-control-max-age": "600",
     vary: "Origin",
@@ -4761,6 +4831,7 @@ export interface TransparencyTurnSummary {
 export interface TransparencySnapshot {
   activeTurnId: number;
   dataBoundary: {
+    consoleSafetyBoundary: ReturnType<typeof getConsoleSafetyBoundary>;
     deniedPrivateFields: string[];
     publicExportFieldsOnly: boolean;
     publicMetricsOnly: boolean;
@@ -4889,6 +4960,7 @@ export interface OperatorAiOperationsSnapshot {
       | "timeout";
   }>;
   generatedAt: string;
+  consoleSafetyBoundary: ReturnType<typeof getConsoleSafetyBoundary>;
   latencyPercentiles: Array<{
     count: number;
     model: string;
@@ -6544,6 +6616,7 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
       (left, right) => right.count - left.count,
     ),
     generatedAt: new Date().toISOString(),
+    consoleSafetyBoundary: getConsoleSafetyBoundary(),
     latencyPercentiles: [...latencyMap.values()]
       .map((row) => ({
         count: row.values.length,
@@ -6611,19 +6684,12 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
         "redacted_incident_status",
       ],
       excludedFields: [
-        "raw_prompt",
-        "raw_completion",
+        ...PRIVATE_TELEMETRY_DENYLIST,
         "normalized_text",
         "compiled_artifact",
         "provider_request_body",
         "provider_response_body",
-        "provider_api_key",
-        "secret_value",
         "private_user_analytics",
-        "ip_address",
-        "device_fingerprint",
-        "session_id",
-        "unredacted_stack_trace",
       ],
     },
     redactedIncidents: redactedIncidents.slice(0, 20),
@@ -6931,22 +6997,10 @@ export function getTransparencySnapshot(
   return {
     activeTurnId: IDEALER_ACTIVE_TURN_ID,
     dataBoundary: {
+      consoleSafetyBoundary: getConsoleSafetyBoundary(),
       deniedPrivateFields: [
-        "ip_address",
-        "device_fingerprint",
-        "session_id",
-        "private_user_agent_record",
-        "wallet_connect_attempt",
-        "wallet_failure",
-        "private_funnel_step",
+        ...PRIVATE_TELEMETRY_DENYLIST,
         "retention_cohort",
-        "raw_prompt",
-        "raw_completion",
-        "provider_api_key",
-        "secret_value",
-        "unrestricted_compiler_reasoning_trace",
-        "private_provider_request_response_body",
-        "unredacted_stack_trace",
       ],
       publicExportFieldsOnly: true,
       publicMetricsOnly: true,
