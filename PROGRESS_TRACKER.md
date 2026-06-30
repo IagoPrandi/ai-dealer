@@ -68,6 +68,25 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-06-30 (Operator token env loading fix)
+
+- Opened required documents/context before working: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, and `.claude/skills`.
+- Confirmed `OPERATOR_AI_CONSOLE_TOKEN` is present and non-empty in root `.env` without printing the secret value; the shell process did not see it automatically, which explained why an already-running API could still report `operator_ai_operations_disabled`.
+- Updated `apps/api` startup to load the root `.env` via Node's native `process.loadEnvFile()` when the file exists, without overriding explicitly supplied process environment variables.
+- Updated `docker-compose.yml` so the `api` service receives `OPERATOR_AI_CONSOLE_TOKEN` from Compose interpolation, and documented the variable in `.env.example`.
+- Verification passed: `pnpm --filter @idealer/api typecheck`, `pnpm --filter @idealer/api test` (55/55), `pnpm --filter @idealer/api lint`, and `pnpm --filter @idealer/api build`.
+- Runtime verification passed with the normal local command `pnpm --filter @idealer/api dev`: `GET /transparency` returned `200`, `GET /operator/ai-operations` with the token read from `.env` returned `200`, and the same restricted endpoint without a bearer token returned `401 operator_authorization_required`.
+- Docker note: `docker compose config` now renders `OPERATOR_AI_CONSOLE_TOKEN` as present and non-empty for the API service. A Docker API rebuild was attempted because the old image lacked a recent `@idealer/constants` export, but the build command timed out without useful output; the broken API container was stopped and local dev verification was used for the final runtime check.
+
+### 2026-06-30 (Restricted AI operations access verification)
+
+- Opened required documents/context before verification: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/idealer-test-and-verify/SKILL.md`, `.claude/skills/idealer-ui-coherence/SKILL.md`, `.claude/skills/idealer-design-system/SKILL.md`, and design-system references `01-tokens.md` through `04-new-screen-recipe.md`.
+- Verified a token-enabled local flow without interrupting the existing `3002`/`3012` processes: started a temporary API on `127.0.0.1:3015` with `OPERATOR_AI_CONSOLE_TOKEN=dev-ai-ops-token`, confirmed `GET /operator/ai-operations` returns `200` with `Authorization: Bearer dev-ai-ops-token`, and confirmed the same endpoint returns `401 operator_authorization_required` without a token.
+- Built and served the admin temporarily on `127.0.0.1:3014` with `NEXT_PUBLIC_IDEALER_API_URL=http://127.0.0.1:3015`; `next build` passed and listed `/operator/ai-operations`.
+- Browser verification with Playwright through the installed `@idealer/web` workspace passed: `/operator/ai-operations` renders `AI Operations Console`, shows one password token input, accepts `dev-ai-ops-token`, loads the restricted metrics, and displays `Validation calls`, `Call volume by role`, `Provider routing by role`, `Queue status`, `Local model health`, and `Redaction`.
+- Responsive verification passed at `390x844` and `1280x900`: no horizontal overflow, restricted metrics remain visible after token load, and the public `/` route does not render the restricted token gate or `AI Operations Console` while keeping the navigation link to the restricted page.
+- Observed one console `404` for `http://127.0.0.1:3014/favicon.ico`; it is unrelated to the restricted panel/API access and no failed API requests were observed. Temporary verification servers on `3014` and `3015` were stopped after the check.
+
 ### 2026-06-29 (PRD M5.7 console safety boundaries implementation)
 
 - Opened required documents/context before working: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/security-best-practices/SKILL.md`, `.claude/skills/security-best-practices/references/javascript-typescript-react-web-frontend-security.md`, `.claude/skills/security-best-practices/references/javascript-typescript-nextjs-web-server-security.md`, and `.claude/skills/idealer-test-and-verify/SKILL.md`.

@@ -1,4 +1,5 @@
 import { createHash, randomInt, timingSafeEqual } from "node:crypto";
+import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import { resolve } from "node:path";
 import { fileURLToPath, URL } from "node:url";
@@ -54,6 +55,11 @@ import {
   detectJailbreak,
   resolveGuardianConfig,
 } from "./guardian.js";
+
+const ROOT_ENV_PATH = resolve(fileURLToPath(new URL("../../..", import.meta.url)), ".env");
+if (existsSync(ROOT_ENV_PATH)) {
+  process.loadEnvFile(ROOT_ENV_PATH);
+}
 
 const { Pool } = pg;
 const MAX_RULE_TEXT_BYTES = 6000;
