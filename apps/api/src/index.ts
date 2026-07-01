@@ -1,4 +1,4 @@
-import { createHash, randomInt, timingSafeEqual } from "node:crypto";
+import { createHash, createPublicKey, randomBytes, randomInt, verify } from "node:crypto";
 import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import { resolve } from "node:path";
@@ -945,7 +945,7 @@ const DASHBOARD_FIELD_REVIEW_CHECKLIST = [
   "Field is not in the private telemetry denylist.",
   "Field cannot mutate guesses, draw results, winners, active rules, prize accounting, claims, or finalized rewards.",
   "Field does not require raw prompts, raw completions, provider payloads, secrets, private request bodies, or unredacted stack traces.",
-  "Restricted AI field remains hidden unless operator bearer-token authorization succeeds.",
+  "Restricted AI field remains hidden unless authorized-wallet signature verification succeeds.",
   "Exported value is a redacted aggregate, hash, count, public identifier, or public-safe audit link.",
 ] as const;
 
@@ -1306,6 +1306,7 @@ export function resetApiStateForTests() {
   auditLogs.clear();
   auditLogOrder.length = 0;
   lastAuditLogHash = null;
+  operatorAiAccessChallenges.clear();
 }
 
 function getRuleTitle(sanitizedText: string) {
@@ -2347,7 +2348,8 @@ function getCorsHeaders(request: import("node:http").IncomingMessage) {
     : "";
 
   return {
-    "access-control-allow-headers": "authorization, content-type",
+    "access-control-allow-headers":
+      "authorization, content-type, x-operator-wallet, x-operator-nonce, x-operator-signature",
     "access-control-allow-methods": getAllowedMethodsForPath(pathname),
     "access-control-allow-origin": allowedOrigin,
     "access-control-max-age": "600",
@@ -6768,8 +6770,8 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
         status: "available",
       },
       {
-        endpoint: "OPERATOR_AI_CONSOLE_TOKEN",
-        label: "Operator bearer token gate",
+        endpoint: "OPERATOR_AI_CONSOLE_AUTHORIZED_WALLETS",
+        label: "Authorized operator wallet gate",
         source: "operator_config",
         status: "available",
       },
@@ -6893,12 +6895,105 @@ export function exportOperatorAiOperationsCsv(
   ].join("\n");
 }
 
-export function authorizeOperatorAiRequest(
-  authorizationHeader: string | undefined,
-  env: Partial<Pick<NodeJS.ProcessEnv, "OPERATOR_AI_CONSOLE_TOKEN">> = process.env,
+const OPERATOR_AI_ACCESS_TTL_MS = 5 * 60 * 1000;
+const SOLANA_BASE58_PUBLIC_KEY_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
+const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const BASE58_INDEX = new Map(
+  [...BASE58_ALPHABET].map((character, index) => [character, index]),
+);
+const operatorAiAccessChallenges = new Map<
+  string,
+  {
+    expiresAt: string;
+    issuedAt: string;
+    nonce: string;
+    used: boolean;
+    wallet: string;
+  }
+>();
+
+function decodeBase58(value: string) {
+  let leadingZeroes = 0;
+  while (value[leadingZeroes] === "1") {
+    leadingZeroes += 1;
+  }
+
+  const bytes = [0];
+  for (const character of value.slice(leadingZeroes)) {
+    const digit = BASE58_INDEX.get(character);
+    if (digit === undefined) {
+      throw new Error("INVALID_BASE58");
+    }
+
+    let carry = digit;
+    for (let index = 0; index < bytes.length; index += 1) {
+      carry += (bytes[index] ?? 0) * 58;
+      bytes[index] = carry & 0xff;
+      carry >>= 8;
+    }
+    while (carry > 0) {
+      bytes.push(carry & 0xff);
+      carry >>= 8;
+    }
+  }
+
+  return Uint8Array.from([
+    ...Array.from({ length: leadingZeroes }, () => 0),
+    ...(leadingZeroes === value.length ? [] : bytes.reverse()),
+  ]);
+}
+
+export function buildOperatorAiAccessMessage(args: {
+  expiresAt: string;
+  issuedAt: string;
+  nonce: string;
+  wallet: string;
+}) {
+  return [
+    "Idealer AI Operations Console",
+    `Wallet: ${args.wallet}`,
+    `Nonce: ${args.nonce}`,
+    `Issued At: ${args.issuedAt}`,
+    `Expires At: ${args.expiresAt}`,
+    "Purpose: read redacted operator AI metrics",
+  ].join("\n");
+}
+
+function parseAuthorizedOperatorWallets(value: string | undefined) {
+  return new Set(
+    (value ?? "")
+      .split(/[\s,;]+/)
+      .map((wallet) => wallet.trim())
+      .filter(Boolean),
+  );
+}
+
+function isSolanaWalletAddress(value: string | undefined) {
+  if (!value || !SOLANA_BASE58_PUBLIC_KEY_PATTERN.test(value)) {
+    return false;
+  }
+
+  try {
+    return decodeBase58(value).length === 32;
+  } catch {
+    return false;
+  }
+}
+
+function getOperatorAiChallengeKey(wallet: string, nonce: string) {
+  return `${wallet}:${nonce}`;
+}
+
+export function createOperatorAiAccessChallenge(
+  walletInput: unknown,
+  env: Partial<Pick<NodeJS.ProcessEnv, "OPERATOR_AI_CONSOLE_AUTHORIZED_WALLETS">> = process.env,
+  now = new Date(),
 ) {
-  const configuredToken = env.OPERATOR_AI_CONSOLE_TOKEN?.trim();
-  if (!configuredToken) {
+  const authorizedWallets = parseAuthorizedOperatorWallets(
+    env.OPERATOR_AI_CONSOLE_AUTHORIZED_WALLETS,
+  );
+  if (authorizedWallets.size === 0) {
     return {
       error: "operator_ai_operations_disabled",
       ok: false as const,
@@ -6906,8 +7001,102 @@ export function authorizeOperatorAiRequest(
     };
   }
 
-  const prefix = "Bearer ";
-  if (!authorizationHeader?.startsWith(prefix)) {
+  const wallet = typeof walletInput === "string" ? walletInput.trim() : "";
+  if (!isSolanaWalletAddress(wallet)) {
+    return {
+      error: "operator_wallet_required",
+      ok: false as const,
+      statusCode: 400,
+    };
+  }
+
+  if (!authorizedWallets.has(wallet)) {
+    return {
+      error: "operator_authorization_denied",
+      ok: false as const,
+      statusCode: 403,
+    };
+  }
+
+  const issuedAt = now.toISOString();
+  const expiresAt = new Date(now.getTime() + OPERATOR_AI_ACCESS_TTL_MS).toISOString();
+  const nonce = randomBytes(18).toString("base64url");
+  const challenge = {
+    expiresAt,
+    issuedAt,
+    message: buildOperatorAiAccessMessage({
+      expiresAt,
+      issuedAt,
+      nonce,
+      wallet,
+    }),
+    nonce,
+    wallet,
+  };
+  operatorAiAccessChallenges.set(getOperatorAiChallengeKey(wallet, nonce), {
+    expiresAt,
+    issuedAt,
+    nonce,
+    used: false,
+    wallet,
+  });
+
+  return {
+    challenge,
+    ok: true as const,
+  };
+}
+
+function verifyOperatorWalletSignature(args: {
+  expiresAt: string;
+  issuedAt: string;
+  nonce: string;
+  signature: string;
+  wallet: string;
+}) {
+  try {
+    const publicKeyBytes = decodeBase58(args.wallet);
+    const signatureBytes = Buffer.from(args.signature, "base64");
+    if (publicKeyBytes.length !== 32 || signatureBytes.length !== 64) {
+      return false;
+    }
+
+    const keyObject = createPublicKey({
+      format: "der",
+      key: Buffer.concat([ED25519_SPKI_PREFIX, Buffer.from(publicKeyBytes)]),
+      type: "spki",
+    });
+    return verify(
+      null,
+      Buffer.from(buildOperatorAiAccessMessage(args), "utf8"),
+      keyObject,
+      Buffer.from(signatureBytes),
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function authorizeOperatorAiRequest(
+  headers: NodeJS.Dict<string | string[] | undefined>,
+  env: Partial<Pick<NodeJS.ProcessEnv, "OPERATOR_AI_CONSOLE_AUTHORIZED_WALLETS">> = process.env,
+  now = new Date(),
+) {
+  const authorizedWallets = parseAuthorizedOperatorWallets(
+    env.OPERATOR_AI_CONSOLE_AUTHORIZED_WALLETS,
+  );
+  if (authorizedWallets.size === 0) {
+    return {
+      error: "operator_ai_operations_disabled",
+      ok: false as const,
+      statusCode: 503,
+    };
+  }
+
+  const wallet = String(headers["x-operator-wallet"] ?? "").trim();
+  const nonce = String(headers["x-operator-nonce"] ?? "").trim();
+  const signature = String(headers["x-operator-signature"] ?? "").trim();
+  if (!wallet || !nonce || !signature) {
     return {
       error: "operator_authorization_required",
       ok: false as const,
@@ -6915,16 +7104,34 @@ export function authorizeOperatorAiRequest(
     };
   }
 
-  const providedToken = authorizationHeader.slice(prefix.length).trim();
-  const configuredHash = createHash("sha256").update(configuredToken).digest();
-  const providedHash = createHash("sha256").update(providedToken).digest();
-  if (!timingSafeEqual(configuredHash, providedHash)) {
+  const challenge = operatorAiAccessChallenges.get(
+    getOperatorAiChallengeKey(wallet, nonce),
+  );
+  const challengeExpiresAtMs = Date.parse(challenge?.expiresAt ?? "");
+  const isFreshChallenge =
+    challenge !== undefined &&
+    !challenge.used &&
+    Number.isFinite(challengeExpiresAtMs) &&
+    now.getTime() <= challengeExpiresAtMs;
+  if (
+    !isSolanaWalletAddress(wallet) ||
+    !authorizedWallets.has(wallet) ||
+    !isFreshChallenge ||
+    !verifyOperatorWalletSignature({
+      expiresAt: challenge.expiresAt,
+      issuedAt: challenge.issuedAt,
+      nonce,
+      signature,
+      wallet,
+    })
+  ) {
     return {
       error: "operator_authorization_denied",
       ok: false as const,
       statusCode: 403,
     };
   }
+  challenge.used = true;
 
   return {
     ok: true as const,
@@ -8596,8 +8803,39 @@ if (isMainModule()) {
       return;
     }
 
+    if (
+      request.method === "POST" &&
+      url.pathname === "/operator/ai-operations/challenge"
+    ) {
+      void readJsonBody(request)
+        .then((body) => {
+          const wallet =
+            body && typeof body === "object" && "wallet" in body
+              ? (body as { wallet?: unknown }).wallet
+              : undefined;
+          const challenge = createOperatorAiAccessChallenge(wallet);
+          if (!challenge.ok) {
+            sendJson(request, response, challenge.statusCode, {
+              error: challenge.error,
+            });
+            return;
+          }
+
+          sendJson(request, response, 200, {
+            challenge: challenge.challenge,
+          });
+        })
+        .catch((error: unknown) => {
+          sendJson(request, response, 400, {
+            error: "invalid_json",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/operator/ai-operations") {
-      const auth = authorizeOperatorAiRequest(request.headers.authorization);
+      const auth = authorizeOperatorAiRequest(request.headers);
       if (!auth.ok) {
         sendJson(request, response, auth.statusCode, { error: auth.error });
         return;
@@ -8613,7 +8851,7 @@ if (isMainModule()) {
       request.method === "GET" &&
       url.pathname === "/operator/ai-operations/export"
     ) {
-      const auth = authorizeOperatorAiRequest(request.headers.authorization);
+      const auth = authorizeOperatorAiRequest(request.headers);
       if (!auth.ok) {
         sendJson(request, response, auth.statusCode, { error: auth.error });
         return;

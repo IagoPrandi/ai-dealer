@@ -4093,7 +4093,7 @@ Alerts:
 
 Idealer must include a read-only transparency console for public product, economy, rule, and settlement insights. The same deployment may also include a restricted operator-only area for AI agent operations monitoring.
 
-The public transparency surface may be deployed separately or exposed as a clearly named transparency surface. It must not depend on private analytics or privileged user-tracking data. The restricted AI operations area must require authentication and role-based access control, and must not be exposed through public navigation.
+The public transparency surface may be deployed separately or exposed as a clearly named transparency surface. It must not depend on private analytics or privileged user-tracking data. The restricted AI operations area must require authentication and role-based access control through an explicitly authorized operator wallet signature, and must not be exposed through public navigation.
 
 Requirements:
 
@@ -4124,7 +4124,7 @@ Transparency Console
   → fee, prize, rule, settlement, and audit dashboards
 
 Restricted AI Operations
-  → authenticated operator-only route/surface
+  → authorized-wallet authenticated operator-only route/surface
   → read-only operational metrics
   → no raw prompts, raw completions, secrets, API keys, private user analytics, or unredacted stack traces
   → agent/provider health, cost, latency, fallback, confidence, and error dashboards
@@ -5826,26 +5826,26 @@ Build a read-only admin/transparency console that exposes public, on-chain, or p
 
 **Checklist:**
 
-- [ ] Admin cannot alter submitted guesses.
-- [ ] Admin cannot alter draw results.
-- [ ] Admin cannot alter finalized winners.
-- [ ] Admin cannot silently modify active rules.
-- [ ] Admin cannot bypass prize accounting.
-- [ ] Admin cannot modify creator reward records after finalization.
-- [ ] Admin mutations are not available in the transparency console.
-- [ ] Console data loaders are read-only.
-- [ ] Console exports contain only public/derivable fields.
-- [ ] Restricted AI operations exports contain only redacted operational fields.
-- [ ] Console logs do not capture private user analytics.
-- [ ] Add a review checklist for new dashboard fields.
-- [ ] Add a denylist for private telemetry fields: IP, device fingerprint, session id, private user-agent record, wallet connect attempt, wallet failure, private funnel step, raw prompt, raw completion, provider API key, secret value, unrestricted compiler reasoning trace, private provider request/response body, and unredacted stack trace.
+- [x] Admin cannot alter submitted guesses.
+- [x] Admin cannot alter draw results.
+- [x] Admin cannot alter finalized winners.
+- [x] Admin cannot silently modify active rules.
+- [x] Admin cannot bypass prize accounting.
+- [x] Admin cannot modify creator reward records after finalization.
+- [x] Admin mutations are not available in the transparency console.
+- [x] Console data loaders are read-only.
+- [x] Console exports contain only public/derivable fields.
+- [x] Restricted AI operations exports contain only redacted operational fields.
+- [x] Console logs do not capture private user analytics.
+- [x] Add a review checklist for new dashboard fields.
+- [x] Add a denylist for private telemetry fields: IP, device fingerprint, session id, private user-agent record, wallet connect attempt, wallet failure, private funnel step, raw prompt, raw completion, provider API key, secret value, unrestricted compiler reasoning trace, private provider request/response body, and unredacted stack trace.
 
 **Approval criteria:**
 
-- [ ] Public console is transparency-focused and restricted AI operations are monitoring-focused, not outcome-control-focused.
-- [ ] Protected game state cannot be mutated through admin.
-- [ ] No private user analytics field is required to render the console.
-- [ ] Restricted AI operations can be disabled without affecting public transparency dashboards or game execution.
+- [x] Public console is transparency-focused and restricted AI operations are monitoring-focused, not outcome-control-focused.
+- [x] Protected game state cannot be mutated through admin.
+- [x] No private user analytics field is required to render the console.
+- [x] Restricted AI operations can be disabled without affecting public transparency dashboards or game execution.
 
 ---
 

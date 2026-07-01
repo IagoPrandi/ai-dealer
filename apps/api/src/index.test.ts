@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
+import { generateKeyPairSync, sign } from "node:crypto";
 import { test } from "node:test";
 import {
   M3_7_POSTGRES_AUDIT_SCHEMA,
   authorizeOperatorAiRequest,
+  buildOperatorAiAccessMessage,
   calculateAndStoreRewardRecords,
   calculateAndStoreWinnerRecords,
   calculatePrizePoolAccounting,
   calculateRepeatedActionFeeLamports,
   calculateRewardDistribution,
   completeClaimApproval,
+  createOperatorAiAccessChallenge,
   createClaimRecordsForTurn,
   createGuessVerificationJobsForTurn,
   getAuditLog,
@@ -79,6 +82,38 @@ const base58 = "6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4";
 
 function hashArray(byte: number) {
   return Array.from({ length: 32 }, () => byte);
+}
+
+const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+function encodeBase58(bytes: Uint8Array) {
+  let leadingZeroes = 0;
+  while (bytes[leadingZeroes] === 0) {
+    leadingZeroes += 1;
+  }
+
+  const digits = [0];
+  bytes.slice(leadingZeroes).forEach((byte) => {
+    let carry = byte;
+    for (let index = 0; index < digits.length; index += 1) {
+      carry += (digits[index] ?? 0) << 8;
+      digits[index] = carry % 58;
+      carry = Math.floor(carry / 58);
+    }
+    while (carry > 0) {
+      digits.push(carry % 58);
+      carry = Math.floor(carry / 58);
+    }
+  });
+
+  return `${"1".repeat(leadingZeroes)}${
+    leadingZeroes === bytes.length
+      ? ""
+      : digits
+          .reverse()
+          .map((digit) => BASE58_ALPHABET[digit])
+          .join("")
+  }`;
 }
 
 function proposal(turnId: number, ruleId: number): RuleProposalRecord {
@@ -882,16 +917,63 @@ test("restricted AI operations snapshot is role-gated and redacted", () => {
   saveFulfilledDraw(turnId);
   createGuessVerificationJobsForTurn(turnId);
 
-  const disabled = authorizeOperatorAiRequest("Bearer token", {});
-  const missing = authorizeOperatorAiRequest(undefined, {
-    OPERATOR_AI_CONSOLE_TOKEN: "token",
+  const keypair = generateKeyPairSync("ed25519");
+  const walletBytes = Buffer.from(
+    keypair.publicKey.export({ format: "der", type: "spki" }),
+  ).subarray(-32);
+  const operatorWallet = encodeBase58(walletBytes);
+  const authorizedEnv = {
+    OPERATOR_AI_CONSOLE_AUTHORIZED_WALLETS: operatorWallet,
+  };
+  const challenge = createOperatorAiAccessChallenge(
+    operatorWallet,
+    authorizedEnv,
+    new Date("2026-06-30T12:00:00.000Z"),
+  );
+  assert.equal(challenge.ok, true);
+  if (!challenge.ok) {
+    throw new Error("expected operator challenge to be created");
+  }
+  assert.equal(
+    challenge.challenge.message,
+    buildOperatorAiAccessMessage({
+      expiresAt: challenge.challenge.expiresAt,
+      issuedAt: challenge.challenge.issuedAt,
+      nonce: challenge.challenge.nonce,
+      wallet: operatorWallet,
+    }),
+  );
+  const signature = sign(
+    null,
+    Buffer.from(challenge.challenge.message, "utf8"),
+    keypair.privateKey,
+  ).toString("base64");
+  const validHeaders = {
+    "x-operator-nonce": challenge.challenge.nonce,
+    "x-operator-signature": signature,
+    "x-operator-wallet": operatorWallet,
+  };
+
+  const disabled = authorizeOperatorAiRequest(validHeaders, {});
+  const missing = authorizeOperatorAiRequest({}, authorizedEnv);
+  const deniedWallet = authorizeOperatorAiRequest(validHeaders, {
+    OPERATOR_AI_CONSOLE_AUTHORIZED_WALLETS: wallet,
   });
-  const denied = authorizeOperatorAiRequest("Bearer wrong", {
-    OPERATOR_AI_CONSOLE_TOKEN: "token",
-  });
-  const allowed = authorizeOperatorAiRequest("Bearer token", {
-    OPERATOR_AI_CONSOLE_TOKEN: "token",
-  });
+  const expired = authorizeOperatorAiRequest(
+    validHeaders,
+    authorizedEnv,
+    new Date("2026-06-30T12:05:01.000Z"),
+  );
+  const allowed = authorizeOperatorAiRequest(
+    validHeaders,
+    authorizedEnv,
+    new Date("2026-06-30T12:04:59.000Z"),
+  );
+  const replay = authorizeOperatorAiRequest(
+    validHeaders,
+    authorizedEnv,
+    new Date("2026-06-30T12:04:59.000Z"),
+  );
   const snapshot = getOperatorAiOperationsSnapshot();
   const csv = exportOperatorAiOperationsCsv(snapshot);
   const serialized = `${JSON.stringify(snapshot)}\n${csv}`.toLowerCase();
@@ -900,9 +982,13 @@ test("restricted AI operations snapshot is role-gated and redacted", () => {
   assert.equal(disabled.statusCode, 503);
   assert.equal(missing.ok, false);
   assert.equal(missing.statusCode, 401);
-  assert.equal(denied.ok, false);
-  assert.equal(denied.statusCode, 403);
+  assert.equal(deniedWallet.ok, false);
+  assert.equal(deniedWallet.statusCode, 403);
+  assert.equal(expired.ok, false);
+  assert.equal(expired.statusCode, 403);
   assert.equal(allowed.ok, true);
+  assert.equal(replay.ok, false);
+  assert.equal(replay.statusCode, 403);
   assert.equal(snapshot.access.role, "ai_operator");
   assert.equal(snapshot.access.readOnly, true);
   assert.equal(snapshot.operationCounts.validationCalls, 1);

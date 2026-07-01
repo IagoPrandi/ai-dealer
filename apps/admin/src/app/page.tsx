@@ -5,6 +5,27 @@ import { CREATOR_REWARD_RESERVE_SHARE_BPS, TREASURY_FEE_BPS } from "@idealer/con
 
 type LoadState = "error" | "loading" | "ready";
 
+interface SolanaBrowserProvider {
+  publicKey?: {
+    toString(): string;
+  };
+  connect(): Promise<{
+    publicKey?: {
+      toString(): string;
+    };
+  }>;
+  signMessage?(
+    message: Uint8Array,
+    encoding?: "utf8",
+  ): Promise<Uint8Array | { signature: Uint8Array }>;
+}
+
+declare global {
+  interface Window {
+    solana?: SolanaBrowserProvider;
+  }
+}
+
 interface ConsoleSafetyBoundary {
   allowedHttpMethods: readonly string[];
   dashboardFieldReviewChecklist: string[];
@@ -443,13 +464,79 @@ function StatCard({
   );
 }
 
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return window.btoa(binary);
+}
+
 export function OperatorAiOperationsPage() {
-  const [operatorToken, setOperatorToken] = useState("");
+  const [operatorWallet, setOperatorWallet] = useState("");
   const [operatorLoadState, setOperatorLoadState] = useState<LoadState | "idle">("idle");
   const [operatorError, setOperatorError] = useState<string | null>(null);
   const [operatorSnapshot, setOperatorSnapshot] =
     useState<OperatorAiOperationsSnapshot | null>(null);
   const apiBaseUrl = useMemo(() => getApiBaseUrl(), []);
+
+  async function getOperatorAuthHeaders() {
+    const provider = window.solana;
+    if (!provider?.connect || !provider.signMessage) {
+      throw new Error("Connect a Solana wallet that supports message signing.");
+    }
+
+    const connected = await provider.connect();
+    const wallet = connected.publicKey?.toString() ?? provider.publicKey?.toString();
+    if (!wallet) {
+      throw new Error("The connected wallet did not return a public address.");
+    }
+
+    const challengeResponse = await fetch(
+      `${apiBaseUrl}/operator/ai-operations/challenge`,
+      {
+        body: JSON.stringify({ wallet }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      },
+    );
+    if (!challengeResponse.ok) {
+      throw new Error(`Operator challenge returned HTTP ${challengeResponse.status}.`);
+    }
+    const challengeBody = (await challengeResponse.json()) as {
+      challenge?: {
+        message: string;
+        nonce: string;
+        wallet: string;
+      };
+    };
+    if (
+      !challengeBody.challenge ||
+      challengeBody.challenge.wallet !== wallet ||
+      !challengeBody.challenge.nonce ||
+      !challengeBody.challenge.message
+    ) {
+      throw new Error("Operator challenge response was invalid.");
+    }
+
+    const signed = await provider.signMessage(
+      new TextEncoder().encode(challengeBody.challenge.message),
+      "utf8",
+    );
+    const signature = signed instanceof Uint8Array ? signed : signed.signature;
+    if (!(signature instanceof Uint8Array)) {
+      throw new Error("The connected wallet did not return a valid signature.");
+    }
+
+    setOperatorWallet(wallet);
+    return {
+      "x-operator-nonce": challengeBody.challenge.nonce,
+      "x-operator-signature": bytesToBase64(signature),
+      "x-operator-wallet": wallet,
+    };
+  }
 
   async function loadOperatorSnapshot(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -458,10 +545,9 @@ export function OperatorAiOperationsPage() {
     setOperatorSnapshot(null);
 
     try {
+      const headers = await getOperatorAuthHeaders();
       const response = await fetch(`${apiBaseUrl}/operator/ai-operations`, {
-        headers: {
-          authorization: `Bearer ${operatorToken}`,
-        },
+        headers,
       });
       if (!response.ok) {
         throw new Error(`Operator API returned HTTP ${response.status}.`);
@@ -487,13 +573,10 @@ export function OperatorAiOperationsPage() {
   async function downloadOperatorExport(format: "csv" | "json") {
     setOperatorError(null);
     try {
+      const headers = await getOperatorAuthHeaders();
       const response = await fetch(
         `${apiBaseUrl}/operator/ai-operations/export?format=${format}`,
-        {
-          headers: {
-            authorization: `Bearer ${operatorToken}`,
-          },
-        },
+        { headers },
       );
       if (!response.ok) {
         throw new Error(`Operator export returned HTTP ${response.status}.`);
@@ -530,7 +613,7 @@ export function OperatorAiOperationsPage() {
           </p>
         </div>
         <div className="policy-strip" aria-label="Console policy">
-          <span>Bearer token required</span>
+          <span>Authorized wallet required</span>
           <span>Redacted operations only</span>
           <a href="/">Public transparency</a>
         </div>
@@ -556,22 +639,19 @@ export function OperatorAiOperationsPage() {
           </div>
           <form className="operator-gate" onSubmit={loadOperatorSnapshot}>
             <label>
-              Operator bearer token
+              Operator wallet
               <input
-                autoComplete="off"
-                onChange={(event) => setOperatorToken(event.target.value)}
-                placeholder="Restricted token"
-                type="password"
-                value={operatorToken}
+                readOnly
+                value={operatorWallet || "Connect and sign with an authorized wallet"}
               />
             </label>
-            <button disabled={!operatorToken || operatorLoadState === "loading"} type="submit">
-              Load AI ops
+            <button disabled={operatorLoadState === "loading"} type="submit">
+              Connect wallet
             </button>
           </form>
 
           {operatorLoadState === "loading" ? (
-            <p className="muted">Loading restricted redacted AI operations metrics.</p>
+            <p className="muted">Waiting for wallet signature and loading restricted metrics.</p>
           ) : null}
 
           {operatorLoadState === "error" ? (
