@@ -13,6 +13,7 @@
     "settlement:run": "tsx src/settlement-run.ts",
     "devnet:stage-turn": "tsx src/devnet-stage-turn.ts",
     "devnet:seed-real-inputs": "tsx src/devnet-seed-real-inputs.ts",
+    "devnet:simulate-10-players": "tsx src/devnet-10-player-simulation.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test --import tsx \"src/**/*.test.ts\""
   },

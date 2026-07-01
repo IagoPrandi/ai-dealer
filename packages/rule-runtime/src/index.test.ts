@@ -96,6 +96,73 @@ test("predicate: count_at_least over intersection", () => {
   );
 });
 
+test("predicate: ordered comparisons and numeric filters", () => {
+  const orderedLower: RuleAst = {
+    schemaVersion: 2,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "all_ordered_compare",
+        left: { kind: "source", source: "guess" },
+        op: "lt",
+        right: { kind: "source", source: "draw" },
+      },
+    },
+  };
+  const evenCountEquals: RuleAst = {
+    schemaVersion: 2,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "compare",
+        left: {
+          kind: "reduce",
+          op: "count",
+          of: {
+            kind: "filter_mod",
+            modulus: 2,
+            equals: 0,
+            of: { kind: "source", source: "guess" },
+          },
+        },
+        op: "eq",
+        right: {
+          kind: "reduce",
+          op: "count",
+          of: {
+            kind: "filter_mod",
+            modulus: 2,
+            equals: 0,
+            of: { kind: "source", source: "draw" },
+          },
+        },
+      },
+    },
+  };
+
+  assert.equal(
+    evaluatePredicate(orderedLower, {
+      guess: [1, 2, 3, 4, 5, 6],
+      draw: [2, 3, 4, 5, 6, 7],
+    }).result,
+    "WIN",
+  );
+  assert.equal(
+    evaluatePredicate(orderedLower, {
+      guess: [1, 2, 8, 4, 5, 6],
+      draw: [2, 3, 4, 5, 6, 7],
+    }).result,
+    "LOSE",
+  );
+  assert.equal(
+    evaluatePredicate(evenCountEquals, {
+      guess: [1, 2, 3, 4, 5, 6],
+      draw: [10, 12, 14, 15, 17, 19],
+    }).result,
+    "WIN",
+  );
+});
+
 test("legacy v1 rules still evaluate", () => {
   const draw = [1, 2, 3, 4, 5, 6];
   assert.equal(

@@ -11,8 +11,23 @@ Each line pairs a player intent with the exact JSON AST to emit.
 "win if the sum of your numbers equals the sum of the drawn numbers" =>
 {"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"compare","op":"eq","left":{"kind":"reduce","op":"sum","of":{"kind":"source","source":"guess"}},"right":{"kind":"reduce","op":"sum","of":{"kind":"source","source":"draw"}}}}}
 
+"win if exactly 3 guessed numbers appear in the draw" =>
+{"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"compare","op":"eq","left":{"kind":"reduce","op":"count","of":{"kind":"intersection","left":{"kind":"source","source":"guess"},"right":{"kind":"source","source":"draw"}}},"right":{"kind":"lit","value":3}}}}
+
+"win if no guessed number appears in the draw" =>
+{"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"compare","op":"eq","left":{"kind":"reduce","op":"count","of":{"kind":"intersection","left":{"kind":"source","source":"guess"},"right":{"kind":"source","source":"draw"}}},"right":{"kind":"lit","value":0}}}}
+
 "win if your exact sequence matches the draw in order" =>
 {"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"all_equal_ordered","left":{"kind":"source","source":"guess"},"right":{"kind":"source","source":"draw"}}}}
+
+"win if every guessed number is lower than the drawn number in the same position" =>
+{"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"all_ordered_compare","op":"lt","left":{"kind":"source","source":"guess"},"right":{"kind":"source","source":"draw"}}}}
+
+"win if the number of even guessed numbers equals the number of even drawn numbers" =>
+{"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"compare","op":"eq","left":{"kind":"reduce","op":"count","of":{"kind":"filter_mod","modulus":2,"equals":0,"of":{"kind":"source","source":"guess"}}},"right":{"kind":"reduce","op":"count","of":{"kind":"filter_mod","modulus":2,"equals":0,"of":{"kind":"source","source":"draw"}}}}}}
+
+"win if the smallest guessed number equals the smallest drawn number" =>
+{"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"compare","op":"eq","left":{"kind":"reduce","op":"min","of":{"kind":"source","source":"guess"}},"right":{"kind":"reduce","op":"min","of":{"kind":"source","source":"draw"}}}}}
 
 "whoever matches the most numbers" / "acertar mais números" (ranking max) =>
 {"schemaVersion":2,"result":{"type":"ranking","direction":"max","tieBreak":"share_pool","score":{"kind":"reduce","op":"count","of":{"kind":"intersection","left":{"kind":"source","source":"guess"},"right":{"kind":"source","source":"draw"}}}}}

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
   buildRuleCompilerSkillPrompt,
@@ -9,6 +10,33 @@ import {
   RULE_COMPILER_SKILL_VERSION,
   validateAndPrecompileRule,
 } from "./index.js";
+
+function readPromptRows(expected: "BLOCK" | "CLARIFY" | "VALID", limit: number) {
+  const markdown = readFileSync(
+    new URL("../../../docs/rule-proposal-prompt-test-set.md", import.meta.url),
+    "utf8",
+  );
+  const rows: string[] = [];
+  const pattern = new RegExp(
+    String.raw`^\|\s*\d+\s*\|\s*${expected}\s*\|\s*(.*?)\s*\|$`,
+    "gm",
+  );
+  for (const match of markdown.matchAll(pattern)) {
+    const prompt = match[1]?.trim();
+    if (prompt) {
+      rows.push(prompt);
+    }
+    if (rows.length >= limit) {
+      break;
+    }
+  }
+  assert.equal(rows.length, limit);
+  return rows;
+}
+
+function tokenCount(prompt: string) {
+  return prompt.trim().split(/\s+/).filter(Boolean).length;
+}
 
 test("the compile_rule_to_ast skill prompt is versioned and covers both rule modes", () => {
   const prompt = buildRuleCompilerSkillPrompt();
@@ -74,6 +102,52 @@ test("validates supported sum and exact-order rules", () => {
   assert.ok(
     exactAst?.schemaVersion === 1 && exactAst.node.kind === "ordered_exact",
   );
+});
+
+test("handles the first 10 VALID prompts from the rule proposal test set", () => {
+  const prompts = readPromptRows("VALID", 10);
+
+  for (const [index, prompt] of prompts.entries()) {
+    const result = validateAndPrecompileRule({
+      prompt,
+      ruleId: index + 1,
+      tokenCount: tokenCount(prompt),
+    });
+
+    assert.equal(result.decision, "VALID", prompt);
+    assert.equal(result.log.reasonCodes.includes("UNSUPPORTED_RULE"), false, prompt);
+    assert.match(result.artifactHash ?? "", /^[0-9a-f]{64}$/, prompt);
+  }
+});
+
+test("classifies the first 10 CLARIFY prompts as ambiguous", () => {
+  const prompts = readPromptRows("CLARIFY", 10);
+
+  for (const prompt of prompts) {
+    const result = validateAndPrecompileRule({
+      prompt,
+      tokenCount: tokenCount(prompt),
+    });
+
+    assert.equal(result.decision, "INVALID", prompt);
+    assert.ok(result.log.reasonCodes.includes("AMBIGUOUS_RULE"), prompt);
+    assert.equal(result.artifactHash, null, prompt);
+  }
+});
+
+test("blocks the first 10 BLOCK prompts as external dependencies", () => {
+  const prompts = readPromptRows("BLOCK", 10);
+
+  for (const prompt of prompts) {
+    const result = validateAndPrecompileRule({
+      prompt,
+      tokenCount: tokenCount(prompt),
+    });
+
+    assert.equal(result.decision, "INVALID", prompt);
+    assert.ok(result.log.reasonCodes.includes("EXTERNAL_DEPENDENCY"), prompt);
+    assert.equal(result.artifactHash, null, prompt);
+  }
 });
 
 test("fails ambiguous or external-dependent rules closed", () => {

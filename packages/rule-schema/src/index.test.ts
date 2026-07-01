@@ -58,6 +58,52 @@ test("accepts valid v2 predicate and ranking rules", () => {
   assert.equal(isRankingRule(predicateRule), false);
 });
 
+test("accepts objective filter and ordered-comparison nodes", () => {
+  const rule: RuleAst = {
+    schemaVersion: 2,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "and",
+        clauses: [
+          {
+            kind: "all_ordered_compare",
+            left: { kind: "source", source: "guess" },
+            op: "lt",
+            right: { kind: "source", source: "draw" },
+          },
+          {
+            kind: "compare",
+            left: {
+              kind: "reduce",
+              op: "count",
+              of: {
+                kind: "filter_mod",
+                modulus: 2,
+                equals: 0,
+                of: { kind: "source", source: "guess" },
+              },
+            },
+            op: "eq",
+            right: {
+              kind: "reduce",
+              op: "count",
+              of: {
+                kind: "filter_compare",
+                op: "gt",
+                value: 50,
+                of: { kind: "source", source: "draw" },
+              },
+            },
+          },
+        ],
+      },
+    },
+  };
+
+  assert.equal(ruleAstSchema.safeParse(rule).success, true);
+});
+
 test("accepts legacy v1 rules", () => {
   assert.equal(
     ruleAstSchema.safeParse({ schemaVersion: 1, node: { kind: "sum_equals" } })

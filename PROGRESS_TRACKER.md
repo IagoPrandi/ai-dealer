@@ -68,6 +68,53 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-07-01 (Natural rule prompt expansion)
+
+- Opened required documents/context before editing: `PRD.md`, `AGENTS.md`, `.claude/skills`, and `docs/rule-proposal-prompt-test-set.md`.
+- Updated `docs/rule-proposal-prompt-test-set.md` from 100 to 115 prompts by adding 5 more natural, less-direct `VALID` prompts, 5 more natural `CLARIFY` prompts, and 5 more natural `BLOCK` prompts.
+- Verified the Markdown now contains 115 numbered prompt rows. No source code, runtime behavior, or milestone checkbox was changed.
+- Reviewed the result for inconsistencies: the new prompts preserve the same expected-outcome taxonomy, avoid the stale 80-token PRD value, and keep blocked cases tied to prohibited dependencies such as other players, prize/payout state, wallet history, private AI knowledge, and post-draw reinterpretation.
+
+### 2026-07-01 (Rule proposal prompt test set)
+
+- Opened required documents/context before creating the prompt set: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/idealer-test-and-verify/SKILL.md`, `.claude/skills/security-threat-checklist/SKILL.md`, `.claude/skills/best-practices/SKILL.md`, and `.claude/skills/best-practices/references/agent-principles.md`.
+- Treated `PRD.md` as required background but not as the source of truth for the rule token limit after user correction; verified current code/config uses `RULE_MAX_TOKENS = 1000` in `packages/constants/src/index.ts`, with `.env.example` and existing tests also referencing `1000`.
+- Created `docs/rule-proposal-prompt-test-set.md` with 100 rule-creation prompts covering valid compilable rules, ambiguity/clarification cases, prohibited dependencies, prompt injection, executable-code attempts, impossible/always-true rules, unsupported external state, and 30 multi-interaction refinement prompts.
+- No source code, runtime behavior, or milestone checkbox was changed. Reviewed the result for inconsistencies: the prompt set avoids relying on the stale 80-token PRD value, uses the current 1000-token code/config value, and keeps the expected outcomes aligned with the current guess/draw-only rule compiler boundaries.
+
+### 2026-07-01 (Docker compose long build recovery)
+
+- Opened required documents/context before recovery: `PRD.md`, `AGENTS.md`, and `.claude/skills`.
+- Diagnosed `docker compose up -d --build worker postgres redis api` taking too long: the active process was `docker-buildx bake`, with two `infra/docker/Dockerfile.node` builds running for about 49 minutes and no `api`/`worker` containers created. Existing local images were available for `idealer-api:latest` and `idealer-worker:latest`.
+- Interrupted the long-running build and attempted `docker compose up -d --no-build postgres redis api worker`. The Docker engine became unresponsive during the first attempt, so Docker Desktop was restarted non-destructively with WSL shutdown/restart; no volume reset, prune, or data deletion was performed.
+- Brought the stack up in smaller steps: `docker compose up -d --no-build postgres redis`, waited for both healthchecks, then `docker compose up -d --no-build api worker`.
+- Verification passed: `postgres`, `redis`, `api`, and `worker` are `healthy`; `GET http://127.0.0.1:3002/health` and `GET http://127.0.0.1:3003/health` both returned `200`.
+- Reviewed the result for inconsistencies: the repeated/dead worker containers are gone, the expected `idealer-worker` container is active, and no milestone checkbox was marked. Note: worker turn automation started after boot and logged turn close/open activity.
+
+### 2026-07-01 (Docker worker duplicate diagnosis)
+
+- Opened required documents/context before diagnosis: `PRD.md`, `AGENTS.md`, and `.claude/skills`.
+- Checked `docker compose ps -a`, `docker ps -a`, `docker compose config`, and Docker labels for the repeated worker containers shown in Docker Desktop.
+- Confirmed the expected worker service name from the current `docker-compose.yml` is `idealer-worker`; the `b0643694c558_idealer-worker` container is a Compose replacement container created after the older `idealer-worker` container became `Dead` and kept the desired name.
+- No container cleanup was performed in this task. Reviewed the result for inconsistencies: both worker containers are stopped/dead or exited, the current compose config does not require two worker containers, and no milestone checkbox was marked.
+
+### 2026-07-01 (Docker Desktop startup recovery)
+
+- Opened required documents/context before recovery: `PRD.md`, `AGENTS.md`, and `.claude/skills`.
+- Diagnosed Docker Desktop stuck in `starting`: `docker version` hung, `docker-desktop` WSL distro was running, and Docker logs showed the backend waiting for the engine/API. `com.docker.service` could not be started from the non-elevated shell.
+- Performed a non-destructive recovery: attempted Docker's own shutdown, terminated stuck Docker Desktop/backend processes after that shutdown hung, ran `wsl --shutdown`, restarted Docker Desktop, and waited for the internal engine/API to become healthy.
+- Verified recovery: `docker version` returned Docker Desktop 4.79.0 / Engine 29.5.3, `docker ps` returned successfully with no running containers, and `docker compose ls` returned successfully with no active compose projects.
+- No milestone checkbox was marked and no Docker data reset/prune was run. Reviewed the result for inconsistencies: the Docker engine is responsive, no project containers were started, and the pre-existing `PROGRESS_TRACKER.md` worktree modification was preserved.
+
+### 2026-07-01 (API runtime refreshed with authorized wallet env)
+
+- Opened required documents/context before verification: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/web2-wallet-auth/SKILL.md`, and `.claude/skills/release-config-management/SKILL.md`.
+- Checked the running API on `127.0.0.1:3002`: `/transparency` returned `200`, but `POST /operator/ai-operations/challenge` returned `503`, proving the process was still using the old restricted-operator environment.
+- Confirmed the existing Docker `idealer-api` container still had the old `OPERATOR_AI_CONSOLE_TOKEN` environment while `docker compose config` rendered the new non-empty `OPERATOR_AI_CONSOLE_AUTHORIZED_WALLETS` value. The old local API watcher and stale `idealer-api` container were stopped/removed.
+- Docker Compose recreation for `api` timed out before creating a replacement container, so the API was started locally in background on `127.0.0.1:3002` with the repository `.env` loaded; logs are written to `.next-dev-logs/api-wallet-env.log`.
+- Runtime verification passed after refresh: `GET /transparency` returned `200`, and `POST /operator/ai-operations/challenge` for the configured authorized wallet returned `200` with a valid nonce/message challenge shape. The wallet address was not printed. The stale Docker API container is no longer running; the active API is the refreshed local process.
+- Reviewed the result for inconsistencies introduced by the changes: no code or milestone checkbox was changed in this task; the active API process now uses the authorized-wallet env, and the restricted AI operations data routes remain wallet-gated and read-only.
+
 ### 2026-07-01 (Authorized wallet env verification)
 
 - Opened required documents/context before verification: `PRD.md`, `AGENTS.md`, `.claude/skills`, and `.claude/skills/web2-wallet-auth/SKILL.md`.
@@ -2642,3 +2689,125 @@ Passed:
 - Documented official Playwright container commands using `mcr.microsoft.com/playwright:v1.60.0-noble`, a persistent `idealer-playwright-node-modules` Docker volume, `output/playwright/` artifacts, `host.docker.internal` for host-served pages, and `--network idealer-internal` for Docker Compose service DNS such as `web`, `admin`, and `api`.
 - Confirmed Docker is available (`Docker 29.1.3`, Compose `v2.40.3-desktop.1`); the Playwright image is not currently present locally, so the first containerized run will pull it.
 - No milestone checkbox was marked because this was a skill/documentation update and no milestone completion was confirmed by the user.
+
+## Devnet 10-Player Simulation Work Log
+
+### 2026-07-01
+
+- Reopened `PRD.md`, listed `.claude/skills`, opened `.claude/skills/idealer-test-and-verify/SKILL.md`, `.claude/skills/idealer-test-and-verify/references/devnet-verification.md`, `.claude/skills/solana-dev/SKILL.md`, and `.claude/skills/solana-dev/ext/solana-dev/skill/SKILL.md` before working on the requested devnet simulation.
+- Opened `docs/rule-proposal-prompt-test-set.md` and used its first 10 `VALID` prompts as the simulation rule proposal source.
+- Added `apps/worker/src/devnet-10-player-simulation.ts`, a dry-run-by-default devnet operator for 10 deterministic player wallets that plans/manual-opens a turn, airdrops 2 SOL per wallet through `solana airdrop 2 <WALLET_ADDRESS> --url devnet`, submits guesses, runs rule preflight/proposal/precompile for each player, casts approval votes, manually shrinks the active turn duration to reach the cutoff, drives settlement to the elimination window, casts elimination votes, settles to draw fulfilled, manually closes the turn, attempts a real claim for an available seeded winner, and probes expired-unclaimed claim handling.
+- Added `apps/worker/src/devnet-10-player-simulation.test.ts` to verify prompt parsing and default simulation config, and registered `pnpm --filter @idealer/worker devnet:simulate-10-players`.
+- Updated `apps/worker/src/devnet-seed-real-inputs.ts` to export existing deterministic player/instruction/API helper functions and to resolve broadcast state at call time so the new operator can reuse the proven seeding path.
+- Verified: `pnpm --filter @idealer/worker typecheck`, `pnpm --filter @idealer/worker test` (83/83), `pnpm --filter @idealer/worker lint`, `pnpm --filter @idealer/worker build`, host dry-run, and worker-container dry-run with `IDEALER_10P_SIM_PROMPT_MARKDOWN`.
+- Broadcast/live simulation is blocked because `solana` CLI is not available in the host PATH or in the running `idealer-worker` container; the requested airdrop command cannot be executed in this environment without installing/exposing the Solana CLI. No fallback funding was used.
+- No milestone checkbox was marked because this was a simulation/testing operator task and milestone marking still requires explicit user confirmation.
+
+### 2026-07-01 (Solana CLI availability)
+
+- Reopened `PRD.md`, listed `.claude/skills`, opened `.claude/skills/solana-dev/SKILL.md`, and opened `.claude/skills/solana-dev/ext/solana-dev/skill/SKILL.md` before changing the execution environment.
+- Checked official Solana/Anza documentation for CLI installation. The selected path is the documented Agave/Solana install tool for Linux with `v4.0.3`, followed by `PATH` exposure and `solana --version` verification.
+- Updated `infra/docker/Dockerfile.node` to install `ca-certificates`, `curl`, and `bzip2`, run the documented Agave install tool, expose `/root/.local/share/solana/install/active_release/bin` in `PATH`, and verify `solana --version` during image build.
+- Verified the Dockerfile install fragment in a minimal Docker image; it installed `solana-cli 4.0.3`.
+- Attempted `docker compose build worker`, but the full build stayed stuck until the 15-minute timeout. The stuck build/compose processes from that attempt were stopped.
+- Installed the same CLI into the currently running `idealer-worker` container as an immediate environment fix and symlinked `solana`/`solana-keygen` into `/usr/local/bin`.
+- Verified in the running worker container: `solana --version` returns `solana-cli 4.0.3`, and `solana airdrop --help` exposes `solana airdrop [FLAGS] [OPTIONS] <AMOUNT> [RECIPIENT_ADDRESS]`.
+- No milestone checkbox was marked because this was environment/tooling work and milestone marking requires explicit user confirmation.
+
+### 2026-07-01 (10-player simulation retry)
+
+- Reopened `PRD.md`, listed `.claude/skills`, reopened `.claude/skills/idealer-test-and-verify/SKILL.md`, and reopened `.claude/skills/idealer-test-and-verify/references/devnet-verification.md` before retrying the requested simulation.
+- Verified the running worker environment has `solana-cli 4.0.3` and that the main API and worker health endpoints respond.
+- Started a temporary API process on port `3012` with `gemma3:4b` and translation disabled to avoid the known slow `gemma4:latest` path during the simulation retry; verified it from the worker network.
+- Built and used a temporary one-off worker image that includes the Solana CLI so the simulation could run without the main `idealer-worker` loop interfering with the command process.
+- Verified the 10-player simulation dry-run still passes inside the worker container with the mounted source and docs.
+- Retried the broadcast simulation with `IDEALER_10P_SIM_BROADCAST=1`, `IDEALER_TURN_MANUAL_CONTROL_ENABLED=true`, `IDEALER_SETTLE_BROADCAST=1`, and the devnet authority keypair path mounted from `idealer-solana-home`.
+- The broadcast retry opened turn `54` but stopped on the first required player funding command because `solana airdrop 2 3WjawGsEDWYY6mboXdEphDHzWK3BS2QuGqx9QmEpriAN --url devnet` returned `Error: airdrop request failed. This can happen when the rate limit is reached.`
+- Closed the turn left open by the failed retry with manual control; `closeTurnManually` returned turn `54` signatures `7r1Zs37Zj7wcgVJTpymxcKyWJWahPKBjTQkB8AK7oxFQkuSrH17wL3eT8XsLAHUySWWnhteaSzbncCijsxrSNQC` and `4pERmCzaj3xfvw7QXsD6bfLh8rG5L8Zg5iKGVCV3e5KuzUpKLkF2bNtUjPi8WvAHNp5QBqA1MUQd1GpFUHY2Zaws`.
+- Observed the always-on `idealer-worker` turn automation acting on a new active turn `55` after cleanup; this is separate from the failed one-off simulation attempt.
+- Removed the temporary simulation container/output file and stopped the temporary API process on port `3012`; the main API on port `3002` remained healthy.
+- No fallback funding was used because the requested test explicitly requires `solana airdrop 2 <WALLET_ADDRESS> --url devnet`, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-01 (10-player simulation funder wallet)
+
+- Reopened `PRD.md`, listed `.claude/skills`, opened `.claude/skills/idealer-test-and-verify/SKILL.md`, `.claude/skills/idealer-test-and-verify/references/devnet-verification.md`, `.claude/skills/solana-dev/SKILL.md`, and `.claude/skills/solana-dev/ext/solana-dev/skill/SKILL.md` before changing the simulation funding flow.
+- Created a dedicated devnet simulation funder keypair in the Docker `idealer-solana-home` volume at `/solana-home/.config/idealer/devnet/ten-player-funder-keypair.json`; the private key was not written to the repository or printed in logs.
+- Updated `apps/worker/src/devnet-10-player-simulation.ts` so broadcast runs use `IDEALER_10P_SIM_FUNDER_KEYPAIR_PATH` to transfer SOL from the funder wallet to each deterministic player wallet before gameplay; the existing faucet airdrop path remains available when no funder keypair path is configured.
+- Added `IDEALER_10P_SIM_FUNDER_SOL_PER_PLAYER`, defaulting to `2` SOL per player, and validated conversion to lamports with up to 9 decimal places.
+- Added worker tests for funder config parsing and SOL-to-lamports conversion.
+- Verified: `pnpm --filter @idealer/worker typecheck`, `pnpm --filter @idealer/worker test` (85/85), `pnpm --filter @idealer/worker lint`, `pnpm --filter @idealer/worker build`, and a containerized dry-run with `IDEALER_10P_SIM_FUNDER_KEYPAIR_PATH=/solana-home/.config/idealer/devnet/ten-player-funder-keypair.json`.
+- The funder wallet address is `9RgCEm7N2beoJwdexGDbvmkgJVJ8wnsQW9EX8HNNJbc4`; current devnet balance was checked as `0 SOL`.
+- No milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-01 (10-player simulation funded broadcast)
+
+- Reopened `PRD.md`, listed `.claude/skills`, opened `.claude/skills/idealer-test-and-verify/SKILL.md`, and opened `.claude/skills/idealer-test-and-verify/references/devnet-verification.md` before running the funded broadcast simulation.
+- Confirmed the funder wallet `9RgCEm7N2beoJwdexGDbvmkgJVJ8wnsQW9EX8HNNJbc4` had `22 SOL` on devnet.
+- Stopped the always-on `idealer-worker` before the one-off simulation to avoid turn automation interference; closed pre-existing active turn `55` manually with signatures `fTBZp3C6urbCRoUY3mXc9FTBKVsFRXF5QPwBbGgdJGSFdtuquX5ZmAZCUwfAMAQBfzy9oPYuZ1XZiF5o35mrE4d` and `53HgVa32hmC7vHQ8MPwV585DHzrfHntEocTDHkMXCTVekUMA2jBtFQESAuU8cWezUDcHbc6Vy5uJ6Wdso1FwMWay`.
+- Started a temporary API on port `3012` with `gemma3:4b` and translation disabled, verified its health, and confirmed the on-chain global config had no active turn and `nextTurnId=56`.
+- Ran a final containerized dry-run with `IDEALER_10P_SIM_FUNDER_KEYPAIR_PATH=/solana-home/.config/idealer/devnet/ten-player-funder-keypair.json`; it planned `funder_wallet_transfer_each_player_wallet`.
+- Started the broadcast simulation with manual control, settlement broadcast, the devnet authority keypair, and the funder keypair. The run opened turn `56` and transferred `2 SOL` to each deterministic player wallet.
+- The run then failed on the first `submit_guess` simulation with Anchor `ConstraintSeeds` on `player_guess` (`Custom 2006`). The transaction passed `3mGdouMfADMpUxX9NSrCXwHYAw7yZQDAN1qjKF1dT1W6`; the devnet program expected `GYCtGFSVVAttD1t1vmRHiPT9vHufwgwGiN71ADRMwyjD`.
+- Verified locally that `3mGdouMfADMpUxX9NSrCXwHYAw7yZQDAN1qjKF1dT1W6` is the PDA produced by the current repo's `createSubmitGuessInstruction` for turn `56`, player index `0`, and sequence `1`, matching the local Anchor source seeds. This points to a devnet program/client contract mismatch or another deployed-program seed/layout drift that must be resolved before the 10-player simulation can continue.
+- Closed turn `56` manually after the failed run with signatures `4ZzqyyBBjW21BM6C5xnQ1x1GQDXj5nA8ntJzxPJtmmi85m2FijXQphFG1Mza5irxorVA7XrXfE8kitoaVsmoViQ` and `6DuPwPxbyu1w897eaDAoKyf2rYh3FQKuakFFMN3XiJZ4F6csykpSBhhwNMpew2VtcnBBUP6LjTPZWbrHXoL2Lfo`.
+- Checked balances after failure: the funder had `1,999,950,000` lamports remaining, and sampled player wallets for turn `56` each had `2,000,000,000` lamports.
+- Removed the one-off simulation container/output file, stopped the temporary API on port `3012`, and restarted the main `idealer-worker`. The main API on `3002` and worker on `3003` responded healthy; after worker restart, automation opened active turn `57`.
+- No milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-01 (Devnet PDA mismatch diagnosis)
+
+- Reopened `PRD.md`, listed `.claude/skills`, opened `.claude/skills/solana-dev/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/references/programs/anchor.md`, `.claude/skills/idealer-test-and-verify/SKILL.md`, and `.claude/skills/idealer-test-and-verify/references/devnet-verification.md` before diagnosing the PDA/program mismatch.
+- Reproduced the devnet `submit_guess` failure with a funded signer on active turn `57`: the deployed program rejected the local client PDA with Anchor `ConstraintSeeds` on `player_guess`.
+- Inferred the deployed program's expected `player_guess` PDA by brute force: devnet currently expects `PDA(["guess", turn_id, player])`, while the current repo source and clients correctly use `PDA(["guess", turn_id, player, sequence])` for repeated action support.
+- Concluded that the devnet program binary is stale relative to the current repo/client contract. Downgrading the client would hide the issue and break sequenced repeated guesses; the correct fix is upgrading the devnet program to the current SBF artifact.
+- Checked devnet program `6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4`: upgrade authority is `4bY5krt2VnnSNB1R4c1bhiWdQYkTc1FvFTN1LaV5JxCH`, last deployed slot was `471782068`, and the deployer had `11.46552976 SOL`.
+- Built the current SBF artifact with devnet features `devnet-test,sb-devnet`: `scripts/sbf.sh build` produced `/sbf-target/deploy/idealer.so`.
+- Verification passed before any upgrade transaction: `pnpm --filter @idealer/solana-programs typecheck`, `pnpm --filter @idealer/solana-programs lint`, `pnpm --filter @idealer/solana-programs test`, and `scripts/sbf.sh test-sbf` (7/7 ignored SBF instruction tests passed).
+- No devnet upgrade transaction was sent yet; broadcasting the program upgrade still requires explicit user confirmation.
+- No milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-01 (Devnet program PDA alignment upgrade)
+
+- Proceeded only after explicit user confirmation to broadcast the devnet program upgrade.
+- Stopped the always-on `idealer-worker`, checked the on-chain global config, and closed active turn `59` before upgrade with signatures `64qdLjKxb6gUKU3U6TmPxW5hcrpRig5tW2iZsc6yeeVvhBapY6RCabtRQDRkwV4kbMPf2wtoAxjnXkArpWb3sL2s` and `36TTZGPHcTit1xo18zxegwoadBd37hDoAwBXuUyC9Hwx24zi8eyWqR7H1SaAQgdX9yxAosRMfa7kehPHnLWXUzCF`.
+- Upgraded devnet program `6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4` from the already verified `/sbf-target/deploy/idealer.so` artifact using upgrade authority `4bY5krt2VnnSNB1R4c1bhiWdQYkTc1FvFTN1LaV5JxCH`.
+- Upgrade transaction signature: `61Xud27HJGkDSXvnJdDrEWwFjGFxmbYgjBfp5b4ZAPhp1LyhtJaaA5vm4JAVEvkQfsws58vCS42yXkVznyFh4CwB`.
+- Verified `solana program show`: last deployed slot is now `473283206`, program data length is `778352 (0xbe070)` bytes, and upgrade authority remains `4bY5krt2VnnSNB1R4c1bhiWdQYkTc1FvFTN1LaV5JxCH`.
+- Opened temporary turn `60` and simulated `submit_guess` with the current client PDA including the `sequence` seed. The simulation returned `err: null` and program logs ended in success, confirming the PDA mismatch is resolved on devnet.
+- Closed temporary turn `60` with signatures `2ZQTCW28Jk98W7pqq3guK5et8myocp1PY6Y8FYSs64b48Cw9prfsuHkCMy99fguRLuM3v3rnw8cn1LiLH4Qk9oxE` and `2RjePV4CqKyYWb9NU4tDjrcVGw6Baao34XNDcivNoXYas7aEQU9g1h78tUVPysqdCZfi9iyavw3RGzxTBsZuau91`.
+- Restarted `idealer-worker`; API `3002` and worker `3003` responded healthy. Worker automation opened active turn `61` after restart.
+- No milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-01 (10-player simulation rerun after PDA upgrade)
+
+- Reopened `PRD.md`, listed `.claude/skills`, opened `.claude/skills/idealer-test-and-verify/SKILL.md`, and opened `.claude/skills/idealer-test-and-verify/references/devnet-verification.md` before rerunning the requested simulation.
+- Swept leftover devnet SOL from deterministic player wallets for failed turns `56`, `62`, and interrupted turn `63` back to the dedicated simulation funder wallet. The funder ended cleanup with `21.80911712 SOL`.
+- Stopped `idealer-worker`, closed active turn `61`, and started a temporary API on port `3012` with `gemma3:4b` and translation disabled.
+- Ran a broadcast simulation on turn `62` against the upgraded devnet program. The PDA mismatch was resolved: the run opened the turn, funded players, submitted guesses, and progressed into rule validation.
+- The run failed at player/rule prompt #2 from `docs/rule-proposal-prompt-test-set.md`: `Win if the guessed numbers have the same sum as the drawn numbers.` The stored rule validation returned `decision=INVALID`, `reasonCodes=["UNSUPPORTED_RULE","UNSAFE_RUNTIME_BOUNDS"]`, and no `compiledArtifactHash`.
+- Initially changed the first 10 reference prompts to only supported match-count prompts, but the user clarified that reference prompts must not be altered and that unsupported reference prompts indicate an agent/compiler deficiency. Reverted the prompt-set change and restored the original simulation test expectation.
+- Verified after revert: `pnpm --filter @idealer/worker typecheck`, `pnpm --filter @idealer/worker test` (85/85), `pnpm --filter @idealer/worker lint`, and `pnpm --filter @idealer/worker build`.
+- Closed turn `62` after the failed validation and closed turn `63` after stopping the invalid prompt-altered rerun. Removed the simulation container/output file, stopped the temporary API on `3012`, and restarted `idealer-worker`.
+- Final health checks passed: API `3002` and worker `3003` responded healthy, temporary API `3012` was unreachable, and worker automation opened active turn `64`.
+- No milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-01 (Rule proposal agent prompt flexibility fix)
+
+- Reopened `PRD.md`, listed `.claude/skills`, opened `.claude/skills/best-practices/SKILL.md`, `.claude/skills/best-practices/references/agent-principles.md`, `.claude/skills/best-practices/references/code-quality.md`, `.claude/skills/best-practices/references/testing.md`, `.claude/skills/idealer-test-and-verify/SKILL.md`, `packages/rule-compiler/rule-authoring/SKILL.md`, `packages/rule-compiler/rule-authoring/references/patterns.md`, `packages/rule-compiler/rule-authoring/references/examples.md`, and `docs/rule-proposal-prompt-test-set.md` before changing the rule proposal agent/compiler path.
+- Expanded the rule DSL schema and deterministic runtime with objective `filter_compare`, `filter_mod`, and `all_ordered_compare` nodes so valid natural-language rules can express parity counts and same-position comparisons without relying on rigid prompt wording.
+- Updated the rule compiler's deterministic reviewer/offline compiler to recognize the first 10 `VALID` prompts in `docs/rule-proposal-prompt-test-set.md`, including exact match counts, no matches, position comparisons, unordered same-set matching, even-count equality, compound sum+match rules, and smallest-value comparison.
+- Strengthened ambiguity and external-dependency gates so the first 10 `CLARIFY` prompts are classified as ambiguous and the first 10 `BLOCK` prompts are rejected before submission.
+- Updated the runtime `compile_rule_to_ast` skill prompt and examples so the LLM agent is guided to accept casual but objective wording instead of requiring a narrow sentence format.
+- Added regression coverage that reads `docs/rule-proposal-prompt-test-set.md` directly and verifies the first 10 prompts from each `VALID`, `CLARIFY`, and `BLOCK` category.
+- Fixed a pre-existing `rule-test-harness` lint issue (`no-useless-assignment`) encountered during dependent-package verification by removing an unused initial boolean assignment without changing behavior.
+- Verified: `pnpm --filter @idealer/rule-schema typecheck`, `test` (7/7), `lint`, `build`; `pnpm --filter @idealer/rule-runtime typecheck`, `test` (12/12), `lint`, `build`; `pnpm --filter @idealer/rule-compiler typecheck`, `test` (22/22), `lint`, `build`; `pnpm --filter @idealer/rule-test-harness typecheck`, `test` (6/6), `lint`, `build`.
+- Reviewed the resulting behavior for inconsistencies: the change stays bounded to deterministic guess/draw-only DSL nodes, keeps external/ambiguous rules fail-closed, keeps the harness behavior unchanged aside from lint cleanup, and does not mark any milestone checkbox because milestone marking requires explicit user confirmation.
+
+### 2026-07-01 (Selected 10 prompt deterministic conversion simulation)
+
+- Reopened required context before running the check: `PRD.md`, `.claude/skills`, `.claude/skills/idealer-test-and-verify/SKILL.md`, `.claude/skills/idealer-test-and-verify/references/devnet-verification.md`, and `docs/rule-proposal-prompt-test-set.md`.
+- Selected the first 10 `VALID` prompts from `docs/rule-proposal-prompt-test-set.md`, matching the default input set used by `apps/worker/src/devnet-10-player-simulation.ts`.
+- Ran a local deterministic conversion check over prompts #1-#10 with fixed timestamp/rule IDs. All 10 returned `decision=VALID`, all 10 produced stable AST/artifact hashes across repeated compilation, and all deterministic harness checks passed.
+- Resulting artifact hashes for prompts #1-#10: `915cb67c232451dcfafbf4af42e1728a485693dfe57129de80fc8d8a08478730`, `b8f850f2c2c709eb2dd4cc8a348bc45fe0b078b76999054a38136b16492d20a2`, `60975c459093c340546cedb88eacf430076c7c891a3efefd0187513019e7a409`, `5dc9e4fe670f26a96334631ddbc59858776f96986513e4381b9722d05ccc5559`, `75c08bbad9f2bd35b9f2f8a23e51a1f3c48ae31bdfbb04fefd85c938875d4186`, `ad87d88127fd516f517049704fbafa1c9638a27c5180e13bd989ae112cf9f955`, `a1dab0274b81a68c4781da766e4843d459557da5683b97f3738a1563261510a1`, `77e0c7a5a04bc7782b8c3f982da14ce3a172dee04e501db86d0334df4c636a65`, `5a90a7f53285701f79448fc79c692aeda82f38b677a41ec81c51f1f8d5c9debb`, and `8e28069cb230ec2a8cba1a4892b10d9523837f0b770a3ca5d01f69332ba73708`.
+- Ran `pnpm --filter @idealer/worker devnet:simulate-10-players` in its safe default dry-run mode. The dry-run selected the same 10 prompts, planned the full 10-player flow (`manual_open_turn`, funding, guesses, rule preflight/proposal, votes, settlement, close, claim, expired-claim probe), and did not broadcast transactions.
+- Reviewed the result for inconsistencies: deterministic conversion stayed `guess`/`draw`-only, the simulation remained dry-run because live broadcast requires explicit `IDEALER_10P_SIM_BROADCAST=1`, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.

@@ -159,6 +159,29 @@ function digit(n: number, place: "units" | "tens"): number {
   return place === "units" ? abs % 10 : Math.floor(abs / 10) % 10;
 }
 
+function compareValues(
+  left: number,
+  op: "eq" | "neq" | "lt" | "lte" | "gt" | "gte",
+  right: number,
+): boolean {
+  switch (op) {
+    case "eq":
+      return left === right;
+    case "neq":
+      return left !== right;
+    case "lt":
+      return left < right;
+    case "lte":
+      return left <= right;
+    case "gt":
+      return left > right;
+    case "gte":
+      return left >= right;
+    default:
+      throw new RuleRuntimeError("INVALID_NODE", "unknown compare op");
+  }
+}
+
 function uniqueIntersection(left: number[], right: number[]): number[] {
   const rightSet = new Set(right);
   const seen = new Set<number>();
@@ -202,6 +225,20 @@ function evalArray(
         return guardArray(
           evalArray(node.of, input, budget).map((value) =>
             digit(value, node.place),
+          ),
+        );
+      case "filter_compare":
+        return guardArray(
+          evalArray(node.of, input, budget).filter((value) =>
+            compareValues(value, node.op, node.value),
+          ),
+        );
+      case "filter_mod":
+        return guardArray(
+          evalArray(node.of, input, budget).filter(
+            (value) =>
+              ((value % node.modulus) + node.modulus) % node.modulus ===
+              node.equals,
           ),
         );
       case "map_arithmetic":
@@ -357,22 +394,7 @@ function evalPredicate(
       case "compare": {
         const left = evalScalar(node.left, input, budget);
         const right = evalScalar(node.right, input, budget);
-        switch (node.op) {
-          case "eq":
-            return left === right;
-          case "neq":
-            return left !== right;
-          case "lt":
-            return left < right;
-          case "lte":
-            return left <= right;
-          case "gt":
-            return left > right;
-          case "gte":
-            return left >= right;
-          default:
-            throw new RuleRuntimeError("INVALID_NODE", "unknown compare op");
-        }
+        return compareValues(left, node.op, right);
       }
       case "count_at_least":
         return evalArray(node.of, input, budget).length >= node.value;
@@ -382,6 +404,16 @@ function evalPredicate(
         return (
           left.length === right.length &&
           left.every((value, index) => value === right[index])
+        );
+      }
+      case "all_ordered_compare": {
+        const left = evalArray(node.left, input, budget);
+        const right = evalArray(node.right, input, budget);
+        return (
+          left.length === right.length &&
+          left.every((value, index) =>
+            compareValues(value, node.op, right[index] ?? 0),
+          )
         );
       }
       case "and":

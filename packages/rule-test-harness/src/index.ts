@@ -188,7 +188,7 @@ export function generateAndRunTests(ast: RuleAst): RuleTestSummary {
   // 2. Determinism: same input yields the same result twice.
   const probeDraw = sixUnique(rng);
   const probeGuess = sixUnique(rng);
-  let deterministic = false;
+  let deterministic: boolean;
   try {
     if (ranking) {
       deterministic =

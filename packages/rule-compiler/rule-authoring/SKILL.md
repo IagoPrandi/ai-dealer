@@ -43,6 +43,8 @@ Portuguese trigger glossary (acertar, errar, mais, menos, pelo menos, dezena, e,
 
 Array nodes (produce a list of numbers):
 - `{"kind":"source","source":"guess"|"draw"}`
+- `{"kind":"filter_compare","op":"eq"|"neq"|"lt"|"lte"|"gt"|"gte","value":<int>,"of":<array>}` - keep values matching a literal comparison
+- `{"kind":"filter_mod","modulus":<int>,"equals":<int>,"of":<array>}` - keep values whose modulo equals a remainder; even numbers use `modulus:2, equals:0`
 - `{"kind":"digits","place":"units"|"tens","of":<array>}`  — per-number digit
 - `{"kind":"intersection"|"difference","left":<array>,"right":<array>}`
 - `{"kind":"map_arithmetic","op":"add"|"sub"|"mul"|"div"|"mod","operand":<int>,"of":<array>}`
@@ -59,11 +61,21 @@ Predicate nodes (produce true/false):
 - `{"kind":"compare","op":"eq"|"neq"|"lt"|"lte"|"gt"|"gte","left":<scalar>,"right":<scalar>}`
 - `{"kind":"count_at_least","value":<int>,"of":<array>}`
 - `{"kind":"all_equal_ordered","left":<array>,"right":<array>}`
+- `{"kind":"all_ordered_compare","op":"eq"|"neq"|"lt"|"lte"|"gt"|"gte","left":<array>,"right":<array>}` - compare every same-position pair
 - `{"kind":"and"|"or","clauses":[<pred>,...]}`  `{"kind":"not","clause":<pred>}`
 
 Common building blocks: matches = `intersection(guess,draw)`; misses =
 `difference(guess,draw)`; shared tens digits =
-`intersection(digits(guess,tens),digits(draw,tens))`.
+`intersection(digits(guess,tens),digits(draw,tens))`; even numbers =
+`filter_mod(source,2,0)`; sorted low/high values = `sort(asc|desc,source)`
+plus `at` or `slice`.
+
+Do not require a rigid input phrase. Casual but objective wording is valid when
+the condition is measurable over `guess` and `draw`: "my ticket has the same
+overall weight as the draw" means equal sums; "four or more of my picked numbers
+show up in the result" means at least four guess/draw intersections; "low end
+lines up" means compare minimum values. Ask for clarification only when the
+measurable threshold, direction, positions, or operation is missing.
 
 ## Tricky intents
 

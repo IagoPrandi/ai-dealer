@@ -30,7 +30,6 @@ import {
  * configured devnet authority; it does not read or persist any player secrets.
  */
 
-const BROADCAST = process.env.IDEALER_M5_INPUTS_BROADCAST === "1";
 const OPEN_TURN_IF_MISSING = process.env.IDEALER_M5_INPUTS_OPEN_TURN === "1";
 const DEFAULT_API_BASE_URL = "http://127.0.0.1:3002";
 const DEFAULT_PLAYER_COUNT = 3;
@@ -60,7 +59,11 @@ const PRECOMPILE_RULE_DISCRIMINATOR = Buffer.from([
   168, 4, 65, 64, 176, 165, 132, 179,
 ]);
 
-interface RulePreflightResult {
+function isInputBroadcastEnabled() {
+  return process.env.IDEALER_M5_INPUTS_BROADCAST === "1";
+}
+
+export interface RulePreflightResult {
   addedOperationalClauses: string[];
   clarityNote: string;
   compiledArtifactHash?: string | null;
@@ -235,7 +238,7 @@ function ruleVotePda(
   ]);
 }
 
-function deterministicPlayer(turnId: number, index: number) {
+export function deterministicPlayer(turnId: number, index: number) {
   const seed = hash32(`idealer:m5.4:devnet-player:v1:${turnId}:${index}`);
   return Keypair.fromSeed(seed);
 }
@@ -248,7 +251,7 @@ export function deterministicGuess(index: number) {
   return [base, base + 1, base + 2, base + 3, base + 4, base + 5];
 }
 
-function createSubmitGuessInstruction({
+export function createSubmitGuessInstruction({
   numbers,
   player,
   programId,
@@ -284,7 +287,7 @@ function createSubmitGuessInstruction({
   };
 }
 
-function createProposeRuleInstruction({
+export function createProposeRuleInstruction({
   player,
   preflight,
   programId,
@@ -337,7 +340,7 @@ function createProposeRuleInstruction({
   };
 }
 
-function createPrecompileRuleInstruction({
+export function createPrecompileRuleInstruction({
   authority,
   compiledArtifactHash,
   programId,
@@ -366,7 +369,7 @@ function createPrecompileRuleInstruction({
   };
 }
 
-function createVoteRuleInstruction({
+export function createVoteRuleInstruction({
   player,
   programId,
   ruleId,
@@ -401,7 +404,7 @@ function createVoteRuleInstruction({
   };
 }
 
-async function sendTransaction({
+export async function sendTransaction({
   connection,
   feePayer,
   instructions,
@@ -436,7 +439,7 @@ async function sendTransaction({
     );
   }
 
-  if (!BROADCAST) {
+  if (!isInputBroadcastEnabled()) {
     return `dry-run:${label}`;
   }
 
@@ -459,7 +462,7 @@ async function sendTransaction({
   return signature;
 }
 
-async function postJson<T>({
+export async function postJson<T>({
   body,
   path,
   seedConfig,
@@ -468,7 +471,7 @@ async function postJson<T>({
   path: string;
   seedConfig: SeedConfig;
 }): Promise<T> {
-  if (!BROADCAST) {
+  if (!isInputBroadcastEnabled()) {
     return body as T;
   }
   const response = await fetch(new URL(path, seedConfig.apiBaseUrl), {
@@ -494,7 +497,7 @@ async function postJson<T>({
  * stored artifact all reconcile. Broadcast-only (the API stores nothing on a dry
  * run); the dry run falls back to the preflight hash for simulation.
  */
-async function runStoredRuleValidation({
+export async function runStoredRuleValidation({
   ruleId,
   seedConfig,
   turnId,
@@ -503,7 +506,7 @@ async function runStoredRuleValidation({
   seedConfig: SeedConfig;
   turnId: number;
 }): Promise<string | null> {
-  if (!BROADCAST) {
+  if (!isInputBroadcastEnabled()) {
     return null;
   }
   const response = await fetch(
@@ -531,7 +534,7 @@ async function runStoredRuleValidation({
   return validation.compiledArtifactHash;
 }
 
-async function fetchRulePreflight(seedConfig: SeedConfig) {
+export async function fetchRulePreflight(seedConfig: SeedConfig) {
   const response = await fetch(new URL("/rule-preflight", seedConfig.apiBaseUrl), {
     body: JSON.stringify({ text: seedConfig.ruleText }),
     headers: { "content-type": "application/json" },
@@ -562,7 +565,7 @@ async function ensureOpenTurn() {
   });
 
   if (!globalConfig.snapshot.hasActiveTurn && OPEN_TURN_IF_MISSING) {
-    if (!BROADCAST) {
+    if (!isInputBroadcastEnabled()) {
       throw new Error(
         "IDEALER_M5_INPUTS_OPEN_TURN=1 would open a real devnet turn. Set IDEALER_M5_INPUTS_BROADCAST=1 to use it.",
       );
@@ -640,7 +643,7 @@ export async function seedRealInputs(): Promise<SeededInputSummary> {
 
   const summary: SeededInputSummary = {
     apiBaseUrl: seedConfig.apiBaseUrl,
-    broadcast: BROADCAST,
+    broadcast: isInputBroadcastEnabled(),
     players: [],
     precompileSignature: null,
     proposal: null,
@@ -840,7 +843,7 @@ if (
   void seedRealInputs()
     .then((summary) => {
       console.log(JSON.stringify(summary, null, 2));
-      if (!BROADCAST) {
+      if (!isInputBroadcastEnabled()) {
         console.log(
           "Dry run only. Set IDEALER_M5_INPUTS_BROADCAST=1 to submit real devnet inputs.",
         );

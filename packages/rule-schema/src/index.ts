@@ -32,12 +32,15 @@ export const MAX_COUNT_VALUE = 12;
 // ---------------------------------------------------------------------------
 
 export type ArithOp = "add" | "sub" | "mul" | "div" | "mod";
+export type CompareOp = "eq" | "neq" | "lt" | "lte" | "gt" | "gte";
 
 export type RangeGuard = { kind: "range_inclusive"; min: number; max: number };
 
 export type ArrayExpr =
   | { kind: "source"; source: "guess" | "draw" }
   | { kind: "digits"; of: ArrayExpr; place: "units" | "tens" }
+  | { kind: "filter_compare"; of: ArrayExpr; op: CompareOp; value: number }
+  | { kind: "filter_mod"; of: ArrayExpr; modulus: number; equals: number }
   | { kind: "map_arithmetic"; of: ArrayExpr; op: ArithOp; operand: number }
   | {
       kind: "map_with_guard";
@@ -68,12 +71,16 @@ export type ScalarExpr =
   | { kind: "at"; of: ArrayExpr; index: number }
   | { kind: "arith"; op: ArithOp; left: ScalarExpr; right: ScalarExpr };
 
-export type CompareOp = "eq" | "neq" | "lt" | "lte" | "gt" | "gte";
-
 export type PredicateNode =
   | { kind: "compare"; left: ScalarExpr; op: CompareOp; right: ScalarExpr }
   | { kind: "count_at_least"; of: ArrayExpr; value: number }
   | { kind: "all_equal_ordered"; left: ArrayExpr; right: ArrayExpr }
+  | {
+      kind: "all_ordered_compare";
+      left: ArrayExpr;
+      op: CompareOp;
+      right: ArrayExpr;
+    }
   | { kind: "and"; clauses: PredicateNode[] }
   | { kind: "or"; clauses: PredicateNode[] }
   | { kind: "not"; clause: PredicateNode };
@@ -109,6 +116,7 @@ export type RuleAst = RuleAstV1 | RuleAstV2;
 
 const intSchema = z.number().int();
 const arithOpSchema = z.enum(["add", "sub", "mul", "div", "mod"]);
+const compareOpSchema = z.enum(["eq", "neq", "lt", "lte", "gt", "gte"]);
 
 // div/mod operands must be safe even before the runtime guard runs.
 const safeOperand = (op: ArithOp, operand: number) => {
@@ -125,6 +133,22 @@ const arrayExprSchema: z.ZodType<ArrayExpr> = z.lazy(() =>
       of: arrayExprSchema,
       place: z.enum(["units", "tens"]),
     }),
+    z.object({
+      kind: z.literal("filter_compare"),
+      of: arrayExprSchema,
+      op: compareOpSchema,
+      value: intSchema,
+    }),
+    z
+      .object({
+        kind: z.literal("filter_mod"),
+        of: arrayExprSchema,
+        modulus: intSchema.min(1).max(100),
+        equals: intSchema.min(0).max(99),
+      })
+      .refine((node) => node.equals < node.modulus, {
+        message: "filter_mod equals must be lower than modulus",
+      }),
     z
       .object({
         kind: z.literal("map_arithmetic"),
@@ -203,8 +227,6 @@ const scalarExprSchema: z.ZodType<ScalarExpr> = z.lazy(() =>
   ]),
 );
 
-const compareOpSchema = z.enum(["eq", "neq", "lt", "lte", "gt", "gte"]);
-
 const predicateNodeSchema: z.ZodType<PredicateNode> = z.lazy(() =>
   z.union([
     z.object({
@@ -221,6 +243,12 @@ const predicateNodeSchema: z.ZodType<PredicateNode> = z.lazy(() =>
     z.object({
       kind: z.literal("all_equal_ordered"),
       left: arrayExprSchema,
+      right: arrayExprSchema,
+    }),
+    z.object({
+      kind: z.literal("all_ordered_compare"),
+      left: arrayExprSchema,
+      op: compareOpSchema,
       right: arrayExprSchema,
     }),
     z.object({

@@ -19,7 +19,11 @@ import {
 import {
   MAX_AST_DEPTH,
   ruleAstSchema,
+  type ArrayExpr,
+  type CompareOp,
+  type PredicateNode,
   type RuleAst,
+  type ScalarExpr,
 } from "@idealer/rule-schema";
 import {
   generateAndRunTests,
@@ -202,17 +206,20 @@ const NUMBER_WORDS = new Map<string, number>([
 ]);
 
 const AMBIGUOUS_PATTERNS = [
-  /\b(close|closest|near|nearest)\b/i,
+  /\b(close|closest|near|nearest|almost)\b/i,
   /\b(lucky|unlucky|interesting|creative|best|worst|fair|randomly)\b/i,
   /\b(about|around|roughly|approximately|similar)\b/i,
+  /\b(feels?|vibe|balanced|nice|pattern|mirror-like|stronger)\b/i,
+  /\b(many|several|spread out|well spread|organized|cleaner)\b/i,
   /\b(anything|something|whatever)\b/i,
 ] as const;
 
 const EXTERNAL_DEPENDENCY_PATTERNS = [
-  /\b(wallet|address|creator|voter|votes?|leaderboard|profile)\b/i,
-  /\b(time|timestamp|block|slot|transaction|signature|balance|prize|pool)\b/i,
-  /\b(previous|next|future|past|history|streak)\b/i,
-  /\b(weather|price|oracle|twitter|discord|website|api|external)\b/i,
+  /\b(wallet|address|creator|voter|votes?|leaderboard|profile|admin)\b/i,
+  /\b(time|timestamp|block|slot|transaction|signature|balance|prize|pool|payout)\b/i,
+  /\b(previous|next|future|past|history|streak|yesterday|today|tomorrow)\b/i,
+  /\b(other players?|all players?|no other player|among all players)\b/i,
+  /\b(weather|rain|rains|sunny|price|oracle|twitter|x\/twitter|discord|website|api|external)\b/i,
 ] as const;
 
 const PROMPT_CONTRACT: RuleValidationPromptContract = {
@@ -871,11 +878,86 @@ function compileSupportedRule(text: string): RuleAst | null {
     };
   }
 
+  const exactMatchCount = parseExactMatchCountRule(text);
+  if (exactMatchCount !== null) {
+    return predicateRule(
+      compare(count(intersection(source("guess"), source("draw"))), "eq", lit(exactMatchCount)),
+    );
+  }
+
+  if (/\bno\b.{0,40}\b(guessed?|picked|ticket|your)\s+numbers?\b.{0,60}\b(appear|appears|match|matches|drawn|in the draw)\b/i.test(text)) {
+    return predicateRule(
+      compare(count(intersection(source("guess"), source("draw"))), "eq", lit(0)),
+    );
+  }
+
+  const positionComparison = parsePositionComparisonRule(text);
+  if (positionComparison) {
+    return predicateRule(positionComparison);
+  }
+
+  if (
+    /\bevery\b.{0,40}\b(guessed?|picked|ticket|your)\s+numbers?\b.{0,30}\b(lower|less|below|greater|higher|above)\b.{0,60}\b(draw|drawn)\b/i.test(text) &&
+    /\b(same position|corresponding position|same index)\b/i.test(text)
+  ) {
+    const op = /\b(lower|less|below)\b/i.test(text) ? "lt" : "gt";
+    return predicateRule({
+      kind: "all_ordered_compare",
+      left: source("guess"),
+      op,
+      right: source("draw"),
+    });
+  }
+
+  if (
+    /\b(same set|same numbers?|contain the same set)\b/i.test(text) &&
+    /\b(regardless of order|any order|unordered|order does not matter)\b/i.test(text)
+  ) {
+    return predicateRule(
+      compare(count(intersection(source("guess"), source("draw"))), "eq", lit(6)),
+    );
+  }
+
+  if (
+    /\b(number|count)\b.{0,40}\beven\b.{0,80}\b(equal|equals|same|match|matches)\b.{0,80}\beven\b/i.test(text)
+  ) {
+    return predicateRule(
+      compare(
+        count(filterMod(source("guess"), 2, 0)),
+        "eq",
+        count(filterMod(source("draw"), 2, 0)),
+      ),
+    );
+  }
+
+  if (
+    /\b(guessed?|picked|ticket|your)\s+sum\b.{0,30}\b(greater|higher|above|more)\b.{0,60}\b(draw|drawn)\s+sum\b/i.test(text) &&
+    /\bat least\s+([1-6]|one|two|three|four|five|six)\b.{0,80}\b(numbers?\s+)?(match|matches|appear|appears)\b/i.test(text)
+  ) {
+    const threshold = parseMatchCountRule(text) ?? 1;
+    return predicateRule({
+      kind: "and",
+      clauses: [
+        compare(sum(source("guess")), "gt", sum(source("draw"))),
+        {
+          kind: "count_at_least",
+          value: threshold,
+          of: intersection(source("guess"), source("draw")),
+        },
+      ],
+    });
+  }
+
+  const minMaxComparison = parseMinMaxComparisonRule(text);
+  if (minMaxComparison) {
+    return predicateRule(minMaxComparison);
+  }
+
   if (
     /\bsum\b/.test(text) &&
     /\b(equal|equals|same|match|matches)\b/.test(text) &&
     /\b(draw|drawn)\b/.test(text) &&
-    /\b(guess|submitted|your numbers|your)\b/.test(text)
+    /\b(guess|guessed|submitted|your numbers|your)\b/.test(text)
   ) {
     return { schemaVersion: 1, node: { kind: "sum_equals" } };
   }
@@ -889,6 +971,139 @@ function compileSupportedRule(text: string): RuleAst | null {
   }
 
   return null;
+}
+
+function source(sourceName: "draw" | "guess"): ArrayExpr {
+  return { kind: "source", source: sourceName };
+}
+
+function lit(value: number): ScalarExpr {
+  return { kind: "lit", value };
+}
+
+function count(of: ArrayExpr): ScalarExpr {
+  return { kind: "reduce", op: "count", of };
+}
+
+function sum(of: ArrayExpr): ScalarExpr {
+  return { kind: "reduce", op: "sum", of };
+}
+
+function min(of: ArrayExpr): ScalarExpr {
+  return { kind: "reduce", op: "min", of };
+}
+
+function max(of: ArrayExpr): ScalarExpr {
+  return { kind: "reduce", op: "max", of };
+}
+
+function at(of: ArrayExpr, index: number): ScalarExpr {
+  return { kind: "at", index, of };
+}
+
+function intersection(left: ArrayExpr, right: ArrayExpr): ArrayExpr {
+  return { kind: "intersection", left, right };
+}
+
+function filterMod(
+  of: ArrayExpr,
+  modulus: number,
+  equals: number,
+): ArrayExpr {
+  return { kind: "filter_mod", equals, modulus, of };
+}
+
+function compare(
+  left: ScalarExpr,
+  op: CompareOp,
+  right: ScalarExpr,
+): PredicateNode {
+  return { kind: "compare", left, op, right };
+}
+
+function predicateRule(predicate: PredicateNode): RuleAst {
+  return { schemaVersion: 2, result: { type: "predicate", predicate } };
+}
+
+function parseExactMatchCountRule(text: string): number | null {
+  const match = text.match(
+    /\bexactly\s+([0-6]|zero|one|two|three|four|five|six)\b.{0,80}\b(match|matches|appear|appears|drawn|in the draw)\b/i,
+  );
+  const rawValue = match?.[1] ?? null;
+  if (!rawValue) {
+    return null;
+  }
+  const value =
+    rawValue.toLowerCase() === "zero"
+      ? 0
+      : (NUMBER_WORDS.get(rawValue.toLowerCase()) ?? Number(rawValue));
+  return Number.isInteger(value) && value >= 0 && value <= 6 ? value : null;
+}
+
+function parseOrdinal(value: string): number | null {
+  const normalized = value.toLowerCase();
+  const ordinals = new Map<string, number>([
+    ["first", 0],
+    ["1st", 0],
+    ["second", 1],
+    ["2nd", 1],
+    ["third", 2],
+    ["3rd", 2],
+    ["fourth", 3],
+    ["4th", 3],
+    ["fifth", 4],
+    ["5th", 4],
+    ["sixth", 5],
+    ["6th", 5],
+  ]);
+  return ordinals.get(normalized) ?? null;
+}
+
+function parseComparisonWord(value: string): CompareOp | null {
+  if (/^(equal|equals|same|matches?|is)$/i.test(value)) {
+    return "eq";
+  }
+  if (/^(greater|higher|above|more)$/i.test(value)) {
+    return "gt";
+  }
+  if (/^(lower|less|below|smaller)$/i.test(value)) {
+    return "lt";
+  }
+  return null;
+}
+
+function parsePositionComparisonRule(text: string): PredicateNode | null {
+  const match = text.match(
+    /\b(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|sixth|6th)\s+(?:guessed?|picked|ticket|your)\s+number\b.{0,20}\b(equal|equals|same|matches?|greater|higher|above|more|lower|less|below|smaller)\b.{0,40}\b(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|sixth|6th)\s+(?:drawn?|draw)\s+number\b/i,
+  );
+  const leftIndex = match?.[1] ? parseOrdinal(match[1]) : null;
+  const op = match?.[2] ? parseComparisonWord(match[2]) : null;
+  const rightIndex = match?.[3] ? parseOrdinal(match[3]) : null;
+  if (leftIndex === null || rightIndex === null || op === null) {
+    return null;
+  }
+  return compare(at(source("guess"), leftIndex), op, at(source("draw"), rightIndex));
+}
+
+function parseMinMaxComparisonRule(text: string): PredicateNode | null {
+  const match = text.match(
+    /\b(smallest|lowest|largest|highest)\s+(?:guessed?|picked|ticket|your)\s+number\b.{0,30}\b(equal|equals|same|matches?|greater|higher|above|more|lower|less|below|smaller)\b.{0,40}\b(smallest|lowest|largest|highest)\s+(?:drawn?|draw)\s+number\b/i,
+  );
+  const leftKind = match?.[1]?.toLowerCase();
+  const op = match?.[2] ? parseComparisonWord(match[2]) : null;
+  const rightKind = match?.[3]?.toLowerCase();
+  if (!leftKind || !rightKind || !op) {
+    return null;
+  }
+  const left =
+    leftKind === "smallest" || leftKind === "lowest"
+      ? min(source("guess"))
+      : max(source("guess"));
+  const right =
+    rightKind === "smallest" || rightKind === "lowest"
+      ? min(source("draw"))
+      : max(source("draw"));
+  return compare(left, op, right);
 }
 
 function parseMatchCountRule(text: string) {
@@ -1022,80 +1237,92 @@ function knownAstSemanticsMatch(expected: RuleAst, actual: RuleAst) {
 function knownAstSignature(ast: RuleAst): string {
   if (ast.schemaVersion === 1) {
     if (ast.node.kind === "match_count_at_least") {
-      return `match_count_at_least:${ast.node.value}`;
+      return `predicate:count_at_least:${ast.node.value}:intersection(source:draw,source:guess)`;
     }
-    return ast.node.kind;
+    if (ast.node.kind === "sum_equals") {
+      return "predicate:compare:eq:reduce:sum:source:draw:reduce:sum:source:guess";
+    }
+    if (ast.node.kind === "ordered_exact") {
+      return "predicate:all_equal_ordered:source:guess:source:draw";
+    }
+    return `legacy:${ast.node.kind}`;
   }
 
-  if (ast.result.type !== "predicate") {
-    return "unknown";
-  }
-
-  const predicate = ast.result.predicate;
-  if (
-    predicate.kind === "count_at_least" &&
-    isGuessDrawIntersection(predicate.of)
-  ) {
-    return `match_count_at_least:${predicate.value}`;
-  }
-  if (
-    predicate.kind === "all_equal_ordered" &&
-    isSource(predicate.left, "guess") &&
-    isSource(predicate.right, "draw")
-  ) {
-    return "ordered_exact";
-  }
-  if (predicate.kind === "compare" && predicate.op === "eq") {
-    if (
-      isSourceReduce(predicate.left, "guess", "sum") &&
-      isSourceReduce(predicate.right, "draw", "sum")
-    ) {
-      return "sum_equals";
-    }
-    if (
-      isSourceReduce(predicate.left, "draw", "sum") &&
-      isSourceReduce(predicate.right, "guess", "sum")
-    ) {
-      return "sum_equals";
-    }
-  }
-  return "unknown";
+  return ast.result.type === "predicate"
+    ? `predicate:${predicateSignature(ast.result.predicate)}`
+    : `ranking:${ast.result.direction}:${scalarSignature(ast.result.score)}`;
 }
 
-function isGuessDrawIntersection(value: unknown) {
-  if (!value || typeof value !== "object") {
-    return false;
+function arraySignature(node: ArrayExpr): string {
+  switch (node.kind) {
+    case "source":
+      return `source:${node.source}`;
+    case "digits":
+      return `digits:${node.place}:${arraySignature(node.of)}`;
+    case "filter_compare":
+      return `filter_compare:${node.op}:${node.value}:${arraySignature(node.of)}`;
+    case "filter_mod":
+      return `filter_mod:${node.modulus}:${node.equals}:${arraySignature(node.of)}`;
+    case "map_arithmetic":
+      return `map_arithmetic:${node.op}:${node.operand}:${arraySignature(node.of)}`;
+    case "map_with_guard":
+      return [
+        "map_with_guard",
+        node.op,
+        node.operand,
+        node.guard.min,
+        node.guard.max,
+        node.onGuardFail,
+        arraySignature(node.of),
+      ].join(":");
+    case "intersection": {
+      const sides = [arraySignature(node.left), arraySignature(node.right)].sort();
+      return `intersection(${sides.join(",")})`;
+    }
+    case "difference":
+      return `difference:${arraySignature(node.left)}:${arraySignature(node.right)}`;
+    case "sort":
+      return `sort:${node.order}:${arraySignature(node.of)}`;
+    case "remove_up_to_n":
+      return `remove_up_to_n:${node.n}:${node.strategy}:${arraySignature(node.of)}`;
+    case "slice":
+      return `slice:${node.start}:${node.end ?? ""}:${arraySignature(node.of)}`;
   }
-  const node = value as {
-    kind?: unknown;
-    left?: unknown;
-    right?: unknown;
-  };
-  return (
-    node.kind === "intersection" &&
-    ((isSource(node.left, "guess") && isSource(node.right, "draw")) ||
-      (isSource(node.left, "draw") && isSource(node.right, "guess")))
-  );
 }
 
-function isSource(value: unknown, source: "draw" | "guess") {
-  return (
-    !!value &&
-    typeof value === "object" &&
-    (value as { kind?: unknown; source?: unknown }).kind === "source" &&
-    (value as { source?: unknown }).source === source
-  );
+function scalarSignature(node: ScalarExpr): string {
+  switch (node.kind) {
+    case "lit":
+      return `lit:${node.value}`;
+    case "reduce":
+      return `reduce:${node.op}:${arraySignature(node.of)}`;
+    case "at":
+      return `at:${node.index}:${arraySignature(node.of)}`;
+    case "arith":
+      return `arith:${node.op}:${scalarSignature(node.left)}:${scalarSignature(node.right)}`;
+  }
 }
 
-function isSourceReduce(value: unknown, source: "draw" | "guess", op: "sum") {
-  return (
-    !!value &&
-    typeof value === "object" &&
-    (value as { kind?: unknown; of?: unknown; op?: unknown }).kind ===
-      "reduce" &&
-    (value as { op?: unknown }).op === op &&
-    isSource((value as { of?: unknown }).of, source)
-  );
+function predicateSignature(node: PredicateNode): string {
+  switch (node.kind) {
+    case "compare": {
+      const sides = [scalarSignature(node.left), scalarSignature(node.right)];
+      const ordered =
+        node.op === "eq" || node.op === "neq" ? sides.sort() : sides;
+      return `compare:${node.op}:${ordered.join(":")}`;
+    }
+    case "count_at_least":
+      return `count_at_least:${node.value}:${arraySignature(node.of)}`;
+    case "all_equal_ordered":
+      return `all_equal_ordered:${arraySignature(node.left)}:${arraySignature(node.right)}`;
+    case "all_ordered_compare":
+      return `all_ordered_compare:${node.op}:${arraySignature(node.left)}:${arraySignature(node.right)}`;
+    case "and":
+    case "or":
+      return `${node.kind}:${node.clauses.map(predicateSignature).sort().join("|")}`;
+    case "not":
+      return `not:${predicateSignature(node.clause)}`;
+  }
 }
 
 function summarizeReasons(
