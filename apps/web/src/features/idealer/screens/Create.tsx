@@ -123,6 +123,32 @@ function RulePreview({ rule }: { rule: RulePreflightResult }) {
           <Ico.info style={{ color: "var(--yellow)", flexShrink: 0, marginTop: 1 }} /> {rule.reasonSummary}
         </p>
       ) : null}
+      {!valid && rule.suggestedRewrite ? (
+        <div style={{ marginTop: 12 }}>
+          <SectionLabel>Suggested rewrite</SectionLabel>
+          <p style={{ margin: "7px 0 0", fontSize: 14, lineHeight: 1.5, color: "var(--text)" }}>{rule.suggestedRewrite}</p>
+        </div>
+      ) : null}
+      {!valid && rule.refinementFocus?.length ? (
+        <div style={{ marginTop: 12 }}>
+          <SectionLabel>What to refine</SectionLabel>
+          <ul style={{ margin: "7px 0 0", paddingLeft: 18, color: "var(--muted)", fontSize: 13.5, lineHeight: 1.5 }}>
+            {rule.refinementFocus.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {!valid && rule.refinementQuestions?.length ? (
+        <div style={{ marginTop: 12 }}>
+          <SectionLabel>Questions</SectionLabel>
+          <ul style={{ margin: "7px 0 0", paddingLeft: 18, color: "var(--muted)", fontSize: 13.5, lineHeight: 1.5 }}>
+            {rule.refinementQuestions.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {rule.reproposalBlocked ? (
         <p style={{ margin: "12px 0 0", fontSize: 13, lineHeight: 1.5, color: "var(--red)", display: "flex", gap: 7 }}>
           <Ico.lock style={{ color: "var(--red)", flexShrink: 0, marginTop: 1 }} /> This rule was already rejected this turn and can&apos;t be re-proposed.

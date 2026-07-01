@@ -45,6 +45,9 @@ test("the compile_rule_to_ast skill prompt is versioned and covers both rule mod
   assert.ok(prompt.includes("predicate") && prompt.includes("ranking"));
   // It must teach the digit + ranking path (the previously-impossible case).
   assert.ok(prompt.includes("digits") && prompt.includes("units"));
+  // It must teach unordered same-set equality, the prompt #7 simulation case.
+  assert.ok(prompt.includes("same set of numbers"));
+  assert.ok(prompt.includes("count(intersection(guess,draw)) == 6"));
   // And forbid external/unverifiable inputs.
   assert.ok(/wallets|votes|oracle|external/i.test(prompt));
 });
@@ -102,6 +105,23 @@ test("validates supported sum and exact-order rules", () => {
   assert.ok(
     exactAst?.schemaVersion === 1 && exactAst.node.kind === "ordered_exact",
   );
+});
+
+test("validates unordered same-set rules as all six numbers matched", () => {
+  const result = validateAndPrecompileRule({
+    prompt:
+      "Win if the guess and draw contain the same set of numbers, regardless of order.",
+    tokenCount: 14,
+  });
+
+  assert.equal(result.decision, "VALID");
+  const ast = result.artifact?.ast;
+  assert.ok(ast?.schemaVersion === 2 && ast.result.type === "predicate");
+  const predicate = ast.result.predicate;
+  assert.equal(predicate.kind, "compare");
+  assert.equal(predicate.op, "eq");
+  assert.deepEqual(predicate.right, { kind: "lit", value: 6 });
+  assert.match(result.artifactHash ?? "", /^[0-9a-f]{64}$/);
 });
 
 test("handles the first 10 VALID prompts from the rule proposal test set", () => {

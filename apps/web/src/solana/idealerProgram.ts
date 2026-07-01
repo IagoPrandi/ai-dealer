@@ -118,11 +118,14 @@ export interface RulePreflightResult {
   officialInterpretationHash: readonly number[];
   preflightResultHash: readonly number[];
   reasonSummary?: string;
+  refinementFocus?: readonly string[];
+  refinementQuestions?: readonly string[];
   reproposalBlocked?: boolean;
   ruleId: number;
   ruleMode?: "predicate" | "ranking";
   sanitizedText: string;
   sanitizedTextHash: readonly number[];
+  suggestedRewrite?: string;
   tokenCount: number;
 }
 

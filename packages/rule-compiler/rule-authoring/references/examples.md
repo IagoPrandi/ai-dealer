@@ -20,6 +20,9 @@ Each line pairs a player intent with the exact JSON AST to emit.
 "win if your exact sequence matches the draw in order" =>
 {"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"all_equal_ordered","left":{"kind":"source","source":"guess"},"right":{"kind":"source","source":"draw"}}}}
 
+"win if the guess and draw contain the same set of numbers, regardless of order" =>
+{"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"compare","op":"eq","left":{"kind":"reduce","op":"count","of":{"kind":"intersection","left":{"kind":"source","source":"guess"},"right":{"kind":"source","source":"draw"}}},"right":{"kind":"lit","value":6}}}}
+
 "win if every guessed number is lower than the drawn number in the same position" =>
 {"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"all_ordered_compare","op":"lt","left":{"kind":"source","source":"guess"},"right":{"kind":"source","source":"draw"}}}}
 

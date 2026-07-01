@@ -79,11 +79,14 @@ export interface RulePreflightResult {
   officialInterpretationHash: number[];
   preflightResultHash: number[];
   reasonSummary?: string;
+  refinementFocus?: string[];
+  refinementQuestions?: string[];
   reproposalBlocked?: boolean;
   ruleId: number;
   ruleMode?: "predicate" | "ranking";
   sanitizedText: string;
   sanitizedTextHash: number[];
+  suggestedRewrite?: string;
   tokenCount: number;
 }
 

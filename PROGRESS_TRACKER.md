@@ -68,6 +68,17 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-07-01 (Rule preflight refinement feedback)
+
+- Opened required documents/context before and during work: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/idealer-test-and-verify/SKILL.md`, `.claude/skills/best-practices/SKILL.md`, `.claude/skills/best-practices/references/agent-principles.md`, `.claude/skills/best-practices/references/testing.md`, `packages/rule-compiler/rule-authoring/SKILL.md`, `packages/rule-compiler/rule-authoring/references/patterns.md`, and `packages/rule-compiler/rule-authoring/references/examples.md`.
+- Reproduced the reported prompt shape from simulation prompt #7 in deterministic coverage: `Win if the guess and draw contain the same set of numbers, regardless of order.` The rule compiler now has an explicit regression asserting this compiles as all 6 guessed numbers appearing in the draw with order ignored.
+- Updated the runtime rule-authoring guidance and API LLM system prompt so "same set of numbers, regardless of order" is compiled as `count(intersection(guess,draw)) == 6`, not ordered equality.
+- Added API preflight refinement feedback for invalid/malformed compile results: `reasonSummary` is user-facing, and the response can include `suggestedRewrite`, `refinementFocus`, and `refinementQuestions` so the player can keep iterating instead of seeing only internal reason codes such as `PROVIDER_MALFORMED_RESPONSE`, `UNSUPPORTED_RULE`, and `UNSAFE_RUNTIME_BOUNDS`.
+- Updated the mobile rule composer preview to display suggested rewrite, what to refine, and clarification questions when a rule needs adjustment.
+- Live API proof passed against `http://127.0.0.1:3002/rule-preflight`: the reported same-set prompt returned `decision="VALID"`, `needsClarification=false`, `ruleMode="predicate"`, a non-null compiled artifact hash, `guardianGrounded=true`, and model `gemma4:e2b`.
+- Verification passed: `pnpm --filter @idealer/rule-compiler typecheck/test/lint/build`, `pnpm --filter @idealer/api typecheck/test/lint/build`, `pnpm --filter @idealer/web typecheck/test/lint/build`, and `pnpm --filter @idealer/worker typecheck/test/lint/build`. After a final prompt wording adjustment, `@idealer/rule-compiler` and `@idealer/api` typecheck/test/lint/build were re-run and passed again. Web dev server was started and `GET http://127.0.0.1:3000/play` returned `200`.
+- Reviewed the result for inconsistencies: invalid preflight remains fail-closed and does not enable payment/proposal; the new rewrite guidance is explicit user-facing English; the exact same-set rule has compiler guidance plus regression coverage; no milestone checkbox was marked because milestone marking requires user confirmation.
+
 ### 2026-07-01 (Natural rule prompt expansion)
 
 - Opened required documents/context before editing: `PRD.md`, `AGENTS.md`, `.claude/skills`, and `docs/rule-proposal-prompt-test-set.md`.
@@ -2811,3 +2822,49 @@ Passed:
 - Resulting artifact hashes for prompts #1-#10: `915cb67c232451dcfafbf4af42e1728a485693dfe57129de80fc8d8a08478730`, `b8f850f2c2c709eb2dd4cc8a348bc45fe0b078b76999054a38136b16492d20a2`, `60975c459093c340546cedb88eacf430076c7c891a3efefd0187513019e7a409`, `5dc9e4fe670f26a96334631ddbc59858776f96986513e4381b9722d05ccc5559`, `75c08bbad9f2bd35b9f2f8a23e51a1f3c48ae31bdfbb04fefd85c938875d4186`, `ad87d88127fd516f517049704fbafa1c9638a27c5180e13bd989ae112cf9f955`, `a1dab0274b81a68c4781da766e4843d459557da5683b97f3738a1563261510a1`, `77e0c7a5a04bc7782b8c3f982da14ce3a172dee04e501db86d0334df4c636a65`, `5a90a7f53285701f79448fc79c692aeda82f38b677a41ec81c51f1f8d5c9debb`, and `8e28069cb230ec2a8cba1a4892b10d9523837f0b770a3ca5d01f69332ba73708`.
 - Ran `pnpm --filter @idealer/worker devnet:simulate-10-players` in its safe default dry-run mode. The dry-run selected the same 10 prompts, planned the full 10-player flow (`manual_open_turn`, funding, guesses, rule preflight/proposal, votes, settlement, close, claim, expired-claim probe), and did not broadcast transactions.
 - Reviewed the result for inconsistencies: deterministic conversion stayed `guess`/`draw`-only, the simulation remained dry-run because live broadcast requires explicit `IDEALER_10P_SIM_BROADCAST=1`, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-01 (Single prompt coverage check)
+
+- Reopened required context before checking the user's requested prompt: `PRD.md`, `.claude/skills`, and `.claude/skills/idealer-test-and-verify/SKILL.md`.
+- Confirmed the prompt `Win if the guessed numbers have the same sum as the drawn numbers.` was already tested as prompt #2 in the selected 10-prompt deterministic conversion run.
+- Existing result for that prompt: `decision=VALID`, deterministic repeated compilation, artifact hash `b8f850f2c2c709eb2dd4cc8a348bc45fe0b078b76999054a38136b16492d20a2`, `ruleMode=predicate`, `difficulty=EXTREME`, `finalConfidence=0.936`, and deterministic harness checks passed.
+- No milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-01 (10-player simulation rerun without player fund sweep)
+
+- Reopened required context before rerunning the live simulation: `PRD.md`, `.claude/skills`, `.claude/skills/idealer-test-and-verify/SKILL.md`, and `.claude/skills/idealer-test-and-verify/references/devnet-verification.md`.
+- Stopped `idealer-worker` to avoid turn automation interference, closed pre-existing active turn `66`, and started a temporary API on port `3012` with `gemma3:4b` and translation disabled.
+- Ran a dry-run of `apps/worker/src/devnet-10-player-simulation.ts`; it selected the first 10 original `VALID` prompts from `docs/rule-proposal-prompt-test-set.md`, planned player funding through the dedicated funder wallet, and did not include any player-balance sweep back to the funder.
+- Ran the broadcast simulation with `IDEALER_10P_SIM_BROADCAST=1`, `IDEALER_10P_SIM_FUNDER_KEYPAIR_PATH=/solana-home/.config/idealer/devnet/ten-player-funder-keypair.json`, manual turn control, settlement broadcast, and the devnet authority keypair.
+- The run opened turn `67`, transferred `2 SOL` from funder wallet `9RgCEm7N2beoJwdexGDbvmkgJVJ8wnsQW9EX8HNNJbc4` to each deterministic player wallet, submitted guesses, and again failed during stored validation of prompt #2: `Win if the guessed numbers have the same sum as the drawn numbers.`
+- The stored rule validation for prompt #2 returned `decision=INVALID`, `reasonCodes=["UNSUPPORTED_RULE","UNSAFE_RUNTIME_BOUNDS"]`, `compiledArtifact=null`, and `compiledArtifactHash=null`; this remains an app/compiler defect because the reference prompts were not changed.
+- Closed turn `67` after failure with signatures `675QmaYqVBd2CB4mJdupF6xeJfEHLTr7cCarAtCqZjYTvgeat7XN5icvPLiww6CtTW6yi74Pk9rX6Zbk7VDnMNar` and `3jdF8EvpgRsp86rqvfqfthx7fPgpJ3LT1NyoFLi9SPxbh4yW2kixYr3MD3adoq3z9aE46pBUB2xbxDEim5CbT9uJ`.
+- Per user request, did not return player wallet SOL to the funding wallet. Confirmed turn `67` player balances stayed in player wallets: player 0 `1.95206344 SOL`, player 1 `1.95206344 SOL`, players 2-9 `1.99639668 SOL` each. The funder wallet balance after funding was `1.80906712 SOL`.
+- Removed only the temporary simulation container/output file, stopped the temporary API on `3012`, and restarted `idealer-worker`. Final health checks passed: API `3002` and worker `3003` responded healthy, and temporary API `3012` was unreachable.
+- Reviewed the result for inconsistencies: the reference prompt file was not modified, no player fund sweep was performed, the failing behavior is still exposed instead of hidden by fallback logic, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-01 (Runtime version verification for rule prompt #2)
+
+- Reopened required context before the verification: `PRD.md`, `.claude/skills`, and `.claude/skills/idealer-test-and-verify/SKILL.md`.
+- Investigated why prompt #2 passed local tests but failed in the live simulation. Confirmed the workspace is at commit `8500607` (`feat: enhance rule compiler with new filtering and comparison capabilities`), but the running Docker API image had different hashes for `packages/rule-compiler/src/index.ts`, `packages/rule-runtime/src/index.ts`, and `packages/rule-schema/src/index.ts`.
+- Confirmed the Docker Compose setup only bind-mounted `apps/api/src` and `apps/worker/src`; shared packages were baked into the Docker image. Therefore API validation inside Docker was using stale package code unless the image was rebuilt.
+- Per user direction, stopped using Docker for the API update path because rebuilding the image is too slow after package changes. Stopped the stale Docker `idealer-api` and `idealer-worker` containers, leaving only Docker Postgres and Redis running.
+- Started the API on the host at `http://127.0.0.1:3002` with the current workspace code, `gemma3:4b`, translation disabled, and host connections to Docker Postgres/Redis.
+- Verified host API health returned `status=ok`, `postgres=ok`, and `redis=ok`.
+- Replayed prompt #2 through the real API flow on the host: `/rule-preflight` returned `decision=VALID`, `needsClarification=false`, and a compiled artifact hash; saving a temporary in-memory proposal then calling `/rule-validations/run` returned `decision=VALID`, `reasonCodes=["SUPPORTED_RULE"]`, `compiledArtifactHash=561b0c07475a61d7911880778f3270ee4111b9804889ab919366359ef30aec30`, and AST node kind `sum_equals`.
+- Conclusion: the previous simulation failure was caused by stale Docker package code, not by the reference prompt. Future simulations should point worker containers at the host API (`http://host.docker.internal:3002`) or use a workflow that bind-mounts shared packages instead of relying on a rebuilt API image.
+- Reviewed the result for inconsistencies: Docker API/worker are stopped, host API is the active current-code API, Docker Postgres/Redis remain healthy, no reference prompts were changed, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-01 (10-player simulation rerun against host API)
+
+- Reopened required context before rerunning the simulation: `PRD.md`, `.claude/skills`, `.claude/skills/idealer-test-and-verify/SKILL.md`, and `.claude/skills/idealer-test-and-verify/references/devnet-verification.md`.
+- Confirmed the active API was the host API at `http://127.0.0.1:3002` with current workspace code; Docker `idealer-api` and `idealer-worker` remained stopped, while Docker Postgres and Redis stayed healthy.
+- Closed pre-existing on-chain active turn `69` before the rerun with signatures `3PXQ5A4mbs3idm6pWvXL3eEBUGTRFpjEVg2XTu5nQDGDsgbB8Kzomz1LSkNjvWUAoChHmtdkVhWwgCjzxgyrPUa9` and `myBRtK5PXVz58h8DnXyDbUcskFaaH6vfmURwPDWfQVus1sKDvBfxZFYF4zVH5FQ9kuwUd1qyeoZ1MPPAd2HTtxy`.
+- Ran a dry-run of `apps/worker/src/devnet-10-player-simulation.ts` from the Solana CLI worker image, pointing `IDEALER_API_BASE_URL` to `http://host.docker.internal:3002`, using the first 10 original `VALID` prompts from `docs/rule-proposal-prompt-test-set.md`, and reducing per-player funding to `0.15 SOL` because the dedicated funder wallet had `1.80906712 SOL` remaining.
+- Started the broadcast simulation with `IDEALER_10P_SIM_BROADCAST=1`, manual turn control, settlement broadcast, the devnet authority keypair, and the dedicated funder keypair.
+- The run opened turn `70`, funded all 10 deterministic player wallets with `0.15 SOL`, submitted guesses and rule proposals for the first six players, and confirmed the previously failing prompt #2 now passes in the live simulation: `Win if the guessed numbers have the same sum as the drawn numbers.` reached `state=eligible`, `precompilationStatus=passed`, `decision=VALID`, `reasonCodes=["SUPPORTED_RULE"]`, and artifact kind `sum_equals`.
+- The run then failed at prompt #7: `Win if the guess and draw contain the same set of numbers, regardless of order.` `/rule-preflight` returned `decision=INVALID`, `needsClarification=true`, `compiledArtifactHash=null`, and `reasonSummary="Rule rejected: PROVIDER_MALFORMED_RESPONSE, UNSUPPORTED_RULE, UNSAFE_RUNTIME_BOUNDS."`
+- Closed turn `70` after the failure with signatures `JEJKbzwiZBgZCq3eCX2sJJUHNMqegn8Coto4dU35aWdtJqdUSktq2VLpRNRyreVcNLkfxqCsvEkGeAdM7GuZr9r` and `2dUjYEf4y5Ln16PQsA9ET2C4avNpCM3N6GnArRrZuJ9AgkpdHRBPGxyWZvLNp7hKXnr6xLyXxaLWQAgG78reShDN`.
+- Per the prior user instruction, did not return player wallet SOL to the funding wallet. Confirmed turn `70` player balances stayed in player wallets: players 0-5 `0.10206344 SOL` each, players 6-9 `0.14639668 SOL` each. The funder wallet balance after the run was `0.30901712 SOL`.
+- Removed the temporary simulation container/output file. Final runtime state: host API `3002` is healthy, Docker Postgres and Redis are healthy, and Docker API/worker are not running.
+- Reviewed the result for inconsistencies: the reference prompt file was not modified, the simulation now uses current API code instead of stale Docker package code, no player fund sweep was performed, the new prompt #7 failure is exposed as a real rule-agent/preflight defect, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.

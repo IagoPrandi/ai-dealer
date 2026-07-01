@@ -119,11 +119,14 @@ export interface RulePreflightResult {
   officialInterpretationHash: readonly number[];
   preflightResultHash: readonly number[];
   reasonSummary?: string;
+  refinementFocus?: readonly string[];
+  refinementQuestions?: readonly string[];
   reproposalBlocked?: boolean;
   ruleId: number;
   ruleMode?: "predicate" | "ranking" | undefined;
   sanitizedText: string;
   sanitizedTextHash: readonly number[];
+  suggestedRewrite?: string;
   tokenCount: number;
 }
 
@@ -1341,6 +1344,137 @@ function createRuleId() {
   return Date.now() * 1_000 + randomInt(0, 1_000);
 }
 
+interface RuleRefinementFeedbackInput {
+  clarityNote: string;
+  compileText: string;
+  officialInterpretation: string;
+  reasonCodes: readonly RuleValidationReasonCode[];
+  reasonSummary: string;
+  sanitizedText: string;
+  tokenCount: number;
+}
+
+interface RuleRefinementFeedback {
+  clarityNote: string;
+  dealerMessage: string;
+  reasonSummary: string;
+  refinementFocus: readonly string[];
+  refinementQuestions: readonly string[];
+  suggestedRewrite?: string;
+}
+
+function looksLikeUnorderedSameSetRule(text: string) {
+  return (
+    /\b(same set|same numbers?|contain the same set)\b/i.test(text) &&
+    /\b(regardless of order|any order|unordered|order does not matter)\b/i.test(text)
+  );
+}
+
+function inferSuggestedRewrite(text: string): string | undefined {
+  if (looksLikeUnorderedSameSetRule(text)) {
+    return "Win if all 6 guessed numbers appear in the draw, regardless of order.";
+  }
+  return undefined;
+}
+
+export function buildRuleRefinementFeedback(
+  input: RuleRefinementFeedbackInput,
+): RuleRefinementFeedback {
+  const reasonCodes = new Set(input.reasonCodes);
+  const focus = new Set<string>();
+  const questions: string[] = [];
+  const suggestedRewrite =
+    inferSuggestedRewrite(input.compileText) ??
+    inferSuggestedRewrite(input.sanitizedText);
+  const deterministicCheck = validateAndPrecompileRule({
+    officialInterpretation: input.officialInterpretation,
+    originalText: input.sanitizedText,
+    prompt: input.compileText,
+    tokenCount: input.tokenCount,
+  });
+
+  if (
+    reasonCodes.has("PROVIDER_MALFORMED_RESPONSE") ||
+    reasonCodes.has("PROVIDER_SCHEMA_UNCONSTRAINED") ||
+    reasonCodes.has("SCHEMA_INVALID")
+  ) {
+    focus.add(
+      "Rewrite the rule as one direct, measurable comparison between the player's guess and the official draw.",
+    );
+  }
+
+  if (
+    reasonCodes.has("UNSUPPORTED_RULE") ||
+    reasonCodes.has("UNSAFE_RUNTIME_BOUNDS") ||
+    reasonCodes.has("COMPLEXITY_EXCEEDED")
+  ) {
+    focus.add(
+      "Avoid shorthand that could imply hidden state; state the exact count, operation, and whether order matters.",
+    );
+  }
+
+  if (reasonCodes.has("AMBIGUOUS_RULE") || input.clarityNote) {
+    focus.add(
+      "Clarify the missing threshold, direction, position, digit meaning, or tie behavior.",
+    );
+  }
+
+  if (reasonCodes.has("EXTERNAL_DEPENDENCY")) {
+    focus.add(
+      "Remove anything about wallets, votes, time, history, other players, prizes, or external events.",
+    );
+  }
+
+  if (
+    looksLikeUnorderedSameSetRule(input.compileText) ||
+    looksLikeUnorderedSameSetRule(input.sanitizedText)
+  ) {
+    questions.push("Should this require all 6 guessed numbers to appear in the draw?");
+    questions.push("Should order be ignored completely?");
+  }
+
+  if (questions.length === 0) {
+    questions.push("What exact count or comparison should make a guess win?");
+    questions.push("Should order or positions matter, or should matching ignore order?");
+  }
+
+  if (deterministicCheck.decision === "VALID" && deterministicCheck.artifact) {
+    focus.add(
+      `Likely intended interpretation: ${deterministicCheck.artifact.officialInterpretation}`,
+    );
+  }
+
+  if (focus.size === 0) {
+    focus.add(
+      "Make the winning condition explicit using only guess and draw numbers.",
+    );
+  }
+
+  const reasonSummary =
+    "Rule needs refinement before payment: the compiler could not turn it into a safe executable rule from this wording.";
+  const rewriteLine = suggestedRewrite
+    ? ` Suggested rewrite: "${suggestedRewrite}"`
+    : "";
+  const dealerMessage = `${reasonSummary}${rewriteLine} Answer the clarification questions by sending a revised rule.`;
+  const clarityNote = [
+    input.clarityNote || input.reasonSummary,
+    `Refine: ${[...focus].join(" ")}`,
+    `Questions: ${questions.join(" ")}`,
+    suggestedRewrite ? `Try: ${suggestedRewrite}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return {
+    clarityNote,
+    dealerMessage,
+    reasonSummary,
+    refinementFocus: [...focus],
+    refinementQuestions: questions,
+    ...(suggestedRewrite ? { suggestedRewrite } : {}),
+  };
+}
+
 async function createRulePreflight(text: string): Promise<RulePreflightResult> {
   const sanitizedText = sanitizeRuleText(text);
   const tokenCount = countRuleTokens(sanitizedText);
@@ -1503,6 +1637,18 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
     : guardianBlocked
       ? "The dealer's interpretation may not match your rule. Please rephrase it."
       : validation.log.reasonSummary;
+  const refinementFeedback =
+    needsClarification && !reproposalBlocked && !guardianBlocked
+      ? buildRuleRefinementFeedback({
+          clarityNote: interpretation.clarityNote,
+          compileText,
+          officialInterpretation,
+          reasonCodes: validation.log.reasonCodes,
+          reasonSummary,
+          sanitizedText,
+          tokenCount,
+        })
+      : null;
 
   const preflightResult = JSON.stringify({
     compiledArtifactHash: validation.artifactHash,
@@ -1510,22 +1656,26 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
     guardianGrounded: guardianGrounded ?? null,
     maxTokens: RULE_MAX_TOKENS,
     modelUsed: pass.model,
+    refinementQuestions: refinementFeedback?.refinementQuestions ?? [],
     reproposalBlocked,
     ruleId,
     sanitizedText,
+    suggestedRewrite: refinementFeedback?.suggestedRewrite ?? null,
     tokenCount,
-    version: 5,
+    version: 6,
   });
 
   return {
     addedOperationalClauses: interpretation.addedOperationalClauses,
     clarityNote:
-      needsClarification && !interpretation.clarityNote
+      refinementFeedback?.clarityNote ??
+      (needsClarification && !interpretation.clarityNote
         ? reasonSummary
-        : interpretation.clarityNote,
+        : interpretation.clarityNote),
     compiledArtifactHash: validation.artifactHash,
     decision: validation.decision,
-    dealerMessage: interpretation.dealerMessage,
+    dealerMessage:
+      refinementFeedback?.dealerMessage ?? interpretation.dealerMessage,
     difficultyClass: validation.log.difficultyClass,
     englishText: compileText,
     escalated,
@@ -1541,12 +1691,21 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
     officialInterpretation,
     officialInterpretationHash: hashBytes(officialInterpretation),
     preflightResultHash: hashBytes(preflightResult),
-    reasonSummary,
+    reasonSummary: refinementFeedback?.reasonSummary ?? reasonSummary,
+    ...(refinementFeedback
+      ? {
+          refinementFocus: refinementFeedback.refinementFocus,
+          refinementQuestions: refinementFeedback.refinementQuestions,
+        }
+      : {}),
     reproposalBlocked,
     ruleId,
     ruleMode: validation.artifact?.ruleMode,
     sanitizedText,
     sanitizedTextHash: hashBytes(sanitizedText),
+    ...(refinementFeedback?.suggestedRewrite
+      ? { suggestedRewrite: refinementFeedback.suggestedRewrite }
+      : {}),
     tokenCount,
   };
 }

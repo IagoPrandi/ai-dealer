@@ -68,7 +68,10 @@ Common building blocks: matches = `intersection(guess,draw)`; misses =
 `difference(guess,draw)`; shared tens digits =
 `intersection(digits(guess,tens),digits(draw,tens))`; even numbers =
 `filter_mod(source,2,0)`; sorted low/high values = `sort(asc|desc,source)`
-plus `at` or `slice`.
+plus `at` or `slice`. "Same set of numbers, regardless of order" means the
+guess and draw contain the same six unique numbers, so use
+`count(intersection(guess,draw)) == 6`; do not compile it as ordered equality
+or describe it as a highest-count ranking.
 
 Do not require a rigid input phrase. Casual but objective wording is valid when
 the condition is measurable over `guess` and `draw`: "my ticket has the same

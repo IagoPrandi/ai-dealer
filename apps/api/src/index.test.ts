@@ -70,6 +70,7 @@ import {
   exportOperatorAiOperationsCsv,
   exportTransparencySnapshotCsv,
   getOperatorAiOperationsSnapshot,
+  buildRuleRefinementFeedback,
   type AuditLogRecord,
   type GuessVerificationResultRecord,
   type RuleProposalRecord,
@@ -142,6 +143,41 @@ function proposal(turnId: number, ruleId: number): RuleProposalRecord {
     turnId,
   };
 }
+
+test("rule preflight refinement feedback explains malformed unordered same-set rules", () => {
+  const feedback = buildRuleRefinementFeedback({
+    clarityNote: "",
+    compileText:
+      "Win if the guess and draw contain the same set of numbers, regardless of order.",
+    officialInterpretation: "",
+    reasonCodes: [
+      "PROVIDER_MALFORMED_RESPONSE",
+      "UNSUPPORTED_RULE",
+      "UNSAFE_RUNTIME_BOUNDS",
+    ],
+    reasonSummary:
+      "Rule rejected: PROVIDER_MALFORMED_RESPONSE, UNSUPPORTED_RULE, UNSAFE_RUNTIME_BOUNDS.",
+    sanitizedText:
+      "Win if the guess and draw contain the same set of numbers, regardless of order.",
+    tokenCount: 14,
+  });
+
+  assert.match(feedback.reasonSummary, /needs refinement/i);
+  assert.equal(
+    feedback.suggestedRewrite,
+    "Win if all 6 guessed numbers appear in the draw, regardless of order.",
+  );
+  assert.ok(
+    feedback.refinementFocus.some((item) =>
+      item.includes("Likely intended interpretation"),
+    ),
+  );
+  assert.deepEqual(feedback.refinementQuestions, [
+    "Should this require all 6 guessed numbers to appear in the draw?",
+    "Should order be ignored completely?",
+  ]);
+  assert.match(feedback.dealerMessage, /send(?:ing)? a revised rule/i);
+});
 
 function settledElection(turnId: number, activeRuleId: number) {
   return {
