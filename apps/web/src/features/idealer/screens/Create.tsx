@@ -19,6 +19,10 @@ import { useIdealer } from "../context";
 import { postConversationDraft, postRuleProposal, postRulePreflight } from "../data/apiClient";
 import { fmtSol, fmtTurnId } from "../data/format";
 import { describeTxError, sendInstruction } from "../data/tx";
+import {
+  composeRefinedRuleDraft,
+  isRuleRefinementPatch,
+} from "../ruleRefinement";
 import { Dealer, Ico, SectionLabel } from "../shared";
 
 interface ChatMessage {
@@ -216,18 +220,40 @@ function CreateChat({ client, fees, go, played, reloadAll, seed, turnId, wallet,
     if (!t || typing) {
       return;
     }
+    const pendingRule = rule;
+    const refinedDraft =
+      pendingRule && !submitted && !isLikelyRuleDraft(t) &&
+      isRuleRefinementPatch(t, {
+        currentRuleText: pendingRule.sanitizedText,
+        refinementQuestions: pendingRule.refinementQuestions ?? null,
+        suggestedRewrite: pendingRule.suggestedRewrite ?? null,
+      })
+        ? composeRefinedRuleDraft(t, {
+            currentRuleText: pendingRule.sanitizedText,
+            refinementQuestions: pendingRule.refinementQuestions ?? null,
+            suggestedRewrite: pendingRule.suggestedRewrite ?? null,
+          })
+        : null;
+    const ruleText = refinedDraft ?? t;
     setVal("");
     setError(null);
     setMsgs((m) => [...m, { text: t, who: "user" }]);
     setTyping(true);
     setRule(null);
     try {
-      if (!isLikelyRuleDraft(t)) {
+      if (!refinedDraft && !isLikelyRuleDraft(t)) {
         setMsgs((m) => [...m, { text: getDealerChatReply(t, fees), who: "ai" }]);
         return;
       }
 
-      const body = await postRulePreflight(t);
+      if (refinedDraft) {
+        setMsgs((m) => [
+          ...m,
+          { text: `I applied that to your previous draft: ${refinedDraft}`, who: "ai" },
+        ]);
+      }
+
+      const body = await postRulePreflight(ruleText);
       const preflight = body.preflight as unknown as RulePreflightResult;
       const valid = preflight.decision === "VALID" && !preflight.needsClarification;
       setMsgs((m) => [

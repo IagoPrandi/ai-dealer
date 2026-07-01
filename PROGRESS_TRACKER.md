@@ -68,6 +68,15 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-07-01 (Rule composer incremental refinements)
+
+- Opened required documents/context before editing: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/develop-frontend/SKILL.md`, and `.claude/skills/idealer-test-and-verify/SKILL.md`.
+- Fixed the rule composer behavior so a player can apply a short correction to the previous draft instead of rewriting the whole rule. When a pending rule exists and the next user message is a refinement such as `ignore order`, `yes` to an order question, `same order`, or another compact correction, the UI composes a revised full draft and sends that full text to `/rule-preflight`.
+- Added `apps/web/src/features/idealer/ruleRefinement.ts` with deterministic refinement helpers and `apps/web/src/features/idealer/ruleRefinement.test.ts` covering suggested-rewrite base selection, short order corrections, yes/no answers to order questions, and chat/cost questions that must remain chat.
+- Updated `apps/web/package.json` so `pnpm --filter @idealer/web test` now runs real `node:test` TypeScript tests instead of a placeholder echo.
+- Verification passed: `pnpm --filter @idealer/web test`, `pnpm --filter @idealer/web lint`, `pnpm --filter @idealer/web build`, and `pnpm --filter @idealer/web typecheck`. The first typecheck attempt hit missing generated `.next/types` files before build; after build regenerated Next types, typecheck passed. Local `GET http://127.0.0.1:3000/play` returned `200`.
+- Reviewed the result for inconsistencies: topic/help/cost messages are not treated as rule edits, submitted on-chain rules remain immutable, short corrections only affect the current pre-submission draft, and no milestone checkbox was marked because milestone marking requires user confirmation.
+
 ### 2026-07-01 (Rule preflight refinement feedback)
 
 - Opened required documents/context before and during work: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/idealer-test-and-verify/SKILL.md`, `.claude/skills/best-practices/SKILL.md`, `.claude/skills/best-practices/references/agent-principles.md`, `.claude/skills/best-practices/references/testing.md`, `packages/rule-compiler/rule-authoring/SKILL.md`, `packages/rule-compiler/rule-authoring/references/patterns.md`, and `packages/rule-compiler/rule-authoring/references/examples.md`.
