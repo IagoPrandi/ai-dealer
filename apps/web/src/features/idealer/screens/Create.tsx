@@ -16,19 +16,27 @@ import {
   type RulePreflightResult,
 } from "../../../solana/idealerProgram";
 import { useIdealer } from "../context";
-import { postConversationDraft, postRuleProposal, postRulePreflight } from "../data/apiClient";
+import { ApiRequestError, postConversationDraft, postRuleProposal, postRulePreflight } from "../data/apiClient";
 import { fmtSol, fmtTurnId } from "../data/format";
 import { describeTxError, sendInstruction } from "../data/tx";
 import {
+  buildRuleGuidanceOptions,
   composeRefinedRuleDraft,
+  getRuleGuidanceTitle,
   isExplicitRuleRefinementPatch,
   isRuleRefinementPatch,
+  type RuleGuidanceOption,
 } from "../ruleRefinement";
 import { Dealer, Ico, SectionLabel } from "../shared";
 
 interface ChatMessage {
   text: string;
   who: "ai" | "user";
+}
+
+interface RuleGuidanceState {
+  options: RuleGuidanceOption[];
+  title: string;
 }
 
 const RULE_DECISION_PATTERN =
@@ -58,6 +66,9 @@ const HOW_IT_WORKS_TOPIC_PATTERN =
 const ALLOWED_TOPIC_PATTERN =
   /\b(allowed|valid|invalid|can i use|what can|only use|permitido|valido|válido|invalido|inválido|posso usar|pode usar|usar na regra|regras validas|regras válidas)\b/i;
 
+const SECURITY_RULE_DRAFT_PATTERN =
+  /\b(ignore\b.{0,40}\b(app\s+)?rules?|previous instructions?|compile\b.{0,40}\bvalid|secretly|hide\b.{0,40}\b(blocked|invalid|rejected))\b/i;
+
 function isLikelyRuleDraft(text: string) {
   const trimmed = text.trim();
   if (!trimmed || GREETING_PATTERN.test(trimmed)) {
@@ -65,6 +76,7 @@ function isLikelyRuleDraft(text: string) {
   }
 
   return (
+    SECURITY_RULE_DRAFT_PATTERN.test(trimmed) ||
     (RULE_DECISION_PATTERN.test(trimmed) && RULE_DATA_PATTERN.test(trimmed)) ||
     (RULE_SHAPE_PATTERN.test(trimmed) && RULE_DATA_PATTERN.test(trimmed))
   );
@@ -128,32 +140,6 @@ function RulePreview({ rule }: { rule: RulePreflightResult }) {
           <Ico.info style={{ color: "var(--yellow)", flexShrink: 0, marginTop: 1 }} /> {rule.reasonSummary}
         </p>
       ) : null}
-      {!valid && rule.suggestedRewrite ? (
-        <div style={{ marginTop: 12 }}>
-          <SectionLabel>Suggested rewrite</SectionLabel>
-          <p style={{ margin: "7px 0 0", fontSize: 14, lineHeight: 1.5, color: "var(--text)" }}>{rule.suggestedRewrite}</p>
-        </div>
-      ) : null}
-      {!valid && rule.refinementFocus?.length ? (
-        <div style={{ marginTop: 12 }}>
-          <SectionLabel>What to refine</SectionLabel>
-          <ul style={{ margin: "7px 0 0", paddingLeft: 18, color: "var(--muted)", fontSize: 13.5, lineHeight: 1.5 }}>
-            {rule.refinementFocus.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-      {!valid && rule.refinementQuestions?.length ? (
-        <div style={{ marginTop: 12 }}>
-          <SectionLabel>Questions</SectionLabel>
-          <ul style={{ margin: "7px 0 0", paddingLeft: 18, color: "var(--muted)", fontSize: 13.5, lineHeight: 1.5 }}>
-            {rule.refinementQuestions.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
       {rule.reproposalBlocked ? (
         <p style={{ margin: "12px 0 0", fontSize: 13, lineHeight: 1.5, color: "var(--red)", display: "flex", gap: 7 }}>
           <Ico.lock style={{ color: "var(--red)", flexShrink: 0, marginTop: 1 }} /> This rule was already rejected this turn and can&apos;t be re-proposed.
@@ -166,47 +152,161 @@ function RulePreview({ rule }: { rule: RulePreflightResult }) {
   );
 }
 
-export function CreateScreen() {
-  const { client, connect, connected, fees, go, played, reloadAll, seed, turnId, wallet, walletAddress } = useIdealer();
+function ClarificationPrompt({
+  disabled,
+  manualText,
+  onDismiss,
+  onManualSelect,
+  onSelect,
+  onSubmit,
+  options,
+  selectedIndex,
+  title,
+}: {
+  disabled: boolean;
+  manualText: string;
+  onDismiss: () => void;
+  onManualSelect: () => void;
+  onSelect: (index: number) => void;
+  onSubmit: () => void;
+  options: readonly RuleGuidanceOption[];
+  selectedIndex: number | null;
+  title: string;
+}) {
+  const selectedOption = selectedIndex === null ? null : options[selectedIndex];
+  const canSubmit = Boolean(selectedOption || manualText.trim());
 
-  if (!connected) {
-    return (
-      <div className="ide-app ide-screen" style={{ height: "100%", position: "relative", overflow: "hidden" }}>
-        <div className="ide-ambient" />
-        <div style={{ position: "relative", zIndex: 1, height: "100%", display: "flex", flexDirection: "column", padding: "52px 22px 30px" }}>
-          <div style={{ display: "flex" }}>
-            <button onClick={() => go("home")} style={{ width: 40, height: 40, borderRadius: 13, background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--text)", display: "grid", placeItems: "center", cursor: "pointer" }} type="button"><Ico.back /></button>
-          </div>
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
-            <div style={{ animation: "ide-float 4s ease-in-out infinite" }}><Dealer size={64} /></div>
-            <h2 style={{ fontSize: 25, fontWeight: 800, margin: "18px 0 8px", letterSpacing: "-0.02em" }}>Connect to create</h2>
-            <p style={{ color: "var(--muted)", fontSize: 15.5, lineHeight: 1.5, margin: "0 0 26px" }}>Chat with the dealer and design your winning rule by prompt. Submitting this rule costs <span className="ide-num" style={{ color: "var(--text)" }}>{fees.ruleNext === 0 ? "Free" : `${fmtSol(fees.ruleNext)} SOL`}</span>.</p>
-            <button onClick={() => connect()} className="ide-btn" style={{ width: "100%", padding: 16, fontSize: 16 }} type="button">
-              <Ico.wallet style={{ color: "#08110C" }} /> Connect wallet
+  return (
+    <div
+      aria-label={title}
+      className="ide-card"
+      style={{
+        animation: "ide-rise .3s ease both",
+        background: "rgba(23,18,31,0.96)",
+        borderColor: "rgba(255,255,255,0.12)",
+        borderRadius: 24,
+        boxShadow: "0 22px 44px -28px rgba(0,0,0,0.9)",
+        display: "grid",
+        gap: 12,
+        padding: 14,
+      }}
+    >
+      <h2 style={{ color: "var(--text)", fontSize: 20, fontWeight: 800, letterSpacing: "-0.01em", lineHeight: 1.15, margin: "2px 2px 8px" }}>
+        {title}
+      </h2>
+      <div style={{ display: "grid", gap: 8 }}>
+        {options.map((option, index) => {
+          const selected = selectedIndex === index;
+          return (
+            <button
+              aria-pressed={selected}
+              key={option.text}
+              onClick={() => onSelect(index)}
+              style={{
+                alignItems: "center",
+                background: selected ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.035)",
+                border: "1px solid transparent",
+                borderColor: selected ? "rgba(255,255,255,0.08)" : "transparent",
+                borderRadius: 18,
+                color: "var(--text)",
+                cursor: "pointer",
+                display: "grid",
+                fontFamily: "Outfit",
+                gap: 12,
+                gridTemplateColumns: "44px minmax(0, 1fr) auto",
+                minHeight: 58,
+                padding: "11px 14px",
+                textAlign: "left",
+              }}
+              type="button"
+            >
+              <span className="ide-num" style={{ alignItems: "center", background: selected ? "rgba(244,241,250,0.9)" : "rgba(255,255,255,0.12)", borderRadius: 999, color: selected ? "#17121F" : "var(--muted)", display: "inline-flex", fontSize: 17, fontWeight: 800, height: 40, justifyContent: "center", width: 40 }}>
+                {index + 1}
+              </span>
+              <span style={{ color: selected ? "var(--text)" : "var(--muted)", fontSize: 15, fontWeight: 750, lineHeight: 1.25, minWidth: 0, overflowWrap: "anywhere" }}>
+                {option.text}
+              </span>
+              {selected ? (
+                <span aria-hidden="true" style={{ color: "var(--dim)", display: "inline-flex", gap: 7, fontSize: 19, lineHeight: 1 }}>
+                  <span>↑</span><span>↓</span>
+                </span>
+              ) : null}
             </button>
-          </div>
-        </div>
+          );
+        })}
+        <button
+          aria-pressed={selectedIndex === null}
+          onClick={onManualSelect}
+          style={{
+            alignItems: "center",
+            background: selectedIndex === null ? "rgba(255,255,255,0.06)" : "transparent",
+            border: "1px solid transparent",
+            borderRadius: 16,
+            color: "var(--muted)",
+            cursor: "pointer",
+            display: "grid",
+            fontFamily: "Outfit",
+            gap: 12,
+            gridTemplateColumns: "44px minmax(0, 1fr)",
+            minHeight: 48,
+            padding: "7px 14px",
+            textAlign: "left",
+          }}
+          type="button"
+        >
+          <span style={{ alignItems: "center", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 999, display: "inline-flex", height: 34, justifyContent: "center", width: 34 }}>
+            <Ico.edit style={{ color: "var(--muted)", height: 17, width: 17 }} />
+          </span>
+          <span style={{ fontSize: 15, lineHeight: 1.25, minWidth: 0, overflowWrap: "anywhere" }}>
+            {manualText.trim() ? manualText : "Write your own clarification..."}
+          </span>
+        </button>
       </div>
-    );
-  }
-
-  return <CreateChat key={seed || "new"} {...{ client, fees, go, played, reloadAll, seed, turnId, wallet, walletAddress }} />;
+      <div style={{ alignItems: "center", display: "flex", gap: 10, justifyContent: "flex-end", paddingTop: 2 }}>
+        <button
+          onClick={onDismiss}
+          style={{ background: "transparent", border: "none", color: "var(--muted)", cursor: "pointer", fontFamily: "Outfit", fontSize: 14.5, fontWeight: 650, padding: "9px 2px" }}
+          type="button"
+        >
+          Dismiss <span style={{ background: "rgba(255,255,255,0.1)", borderRadius: 9, color: "var(--text)", marginLeft: 5, padding: "2px 7px" }}>ESC</span>
+        </button>
+        <button
+          className="ide-btn"
+          disabled={disabled || !canSubmit}
+          onClick={onSubmit}
+          style={{ background: "#78b7df", borderRadius: 20, boxShadow: "none", color: "#09131A", minWidth: 112, opacity: disabled || !canSubmit ? 0.5 : 1, padding: "13px 18px" }}
+          type="button"
+        >
+          Submit <Ico.back style={{ color: "#09131A", height: 18, transform: "rotate(180deg)", width: 18 }} />
+        </button>
+      </div>
+    </div>
+  );
 }
 
-type ChatProps = Pick<ReturnType<typeof useIdealer>, "client" | "fees" | "go" | "played" | "reloadAll" | "seed" | "turnId" | "wallet" | "walletAddress">;
+export function CreateScreen() {
+  const { client, connected, fees, go, played, reloadAll, seed, turnId, wallet, walletAddress } = useIdealer();
 
-function CreateChat({ client, fees, go, played, reloadAll, seed, turnId, wallet, walletAddress }: ChatProps) {
+  return <CreateChat key={seed || "new"} {...{ client, connected, fees, go, played, reloadAll, seed, turnId, wallet, walletAddress }} />;
+}
+
+type ChatProps = Pick<ReturnType<typeof useIdealer>, "client" | "connected" | "fees" | "go" | "played" | "reloadAll" | "seed" | "turnId" | "wallet" | "walletAddress">;
+
+function CreateChat({ client, connected, fees, go, played, reloadAll, seed, turnId, wallet, walletAddress }: ChatProps) {
   const [msgs, setMsgs] = useState<ChatMessage[]>([
-    { text: "Hey! Tell me in one sentence how your rule decides the round winner. Be creative — I turn it into a valid rule. 🎲", who: "ai" },
+    { text: "Hey! Tell me in one sentence how your rule decides the round winner. Be creative - I turn it into a valid rule.", who: "ai" },
   ]);
   const [val, setVal] = useState(seed ?? "");
   const [typing, setTyping] = useState(false);
   const [rule, setRule] = useState<RulePreflightResult | null>(null);
+  const [guidance, setGuidance] = useState<RuleGuidanceState | null>(null);
+  const [selectedGuidanceIndex, setSelectedGuidanceIndex] = useState<number | null>(0);
   const [submitted, setSubmitted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<null | string>(null);
   const [activeDraftId, setActiveDraftId] = useState<null | string>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const autoSentRef = useRef(false);
 
   useEffect(() => {
@@ -214,7 +314,61 @@ function CreateChat({ client, fees, go, played, reloadAll, seed, turnId, wallet,
     if (el) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [msgs, typing, rule]);
+  }, [msgs, typing, rule, guidance]);
+
+  useEffect(() => {
+    if (!guidance) {
+      return undefined;
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setGuidance(null);
+        return;
+      }
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setSelectedGuidanceIndex((index) => {
+          const current = index ?? -1;
+          return Math.min(guidance.options.length - 1, current + 1);
+        });
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setSelectedGuidanceIndex((index) => {
+          const current = index ?? guidance.options.length;
+          return Math.max(0, current - 1);
+        });
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [guidance]);
+
+  function openGuidance(context: Parameters<typeof buildRuleGuidanceOptions>[0]) {
+    const options = buildRuleGuidanceOptions(context);
+    setGuidance({
+      options,
+      title: getRuleGuidanceTitle(context),
+    });
+    setSelectedGuidanceIndex(options.length > 0 ? 0 : null);
+  }
+
+  function submitGuidance() {
+    if (!guidance || typing) {
+      return;
+    }
+    const selectedText =
+      selectedGuidanceIndex === null
+        ? val.trim()
+        : guidance.options[selectedGuidanceIndex]?.text.trim();
+    if (!selectedText) {
+      textareaRef.current?.focus();
+      return;
+    }
+    void send(selectedText);
+  }
 
   async function send(text?: string) {
     const t = (text ?? val).trim();
@@ -240,6 +394,7 @@ function CreateChat({ client, fees, go, played, reloadAll, seed, turnId, wallet,
     const ruleText = refinedDraft ?? t;
     setVal("");
     setError(null);
+    setGuidance(null);
     setMsgs((m) => [...m, { text: t, who: "user" }]);
     setTyping(true);
     setRule(null);
@@ -264,6 +419,19 @@ function CreateChat({ client, fees, go, played, reloadAll, seed, turnId, wallet,
         { text: preflight.dealerMessage || (valid ? "Done! I compiled your rule. Review it — if you like it, submit it to the round." : "Almost there! Try describing the win condition in a few clear words."), who: "ai" },
       ]);
       setRule(preflight);
+      if (valid) {
+        setGuidance(null);
+      } else {
+        openGuidance({
+          clarityNote: preflight.clarityNote,
+          currentRuleText: preflight.sanitizedText,
+          needsClarification: preflight.needsClarification,
+          reasonSummary: preflight.reasonSummary ?? null,
+          refinementQuestions: preflight.refinementQuestions ?? null,
+          sanitizedText: preflight.sanitizedText,
+          suggestedRewrite: preflight.suggestedRewrite ?? null,
+        });
+      }
       if (walletAddress) {
         try {
           const saved = await postConversationDraft(walletAddress, {
@@ -283,6 +451,26 @@ function CreateChat({ client, fees, go, played, reloadAll, seed, turnId, wallet,
         }
       }
     } catch (cause) {
+      if (
+        cause instanceof ApiRequestError &&
+        cause.status < 500 &&
+        cause.code !== "invalid_json" &&
+        cause.code !== "invalid_rule_text"
+      ) {
+        const blockedMessage =
+          cause.code === "RULE_PROMPT_INJECTION"
+            ? "That is blocked because it asks the compiler to ignore or hide the app rules. Choose a clean measurable rule instead."
+            : cause.code === "RULE_EXTERNAL_DEPENDENCY"
+              ? "That is blocked because it depends on information outside this guess and draw. Choose a rewrite that only compares your guess with the official draw."
+              : cause.message;
+        setMsgs((m) => [...m, { text: blockedMessage, who: "ai" }]);
+        openGuidance({
+          apiCode: cause.code,
+          reasonSummary: cause.message,
+          sanitizedText: ruleText,
+        });
+        return;
+      }
       setMsgs((m) => [...m, { text: "Dealer engine unavailable. The compiler must be online before I can lock a rule.", who: "ai" }]);
       setError(describeTxError(cause));
     } finally {
@@ -350,6 +538,8 @@ function CreateChat({ client, fees, go, played, reloadAll, seed, turnId, wallet,
     setSubmitted(false);
     setError(null);
     setActiveDraftId(null);
+    setGuidance(null);
+    setSelectedGuidanceIndex(0);
     setMsgs([{ text: "On to the next one! How does your new rule decide the winner?", who: "ai" }]);
   }
 
@@ -365,7 +555,7 @@ function CreateChat({ client, fees, go, played, reloadAll, seed, turnId, wallet,
             <Dealer size={30} />
             <div>
               <div style={{ fontWeight: 800, fontSize: 16, lineHeight: 1.15, whiteSpace: "nowrap" }}>AI Dealer</div>
-              <div style={{ fontSize: 12, color: "var(--green)", marginTop: 1, whiteSpace: "nowrap" }}>{submitted ? "● rule submitted" : "● crafting your rule"}</div>
+              <div style={{ fontSize: 12, color: "var(--green)", marginTop: 1, whiteSpace: "nowrap" }}>{submitted ? "● rule submitted" : connected ? "● crafting your rule" : "● preflight is free"}</div>
             </div>
           </div>
           <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--dim)" }}>submit <span className="ide-num" style={{ color: "var(--muted)" }}>{fees.ruleNext === 0 ? "Free" : fmtSol(fees.ruleNext)}</span></span>
@@ -379,6 +569,23 @@ function CreateChat({ client, fees, go, played, reloadAll, seed, turnId, wallet,
         {typing ? <div className="ide-bubble-ai ide-typing" style={{ width: 56 }}><span /><span /><span /></div> : null}
 
         {rule && !typing ? <RulePreview rule={rule} /> : null}
+
+        {guidance && !typing ? (
+          <ClarificationPrompt
+            disabled={typing}
+            manualText={val}
+            onDismiss={() => setGuidance(null)}
+            onManualSelect={() => {
+              setSelectedGuidanceIndex(null);
+              textareaRef.current?.focus();
+            }}
+            onSelect={(index) => setSelectedGuidanceIndex(index)}
+            onSubmit={submitGuidance}
+            options={guidance.options}
+            selectedIndex={selectedGuidanceIndex}
+            title={guidance.title}
+          />
+        ) : null}
 
         {rule && valid && !typing ? (
           submitted ? (
@@ -420,11 +627,21 @@ function CreateChat({ client, fees, go, played, reloadAll, seed, turnId, wallet,
           <div style={{ display: "flex", alignItems: "flex-end", gap: 9 }}>
             <textarea
               aria-label="Message"
+              ref={textareaRef}
               value={val}
               onChange={(e) => setVal(e.target.value)}
               rows={1}
-              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }}
-              placeholder={rule ? "Ask for a tweak or describe another rule…" : "Describe your rule…"}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  if (guidance) {
+                    submitGuidance();
+                  } else {
+                    void send();
+                  }
+                }
+              }}
+              placeholder={guidance ? "Choose an option or write your own clarification..." : rule ? "Ask for a tweak or describe another rule..." : "Describe your rule..."}
               style={{ flex: 1, resize: "none", background: "var(--surface)", border: "1px solid var(--line-2)", borderRadius: 16, padding: "13px 15px", color: "var(--text)", fontSize: 15, fontFamily: "Outfit", outline: "none", maxHeight: 90 }}
             />
             <button aria-label="Send message" onClick={() => void send()} className="ide-btn" style={{ width: 48, height: 48, padding: 0, borderRadius: 15, flexShrink: 0 }} type="button"><Ico.send style={{ color: "#08110C" }} /></button>

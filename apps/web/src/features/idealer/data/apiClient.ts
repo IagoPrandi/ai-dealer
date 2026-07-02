@@ -19,6 +19,25 @@ import { getApiBaseUrl } from "../../../lib/apiBase";
 
 export const API_BASE_URL = getApiBaseUrl;
 
+export class ApiRequestError extends Error {
+  readonly code: string | null;
+  readonly detail: unknown;
+  readonly status: number;
+
+  constructor(args: {
+    code?: string | null;
+    detail: unknown;
+    message: string;
+    status: number;
+  }) {
+    super(args.message);
+    this.name = "ApiRequestError";
+    this.code = args.code ?? null;
+    this.detail = args.detail;
+    this.status = args.status;
+  }
+}
+
 async function getJson<T>(
   path: string,
   options: { allow404?: boolean; signal?: AbortSignal } = {},
@@ -69,6 +88,14 @@ function apiErrorMessage(path: string, status: number, detail: unknown) {
   return `POST ${path} returned HTTP ${status}.`;
 }
 
+function apiErrorCode(detail: unknown) {
+  if (!detail || typeof detail !== "object") {
+    return null;
+  }
+  const record = detail as Record<string, unknown>;
+  return typeof record.error === "string" ? record.error : null;
+}
+
 async function postStrictJson<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
     body: JSON.stringify(body),
@@ -83,7 +110,12 @@ async function postStrictJson<T>(path: string, body: unknown): Promise<T> {
     } catch {
       detail = undefined;
     }
-    throw new Error(apiErrorMessage(path, response.status, detail));
+    throw new ApiRequestError({
+      code: apiErrorCode(detail),
+      detail,
+      message: apiErrorMessage(path, response.status, detail),
+      status: response.status,
+    });
   }
 
   return (await response.json()) as T;

@@ -2939,3 +2939,15 @@ Passed:
 - Added regression coverage that reads the requested prompt IDs directly from `docs/rule-proposal-prompt-test-set.md` and verifies prompts `#9`, `#10`, `#11`, and `#101` compile to `VALID`, including AST-shape checks for `#9` and `#101`.
 - Verified: direct deterministic check for prompts `#9`, `#10`, `#11`, and `#101`; `pnpm --filter @idealer/rule-compiler typecheck`; `pnpm --filter @idealer/rule-compiler test` (24/24); `pnpm --filter @idealer/rule-compiler lint`; `pnpm --filter @idealer/rule-compiler build`.
 - Reviewed the result for inconsistencies: the reference prompt file was not modified, the compiler remains bounded to deterministic `guess`/`draw` inputs, no fallback hides invalid behavior, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-02 (Agent chat clarification options UX)
+
+- Reopened required context before working: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/develop-frontend/SKILL.md`, `.claude/skills/idealer-design-system/SKILL.md`, `.claude/skills/idealer-test-and-verify/SKILL.md`, and `docs/rule-proposal-prompt-test-set.md`.
+- Added `/play/propose` as a stable deep link to the rule-proposal dealer chat.
+- Updated the dealer chat so wallet connection is no longer required for free chat/preflight; wallet and Game Token remain required for draft persistence and on-chain submission.
+- Added structured API request errors in the web API client so rule blocks (`RULE_PROMPT_INJECTION`, `RULE_EXTERNAL_DEPENDENCY`) are shown as rule-fix prompts while real 5xx dealer/LLM failures remain honest infrastructure errors.
+- Added deterministic guidance helpers and tests for Sequence 8 and Sequence 9 from `docs/rule-proposal-prompt-test-set.md`, including prompt-injection cleanup, other-player dependency removal, and objective close-rule clarification.
+- Replaced inline clarification lists in the create-rule chat with a Codex/Claude-style dark choice prompt: numbered selectable suggestions, manual clarification row, keyboard arrow hints, `Dismiss ESC`, and `Submit`.
+- Updated Playwright coverage for Sequence 8 and Sequence 9 against the live `/play/propose` route with mocked preflight responses.
+- Verified: `pnpm --filter @idealer/web typecheck`; `pnpm --filter @idealer/web test` (8/8); `pnpm --filter @idealer/web lint`; `pnpm --filter @idealer/web build`; `pnpm --filter @idealer/web test:e2e -- e2e/rule-proposal.spec.ts` (3/3).
+- Reviewed the result for inconsistencies: UI copy remains English, manual clarification remains available, blocked-rule UX does not hide compiler errors, infrastructure failures are not converted into rule suggestions, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
