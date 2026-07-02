@@ -140,6 +140,9 @@ test("interpret harness teaches predicate min/max and casual threshold cases", a
   assert.match(systemPrompt, /min\(guess\) == min\(draw\)/i);
   assert.match(systemPrompt, /max\(guess\) > max\(draw\)/i);
   assert.match(systemPrompt, /four or more picked numbers show up/i);
+  assert.match(systemPrompt, /second guessed number equals/i);
+  assert.match(systemPrompt, /absolute difference/i);
+  assert.match(systemPrompt, /match the\s+draw in reverse/i);
 });
 
 test("compile harness prompt includes selected prompt-set examples", async () => {
@@ -189,4 +192,7 @@ test("compile harness prompt includes selected prompt-set examples", async () =>
   assert.match(systemPrompt, /smallest guessed number equals the smallest drawn number/i);
   assert.match(systemPrompt, /largest guessed number is greater than the largest drawn number/i);
   assert.match(systemPrompt, /four or more of my picked numbers show up/i);
+  assert.match(systemPrompt, /second guessed number equals second drawn number/i);
+  assert.match(systemPrompt, /all_ordered_abs_diff_lte/i);
+  assert.match(systemPrompt, /reversed_position_match_count_at_least/i);
 });

@@ -36,6 +36,17 @@ Examples:
 - Casual objective threshold wording is still a predicate: "four or more of my
   picked numbers show up in the result" = `count_at_least value:4` over
   `intersection(guess,draw)`.
+- Position wording uses 1-based user positions but 0-based AST indexes:
+  "second guessed number equals second drawn number" = `at(guess,1) == at(draw,1)`;
+  "first pick is higher than first drawn number" = `at(guess,0) > at(draw,0)`.
+- "absolute difference between each guessed number and drawn number in the same
+  position is at most 5" is a same-position predicate, not a ranking; emit
+  `all_ordered_abs_diff_lte value:5`.
+- Reverse-order wording is ambiguous if the player only says "match in reverse".
+  Ask for clarification unless they define exact reverse positions or a threshold.
+  "position 1 equals position 6, position 2 equals position 5, and so on" =
+  `reversed_position_match_count_at_least value:6`; "at least 4 of 6 reversed
+  positions" = value 4.
 
 ## 3. Compound rules — keep every clause
 

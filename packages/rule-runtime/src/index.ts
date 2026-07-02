@@ -416,6 +416,27 @@ function evalPredicate(
           )
         );
       }
+      case "all_ordered_abs_diff_lte": {
+        const left = evalArray(node.left, input, budget);
+        const right = evalArray(node.right, input, budget);
+        return (
+          left.length === right.length &&
+          left.every(
+            (value, index) => Math.abs(value - (right[index] ?? 0)) <= node.value,
+          )
+        );
+      }
+      case "reversed_position_match_count_at_least": {
+        const left = evalArray(node.left, input, budget);
+        const right = evalArray(node.right, input, budget);
+        if (left.length !== right.length) {
+          return false;
+        }
+        const matches = left.filter(
+          (value, index) => value === right[right.length - 1 - index],
+        ).length;
+        return matches >= node.value;
+      }
       case "and":
         return node.clauses.every((clause) =>
           evalPredicate(clause, input, budget),

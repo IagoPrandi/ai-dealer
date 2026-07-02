@@ -34,6 +34,26 @@ function readPromptRows(expected: "BLOCK" | "CLARIFY" | "VALID", limit: number) 
   return rows;
 }
 
+function readPromptRowsById(ids: readonly number[]) {
+  const markdown = readFileSync(
+    new URL("../../../docs/rule-proposal-prompt-test-set.md", import.meta.url),
+    "utf8",
+  );
+  const rows = new Map<number, { expected: "BLOCK" | "CLARIFY" | "VALID"; prompt: string }>();
+  const pattern = /^\|\s*(\d+)\s*\|\s*(BLOCK|CLARIFY|VALID)\s*\|\s*(.*?)\s*\|$/gm;
+  for (const match of markdown.matchAll(pattern)) {
+    const id = Number(match[1]);
+    if (ids.includes(id)) {
+      rows.set(id, {
+        expected: match[2] as "BLOCK" | "CLARIFY" | "VALID",
+        prompt: match[3]?.trim() ?? "",
+      });
+    }
+  }
+  assert.equal(rows.size, ids.length);
+  return rows;
+}
+
 function tokenCount(prompt: string) {
   return prompt.trim().split(/\s+/).filter(Boolean).length;
 }
@@ -53,6 +73,11 @@ test("the compile_rule_to_ast skill prompt is versioned and covers both rule mod
   assert.ok(prompt.includes("min(guess) == min(draw)"));
   assert.ok(prompt.includes("max(guess) > max(draw)"));
   assert.ok(prompt.includes("four or more of my picked numbers show up"));
+  // It must teach prompt 12/13/103 and sequence 10 reverse-order cases.
+  assert.ok(prompt.includes("second guessed number equals second drawn number"));
+  assert.ok(prompt.includes("all_ordered_abs_diff_lte"));
+  assert.ok(prompt.includes("first pick only needs to be higher"));
+  assert.ok(prompt.includes("reversed_position_match_count_at_least"));
   // And forbid external/unverifiable inputs.
   assert.ok(/wallets|votes|oracle|external/i.test(prompt));
 });
@@ -223,6 +248,121 @@ test("preserves selected prompt-test semantics for rule proposal agent prompts",
   const ast = casualThreshold.artifact?.ast;
   assert.ok(ast?.schemaVersion === 1 && ast.node.kind === "match_count_at_least");
   assert.equal(ast.node.value, 4);
+});
+
+test("preserves prompt semantics for position, distance, and reverse-order rules", () => {
+  const prompts = readPromptRowsById([12, 13, 98, 99, 100, 103]);
+
+  const expected = new Map<number, "BLOCK" | "CLARIFY" | "VALID">([
+    [12, "VALID"],
+    [13, "VALID"],
+    [98, "CLARIFY"],
+    [99, "VALID"],
+    [100, "VALID"],
+    [103, "VALID"],
+  ]);
+
+  for (const [ruleId, row] of prompts) {
+    assert.equal(row.expected, expected.get(ruleId));
+    const result = validateAndPrecompileRule({
+      prompt: row.prompt,
+      ruleId,
+      tokenCount: tokenCount(row.prompt),
+    });
+
+    if (row.expected === "VALID") {
+      assert.equal(result.decision, "VALID", row.prompt);
+      assert.match(result.artifactHash ?? "", /^[0-9a-f]{64}$/, row.prompt);
+    } else {
+      assert.equal(result.decision, "INVALID", row.prompt);
+      assert.ok(result.log.reasonCodes.includes("AMBIGUOUS_RULE"), row.prompt);
+      assert.equal(result.artifactHash, null, row.prompt);
+    }
+  }
+
+  const secondPosition = validateAndPrecompileRule({
+    prompt: prompts.get(12)?.prompt ?? "",
+    ruleId: 12,
+    tokenCount: tokenCount(prompts.get(12)?.prompt ?? ""),
+  });
+  assert.deepEqual(secondPosition.artifact?.ast, {
+    schemaVersion: 2,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "compare",
+        left: { kind: "at", of: { kind: "source", source: "guess" }, index: 1 },
+        op: "eq",
+        right: { kind: "at", of: { kind: "source", source: "draw" }, index: 1 },
+      },
+    },
+  });
+
+  const absDiff = validateAndPrecompileRule({
+    prompt: prompts.get(13)?.prompt ?? "",
+    ruleId: 13,
+    tokenCount: tokenCount(prompts.get(13)?.prompt ?? ""),
+  });
+  assert.deepEqual(absDiff.artifact?.ast, {
+    schemaVersion: 2,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "all_ordered_abs_diff_lte",
+        left: { kind: "source", source: "guess" },
+        right: { kind: "source", source: "draw" },
+        value: 5,
+      },
+    },
+  });
+
+  const reverseExact = validateAndPrecompileRule({
+    prompt: prompts.get(99)?.prompt ?? "",
+    ruleId: 99,
+    tokenCount: tokenCount(prompts.get(99)?.prompt ?? ""),
+  });
+  assert.equal(
+    reverseExact.artifact?.ast.schemaVersion === 2 &&
+      reverseExact.artifact.ast.result.type === "predicate" &&
+      reverseExact.artifact.ast.result.predicate.kind ===
+        "reversed_position_match_count_at_least"
+      ? reverseExact.artifact.ast.result.predicate.value
+      : null,
+    6,
+  );
+
+  const reverseThreshold = validateAndPrecompileRule({
+    prompt: prompts.get(100)?.prompt ?? "",
+    ruleId: 100,
+    tokenCount: tokenCount(prompts.get(100)?.prompt ?? ""),
+  });
+  assert.equal(
+    reverseThreshold.artifact?.ast.schemaVersion === 2 &&
+      reverseThreshold.artifact.ast.result.type === "predicate" &&
+      reverseThreshold.artifact.ast.result.predicate.kind ===
+        "reversed_position_match_count_at_least"
+      ? reverseThreshold.artifact.ast.result.predicate.value
+      : null,
+    4,
+  );
+
+  const firstPickGreater = validateAndPrecompileRule({
+    prompt: prompts.get(103)?.prompt ?? "",
+    ruleId: 103,
+    tokenCount: tokenCount(prompts.get(103)?.prompt ?? ""),
+  });
+  assert.deepEqual(firstPickGreater.artifact?.ast, {
+    schemaVersion: 2,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "compare",
+        left: { kind: "at", of: { kind: "source", source: "guess" }, index: 0 },
+        op: "gt",
+        right: { kind: "at", of: { kind: "source", source: "draw" }, index: 0 },
+      },
+    },
+  });
 });
 
 test("classifies the first 10 CLARIFY prompts as ambiguous", () => {

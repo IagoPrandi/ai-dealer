@@ -81,6 +81,18 @@ export type PredicateNode =
       op: CompareOp;
       right: ArrayExpr;
     }
+  | {
+      kind: "all_ordered_abs_diff_lte";
+      left: ArrayExpr;
+      right: ArrayExpr;
+      value: number;
+    }
+  | {
+      kind: "reversed_position_match_count_at_least";
+      left: ArrayExpr;
+      right: ArrayExpr;
+      value: number;
+    }
   | { kind: "and"; clauses: PredicateNode[] }
   | { kind: "or"; clauses: PredicateNode[] }
   | { kind: "not"; clause: PredicateNode };
@@ -250,6 +262,18 @@ const predicateNodeSchema: z.ZodType<PredicateNode> = z.lazy(() =>
       left: arrayExprSchema,
       op: compareOpSchema,
       right: arrayExprSchema,
+    }),
+    z.object({
+      kind: z.literal("all_ordered_abs_diff_lte"),
+      left: arrayExprSchema,
+      right: arrayExprSchema,
+      value: intSchema.min(0).max(100),
+    }),
+    z.object({
+      kind: z.literal("reversed_position_match_count_at_least"),
+      left: arrayExprSchema,
+      right: arrayExprSchema,
+      value: intSchema.min(0).max(6),
     }),
     z.object({
       kind: z.literal("and"),

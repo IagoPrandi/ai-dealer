@@ -26,6 +26,21 @@ Each line pairs a player intent with the exact JSON AST to emit.
 "win if every guessed number is lower than the drawn number in the same position" =>
 {"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"all_ordered_compare","op":"lt","left":{"kind":"source","source":"guess"},"right":{"kind":"source","source":"draw"}}}}
 
+"win if the second guessed number equals the second drawn number" =>
+{"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"compare","op":"eq","left":{"kind":"at","index":1,"of":{"kind":"source","source":"guess"}},"right":{"kind":"at","index":1,"of":{"kind":"source","source":"draw"}}}}}
+
+"first pick only needs to be higher than the first drawn number" =>
+{"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"compare","op":"gt","left":{"kind":"at","index":0,"of":{"kind":"source","source":"guess"}},"right":{"kind":"at","index":0,"of":{"kind":"source","source":"draw"}}}}}
+
+"win if the absolute difference between each guessed number and drawn number in the same position is at most 5" =>
+{"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"all_ordered_abs_diff_lte","value":5,"left":{"kind":"source","source":"guess"},"right":{"kind":"source","source":"draw"}}}}
+
+"win if guessed position 1 equals drawn position 6, position 2 equals drawn position 5, and so on" =>
+{"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"reversed_position_match_count_at_least","value":6,"left":{"kind":"source","source":"guess"},"right":{"kind":"source","source":"draw"}}}}
+
+"at least 4 of the 6 reversed positions must match" =>
+{"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"reversed_position_match_count_at_least","value":4,"left":{"kind":"source","source":"guess"},"right":{"kind":"source","source":"draw"}}}}
+
 "win if the number of even guessed numbers equals the number of even drawn numbers" =>
 {"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"compare","op":"eq","left":{"kind":"reduce","op":"count","of":{"kind":"filter_mod","modulus":2,"equals":0,"of":{"kind":"source","source":"guess"}}},"right":{"kind":"reduce","op":"count","of":{"kind":"filter_mod","modulus":2,"equals":0,"of":{"kind":"source","source":"draw"}}}}}}
 

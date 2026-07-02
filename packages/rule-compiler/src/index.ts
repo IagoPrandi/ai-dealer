@@ -533,6 +533,12 @@ function buildAttemptContext(
   if (hasPattern(normalizedText, AMBIGUOUS_PATTERNS)) {
     reasonCodes.add("AMBIGUOUS_RULE");
   }
+  if (looksLikeObjectiveStartComparison(normalizedText)) {
+    reasonCodes.delete("AMBIGUOUS_RULE");
+  }
+  if (looksLikeAmbiguousReverseRule(normalizedText)) {
+    reasonCodes.add("AMBIGUOUS_RULE");
+  }
   if (hasPattern(normalizedText, EXTERNAL_DEPENDENCY_PATTERNS)) {
     reasonCodes.add("EXTERNAL_DEPENDENCY");
   }
@@ -891,6 +897,16 @@ function hasPattern(value: string, patterns: readonly RegExp[]) {
 }
 
 function compileSupportedRule(text: string): RuleAst | null {
+  const reversePositionMatch = parseReversePositionMatchRule(text);
+  if (reversePositionMatch) {
+    return predicateRule(reversePositionMatch);
+  }
+
+  const absDiffRule = parseOrderedAbsoluteDifferenceRule(text);
+  if (absDiffRule) {
+    return predicateRule(absDiffRule);
+  }
+
   if (
     /\b(guessed?|picked|ticket|your)\s+sum\b.{0,30}\b(greater|higher|above|more)\b.{0,60}\b(draw|drawn)\s+sum\b/i.test(text) &&
     /\bat least\s+([1-6]|one|two|three|four|five|six)\b.{0,80}\b(numbers?\s+)?(match|matches|appear|appears)\b/i.test(text)
@@ -1046,6 +1062,21 @@ function predicateRule(predicate: PredicateNode): RuleAst {
   return { schemaVersion: 2, result: { type: "predicate", predicate } };
 }
 
+function looksLikeAmbiguousReverseRule(text: string) {
+  return (
+    /\bmatch(?:es)?\b.{0,40}\b(draw|drawn)\b.{0,40}\breverse\b/i.test(text) &&
+    !/\bposition\s*1\b.{0,80}\bposition\s*6\b/i.test(text) &&
+    !/\bat least\s+([1-6]|one|two|three|four|five|six)\b.{0,80}\breversed?\s+positions?\b/i.test(text)
+  );
+}
+
+function looksLikeObjectiveStartComparison(text: string) {
+  return (
+    /\bstart\s+stronger\b/i.test(text) &&
+    /\bfirst\s+pick\b.{0,80}\b(higher|greater|above|more)\b.{0,80}\bfirst\s+drawn\s+number\b/i.test(text)
+  );
+}
+
 function describeRuleAst(ast: RuleAst): string | null {
   if (ast.schemaVersion === 1) {
     if (ast.node.kind === "match_count_at_least") {
@@ -1079,6 +1110,32 @@ function describePredicate(predicate: PredicateNode): string | null {
   if (predicate.kind === "count_at_least") {
     if (isIntersectionOfSources(predicate.of, "guess", "draw")) {
       return `at least ${predicate.value} of its numbers appear in the official draw, regardless of order`;
+    }
+    return null;
+  }
+
+  if (predicate.kind === "all_ordered_abs_diff_lte") {
+    if (
+      predicate.left.kind === "source" &&
+      predicate.left.source === "guess" &&
+      predicate.right.kind === "source" &&
+      predicate.right.source === "draw"
+    ) {
+      return `the absolute difference between each guessed number and the drawn number in the same position is at most ${predicate.value}`;
+    }
+    return null;
+  }
+
+  if (predicate.kind === "reversed_position_match_count_at_least") {
+    if (
+      predicate.left.kind === "source" &&
+      predicate.left.source === "guess" &&
+      predicate.right.kind === "source" &&
+      predicate.right.source === "draw"
+    ) {
+      return predicate.value === 6
+        ? "all six guessed numbers match the official draw in reverse position order"
+        : `at least ${predicate.value} guessed numbers match the official draw in reverse position order`;
     }
     return null;
   }
@@ -1211,7 +1268,7 @@ function parseComparisonWord(value: string): CompareOp | null {
 
 function parsePositionComparisonRule(text: string): PredicateNode | null {
   const match = text.match(
-    /\b(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|sixth|6th)\s+(?:guessed?|picked|ticket|your)\s+number\b.{0,20}\b(equal|equals|same|matches?|greater|higher|above|more|lower|less|below|smaller)\b.{0,40}\b(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|sixth|6th)\s+(?:drawn?|draw)\s+number\b/i,
+    /\b(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|sixth|6th)\s+(?:(?:guessed?|picked|drawn?|draw)\s+)?(?:number|pick)\b.{0,40}(?:\b(?:is|be|are)\b\s+)?\b(equal|equals|same|matches?|greater|higher|above|more|lower|less|below|smaller)\b.{0,50}\b(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|sixth|6th)\s+(?:drawn?|draw)\s+number\b/i,
   );
   const leftIndex = match?.[1] ? parseOrdinal(match[1]) : null;
   const op = match?.[2] ? parseComparisonWord(match[2]) : null;
@@ -1220,6 +1277,55 @@ function parsePositionComparisonRule(text: string): PredicateNode | null {
     return null;
   }
   return compare(at(source("guess"), leftIndex), op, at(source("draw"), rightIndex));
+}
+
+function parseOrderedAbsoluteDifferenceRule(text: string): PredicateNode | null {
+  const match = text.match(
+    /\babsolute\s+difference\b.{0,80}\beach\s+(?:guessed?|picked|ticket|your)\s+number\b.{0,80}\b(draw|drawn)\s+number\b.{0,80}\b(same position|corresponding position|same index)\b.{0,80}\b(at most|no more than|less than or equal to|<=)\s+([0-9]+)\b/i,
+  );
+  const value = match?.[4] ? Number(match[4]) : NaN;
+  if (!Number.isInteger(value) || value < 0 || value > 100) {
+    return null;
+  }
+  return {
+    kind: "all_ordered_abs_diff_lte",
+    left: source("guess"),
+    right: source("draw"),
+    value,
+  };
+}
+
+function parseReversePositionMatchRule(text: string): PredicateNode | null {
+  const thresholdMatch = text.match(
+    /\bat least\s+([1-6]|one|two|three|four|five|six)\b.{0,40}\b(?:of\s+the\s+)?6\b.{0,60}\breversed?\s+positions?\b.{0,30}\b(match|matches)\b/i,
+  );
+  if (thresholdMatch?.[1]) {
+    const rawValue = thresholdMatch[1].toLowerCase();
+    const value = NUMBER_WORDS.get(rawValue) ?? Number(rawValue);
+    if (Number.isInteger(value) && value >= 1 && value <= 6) {
+      return {
+        kind: "reversed_position_match_count_at_least",
+        left: source("guess"),
+        right: source("draw"),
+        value,
+      };
+    }
+  }
+
+  if (
+    /\bguessed?\s+position\s*1\b.{0,80}\bdrawn?\s+position\s*6\b/i.test(text) &&
+    /\bposition\s*2\b.{0,80}\bposition\s*5\b/i.test(text) &&
+    /\b(and so on|reverse|reversed)\b/i.test(text)
+  ) {
+    return {
+      kind: "reversed_position_match_count_at_least",
+      left: source("guess"),
+      right: source("draw"),
+      value: 6,
+    };
+  }
+
+  return null;
 }
 
 function parseMinMaxComparisonRule(text: string): PredicateNode | null {
@@ -1457,6 +1563,10 @@ function predicateSignature(node: PredicateNode): string {
       return `all_equal_ordered:${arraySignature(node.left)}:${arraySignature(node.right)}`;
     case "all_ordered_compare":
       return `all_ordered_compare:${node.op}:${arraySignature(node.left)}:${arraySignature(node.right)}`;
+    case "all_ordered_abs_diff_lte":
+      return `all_ordered_abs_diff_lte:${node.value}:${arraySignature(node.left)}:${arraySignature(node.right)}`;
+    case "reversed_position_match_count_at_least":
+      return `reversed_position_match_count_at_least:${node.value}:${arraySignature(node.left)}:${arraySignature(node.right)}`;
     case "and":
     case "or":
       return `${node.kind}:${node.clauses.map(predicateSignature).sort().join("|")}`;

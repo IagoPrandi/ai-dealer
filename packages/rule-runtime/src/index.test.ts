@@ -163,6 +163,62 @@ test("predicate: ordered comparisons and numeric filters", () => {
   );
 });
 
+test("predicate: absolute same-position distance and reversed-position matches", () => {
+  const closeByPosition: RuleAst = {
+    schemaVersion: 2,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "all_ordered_abs_diff_lte",
+        left: { kind: "source", source: "guess" },
+        right: { kind: "source", source: "draw" },
+        value: 5,
+      },
+    },
+  };
+  const reversedAtLeastFour: RuleAst = {
+    schemaVersion: 2,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "reversed_position_match_count_at_least",
+        left: { kind: "source", source: "guess" },
+        right: { kind: "source", source: "draw" },
+        value: 4,
+      },
+    },
+  };
+
+  assert.equal(
+    evaluatePredicate(closeByPosition, {
+      guess: [10, 20, 30, 40, 50, 60],
+      draw: [15, 16, 35, 39, 45, 65],
+    }).result,
+    "WIN",
+  );
+  assert.equal(
+    evaluatePredicate(closeByPosition, {
+      guess: [10, 20, 30, 40, 50, 60],
+      draw: [16, 20, 30, 40, 50, 60],
+    }).result,
+    "LOSE",
+  );
+  assert.equal(
+    evaluatePredicate(reversedAtLeastFour, {
+      guess: [6, 5, 4, 3, 99, 98],
+      draw: [1, 2, 3, 4, 5, 6],
+    }).result,
+    "WIN",
+  );
+  assert.equal(
+    evaluatePredicate(reversedAtLeastFour, {
+      guess: [6, 5, 99, 98, 97, 96],
+      draw: [1, 2, 3, 4, 5, 6],
+    }).result,
+    "LOSE",
+  );
+});
+
 test("legacy v1 rules still evaluate", () => {
   const draw = [1, 2, 3, 4, 5, 6];
   assert.equal(

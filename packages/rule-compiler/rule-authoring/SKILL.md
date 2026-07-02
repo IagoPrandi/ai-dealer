@@ -62,6 +62,8 @@ Predicate nodes (produce true/false):
 - `{"kind":"count_at_least","value":<int>,"of":<array>}`
 - `{"kind":"all_equal_ordered","left":<array>,"right":<array>}`
 - `{"kind":"all_ordered_compare","op":"eq"|"neq"|"lt"|"lte"|"gt"|"gte","left":<array>,"right":<array>}` - compare every same-position pair
+- `{"kind":"all_ordered_abs_diff_lte","left":<array>,"right":<array>,"value":<int>}` - every same-position absolute difference is <= value
+- `{"kind":"reversed_position_match_count_at_least","left":<array>,"right":<array>,"value":<0..6>}` - count matches where left position i equals right position 6-i
 - `{"kind":"and"|"or","clauses":[<pred>,...]}`  `{"kind":"not","clause":<pred>}`
 
 Common building blocks: matches = `intersection(guess,draw)`; misses =
@@ -88,6 +90,11 @@ guess-vs-draw comparisons:
 - "largest guessed number is greater than the largest drawn number" -> `max(guess) > max(draw)`
 - "guessed sum is greater than drawn sum and at least 2 numbers match" -> an AND
   predicate containing both the sum comparison and the match threshold.
+- "second guessed number equals second drawn number" -> compare `at(guess,1)` to `at(draw,1)`; user positions are 1-based, AST indexes are 0-based.
+- "absolute difference between each guessed number and drawn number in the same position is at most 5" -> `all_ordered_abs_diff_lte` with value 5.
+- "guessed position 1 equals drawn position 6, position 2 equals drawn position 5, and so on" -> `reversed_position_match_count_at_least` with value 6.
+- "at least 4 of the 6 reversed positions must match" -> `reversed_position_match_count_at_least` with value 4.
+- "match the draw in reverse" without exact positions or threshold is ambiguous; ask for clarification.
 
 ## Tricky intents
 
