@@ -79,6 +79,18 @@ test("accepts objective filter and ordered-comparison nodes", () => {
             value: 5,
           },
           {
+            kind: "total_ordered_abs_diff_lte",
+            left: { kind: "source", source: "guess" },
+            right: { kind: "source", source: "draw" },
+            value: 30,
+          },
+          {
+            kind: "ordered_position_match_count_eq",
+            left: { kind: "source", source: "guess" },
+            right: { kind: "source", source: "draw" },
+            value: 2,
+          },
+          {
             kind: "reversed_position_match_count_at_least",
             left: { kind: "source", source: "guess" },
             right: { kind: "source", source: "draw" },

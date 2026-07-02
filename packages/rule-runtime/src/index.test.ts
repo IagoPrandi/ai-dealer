@@ -176,6 +176,30 @@ test("predicate: absolute same-position distance and reversed-position matches",
       },
     },
   };
+  const totalCloseByPosition: RuleAst = {
+    schemaVersion: 2,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "total_ordered_abs_diff_lte",
+        left: { kind: "source", source: "guess" },
+        right: { kind: "source", source: "draw" },
+        value: 30,
+      },
+    },
+  };
+  const exactlyTwoSamePositions: RuleAst = {
+    schemaVersion: 2,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "ordered_position_match_count_eq",
+        left: { kind: "source", source: "guess" },
+        right: { kind: "source", source: "draw" },
+        value: 2,
+      },
+    },
+  };
   const reversedAtLeastFour: RuleAst = {
     schemaVersion: 2,
     result: {
@@ -200,6 +224,34 @@ test("predicate: absolute same-position distance and reversed-position matches",
     evaluatePredicate(closeByPosition, {
       guess: [10, 20, 30, 40, 50, 60],
       draw: [16, 20, 30, 40, 50, 60],
+    }).result,
+    "LOSE",
+  );
+  assert.equal(
+    evaluatePredicate(totalCloseByPosition, {
+      guess: [10, 20, 30, 40, 50, 60],
+      draw: [15, 15, 35, 35, 55, 55],
+    }).result,
+    "WIN",
+  );
+  assert.equal(
+    evaluatePredicate(totalCloseByPosition, {
+      guess: [10, 20, 30, 40, 50, 60],
+      draw: [20, 30, 40, 50, 60, 70],
+    }).result,
+    "LOSE",
+  );
+  assert.equal(
+    evaluatePredicate(exactlyTwoSamePositions, {
+      guess: [1, 2, 30, 40, 50, 60],
+      draw: [1, 2, 3, 4, 5, 6],
+    }).result,
+    "WIN",
+  );
+  assert.equal(
+    evaluatePredicate(exactlyTwoSamePositions, {
+      guess: [1, 2, 3, 40, 50, 60],
+      draw: [1, 2, 3, 4, 5, 6],
     }).result,
     "LOSE",
   );

@@ -68,7 +68,12 @@ const RULE_PREVENTED_PATTERNS = [
   /\b(system|developer)\s+(prompt|message|instruction)\b/i,
   /\bjailbreak\b/i,
   /\bprompt\s*injection\b/i,
+  /\b(secretly|silently)\b.{0,60}\bcompile\b.{0,60}\bvalid\b/i,
+  /\bhide\b.{0,60}\b(blocked|invalid|rejected)\b/i,
   /\breveal\b.{0,40}\b(prompt|secret|private key|seed phrase)\b/i,
+] as const;
+const RULE_EXTERNAL_BLOCK_PATTERNS = [
+  /\bclosest\b.{0,40}\bamong\s+all\s+players\b/i,
 ] as const;
 
 export interface ServiceHealth {
@@ -1324,6 +1329,10 @@ function hasPreventedRulePattern(value: string) {
   return RULE_PREVENTED_PATTERNS.some((pattern) => pattern.test(value));
 }
 
+function hasRulePattern(value: string, patterns: readonly RegExp[]) {
+  return patterns.some((pattern) => pattern.test(value));
+}
+
 // High-signal markers (on the English text) for rule shapes the small primary
 // model compiles unreliably: negation/inverse and compound conditions. These are
 // routed straight to the stronger escalation model.
@@ -1486,6 +1495,10 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
 
   if (hasPreventedRulePattern(sanitizedText)) {
     throw new Error("RULE_PROMPT_INJECTION");
+  }
+
+  if (hasRulePattern(sanitizedText, RULE_EXTERNAL_BLOCK_PATTERNS)) {
+    throw new Error("RULE_EXTERNAL_DEPENDENCY");
   }
 
   if (tokenCount > RULE_MAX_TOKENS) {
@@ -7753,6 +7766,8 @@ if (isMainModule()) {
               message:
                 code === "RULE_PROMPT_INJECTION"
                   ? "Rule text contains prompt-injection language. Rewrite it as a measurable game condition."
+                  : code === "RULE_EXTERNAL_DEPENDENCY"
+                    ? "Rule text depends on unavailable external game state. Rewrite it using only your guess and the official draw."
                   : code === "RULE_TOKEN_LIMIT_EXCEEDED"
                     ? `Rule text exceeds the ${RULE_MAX_TOKENS}-token limit.`
                     : code === "RULE_TEXT_TOO_LONG"

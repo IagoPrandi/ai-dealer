@@ -42,6 +42,12 @@ Examples:
 - "absolute difference between each guessed number and drawn number in the same
   position is at most 5" is a same-position predicate, not a ranking; emit
   `all_ordered_abs_diff_lte value:5`.
+- "exactly 2 guessed numbers match in the same position" is an ordered position
+  count, not an unordered intersection count; emit
+  `ordered_position_match_count_eq value:2`.
+- "total absolute position-by-position difference between guess and draw is 30
+  or less" sums `abs(guess[i] - draw[i])` for every position and emits
+  `total_ordered_abs_diff_lte value:30`.
 - Reverse-order wording is ambiguous if the player only says "match in reverse".
   Ask for clarification unless they define exact reverse positions or a threshold.
   "position 1 equals position 6, position 2 equals position 5, and so on" =

@@ -907,6 +907,16 @@ function compileSupportedRule(text: string): RuleAst | null {
     return predicateRule(absDiffRule);
   }
 
+  const totalAbsDiffRule = parseTotalOrderedAbsoluteDifferenceRule(text);
+  if (totalAbsDiffRule) {
+    return predicateRule(totalAbsDiffRule);
+  }
+
+  const orderedPositionMatchCount = parseOrderedPositionMatchCountRule(text);
+  if (orderedPositionMatchCount) {
+    return predicateRule(orderedPositionMatchCount);
+  }
+
   if (
     /\b(guessed?|picked|ticket|your)\s+sum\b.{0,30}\b(greater|higher|above|more)\b.{0,60}\b(draw|drawn)\s+sum\b/i.test(text) &&
     /\bat least\s+([1-6]|one|two|three|four|five|six)\b.{0,80}\b(numbers?\s+)?(match|matches|appear|appears)\b/i.test(text)
@@ -1126,6 +1136,30 @@ function describePredicate(predicate: PredicateNode): string | null {
     return null;
   }
 
+  if (predicate.kind === "total_ordered_abs_diff_lte") {
+    if (
+      predicate.left.kind === "source" &&
+      predicate.left.source === "guess" &&
+      predicate.right.kind === "source" &&
+      predicate.right.source === "draw"
+    ) {
+      return `the total absolute position-by-position difference between the guess and draw is at most ${predicate.value}`;
+    }
+    return null;
+  }
+
+  if (predicate.kind === "ordered_position_match_count_eq") {
+    if (
+      predicate.left.kind === "source" &&
+      predicate.left.source === "guess" &&
+      predicate.right.kind === "source" &&
+      predicate.right.source === "draw"
+    ) {
+      return `exactly ${predicate.value} guessed numbers match the official draw in the same positions`;
+    }
+    return null;
+  }
+
   if (predicate.kind === "reversed_position_match_count_at_least") {
     if (
       predicate.left.kind === "source" &&
@@ -1289,6 +1323,46 @@ function parseOrderedAbsoluteDifferenceRule(text: string): PredicateNode | null 
   }
   return {
     kind: "all_ordered_abs_diff_lte",
+    left: source("guess"),
+    right: source("draw"),
+    value,
+  };
+}
+
+function parseTotalOrderedAbsoluteDifferenceRule(text: string): PredicateNode | null {
+  const match = text.match(
+    /\btotal\s+absolute\b.{0,80}\b(position-by-position|same-position|same position|corresponding position|corresponding-position)\s+difference\b.{0,80}\b(guess|guessed|ticket|your)\b.{0,80}\b(draw|drawn)\b.{0,80}(?:(?:\b(is\s+)?(at most|no more than|less than or equal to|<=)\s+([0-9]+)\b)|(?:\b(is\s+)?([0-9]+)\s+or\s+less\b))/i,
+  );
+  const value = match?.[6] ? Number(match[6]) : match?.[8] ? Number(match[8]) : NaN;
+  if (!Number.isInteger(value) || value < 0 || value > 600) {
+    return null;
+  }
+  return {
+    kind: "total_ordered_abs_diff_lte",
+    left: source("guess"),
+    right: source("draw"),
+    value,
+  };
+}
+
+function parseOrderedPositionMatchCountRule(text: string): PredicateNode | null {
+  const match = text.match(
+    /\b(exactly|at least|at most)\s+([0-6]|one|two|three|four|five|six)\b.{0,80}\b(guessed?|picked|ticket|your)?\s*numbers?\b.{0,80}\b(match|matches|equal|equals)\b.{0,80}\b(same position|same positions|corresponding position|corresponding positions|same index|same indexes)\b/i,
+  );
+  if (!match?.[1] || !match[2]) {
+    return null;
+  }
+  const comparator = match[1].toLowerCase();
+  const rawValue = match[2].toLowerCase();
+  const value = NUMBER_WORDS.get(rawValue) ?? Number(rawValue);
+  if (!Number.isInteger(value) || value < 0 || value > 6) {
+    return null;
+  }
+  if (comparator !== "exactly") {
+    return null;
+  }
+  return {
+    kind: "ordered_position_match_count_eq",
     left: source("guess"),
     right: source("draw"),
     value,
@@ -1565,6 +1639,10 @@ function predicateSignature(node: PredicateNode): string {
       return `all_ordered_compare:${node.op}:${arraySignature(node.left)}:${arraySignature(node.right)}`;
     case "all_ordered_abs_diff_lte":
       return `all_ordered_abs_diff_lte:${node.value}:${arraySignature(node.left)}:${arraySignature(node.right)}`;
+    case "total_ordered_abs_diff_lte":
+      return `total_ordered_abs_diff_lte:${node.value}:${arraySignature(node.left)}:${arraySignature(node.right)}`;
+    case "ordered_position_match_count_eq":
+      return `ordered_position_match_count_eq:${node.value}:${arraySignature(node.left)}:${arraySignature(node.right)}`;
     case "reversed_position_match_count_at_least":
       return `reversed_position_match_count_at_least:${node.value}:${arraySignature(node.left)}:${arraySignature(node.right)}`;
     case "and":

@@ -35,6 +35,12 @@ Each line pairs a player intent with the exact JSON AST to emit.
 "win if the absolute difference between each guessed number and drawn number in the same position is at most 5" =>
 {"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"all_ordered_abs_diff_lte","value":5,"left":{"kind":"source","source":"guess"},"right":{"kind":"source","source":"draw"}}}}
 
+"win if exactly 2 guessed numbers match in the same position" =>
+{"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"ordered_position_match_count_eq","value":2,"left":{"kind":"source","source":"guess"},"right":{"kind":"source","source":"draw"}}}}
+
+"win if the total absolute position-by-position difference between guess and draw is 30 or less" =>
+{"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"total_ordered_abs_diff_lte","value":30,"left":{"kind":"source","source":"guess"},"right":{"kind":"source","source":"draw"}}}}
+
 "win if guessed position 1 equals drawn position 6, position 2 equals drawn position 5, and so on" =>
 {"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"reversed_position_match_count_at_least","value":6,"left":{"kind":"source","source":"guess"},"right":{"kind":"source","source":"draw"}}}}
 

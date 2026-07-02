@@ -21,6 +21,7 @@ import { fmtSol, fmtTurnId } from "../data/format";
 import { describeTxError, sendInstruction } from "../data/tx";
 import {
   composeRefinedRuleDraft,
+  isExplicitRuleRefinementPatch,
   isRuleRefinementPatch,
 } from "../ruleRefinement";
 import { Dealer, Ico, SectionLabel } from "../shared";
@@ -221,8 +222,10 @@ function CreateChat({ client, fees, go, played, reloadAll, seed, turnId, wallet,
       return;
     }
     const pendingRule = rule;
+    const likelyRuleDraft = isLikelyRuleDraft(t);
+    const explicitPatch = isExplicitRuleRefinementPatch(t);
     const refinedDraft =
-      pendingRule && !submitted && !isLikelyRuleDraft(t) &&
+      pendingRule && !submitted && (!likelyRuleDraft || explicitPatch) &&
       isRuleRefinementPatch(t, {
         currentRuleText: pendingRule.sanitizedText,
         refinementQuestions: pendingRule.refinementQuestions ?? null,
@@ -241,7 +244,7 @@ function CreateChat({ client, fees, go, played, reloadAll, seed, turnId, wallet,
     setTyping(true);
     setRule(null);
     try {
-      if (!refinedDraft && !isLikelyRuleDraft(t)) {
+      if (!refinedDraft && !likelyRuleDraft) {
         setMsgs((m) => [...m, { text: getDealerChatReply(t, fees), who: "ai" }]);
         return;
       }

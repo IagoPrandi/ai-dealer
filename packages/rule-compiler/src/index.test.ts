@@ -76,6 +76,8 @@ test("the compile_rule_to_ast skill prompt is versioned and covers both rule mod
   // It must teach prompt 12/13/103 and sequence 10 reverse-order cases.
   assert.ok(prompt.includes("second guessed number equals second drawn number"));
   assert.ok(prompt.includes("all_ordered_abs_diff_lte"));
+  assert.ok(prompt.includes("ordered_position_match_count_eq"));
+  assert.ok(prompt.includes("total_ordered_abs_diff_lte"));
   assert.ok(prompt.includes("first pick only needs to be higher"));
   assert.ok(prompt.includes("reversed_position_match_count_at_least"));
   // And forbid external/unverifiable inputs.
@@ -363,6 +365,100 @@ test("preserves prompt semantics for position, distance, and reverse-order rules
       },
     },
   });
+});
+
+test("preserves prompt sequence semantics for sequences 8, 9, and 10", () => {
+  const prompts = readPromptRowsById([92, 93, 94, 95, 96, 97, 98, 99, 100]);
+
+  const cleanSamePosition = validateAndPrecompileRule({
+    prompt: prompts.get(94)?.prompt ?? "",
+    ruleId: 94,
+    tokenCount: tokenCount(prompts.get(94)?.prompt ?? ""),
+  });
+  assert.deepEqual(cleanSamePosition.artifact?.ast, {
+    schemaVersion: 2,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "ordered_position_match_count_eq",
+        left: { kind: "source", source: "guess" },
+        right: { kind: "source", source: "draw" },
+        value: 2,
+      },
+    },
+  });
+
+  const closeAmongPlayers = validateAndPrecompileRule({
+    prompt: prompts.get(95)?.prompt ?? "",
+    ruleId: 95,
+    tokenCount: tokenCount(prompts.get(95)?.prompt ?? ""),
+  });
+  assert.equal(closeAmongPlayers.decision, "INVALID");
+  assert.ok(closeAmongPlayers.log.reasonCodes.includes("EXTERNAL_DEPENDENCY"));
+
+  const closeToDraw = validateAndPrecompileRule({
+    prompt: prompts.get(96)?.prompt ?? "",
+    ruleId: 96,
+    tokenCount: tokenCount(prompts.get(96)?.prompt ?? ""),
+  });
+  assert.equal(closeToDraw.decision, "INVALID");
+  assert.ok(closeToDraw.log.reasonCodes.includes("AMBIGUOUS_RULE"));
+
+  const totalDistance = validateAndPrecompileRule({
+    prompt: prompts.get(97)?.prompt ?? "",
+    ruleId: 97,
+    tokenCount: tokenCount(prompts.get(97)?.prompt ?? ""),
+  });
+  assert.deepEqual(totalDistance.artifact?.ast, {
+    schemaVersion: 2,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "total_ordered_abs_diff_lte",
+        left: { kind: "source", source: "guess" },
+        right: { kind: "source", source: "draw" },
+        value: 30,
+      },
+    },
+  });
+
+  const reverseClarify = validateAndPrecompileRule({
+    prompt: prompts.get(98)?.prompt ?? "",
+    ruleId: 98,
+    tokenCount: tokenCount(prompts.get(98)?.prompt ?? ""),
+  });
+  assert.equal(reverseClarify.decision, "INVALID");
+  assert.ok(reverseClarify.log.reasonCodes.includes("AMBIGUOUS_RULE"));
+
+  const reverseExact = validateAndPrecompileRule({
+    prompt: prompts.get(99)?.prompt ?? "",
+    ruleId: 99,
+    tokenCount: tokenCount(prompts.get(99)?.prompt ?? ""),
+  });
+  const reversePatch = `${prompts.get(99)?.prompt ?? ""} ${prompts.get(100)?.prompt ?? ""}`;
+  const reverseThreshold = validateAndPrecompileRule({
+    prompt: reversePatch,
+    ruleId: 100,
+    tokenCount: tokenCount(reversePatch),
+  });
+  assert.equal(
+    reverseExact.artifact?.ast.schemaVersion === 2 &&
+      reverseExact.artifact.ast.result.type === "predicate" &&
+      reverseExact.artifact.ast.result.predicate.kind ===
+        "reversed_position_match_count_at_least"
+      ? reverseExact.artifact.ast.result.predicate.value
+      : null,
+    6,
+  );
+  assert.equal(
+    reverseThreshold.artifact?.ast.schemaVersion === 2 &&
+      reverseThreshold.artifact.ast.result.type === "predicate" &&
+      reverseThreshold.artifact.ast.result.predicate.kind ===
+        "reversed_position_match_count_at_least"
+      ? reverseThreshold.artifact.ast.result.predicate.value
+      : null,
+    4,
+  );
 });
 
 test("classifies the first 10 CLARIFY prompts as ambiguous", () => {

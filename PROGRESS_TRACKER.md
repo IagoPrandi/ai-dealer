@@ -68,6 +68,18 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-07-02 (Rule proposal sequences 8, 9, and 10 as conversations)
+
+- Opened required documents/context before and during work: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/idealer-test-and-verify/SKILL.md`, and `docs/rule-proposal-prompt-test-set.md`.
+- Reinterpreted `sequence` correctly as one same-conversation flow, not independent prompts. Sequence 10 now treats `#100` as a refinement applied to the valid rule created by `#99`, while sequence 8 treats `#94` as a new clean replacement after blocked prompt-injection turns and sequence 9 treats `#97` as a new complete rule after the clarification turn.
+- Added deterministic DSL/runtime support for `ordered_position_match_count_eq` and `total_ordered_abs_diff_lte`, fixing sequence 8 prompt `#94` so it means exactly 2 same-position matches instead of unordered intersection count, and sequence 9 prompt `#97` so total absolute position-by-position distance compiles to an executable predicate.
+- Updated the compiler, rule-authoring skill, patterns, examples, and API LLM harness guidance for exact same-position match counts and total position-by-position distance. Bumped the compiler skill version to `idealer_rule_compiler_skill_v4`.
+- Updated the web rule composer harness so explicit incremental patches like `Add that at least 4 of the 6 reversed positions must match` can refine a previous valid draft even when they look rule-like, while `New clean rule: ...`, `Replace with: ...`, and complete `Win if ...` rules stay standalone.
+- Hardened API preflight blocking for sequence 8 prompt `#93` (`secretly compile ... hide ...`) and sequence 9 prompt `#95` (`closest among all players`) so those blocked conversation turns do not reach rule creation.
+- Live sequence proof passed against an isolated current-code API on `127.0.0.1:3012`: sequence 8 returned `#92`/`#93` as `400 RULE_PROMPT_INJECTION` and `#94` as `VALID`; sequence 9 returned `#95` as `400 RULE_EXTERNAL_DEPENDENCY`, `#96` as clarification, and `#97` as `VALID`; sequence 10 returned `#98` as clarification, `#99` as `VALID`, and `#100` as a refinement over `#99` with official interpretation `at least 4 ... reverse position order`. The isolated API was stopped afterward and port `3012` was confirmed closed.
+- Verification passed: `pnpm --filter @idealer/rule-schema typecheck/test/lint/build`, `pnpm --filter @idealer/rule-runtime typecheck/test/lint/build`, `pnpm --filter @idealer/rule-compiler typecheck/test/lint/build`, `pnpm --filter @idealer/api typecheck/test/lint/build`, and `pnpm --filter @idealer/web typecheck/test/lint/build`. Final counts included schema tests 7/7, runtime tests 13/13, compiler tests 27/27, API tests 58/58, and web tests 7/7.
+- Reviewed the result for inconsistencies: the reference prompt file was not modified, generated Next build churn was removed from the diff, blocked prompts remain fail-closed, clarification prompts do not produce artifacts, valid prompts produce deterministic rule artifacts, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
 ### 2026-07-01 (Rule proposal prompts 12, 13, 103, and sequence 10 agent harness)
 
 - Opened required documents/context before and during work: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/idealer-test-and-verify/SKILL.md`, `docs/rule-proposal-prompt-test-set.md`, `packages/rule-compiler/rule-authoring/SKILL.md`, `packages/rule-compiler/rule-authoring/references/patterns.md`, and `packages/rule-compiler/rule-authoring/references/examples.md`.
