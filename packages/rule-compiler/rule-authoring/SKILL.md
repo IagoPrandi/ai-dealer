@@ -80,6 +80,15 @@ show up in the result" means at least four guess/draw intersections; "low end
 lines up" means compare minimum values. Ask for clarification only when the
 measurable threshold, direction, positions, or operation is missing.
 
+For "win if" wording, default to a predicate. Do not convert it into a ranking
+unless the player clearly asks for comparison against other guesses ("the most",
+"fewest", "closest among all players"). Keep direct min/max comparisons as direct
+guess-vs-draw comparisons:
+- "smallest guessed number equals the smallest drawn number" -> `min(guess) == min(draw)`
+- "largest guessed number is greater than the largest drawn number" -> `max(guess) > max(draw)`
+- "guessed sum is greater than drawn sum and at least 2 numbers match" -> an AND
+  predicate containing both the sum comparison and the match threshold.
+
 ## Tricky intents
 
 Before emitting, check references/patterns.md for the correct mapping of:

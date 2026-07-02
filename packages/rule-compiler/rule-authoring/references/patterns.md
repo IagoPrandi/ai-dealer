@@ -28,6 +28,15 @@ Examples:
   `count_at_least value:2`). Do not collapse it into a ranking — that would drop
   the floor and let a 1-match guess win.
 
+- "win if" / "ticket wins if" / "guess wins if" describes a single-guess
+  predicate unless the text explicitly compares against other guesses. Keep
+  min/max wording as a direct guess-vs-draw comparison: min(guess) == min(draw),
+  max(guess) > max(draw), etc. Do not turn these into "lowest" or "highest"
+  competitions.
+- Casual objective threshold wording is still a predicate: "four or more of my
+  picked numbers show up in the result" = `count_at_least value:4` over
+  `intersection(guess,draw)`.
+
 ## 3. Compound rules — keep every clause
 
 - "A and B / A e B" → `{"kind":"and","clauses":[<A>,<B>]}`.

@@ -29,8 +29,17 @@ Each line pairs a player intent with the exact JSON AST to emit.
 "win if the number of even guessed numbers equals the number of even drawn numbers" =>
 {"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"compare","op":"eq","left":{"kind":"reduce","op":"count","of":{"kind":"filter_mod","modulus":2,"equals":0,"of":{"kind":"source","source":"guess"}}},"right":{"kind":"reduce","op":"count","of":{"kind":"filter_mod","modulus":2,"equals":0,"of":{"kind":"source","source":"draw"}}}}}}
 
+"win if the guessed sum is greater than the drawn sum and at least 2 numbers match" =>
+{"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"and","clauses":[{"kind":"compare","op":"gt","left":{"kind":"reduce","op":"sum","of":{"kind":"source","source":"guess"}},"right":{"kind":"reduce","op":"sum","of":{"kind":"source","source":"draw"}}},{"kind":"count_at_least","value":2,"of":{"kind":"intersection","left":{"kind":"source","source":"guess"},"right":{"kind":"source","source":"draw"}}}]}}}
+
 "win if the smallest guessed number equals the smallest drawn number" =>
 {"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"compare","op":"eq","left":{"kind":"reduce","op":"min","of":{"kind":"source","source":"guess"}},"right":{"kind":"reduce","op":"min","of":{"kind":"source","source":"draw"}}}}}
+
+"win if the largest guessed number is greater than the largest drawn number" =>
+{"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"compare","op":"gt","left":{"kind":"reduce","op":"max","of":{"kind":"source","source":"guess"}},"right":{"kind":"reduce","op":"max","of":{"kind":"source","source":"draw"}}}}}
+
+"four or more of my picked numbers show up in the result" / "four or more are somewhere in the draw" =>
+{"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"count_at_least","value":4,"of":{"kind":"intersection","left":{"kind":"source","source":"guess"},"right":{"kind":"source","source":"draw"}}}}}
 
 "whoever matches the most numbers" / "acertar mais números" (ranking max) =>
 {"schemaVersion":2,"result":{"type":"ranking","direction":"max","tieBreak":"share_pool","score":{"kind":"reduce","op":"count","of":{"kind":"intersection","left":{"kind":"source","source":"guess"},"right":{"kind":"source","source":"draw"}}}}}

@@ -92,6 +92,11 @@ export type RuleAstProvider = (params: {
   providerConfig: AgentProviderConfig;
 }) => Promise<unknown>;
 
+export interface RuleCompileArtifactOptions {
+  astProvider: RuleAstProvider;
+  preferDeterministic?: boolean;
+}
+
 export interface RuleCompilationRequest {
   model?: string;
   officialInterpretation?: string;
@@ -426,7 +431,7 @@ export function validateAndPrecompileRule(
  */
 export async function compileRuleArtifact(
   request: RuleCompilationRequest,
-  options: { astProvider: RuleAstProvider },
+  options: RuleCompileArtifactOptions,
 ): Promise<RuleValidationResult> {
   const timestamp = request.timestamp ?? new Date().toISOString();
   const providerRouting = normalizeProviderRouting(request);
@@ -437,7 +442,7 @@ export async function compileRuleArtifact(
       request,
       timestamp,
       providerConfig,
-      options.astProvider,
+      options,
     );
     attempts.push(evaluation);
     if (
@@ -705,13 +710,29 @@ async function evaluateProviderAttemptAsync(
   request: RuleCompilationRequest,
   timestamp: string,
   providerConfig: AgentProviderConfig,
-  astProvider: RuleAstProvider,
+  options: RuleCompileArtifactOptions,
 ): Promise<ProviderEvaluation> {
   const ctx = buildAttemptContext(request, providerConfig);
   let rawAst: unknown = null;
   if (!ctx.forcedFailure) {
+    if (options.preferDeterministic) {
+      const deterministicAst = compileSupportedRule(ctx.normalizedText);
+      if (deterministicAst) {
+        const deterministicInterpretation = describeRuleAst(deterministicAst);
+        return validateResolvedAst(
+          deterministicInterpretation
+            ? { ...request, officialInterpretation: deterministicInterpretation }
+            : request,
+          timestamp,
+          providerConfig,
+          ctx,
+          deterministicAst,
+        );
+      }
+    }
+
     try {
-      rawAst = await astProvider({
+      rawAst = await options.astProvider({
         normalizedText: ctx.normalizedText,
         prompt: request.prompt,
         providerConfig,
@@ -870,6 +891,24 @@ function hasPattern(value: string, patterns: readonly RegExp[]) {
 }
 
 function compileSupportedRule(text: string): RuleAst | null {
+  if (
+    /\b(guessed?|picked|ticket|your)\s+sum\b.{0,30}\b(greater|higher|above|more)\b.{0,60}\b(draw|drawn)\s+sum\b/i.test(text) &&
+    /\bat least\s+([1-6]|one|two|three|four|five|six)\b.{0,80}\b(numbers?\s+)?(match|matches|appear|appears)\b/i.test(text)
+  ) {
+    const threshold = parseMatchCountRule(text) ?? 1;
+    return predicateRule({
+      kind: "and",
+      clauses: [
+        compare(sum(source("guess")), "gt", sum(source("draw"))),
+        {
+          kind: "count_at_least",
+          value: threshold,
+          of: intersection(source("guess"), source("draw")),
+        },
+      ],
+    });
+  }
+
   const matchCount = parseMatchCountRule(text);
   if (matchCount) {
     return {
@@ -928,24 +967,6 @@ function compileSupportedRule(text: string): RuleAst | null {
         count(filterMod(source("draw"), 2, 0)),
       ),
     );
-  }
-
-  if (
-    /\b(guessed?|picked|ticket|your)\s+sum\b.{0,30}\b(greater|higher|above|more)\b.{0,60}\b(draw|drawn)\s+sum\b/i.test(text) &&
-    /\bat least\s+([1-6]|one|two|three|four|five|six)\b.{0,80}\b(numbers?\s+)?(match|matches|appear|appears)\b/i.test(text)
-  ) {
-    const threshold = parseMatchCountRule(text) ?? 1;
-    return predicateRule({
-      kind: "and",
-      clauses: [
-        compare(sum(source("guess")), "gt", sum(source("draw"))),
-        {
-          kind: "count_at_least",
-          value: threshold,
-          of: intersection(source("guess"), source("draw")),
-        },
-      ],
-    });
   }
 
   const minMaxComparison = parseMinMaxComparisonRule(text);
@@ -1023,6 +1044,122 @@ function compare(
 
 function predicateRule(predicate: PredicateNode): RuleAst {
   return { schemaVersion: 2, result: { type: "predicate", predicate } };
+}
+
+function describeRuleAst(ast: RuleAst): string | null {
+  if (ast.schemaVersion === 1) {
+    if (ast.node.kind === "match_count_at_least") {
+      return `A guess wins if at least ${ast.node.value} of its numbers appear in the official draw, regardless of order.`;
+    }
+    if (ast.node.kind === "sum_equals") {
+      return "A guess wins if the sum of its six numbers equals the sum of the six official draw numbers.";
+    }
+    if (ast.node.kind === "ordered_exact") {
+      return "A guess wins if all six guessed numbers match the official draw in the same positions.";
+    }
+  }
+
+  if (ast.schemaVersion !== 2 || ast.result.type !== "predicate") {
+    return null;
+  }
+
+  const predicate = ast.result.predicate;
+  if (predicate.kind === "and") {
+    const clauses = predicate.clauses.map(describePredicate).filter(Boolean);
+    return clauses.length === predicate.clauses.length
+      ? `A guess wins if ${clauses.join(" and ")}.`
+      : null;
+  }
+
+  const description = describePredicate(predicate);
+  return description ? `A guess wins if ${description}.` : null;
+}
+
+function describePredicate(predicate: PredicateNode): string | null {
+  if (predicate.kind === "count_at_least") {
+    if (isIntersectionOfSources(predicate.of, "guess", "draw")) {
+      return `at least ${predicate.value} of its numbers appear in the official draw, regardless of order`;
+    }
+    return null;
+  }
+
+  if (predicate.kind !== "compare") {
+    return null;
+  }
+
+  const left = describeScalar(predicate.left);
+  const right = describeScalar(predicate.right);
+  const op = describeCompareOp(predicate.op);
+  if (!left || !right || !op) {
+    return null;
+  }
+
+  return `${left} is ${op} ${right}`;
+}
+
+function describeScalar(scalar: ScalarExpr): string | null {
+  if (scalar.kind === "lit") {
+    return String(scalar.value);
+  }
+  if (scalar.kind === "reduce") {
+    const sourceName =
+      scalar.of.kind === "source"
+        ? scalar.of.source === "guess"
+          ? "the guess"
+          : "the official draw"
+        : null;
+    if (!sourceName) {
+      if (
+        scalar.op === "count" &&
+        isIntersectionOfSources(scalar.of, "guess", "draw")
+      ) {
+        return "the count of guessed numbers that appear in the official draw";
+      }
+      return null;
+    }
+    if (scalar.op === "sum") {
+      return `the sum of ${sourceName}'s six numbers`;
+    }
+    if (scalar.op === "min") {
+      return `the smallest number in ${sourceName}`;
+    }
+    if (scalar.op === "max") {
+      return `the largest number in ${sourceName}`;
+    }
+  }
+  return null;
+}
+
+function describeCompareOp(op: CompareOp): string | null {
+  switch (op) {
+    case "eq":
+      return "equal to";
+    case "gt":
+      return "greater than";
+    case "gte":
+      return "greater than or equal to";
+    case "lt":
+      return "less than";
+    case "lte":
+      return "less than or equal to";
+    case "neq":
+      return "not equal to";
+  }
+}
+
+function isIntersectionOfSources(
+  array: ArrayExpr,
+  first: "draw" | "guess",
+  second: "draw" | "guess",
+) {
+  if (array.kind !== "intersection") {
+    return false;
+  }
+  const sides = [array.left, array.right];
+  return (
+    sides.some((side) => side.kind === "source" && side.source === first) &&
+    sides.some((side) => side.kind === "source" && side.source === second)
+  );
 }
 
 function parseExactMatchCountRule(text: string): number | null {
@@ -1110,8 +1247,11 @@ function parseMatchCountRule(text: string) {
   const numericMatch = text.match(
     /\bat least\s+([1-6]|one|two|three|four|five|six)\b.{0,80}\b(match|matches|appear|appears|in the draw|drawn)\b/i,
   );
+  const orMoreMatch = text.match(
+    /\b([1-6]|one|two|three|four|five|six)\s+or\s+more\b.{0,80}\b(guessed?|picked|ticket|my|your)?\s*numbers?\b.{0,100}\b(show up|appear|appears|match|matches|somewhere in the draw|in the draw|drawn)\b/i,
+  );
   const compactMatch = text.match(/\b([1-6])\s+numbers?\s+(match|appear)\b/i);
-  const rawValue = numericMatch?.[1] ?? compactMatch?.[1] ?? null;
+  const rawValue = numericMatch?.[1] ?? orMoreMatch?.[1] ?? compactMatch?.[1] ?? null;
   if (!rawValue) {
     return null;
   }

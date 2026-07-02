@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import {
+  compileRuleToAst,
   ensureModelLoaded,
+  interpretRuleWithAgent,
   resolveEscalationModel,
   resolveRuleAgentConfig,
   resolveTranslateToEnglish,
@@ -94,4 +96,97 @@ test("rule agent config ignores inline comments copied from .env examples", () =
   assert.equal(config.timeoutMs, 180_000);
   assert.equal(resolveEscalationModel(env), "gemma4:e2b");
   assert.equal(resolveTranslateToEnglish(env), false);
+});
+
+test("interpret harness teaches predicate min/max and casual threshold cases", async () => {
+  let systemPrompt = "";
+  globalThis.fetch = (async (
+    _input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    const body = JSON.parse(String(init?.body)) as {
+      messages: Array<{ content: string; role: string }>;
+    };
+    systemPrompt = body.messages[0]?.content ?? "";
+    return new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                addedOperationalClauses: [],
+                clarityNote: "",
+                dealerMessage: "Compiled as a predicate.",
+                needsClarification: false,
+                normalizedText:
+                  "A guess wins if the smallest guessed number equals the smallest drawn number.",
+                officialInterpretation:
+                  "A guess wins if min(guess) equals min(draw).",
+              }),
+            },
+          },
+        ],
+      }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+
+  await interpretRuleWithAgent(
+    "Win if the smallest guessed number equals the smallest drawn number.",
+    CONFIG,
+  );
+
+  assert.match(systemPrompt, /'win if' means an absolute predicate/i);
+  assert.match(systemPrompt, /min\(guess\) == min\(draw\)/i);
+  assert.match(systemPrompt, /max\(guess\) > max\(draw\)/i);
+  assert.match(systemPrompt, /four or more picked numbers show up/i);
+});
+
+test("compile harness prompt includes selected prompt-set examples", async () => {
+  let systemPrompt = "";
+  globalThis.fetch = (async (
+    _input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    const body = JSON.parse(String(init?.body)) as {
+      messages: Array<{ content: string; role: string }>;
+    };
+    systemPrompt = body.messages[0]?.content ?? "";
+    return new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                result: {
+                  predicate: {
+                    kind: "count_at_least",
+                    of: {
+                      kind: "intersection",
+                      left: { kind: "source", source: "guess" },
+                      right: { kind: "source", source: "draw" },
+                    },
+                    value: 4,
+                  },
+                  type: "predicate",
+                },
+                schemaVersion: 2,
+              }),
+            },
+          },
+        ],
+      }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+
+  await compileRuleToAst(
+    "I want the win to go to guesses where four or more picked numbers show up in the result.",
+    CONFIG,
+  );
+
+  assert.match(systemPrompt, /guessed sum is greater than the drawn sum/i);
+  assert.match(systemPrompt, /smallest guessed number equals the smallest drawn number/i);
+  assert.match(systemPrompt, /largest guessed number is greater than the largest drawn number/i);
+  assert.match(systemPrompt, /four or more of my picked numbers show up/i);
 });

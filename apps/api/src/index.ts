@@ -1556,7 +1556,7 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
         ruleId,
         tokenCount,
       },
-      { astProvider },
+      { astProvider, preferDeterministic: true },
     );
     let grounded: boolean | undefined;
     if (guardianConfig.enabled && validation.decision === "VALID") {
@@ -1613,8 +1613,11 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
   }
 
   const { interpretation, validation } = pass;
-  const normalizedText = interpretation.normalizedText;
-  const officialInterpretation = interpretation.officialInterpretation;
+  const normalizedText =
+    validation.artifact?.normalizedText ?? interpretation.normalizedText;
+  const officialInterpretation =
+    validation.artifact?.officialInterpretation ??
+    interpretation.officialInterpretation;
   const guardianGrounded = pass.grounded;
   const guardianBlocked = guardianGrounded === false;
 

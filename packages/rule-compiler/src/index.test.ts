@@ -48,6 +48,11 @@ test("the compile_rule_to_ast skill prompt is versioned and covers both rule mod
   // It must teach unordered same-set equality, the prompt #7 simulation case.
   assert.ok(prompt.includes("same set of numbers"));
   assert.ok(prompt.includes("count(intersection(guess,draw)) == 6"));
+  // It must teach the prompt 9/10/11/101 harness cases and their variants.
+  assert.ok(prompt.includes("guessed sum is greater than the drawn sum"));
+  assert.ok(prompt.includes("min(guess) == min(draw)"));
+  assert.ok(prompt.includes("max(guess) > max(draw)"));
+  assert.ok(prompt.includes("four or more of my picked numbers show up"));
   // And forbid external/unverifiable inputs.
   assert.ok(/wallets|votes|oracle|external/i.test(prompt));
 });
@@ -138,6 +143,86 @@ test("handles the first 10 VALID prompts from the rule proposal test set", () =>
     assert.equal(result.log.reasonCodes.includes("UNSUPPORTED_RULE"), false, prompt);
     assert.match(result.artifactHash ?? "", /^[0-9a-f]{64}$/, prompt);
   }
+});
+
+test("preserves selected prompt-test semantics for rule proposal agent prompts", () => {
+  const prompts = new Map([
+    [
+      9,
+      "Win if the guessed sum is greater than the drawn sum and at least 2 numbers match.",
+    ],
+    [
+      10,
+      "Win if the smallest guessed number equals the smallest drawn number.",
+    ],
+    [
+      11,
+      "Win if the largest guessed number is greater than the largest drawn number.",
+    ],
+    [
+      101,
+      "I want the win to go to guesses that really show up in the result, like when four or more of my picked numbers are somewhere in the draw.",
+    ],
+  ]);
+
+  for (const [ruleId, prompt] of prompts) {
+    const result = validateAndPrecompileRule({
+      prompt,
+      ruleId,
+      tokenCount: tokenCount(prompt),
+    });
+    assert.equal(result.decision, "VALID", prompt);
+    assert.match(result.artifactHash ?? "", /^[0-9a-f]{64}$/, prompt);
+  }
+
+  const compound = validateAndPrecompileRule({
+    prompt: prompts.get(9) ?? "",
+    ruleId: 9,
+    tokenCount: tokenCount(prompts.get(9) ?? ""),
+  });
+  assert.deepEqual(compound.artifact?.ast, {
+    schemaVersion: 2,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "and",
+        clauses: [
+          {
+            kind: "compare",
+            left: {
+              kind: "reduce",
+              of: { kind: "source", source: "guess" },
+              op: "sum",
+            },
+            op: "gt",
+            right: {
+              kind: "reduce",
+              of: { kind: "source", source: "draw" },
+              op: "sum",
+            },
+          },
+          {
+            kind: "count_at_least",
+            of: {
+              kind: "intersection",
+              left: { kind: "source", source: "guess" },
+              right: { kind: "source", source: "draw" },
+            },
+            value: 2,
+          },
+        ],
+      },
+    },
+  });
+
+  const casualThreshold = validateAndPrecompileRule({
+    prompt: prompts.get(101) ?? "",
+    ruleId: 101,
+    tokenCount: tokenCount(prompts.get(101) ?? ""),
+  });
+  const ast = casualThreshold.artifact?.ast;
+  assert.ok(ast?.schemaVersion === 1 && ast.node.kind === "match_count_at_least");
+  assert.equal(ast.node.value, 4);
 });
 
 test("classifies the first 10 CLARIFY prompts as ambiguous", () => {
@@ -351,6 +436,52 @@ test("rejects a text-to-AST reviewer mismatch from an LLM provider", async () =>
   assert.equal(result.decision, "INVALID");
   assert.equal(result.artifactHash, null);
   assert.ok(result.log.reasonCodes.includes("REVIEWER_MISMATCH"));
+});
+
+test("can prefer deterministic compilation for known preflight patterns", async () => {
+  let providerCalled = false;
+  const result = await compileRuleArtifact(
+    {
+      prompt:
+        "Win if the guessed sum is greater than the drawn sum and at least 2 numbers match.",
+      tokenCount: 16,
+    },
+    {
+      astProvider: async () => {
+        providerCalled = true;
+        throw new Error("provider should not be needed for supported grammar");
+      },
+      preferDeterministic: true,
+    },
+  );
+
+  assert.equal(providerCalled, false);
+  assert.equal(result.decision, "VALID");
+  assert.match(result.artifactHash ?? "", /^[0-9a-f]{64}$/);
+  assert.match(
+    result.artifact?.officialInterpretation ?? "",
+    /sum of the guess's six numbers.*greater than.*sum of the official draw's six numbers.*at least 2/i,
+  );
+
+  const minResult = await compileRuleArtifact(
+    {
+      prompt:
+        "Win if the smallest guessed number equals the smallest drawn number.",
+      tokenCount: 10,
+    },
+    {
+      astProvider: async () => {
+        throw new Error("provider should not be needed for supported grammar");
+      },
+      preferDeterministic: true,
+    },
+  );
+
+  assert.equal(minResult.decision, "VALID");
+  assert.match(
+    minResult.artifact?.officialInterpretation ?? "",
+    /smallest number in the guess is equal to the smallest number in the official draw/i,
+  );
 });
 
 test("rejects an LLM response that is not a valid AST and escalates", async () => {
