@@ -38,6 +38,15 @@ Each line pairs a player intent with the exact JSON AST to emit.
 "win if exactly 2 guessed numbers match in the same position" =>
 {"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"ordered_position_match_count_eq","value":2,"left":{"kind":"source","source":"guess"},"right":{"kind":"source","source":"draw"}}}}
 
+"win if exactly 2 guessed numbers are greater than the drawn number in the same position" =>
+{"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"ordered_position_compare_count_eq","op":"gt","value":2,"left":{"kind":"source","source":"guess"},"right":{"kind":"source","source":"draw"}}}}
+
+"win if at least 3 guessed numbers have the same last digit as any drawn number" =>
+{"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"digit_match_count_at_least","place":"units","value":3,"left":{"kind":"source","source":"guess"},"right":{"kind":"source","source":"draw"}}}}
+
+"win if all guessed numbers are between the smallest and largest drawn number, inclusive" =>
+{"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"all_values_between_min_max","of":{"kind":"source","source":"guess"},"range":{"kind":"source","source":"draw"}}}}
+
 "win if the total absolute position-by-position difference between guess and draw is 30 or less" =>
 {"schemaVersion":2,"result":{"type":"predicate","predicate":{"kind":"total_ordered_abs_diff_lte","value":30,"left":{"kind":"source","source":"guess"},"right":{"kind":"source","source":"draw"}}}}
 

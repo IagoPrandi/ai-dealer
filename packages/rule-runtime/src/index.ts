@@ -449,6 +449,39 @@ function evalPredicate(
         ).length;
         return matches === node.value;
       }
+      case "ordered_position_compare_count_eq": {
+        const left = evalArray(node.left, input, budget);
+        const right = evalArray(node.right, input, budget);
+        if (left.length !== right.length) {
+          return false;
+        }
+        const matches = left.filter((value, index) =>
+          compareValues(value, node.op, right[index] ?? 0),
+        ).length;
+        return matches === node.value;
+      }
+      case "digit_match_count_at_least": {
+        const left = evalArray(node.left, input, budget);
+        const rightDigits = new Set(
+          evalArray(node.right, input, budget).map((value) =>
+            digit(value, node.place),
+          ),
+        );
+        const matches = left.filter((value) =>
+          rightDigits.has(digit(value, node.place)),
+        ).length;
+        return matches >= node.value;
+      }
+      case "all_values_between_min_max": {
+        const values = evalArray(node.of, input, budget);
+        const range = evalArray(node.range, input, budget);
+        if (range.length === 0) {
+          return false;
+        }
+        const minValue = Math.min(...range);
+        const maxValue = Math.max(...range);
+        return values.every((value) => value >= minValue && value <= maxValue);
+      }
       case "reversed_position_match_count_at_least": {
         const left = evalArray(node.left, input, budget);
         const right = evalArray(node.right, input, budget);

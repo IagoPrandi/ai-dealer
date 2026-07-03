@@ -144,6 +144,8 @@ test("interpret harness teaches predicate min/max and casual threshold cases", a
   assert.match(systemPrompt, /absolute difference/i);
   assert.match(systemPrompt, /exactly 2 guessed numbers/i);
   assert.match(systemPrompt, /total absolute\s+position-by-position difference/i);
+  assert.match(systemPrompt, /same last digit/i);
+  assert.match(systemPrompt, /two smallest\/largest/i);
   assert.match(systemPrompt, /match the\s+draw in reverse/i);
 });
 

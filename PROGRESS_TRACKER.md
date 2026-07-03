@@ -68,6 +68,19 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-07-02 (Rule proposal prompts 14-20, 31-39, 48-55, 104-105, sequences 6-7)
+
+- Opened required documents/context before and during work: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/idealer-test-and-verify/SKILL.md`, and `docs/rule-proposal-prompt-test-set.md`.
+- Tested the requested prompt set from `docs/rule-proposal-prompt-test-set.md`: valid prompts `#14-#20`, clarification prompts `#31-#39`, blocked prompts `#48-#55`, natural valid prompts `#104-#105`, sequence 6 (`#86-#88`), and sequence 7 (`#89-#91`). Initial deterministic findings: `#17`, `#18`, `#20`, and `#105` were unsupported; `#14`, `#15`, `#19`, and `#91` could compile with overly generic semantics; sequence 6 division needed an explicit non-zero divisor guard.
+- Extended the deterministic DSL/runtime/compiler with `digit_match_count_at_least`, `ordered_position_compare_count_eq`, and `all_values_between_min_max`, and added parsers for odd-sum equality, multiples-of-N count comparisons, sorted two-lowest/two-largest sum comparisons, same-number-of-evens equality, and guarded division over even drawn-number count.
+- Updated the compiler ambiguity/blocking rules so objective even-count wording is not rejected as vague, `division works out nicely` is clarification-worthy, historical re-proposal wording is blocked, and sequence 7's differentiating condition keeps both the match threshold and guessed-sum-lower-than-drawn-sum clause.
+- Hardened API preflight blocking for the requested `BLOCK` prompts: SOL/USD price, weather/rain, X/Twitter likes, Python/import code, URL fetches, local file reads, random player selection, runtime-guessed divisor, exact-rule reuse from last turn, and same-rule/different-wording re-proposal.
+- Updated the API LLM harness prompt and rule-authoring skill/pattern/example docs to teach digit matching, odd/even filtered sums/counts, exact ordered comparison counts, inclusive draw min/max range, sorted low/high pair sums, and defined division. Bumped the compiler skill version to `idealer_rule_compiler_skill_v5`.
+- Added regression coverage that reads the requested prompt IDs directly from the markdown file and verifies expected decisions plus AST-shape checks for the previously weak cases. Added schema/runtime tests for the new predicate nodes and API prompt-harness assertions.
+- Live preflight proof passed against an isolated current-code API on `127.0.0.1:3012`: all 32 requested prompts matched their expected outcome. `VALID` prompts returned `decision="VALID"`, `needsClarification=false`, `ruleMode="predicate"`, and non-null compiled artifact hashes; `CLARIFY` prompts returned no artifact and `needsClarification=true`; `BLOCK` prompts returned `400` where preflight can block up front or invalid/no-artifact where handled by compiler policy. Sequence 6 sent `#88` with the prior `#87` context and blocked it. The isolated API was stopped afterward and port `3012` was confirmed closed.
+- Verification passed: `pnpm --filter @idealer/rule-schema typecheck/test/lint/build`, `pnpm --filter @idealer/rule-runtime typecheck/test/lint/build`, `pnpm --filter @idealer/rule-compiler typecheck/test/lint/build`, and `pnpm --filter @idealer/api typecheck/test/lint/build`. Final counts included schema tests 7/7, runtime tests 13/13, compiler tests 28/28, and API tests 58/58.
+- Reviewed the result for inconsistencies: the reference prompt file was not modified, unsupported/blocked prompts still fail closed without artifact, valid prompts now compile to specific deterministic ASTs instead of broad fallbacks, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
 ### 2026-07-02 (Compact clarification UI screenshot)
 
 - Opened required documents/context before visual capture: `PRD.md`, `AGENTS.md`, `.claude/skills`, and `.claude/skills/playwright/SKILL.md`.

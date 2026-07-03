@@ -77,6 +77,9 @@ test("the compile_rule_to_ast skill prompt is versioned and covers both rule mod
   assert.ok(prompt.includes("second guessed number equals second drawn number"));
   assert.ok(prompt.includes("all_ordered_abs_diff_lte"));
   assert.ok(prompt.includes("ordered_position_match_count_eq"));
+  assert.ok(prompt.includes("ordered_position_compare_count_eq"));
+  assert.ok(prompt.includes("digit_match_count_at_least"));
+  assert.ok(prompt.includes("all_values_between_min_max"));
   assert.ok(prompt.includes("total_ordered_abs_diff_lte"));
   assert.ok(prompt.includes("first pick only needs to be higher"));
   assert.ok(prompt.includes("reversed_position_match_count_at_least"));
@@ -459,6 +462,72 @@ test("preserves prompt sequence semantics for sequences 8, 9, and 10", () => {
       : null,
     4,
   );
+});
+
+test("preserves prompt semantics for requested valid, clarify, block, and sequence cases", () => {
+  const ids = [
+    ...Array.from({ length: 7 }, (_, index) => 14 + index),
+    ...Array.from({ length: 9 }, (_, index) => 31 + index),
+    ...Array.from({ length: 8 }, (_, index) => 48 + index),
+    104,
+    105,
+    ...Array.from({ length: 6 }, (_, index) => 86 + index),
+  ];
+  const prompts = readPromptRowsById(ids);
+
+  for (const [ruleId, row] of prompts) {
+    const result = validateAndPrecompileRule({
+      prompt: row.prompt,
+      ruleId,
+      tokenCount: tokenCount(row.prompt),
+    });
+    if (row.expected === "VALID") {
+      assert.equal(result.decision, "VALID", row.prompt);
+      assert.match(result.artifactHash ?? "", /^[0-9a-f]{64}$/, row.prompt);
+    } else {
+      assert.equal(result.decision, "INVALID", row.prompt);
+      assert.equal(result.artifactHash, null, row.prompt);
+    }
+  }
+
+  const predicateFor = (ruleId: number) => {
+    const prompt = prompts.get(ruleId)?.prompt ?? "";
+    const result = validateAndPrecompileRule({
+      prompt,
+      ruleId,
+      tokenCount: tokenCount(prompt),
+    });
+    return result.artifact?.ast.schemaVersion === 2 &&
+      result.artifact.ast.result.type === "predicate"
+      ? result.artifact.ast.result.predicate
+      : null;
+  };
+
+  assert.equal(predicateFor(14)?.kind, "digit_match_count_at_least");
+  assert.equal(predicateFor(16)?.kind, "ordered_position_compare_count_eq");
+  assert.equal(predicateFor(17)?.kind, "all_values_between_min_max");
+  assert.equal(predicateFor(18)?.kind, "compare");
+  assert.equal(predicateFor(19)?.kind, "compare");
+  assert.equal(predicateFor(20)?.kind, "compare");
+  assert.equal(predicateFor(105)?.kind, "compare");
+
+  const compound = predicateFor(91);
+  assert.equal(compound?.kind, "and");
+  assert.equal(
+    compound?.kind === "and" &&
+      compound.clauses.some((clause) => clause.kind === "count_at_least"),
+    true,
+  );
+  assert.equal(
+    compound?.kind === "and" &&
+      compound.clauses.some(
+        (clause) => clause.kind === "compare" && clause.op === "lt",
+      ),
+    true,
+  );
+
+  const division = predicateFor(87);
+  assert.equal(division?.kind, "and");
 });
 
 test("classifies the first 10 CLARIFY prompts as ambiguous", () => {

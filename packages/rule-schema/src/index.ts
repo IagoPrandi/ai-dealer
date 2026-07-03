@@ -100,6 +100,25 @@ export type PredicateNode =
       value: number;
     }
   | {
+      kind: "ordered_position_compare_count_eq";
+      left: ArrayExpr;
+      op: CompareOp;
+      right: ArrayExpr;
+      value: number;
+    }
+  | {
+      kind: "digit_match_count_at_least";
+      left: ArrayExpr;
+      right: ArrayExpr;
+      place: "units" | "tens";
+      value: number;
+    }
+  | {
+      kind: "all_values_between_min_max";
+      of: ArrayExpr;
+      range: ArrayExpr;
+    }
+  | {
       kind: "reversed_position_match_count_at_least";
       left: ArrayExpr;
       right: ArrayExpr;
@@ -292,6 +311,25 @@ const predicateNodeSchema: z.ZodType<PredicateNode> = z.lazy(() =>
       left: arrayExprSchema,
       right: arrayExprSchema,
       value: intSchema.min(0).max(6),
+    }),
+    z.object({
+      kind: z.literal("ordered_position_compare_count_eq"),
+      left: arrayExprSchema,
+      op: compareOpSchema,
+      right: arrayExprSchema,
+      value: intSchema.min(0).max(6),
+    }),
+    z.object({
+      kind: z.literal("digit_match_count_at_least"),
+      left: arrayExprSchema,
+      right: arrayExprSchema,
+      place: z.enum(["units", "tens"]),
+      value: intSchema.min(0).max(6),
+    }),
+    z.object({
+      kind: z.literal("all_values_between_min_max"),
+      of: arrayExprSchema,
+      range: arrayExprSchema,
     }),
     z.object({
       kind: z.literal("reversed_position_match_count_at_least"),

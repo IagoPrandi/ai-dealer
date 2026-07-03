@@ -91,6 +91,37 @@ test("accepts objective filter and ordered-comparison nodes", () => {
             value: 2,
           },
           {
+            kind: "ordered_position_compare_count_eq",
+            left: { kind: "source", source: "guess" },
+            op: "gt",
+            right: { kind: "source", source: "draw" },
+            value: 2,
+          },
+          {
+            kind: "digit_match_count_at_least",
+            left: { kind: "source", source: "guess" },
+            place: "units",
+            right: { kind: "source", source: "draw" },
+            value: 3,
+          },
+          {
+            kind: "all_values_between_min_max",
+            of: { kind: "source", source: "guess" },
+            range: { kind: "source", source: "draw" },
+          },
+        ],
+      },
+    },
+  };
+
+  const secondRule: RuleAst = {
+    schemaVersion: 2,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "and",
+        clauses: [
+          {
             kind: "reversed_position_match_count_at_least",
             left: { kind: "source", source: "guess" },
             right: { kind: "source", source: "draw" },
@@ -126,6 +157,7 @@ test("accepts objective filter and ordered-comparison nodes", () => {
   };
 
   assert.equal(ruleAstSchema.safeParse(rule).success, true);
+  assert.equal(ruleAstSchema.safeParse(secondRule).success, true);
 });
 
 test("accepts legacy v1 rules", () => {

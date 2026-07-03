@@ -214,7 +214,7 @@ const AMBIGUOUS_PATTERNS = [
   /\b(close|closest|near|nearest|almost)\b/i,
   /\b(lucky|unlucky|interesting|creative|best|worst|fair|randomly)\b/i,
   /\b(about|around|roughly|approximately|similar)\b/i,
-  /\b(feels?|vibe|balanced|nice|pattern|mirror-like|stronger)\b/i,
+  /\b(feels?|vibe|balanced|nice|nicely|pattern|mirror-like|stronger)\b/i,
   /\b(many|several|spread out|well spread|organized|cleaner)\b/i,
   /\b(anything|something|whatever)\b/i,
 ] as const;
@@ -222,7 +222,8 @@ const AMBIGUOUS_PATTERNS = [
 const EXTERNAL_DEPENDENCY_PATTERNS = [
   /\b(wallet|address|creator|voter|votes?|leaderboard|profile|admin)\b/i,
   /\b(time|timestamp|block|slot|transaction|signature|balance|prize|pool|payout)\b/i,
-  /\b(previous|next|future|past|history|streak|yesterday|today|tomorrow)\b/i,
+  /\b(previous|next|future|past|history|streak|yesterday|today|tomorrow|last\s+turn)\b/i,
+  /\bsame\s+rule\b.{0,60}\bdifferent\s+wording\b/i,
   /\b(other players?|all players?|no other player|among all players)\b/i,
   /\b(weather|rain|rains|sunny|price|oracle|twitter|x\/twitter|discord|website|api|external)\b/i,
 ] as const;
@@ -534,6 +535,9 @@ function buildAttemptContext(
     reasonCodes.add("AMBIGUOUS_RULE");
   }
   if (looksLikeObjectiveStartComparison(normalizedText)) {
+    reasonCodes.delete("AMBIGUOUS_RULE");
+  }
+  if (looksLikeObjectiveEvenCountComparison(normalizedText)) {
     reasonCodes.delete("AMBIGUOUS_RULE");
   }
   if (looksLikeAmbiguousReverseRule(normalizedText)) {
@@ -917,6 +921,51 @@ function compileSupportedRule(text: string): RuleAst | null {
     return predicateRule(orderedPositionMatchCount);
   }
 
+  const digitMatchRule = parseDigitMatchCountRule(text);
+  if (digitMatchRule) {
+    return predicateRule(digitMatchRule);
+  }
+
+  const oddSumRule = parseOddSumEqualsRule(text);
+  if (oddSumRule) {
+    return predicateRule(oddSumRule);
+  }
+
+  const orderedPositionCompareCount = parseOrderedPositionCompareCountRule(text);
+  if (orderedPositionCompareCount) {
+    return predicateRule(orderedPositionCompareCount);
+  }
+
+  const betweenMinMaxRule = parseAllValuesBetweenMinMaxRule(text);
+  if (betweenMinMaxRule) {
+    return predicateRule(betweenMinMaxRule);
+  }
+
+  const moduloCountComparison = parseModuloCountComparisonRule(text);
+  if (moduloCountComparison) {
+    return predicateRule(moduloCountComparison);
+  }
+
+  const sortedPairSumComparison = parseSortedPairSumComparisonRule(text);
+  if (sortedPairSumComparison) {
+    return predicateRule(sortedPairSumComparison);
+  }
+
+  const definedDivision = parseDefinedDivisionRule(text);
+  if (definedDivision) {
+    return predicateRule(definedDivision);
+  }
+
+  const evenCountEquality = parseEvenCountEqualityRule(text);
+  if (evenCountEquality) {
+    return predicateRule(evenCountEquality);
+  }
+
+  const compoundMatchAndSumComparison = parseCompoundMatchAndSumComparisonRule(text);
+  if (compoundMatchAndSumComparison) {
+    return predicateRule(compoundMatchAndSumComparison);
+  }
+
   if (
     /\b(guessed?|picked|ticket|your)\s+sum\b.{0,30}\b(greater|higher|above|more)\b.{0,60}\b(draw|drawn)\s+sum\b/i.test(text) &&
     /\bat least\s+([1-6]|one|two|three|four|five|six)\b.{0,80}\b(numbers?\s+)?(match|matches|appear|appears)\b/i.test(text)
@@ -1048,8 +1097,20 @@ function at(of: ArrayExpr, index: number): ScalarExpr {
   return { kind: "at", index, of };
 }
 
+function arith(op: "add" | "sub" | "mul" | "div" | "mod", left: ScalarExpr, right: ScalarExpr): ScalarExpr {
+  return { kind: "arith", left, op, right };
+}
+
 function intersection(left: ArrayExpr, right: ArrayExpr): ArrayExpr {
   return { kind: "intersection", left, right };
+}
+
+function sortArray(of: ArrayExpr, order: "asc" | "desc"): ArrayExpr {
+  return { kind: "sort", of, order };
+}
+
+function sliceArray(of: ArrayExpr, start: number, end?: number): ArrayExpr {
+  return { kind: "slice", of, start, ...(end === undefined ? {} : { end }) };
 }
 
 function filterMod(
@@ -1084,6 +1145,14 @@ function looksLikeObjectiveStartComparison(text: string) {
   return (
     /\bstart\s+stronger\b/i.test(text) &&
     /\bfirst\s+pick\b.{0,80}\b(higher|greater|above|more)\b.{0,80}\bfirst\s+drawn\s+number\b/i.test(text)
+  );
+}
+
+function looksLikeObjectiveEvenCountComparison(text: string) {
+  return (
+    /\b(same\s+number\s+of\s+evens|number\s+of\s+even\b.{0,80}\b(equal|equals|same|match|matches))\b/i.test(text) &&
+    /\b(guess|guessed|picked|ticket|picks?)\b/i.test(text) &&
+    /\b(draw|drawn)\b/i.test(text)
   );
 }
 
@@ -1156,6 +1225,43 @@ function describePredicate(predicate: PredicateNode): string | null {
       predicate.right.source === "draw"
     ) {
       return `exactly ${predicate.value} guessed numbers match the official draw in the same positions`;
+    }
+    return null;
+  }
+
+  if (predicate.kind === "ordered_position_compare_count_eq") {
+    if (
+      predicate.left.kind === "source" &&
+      predicate.left.source === "guess" &&
+      predicate.right.kind === "source" &&
+      predicate.right.source === "draw"
+    ) {
+      return `exactly ${predicate.value} guessed numbers are ${describeCompareOp(predicate.op)} the drawn number in the same position`;
+    }
+    return null;
+  }
+
+  if (predicate.kind === "digit_match_count_at_least") {
+    if (
+      predicate.left.kind === "source" &&
+      predicate.left.source === "guess" &&
+      predicate.right.kind === "source" &&
+      predicate.right.source === "draw"
+    ) {
+      const digitName = predicate.place === "units" ? "last digit" : "tens digit";
+      return `at least ${predicate.value} guessed numbers have the same ${digitName} as any drawn number`;
+    }
+    return null;
+  }
+
+  if (predicate.kind === "all_values_between_min_max") {
+    if (
+      predicate.of.kind === "source" &&
+      predicate.of.source === "guess" &&
+      predicate.range.kind === "source" &&
+      predicate.range.source === "draw"
+    ) {
+      return "all guessed numbers are between the smallest and largest drawn number, inclusive";
     }
     return null;
   }
@@ -1366,6 +1472,170 @@ function parseOrderedPositionMatchCountRule(text: string): PredicateNode | null 
     left: source("guess"),
     right: source("draw"),
     value,
+  };
+}
+
+function parseDigitMatchCountRule(text: string): PredicateNode | null {
+  const match = text.match(
+    /\bat least\s+([1-6]|one|two|three|four|five|six)\b.{0,80}\b(guessed?|picked|ticket|your)\s+numbers?\b.{0,80}\b(same\s+)?(last|units?)\s+digit\b.{0,80}\b(any\s+)?drawn?\s+number\b/i,
+  );
+  const rawValue = match?.[1]?.toLowerCase();
+  const value = rawValue ? NUMBER_WORDS.get(rawValue) ?? Number(rawValue) : NaN;
+  if (!Number.isInteger(value) || value < 1 || value > 6) {
+    return null;
+  }
+  return {
+    kind: "digit_match_count_at_least",
+    left: source("guess"),
+    place: "units",
+    right: source("draw"),
+    value,
+  };
+}
+
+function parseOddSumEqualsRule(text: string): PredicateNode | null {
+  if (
+    !/\bsum\b.{0,40}\bodd\s+(guessed?|picked|ticket|your)\s+numbers?\b/i.test(text) ||
+    !/\b(equal|equals|same|match|matches)\b.{0,40}\bsum\b.{0,40}\bodd\s+(drawn?|draw)\s+numbers?\b/i.test(text)
+  ) {
+    return null;
+  }
+  return compare(
+    sum(filterMod(source("guess"), 2, 1)),
+    "eq",
+    sum(filterMod(source("draw"), 2, 1)),
+  );
+}
+
+function parseOrderedPositionCompareCountRule(text: string): PredicateNode | null {
+  const match = text.match(
+    /\bexactly\s+([0-6]|one|two|three|four|five|six)\b.{0,80}\b(guessed?|picked|ticket|your)\s+numbers?\b.{0,80}\b(greater|higher|above|more|lower|less|below|smaller)\b.{0,80}\b(drawn?|draw)\s+number\b.{0,80}\b(same position|same positions|corresponding position|corresponding positions|same index|same indexes)\b/i,
+  );
+  const rawValue = match?.[1]?.toLowerCase();
+  const value = rawValue ? NUMBER_WORDS.get(rawValue) ?? Number(rawValue) : NaN;
+  const op = match?.[3] ? parseComparisonWord(match[3]) : null;
+  if (!Number.isInteger(value) || value < 0 || value > 6 || !op) {
+    return null;
+  }
+  return {
+    kind: "ordered_position_compare_count_eq",
+    left: source("guess"),
+    op,
+    right: source("draw"),
+    value,
+  };
+}
+
+function parseAllValuesBetweenMinMaxRule(text: string): PredicateNode | null {
+  if (
+    !/\ball\s+(guessed?|picked|ticket|your)\s+numbers?\b/i.test(text) ||
+    !/\bbetween\b.{0,80}\bsmallest\b.{0,40}\blargest\b.{0,40}\bdrawn?\s+number\b/i.test(text)
+  ) {
+    return null;
+  }
+  return {
+    kind: "all_values_between_min_max",
+    of: source("guess"),
+    range: source("draw"),
+  };
+}
+
+function parseModuloCountComparisonRule(text: string): PredicateNode | null {
+  const multipleMatch = text.match(
+    /\b(guessed?|picked|ticket|your)\s+numbers?\b.{0,80}\b(contain|have|has)\b.{0,40}\b(more|greater|higher|fewer|less|lower)\b.{0,80}\bmultiples?\s+of\s+([0-9]+)\b.{0,80}\b(draw|drawn)\s+numbers?\b/i,
+  );
+  if (!multipleMatch?.[3] || !multipleMatch[4]) {
+    return null;
+  }
+  const modulus = Number(multipleMatch[4]);
+  const op = parseComparisonWord(multipleMatch[3]);
+  if (!Number.isInteger(modulus) || modulus <= 0 || modulus > 100 || !op) {
+    return null;
+  }
+  return compare(
+    count(filterMod(source("guess"), modulus, 0)),
+    op,
+    count(filterMod(source("draw"), modulus, 0)),
+  );
+}
+
+function parseSortedPairSumComparisonRule(text: string): PredicateNode | null {
+  const match = text.match(
+    /\bsum\b.{0,40}\btwo\s+(smallest|lowest|largest|highest)\s+(guessed?|picked|ticket|your)\s+numbers?\b.{0,80}\b(equal|equals|same|match|matches|greater|higher|above|more|lower|less|below|smaller)\b.{0,80}\bsum\b.{0,40}\btwo\s+(smallest|lowest|largest|highest)\s+(drawn?|draw)\s+numbers?\b/i,
+  );
+  if (!match?.[1] || !match[3] || !match[4]) {
+    return null;
+  }
+  const leftOrder = /smallest|lowest/i.test(match[1]) ? "asc" : "desc";
+  const rightOrder = /smallest|lowest/i.test(match[4]) ? "asc" : "desc";
+  const op = parseComparisonWord(match[3]);
+  if (!op) {
+    return null;
+  }
+  return compare(
+    sum(sliceArray(sortArray(source("guess"), leftOrder), 0, 2)),
+    op,
+    sum(sliceArray(sortArray(source("draw"), rightOrder), 0, 2)),
+  );
+}
+
+function parseEvenCountEqualityRule(text: string): PredicateNode | null {
+  if (
+    !/\b(same\s+number\s+of\s+evens|number\s+of\s+even\b.{0,80}\b(equal|equals|same|match|matches))\b/i.test(text) &&
+    !/\bnumber\b.{0,40}\beven\b.{0,80}\b(equal|equals|same|match|matches)\b.{0,80}\beven\b/i.test(text)
+  ) {
+    return null;
+  }
+  if (!/\b(guess|guessed|picked|ticket|picks?)\b/i.test(text) || !/\b(draw|drawn)\b/i.test(text)) {
+    return null;
+  }
+  return compare(
+    count(filterMod(source("guess"), 2, 0)),
+    "eq",
+    count(filterMod(source("draw"), 2, 0)),
+  );
+}
+
+function parseCompoundMatchAndSumComparisonRule(text: string): PredicateNode | null {
+  const matchThreshold = parseMatchCountRule(text);
+  if (!matchThreshold) {
+    return null;
+  }
+  const sumComparison = text.match(
+    /\b(guessed?|picked|ticket|your)\s+sum\b.{0,80}\b(greater|higher|above|more|lower|less|below|smaller)\b.{0,80}\b(draw|drawn)\s+sum\b/i,
+  );
+  const op = sumComparison?.[2] ? parseComparisonWord(sumComparison[2]) : null;
+  if (!op) {
+    return null;
+  }
+  return {
+    kind: "and",
+    clauses: [
+      compare(sum(source("guess")), op, sum(source("draw"))),
+      {
+        kind: "count_at_least",
+        of: intersection(source("guess"), source("draw")),
+        value: matchThreshold,
+      },
+    ],
+  };
+}
+
+function parseDefinedDivisionRule(text: string): PredicateNode | null {
+  const match = text.match(
+    /\bguessed?\s+sum\b.{0,40}\bdivided\s+by\b.{0,80}\b(?:the\s+)?number\s+of\s+even\s+drawn\s+numbers?\b.{0,80}\b(equal|equals|=)\s+([0-9]+)\b/i,
+  );
+  const value = match?.[2] ? Number(match[2]) : NaN;
+  if (!Number.isInteger(value)) {
+    return null;
+  }
+  const evenDrawCount = count(filterMod(source("draw"), 2, 0));
+  return {
+    kind: "and",
+    clauses: [
+      compare(evenDrawCount, "gt", lit(0)),
+      compare(arith("div", sum(source("guess")), evenDrawCount), "eq", lit(value)),
+    ],
   };
 }
 
@@ -1643,6 +1913,12 @@ function predicateSignature(node: PredicateNode): string {
       return `total_ordered_abs_diff_lte:${node.value}:${arraySignature(node.left)}:${arraySignature(node.right)}`;
     case "ordered_position_match_count_eq":
       return `ordered_position_match_count_eq:${node.value}:${arraySignature(node.left)}:${arraySignature(node.right)}`;
+    case "ordered_position_compare_count_eq":
+      return `ordered_position_compare_count_eq:${node.value}:${node.op}:${arraySignature(node.left)}:${arraySignature(node.right)}`;
+    case "digit_match_count_at_least":
+      return `digit_match_count_at_least:${node.value}:${node.place}:${arraySignature(node.left)}:${arraySignature(node.right)}`;
+    case "all_values_between_min_max":
+      return `all_values_between_min_max:${arraySignature(node.of)}:${arraySignature(node.range)}`;
     case "reversed_position_match_count_at_least":
       return `reversed_position_match_count_at_least:${node.value}:${arraySignature(node.left)}:${arraySignature(node.right)}`;
     case "and":

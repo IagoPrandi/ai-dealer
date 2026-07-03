@@ -74,6 +74,16 @@ const RULE_PREVENTED_PATTERNS = [
 ] as const;
 const RULE_EXTERNAL_BLOCK_PATTERNS = [
   /\bclosest\b.{0,40}\bamong\s+all\s+players\b/i,
+  /\bsol\s+price\b|\busd\b/i,
+  /\b(weather|rains?|rain|sunny)\b/i,
+  /\bx\/twitter\b|\btwitter\b|\bpost\b.{0,40}\blikes?\b/i,
+  /\buse\s+python\b|\bimport\s+random\b|\bcode\s+to\s+calculate\b/i,
+  /\bfetch\b.{0,80}\bhttps?:\/\//i,
+  /\bread\b.{0,40}\blocal\s+file\b|\bsecret\.txt\b/i,
+  /\brandomly\s+choose\b.{0,60}\bplayers?\b/i,
+  /\bdivisor\s+is\s+zero\b.{0,80}\bruntime\b.{0,40}\bguess\b/i,
+  /\breuse\b.{0,40}\bexact\s+rule\b.{0,80}\blast\s+turn\b/i,
+  /\bsame\s+rule\b.{0,60}\bdifferent\s+wording\b/i,
 ] as const;
 
 export interface ServiceHealth {

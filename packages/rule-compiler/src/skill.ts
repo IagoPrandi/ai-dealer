@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 
 export const RULE_COMPILER_SKILL = {
   name: "compile_rule_to_ast",
-  version: "idealer_rule_compiler_skill_v4",
+  version: "idealer_rule_compiler_skill_v5",
   allowedInputs: ["guess", "draw"] as const,
 } as const;
 

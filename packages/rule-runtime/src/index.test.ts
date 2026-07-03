@@ -200,6 +200,43 @@ test("predicate: absolute same-position distance and reversed-position matches",
       },
     },
   };
+  const exactlyTwoGreaterByPosition: RuleAst = {
+    schemaVersion: 2,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "ordered_position_compare_count_eq",
+        left: { kind: "source", source: "guess" },
+        op: "gt",
+        right: { kind: "source", source: "draw" },
+        value: 2,
+      },
+    },
+  };
+  const threeSameLastDigits: RuleAst = {
+    schemaVersion: 2,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "digit_match_count_at_least",
+        left: { kind: "source", source: "guess" },
+        place: "units",
+        right: { kind: "source", source: "draw" },
+        value: 3,
+      },
+    },
+  };
+  const betweenDrawRange: RuleAst = {
+    schemaVersion: 2,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "all_values_between_min_max",
+        of: { kind: "source", source: "guess" },
+        range: { kind: "source", source: "draw" },
+      },
+    },
+  };
   const reversedAtLeastFour: RuleAst = {
     schemaVersion: 2,
     result: {
@@ -252,6 +289,48 @@ test("predicate: absolute same-position distance and reversed-position matches",
     evaluatePredicate(exactlyTwoSamePositions, {
       guess: [1, 2, 3, 40, 50, 60],
       draw: [1, 2, 3, 4, 5, 6],
+    }).result,
+    "LOSE",
+  );
+  assert.equal(
+    evaluatePredicate(exactlyTwoGreaterByPosition, {
+      guess: [2, 3, 3, 4, 5, 6],
+      draw: [1, 2, 3, 4, 5, 6],
+    }).result,
+    "WIN",
+  );
+  assert.equal(
+    evaluatePredicate(exactlyTwoGreaterByPosition, {
+      guess: [2, 3, 4, 4, 5, 6],
+      draw: [1, 2, 3, 4, 5, 6],
+    }).result,
+    "LOSE",
+  );
+  assert.equal(
+    evaluatePredicate(threeSameLastDigits, {
+      guess: [11, 21, 31, 42, 53, 64],
+      draw: [1, 2, 3, 4, 5, 6],
+    }).result,
+    "WIN",
+  );
+  assert.equal(
+    evaluatePredicate(threeSameLastDigits, {
+      guess: [11, 22, 33, 44, 55, 66],
+      draw: [7, 8, 9, 10, 20, 30],
+    }).result,
+    "LOSE",
+  );
+  assert.equal(
+    evaluatePredicate(betweenDrawRange, {
+      guess: [11, 20, 30, 40, 50, 59],
+      draw: [10, 25, 35, 45, 55, 60],
+    }).result,
+    "WIN",
+  );
+  assert.equal(
+    evaluatePredicate(betweenDrawRange, {
+      guess: [9, 20, 30, 40, 50, 59],
+      draw: [10, 25, 35, 45, 55, 60],
     }).result,
     "LOSE",
   );

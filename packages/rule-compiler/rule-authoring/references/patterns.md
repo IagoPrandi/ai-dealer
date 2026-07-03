@@ -45,9 +45,16 @@ Examples:
 - "exactly 2 guessed numbers match in the same position" is an ordered position
   count, not an unordered intersection count; emit
   `ordered_position_match_count_eq value:2`.
+- "exactly 2 guessed numbers are greater than the drawn number in the same
+  position" is an ordered comparison count; emit
+  `ordered_position_compare_count_eq op:gt value:2`.
 - "total absolute position-by-position difference between guess and draw is 30
   or less" sums `abs(guess[i] - draw[i])` for every position and emits
   `total_ordered_abs_diff_lte value:30`.
+- "same last digit as any drawn number" counts guessed values whose units digit
+  appears in any drawn value; emit `digit_match_count_at_least place:units`.
+- "all guessed numbers are between the smallest and largest drawn number" is an
+  inclusive min/max range predicate; emit `all_values_between_min_max`.
 - Reverse-order wording is ambiguous if the player only says "match in reverse".
   Ask for clarification unless they define exact reverse positions or a threshold.
   "position 1 equals position 6, position 2 equals position 5, and so on" =

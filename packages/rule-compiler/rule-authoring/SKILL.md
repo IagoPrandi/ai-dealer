@@ -65,6 +65,9 @@ Predicate nodes (produce true/false):
 - `{"kind":"all_ordered_abs_diff_lte","left":<array>,"right":<array>,"value":<int>}` - every same-position absolute difference is <= value
 - `{"kind":"total_ordered_abs_diff_lte","left":<array>,"right":<array>,"value":<int>}` - sum of same-position absolute differences is <= value
 - `{"kind":"ordered_position_match_count_eq","left":<array>,"right":<array>,"value":<0..6>}` - exactly value same-position matches
+- `{"kind":"ordered_position_compare_count_eq","left":<array>,"op":"eq"|"neq"|"lt"|"lte"|"gt"|"gte","right":<array>,"value":<0..6>}` - exactly value same-position comparisons satisfy op
+- `{"kind":"digit_match_count_at_least","left":<array>,"right":<array>,"place":"units"|"tens","value":<0..6>}` - count numbers in left whose selected digit appears in any right number
+- `{"kind":"all_values_between_min_max","of":<array>,"range":<array>}` - every value in of is between min(range) and max(range), inclusive
 - `{"kind":"reversed_position_match_count_at_least","left":<array>,"right":<array>,"value":<0..6>}` - count matches where left position i equals right position 6-i
 - `{"kind":"and"|"or","clauses":[<pred>,...]}`  `{"kind":"not","clause":<pred>}`
 
@@ -95,7 +98,11 @@ guess-vs-draw comparisons:
 - "second guessed number equals second drawn number" -> compare `at(guess,1)` to `at(draw,1)`; user positions are 1-based, AST indexes are 0-based.
 - "absolute difference between each guessed number and drawn number in the same position is at most 5" -> `all_ordered_abs_diff_lte` with value 5.
 - "exactly 2 guessed numbers match in the same position" -> `ordered_position_match_count_eq` with value 2.
+- "exactly 2 guessed numbers are greater than the drawn number in the same position" -> `ordered_position_compare_count_eq` with op `gt` and value 2.
 - "total absolute position-by-position difference between guess and draw is 30 or less" -> `total_ordered_abs_diff_lte` with value 30.
+- "at least 3 guessed numbers have the same last digit as any drawn number" -> `digit_match_count_at_least` with place `units` and value 3.
+- "all guessed numbers are between the smallest and largest drawn number, inclusive" -> `all_values_between_min_max`.
+- "sum of the two smallest/largest guessed numbers ..." -> sort ascending/descending, slice first 2, reduce sum, then compare to the equivalent draw expression.
 - "guessed position 1 equals drawn position 6, position 2 equals drawn position 5, and so on" -> `reversed_position_match_count_at_least` with value 6.
 - "at least 4 of the 6 reversed positions must match" -> `reversed_position_match_count_at_least` with value 4.
 - "match the draw in reverse" without exact positions or threshold is ambiguous; ask for clarification.
