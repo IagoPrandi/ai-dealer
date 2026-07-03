@@ -107,6 +107,13 @@ export type PredicateNode =
       value: number;
     }
   | {
+      kind: "value_within_any_count_at_least";
+      left: ArrayExpr;
+      right: ArrayExpr;
+      distance: number;
+      value: number;
+    }
+  | {
       kind: "digit_match_count_at_least";
       left: ArrayExpr;
       right: ArrayExpr;
@@ -317,6 +324,13 @@ const predicateNodeSchema: z.ZodType<PredicateNode> = z.lazy(() =>
       left: arrayExprSchema,
       op: compareOpSchema,
       right: arrayExprSchema,
+      value: intSchema.min(0).max(6),
+    }),
+    z.object({
+      kind: z.literal("value_within_any_count_at_least"),
+      left: arrayExprSchema,
+      right: arrayExprSchema,
+      distance: intSchema.min(0).max(100),
       value: intSchema.min(0).max(6),
     }),
     z.object({

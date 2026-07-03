@@ -98,6 +98,13 @@ test("accepts objective filter and ordered-comparison nodes", () => {
             value: 2,
           },
           {
+            kind: "value_within_any_count_at_least",
+            left: { kind: "source", source: "guess" },
+            right: { kind: "source", source: "draw" },
+            distance: 10,
+            value: 4,
+          },
+          {
             kind: "digit_match_count_at_least",
             left: { kind: "source", source: "guess" },
             place: "units",

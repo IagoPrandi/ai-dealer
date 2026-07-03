@@ -48,6 +48,7 @@ Array nodes (produce a list of numbers):
 - `{"kind":"digits","place":"units"|"tens","of":<array>}`  — per-number digit
 - `{"kind":"intersection"|"difference","left":<array>,"right":<array>}`
 - `{"kind":"map_arithmetic","op":"add"|"sub"|"mul"|"div"|"mod","operand":<int>,"of":<array>}`
+- `{"kind":"map_with_guard","op":"add"|"sub"|"mul"|"div"|"mod","operand":<int>,"guard":{"kind":"range_inclusive","min":<int>,"max":<int>},"onGuardFail":"keep_original"|"drop","of":<array>}` - map each value and either keep or drop values whose mapped result is outside the guard
 - `{"kind":"sort","order":"asc"|"desc","of":<array>}`  `{"kind":"slice","start":<int>,"end":<int>,"of":<array>}`
 - `{"kind":"remove_up_to_n","n":<1..4>,"strategy":"highest"|"lowest"|"first","of":<array>}`
 
@@ -66,6 +67,7 @@ Predicate nodes (produce true/false):
 - `{"kind":"total_ordered_abs_diff_lte","left":<array>,"right":<array>,"value":<int>}` - sum of same-position absolute differences is <= value
 - `{"kind":"ordered_position_match_count_eq","left":<array>,"right":<array>,"value":<0..6>}` - exactly value same-position matches
 - `{"kind":"ordered_position_compare_count_eq","left":<array>,"op":"eq"|"neq"|"lt"|"lte"|"gt"|"gte","right":<array>,"value":<0..6>}` - exactly value same-position comparisons satisfy op
+- `{"kind":"value_within_any_count_at_least","left":<array>,"right":<array>,"distance":<0..100>,"value":<0..6>}` - at least value entries from left are within distance of any entry from right
 - `{"kind":"digit_match_count_at_least","left":<array>,"right":<array>,"place":"units"|"tens","value":<0..6>}` - count numbers in left whose selected digit appears in any right number
 - `{"kind":"all_values_between_min_max","of":<array>,"range":<array>}` - every value in of is between min(range) and max(range), inclusive
 - `{"kind":"reversed_position_match_count_at_least","left":<array>,"right":<array>,"value":<0..6>}` - count matches where left position i equals right position 6-i
@@ -100,6 +102,15 @@ guess-vs-draw comparisons:
 - "exactly 2 guessed numbers match in the same position" -> `ordered_position_match_count_eq` with value 2.
 - "exactly 2 guessed numbers are greater than the drawn number in the same position" -> `ordered_position_compare_count_eq` with op `gt` and value 2.
 - "total absolute position-by-position difference between guess and draw is 30 or less" -> `total_ordered_abs_diff_lte` with value 30.
+- "four picks are within ten of at least one drawn number" -> `value_within_any_count_at_least` with left `guess`, right `draw`, distance 10, value 4. This is any-draw closeness, not same-position closeness.
+- "Position by position, each pick has the same odd-or-even type as the drawn number there" -> compare `map_arithmetic(guess, mod 2)` to `map_arithmetic(draw, mod 2)` with `all_equal_ordered`.
+- "Use the below-50 split: ticket and draw have the same count under 50" -> compare `count(filter_compare(guess, lt, 50))` to `count(filter_compare(draw, lt, 50))`.
+- "If doubling each pick stays within 1 to 100, at least three doubled values are in the draw" -> `map_with_guard` over `guess` with `op:"mul"`, `operand:2`, guard `1..100`, `onGuardFail:"drop"`, then `count_at_least(intersection(mapped,draw),3)`.
+- "Ignore my highest picked number, then the rest total the full draw" -> `remove_up_to_n` over `guess` with `n:1`, `strategy:"highest"`, then compare the remaining sum to `sum(draw)`.
+- "Drop up to two lowest picks, then still have three numbers in the draw" -> `remove_up_to_n` over `guess` with `n:2`, `strategy:"lowest"`, then require at least 3 remaining values in `draw`.
+- "first/last three picks add up to first/last three drawn numbers" -> compare sums of `slice(guess,0,3)`/`slice(draw,0,3)` or `slice(guess,3)`/`slice(draw,3)`.
+- "the last digit of the totals matters: ticket sum modulo 10 equals draw sum modulo 10" -> compare `sum(guess) mod 10` to `sum(draw) mod 10`.
+- "exactly one position is an exact match" -> `ordered_position_match_count_eq` with value 1.
 - "at least 3 guessed numbers have the same last digit as any drawn number" -> `digit_match_count_at_least` with place `units` and value 3.
 - "all guessed numbers are between the smallest and largest drawn number, inclusive" -> `all_values_between_min_max`.
 - "sum of the two smallest/largest guessed numbers ..." -> sort ascending/descending, slice first 2, reduce sum, then compare to the equivalent draw expression.

@@ -202,12 +202,17 @@ export interface RuleValidationPromptContract {
 }
 
 const NUMBER_WORDS = new Map<string, number>([
+  ["zero", 0],
   ["one", 1],
   ["two", 2],
   ["three", 3],
   ["four", 4],
   ["five", 5],
   ["six", 6],
+  ["seven", 7],
+  ["eight", 8],
+  ["nine", 9],
+  ["ten", 10],
 ]);
 
 const AMBIGUOUS_PATTERNS = [
@@ -221,7 +226,8 @@ const AMBIGUOUS_PATTERNS = [
 
 const EXTERNAL_DEPENDENCY_PATTERNS = [
   /\b(wallet|address|creator|voter|votes?|leaderboard|profile|admin)\b/i,
-  /\b(time|timestamp|block|slot|transaction|signature|balance|prize|pool|payout|fees?)\b/i,
+  /\b(time|timestamp|block|transaction|signature|balance|prize|pool|payout|fees?)\b/i,
+  /\b(solana\s+slot|block\s+slot|slot\s+hash|slot\s+height)\b/i,
   /\b(previous|next|future|past|history|streak|yesterday|today|tomorrow|last\s+turn|last\s+round|this\s+week)\b/i,
   /\bsame\s+rule\b.{0,60}\bdifferent\s+wording\b/i,
   /\b(other players?|all players?|no other player|among all players|everyone\s+else)\b/i,
@@ -570,6 +576,9 @@ function buildAttemptContext(
     reasonCodes.delete("AMBIGUOUS_RULE");
   }
   if (looksLikeObjectiveEvenCountComparison(normalizedText)) {
+    reasonCodes.delete("AMBIGUOUS_RULE");
+  }
+  if (parseWithinAnyDistanceCountRule(normalizedText)) {
     reasonCodes.delete("AMBIGUOUS_RULE");
   }
   // A vague word (close, balanced, ...) is a false positive when the player is
@@ -944,6 +953,31 @@ function hasPattern(value: string, patterns: readonly RegExp[]) {
 function compileSupportedRule(text: string): RuleAst | null {
   // Newly-supported deterministic shapes (prompt-set 24/25/26/27/82/84). Placed
   // first so their specific wording wins over the broader generic fallbacks.
+  const removedHighestSum = parseRemovedHighestSumComparisonRule(text);
+  if (removedHighestSum) {
+    return predicateRule(removedHighestSum);
+  }
+
+  const removedLowestMatch = parseRemovedLowestMatchRule(text);
+  if (removedLowestMatch) {
+    return predicateRule(removedLowestMatch);
+  }
+
+  const guardedMappedMatch = parseGuardedMappedMatchRule(text);
+  if (guardedMappedMatch) {
+    return predicateRule(guardedMappedMatch);
+  }
+
+  const withinAnyDistance = parseWithinAnyDistanceCountRule(text);
+  if (withinAnyDistance) {
+    return predicateRule(withinAnyDistance);
+  }
+
+  const sumModuloEquality = parseSumModuloEqualityRule(text);
+  if (sumModuloEquality) {
+    return predicateRule(sumModuloEquality);
+  }
+
   const orderedParityMatch = parseOrderedParityMatchRule(text);
   if (orderedParityMatch) {
     return predicateRule(orderedParityMatch);
@@ -1024,6 +1058,11 @@ function compileSupportedRule(text: string): RuleAst | null {
     return predicateRule(sortedPairSumComparison);
   }
 
+  const casualSortedPairSumComparison = parseCasualSortedPairSumComparisonRule(text);
+  if (casualSortedPairSumComparison) {
+    return predicateRule(casualSortedPairSumComparison);
+  }
+
   const definedDivision = parseDefinedDivisionRule(text);
   if (definedDivision) {
     return predicateRule(definedDivision);
@@ -1040,8 +1079,8 @@ function compileSupportedRule(text: string): RuleAst | null {
   }
 
   if (
-    /\b(guessed?|picked|ticket|your)\s+sum\b.{0,30}\b(greater|higher|above|more)\b.{0,60}\b(draw|drawn)\s+sum\b/i.test(text) &&
-    /\bat least\s+([1-6]|one|two|three|four|five|six)\b.{0,80}\b(numbers?\s+)?(match|matches|appear|appears)\b/i.test(text)
+    /\b(guessed?|picked|ticket|your)(?:\s+sum|\s+total)?\b.{0,30}\b(greater|higher|above|more|bigger|larger)\b.{0,60}\b(draw|drawn)(?:\s+sum|\s+total)?\b/i.test(text) &&
+    /\bat least\s+([1-6]|one|two|three|four|five|six)\b.{0,80}\b(numbers?\s+)?(match|matches|appear|appears|hits?)\b/i.test(text)
   ) {
     const threshold = parseMatchCountRule(text) ?? 1;
     return predicateRule({
@@ -1072,7 +1111,11 @@ function compileSupportedRule(text: string): RuleAst | null {
     );
   }
 
-  if (/\bno\b.{0,40}\b(guessed?|picked|ticket|your)\s+numbers?\b.{0,60}\b(appear|appears|match|matches|drawn|in the draw)\b/i.test(text)) {
+  if (
+    /\bno\b.{0,40}\b(guessed?|picked|ticket|your)\s+numbers?\b.{0,60}\b(appear|appears|match|matches|drawn|in the draw)\b/i.test(text) ||
+    /\bnone\s+of\s+(my|your|the)\s+numbers?\b.{0,60}\b(appear|appears|match|matches)\b/i.test(text) ||
+    /\b(ticket|picks?|numbers?)\b.{0,40}\bdodges?\s+the\s+draw\b/i.test(text)
+  ) {
     return predicateRule(
       compare(count(intersection(source("guess"), source("draw"))), "eq", lit(0)),
     );
@@ -1084,10 +1127,10 @@ function compileSupportedRule(text: string): RuleAst | null {
   }
 
   if (
-    /\bevery\b.{0,40}\b(guessed?|picked|ticket|your)\s+numbers?\b.{0,30}\b(lower|less|below|greater|higher|above)\b.{0,60}\b(draw|drawn)\b/i.test(text) &&
-    /\b(same position|corresponding position|same index)\b/i.test(text)
+    /\bevery\b.{0,40}\b(guessed?|picked|ticket|your)\s+numbers?\b.{0,30}\b(lower|less|below|greater|higher|above|sit below|sits below)\b.{0,60}\b(draw|drawn)\b/i.test(text) &&
+    /\b(same position|corresponding position|same index|matching position|same slot)\b/i.test(text)
   ) {
-    const op = /\b(lower|less|below)\b/i.test(text) ? "lt" : "gt";
+    const op = /\b(lower|less|below|sit below|sits below)\b/i.test(text) ? "lt" : "gt";
     return predicateRule({
       kind: "all_ordered_compare",
       left: source("guess"),
@@ -1097,8 +1140,8 @@ function compileSupportedRule(text: string): RuleAst | null {
   }
 
   if (
-    /\b(same set|same numbers?|contain the same set)\b/i.test(text) &&
-    /\b(regardless of order|any order|unordered|order does not matter)\b/i.test(text)
+    /\b(same set|same numbers?|same six numbers?|contain the same set)\b/i.test(text) &&
+    /\b(regardless of order|any order|unordered|order does not matter|different order)\b/i.test(text)
   ) {
     return predicateRule(
       compare(count(intersection(source("guess"), source("draw"))), "eq", lit(6)),
@@ -1106,7 +1149,8 @@ function compileSupportedRule(text: string): RuleAst | null {
   }
 
   if (
-    /\b(number|count)\b.{0,40}\beven\b.{0,80}\b(equal|equals|same|match|matches)\b.{0,80}\beven\b/i.test(text)
+    /\b(number|count|amount)\b.{0,40}\beven\b.{0,80}\b(equal|equals|same|match|matches|amount)\b.{0,80}\beven\b/i.test(text) ||
+    /\bsame\s+amount\s+of\s+even\s+numbers?\b/i.test(text)
   ) {
     return predicateRule(
       compare(
@@ -1126,7 +1170,15 @@ function compileSupportedRule(text: string): RuleAst | null {
     /\bsum\b/.test(text) &&
     /\b(equal|equals|same|match|matches)\b/.test(text) &&
     /\b(draw|drawn)\b/.test(text) &&
-    /\b(guess|guessed|submitted|your numbers|your)\b/.test(text)
+    /\b(guess|guessed|submitted|your numbers|your|my six numbers|ticket|picks?)\b/.test(text)
+  ) {
+    return { schemaVersion: 1, node: { kind: "sum_equals" } };
+  }
+
+  if (
+    /\b(same-total|same total)\b/i.test(text) &&
+    /\b(draw|drawn)\b/i.test(text) &&
+    /\b(my|your|ticket|numbers?|picks?)\b/i.test(text)
   ) {
     return { schemaVersion: 1, node: { kind: "sum_equals" } };
   }
@@ -1210,6 +1262,32 @@ function mapArith(
   return { kind: "map_arithmetic", of, op, operand };
 }
 
+function mapWithGuard(
+  of: ArrayExpr,
+  op: "add" | "sub" | "mul" | "div" | "mod",
+  operand: number,
+  min: number,
+  max: number,
+  onGuardFail: "drop" | "keep_original",
+): ArrayExpr {
+  return {
+    kind: "map_with_guard",
+    guard: { kind: "range_inclusive", min, max },
+    of,
+    onGuardFail,
+    op,
+    operand,
+  };
+}
+
+function removeUpToN(
+  of: ArrayExpr,
+  n: number,
+  strategy: "first" | "highest" | "lowest",
+): ArrayExpr {
+  return { kind: "remove_up_to_n", n, of, strategy };
+}
+
 function allEqualOrdered(left: ArrayExpr, right: ArrayExpr): PredicateNode {
   return { kind: "all_equal_ordered", left, right };
 }
@@ -1227,20 +1305,140 @@ function parseWordOrDigit(value: string): number | null {
   return Number.isInteger(parsed) ? parsed : null;
 }
 
+function parseRemovedHighestSumComparisonRule(text: string): PredicateNode | null {
+  if (
+    !/\b(ignore|drop|remove)\b[^.]{0,35}\b(highest|largest|biggest)\b[^.]{0,35}\b(picked|pick|guess|guessed|ticket|my)\b/i.test(text) ||
+    !/\b(rest|remaining|after that)\b[^.]{0,80}\b(total|sum|add up)\b[^.]{0,80}\b(same|equal|equals|match|matches)\b[^.]{0,80}\b(full\s+)?draw\b/i.test(text)
+  ) {
+    return null;
+  }
+  return compare(
+    sum(removeUpToN(source("guess"), 1, "highest")),
+    "eq",
+    sum(source("draw")),
+  );
+}
+
+function parseRemovedLowestMatchRule(text: string): PredicateNode | null {
+  const match = text.match(
+    /\b(drop|remove)\b\s+up\s+to\s+(one|two|three|four|\d+)\b[^.]{0,45}\b(lowest|smallest)\b[^.]{0,40}\b(picks?|guesses|numbers?)\b[^.]{0,90}\b(still\s+)?(?:have|has)\s+(one|two|three|four|five|six|\d+)\s+(?:numbers?\s+)?(?:in|inside|appear(?:ing)?\s+in)\s+the\s+draw\b/i,
+  );
+  if (!match) {
+    return null;
+  }
+  const removeCount = parseWordOrDigit(match[2] ?? "");
+  const threshold = parseWordOrDigit(match[6] ?? "");
+  if (
+    removeCount === null ||
+    threshold === null ||
+    removeCount < 1 ||
+    removeCount > 4 ||
+    threshold < 1 ||
+    threshold > 6
+  ) {
+    return null;
+  }
+  return countAtLeast(
+    intersection(removeUpToN(source("guess"), removeCount, "lowest"), source("draw")),
+    threshold,
+  );
+}
+
+function parseGuardedMappedMatchRule(text: string): PredicateNode | null {
+  const match = text.match(
+    /\b(doubling|double)\b[^.]{0,35}\b(each|every)\b[^.]{0,25}\b(pick|picked|guess|guessed|ticket)\b[^.]{0,60}\b(within|between|stays within)\b[^.]{0,20}\b(1)\s+(?:to|and|-)\s+(100)\b[^.]{0,100}\bat least\s+(one|two|three|four|five|six|\d+)\b[^.]{0,45}\b(doubled|double)\b[^.]{0,35}\b(values?|numbers?)\b[^.]{0,35}\b(draw|drawn)\b/i,
+  );
+  if (!match) {
+    return null;
+  }
+  const threshold = parseWordOrDigit(match[7] ?? "");
+  if (threshold === null || threshold < 1 || threshold > 6) {
+    return null;
+  }
+  return countAtLeast(
+    intersection(
+      mapWithGuard(source("guess"), "mul", 2, 1, 100, "drop"),
+      source("draw"),
+    ),
+    threshold,
+  );
+}
+
+function parseWithinAnyDistanceCountRule(text: string): PredicateNode | null {
+  const match = text.match(
+    /\b(?:near-hit\s+rule|near\s+hit\s+rule|win)\b[^.]{0,80}\b(one|two|three|four|five|six|\d+)\s+(?:picks?|guessed?\s+numbers?|ticket\s+numbers?)\b[^.]{0,50}\b(within|off by)\s+(one|two|three|four|five|six|seven|eight|nine|ten|\d+)\b[^.]{0,50}\b(at least\s+one|any|one)\s+(drawn?|draw)\s+number\b/i,
+  );
+  if (!match) {
+    return null;
+  }
+  const threshold = parseWordOrDigit(match[1] ?? "");
+  const distance = parseWordOrDigit(match[3] ?? "");
+  if (
+    threshold === null ||
+    distance === null ||
+    threshold < 1 ||
+    threshold > 6 ||
+    distance < 0 ||
+    distance > 100
+  ) {
+    return null;
+  }
+  return {
+    kind: "value_within_any_count_at_least",
+    distance,
+    left: source("guess"),
+    right: source("draw"),
+    value: threshold,
+  };
+}
+
+function parseSumModuloEqualityRule(text: string): PredicateNode | null {
+  const match = text.match(
+    /\b(?:last\s+digit\s+of\s+the\s+totals?|sum\s+modulo)\b[^.]{0,120}\b(ticket|guess|guessed|picked|my)\b[^.]{0,35}\b(sum|total)\b[^.]{0,20}\b(?:modulo|mod)\s+(\d+)\b[^.]{0,35}\b(equal|equals|same|matches?)\b[^.]{0,60}\b(draw|drawn)\b[^.]{0,35}\b(sum|total)\b[^.]{0,20}\b(?:modulo|mod)\s+(\d+)\b/i,
+  );
+  if (!match) {
+    return null;
+  }
+  const leftMod = Number(match[3]);
+  const rightMod = Number(match[7]);
+  if (
+    !Number.isInteger(leftMod) ||
+    !Number.isInteger(rightMod) ||
+    leftMod !== rightMod ||
+    leftMod < 1 ||
+    leftMod > 100
+  ) {
+    return null;
+  }
+  return compare(
+    arith("mod", sum(source("guess")), lit(leftMod)),
+    "eq",
+    arith("mod", sum(source("draw")), lit(rightMod)),
+  );
+}
+
 // #24: "count of guessed numbers below 50 equals the count of drawn numbers
 // below 50" -> compare the two filtered counts. Supports below/under (lt) and
 // above/over (gt); thresholds must be a valid 1..100 number value.
 function parseFilteredCountComparisonRule(text: string): PredicateNode | null {
-  const match = text.match(
-    /\bcount\b[^.]{0,30}\b(guessed?|picked|ticket|your)\b[^.]{0,25}\b(below|under|less than|fewer than|above|over|greater than|more than)\s+(\d+)\b[^.]{0,50}\b(equal|equals|same|matches?|is)\b[^.]{0,50}\b(drawn?|draw)\b[^.]{0,25}\b(below|under|less than|fewer than|above|over|greater than|more than)\s+(\d+)\b/i,
+  const splitMatch = text.match(
+    /\b(?:below|under|less than|above|over|greater than)[-\s]+(\d+)\s+split\b[^.]{0,80}\b(ticket|guess|picks?|picked)\b[^.]{0,80}\b(draw|drawn)\b[^.]{0,80}\b(same|equal|equals|matching?)\s+count\b[^.]{0,40}\b(?:below|under|less than|above|over|greater than)[-\s]+\1\b/i,
   );
+  const match =
+    splitMatch ??
+    text.match(
+    /\bcount\b[^.]{0,30}\b(guessed?|picked|ticket|your)\b[^.]{0,25}\b(below|under|less than|fewer than|above|over|greater than|more than)\s+(\d+)\b[^.]{0,50}\b(equal|equals|same|matches?|is)\b[^.]{0,50}\b(drawn?|draw)\b[^.]{0,25}\b(below|under|less than|fewer than|above|over|greater than|more than)\s+(\d+)\b/i,
+    );
   if (!match) {
     return null;
   }
   const opFor = (word: string): CompareOp =>
     /below|under|less|fewer/i.test(word) ? "lt" : "gt";
-  const guessValue = Number(match[3]);
-  const drawValue = Number(match[7]);
+  const splitOpWord = splitMatch?.[0]?.match(/\b(below|under|less than|above|over|greater than)\b/i)?.[1] ?? "";
+  const guessValue = splitMatch ? Number(match[1]) : Number(match[3]);
+  const drawValue = splitMatch ? Number(match[1]) : Number(match[7]);
+  const guessOpWord = splitMatch ? splitOpWord : (match[2] ?? "");
+  const drawOpWord = splitMatch ? splitOpWord : (match[6] ?? "");
   if (
     !Number.isInteger(guessValue) ||
     !Number.isInteger(drawValue) ||
@@ -1252,25 +1450,34 @@ function parseFilteredCountComparisonRule(text: string): PredicateNode | null {
     return null;
   }
   return compare(
-    count(filterCompare(source("guess"), opFor(match[2] ?? ""), guessValue)),
+    count(filterCompare(source("guess"), opFor(guessOpWord), guessValue)),
     "eq",
-    count(filterCompare(source("draw"), opFor(match[6] ?? ""), drawValue)),
+    count(filterCompare(source("draw"), opFor(drawOpWord), drawValue)),
   );
 }
 
 // #25/#26: "the first/last three guessed numbers sum to the first/last three
 // drawn numbers" -> compare the sums of the sliced sub-arrays (fixed size 6).
 function parseSlicedSumComparisonRule(text: string): PredicateNode | null {
-  const match = text.match(
+  const explicitMatch = text.match(
     /\b(first|last)\s+(one|two|three|four|five|six|\d+)\b[^.]{0,25}\b(guessed?|picked|ticket|your)\b[^.]{0,40}\b(sum|add up|total)\b[^.]{0,40}\b(first|last)\s+(one|two|three|four|five|six|\d+)\b[^.]{0,25}\b(drawn?|draw)\b/i,
   );
-  if (!match) {
+  const casualMatch =
+    explicitMatch ??
+    text.match(
+      /\b(first|last)\s+(one|two|three|four|five|six|\d+)\s+(?:picks?|guesses|ticket\s+numbers?)\b[^.]{0,45}\b(add up|sum|total)\b[^.]{0,60}\b(first|last)\s+(one|two|three|four|five|six|\d+)\s+(?:drawn?|draw)\s+numbers?\b/i,
+    );
+  if (!casualMatch) {
     return null;
   }
-  const side = (match[1] ?? "").toLowerCase();
-  const otherSide = (match[5] ?? "").toLowerCase();
-  const n = parseWordOrDigit(match[2] ?? "");
-  const otherN = parseWordOrDigit(match[6] ?? "");
+  const side = (casualMatch[1] ?? "").toLowerCase();
+  const otherSide = (
+    explicitMatch ? (casualMatch[5] ?? "") : (casualMatch[4] ?? "")
+  ).toLowerCase();
+  const n = parseWordOrDigit(casualMatch[2] ?? "");
+  const otherN = parseWordOrDigit(
+    explicitMatch ? (casualMatch[6] ?? "") : (casualMatch[5] ?? ""),
+  );
   if (n === null || otherN === null || n !== otherN || n < 1 || n > 6 || side !== otherSide) {
     return null;
   }
@@ -1307,8 +1514,13 @@ function parseSumDifferenceThresholdRule(text: string): PredicateNode | null {
 // ordered equality.
 function parseOrderedParityMatchRule(text: string): PredicateNode | null {
   if (
-    !/\bevery\s+(guessed?|picked)\s+number\b[^.]{0,40}\bsame\s+parity\b[^.]{0,60}\b(drawn?|draw)\b[^.]{0,40}\b(same position|corresponding position|same index)\b/i.test(
+    !(
+      /\bevery\s+(guessed?|picked)\s+number\b[^.]{0,40}\bsame\s+parity\b[^.]{0,60}\b(drawn?|draw)\b[^.]{0,40}\b(same position|corresponding position|same index)\b/i.test(
+        text,
+      ) ||
+      /\bposition\s+by\s+position\b[^.]{0,80}\beach\s+(pick|picked|guess|guessed)\b[^.]{0,60}\bsame\s+(odd-or-even|odd\s+or\s+even|parity)\s+type\b[^.]{0,60}\b(drawn?|draw)\s+number\b/i.test(
       text,
+    )
     )
   ) {
     return null;
@@ -1443,6 +1655,45 @@ function describePredicate(predicate: PredicateNode): string | null {
     if (isIntersectionOfSources(predicate.of, "guess", "draw")) {
       return `at least ${predicate.value} of its numbers appear in the official draw, regardless of order`;
     }
+    if (
+      predicate.of.kind === "intersection" &&
+      predicate.of.left.kind === "remove_up_to_n" &&
+      predicate.of.left.of.kind === "source" &&
+      predicate.of.left.of.source === "guess" &&
+      predicate.of.right.kind === "source" &&
+      predicate.of.right.source === "draw"
+    ) {
+      return `after removing up to ${predicate.of.left.n} ${predicate.of.left.strategy} guessed numbers, at least ${predicate.value} remaining guessed numbers appear in the official draw`;
+    }
+    if (
+      predicate.of.kind === "intersection" &&
+      predicate.of.left.kind === "map_with_guard" &&
+      predicate.of.left.of.kind === "source" &&
+      predicate.of.left.of.source === "guess" &&
+      predicate.of.left.op === "mul" &&
+      predicate.of.right.kind === "source" &&
+      predicate.of.right.source === "draw"
+    ) {
+      return `at least ${predicate.value} guessed numbers, after multiplying each by ${predicate.of.left.operand} and dropping mapped values outside ${predicate.of.left.guard.min}-${predicate.of.left.guard.max}, appear in the official draw`;
+    }
+    return null;
+  }
+
+  if (predicate.kind === "all_equal_ordered") {
+    if (
+      predicate.left.kind === "map_arithmetic" &&
+      predicate.left.op === "mod" &&
+      predicate.left.operand === 2 &&
+      predicate.left.of.kind === "source" &&
+      predicate.left.of.source === "guess" &&
+      predicate.right.kind === "map_arithmetic" &&
+      predicate.right.op === "mod" &&
+      predicate.right.operand === 2 &&
+      predicate.right.of.kind === "source" &&
+      predicate.right.of.source === "draw"
+    ) {
+      return "each guessed number has the same odd-or-even parity as the drawn number in the same position";
+    }
     return null;
   }
 
@@ -1490,6 +1741,18 @@ function describePredicate(predicate: PredicateNode): string | null {
       predicate.right.source === "draw"
     ) {
       return `exactly ${predicate.value} guessed numbers are ${describeCompareOp(predicate.op)} the drawn number in the same position`;
+    }
+    return null;
+  }
+
+  if (predicate.kind === "value_within_any_count_at_least") {
+    if (
+      predicate.left.kind === "source" &&
+      predicate.left.source === "guess" &&
+      predicate.right.kind === "source" &&
+      predicate.right.source === "draw"
+    ) {
+      return `at least ${predicate.value} guessed numbers are within ${predicate.distance} of at least one drawn number`;
     }
     return null;
   }
@@ -1552,29 +1815,86 @@ function describeScalar(scalar: ScalarExpr): string | null {
     return String(scalar.value);
   }
   if (scalar.kind === "reduce") {
-    const sourceName =
-      scalar.of.kind === "source"
-        ? scalar.of.source === "guess"
-          ? "the guess"
-          : "the official draw"
-        : null;
-    if (!sourceName) {
-      if (
-        scalar.op === "count" &&
-        isIntersectionOfSources(scalar.of, "guess", "draw")
-      ) {
-        return "the count of guessed numbers that appear in the official draw";
+    if (scalar.op === "count" && isIntersectionOfSources(scalar.of, "guess", "draw")) {
+      return "the count of guessed numbers that appear in the official draw";
+    }
+    if (scalar.of.kind === "source") {
+      const sourceName =
+        scalar.of.source === "guess" ? "the guess" : "the official draw";
+      if (scalar.op === "sum") {
+        return `the sum of ${sourceName}'s six numbers`;
       }
+      if (scalar.op === "min") {
+        return `the smallest number in ${sourceName}`;
+      }
+      if (scalar.op === "max") {
+        return `the largest number in ${sourceName}`;
+      }
+    }
+    const arrayName = describeArray(scalar.of);
+    if (!arrayName) {
       return null;
     }
     if (scalar.op === "sum") {
-      return `the sum of ${sourceName}'s six numbers`;
+      return `the sum of ${arrayName}`;
     }
     if (scalar.op === "min") {
-      return `the smallest number in ${sourceName}`;
+      return `the smallest number in ${arrayName}`;
     }
     if (scalar.op === "max") {
-      return `the largest number in ${sourceName}`;
+      return `the largest number in ${arrayName}`;
+    }
+    if (scalar.op === "count") {
+      return `the count of ${arrayName}`;
+    }
+  }
+  if (scalar.kind === "arith" && scalar.op === "mod") {
+    const left = describeScalar(scalar.left);
+    const right = describeScalar(scalar.right);
+    return left && right ? `${left} modulo ${right}` : null;
+  }
+  return null;
+}
+
+function describeArray(array: ArrayExpr): string | null {
+  if (array.kind === "source") {
+    return array.source === "guess"
+      ? "the guess's six numbers"
+      : "the official draw's six numbers";
+  }
+  if (array.kind === "filter_compare") {
+    const sourceName = describeArray(array.of);
+    if (!sourceName) {
+      return null;
+    }
+    return `numbers in ${sourceName} that are ${describeCompareOp(array.op)} ${array.value}`;
+  }
+  if (array.kind === "filter_mod") {
+    const sourceName = describeArray(array.of);
+    if (!sourceName) {
+      return null;
+    }
+    if (array.modulus === 2) {
+      return `${array.equals === 0 ? "even" : "odd"} numbers in ${sourceName}`;
+    }
+    return `numbers in ${sourceName} with modulo ${array.modulus} equal to ${array.equals}`;
+  }
+  if (array.kind === "remove_up_to_n") {
+    const sourceName = describeArray(array.of);
+    return sourceName
+      ? `${sourceName} after removing up to ${array.n} ${array.strategy} values`
+      : null;
+  }
+  if (array.kind === "slice") {
+    const sourceName = describeArray(array.of);
+    if (!sourceName) {
+      return null;
+    }
+    if (array.start === 0 && array.end !== undefined) {
+      return `the first ${array.end} values of ${sourceName}`;
+    }
+    if (array.end === undefined) {
+      return `the last ${6 - array.start} values of ${sourceName}`;
     }
   }
   return null;
@@ -1614,7 +1934,7 @@ function isIntersectionOfSources(
 
 function parseExactMatchCountRule(text: string): number | null {
   const match = text.match(
-    /\bexactly\s+([0-6]|zero|one|two|three|four|five|six)\b.{0,80}\b(match|matches|appear|appears|drawn|in the draw)\b/i,
+    /\bexactly\s+([0-6]|zero|one|two|three|four|five|six)\b.{0,80}\b(match|matches|appear|appears|overlaps?|drawn|in the draw)\b/i,
   );
   const rawValue = match?.[1] ?? null;
   if (!rawValue) {
@@ -1647,10 +1967,10 @@ function parseOrdinal(value: string): number | null {
 }
 
 function parseComparisonWord(value: string): CompareOp | null {
-  if (/^(equal|equals|same|matches?|is)$/i.test(value)) {
+  if (/^(equal|equals|same|match|matches|is)$/i.test(value)) {
     return "eq";
   }
-  if (/^(greater|higher|above|more)$/i.test(value)) {
+  if (/^(greater|higher|above|more|bigger|larger|beats?|exceeds?)$/i.test(value)) {
     return "gt";
   }
   if (/^(lower|less|below|smaller)$/i.test(value)) {
@@ -1660,9 +1980,13 @@ function parseComparisonWord(value: string): CompareOp | null {
 }
 
 function parsePositionComparisonRule(text: string): PredicateNode | null {
-  const match = text.match(
-    /\b(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|sixth|6th)\s+(?:(?:guessed?|picked|drawn?|draw)\s+)?(?:number|pick)\b.{0,40}(?:\b(?:is|be|are)\b\s+)?\b(equal|equals|same|matches?|greater|higher|above|more|lower|less|below|smaller)\b.{0,50}\b(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|sixth|6th)\s+(?:drawn?|draw)\s+number\b/i,
-  );
+  const match =
+    text.match(
+      /\b(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|sixth|6th)\s+(?:(?:guessed?|picked|drawn?|draw|ticket)\s+)?(?:number|pick)\b.{0,50}(?:\b(?:is|be|are)\b\s+)?\b(equal|equals|same|matches?|match|greater|higher|above|more|bigger|larger|beats?|exceeds?|lower|less|below|smaller)\b.{0,60}\b(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|sixth|6th)\s+(?:(?:drawn?|draw)\s+number|number\s+that\s+gets\s+drawn)\b/i,
+    ) ??
+    text.match(
+      /\b(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|sixth|6th)\s+(?:number|pick)\b.{0,30}\b(?:ticket|guess)\b.{0,40}\b(equal|equals|same|matches?|match|greater|higher|above|more|bigger|larger|beats?|exceeds?|lower|less|below|smaller)\b.{0,60}\b(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|sixth|6th)\s+(?:(?:drawn?|draw)\s+number|number\s+that\s+gets\s+drawn)\b/i,
+    );
   const leftIndex = match?.[1] ? parseOrdinal(match[1]) : null;
   const op = match?.[2] ? parseComparisonWord(match[2]) : null;
   const rightIndex = match?.[3] ? parseOrdinal(match[3]) : null;
@@ -1674,7 +1998,7 @@ function parsePositionComparisonRule(text: string): PredicateNode | null {
 
 function parseOrderedAbsoluteDifferenceRule(text: string): PredicateNode | null {
   const match = text.match(
-    /\babsolute\s+difference\b.{0,80}\beach\s+(?:guessed?|picked|ticket|your)\s+number\b.{0,80}\b(draw|drawn)\s+number\b.{0,80}\b(same position|corresponding position|same index)\b.{0,80}\b(at most|no more than|less than or equal to|<=)\s+([0-9]+)\b/i,
+    /\babsolute\s+difference\b.{0,80}\beach\s+(?:guessed?|picked|ticket|your)\s+number\b.{0,80}\b(draw|drawn)\s+number\b.{0,80}\b(same position|corresponding position|same index|same slot)\b.{0,80}\b(at most|no more than|less than or equal to|<=)\s+([0-9]+)\b/i,
   );
   // Alternative wording (prompt-set 72): "each guessed number is within 5 of the
   // drawn number in the same position" — same predicate, no "absolute difference"
@@ -1682,12 +2006,12 @@ function parseOrderedAbsoluteDifferenceRule(text: string): PredicateNode | null 
   const withinMatch =
     match ??
     text.match(
-      /\beach\s+(?:guessed?|picked|ticket|your)\s+number\b.{0,40}\bwithin\s+([0-9]+)\b.{0,40}\b(draw|drawn)\s+number\b.{0,40}\b(same position|corresponding position|same index)\b/i,
+      /\beach\s+(?:guessed?|picked|ticket|your)\s+number\b.{0,60}\b(within|off by)\s+([0-9]+|one|two|three|four|five|six)\b.{0,50}\b(at most|no more than)?\b.{0,40}\b(draw|drawn)\s+number\b.{0,50}\b(same position|corresponding position|same index|same slot)\b/i,
     );
   const value = match?.[4]
     ? Number(match[4])
-    : withinMatch?.[1]
-      ? Number(withinMatch[1])
+    : withinMatch?.[2]
+      ? (parseWordOrDigit(withinMatch[2]) ?? NaN)
       : NaN;
   if (!Number.isInteger(value) || value < 0 || value > 100) {
     return null;
@@ -1757,9 +2081,13 @@ function parseTotalOrderedAbsoluteDifferenceRule(text: string): PredicateNode | 
 }
 
 function parseOrderedPositionMatchCountRule(text: string): PredicateNode | null {
-  const match = text.match(
-    /\b(exactly|at least|at most)\s+([0-6]|one|two|three|four|five|six)\b.{0,80}\b(guessed?|picked|ticket|your)?\s*numbers?\b.{0,80}\b(match|matches|equal|equals)\b.{0,80}\b(same position|same positions|corresponding position|corresponding positions|same index|same indexes)\b/i,
-  );
+  const match =
+    text.match(
+      /\b(exactly|at least|at most)\s+([0-6]|one|two|three|four|five|six)\b.{0,80}\b(guessed?|picked|ticket|your)?\s*numbers?\b.{0,80}\b(match|matches|equal|equals)\b.{0,80}\b(same position|same positions|corresponding position|corresponding positions|same index|same indexes)\b/i,
+    ) ??
+    text.match(
+      /\b(exactly|at least|at most)\s+([0-6]|one|two|three|four|five|six)\s+positions?\b.{0,80}\b(exact\s+match|match|matches)\b/i,
+    );
   if (!match?.[1] || !match[2]) {
     return null;
   }
@@ -1800,8 +2128,14 @@ function parseDigitMatchCountRule(text: string): PredicateNode | null {
 
 function parseOddSumEqualsRule(text: string): PredicateNode | null {
   if (
-    !/\bsum\b.{0,40}\bodd\s+(guessed?|picked|ticket|your)\s+numbers?\b/i.test(text) ||
-    !/\b(equal|equals|same|match|matches)\b.{0,40}\bsum\b.{0,40}\bodd\s+(drawn?|draw)\s+numbers?\b/i.test(text)
+    !(
+      /\bsum\b.{0,40}\bodd\s+(guessed?|picked|ticket|your)\s+numbers?\b/i.test(text) ||
+      /\bodd\s+(picks?|guessed?|picked|ticket|your)\b.{0,40}\b(add up|sum|total)\b/i.test(text)
+    ) ||
+    !(
+      /\b(equal|equals|same|match|matches)\b.{0,40}\bsum\b.{0,40}\bodd\s+(drawn?|draw)\s+numbers?\b/i.test(text) ||
+      /\bsame\s+odd-number\s+total\s+in\s+the\s+draw\b/i.test(text)
+    )
   ) {
     return null;
   }
@@ -1833,8 +2167,12 @@ function parseOrderedPositionCompareCountRule(text: string): PredicateNode | nul
 
 function parseAllValuesBetweenMinMaxRule(text: string): PredicateNode | null {
   if (
-    !/\ball\s+(guessed?|picked|ticket|your)\s+numbers?\b/i.test(text) ||
-    !/\bbetween\b.{0,80}\bsmallest\b.{0,40}\blargest\b.{0,40}\bdrawn?\s+number\b/i.test(text)
+    !/\b(all\s+)?(guessed?|picked|ticket|my|your)\s+(numbers?|picks?)\b/i.test(text) ||
+    !(
+      /\bbetween\b.{0,80}\bsmallest\b.{0,40}\blargest\b.{0,40}\bdrawn?\s+number\b/i.test(text) ||
+      /\binside\b.{0,80}\bdraw'?s\s+lowest-to-highest\s+range\b/i.test(text) ||
+      /\binside\b.{0,80}\bdraw'?s\s+lowest\s+to\s+highest\s+range\b/i.test(text)
+    )
   ) {
     return null;
   }
@@ -1847,7 +2185,7 @@ function parseAllValuesBetweenMinMaxRule(text: string): PredicateNode | null {
 
 function parseModuloCountComparisonRule(text: string): PredicateNode | null {
   const multipleMatch = text.match(
-    /\b(guessed?|picked|ticket|your)\s+numbers?\b.{0,80}\b(contain|have|has)\b.{0,40}\b(more|greater|higher|fewer|less|lower)\b.{0,80}\bmultiples?\s+of\s+([0-9]+)\b.{0,80}\b(draw|drawn)\s+numbers?\b/i,
+    /\b(guessed?|picked|ticket|your|my)\b(?:\s+numbers?)?\b.{0,80}\b(contain|have|has|should\s+have)\b.{0,40}\b(more|greater|higher|fewer|less|lower)\b.{0,80}\bmultiples?\s+of\s+([0-9]+)\b.{0,80}\b(draw|drawn)\b/i,
   );
   if (!multipleMatch?.[3] || !multipleMatch[4]) {
     return null;
@@ -1866,7 +2204,7 @@ function parseModuloCountComparisonRule(text: string): PredicateNode | null {
 
 function parseSortedPairSumComparisonRule(text: string): PredicateNode | null {
   const match = text.match(
-    /\bsum\b.{0,40}\btwo\s+(smallest|lowest|largest|highest)\s+(guessed?|picked|ticket|your)\s+numbers?\b.{0,80}\b(equal|equals|same|match|matches|greater|higher|above|more|lower|less|below|smaller)\b.{0,80}\bsum\b.{0,40}\btwo\s+(smallest|lowest|largest|highest)\s+(drawn?|draw)\s+numbers?\b/i,
+    /\bsum\b.{0,40}\btwo\s+(smallest|lowest|largest|highest|biggest)\s+(guessed?|picked|ticket|your)\s+numbers?\b.{0,80}\b(equal|equals|same|match|matches|greater|higher|above|more|bigger|larger|lower|less|below|smaller)\b.{0,80}\bsum\b.{0,40}\btwo\s+(smallest|lowest|largest|highest|biggest)\s+(drawn?|draw)\s+numbers?\b/i,
   );
   if (!match?.[1] || !match[3] || !match[4]) {
     return null;
@@ -1884,9 +2222,34 @@ function parseSortedPairSumComparisonRule(text: string): PredicateNode | null {
   );
 }
 
+function parseCasualSortedPairSumComparisonRule(text: string): PredicateNode | null {
+  const sideMatch = text.match(
+    /\btwo\s+(smallest|lowest|biggest|largest|highest)\s+numbers?\b/i,
+  );
+  const compareMatch = text.match(
+    /\b(pair|sums?)\b.{0,80}\b(equal|equals|same|match|matches|greater|higher|above|more|bigger|larger|lower|less|below|smaller)\b/i,
+  );
+  if (!sideMatch?.[1] || !compareMatch?.[2]) {
+    return null;
+  }
+  if (!/\b(each side|ticket'?s pair|my ticket|my picks?|draw'?s pair|drawn?)\b/i.test(text)) {
+    return null;
+  }
+  const order = /smallest|lowest/i.test(sideMatch[1]) ? "asc" : "desc";
+  const op = parseComparisonWord(compareMatch[2]);
+  if (!op) {
+    return null;
+  }
+  return compare(
+    sum(sliceArray(sortArray(source("guess"), order), 0, 2)),
+    op,
+    sum(sliceArray(sortArray(source("draw"), order), 0, 2)),
+  );
+}
+
 function parseEvenCountEqualityRule(text: string): PredicateNode | null {
   if (
-    !/\b(same\s+number\s+of\s+evens|number\s+of\s+even\b.{0,80}\b(equal|equals|same|match|matches))\b/i.test(text) &&
+    !/\b(same\s+(number|amount)\s+of\s+evens?|number\s+of\s+even\b.{0,80}\b(equal|equals|same|match|matches))\b/i.test(text) &&
     !/\bnumber\b.{0,40}\beven\b.{0,80}\b(equal|equals|same|match|matches)\b.{0,80}\beven\b/i.test(text)
   ) {
     return null;
@@ -1979,7 +2342,7 @@ function parseReversePositionMatchRule(text: string): PredicateNode | null {
 
 function parseMinMaxComparisonRule(text: string): PredicateNode | null {
   const match = text.match(
-    /\b(smallest|lowest|largest|highest)\s+(?:guessed?|picked|ticket|your)\s+number\b.{0,30}\b(equal|equals|same|matches?|greater|higher|above|more|lower|less|below|smaller)\b.{0,40}\b(smallest|lowest|largest|highest)\s+(?:drawn?|draw)\s+number\b/i,
+    /\b(smallest|lowest|largest|highest)\s+(?:guessed?|picked|ticket|your)?\s*(?:number|pick)\b.{0,30}\b(equal|equals|same|matches?|greater|higher|above|more|bigger|larger|beats?|exceeds?|lower|less|below|smaller)\b.{0,40}\b(smallest|lowest|largest|highest)\s+(?:drawn?|draw)\s+number\b/i,
   );
   const leftKind = match?.[1]?.toLowerCase();
   const op = match?.[2] ? parseComparisonWord(match[2]) : null;
@@ -2000,13 +2363,21 @@ function parseMinMaxComparisonRule(text: string): PredicateNode | null {
 
 function parseMatchCountRule(text: string) {
   const numericMatch = text.match(
-    /\bat least\s+([1-6]|one|two|three|four|five|six)\b.{0,80}\b(match|matches|appear|appears|in the draw|drawn)\b/i,
+    /\bat least\s+([1-6]|one|two|three|four|five|six)\b.{0,80}\b(match|matches|appear|appears|hits?|in the draw|drawn)\b/i,
   );
   const orMoreMatch = text.match(
     /\b([1-6]|one|two|three|four|five|six)\s+or\s+more\b.{0,80}\b(guessed?|picked|ticket|my|your)?\s*numbers?\b.{0,100}\b(show up|appear|appears|match|matches|somewhere in the draw|in the draw|drawn)\b/i,
   );
+  const directMatch = text.match(
+    /\b([1-6]|one|two|three|four|five|six)\b.{0,30}\b(picks?|guessed?|ticket|my|your)\b.{0,60}\b(show up|appear|appears|match|matches|hits?)\b/i,
+  );
   const compactMatch = text.match(/\b([1-6])\s+numbers?\s+(match|appear)\b/i);
-  const rawValue = numericMatch?.[1] ?? orMoreMatch?.[1] ?? compactMatch?.[1] ?? null;
+  const rawValue =
+    numericMatch?.[1] ??
+    orMoreMatch?.[1] ??
+    directMatch?.[1] ??
+    compactMatch?.[1] ??
+    null;
   if (!rawValue) {
     return null;
   }
@@ -2220,6 +2591,8 @@ function predicateSignature(node: PredicateNode): string {
       return `ordered_position_match_count_eq:${node.value}:${arraySignature(node.left)}:${arraySignature(node.right)}`;
     case "ordered_position_compare_count_eq":
       return `ordered_position_compare_count_eq:${node.value}:${node.op}:${arraySignature(node.left)}:${arraySignature(node.right)}`;
+    case "value_within_any_count_at_least":
+      return `value_within_any_count_at_least:${node.value}:${node.distance}:${arraySignature(node.left)}:${arraySignature(node.right)}`;
     case "digit_match_count_at_least":
       return `digit_match_count_at_least:${node.value}:${node.place}:${arraySignature(node.left)}:${arraySignature(node.right)}`;
     case "all_values_between_min_max":

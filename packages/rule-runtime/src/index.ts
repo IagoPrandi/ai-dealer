@@ -460,6 +460,14 @@ function evalPredicate(
         ).length;
         return matches === node.value;
       }
+      case "value_within_any_count_at_least": {
+        const left = evalArray(node.left, input, budget);
+        const right = evalArray(node.right, input, budget);
+        const matches = left.filter((value) =>
+          right.some((target) => Math.abs(value - target) <= node.distance),
+        ).length;
+        return matches >= node.value;
+      }
       case "digit_match_count_at_least": {
         const left = evalArray(node.left, input, budget);
         const rightDigits = new Set(

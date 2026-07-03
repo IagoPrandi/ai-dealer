@@ -201,4 +201,9 @@ test("compile harness prompt includes selected prompt-set examples", async () =>
   assert.match(systemPrompt, /ordered_position_match_count_eq/i);
   assert.match(systemPrompt, /total_ordered_abs_diff_lte/i);
   assert.match(systemPrompt, /reversed_position_match_count_at_least/i);
+  assert.match(systemPrompt, /remove_up_to_n/i);
+  assert.match(systemPrompt, /map_with_guard/i);
+  assert.match(systemPrompt, /below-50 split/i);
+  assert.match(systemPrompt, /value_within_any_count_at_least/i);
+  assert.match(systemPrompt, /sum\(guess\) mod 10/i);
 });

@@ -15,6 +15,10 @@ import {
   validateAndPrecompileRule,
 } from "./index.js";
 
+type PromptTestSetFile =
+  | "rule-proposal-prompt-test-set-2.md"
+  | "rule-proposal-prompt-test-set.md";
+
 function readPromptRows(expected: "BLOCK" | "CLARIFY" | "VALID", limit: number) {
   const markdown = readFileSync(
     new URL("../../../docs/rule-proposal-prompt-test-set.md", import.meta.url),
@@ -38,9 +42,12 @@ function readPromptRows(expected: "BLOCK" | "CLARIFY" | "VALID", limit: number) 
   return rows;
 }
 
-function readPromptRowsById(ids: readonly number[]) {
+function readPromptRowsById(
+  ids: readonly number[],
+  fileName: PromptTestSetFile = "rule-proposal-prompt-test-set.md",
+) {
   const markdown = readFileSync(
-    new URL("../../../docs/rule-proposal-prompt-test-set.md", import.meta.url),
+    new URL(`../../../docs/${fileName}`, import.meta.url),
     "utf8",
   );
   const rows = new Map<number, { expected: "BLOCK" | "CLARIFY" | "VALID"; prompt: string }>();
@@ -87,6 +94,10 @@ test("the compile_rule_to_ast skill prompt is versioned and covers both rule mod
   assert.ok(prompt.includes("total_ordered_abs_diff_lte"));
   assert.ok(prompt.includes("first pick only needs to be higher"));
   assert.ok(prompt.includes("reversed_position_match_count_at_least"));
+  assert.ok(prompt.includes("remove_up_to_n"));
+  assert.ok(prompt.includes("map_with_guard"));
+  assert.ok(prompt.includes("value_within_any_count_at_least"));
+  assert.ok(prompt.includes("sum(guess) mod 10"));
   // And forbid external/unverifiable inputs.
   assert.ok(/wallets|votes|oracle|external/i.test(prompt));
 });
@@ -177,6 +188,59 @@ test("handles the first 10 VALID prompts from the rule proposal test set", () =>
     assert.equal(result.log.reasonCodes.includes("UNSUPPORTED_RULE"), false, prompt);
     assert.match(result.artifactHash ?? "", /^[0-9a-f]{64}$/, prompt);
   }
+});
+
+test("handles prompts 1-20 from rule proposal test set 2 as valid rules", () => {
+  const rows = readPromptRowsById(
+    Array.from({ length: 20 }, (_value, index) => index + 1),
+    "rule-proposal-prompt-test-set-2.md",
+  );
+
+  for (const [ruleId, row] of rows) {
+    const result = validateAndPrecompileRule({
+      prompt: row.prompt,
+      ruleId,
+      tokenCount: tokenCount(row.prompt),
+    });
+
+    assert.equal(row.expected, "VALID", `#${ruleId}: ${row.prompt}`);
+    assert.equal(result.decision, "VALID", `#${ruleId}: ${row.prompt}`);
+    assert.equal(
+      result.log.reasonCodes.includes("UNSUPPORTED_RULE"),
+      false,
+      `#${ruleId}: ${row.prompt}`,
+    );
+    assert.match(result.artifactHash ?? "", /^[0-9a-f]{64}$/, row.prompt);
+    assert.ok(
+      result.log.evaluatedTestCases.every((testCase) => testCase.passed),
+      `#${ruleId}: ${row.prompt}`,
+    );
+  }
+
+  const predicateKindFor = (ruleId: number) => {
+    const row = rows.get(ruleId);
+    assert.ok(row, `missing prompt #${ruleId}`);
+    const result = validateAndPrecompileRule({
+      prompt: row.prompt,
+      ruleId,
+      tokenCount: tokenCount(row.prompt),
+    });
+    const ast = result.artifact?.ast;
+    return ast?.schemaVersion === 2 && ast.result.type === "predicate"
+      ? ast.result.predicate.kind
+      : ast?.schemaVersion === 1
+        ? ast.node.kind
+        : null;
+  };
+
+  assert.equal(predicateKindFor(1), "match_count_at_least");
+  assert.equal(predicateKindFor(3), "compare");
+  assert.equal(predicateKindFor(6), "all_ordered_compare");
+  assert.equal(predicateKindFor(7), "compare");
+  assert.equal(predicateKindFor(9), "and");
+  assert.equal(predicateKindFor(13), "all_ordered_abs_diff_lte");
+  assert.equal(predicateKindFor(17), "all_values_between_min_max");
+  assert.equal(predicateKindFor(20), "compare");
 });
 
 test("preserves selected prompt-test semantics for rule proposal agent prompts", () => {
@@ -605,6 +669,18 @@ test("detects provider / AI-subjectivity / meta / social external dependencies",
     ),
     false,
   );
+  assert.equal(
+    hasExternalDependency(
+      "Use the next Solana slot hash as a bonus condition.",
+    ),
+    true,
+  );
+  assert.equal(
+    hasExternalDependency(
+      "Each picked number can be off by five at most from the drawn number in the same slot.",
+    ),
+    false,
+  );
 });
 
 test("deterministically compiles filtered-count, sliced-sum, parity, sum-diff and bounded-removal rules", () => {
@@ -658,6 +734,127 @@ test("deterministically compiles filtered-count, sliced-sum, parity, sum-diff an
   );
   assert.equal(
     evaluatePredicate(removalAst, { guess: [1, 2, 40, 41, 50, 60], draw: [1, 2, 3, 70, 80, 90] }).result,
+    "LOSE",
+  );
+});
+
+test("deterministically compiles prompt-test-set-2 prompts 21 through 30", () => {
+  const ids = Array.from({ length: 10 }, (_, index) => 21 + index);
+  const prompts = readPromptRowsById(ids, "rule-proposal-prompt-test-set-2.md");
+  const expectedKind: Record<number, string> = {
+    21: "compare",
+    22: "count_at_least",
+    23: "count_at_least",
+    24: "compare",
+    25: "compare",
+    26: "compare",
+    27: "all_equal_ordered",
+    28: "value_within_any_count_at_least",
+    29: "compare",
+    30: "ordered_position_match_count_eq",
+  };
+
+  const compiled = new Map<number, ReturnType<typeof validateAndPrecompileRule>>();
+  for (const [ruleId, row] of prompts) {
+    assert.equal(row.expected, "VALID", `#${ruleId}: ${row.prompt}`);
+    const result = validateAndPrecompileRule({
+      prompt: row.prompt,
+      ruleId,
+      tokenCount: tokenCount(row.prompt),
+    });
+    compiled.set(ruleId, result);
+    assert.equal(result.decision, "VALID", `#${ruleId}: ${row.prompt}`);
+    assert.match(result.artifactHash ?? "", /^[0-9a-f]{64}$/, row.prompt);
+    const predicate =
+      result.artifact?.ast.schemaVersion === 2 &&
+      result.artifact.ast.result.type === "predicate"
+        ? result.artifact.ast.result.predicate
+        : null;
+    assert.equal(predicate?.kind, expectedKind[ruleId], `#${ruleId} kind`);
+  }
+
+  const doubled = compiled.get(23)?.artifact?.ast;
+  assert.ok(doubled);
+  assert.equal(
+    evaluatePredicate(doubled, {
+      guess: [5, 10, 20, 60, 70, 80],
+      draw: [10, 20, 40, 1, 2, 3],
+    }).result,
+    "WIN",
+  );
+  assert.equal(
+    evaluatePredicate(doubled, {
+      guess: [5, 10, 20, 60, 70, 80],
+      draw: [10, 20, 120, 1, 2, 3],
+    }).result,
+    "LOSE",
+  );
+
+  const lastThree = compiled.get(26)?.artifact?.ast;
+  assert.ok(lastThree);
+  assert.equal(
+    evaluatePredicate(lastThree, {
+      guess: [1, 2, 3, 10, 20, 30],
+      draw: [99, 98, 97, 5, 25, 30],
+    }).result,
+    "WIN",
+  );
+  assert.equal(
+    evaluatePredicate(lastThree, {
+      guess: [1, 2, 3, 10, 20, 30],
+      draw: [10, 20, 30, 1, 2, 3],
+    }).result,
+    "LOSE",
+  );
+
+  const withinAny = compiled.get(28)?.artifact?.ast;
+  assert.ok(withinAny);
+  assert.equal(
+    evaluatePredicate(withinAny, {
+      guess: [8, 29, 41, 62, 90, 100],
+      draw: [10, 20, 50, 70, 1, 2],
+    }).result,
+    "WIN",
+  );
+  assert.equal(
+    evaluatePredicate(withinAny, {
+      guess: [8, 29, 41, 90, 95, 100],
+      draw: [10, 20, 70, 1, 2, 3],
+    }).result,
+    "LOSE",
+  );
+
+  const modulo = compiled.get(29)?.artifact?.ast;
+  assert.ok(modulo);
+  assert.equal(
+    evaluatePredicate(modulo, {
+      guess: [1, 2, 3, 4, 5, 6],
+      draw: [11, 12, 13, 14, 15, 16],
+    }).result,
+    "WIN",
+  );
+  assert.equal(
+    evaluatePredicate(modulo, {
+      guess: [1, 2, 3, 4, 5, 6],
+      draw: [1, 2, 3, 4, 5, 7],
+    }).result,
+    "LOSE",
+  );
+
+  const exactOnePosition = compiled.get(30)?.artifact?.ast;
+  assert.ok(exactOnePosition);
+  assert.equal(
+    evaluatePredicate(exactOnePosition, {
+      guess: [1, 20, 30, 40, 50, 60],
+      draw: [1, 2, 3, 4, 5, 6],
+    }).result,
+    "WIN",
+  );
+  assert.equal(
+    evaluatePredicate(exactOnePosition, {
+      guess: [1, 2, 30, 40, 50, 60],
+      draw: [1, 2, 3, 4, 5, 6],
+    }).result,
     "LOSE",
   );
 });

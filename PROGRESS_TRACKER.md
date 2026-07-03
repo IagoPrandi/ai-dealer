@@ -68,6 +68,25 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-07-03 (Rule proposal prompt test set 2 prompts 1-20)
+
+- Reopened required documents/context before working: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/idealer-test-and-verify/SKILL.md`, `packages/rule-compiler/rule-authoring/SKILL.md`, `packages/rule-compiler/rule-authoring/references/patterns.md`, `packages/rule-compiler/rule-authoring/references/examples.md`, and `docs/rule-proposal-prompt-test-set-2.md`.
+- Tested prompts `#1` through `#20` from `docs/rule-proposal-prompt-test-set-2.md` through the deterministic rule compiler. Initial source check accepted only `#10`, `#14`, and `#16`; the rest failed closed as unsupported or, for `#13`, as a false external dependency because positional `slot` was conflated with chain slot state.
+- Updated the deterministic rule compiler to recognize objective casual wording for match counts, exact overlap counts, no-overlap rules, same-total rules, position comparisons, all-position comparisons, unordered same-set rules, even-count equality, compound total-plus-hit rules, positional absolute difference, odd-number totals, min/max range containment, multiple-count comparisons, and two-smallest/two-largest pair-sum comparisons.
+- Narrowed the external dependency gate so `same slot` can mean same ticket/draw position while `Solana slot`, `block slot`, and `slot hash` remain blocked as external chain state.
+- Improved the prompt-test harness so prompt rows can be read by id from either prompt-test markdown file, then added regression coverage that verifies set-2 prompts `#1`-`#20` compile as `VALID`, produce artifact hashes, pass generated runtime checks, and preserve representative AST shapes.
+- Verified: direct source sweep for set-2 prompts `#1`-`#20` returned `failures=0`; `pnpm --filter @idealer/rule-compiler typecheck`; `pnpm --filter @idealer/rule-compiler test` (33/33); `pnpm --filter @idealer/rule-compiler lint`; `pnpm --filter @idealer/rule-compiler build`.
+- Reviewed the result for inconsistencies: no fallback was introduced, invalid dependencies still fail closed, `slot hash` remains blocked, all accepted rules stay bounded to deterministic `guess`/`draw` DSL/runtime nodes, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-03 (Second rule proposal prompt test set)
+
+- Opened required documents/context before working: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/idealer-test-and-verify/SKILL.md`, `packages/rule-compiler/rule-authoring/SKILL.md`, `packages/rule-compiler/rule-authoring/references/patterns.md`, `packages/rule-compiler/rule-authoring/references/examples.md`, and `docs/rule-proposal-prompt-test-set.md`.
+- Added `docs/rule-proposal-prompt-test-set-2.md` as a second rule proposal prompt test set with 200 additional prompts based on the structure of the original test-set document.
+- Covered 140 single-prompt cases and 60 multi-interaction prompts across 20 simulated refinement sequences. The prompts intentionally use more casual, indirect wording to test conversion, clarification, and fail-closed blocking behavior.
+- Expanded coverage across deterministic `guess`/`draw` rules, vague natural-language clarification cases, wallet/history/social/prize/oracle/weather/market/dependency blocks, prompt injection, code/network/file access, private analytics, randomness, payout circularity, post-draw mutation, duplicate-rule rewording, and impossible conditions.
+- Verified the new markdown structure with a PowerShell count check: 200 numbered prompt rows, first `1`, last `200`, no missing numbers, no duplicates, 140 single-prompt rows, 60 sequence rows, and 20 sequence headings.
+- Reviewed the result for inconsistencies: `VALID` prompts remain deterministic over `guess` and `draw`, `CLARIFY` prompts are ambiguous instead of blocked violations, `BLOCK` prompts depend on prohibited or impossible inputs, no fallback behavior was introduced, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
 ### 2026-07-02 (Rule proposal prompts 14-20, 31-39, 48-55, 104-105, sequences 6-7)
 
 - Opened required documents/context before and during work: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/idealer-test-and-verify/SKILL.md`, and `docs/rule-proposal-prompt-test-set.md`.
@@ -3009,3 +3028,22 @@ Passed:
 - Updated Playwright coverage for Sequence 8 and Sequence 9 against the live `/play/propose` route with mocked preflight responses.
 - Verified: `pnpm --filter @idealer/web typecheck`; `pnpm --filter @idealer/web test` (8/8); `pnpm --filter @idealer/web lint`; `pnpm --filter @idealer/web build`; `pnpm --filter @idealer/web test:e2e -- e2e/rule-proposal.spec.ts` (3/3).
 - Reviewed the result for inconsistencies: UI copy remains English, manual clarification remains available, blocked-rule UX does not hide compiler errors, infrastructure failures are not converted into rule suggestions, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-03 (Rule agent generalization and production-code pipeline assessment)
+
+- Reopened required context before answering: `PRD.md`, `.claude/skills`, `.claude/skills/best-practices/SKILL.md`, `.claude/skills/best-practices/references/agent-principles.md`, `.claude/skills/best-practices/references/architecture.md`, `.claude/skills/best-practices/references/testing.md`, `.claude/skills/idealer-test-and-verify/SKILL.md`, `.claude/skills/security-best-practices/SKILL.md`, `packages/rule-compiler/rule-authoring/SKILL.md`, `packages/rule-compiler/rule-authoring/references/patterns.md`, `packages/rule-compiler/rule-authoring/references/examples.md`, and `docs/rule-proposal-prompt-test-set.md`.
+- Reviewed the rule compiler architecture across `packages/rule-schema`, `packages/rule-runtime`, `packages/rule-compiler`, and the API preflight path to assess whether rules outside the markdown prompt set can be handled safely.
+- Conclusion recorded for the task: the agent can generalize only within the bounded `guess`/`draw` DSL and runtime schema; unsupported or ambiguous rules fail closed. A production pipeline where the agent emits arbitrary code is not recommended for money-bearing game rules; the safer path is to evolve the versioned DSL/compiler/harness with staged validation and deployment gates.
+- Reviewed the result for inconsistencies: no code behavior was changed, no tests were run because this was an architecture assessment only, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-03 (LLM rule harness prompts 21-30)
+
+- Reopened required context before working: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/idealer-test-and-verify/SKILL.md`, `packages/rule-compiler/rule-authoring/SKILL.md`, `packages/rule-compiler/rule-authoring/references/patterns.md`, `packages/rule-compiler/rule-authoring/references/examples.md`, and `docs/rule-proposal-prompt-test-set-2.md`.
+- Tested prompts `#21` through `#30` from `docs/rule-proposal-prompt-test-set-2.md` with the real local LLM harness (`gemma3:4b`, Ollama, translation disabled). The initial LLM-assisted check exposed unsafe semantic drift when normalized text was used in an ad hoc harness: removal, doubling, modulo, and exact-position semantics could be dropped.
+- Updated the deterministic rule DSL/compiler path so prompts `#21`-`#30` compile into exact guess/draw-only ASTs: bounded removal, guarded doubled values, below-50 count split, first/last-three slice sums, position-wise parity, within-any-draw distance, sum modulo 10, and exact same-position match count.
+- Added `value_within_any_count_at_least` to the schema/runtime for prompt `#28`, because "within ten of at least one drawn number" is not the same as same-position distance.
+- Improved the LLM compile harness prompt and runtime `rule-authoring` skill with the new node and concrete prompt-set examples, including `remove_up_to_n`, `map_with_guard`, `below-50 split`, `value_within_any_count_at_least`, and `sum(guess) mod 10`.
+- Added regression coverage for schema validation, runtime behavior, compiler prompt coverage, API LLM prompt coverage, and direct prompt-set-2 prompts `#21`-`#30`, including runtime spot checks for doubled values, last-three sums, within-any distance, modulo sums, and exact one position.
+- Final real LLM harness run mirrored the API flow by compiling from the original prompt text, not the LLM-normalized text. All prompts `#21`-`#30` returned `VALID`, `failures=0`, and deterministic AST kinds were: `compare`, `count_at_least`, `count_at_least`, `compare`, `compare`, `compare`, `all_equal_ordered`, `value_within_any_count_at_least`, `compare`, and `ordered_position_match_count_eq`.
+- Verified: `pnpm --filter @idealer/rule-schema typecheck`, `test` (7/7), `lint`, `build`; `pnpm --filter @idealer/rule-runtime typecheck`, `test` (13/13), `lint`, `build`; `pnpm --filter @idealer/rule-compiler typecheck`, `test` (34/34), `lint`, `build`; `pnpm --filter @idealer/api typecheck`, `test` (58/58), `lint`, `build`.
+- Reviewed the result for inconsistencies: all new semantics remain inside the bounded `guess`/`draw` DSL, ambiguous/external rules still fail closed, no prompt reference file was edited for convenience, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.

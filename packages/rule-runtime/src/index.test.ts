@@ -213,6 +213,19 @@ test("predicate: absolute same-position distance and reversed-position matches",
       },
     },
   };
+  const fourWithinTenOfAnyDraw: RuleAst = {
+    schemaVersion: 2,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "value_within_any_count_at_least",
+        left: { kind: "source", source: "guess" },
+        right: { kind: "source", source: "draw" },
+        distance: 10,
+        value: 4,
+      },
+    },
+  };
   const threeSameLastDigits: RuleAst = {
     schemaVersion: 2,
     result: {
@@ -303,6 +316,20 @@ test("predicate: absolute same-position distance and reversed-position matches",
     evaluatePredicate(exactlyTwoGreaterByPosition, {
       guess: [2, 3, 4, 4, 5, 6],
       draw: [1, 2, 3, 4, 5, 6],
+    }).result,
+    "LOSE",
+  );
+  assert.equal(
+    evaluatePredicate(fourWithinTenOfAnyDraw, {
+      guess: [8, 29, 41, 62, 90, 100],
+      draw: [10, 20, 50, 70, 1, 2],
+    }).result,
+    "WIN",
+  );
+  assert.equal(
+    evaluatePredicate(fourWithinTenOfAnyDraw, {
+      guess: [8, 29, 41, 90, 95, 100],
+      draw: [10, 20, 70, 1, 2, 3],
     }).result,
     "LOSE",
   );
