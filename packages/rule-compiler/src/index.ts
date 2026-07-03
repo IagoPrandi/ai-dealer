@@ -221,11 +221,22 @@ const AMBIGUOUS_PATTERNS = [
 
 const EXTERNAL_DEPENDENCY_PATTERNS = [
   /\b(wallet|address|creator|voter|votes?|leaderboard|profile|admin)\b/i,
-  /\b(time|timestamp|block|slot|transaction|signature|balance|prize|pool|payout)\b/i,
-  /\b(previous|next|future|past|history|streak|yesterday|today|tomorrow|last\s+turn)\b/i,
+  /\b(time|timestamp|block|slot|transaction|signature|balance|prize|pool|payout|fees?)\b/i,
+  /\b(previous|next|future|past|history|streak|yesterday|today|tomorrow|last\s+turn|last\s+round|this\s+week)\b/i,
   /\bsame\s+rule\b.{0,60}\bdifferent\s+wording\b/i,
-  /\b(other players?|all players?|no other player|among all players)\b/i,
+  /\b(other players?|all players?|no other player|among all players|everyone\s+else)\b/i,
   /\b(weather|rain|rains|sunny|price|oracle|twitter|x\/twitter|discord|website|api|external)\b/i,
+  // Provider / model identity: a rule must never depend on which AI/provider
+  // compiled it (that is off-chain, non-deterministic infrastructure state).
+  /\b(openai|anthropic|gpt-?\d|claude|gemini|ollama|vllm|compiler\s+provider|model\s+provider|provider\s+is)\b/i,
+  // AI subjectivity / non-determinism: the AI must convert intent, never decide
+  // the outcome. "the AI thinks/decides/chooses/knows", "let the AI ...".
+  /\b(a\.?i\.?|artificial\s+intelligence|llm)\b[^.]{0,25}\b(think|thinks|thought|decide|decides|deciding|choose|chooses|choosing|judge|judges|feel|feels|knows?|privately|interpret|reinterpret)\b/i,
+  /\blet\s+the\s+(ai|model|runtime|dealer)\b/i,
+  /\bask\s+the\s+runtime\b/i,
+  // Meta / game-state: outcomes tied to the rule's own election/standing.
+  /\brule\s+of\s+the\s+hour\b/i,
+  /\b(early\s+supporters?|before\s+everyone|first\s+to\s+(propose|vote|support|back))\b/i,
 ] as const;
 
 const PROMPT_CONTRACT: RuleValidationPromptContract = {
@@ -253,6 +264,27 @@ const PROMPT_CONTRACT: RuleValidationPromptContract = {
 
 export function getRuleValidationPromptContract(): RuleValidationPromptContract {
   return PROMPT_CONTRACT;
+}
+
+/**
+ * Fast, deterministic check for whether a rule references off-chain / external /
+ * non-deterministic state (wallets, votes, prizes, time, other players, AI
+ * subjectivity, provider identity, the rule's own election, ...). Exposed so the
+ * API preflight can reject these BEFORE spending an LLM interpret call — the same
+ * patterns the validator uses, so the pre-LLM gate and the validator agree. This
+ * is intentionally the single source of truth for "external dependency".
+ */
+export function hasExternalDependency(text: string): boolean {
+  return hasPattern(normalizeRuleText(text), EXTERNAL_DEPENDENCY_PATTERNS);
+}
+
+/**
+ * Fast, deterministic check for subjective / vague wording that cannot be turned
+ * into an objective predicate without clarification (close, lucky, balanced,
+ * vibe, ...). Exposed for the same reason as hasExternalDependency.
+ */
+export function hasAmbiguousWording(text: string): boolean {
+  return hasPattern(normalizeRuleText(text), AMBIGUOUS_PATTERNS);
 }
 
 export function createCompilerPlaceholder(
@@ -538,6 +570,15 @@ function buildAttemptContext(
     reasonCodes.delete("AMBIGUOUS_RULE");
   }
   if (looksLikeObjectiveEvenCountComparison(normalizedText)) {
+    reasonCodes.delete("AMBIGUOUS_RULE");
+  }
+  // A vague word (close, balanced, ...) is a false positive when the player is
+  // explicitly DEFINING it with objective criteria that the deterministic
+  // compiler can turn into a concrete predicate — e.g. "By close, I mean each
+  // guessed number is within 5 ..." or "Balanced means exactly 3 odd and 3 even"
+  // (prompt-set sequences 1 & 2, turns 72 and 75). Only clear the flag when both
+  // hold, so a merely-vague rule (no definition, no compile) still asks to refine.
+  if (looksLikeDefinedObjectiveRule(normalizedText)) {
     reasonCodes.delete("AMBIGUOUS_RULE");
   }
   if (looksLikeAmbiguousReverseRule(normalizedText)) {
@@ -901,6 +942,38 @@ function hasPattern(value: string, patterns: readonly RegExp[]) {
 }
 
 function compileSupportedRule(text: string): RuleAst | null {
+  // Newly-supported deterministic shapes (prompt-set 24/25/26/27/82/84). Placed
+  // first so their specific wording wins over the broader generic fallbacks.
+  const orderedParityMatch = parseOrderedParityMatchRule(text);
+  if (orderedParityMatch) {
+    return predicateRule(orderedParityMatch);
+  }
+
+  const slicedSumComparison = parseSlicedSumComparisonRule(text);
+  if (slicedSumComparison) {
+    return predicateRule(slicedSumComparison);
+  }
+
+  const filteredCountComparison = parseFilteredCountComparisonRule(text);
+  if (filteredCountComparison) {
+    return predicateRule(filteredCountComparison);
+  }
+
+  const sumDifferenceThreshold = parseSumDifferenceThresholdRule(text);
+  if (sumDifferenceThreshold) {
+    return predicateRule(sumDifferenceThreshold);
+  }
+
+  const boundedRemovalMatch = parseBoundedRemovalMatchRule(text);
+  if (boundedRemovalMatch) {
+    return predicateRule(boundedRemovalMatch);
+  }
+
+  const exactParityCount = parseExactParityCountRule(text);
+  if (exactParityCount) {
+    return predicateRule(exactParityCount);
+  }
+
   const reversePositionMatch = parseReversePositionMatchRule(text);
   if (reversePositionMatch) {
     return predicateRule(reversePositionMatch);
@@ -1121,6 +1194,176 @@ function filterMod(
   return { kind: "filter_mod", equals, modulus, of };
 }
 
+function filterCompare(
+  of: ArrayExpr,
+  op: CompareOp,
+  value: number,
+): ArrayExpr {
+  return { kind: "filter_compare", of, op, value };
+}
+
+function mapArith(
+  of: ArrayExpr,
+  op: "add" | "sub" | "mul" | "div" | "mod",
+  operand: number,
+): ArrayExpr {
+  return { kind: "map_arithmetic", of, op, operand };
+}
+
+function allEqualOrdered(left: ArrayExpr, right: ArrayExpr): PredicateNode {
+  return { kind: "all_equal_ordered", left, right };
+}
+
+function countAtLeast(of: ArrayExpr, value: number): PredicateNode {
+  return { kind: "count_at_least", of, value };
+}
+
+function parseWordOrDigit(value: string): number | null {
+  const word = value.toLowerCase();
+  if (NUMBER_WORDS.has(word)) {
+    return NUMBER_WORDS.get(word) ?? null;
+  }
+  const parsed = Number(word);
+  return Number.isInteger(parsed) ? parsed : null;
+}
+
+// #24: "count of guessed numbers below 50 equals the count of drawn numbers
+// below 50" -> compare the two filtered counts. Supports below/under (lt) and
+// above/over (gt); thresholds must be a valid 1..100 number value.
+function parseFilteredCountComparisonRule(text: string): PredicateNode | null {
+  const match = text.match(
+    /\bcount\b[^.]{0,30}\b(guessed?|picked|ticket|your)\b[^.]{0,25}\b(below|under|less than|fewer than|above|over|greater than|more than)\s+(\d+)\b[^.]{0,50}\b(equal|equals|same|matches?|is)\b[^.]{0,50}\b(drawn?|draw)\b[^.]{0,25}\b(below|under|less than|fewer than|above|over|greater than|more than)\s+(\d+)\b/i,
+  );
+  if (!match) {
+    return null;
+  }
+  const opFor = (word: string): CompareOp =>
+    /below|under|less|fewer/i.test(word) ? "lt" : "gt";
+  const guessValue = Number(match[3]);
+  const drawValue = Number(match[7]);
+  if (
+    !Number.isInteger(guessValue) ||
+    !Number.isInteger(drawValue) ||
+    guessValue < 1 ||
+    guessValue > 100 ||
+    drawValue < 1 ||
+    drawValue > 100
+  ) {
+    return null;
+  }
+  return compare(
+    count(filterCompare(source("guess"), opFor(match[2] ?? ""), guessValue)),
+    "eq",
+    count(filterCompare(source("draw"), opFor(match[6] ?? ""), drawValue)),
+  );
+}
+
+// #25/#26: "the first/last three guessed numbers sum to the first/last three
+// drawn numbers" -> compare the sums of the sliced sub-arrays (fixed size 6).
+function parseSlicedSumComparisonRule(text: string): PredicateNode | null {
+  const match = text.match(
+    /\b(first|last)\s+(one|two|three|four|five|six|\d+)\b[^.]{0,25}\b(guessed?|picked|ticket|your)\b[^.]{0,40}\b(sum|add up|total)\b[^.]{0,40}\b(first|last)\s+(one|two|three|four|five|six|\d+)\b[^.]{0,25}\b(drawn?|draw)\b/i,
+  );
+  if (!match) {
+    return null;
+  }
+  const side = (match[1] ?? "").toLowerCase();
+  const otherSide = (match[5] ?? "").toLowerCase();
+  const n = parseWordOrDigit(match[2] ?? "");
+  const otherN = parseWordOrDigit(match[6] ?? "");
+  if (n === null || otherN === null || n !== otherN || n < 1 || n > 6 || side !== otherSide) {
+    return null;
+  }
+  const sliceFor = (name: "draw" | "guess"): ArrayExpr =>
+    side === "first" ? sliceArray(source(name), 0, n) : sliceArray(source(name), 6 - n);
+  return compare(sum(sliceFor("guess")), "eq", sum(sliceFor("draw")));
+}
+
+// #82: "guessed sum is greater than the drawn sum by at least 20" -> compare the
+// difference of the two sums against the threshold (at least=gte, more than=gt,
+// exactly=eq).
+function parseSumDifferenceThresholdRule(text: string): PredicateNode | null {
+  const match = text.match(
+    /\b(guessed?|picked|ticket|your)\s+sum\b[^.]{0,30}\b(greater|higher|above|more|exceeds?|larger|bigger)\b[^.]{0,30}\b(drawn?|draw)\s+sum\b[^.]{0,20}\bby\s+(at least|more than|over|exactly)\s+(\d+)\b/i,
+  );
+  if (!match) {
+    return null;
+  }
+  const value = Number(match[5]);
+  if (!Number.isInteger(value) || value < 0 || value > 600) {
+    return null;
+  }
+  const kind = (match[4] ?? "").toLowerCase();
+  const op: CompareOp = kind === "exactly" ? "eq" : kind === "at least" ? "gte" : "gt";
+  return compare(
+    arith("sub", sum(source("guess")), sum(source("draw"))),
+    op,
+    lit(value),
+  );
+}
+
+// #27: "every guessed number has the same parity as the drawn number in the same
+// position" -> compare the position-wise parity arrays (value mod 2) for exact
+// ordered equality.
+function parseOrderedParityMatchRule(text: string): PredicateNode | null {
+  if (
+    !/\bevery\s+(guessed?|picked)\s+number\b[^.]{0,40}\bsame\s+parity\b[^.]{0,60}\b(drawn?|draw)\b[^.]{0,40}\b(same position|corresponding position|same index)\b/i.test(
+      text,
+    )
+  ) {
+    return null;
+  }
+  return allEqualOrdered(
+    mapArith(source("guess"), "mod", 2),
+    mapArith(source("draw"), "mod", 2),
+  );
+}
+
+// #84: "remove up to 2 guessed numbers with the largest absolute difference from
+// any drawn number, then win if 3 remaining guessed numbers appear in the draw".
+// The removed numbers are the ones FARTHEST from the draw (distance > 0), which
+// are by definition not in the draw, so removal never changes how many guessed
+// numbers appear in the draw -> this is exactly "at least M appear in the draw".
+function parseBoundedRemovalMatchRule(text: string): PredicateNode | null {
+  const match = text.match(
+    /\bremove\s+up\s+to\s+\d+\b[^.]{0,60}\blargest\s+absolute\s+difference\b[^.]{0,50}\b(drawn?|draw)\b[^.]{0,70}\b(one|two|three|four|five|six|\d+)\s+remaining\b[^.]{0,45}\b(appear|appears|in the draw|in the drawn)\b/i,
+  );
+  if (!match) {
+    return null;
+  }
+  const value = parseWordOrDigit(match[2] ?? "");
+  if (value === null || value < 1 || value > 6) {
+    return null;
+  }
+  return countAtLeast(intersection(source("guess"), source("draw")), value);
+}
+
+// Impossible-by-construction rules (prompt-set 64/65). A guessed/drawn NUMBER
+// value can only be 1..100, and no integer is both even and odd. These can never
+// hold, so they are rejected before payment rather than compiled into a rule
+// that always loses. Exported so the API preflight blocks them before the LLM.
+const INVALID_CONSTRAINT_PATTERNS = [
+  /\b(both\s+even\s+and\s+odd|even\s+and\s+odd\s+at\s+the\s+same\s+time|odd\s+and\s+even\s+at\s+the\s+same\s+time)\b/i,
+] as const;
+
+export function hasInvalidConstraint(text: string): boolean {
+  const normalized = normalizeRuleText(text);
+  if (hasPattern(normalized, INVALID_CONSTRAINT_PATTERNS)) {
+    return true;
+  }
+  // A single guessed/drawn number compared/equated to a value outside 1..100.
+  const outOfRange = normalized.matchAll(
+    /\b(?:any|a|each|every|some|the)?\s*(?:guessed?|picked|drawn?|draw|ticket)?\s*number\b[^.]{0,20}\b(?:is|are|be|equals?|equal to|=|hits?|reaches?)\s+(\d{1,4})\b/gi,
+  );
+  for (const m of outOfRange) {
+    const value = Number(m[1]);
+    if (Number.isInteger(value) && (value < 1 || value > 100)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function compare(
   left: ScalarExpr,
   op: CompareOp,
@@ -1146,6 +1389,16 @@ function looksLikeObjectiveStartComparison(text: string) {
     /\bstart\s+stronger\b/i.test(text) &&
     /\bfirst\s+pick\b.{0,80}\b(higher|greater|above|more)\b.{0,80}\bfirst\s+drawn\s+number\b/i.test(text)
   );
+}
+
+// The player is defining a vague term (means / I mean / defined as) AND the
+// wording deterministically compiles to a concrete predicate. When both hold,
+// the vague trigger word is a false positive for ambiguity.
+function looksLikeDefinedObjectiveRule(text: string): boolean {
+  const definesTerm =
+    /\b(means|i mean|defined as|defining|refers to)\b/i.test(text) ||
+    /\bby\s+[\w-]+,?\s+i\s+mean\b/i.test(text);
+  return definesTerm && compileSupportedRule(text) !== null;
 }
 
 function looksLikeObjectiveEvenCountComparison(text: string) {
@@ -1423,7 +1676,19 @@ function parseOrderedAbsoluteDifferenceRule(text: string): PredicateNode | null 
   const match = text.match(
     /\babsolute\s+difference\b.{0,80}\beach\s+(?:guessed?|picked|ticket|your)\s+number\b.{0,80}\b(draw|drawn)\s+number\b.{0,80}\b(same position|corresponding position|same index)\b.{0,80}\b(at most|no more than|less than or equal to|<=)\s+([0-9]+)\b/i,
   );
-  const value = match?.[4] ? Number(match[4]) : NaN;
+  // Alternative wording (prompt-set 72): "each guessed number is within 5 of the
+  // drawn number in the same position" — same predicate, no "absolute difference"
+  // phrase. "within N" of the same-position value means |guess[i]-draw[i]| <= N.
+  const withinMatch =
+    match ??
+    text.match(
+      /\beach\s+(?:guessed?|picked|ticket|your)\s+number\b.{0,40}\bwithin\s+([0-9]+)\b.{0,40}\b(draw|drawn)\s+number\b.{0,40}\b(same position|corresponding position|same index)\b/i,
+    );
+  const value = match?.[4]
+    ? Number(match[4])
+    : withinMatch?.[1]
+      ? Number(withinMatch[1])
+      : NaN;
   if (!Number.isInteger(value) || value < 0 || value > 100) {
     return null;
   }
@@ -1432,6 +1697,46 @@ function parseOrderedAbsoluteDifferenceRule(text: string): PredicateNode | null 
     left: source("guess"),
     right: source("draw"),
     value,
+  };
+}
+
+// #75/#76: "exactly 3 guessed numbers are odd and exactly 3 are even" (or the
+// same for the draw). Compiles to a conjunction of two filtered-count equalities
+// over one source (guess unless only the draw is named).
+function parseExactParityCountRule(text: string): PredicateNode | null {
+  const match = text.match(
+    /\bexactly\s+(one|two|three|four|five|six|\d+)\b[^.]{0,35}\b(odd|even)\b[^.]{0,25}\band\b[^.]{0,25}(?:exactly\s+)?(one|two|three|four|five|six|\d+)\b[^.]{0,25}\b(odd|even)\b/i,
+  );
+  if (!match) {
+    return null;
+  }
+  const firstCount = parseWordOrDigit(match[1] ?? "");
+  const secondCount = parseWordOrDigit(match[3] ?? "");
+  const firstParity = (match[2] ?? "").toLowerCase();
+  const secondParity = (match[4] ?? "").toLowerCase();
+  if (
+    firstCount === null ||
+    secondCount === null ||
+    firstCount < 0 ||
+    firstCount > 6 ||
+    secondCount < 0 ||
+    secondCount > 6 ||
+    firstParity === secondParity
+  ) {
+    return null;
+  }
+  const drawOnly =
+    /\b(drawn?|draw)\b/i.test(text) &&
+    !/\b(guess|guessed|picked|ticket)\b/i.test(text);
+  const src = source(drawOnly ? "draw" : "guess");
+  const clauseFor = (parity: string, value: number): PredicateNode =>
+    compare(count(filterMod(src, 2, parity === "odd" ? 1 : 0)), "eq", lit(value));
+  return {
+    kind: "and",
+    clauses: [
+      clauseFor(firstParity, firstCount),
+      clauseFor(secondParity, secondCount),
+    ],
   };
 }
 

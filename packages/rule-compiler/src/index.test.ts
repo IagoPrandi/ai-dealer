@@ -6,7 +6,11 @@ import {
   compileRuleArtifact,
   createLocalOnlyProviderRoutingPolicy,
   createCompilerPlaceholder,
+  evaluatePredicate,
   getRuleValidationPromptContract,
+  hasAmbiguousWording,
+  hasExternalDependency,
+  hasInvalidConstraint,
   RULE_COMPILER_SKILL_VERSION,
   validateAndPrecompileRule,
 } from "./index.js";
@@ -557,6 +561,161 @@ test("blocks the first 10 BLOCK prompts as external dependencies", () => {
     assert.equal(result.decision, "INVALID", prompt);
     assert.ok(result.log.reasonCodes.includes("EXTERNAL_DEPENDENCY"), prompt);
     assert.equal(result.artifactHash, null, prompt);
+  }
+});
+
+test("detects provider / AI-subjectivity / meta / social external dependencies", () => {
+  // Prompts that previously fell through to the LLM (or were mislabeled as merely
+  // ambiguous) must now be caught deterministically as external dependencies so
+  // the API preflight can reject them before spending a model call.
+  const externalIds = [56, 57, 60, 85, 111];
+  for (const [ruleId, row] of readPromptRowsById(externalIds)) {
+    assert.equal(
+      hasExternalDependency(row.prompt),
+      true,
+      `#${ruleId} should be flagged external: ${row.prompt}`,
+    );
+    const result = validateAndPrecompileRule({
+      prompt: row.prompt,
+      ruleId,
+      tokenCount: tokenCount(row.prompt),
+    });
+    assert.equal(result.decision, "INVALID", row.prompt);
+    assert.ok(
+      result.log.reasonCodes.includes("EXTERNAL_DEPENDENCY"),
+      row.prompt,
+    );
+  }
+
+  // The guard must not swallow legitimately objective or merely-ambiguous rules.
+  const notExternalIds = [21, 24, 27, 29, 30, 40, 82, 84, 106, 108, 110];
+  for (const [ruleId, row] of readPromptRowsById(notExternalIds)) {
+    assert.equal(
+      hasExternalDependency(row.prompt),
+      false,
+      `#${ruleId} must NOT be flagged external: ${row.prompt}`,
+    );
+  }
+
+  // Sanity: the exported ambiguity helper still recognizes vague wording.
+  assert.equal(hasAmbiguousWording("Win if my numbers are close to the draw."), true);
+  assert.equal(
+    hasAmbiguousWording(
+      "Win if exactly one guessed number matches the drawn number in the same position.",
+    ),
+    false,
+  );
+});
+
+test("deterministically compiles filtered-count, sliced-sum, parity, sum-diff and bounded-removal rules", () => {
+  const expectedKind: Record<number, string> = {
+    24: "compare",
+    25: "compare",
+    26: "compare",
+    27: "all_equal_ordered",
+    82: "compare",
+    84: "count_at_least",
+  };
+  for (const [ruleId, row] of readPromptRowsById([24, 25, 26, 27, 82, 84])) {
+    const result = validateAndPrecompileRule({
+      prompt: row.prompt,
+      ruleId,
+      tokenCount: tokenCount(row.prompt),
+    });
+    assert.equal(result.decision, "VALID", `#${ruleId}: ${row.prompt}`);
+    assert.match(result.artifactHash ?? "", /^[0-9a-f]{64}$/, row.prompt);
+    const ast = result.artifact?.ast;
+    const predicate =
+      ast?.schemaVersion === 2 && ast.result.type === "predicate"
+        ? ast.result.predicate
+        : null;
+    assert.equal(predicate?.kind, expectedKind[ruleId], `#${ruleId} kind`);
+  }
+
+  // Spot-check runtime semantics for the two shapes with the subtlest meaning.
+  const parityAst = validateAndPrecompileRule({
+    prompt:
+      "Win if every guessed number has the same parity as the drawn number in the same position.",
+    tokenCount: 16,
+  }).artifact!.ast;
+  assert.equal(
+    evaluatePredicate(parityAst, { guess: [1, 4, 5, 8, 9, 12], draw: [3, 2, 7, 6, 11, 20] }).result,
+    "WIN",
+  );
+  assert.equal(
+    evaluatePredicate(parityAst, { guess: [2, 4, 5, 8, 9, 12], draw: [3, 2, 7, 6, 11, 20] }).result,
+    "LOSE",
+  );
+
+  const removalAst = validateAndPrecompileRule({
+    prompt:
+      "Remove up to 2 guessed numbers with the largest absolute difference from any drawn number, then win if 3 remaining guessed numbers appear in the draw.",
+    tokenCount: 26,
+  }).artifact!.ast;
+  assert.equal(
+    evaluatePredicate(removalAst, { guess: [1, 2, 3, 40, 50, 60], draw: [1, 2, 3, 70, 80, 90] }).result,
+    "WIN",
+  );
+  assert.equal(
+    evaluatePredicate(removalAst, { guess: [1, 2, 40, 41, 50, 60], draw: [1, 2, 3, 70, 80, 90] }).result,
+    "LOSE",
+  );
+});
+
+test("compiles defined vague terms (sequences 1 & 2) while keeping bare vague rules ambiguous", () => {
+  // Bare vague term -> still needs clarification.
+  for (const [, row] of readPromptRowsById([71, 74])) {
+    const result = validateAndPrecompileRule({
+      prompt: row.prompt,
+      tokenCount: tokenCount(row.prompt),
+    });
+    assert.equal(result.decision, "INVALID", row.prompt);
+    assert.ok(result.log.reasonCodes.includes("AMBIGUOUS_RULE"), row.prompt);
+  }
+  // Same vague word, now explicitly defined with objective, compilable criteria.
+  const expectedKind: Record<number, string> = {
+    72: "all_ordered_abs_diff_lte",
+    75: "and",
+    76: "and",
+  };
+  for (const [ruleId, row] of readPromptRowsById([72, 75, 76])) {
+    const result = validateAndPrecompileRule({
+      prompt: row.prompt,
+      ruleId,
+      tokenCount: tokenCount(row.prompt),
+    });
+    assert.equal(result.decision, "VALID", `#${ruleId}: ${row.prompt}`);
+    const ast = result.artifact?.ast;
+    const predicate =
+      ast?.schemaVersion === 2 && ast.result.type === "predicate"
+        ? ast.result.predicate
+        : null;
+    assert.equal(predicate?.kind, expectedKind[ruleId], `#${ruleId} kind`);
+  }
+
+  // #75 semantics: exactly 3 odd and 3 even guessed numbers.
+  const balancedAst = validateAndPrecompileRule({
+    prompt:
+      "Balanced means exactly 3 guessed numbers are odd and exactly 3 are even.",
+    tokenCount: 12,
+  }).artifact!.ast;
+  assert.equal(
+    evaluatePredicate(balancedAst, { guess: [1, 3, 5, 2, 4, 6], draw: [9, 9, 9, 9, 9, 9] }).result,
+    "WIN",
+  );
+  assert.equal(
+    evaluatePredicate(balancedAst, { guess: [1, 3, 2, 2, 4, 6], draw: [9, 9, 9, 9, 9, 9] }).result,
+    "LOSE",
+  );
+});
+
+test("rejects impossible-by-construction rules (out-of-range value, even-and-odd)", () => {
+  for (const [, row] of readPromptRowsById([64, 65])) {
+    assert.equal(hasInvalidConstraint(row.prompt), true, row.prompt);
+  }
+  // Must not fire on legitimate in-range references or thresholds.
+  for (const [, row] of readPromptRowsById([23, 28, 82])) {
+    assert.equal(hasInvalidConstraint(row.prompt), false, row.prompt);
   }
 });
 

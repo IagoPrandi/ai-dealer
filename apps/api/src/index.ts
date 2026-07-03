@@ -24,6 +24,8 @@ import {
 } from "@idealer/constants";
 import {
   compileRuleArtifact,
+  hasExternalDependency,
+  hasInvalidConstraint,
   ruleAstSchema,
   resolveRankingWinners,
   validateAndPrecompileRule,
@@ -1509,6 +1511,23 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
 
   if (hasRulePattern(sanitizedText, RULE_EXTERNAL_BLOCK_PATTERNS)) {
     throw new Error("RULE_EXTERNAL_DEPENDENCY");
+  }
+
+  // Deterministic external-dependency gate, run BEFORE any LLM call. The compiler
+  // validator already rejects external references, but only after the ~expensive
+  // interpret step — which also risks a spurious RULE_AGENT_BAD_RESPONSE when a
+  // small model chokes on an obviously-unsupportable rule. Blocking here (using
+  // the compiler's own patterns as the single source of truth) turns those cases
+  // into an instant, clean rejection and never wastes a model round-trip.
+  if (hasExternalDependency(sanitizedText)) {
+    throw new Error("RULE_EXTERNAL_DEPENDENCY");
+  }
+
+  // Impossible-by-construction rules (a number outside 1-100, or both even and
+  // odd) can never hold; reject before payment instead of compiling a rule that
+  // always loses. Deterministic, so it also runs before any LLM call.
+  if (hasInvalidConstraint(sanitizedText)) {
+    throw new Error("RULE_INVALID_CONSTRAINT");
   }
 
   if (tokenCount > RULE_MAX_TOKENS) {
@@ -7778,6 +7797,8 @@ if (isMainModule()) {
                   ? "Rule text contains prompt-injection language. Rewrite it as a measurable game condition."
                   : code === "RULE_EXTERNAL_DEPENDENCY"
                     ? "Rule text depends on unavailable external game state. Rewrite it using only your guess and the official draw."
+                  : code === "RULE_INVALID_CONSTRAINT"
+                    ? "Rule uses an impossible constraint (numbers are 1-100, and a number cannot be both even and odd). Rewrite it as a condition that can actually happen."
                   : code === "RULE_TOKEN_LIMIT_EXCEEDED"
                     ? `Rule text exceeds the ${RULE_MAX_TOKENS}-token limit.`
                     : code === "RULE_TEXT_TOO_LONG"
