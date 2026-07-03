@@ -187,14 +187,14 @@ function ClarificationPrompt({
         borderRadius: 24,
         boxShadow: "0 22px 44px -28px rgba(0,0,0,0.9)",
         display: "grid",
-        gap: 12,
-        padding: 14,
+        gap: 10,
+        padding: 12,
       }}
     >
-      <h2 style={{ color: "var(--text)", fontSize: 20, fontWeight: 800, letterSpacing: "-0.01em", lineHeight: 1.15, margin: "2px 2px 8px" }}>
+      <h2 style={{ color: "var(--text)", fontSize: 17, fontWeight: 800, letterSpacing: "-0.01em", lineHeight: 1.2, margin: "0 2px 2px" }}>
         {title}
       </h2>
-      <div style={{ display: "grid", gap: 8 }}>
+      <div style={{ display: "grid", gap: 7 }}>
         {options.map((option, index) => {
           const selected = selectedIndex === index;
           return (
@@ -213,9 +213,9 @@ function ClarificationPrompt({
                 display: "grid",
                 fontFamily: "Outfit",
                 gap: 12,
-                gridTemplateColumns: "44px minmax(0, 1fr) auto",
-                minHeight: 58,
-                padding: "11px 14px",
+                gridTemplateColumns: "44px minmax(0, 1fr)",
+                minHeight: 54,
+                padding: "10px 12px",
                 textAlign: "left",
               }}
               type="button"
@@ -223,14 +223,9 @@ function ClarificationPrompt({
               <span className="ide-num" style={{ alignItems: "center", background: selected ? "rgba(244,241,250,0.9)" : "rgba(255,255,255,0.12)", borderRadius: 999, color: selected ? "#17121F" : "var(--muted)", display: "inline-flex", fontSize: 17, fontWeight: 800, height: 40, justifyContent: "center", width: 40 }}>
                 {index + 1}
               </span>
-              <span style={{ color: selected ? "var(--text)" : "var(--muted)", fontSize: 15, fontWeight: 750, lineHeight: 1.25, minWidth: 0, overflowWrap: "anywhere" }}>
+              <span style={{ color: selected ? "var(--text)" : "var(--muted)", fontSize: 15, fontWeight: 400, lineHeight: 1.45, minWidth: 0, overflowWrap: "anywhere" }}>
                 {option.text}
               </span>
-              {selected ? (
-                <span aria-hidden="true" style={{ color: "var(--dim)", display: "inline-flex", gap: 7, fontSize: 19, lineHeight: 1 }}>
-                  <span>↑</span><span>↓</span>
-                </span>
-              ) : null}
             </button>
           );
         })}
@@ -249,7 +244,7 @@ function ClarificationPrompt({
             gap: 12,
             gridTemplateColumns: "44px minmax(0, 1fr)",
             minHeight: 48,
-            padding: "7px 14px",
+            padding: "6px 12px",
             textAlign: "left",
           }}
           type="button"
@@ -257,18 +252,18 @@ function ClarificationPrompt({
           <span style={{ alignItems: "center", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 999, display: "inline-flex", height: 34, justifyContent: "center", width: 34 }}>
             <Ico.edit style={{ color: "var(--muted)", height: 17, width: 17 }} />
           </span>
-          <span style={{ fontSize: 15, lineHeight: 1.25, minWidth: 0, overflowWrap: "anywhere" }}>
+          <span style={{ fontSize: 15, fontWeight: 400, lineHeight: 1.45, minWidth: 0, overflowWrap: "anywhere" }}>
             {manualText.trim() ? manualText : "Write your own clarification..."}
           </span>
         </button>
       </div>
-      <div style={{ alignItems: "center", display: "flex", gap: 10, justifyContent: "flex-end", paddingTop: 2 }}>
+      <div style={{ alignItems: "center", display: "flex", gap: 10, justifyContent: "space-between", paddingTop: 2 }}>
         <button
           onClick={onDismiss}
-          style={{ background: "transparent", border: "none", color: "var(--muted)", cursor: "pointer", fontFamily: "Outfit", fontSize: 14.5, fontWeight: 650, padding: "9px 2px" }}
+          style={{ background: "transparent", border: "none", color: "var(--muted)", cursor: "pointer", fontFamily: "Outfit", fontSize: 14.5, fontWeight: 650, minHeight: 44, padding: "9px 2px" }}
           type="button"
         >
-          Dismiss <span style={{ background: "rgba(255,255,255,0.1)", borderRadius: 9, color: "var(--text)", marginLeft: 5, padding: "2px 7px" }}>ESC</span>
+          Dismiss
         </button>
         <button
           className="ide-btn"

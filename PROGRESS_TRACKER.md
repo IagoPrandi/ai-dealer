@@ -68,6 +68,51 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-07-02 (Compact clarification UI screenshot)
+
+- Opened required documents/context before visual capture: `PRD.md`, `AGENTS.md`, `.claude/skills`, and `.claude/skills/playwright/SKILL.md`.
+- Started the web app on `127.0.0.1:3005` with mocked Sequence 8 and Sequence 9 preflight responses, then captured the current compact mobile clarification UI.
+- Saved screenshots under `output/playwright/`: `rule-prompt-compact-seq8-panel.png`, `rule-prompt-compact-seq8-full.png`, `rule-prompt-compact-seq9-panel.png`, and `rule-prompt-compact-seq9-full.png`.
+- Reviewed the screenshots for inconsistencies: the header is smaller, panel margins are tighter, suggestions remain normal-weight chat-sized text, and mobile `Dismiss`/`Submit` actions remain available. The local dev server was stopped afterward and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-02 (Compact rule clarification prompt spacing)
+
+- Opened required documents/context before editing: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/develop-frontend/SKILL.md`, `.claude/skills/idealer-design-system/SKILL.md`, and `.claude/skills/idealer-test-and-verify/SKILL.md`.
+- Reduced the rule clarification prompt header size from 20px to 17px and tightened the header margin so `Fix this blocked rule?` / `Clarify this rule?` no longer dominates the mobile panel.
+- Reduced panel padding, internal gaps, option-row padding, and option-row minimum height while preserving 44px+ tap targets and the 15px normal-weight suggestion text.
+- Updated the E2E test to assert the compact 17px heading while keeping Sequence 8/9 behavior, suggestion typography checks, and mobile-only checks for absence of visible `ESC`, `↑`, and `↓` hints.
+- Verification passed: `pnpm --filter @idealer/web typecheck`, `pnpm --filter @idealer/web test`, `pnpm --filter @idealer/web lint`, `pnpm --filter @idealer/web build`, and `pnpm --filter @idealer/web test:e2e -- e2e/rule-proposal.spec.ts` (3/3). No milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-02 (Current clarification UI screenshot)
+
+- Opened required documents/context before visual capture: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/playwright/SKILL.md`, and `.claude/skills/idealer-test-and-verify/SKILL.md`.
+- Started the web app on `127.0.0.1:3005` with mocked Sequence 8 and Sequence 9 preflight responses, then captured the current mobile clarification UI after the typography and mobile-hint cleanup.
+- Saved current screenshots under `output/playwright/`: `rule-prompt-current-seq8-panel.png`, `rule-prompt-current-seq8-full.png`, `rule-prompt-current-seq9-panel.png`, and `rule-prompt-current-seq9-full.png`.
+- Reviewed the screenshots for inconsistencies: suggestions now use normal-weight chat-sized text, visible `ESC` and arrow hints are absent, and the mobile `Dismiss`/`Submit` actions remain available. The local dev server was stopped afterward and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-02 (Rule clarification prompt typography)
+
+- Opened required documents/context before editing: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/develop-frontend/SKILL.md`, `.claude/skills/idealer-design-system/SKILL.md`, and `.claude/skills/idealer-test-and-verify/SKILL.md`.
+- Updated the mobile rule clarification prompt so suggestion text uses the same 15px body size as the chat bubbles, with normal `fontWeight: 400` instead of bold styling.
+- Updated the manual clarification row to match the same 15px normal-weight text rhythm and line-height.
+- Added E2E assertions for the primary suggestion font size and font weight, while preserving Sequence 8/9 behavior and the existing mobile checks that no `ESC`, `↑`, or `↓` hints are rendered.
+- Verification passed: `pnpm --filter @idealer/web typecheck`, `pnpm --filter @idealer/web test`, `pnpm --filter @idealer/web lint`, `pnpm --filter @idealer/web build`, and `pnpm --filter @idealer/web test:e2e -- e2e/rule-proposal.spec.ts`. The E2E run again logged Solana devnet warmup certificate warnings, but the mocked rule proposal tests passed 3/3. No milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-02 (Mobile cleanup for rule clarification prompt)
+
+- Opened required documents/context before editing: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/develop-frontend/SKILL.md`, `.claude/skills/idealer-design-system/SKILL.md`, and `.claude/skills/idealer-test-and-verify/SKILL.md`.
+- Removed desktop-only visual affordances from the mobile rule clarification panel: the visible `ESC` key hint, the selected-row up/down arrow hints, and the extra option-grid column reserved for keyboard arrows.
+- Kept the selectable suggestion rows, manual pencil row, `Dismiss`, and blue `Submit` action while making the dismiss control maintain a mobile-sized tap target.
+- Updated `apps/web/e2e/rule-proposal.spec.ts` to assert that Sequence 8/9 still work and that the mobile panel does not render `ESC`, `↑`, or `↓`.
+- Verification passed: `pnpm --filter @idealer/web typecheck`, `pnpm --filter @idealer/web test`, `pnpm --filter @idealer/web lint`, `pnpm --filter @idealer/web build`, and `pnpm --filter @idealer/web test:e2e -- e2e/rule-proposal.spec.ts`. The E2E run logged Solana devnet warmup certificate warnings, but the mocked rule proposal tests passed 3/3. No milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-02 (Rule proposal clarification UI capture)
+
+- Opened required documents/context before visual verification: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/playwright/SKILL.md`, `.claude/skills/idealer-design-system/SKILL.md`, `.claude/skills/idealer-test-and-verify/SKILL.md`, and `docs/rule-proposal-prompt-test-set.md`.
+- Started the web app on `127.0.0.1:3005` with mocked shell data and `/rule-preflight` responses matching Sequence 8 and Sequence 9.
+- Captured the implemented Codex/Claude-style clarification panels under `output/playwright/`: `rule-prompt-seq8-blocked-panel.png`, `rule-prompt-seq8-blocked-full.png`, `rule-prompt-seq9-blocked-panel.png`, `rule-prompt-seq9-clarify-panel.png`, and `rule-prompt-seq9-clarify-full.png`.
+- Reviewed the screenshots for inconsistencies: the panels show the dark rounded surface, selected numbered option, manual pencil row, arrow-key hints, `Dismiss`, `ESC`, and blue `Submit` button. The local dev server was stopped afterward and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
 ### 2026-07-02 (Rule proposal sequences 8, 9, and 10 as conversations)
 
 - Opened required documents/context before and during work: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/idealer-test-and-verify/SKILL.md`, and `docs/rule-proposal-prompt-test-set.md`.
@@ -2947,7 +2992,7 @@ Passed:
 - Updated the dealer chat so wallet connection is no longer required for free chat/preflight; wallet and Game Token remain required for draft persistence and on-chain submission.
 - Added structured API request errors in the web API client so rule blocks (`RULE_PROMPT_INJECTION`, `RULE_EXTERNAL_DEPENDENCY`) are shown as rule-fix prompts while real 5xx dealer/LLM failures remain honest infrastructure errors.
 - Added deterministic guidance helpers and tests for Sequence 8 and Sequence 9 from `docs/rule-proposal-prompt-test-set.md`, including prompt-injection cleanup, other-player dependency removal, and objective close-rule clarification.
-- Replaced inline clarification lists in the create-rule chat with a Codex/Claude-style dark choice prompt: numbered selectable suggestions, manual clarification row, keyboard arrow hints, `Dismiss ESC`, and `Submit`.
+- Replaced inline clarification lists in the create-rule chat with a Codex/Claude-style dark choice prompt: numbered selectable suggestions, manual clarification row, `Dismiss`, and `Submit`; later mobile cleanup removed visible desktop keyboard hints.
 - Updated Playwright coverage for Sequence 8 and Sequence 9 against the live `/play/propose` route with mocked preflight responses.
 - Verified: `pnpm --filter @idealer/web typecheck`; `pnpm --filter @idealer/web test` (8/8); `pnpm --filter @idealer/web lint`; `pnpm --filter @idealer/web build`; `pnpm --filter @idealer/web test:e2e -- e2e/rule-proposal.spec.ts` (3/3).
 - Reviewed the result for inconsistencies: UI copy remains English, manual clarification remains available, blocked-rule UX does not hide compiler errors, infrastructure failures are not converted into rule suggestions, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
