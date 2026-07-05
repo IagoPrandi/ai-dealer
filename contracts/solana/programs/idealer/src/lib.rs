@@ -28,9 +28,14 @@ pub const REPEATED_ACTION_FEE_MULTIPLIER: u64 = 2;
 /// test-only `devnet-test` feature it collapses to a few seconds so the full
 /// election → elimination → active-election pipeline can be validated end-to-end
 /// on devnet without a real 1-hour wait; production builds keep the full hour.
-#[cfg(feature = "devnet-test")]
+/// The `manual-test` feature sets a human-scale 2-minute window for hands-on
+/// devnet playtesting (turn duration itself is runtime-scaled off-chain), and
+/// takes precedence over `devnet-test` when both are enabled.
+#[cfg(feature = "manual-test")]
+pub const ELIMINATION_WINDOW_SECONDS: i64 = 120;
+#[cfg(all(feature = "devnet-test", not(feature = "manual-test")))]
 pub const ELIMINATION_WINDOW_SECONDS: i64 = 5;
-#[cfg(not(feature = "devnet-test"))]
+#[cfg(all(not(feature = "devnet-test"), not(feature = "manual-test")))]
 pub const ELIMINATION_WINDOW_SECONDS: i64 = 3_600;
 pub const MAX_RULE_TEXT_BYTES: usize = 6000;
 pub const BASIS_POINTS_DENOMINATOR: u16 = 10_000;

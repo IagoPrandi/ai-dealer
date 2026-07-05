@@ -17,6 +17,10 @@ custom-heap = []
 # by default and MUST stay off for production builds so the instruction is
 # excluded from the program entirely.
 devnet-test = []
+# TEST-ONLY (devnet): human-scale 2-minute elimination/decision window for
+# hands-on manual playtesting. Takes precedence over `devnet-test`'s 5-second
+# window. OFF by default and MUST stay off for production builds.
+manual-test = []
 # Selects which Switchboard On-Demand program id is accepted as the owner of
 # randomness accounts consumed by the trustless `settle_*` instructions. Enable
 # for devnet builds (binds the devnet Switchboard program); OFF for production

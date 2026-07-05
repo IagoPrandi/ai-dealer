@@ -1,5 +1,7 @@
+import { existsSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { pathToFileURL } from "node:url";
+import { resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { getTurnDurationHours } from "@idealer/game-engine";
 import { createSolanaRpc } from "@solana/kit";
 import pg from "pg";
@@ -36,6 +38,17 @@ export * from "./settlement-loop.js";
 export * from "./settlement-scheduler.js";
 export * from "./switchboard.js";
 export * from "./turn-automation.js";
+
+// Load the repo-root .env for native (non-Docker) dev so DATABASE_URL/REDIS_URL,
+// the turn-authority keypair path, and the LLM/IDEALER_* settings are available
+// without Docker Compose injecting them. Existing process env wins over the file.
+const ROOT_ENV_PATH = resolve(
+  fileURLToPath(new URL("../../..", import.meta.url)),
+  ".env",
+);
+if (existsSync(ROOT_ENV_PATH)) {
+  process.loadEnvFile(ROOT_ENV_PATH);
+}
 
 const { Pool } = pg;
 
