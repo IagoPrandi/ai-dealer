@@ -12,10 +12,11 @@ export const metadata: Metadata = {
   title: "Idealer",
   description: "Mobile-first Solana DApp for community-elected lottery rules.",
   icons: {
-    apple: "/icons/icon-192.svg",
+    apple: "/icons/apple-touch-icon.png",
     icon: [
-      { rel: "icon", url: "/icons/icon-192.svg" },
-      { rel: "icon", sizes: "512x512", url: "/icons/icon-512.svg" },
+      { rel: "icon", sizes: "32x32", type: "image/png", url: "/icons/favicon-32.png" },
+      { rel: "icon", sizes: "192x192", type: "image/png", url: "/icons/icon-192.png" },
+      { rel: "icon", sizes: "512x512", type: "image/png", url: "/icons/icon-512.png" },
     ],
   },
   manifest: "/manifest.webmanifest",

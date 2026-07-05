@@ -54,6 +54,48 @@ docker compose --profile observability --profile mail up --build
 - Grafana, with profile: `http://localhost:3004`
 - Mailpit UI, with profile: `http://localhost:8025`
 
+## Testing on a Real Phone (PWA install)
+
+Idealer is a **mobile-first PWA**, not a native/Expo app. The "app on the phone"
+experience comes from installing the PWA to the home screen (`display: standalone`),
+which requires a **secure (HTTPS) origin** — the service worker will not register
+over plain `http://<LAN-IP>`, so the install prompt never appears there.
+
+Two supported ways to reach an HTTPS origin from the phone (phone and computer on
+the same network for option B):
+
+### Option A — Cloudflare tunnel (recommended, trusted cert)
+
+```bash
+# terminal 1 — app (already binds 0.0.0.0:3000)
+pnpm --filter @idealer/web dev
+# terminal 2 — public HTTPS URL that proxies to localhost:3000
+pnpm --filter @idealer/web dev:tunnel
+```
+
+`dev:tunnel` prints a `https://<random>.trycloudflare.com` URL. Open it on the phone,
+then use the browser menu → **Add to Home Screen** to install. Because the cert is
+trusted, the service worker registers and the app opens full-screen like a native app.
+
+### Option B — Next.js self-signed HTTPS over LAN
+
+```bash
+pnpm --filter @idealer/web dev:https
+```
+
+Open `https://<your-computer-LAN-IP>:3000` on the phone and accept the certificate
+warning. Use this when offline / without a tunnel; the trusted-cert path (Option A)
+is more reliable for exercising the install prompt.
+
+### App icons
+
+Home-screen icons live in `apps/web/public/icons/` as PNG (SVG is not accepted by
+iOS for home-screen icons). They are regenerated from `icon-source.svg` with:
+
+```bash
+cd apps/web && node scripts/build-icons.mjs
+```
+
 ## Shutdown
 
 Stop containers while keeping volumes:
