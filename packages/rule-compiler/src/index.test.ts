@@ -12,6 +12,7 @@ import {
   hasExternalDependency,
   hasInvalidConstraint,
   RULE_COMPILER_SKILL_VERSION,
+  ruleAstSchema,
   validateAndPrecompileRule,
 } from "./index.js";
 
@@ -72,34 +73,55 @@ function tokenCount(prompt: string) {
 test("the compile_rule_to_ast skill prompt is versioned and covers both rule modes", () => {
   const prompt = buildRuleCompilerSkillPrompt();
   assert.match(RULE_COMPILER_SKILL_VERSION, /^idealer_rule_compiler_skill_/);
-  assert.ok(prompt.includes('"schemaVersion":2'));
+  assert.ok(prompt.includes('"schemaVersion":3'));
   assert.ok(prompt.includes("predicate") && prompt.includes("ranking"));
   // It must teach the digit + ranking path (the previously-impossible case).
   assert.ok(prompt.includes("digits") && prompt.includes("units"));
   // It must teach unordered same-set equality, the prompt #7 simulation case.
   assert.ok(prompt.includes("same set of numbers"));
+  // It must teach the compositional idioms for novel rules.
+  assert.ok(prompt.includes("pairs_map") && prompt.includes("Shifted zip"));
   assert.ok(prompt.includes("count(intersection(guess,draw)) == 6"));
   // It must teach the prompt 9/10/11/101 harness cases and their variants.
   assert.ok(prompt.includes("guessed sum is greater than the drawn sum"));
   assert.ok(prompt.includes("min(guess) == min(draw)"));
   assert.ok(prompt.includes("max(guess) > max(draw)"));
   assert.ok(prompt.includes("four or more of my picked numbers show up"));
-  // It must teach prompt 12/13/103 and sequence 10 reverse-order cases.
+  // It must teach prompt 12/13/103 and sequence 10 reverse-order cases via the
+  // core grammar (pairwise zips, quantifiers, filters).
   assert.ok(prompt.includes("second guessed number equals second drawn number"));
-  assert.ok(prompt.includes("all_ordered_abs_diff_lte"));
-  assert.ok(prompt.includes("ordered_position_match_count_eq"));
-  assert.ok(prompt.includes("ordered_position_compare_count_eq"));
-  assert.ok(prompt.includes("digit_match_count_at_least"));
-  assert.ok(prompt.includes("all_values_between_min_max"));
-  assert.ok(prompt.includes("total_ordered_abs_diff_lte"));
+  assert.ok(prompt.includes("pairs_forall"));
+  assert.ok(prompt.includes("pairs_exists"));
+  assert.ok(prompt.includes('"kind":"reverse"'));
+  assert.ok(prompt.includes('"kind":"filter"'));
+  assert.ok(prompt.includes('"kind":"ite"'));
+  assert.ok(prompt.includes('"kind":"contains"'));
+  assert.ok(prompt.includes('"kind":"forall"'));
+  assert.ok(prompt.includes('"kind":"abs"'));
+  assert.ok(prompt.includes('"up":1'));
   assert.ok(prompt.includes("first pick only needs to be higher"));
-  assert.ok(prompt.includes("reversed_position_match_count_at_least"));
-  assert.ok(prompt.includes("remove_up_to_n"));
-  assert.ok(prompt.includes("map_with_guard"));
-  assert.ok(prompt.includes("value_within_any_count_at_least"));
   assert.ok(prompt.includes("sum(guess) mod 10"));
   // And forbid external/unverifiable inputs.
   assert.ok(/wallets|votes|oracle|external/i.test(prompt));
+});
+
+test("every worked example in the skill validates against the rule AST schema", () => {
+  const markdown = readFileSync(
+    new URL("../rule-authoring/references/examples.md", import.meta.url),
+    "utf8",
+  );
+  const lines = markdown
+    .split("\n")
+    .filter((line) => line.startsWith('{"schemaVersion"'));
+  assert.ok(lines.length >= 30, "examples.md must keep its worked examples");
+  for (const line of lines) {
+    const parsed = ruleAstSchema.safeParse(JSON.parse(line));
+    assert.equal(
+      parsed.success,
+      true,
+      `invalid example AST: ${line.slice(0, 120)}...`,
+    );
+  }
 });
 
 test("validates and precompiles a clear match-count rule", () => {
@@ -1063,6 +1085,135 @@ test("accepts a semantically equivalent LLM v2 AST for a known threshold rule", 
     result.artifact?.originalText,
     "Win if at least 4 of your numbers appear in the draw.",
   );
+});
+
+test("accepts an LLM-emitted v3 core AST that matches the reviewer semantically", async () => {
+  // v3 desugared form of "at least 4 guessed numbers appear in the draw"; the
+  // deterministic reviewer compiles the same prompt to a v1 macro, so only the
+  // sampled semantic equivalence can certify agreement across versions.
+  const v3MatchCount = {
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "compare",
+        op: "gte",
+        left: {
+          kind: "reduce",
+          op: "count",
+          of: {
+            kind: "intersection",
+            left: { kind: "source", source: "guess" },
+            right: { kind: "source", source: "draw" },
+          },
+        },
+        right: { kind: "lit", value: 4 },
+      },
+    },
+  };
+  const result = await compileRuleArtifact(
+    {
+      prompt: "Win if at least 4 of your numbers appear in the draw.",
+      tokenCount: 12,
+    },
+    { astProvider: async () => v3MatchCount },
+  );
+
+  assert.equal(result.decision, "VALID");
+  assert.equal(result.artifact?.schemaVersion, 3);
+  assert.equal(result.artifact?.ruleMode, "predicate");
+  assert.ok(!result.log.reasonCodes.includes("REVIEWER_MISMATCH"));
+});
+
+test("compiles a novel v3 composition no specialized v2 kind can express", async () => {
+  // "At least four picks within 3 of the drawn number in the same slot" — the
+  // counted same-position near-match from the rule-algebra design doc.
+  const countedNearSlots = {
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "compare",
+        op: "gte",
+        left: {
+          kind: "reduce",
+          op: "sum",
+          of: {
+            kind: "pairs_map",
+            left: { kind: "source", source: "guess" },
+            right: { kind: "source", source: "draw" },
+            expr: {
+              kind: "ite",
+              if: {
+                kind: "compare",
+                op: "lte",
+                left: {
+                  kind: "abs",
+                  of: {
+                    kind: "arith",
+                    op: "sub",
+                    left: { kind: "pair", side: "left" },
+                    right: { kind: "pair", side: "right" },
+                  },
+                },
+                right: { kind: "lit", value: 3 },
+              },
+              then: { kind: "lit", value: 1 },
+              else: { kind: "lit", value: 0 },
+            },
+          },
+        },
+        right: { kind: "lit", value: 4 },
+      },
+    },
+  };
+  const result = await compileRuleArtifact(
+    {
+      prompt:
+        "Win when at least four guessed numbers are within 3 of the drawn number in the same position.",
+      tokenCount: 18,
+    },
+    { astProvider: async () => countedNearSlots },
+  );
+
+  assert.equal(result.decision, "VALID");
+  assert.equal(result.artifact?.schemaVersion, 3);
+  assert.match(result.artifactHash ?? "", /^[0-9a-f]{64}$/);
+});
+
+test("rejects a v3 AST that semantically contradicts the deterministic reviewer", async () => {
+  // Reviewer compiles "none of my numbers appear" to count == 0; the provider
+  // emits the complement (count >= 1), which diverges on every sampled input.
+  const complementAst = {
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "compare",
+        op: "gte",
+        left: {
+          kind: "reduce",
+          op: "count",
+          of: {
+            kind: "intersection",
+            left: { kind: "source", source: "guess" },
+            right: { kind: "source", source: "draw" },
+          },
+        },
+        right: { kind: "lit", value: 1 },
+      },
+    },
+  };
+  const result = await compileRuleArtifact(
+    {
+      prompt: "None of my numbers appear in the draw.",
+      tokenCount: 8,
+    },
+    { astProvider: async () => complementAst },
+  );
+
+  assert.equal(result.decision, "INVALID");
+  assert.ok(result.log.reasonCodes.includes("REVIEWER_MISMATCH"));
 });
 
 test("rejects a text-to-AST reviewer mismatch from an LLM provider", async () => {

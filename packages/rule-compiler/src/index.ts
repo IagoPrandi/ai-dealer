@@ -17,6 +17,7 @@ import {
   type CompilerConfidenceWeights,
 } from "@idealer/agent-core";
 import {
+  isRankingRule,
   MAX_AST_DEPTH,
   ruleAstSchema,
   type ArrayExpr,
@@ -25,6 +26,7 @@ import {
   type RuleAst,
   type ScalarExpr,
 } from "@idealer/rule-schema";
+import { evaluatePredicate, scoreGuess } from "@idealer/rule-runtime";
 import {
   generateAndRunTests,
   RULE_TEST_HARNESS_VERSION,
@@ -182,7 +184,7 @@ export interface RuleCompiledArtifact {
   promptContractVersion: string;
   providerPath: AgentProviderAttemptLog[];
   ruleMode: "predicate" | "ranking";
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
   skillVersion: string;
   testCoverageScore: number;
   testHarnessVersion: string;
@@ -222,6 +224,15 @@ const AMBIGUOUS_PATTERNS = [
   /\b(feels?|vibe|balanced|nice|nicely|pattern|mirror-like|stronger)\b/i,
   /\b(many|several|spread out|well spread|organized|cleaner)\b/i,
   /\b(anything|something|whatever)\b/i,
+  // Vague vocabulary from prompt-set-2: similes, hedges, and aesthetic words
+  // that have no measurable threshold until the player defines one. A word here
+  // sends the rule to the CLARIFY flow, never to a silent interpretation.
+  /\b(kind\s+of|sort\s+of|basically|somehow|enough)\b/i,
+  /\b(looks?|feels?|feeling)\s+like\b/i,
+  /\b\w+-(looking|style|heavy)\b/i,
+  /\b(satisfying|rhythm|symmetrical|clustered|forgiving|safer|strange|soft|mirrors?)\b/i,
+  /\bnot\s+too\b|\btoo\s+(many|much|high|low|predictable|boring)\b/i,
+  /\b(a\s+few\s+places|second\s+chance|strong\s+beginning|good\s+way|in\s+a\s+good\s+way)\b/i,
 ] as const;
 
 const EXTERNAL_DEPENDENCY_PATTERNS = [
@@ -231,7 +242,11 @@ const EXTERNAL_DEPENDENCY_PATTERNS = [
   /\b(previous|next|future|past|history|streak|yesterday|today|tomorrow|last\s+turn|last\s+round|this\s+week)\b/i,
   /\bsame\s+rule\b.{0,60}\bdifferent\s+wording\b/i,
   /\b(other players?|all players?|no other player|among all players|everyone\s+else)\b/i,
-  /\b(weather|rain|rains|sunny|price|oracle|twitter|x\/twitter|discord|website|api|external)\b/i,
+  // Weather is external only as an actual condition ("weather", "raining"). A
+  // weather WORD the player redefines numerically ("define sunny as at least
+  // four drawn numbers above 50") is not a dependency — see prompt-set-2 #155.
+  /\b(weather|rain|rains|raining|price|oracle|twitter|x\/twitter|discord|website|api|external)\b/i,
+  /\bsunny\b.{0,30}\b(during|weather|outside|forecast)\b|\b(weather|forecast)\b.{0,30}\bsunny\b|\bif\s+it\s+is\s+sunny\b/i,
   // Provider / model identity: a rule must never depend on which AI/provider
   // compiled it (that is off-chain, non-deterministic infrastructure state).
   /\b(openai|anthropic|gpt-?\d|claude|gemini|ollama|vllm|compiler\s+provider|model\s+provider|provider\s+is)\b/i,
@@ -272,6 +287,47 @@ export function getRuleValidationPromptContract(): RuleValidationPromptContract 
   return PROMPT_CONTRACT;
 }
 
+// A dismissal clause explicitly REMOVES a dependency ("no weather;", "forget
+// shares,", "ignore wallet history and", "without comparing other players,").
+// The banned noun inside such a clause is the thing being taken OUT of the rule,
+// so it must not trigger the external-dependency block (prompt-set-2 sequences
+// 3/5/6/12/18/20 refinements). Safety valve: a clause that still talks about
+// winning/eligibility/payment ("no wallet outside the allowlist can win") is
+// NOT a dismissal and is kept for matching.
+const DISMISSAL_CLAUSE_PATTERN =
+  /\b(?:no|without|forget(?:\s+about)?|ignore|ignoring|not\s+using|stop\s+using|instead\s+of)\b[^.;:,]*?(?=[.;:,]|\band\b|\bmake\b|\bjust\b|\bthen\b|$)/gi;
+
+// A simile ("make it look like a return streak") describes a numeric pattern by
+// analogy — the noun inside it is not a data dependency. The simile itself is
+// vague, so it still routes to CLARIFY via AMBIGUOUS_PATTERNS.
+const SIMILE_CLAUSE_PATTERN =
+  /\b(?:look|looks|looking|feel|feels|feeling|seem|seems)\s+like\b[^.;:,]*/gi;
+const DISMISSAL_KEEP_PATTERN =
+  /\b(win|wins|winners?|eligible|eligibility|qualif\w+|pay|paid|pays|payout)\b/i;
+
+// "Let the AI pick the most reasonable objective version ..." asks for the
+// clarification flow itself, not for the model to decide winners — route it to
+// CLARIFY instead of BLOCK.
+const OBJECTIVE_CLARIFICATION_PATTERN =
+  /\b(?:let\s+the\s+(?:ai|model)|ai|model)\b[^.;:]{0,40}\b(?:pick|choose|select|suggest)s?\b[^.;:]{0,40}\b(?:reasonable|objective|measurable)\b[^.;:]{0,40}\b(?:version|interpretation|reading)\b[^.;:]*/gi;
+
+/**
+ * Text used for external-dependency matching: the normalized rule with
+ * dismissal clauses and objective-clarification requests removed. Exposed so
+ * the API preflight applies its own block patterns to the exact same view of
+ * the text as the compiler gate (no gate disagreement).
+ */
+export function externalDependencyGateText(text: string): string {
+  return normalizeRuleText(text)
+    .replace(OBJECTIVE_CLARIFICATION_PATTERN, " ")
+    .replace(SIMILE_CLAUSE_PATTERN, (clause) =>
+      DISMISSAL_KEEP_PATTERN.test(clause) ? clause : " ",
+    )
+    .replace(DISMISSAL_CLAUSE_PATTERN, (clause) =>
+      DISMISSAL_KEEP_PATTERN.test(clause) ? clause : " ",
+    );
+}
+
 /**
  * Fast, deterministic check for whether a rule references off-chain / external /
  * non-deterministic state (wallets, votes, prizes, time, other players, AI
@@ -281,7 +337,7 @@ export function getRuleValidationPromptContract(): RuleValidationPromptContract 
  * is intentionally the single source of truth for "external dependency".
  */
 export function hasExternalDependency(text: string): boolean {
-  return hasPattern(normalizeRuleText(text), EXTERNAL_DEPENDENCY_PATTERNS);
+  return hasPattern(externalDependencyGateText(text), EXTERNAL_DEPENDENCY_PATTERNS);
 }
 
 /**
@@ -581,6 +637,11 @@ function buildAttemptContext(
   if (parseWithinAnyDistanceCountRule(normalizedText)) {
     reasonCodes.delete("AMBIGUOUS_RULE");
   }
+  // "all six reversed positions should match" carries an incidental vague word
+  // ("around" in "flip the draw around") but is a fully explicit reverse rule.
+  if (parseReversePositionMatchRule(normalizedText)) {
+    reasonCodes.delete("AMBIGUOUS_RULE");
+  }
   // A vague word (close, balanced, ...) is a false positive when the player is
   // explicitly DEFINING it with objective criteria that the deterministic
   // compiler can turn into a concrete predicate — e.g. "By close, I mean each
@@ -593,7 +654,14 @@ function buildAttemptContext(
   if (looksLikeAmbiguousReverseRule(normalizedText)) {
     reasonCodes.add("AMBIGUOUS_RULE");
   }
-  if (hasPattern(normalizedText, EXTERNAL_DEPENDENCY_PATTERNS)) {
+  // Same dismissal-aware view of the text as the API preflight gate, so the
+  // validator and the pre-LLM gate always agree.
+  if (
+    hasPattern(
+      externalDependencyGateText(normalizedText),
+      EXTERNAL_DEPENDENCY_PATTERNS,
+    )
+  ) {
     reasonCodes.add("EXTERNAL_DEPENDENCY");
   }
 
@@ -699,9 +767,7 @@ function validateResolvedAst(
     providerConfig.capabilities.grammar_constrained_decoding === true &&
     providerConfig.capabilities.json_schema_response === true;
   const ruleMode: "predicate" | "ranking" =
-    ast?.schemaVersion === 2 && ast.result.type === "ranking"
-      ? "ranking"
-      : "predicate";
+    ast && isRankingRule(ast) ? "ranking" : "predicate";
 
   const artifact: RuleCompiledArtifact | null =
     decision === "VALID" && ast
@@ -1592,7 +1658,9 @@ function looksLikeAmbiguousReverseRule(text: string) {
   return (
     /\bmatch(?:es)?\b.{0,40}\b(draw|drawn)\b.{0,40}\breverse\b/i.test(text) &&
     !/\bposition\s*1\b.{0,80}\bposition\s*6\b/i.test(text) &&
-    !/\bat least\s+([1-6]|one|two|three|four|five|six)\b.{0,80}\breversed?\s+positions?\b/i.test(text)
+    !/\bat least\s+([1-6]|one|two|three|four|five|six)\b.{0,80}\breversed?\s+positions?\b/i.test(text) &&
+    // "all six reversed positions should match" is fully explicit, not vague.
+    !/\ball\s+(six|6)\b.{0,40}\breversed?\s+(positions?|slots?)\b/i.test(text)
   );
 }
 
@@ -1603,14 +1671,33 @@ function looksLikeObjectiveStartComparison(text: string) {
   );
 }
 
-// The player is defining a vague term (means / I mean / defined as) AND the
-// wording deterministically compiles to a concrete predicate. When both hold,
-// the vague trigger word is a false positive for ambiguity.
+// The player is DEFINING a vague term with objective criteria. When the
+// definition marker is present AND the wording either compiles deterministically
+// or carries concrete numeric/positional criteria (a number plus a measurable
+// operation), the vague trigger word is a false positive for ambiguity — the
+// definition itself is the objectivity, even when only the LLM path can compile
+// it ("By close, mean every pick is within 6 of the drawn number in the same
+// position", "Define sunny as at least four drawn numbers above 50").
 function looksLikeDefinedObjectiveRule(text: string): boolean {
   const definesTerm =
     /\b(means|i mean|defined as|defining|refers to)\b/i.test(text) ||
-    /\bby\s+[\w-]+,?\s+i\s+mean\b/i.test(text);
-  return definesTerm && compileSupportedRule(text) !== null;
+    /\bby\s+[\w-]+,?\s+(i\s+)?mean\b/i.test(text) ||
+    /\bdefine[sd]?\s+[\w-]+\s+as\b/i.test(text) ||
+    // Colon-definition: "more forgiving: at least four ...", "No admin step:
+    // at least five picks ...".
+    /:\s*(at\s+least|exactly|all|every|each|my|the|use)\b/i.test(text);
+  if (!definesTerm) {
+    return false;
+  }
+  if (compileSupportedRule(text) !== null) {
+    return true;
+  }
+  const hasConcreteCriteria =
+    /\b(one|two|three|four|five|six|\d+)\b/i.test(text) &&
+    /\b(within|position|positions|sum|total|digit|digits|odd|even|match|matches|appear|appears|smallest|largest|greater|higher|lower|above|below|count|between|equal|equals)\b/i.test(
+      text,
+    );
+  return hasConcreteCriteria;
 }
 
 function looksLikeObjectiveEvenCountComparison(text: string) {
@@ -2006,7 +2093,7 @@ function parseOrderedAbsoluteDifferenceRule(text: string): PredicateNode | null 
   const withinMatch =
     match ??
     text.match(
-      /\beach\s+(?:guessed?|picked|ticket|your)\s+number\b.{0,60}\b(within|off by)\s+([0-9]+|one|two|three|four|five|six)\b.{0,50}\b(at most|no more than)?\b.{0,40}\b(draw|drawn)\s+number\b.{0,50}\b(same position|corresponding position|same index|same slot)\b/i,
+      /\b(?:each|every)\s+(?:(?:guessed?|picked|ticket|your)\s+)?(?:number|pick)\b.{0,60}\b(within|off by)\s+([0-9]+|one|two|three|four|five|six)\b.{0,50}\b(at most|no more than)?\b.{0,40}\b(draw|drawn)\s+number\b.{0,50}\b(same position|corresponding position|same index|same slot)\b/i,
     );
   const value = match?.[4]
     ? Number(match[4])
@@ -2110,7 +2197,7 @@ function parseOrderedPositionMatchCountRule(text: string): PredicateNode | null 
 
 function parseDigitMatchCountRule(text: string): PredicateNode | null {
   const match = text.match(
-    /\bat least\s+([1-6]|one|two|three|four|five|six)\b.{0,80}\b(guessed?|picked|ticket|your)\s+numbers?\b.{0,80}\b(same\s+)?(last|units?)\s+digit\b.{0,80}\b(any\s+)?drawn?\s+number\b/i,
+    /\bat least\s+([1-6]|one|two|three|four|five|six)\b.{0,80}\b(?:(?:guessed?|picked|ticket|your)\s+numbers?|picks?)\b.{0,80}\b(?:same\s+)?(?:last|units?)\s+digit\b.{0,80}\b(?:any\s+)?drawn?\s+number\b/i,
   );
   const rawValue = match?.[1]?.toLowerCase();
   const value = rawValue ? NUMBER_WORDS.get(rawValue) ?? Number(rawValue) : NaN;
@@ -2325,9 +2412,23 @@ function parseReversePositionMatchRule(text: string): PredicateNode | null {
   }
 
   if (
-    /\bguessed?\s+position\s*1\b.{0,80}\bdrawn?\s+position\s*6\b/i.test(text) &&
+    /\b(guessed?|picked)\s+position\s*1\b.{0,80}\bdrawn?\s+position\s*6\b/i.test(text) &&
     /\bposition\s*2\b.{0,80}\bposition\s*5\b/i.test(text) &&
     /\b(and so on|reverse|reversed)\b/i.test(text)
+  ) {
+    return {
+      kind: "reversed_position_match_count_at_least",
+      left: source("guess"),
+      right: source("draw"),
+      value: 6,
+    };
+  }
+
+  // "Flip the draw around ...; all six reversed positions should match."
+  if (
+    /\ball\s+(six|6)\b.{0,40}\breversed?\s+(positions?|slots?)\b.{0,40}\b(match|matches|line up)\b/i.test(
+      text,
+    )
   ) {
     return {
       kind: "reversed_position_match_count_at_least",
@@ -2496,11 +2597,70 @@ function hashJson(value: unknown) {
     .digest("hex");
 }
 
+// Reviewer agreement (PRD §7.4): the deterministic reviewer AST and the
+// provider AST match when they are structurally equivalent (fast path, v1/v2
+// signatures) OR sampled-semantically equivalent. The semantic check makes
+// novel v3 compositions reviewable: a v2 reviewer macro and its v3 desugaring
+// have different shapes but identical behavior, so structural signatures alone
+// would flag every legitimate composition as a mismatch.
 function knownAstSemanticsMatch(expected: RuleAst, actual: RuleAst) {
-  return knownAstSignature(expected) === knownAstSignature(actual);
+  if (
+    expected.schemaVersion !== 3 &&
+    actual.schemaVersion !== 3 &&
+    knownAstSignature(expected) === knownAstSignature(actual)
+  ) {
+    return true;
+  }
+  return sampledSemanticsMatch(expected, actual);
 }
 
-function knownAstSignature(ast: RuleAst): string {
+// Deterministic Monte-Carlo semantic equivalence: both ASTs must agree on every
+// sampled (guess, draw) pair. Seeded PRNG (mulberry32, same family as the test
+// harness) so the reviewer verdict is reproducible and auditable.
+const SEMANTIC_MATCH_SAMPLES = 240;
+
+function sampledSemanticsMatch(expected: RuleAst, actual: RuleAst): boolean {
+  const expectedRanking = isRankingRule(expected);
+  if (expectedRanking !== isRankingRule(actual)) {
+    return false;
+  }
+  let seed = 0x1dea1e7 >>> 0;
+  const rng = () => {
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const sixUnique = () => {
+    const pool = new Set<number>();
+    while (pool.size < 6) {
+      pool.add(1 + Math.floor(rng() * 100));
+    }
+    return [...pool];
+  };
+  try {
+    for (let i = 0; i < SEMANTIC_MATCH_SAMPLES; i += 1) {
+      const input = { guess: sixUnique(), draw: sixUnique() };
+      if (expectedRanking) {
+        if (scoreGuess(expected, input) !== scoreGuess(actual, input)) {
+          return false;
+        }
+      } else if (
+        evaluatePredicate(expected, input).result !==
+        evaluatePredicate(actual, input).result
+      ) {
+        return false;
+      }
+    }
+    return true;
+  } catch {
+    // A runtime error on either side means they cannot be certified equal.
+    return false;
+  }
+}
+
+function knownAstSignature(ast: Exclude<RuleAst, { schemaVersion: 3 }>): string {
   if (ast.schemaVersion === 1) {
     if (ast.node.kind === "match_count_at_least") {
       return `predicate:count_at_least:${ast.node.value}:intersection(source:draw,source:guess)`;

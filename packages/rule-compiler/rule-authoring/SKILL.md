@@ -1,6 +1,6 @@
 ---
 name: rule-authoring
-description: Authoring guidance for the Idealer AI Rule Compiler — converts a player's natural-language lottery rule (English or Portuguese) into the verifiable rule DSL/AST. Covers the node grammar, the predicate-vs-ranking decision, and correct handling of negation/inverse, compound (AND/OR), threshold ("at least N"), and ambiguous terms (e.g. "dezena"). Use this when emitting a rule AST from a proposed rule, or when extending the rule compiler's capabilities. This is a RUNTIME asset of the LLM compile harness, not developer tooling.
+description: Authoring guidance for the Idealer AI Rule Compiler — converts a player's natural-language lottery rule (English or Portuguese) into the verifiable rule DSL/AST (schemaVersion 3 compositional core). Covers the core node grammar, binder scopes, the predicate-vs-ranking decision, the macro cookbook for common intents, and correct handling of negation/inverse, compound (AND/OR), threshold ("at least N"), and ambiguous terms (e.g. "dezena"). Use this when emitting a rule AST from a proposed rule, or when extending the rule compiler's capabilities. This is a RUNTIME asset of the LLM compile harness, not developer tooling.
 ---
 
 # Rule Authoring (compile_rule_to_ast)
@@ -24,7 +24,7 @@ comparison (see references/patterns.md).
 
 ## Output shape and the predicate-vs-ranking decision
 
-Top level: `{"schemaVersion":2,"result":<result>}`. Choose `<result>`:
+Top level: `{"schemaVersion":3,"result":<result>}`. Choose `<result>`:
 
 - **predicate** — an ABSOLUTE win/lose test for a single guess (it does not depend
   on other players). Use for "win if ...", "at least N", "exactly", "matches".
@@ -39,89 +39,121 @@ the phrasing also says "or more". A comparative ("more than others", "the most")
 a **ranking**. See references/patterns.md for the full decision rules and the
 Portuguese trigger glossary (acertar, errar, mais, menos, pelo menos, dezena, e, ou).
 
-## Node grammar
+## Core node grammar (schemaVersion 3)
+
+The grammar is a SMALL COMPOSITIONAL CORE. There are no specialized predicate
+kinds: every rule — including novel ones — is expressed by COMPOSING these nodes.
 
 Array nodes (produce a list of numbers):
 - `{"kind":"source","source":"guess"|"draw"}`
-- `{"kind":"filter_compare","op":"eq"|"neq"|"lt"|"lte"|"gt"|"gte","value":<int>,"of":<array>}` - keep values matching a literal comparison
-- `{"kind":"filter_mod","modulus":<int>,"equals":<int>,"of":<array>}` - keep values whose modulo equals a remainder; even numbers use `modulus:2, equals:0`
-- `{"kind":"digits","place":"units"|"tens","of":<array>}`  — per-number digit
-- `{"kind":"intersection"|"difference","left":<array>,"right":<array>}`
-- `{"kind":"map_arithmetic","op":"add"|"sub"|"mul"|"div"|"mod","operand":<int>,"of":<array>}`
-- `{"kind":"map_with_guard","op":"add"|"sub"|"mul"|"div"|"mod","operand":<int>,"guard":{"kind":"range_inclusive","min":<int>,"max":<int>},"onGuardFail":"keep_original"|"drop","of":<array>}` - map each value and either keep or drop values whose mapped result is outside the guard
-- `{"kind":"sort","order":"asc"|"desc","of":<array>}`  `{"kind":"slice","start":<int>,"end":<int>,"of":<array>}`
-- `{"kind":"remove_up_to_n","n":<1..4>,"strategy":"highest"|"lowest"|"first","of":<array>}`
+- `{"kind":"sort","order":"asc"|"desc","of":<array>}`
+- `{"kind":"reverse","of":<array>}`
+- `{"kind":"slice","start":<int>,"end":<int?>,"of":<array>}` — JS slice; negative `end` counts from the end
+- `{"kind":"distinct","of":<array>}` — drop duplicate values, keep first occurrences
+- `{"kind":"intersection"|"difference","left":<array>,"right":<array>}` — unique values, left order
+- `{"kind":"digits","place":"units"|"tens","of":<array>}` — per-number digit
+- `{"kind":"map","of":<array>,"expr":<scalar>}` — transform each element; `expr` sees the element as `{"kind":"elem"}`
+- `{"kind":"filter","of":<array>,"where":<pred>}` — keep elements where the predicate holds; `where` sees `{"kind":"elem"}`
+- `{"kind":"pairs_map","left":<array>,"right":<array>,"expr":<scalar>}` — zip both arrays position by position (length = shorter side); `expr` sees `{"kind":"pair","side":"left"|"right"}`
 
 Scalar nodes (produce one number):
 - `{"kind":"lit","value":<int>}`
 - `{"kind":"reduce","op":"sum"|"product"|"count"|"min"|"max"|"range_span","of":<array>}`
+- `{"kind":"at","index":<int>,"of":<array>}` — 0-based; ONLY on arrays whose length is statically known (source/sort/reverse/slice/map/digits chains). After filter/intersection/difference/distinct use `sort`+`slice`+`reduce` instead.
 - `{"kind":"arith","op":"add"|"sub"|"mul"|"div"|"mod","left":<scalar>,"right":<scalar>}`
-- `{"kind":"at","index":<int>,"of":<array>}`
+- `{"kind":"abs","of":<scalar>}`
+- `{"kind":"ite","if":<pred>,"then":<scalar>,"else":<scalar>}` — conditional value (use for counting: then 1 else 0)
+- `{"kind":"elem"}` / `{"kind":"elem","up":1}` — the current element of the nearest (`up:1`: the outer) map/filter/forall/exists binder
+- `{"kind":"pair","side":"left"|"right"}` — the current pair inside pairs_map/pairs_forall/pairs_exists
 
 Predicate nodes (produce true/false):
 - `{"kind":"compare","op":"eq"|"neq"|"lt"|"lte"|"gt"|"gte","left":<scalar>,"right":<scalar>}`
-- `{"kind":"count_at_least","value":<int>,"of":<array>}`
-- `{"kind":"all_equal_ordered","left":<array>,"right":<array>}`
-- `{"kind":"all_ordered_compare","op":"eq"|"neq"|"lt"|"lte"|"gt"|"gte","left":<array>,"right":<array>}` - compare every same-position pair
-- `{"kind":"all_ordered_abs_diff_lte","left":<array>,"right":<array>,"value":<int>}` - every same-position absolute difference is <= value
-- `{"kind":"total_ordered_abs_diff_lte","left":<array>,"right":<array>,"value":<int>}` - sum of same-position absolute differences is <= value
-- `{"kind":"ordered_position_match_count_eq","left":<array>,"right":<array>,"value":<0..6>}` - exactly value same-position matches
-- `{"kind":"ordered_position_compare_count_eq","left":<array>,"op":"eq"|"neq"|"lt"|"lte"|"gt"|"gte","right":<array>,"value":<0..6>}` - exactly value same-position comparisons satisfy op
-- `{"kind":"value_within_any_count_at_least","left":<array>,"right":<array>,"distance":<0..100>,"value":<0..6>}` - at least value entries from left are within distance of any entry from right
-- `{"kind":"digit_match_count_at_least","left":<array>,"right":<array>,"place":"units"|"tens","value":<0..6>}` - count numbers in left whose selected digit appears in any right number
-- `{"kind":"all_values_between_min_max","of":<array>,"range":<array>}` - every value in of is between min(range) and max(range), inclusive
-- `{"kind":"reversed_position_match_count_at_least","left":<array>,"right":<array>,"value":<0..6>}` - count matches where left position i equals right position 6-i
+- `{"kind":"contains","array":<array>,"value":<scalar>}`
+- `{"kind":"forall"|"exists","of":<array>,"where":<pred>}` — quantify over elements; `where` sees `{"kind":"elem"}`
+- `{"kind":"pairs_forall"|"pairs_exists","left":<array>,"right":<array>,"where":<pred>}` — quantify over same-position pairs
 - `{"kind":"and"|"or","clauses":[<pred>,...]}`  `{"kind":"not","clause":<pred>}`
 
-Common building blocks: matches = `intersection(guess,draw)`; misses =
-`difference(guess,draw)`; shared tens digits =
-`intersection(digits(guess,tens),digits(draw,tens))`; even numbers =
-`filter_mod(source,2,0)`; sorted low/high values = `sort(asc|desc,source)`
-plus `at` or `slice`. "Same set of numbers, regardless of order" means the
-guess and draw contain the same six unique numbers, so use
-`count(intersection(guess,draw)) == 6`; do not compile it as ordered equality
-or describe it as a highest-count ranking.
+Binder scopes: `map`/`filter`/`forall`/`exists` bind one element; `pairs_*` bind a
+pair. Nesting is capped at 2 binders. Inside a nested binder, `{"kind":"elem","up":1}`
+refers to the OUTER element (cross-array quantification: "for each of my picks,
+does any drawn number ...").
+
+Total-algebra identities (defined, deterministic — never errors): `sum`/`count` of
+an empty array = 0, `product` of empty = 1, `min`/`max`/`range_span` of empty = 0,
+`x div 0` = 0, `x mod m` = 0 for m ≤ 0. Division is integer (truncated).
+
+## Macro cookbook — common intents as compositions
+
+Building blocks: matches = `intersection(guess,draw)`; misses =
+`difference(guess,draw)`; even numbers = `filter(src, elem mod 2 == 0)`; count of
+X = `reduce count`; "N smallest/largest" = `sort` + `slice`.
+
+- "at least N of my numbers appear in the draw" -> `compare(count(intersection(guess,draw)), gte, N)`.
+- "exactly N match" -> same with `eq`. "none appear" -> `eq 0`.
+- "same set of numbers, regardless of order" -> `count(intersection(guess,draw)) == 6`; never ordered equality or a ranking.
+- "sums are equal" -> `compare(sum(guess), eq, sum(draw))`.
+- "all six match in the same positions" -> `pairs_forall(guess, draw, pair.left == pair.right)`.
+- "every pick is below the drawn number in the same position" -> `pairs_forall(guess, draw, left lt right)`.
+- "each pick within 5 of the same-position drawn number" -> `pairs_forall(guess, draw, abs(left - right) <= 5)`.
+- "at least/exactly N same-position matches" -> count with a pairwise 0/1 map:
+  `compare(sum(pairs_map(guess, draw, ite(left == right, 1, 0))), gte|eq, N)`.
+- "exactly N picks greater than the same-position drawn number" -> same shape with `gt` inside the `ite`.
+- "total position-by-position absolute difference <= T" -> `compare(sum(pairs_map(guess, draw, abs(left - right))), lte, T)`.
+- "N picks within D of ANY drawn number" (any-draw closeness, not same-position) ->
+  `compare(count(filter(guess, exists(draw, abs(elem(up:1) - elem) <= D))), gte, N)`.
+- "at least N picks share the units/last digit with any drawn number" ->
+  `compare(count(filter(digits(guess,units), contains(digits(draw,units), elem))), gte, N)`.
+- "all picks between the smallest and largest drawn number, inclusive" ->
+  `forall(guess, elem >= min(draw) AND elem <= max(draw))`.
+- "reverse match: position 1 vs 6, 2 vs 5, and so on" -> pair with the reversed draw:
+  all six = `pairs_forall(guess, reverse(draw), left == right)`; "at least 4 of the
+  reversed positions" = `compare(sum(pairs_map(guess, reverse(draw), ite(left == right, 1, 0))), gte, 4)`.
+- "same count of even numbers" -> `compare(count(filter(guess, elem mod 2 == 0)), eq, count(filter(draw, elem mod 2 == 0)))`.
+- "the below-50 split: ticket and draw have the same count under 50" -> `compare(count(filter(guess, elem lt 50)), eq, count(filter(draw, elem lt 50)))`.
+- "sum of the two smallest/largest ..." -> `sum(slice(sort(src, asc|desc), 0, 2))`, then compare both sides.
+- "ignore my highest pick, the rest totals the draw" -> `compare(sum(slice(sort(guess,asc), 0, -1)), eq, sum(draw))`.
+- "drop up to two lowest picks, then still have three numbers in the draw" ->
+  `compare(count(intersection(slice(sort(guess,asc), 2), draw)), gte, 3)`.
+- "if doubling each pick stays within 1 to 100, at least three doubled values are drawn" ->
+  `compare(count(intersection(filter(map(guess, elem * 2), elem >= 1 AND elem <= 100), draw)), gte, 3)`.
+- "first/last three picks sum to the first/last three drawn numbers" -> compare sums of `slice(src, 0, 3)` / `slice(src, 3)`.
+- "ticket sum modulo 10 equals draw sum modulo 10" -> `compare(sum(guess) mod 10, eq, sum(draw) mod 10)`.
+- positions are 1-based in user language, 0-based in the AST: "second pick equals second drawn number" -> `at(guess,1) == at(draw,1)`.
+- min/max stay direct comparisons: "smallest pick equals smallest drawn" -> `min(guess) == min(draw)`; "largest pick beats largest drawn" -> `max(guess) > max(draw)`.
+
+## Novel-composition idioms (when no cookbook entry fits)
+
+- **Counted pairs**: to COUNT how many positions satisfy a per-pair condition, map
+  pairs to 0/1 with `ite` and `sum` the result.
+- **Shifted zip** (relate NEIGHBORS inside one array): zip a sorted array against
+  itself shifted by one — `pairs_*` with `left: slice(sorted, 0, -1)` and
+  `right: slice(sorted, 1)`. "two of my picks are consecutive" ->
+  `pairs_exists(..., right - left == 1)`; "no two picks within 5 of each other" ->
+  `pairs_forall(..., right - left >= 5)`.
+- **Digit aggregation**: `digits` yields an array — reduce or compare it like any
+  other array ("units digits of my ticket sum to more than the draw's" ->
+  `compare(sum(digits(guess,units)), gt, sum(digits(draw,units)))`).
+- **Halves / zones**: `slice` the source, then filter/count each part ("more even
+  numbers in my first half than my second half").
+- **Cross-array quantification**: nest `exists` inside `forall`/`filter` and reach
+  the outer element with `elem(up:1)`.
 
 Do not require a rigid input phrase. Casual but objective wording is valid when
 the condition is measurable over `guess` and `draw`: "my ticket has the same
 overall weight as the draw" means equal sums; "four or more of my picked numbers
 show up in the result" means at least four guess/draw intersections; "low end
 lines up" means compare minimum values. Ask for clarification only when the
-measurable threshold, direction, positions, or operation is missing.
+measurable threshold, direction, positions, or operation is missing. "Match the
+draw in reverse" without exact positions or a threshold is ambiguous; ask.
 
 For "win if" wording, default to a predicate. Do not convert it into a ranking
 unless the player clearly asks for comparison against other guesses ("the most",
-"fewest", "closest among all players"). Keep direct min/max comparisons as direct
-guess-vs-draw comparisons:
-- "smallest guessed number equals the smallest drawn number" -> `min(guess) == min(draw)`
-- "largest guessed number is greater than the largest drawn number" -> `max(guess) > max(draw)`
-- "guessed sum is greater than drawn sum and at least 2 numbers match" -> an AND
-  predicate containing both the sum comparison and the match threshold.
-- "second guessed number equals second drawn number" -> compare `at(guess,1)` to `at(draw,1)`; user positions are 1-based, AST indexes are 0-based.
-- "absolute difference between each guessed number and drawn number in the same position is at most 5" -> `all_ordered_abs_diff_lte` with value 5.
-- "exactly 2 guessed numbers match in the same position" -> `ordered_position_match_count_eq` with value 2.
-- "exactly 2 guessed numbers are greater than the drawn number in the same position" -> `ordered_position_compare_count_eq` with op `gt` and value 2.
-- "total absolute position-by-position difference between guess and draw is 30 or less" -> `total_ordered_abs_diff_lte` with value 30.
-- "four picks are within ten of at least one drawn number" -> `value_within_any_count_at_least` with left `guess`, right `draw`, distance 10, value 4. This is any-draw closeness, not same-position closeness.
-- "Position by position, each pick has the same odd-or-even type as the drawn number there" -> compare `map_arithmetic(guess, mod 2)` to `map_arithmetic(draw, mod 2)` with `all_equal_ordered`.
-- "Use the below-50 split: ticket and draw have the same count under 50" -> compare `count(filter_compare(guess, lt, 50))` to `count(filter_compare(draw, lt, 50))`.
-- "If doubling each pick stays within 1 to 100, at least three doubled values are in the draw" -> `map_with_guard` over `guess` with `op:"mul"`, `operand:2`, guard `1..100`, `onGuardFail:"drop"`, then `count_at_least(intersection(mapped,draw),3)`.
-- "Ignore my highest picked number, then the rest total the full draw" -> `remove_up_to_n` over `guess` with `n:1`, `strategy:"highest"`, then compare the remaining sum to `sum(draw)`.
-- "Drop up to two lowest picks, then still have three numbers in the draw" -> `remove_up_to_n` over `guess` with `n:2`, `strategy:"lowest"`, then require at least 3 remaining values in `draw`.
-- "first/last three picks add up to first/last three drawn numbers" -> compare sums of `slice(guess,0,3)`/`slice(draw,0,3)` or `slice(guess,3)`/`slice(draw,3)`.
-- "the last digit of the totals matters: ticket sum modulo 10 equals draw sum modulo 10" -> compare `sum(guess) mod 10` to `sum(draw) mod 10`.
-- "exactly one position is an exact match" -> `ordered_position_match_count_eq` with value 1.
-- "at least 3 guessed numbers have the same last digit as any drawn number" -> `digit_match_count_at_least` with place `units` and value 3.
-- "all guessed numbers are between the smallest and largest drawn number, inclusive" -> `all_values_between_min_max`.
-- "sum of the two smallest/largest guessed numbers ..." -> sort ascending/descending, slice first 2, reduce sum, then compare to the equivalent draw expression.
-- "guessed position 1 equals drawn position 6, position 2 equals drawn position 5, and so on" -> `reversed_position_match_count_at_least` with value 6.
-- "at least 4 of the 6 reversed positions must match" -> `reversed_position_match_count_at_least` with value 4.
-- "match the draw in reverse" without exact positions or threshold is ambiguous; ask for clarification.
+"fewest", "closest among all players").
 
 ## Tricky intents
 
 Before emitting, check references/patterns.md for the correct mapping of:
 negation/inverse ("errar"/miss), compound ("e"/AND, "ou"/OR), threshold vs
 comparative, and ambiguous terms ("dezena"). Read references/examples.md for a
-worked AST per shape (count, threshold, sum-equals, ordered, units-digit ranking,
-closest-sum ranking, miss-count ranking, and compound AND).
+worked AST per shape (count, threshold, sum-equals, ordered, pairwise counts,
+digit rules, rankings, compound AND, and the novel-composition idioms).

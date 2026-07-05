@@ -24,6 +24,7 @@ import {
 } from "@idealer/constants";
 import {
   compileRuleArtifact,
+  externalDependencyGateText,
   hasExternalDependency,
   hasInvalidConstraint,
   ruleAstSchema,
@@ -66,7 +67,7 @@ if (existsSync(ROOT_ENV_PATH)) {
 const { Pool } = pg;
 const MAX_RULE_TEXT_BYTES = 6000;
 const RULE_PREVENTED_PATTERNS = [
-  /\bignore\b.{0,40}\b(instructions?|rules?|prompt)\b/i,
+  /\bignore\b.{0,40}\b(instructions?|rules?|prompt|polic\w+|safety)\b/i,
   /\b(system|developer)\s+(prompt|message|instruction)\b/i,
   /\bjailbreak\b/i,
   /\bprompt\s*injection\b/i,
@@ -77,7 +78,9 @@ const RULE_PREVENTED_PATTERNS = [
 const RULE_EXTERNAL_BLOCK_PATTERNS = [
   /\bclosest\b.{0,40}\bamong\s+all\s+players\b/i,
   /\bsol\s+price\b|\busd\b/i,
-  /\b(weather|rains?|rain|sunny)\b/i,
+  // Weather/rain/sunny live in the compiler's EXTERNAL_DEPENDENCY_PATTERNS
+  // (single source of truth), which is dismissal-aware — "no weather; ..." and
+  // "define sunny as <numeric criteria>" must not be blocked here.
   /\bx\/twitter\b|\btwitter\b|\bpost\b.{0,40}\blikes?\b/i,
   /\buse\s+python\b|\bimport\s+random\b|\bcode\s+to\s+calculate\b/i,
   /\bfetch\b.{0,80}\bhttps?:\/\//i,
@@ -1509,7 +1512,15 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
     throw new Error("RULE_PROMPT_INJECTION");
   }
 
-  if (hasRulePattern(sanitizedText, RULE_EXTERNAL_BLOCK_PATTERNS)) {
+  // Match on the compiler's dismissal-aware view of the text, so a refinement
+  // that REMOVES a dependency ("forget shares, ...") is not blocked for
+  // mentioning the removed thing.
+  if (
+    hasRulePattern(
+      externalDependencyGateText(sanitizedText),
+      RULE_EXTERNAL_BLOCK_PATTERNS,
+    )
+  ) {
     throw new Error("RULE_EXTERNAL_DEPENDENCY");
   }
 
@@ -3127,6 +3138,9 @@ function canonicalizeNode(value: unknown): unknown {
   }
 
   const out: AstRecord = { ...node };
+  // Recursive fields across v2 and the v3 compositional core. Primitive values
+  // (e.g. v2 numeric `value`) pass through canonicalizeNode unchanged, so the
+  // v1/v2 canonical forms — and therefore their mandate signatures — are stable.
   for (const field of [
     "of",
     "left",
@@ -3135,6 +3149,13 @@ function canonicalizeNode(value: unknown): unknown {
     "predicate",
     "score",
     "guard",
+    "expr",
+    "where",
+    "array",
+    "value",
+    "if",
+    "then",
+    "else",
   ]) {
     if (out[field] !== undefined) {
       out[field] = canonicalizeNode(out[field]);
@@ -3148,9 +3169,9 @@ function canonicalizeNode(value: unknown): unknown {
 
 export function ruleSignature(ast: RuleAst): string {
   const canonical =
-    ast.schemaVersion === 2
-      ? { result: canonicalizeNode(ast.result), v: 2 }
-      : { node: ast.node, v: 1 };
+    ast.schemaVersion === 1
+      ? { node: ast.node, v: 1 }
+      : { result: canonicalizeNode(ast.result), v: ast.schemaVersion };
   return createHash("sha256")
     .update(stableStringify(canonical), "utf8")
     .digest("hex");

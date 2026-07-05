@@ -1,10 +1,13 @@
 import { ruleAstSchema } from "@idealer/rule-schema";
 import type {
   ArrayExpr,
+  ArrayExprV3,
   ArithOp,
   PredicateNode,
+  PredicateNodeV3,
   RuleAst,
   ScalarExpr,
+  ScalarExprV3,
 } from "@idealer/rule-schema";
 
 // Deterministic, sandboxed interpreter for the frozen rule DSL/AST (PRD §7.7).
@@ -126,11 +129,25 @@ function normalizeInput(input: RuleRuntimeInput): RuleRuntimeInput {
   };
 }
 
+// Frozen artifacts are immutable, so a given AST object validates once; the
+// per-guess winner loop then evaluates without re-running the recursive zod
+// parse (which dominates evaluation cost for deep v3 trees). Keyed by object
+// identity — a different (even structurally equal) object re-validates.
+const validatedAstCache = new WeakMap<object, RuleAst>();
+
 function parseRuntimeAst(ast: RuleAst): RuleAst {
+  const cached =
+    typeof ast === "object" && ast !== null
+      ? validatedAstCache.get(ast)
+      : undefined;
+  if (cached) {
+    return cached;
+  }
   const parsed = ruleAstSchema.safeParse(ast);
   if (!parsed.success) {
     throw new RuleRuntimeError("INVALID_NODE", "invalid rule AST");
   }
+  validatedAstCache.set(ast, parsed.data);
   return parsed.data;
 }
 
@@ -524,6 +541,319 @@ function evalPredicate(
   }
 }
 
+// ---------------------------------------------------------------------------
+// schemaVersion 3 — evaluator for the orthogonal compositional core.
+//
+// Binder scopes are a stack of frames: map/filter/forall/exists push an
+// element frame; pairs_map/pairs_forall/pairs_exists push a (left,right) pair
+// frame. Scope validity is guaranteed statically by the schema; an unresolved
+// reference here is therefore an INVALID_NODE error, never a default value.
+//
+// Documented total-algebra identities (shared with v2 so desugared trees are
+// byte-for-byte behaviorally identical): sum/count of [] = 0, product of [] =
+// 1, min/max/range_span of [] = 0, x div 0 = 0, x mod m = 0 for m <= 0.
+// ---------------------------------------------------------------------------
+
+type BinderFrame =
+  | { kind: "elem"; value: number }
+  | { kind: "pair"; left: number; right: number };
+
+function evalArrayV3(
+  node: ArrayExprV3,
+  input: RuleRuntimeInput,
+  budget: Budget,
+  scope: BinderFrame[],
+): number[] {
+  tick(budget);
+  enter(budget);
+  try {
+    switch (node.kind) {
+      case "source":
+        return guardArray([
+          ...(node.source === "guess" ? input.guess : input.draw),
+        ]);
+      case "sort": {
+        const sorted = [...evalArrayV3(node.of, input, budget, scope)].sort(
+          (a, b) => (node.order === "asc" ? a - b : b - a),
+        );
+        return guardArray(sorted);
+      }
+      case "reverse":
+        return guardArray(
+          [...evalArrayV3(node.of, input, budget, scope)].reverse(),
+        );
+      case "slice": {
+        const source = evalArrayV3(node.of, input, budget, scope);
+        return guardArray(source.slice(node.start, node.end));
+      }
+      case "distinct": {
+        const seen = new Set<number>();
+        const out: number[] = [];
+        for (const value of evalArrayV3(node.of, input, budget, scope)) {
+          if (!seen.has(value)) {
+            seen.add(value);
+            out.push(value);
+          }
+        }
+        return guardArray(out);
+      }
+      case "intersection":
+        return guardArray(
+          uniqueIntersection(
+            evalArrayV3(node.left, input, budget, scope),
+            evalArrayV3(node.right, input, budget, scope),
+          ),
+        );
+      case "difference":
+        return guardArray(
+          uniqueDifference(
+            evalArrayV3(node.left, input, budget, scope),
+            evalArrayV3(node.right, input, budget, scope),
+          ),
+        );
+      case "digits":
+        return guardArray(
+          evalArrayV3(node.of, input, budget, scope).map((value) =>
+            digit(value, node.place),
+          ),
+        );
+      case "map": {
+        const out: number[] = [];
+        for (const value of evalArrayV3(node.of, input, budget, scope)) {
+          scope.push({ kind: "elem", value });
+          try {
+            out.push(guardScalar(evalScalarV3(node.expr, input, budget, scope)));
+          } finally {
+            scope.pop();
+          }
+        }
+        return guardArray(out);
+      }
+      case "filter": {
+        const out: number[] = [];
+        for (const value of evalArrayV3(node.of, input, budget, scope)) {
+          scope.push({ kind: "elem", value });
+          try {
+            if (evalPredicateV3(node.where, input, budget, scope)) {
+              out.push(value);
+            }
+          } finally {
+            scope.pop();
+          }
+        }
+        return guardArray(out);
+      }
+      case "pairs_map": {
+        const left = evalArrayV3(node.left, input, budget, scope);
+        const right = evalArrayV3(node.right, input, budget, scope);
+        const length = Math.min(left.length, right.length);
+        const out: number[] = [];
+        for (let index = 0; index < length; index += 1) {
+          scope.push({ kind: "pair", left: left[index]!, right: right[index]! });
+          try {
+            out.push(guardScalar(evalScalarV3(node.expr, input, budget, scope)));
+          } finally {
+            scope.pop();
+          }
+        }
+        return guardArray(out);
+      }
+      default: {
+        const _exhaustive: never = node;
+        throw new RuleRuntimeError(
+          "INVALID_NODE",
+          `unknown v3 array node ${JSON.stringify(_exhaustive)}`,
+        );
+      }
+    }
+  } finally {
+    leave(budget);
+  }
+}
+
+function evalScalarV3(
+  node: ScalarExprV3,
+  input: RuleRuntimeInput,
+  budget: Budget,
+  scope: BinderFrame[],
+): number {
+  tick(budget);
+  enter(budget);
+  try {
+    switch (node.kind) {
+      case "lit":
+        return guardScalar(node.value);
+      case "reduce": {
+        const values = evalArrayV3(node.of, input, budget, scope);
+        switch (node.op) {
+          case "sum":
+            return guardScalar(
+              values.reduce((total, value) => total + value, 0),
+            );
+          case "product":
+            return guardScalar(
+              values.reduce((total, value) => guardScalar(total * value), 1),
+            );
+          case "count":
+            return values.length;
+          case "min":
+            return values.length === 0 ? 0 : Math.min(...values);
+          case "max":
+            return values.length === 0 ? 0 : Math.max(...values);
+          case "range_span":
+            return values.length === 0
+              ? 0
+              : Math.max(...values) - Math.min(...values);
+          default:
+            throw new RuleRuntimeError("INVALID_NODE", "unknown reduce op");
+        }
+      }
+      case "at": {
+        const values = evalArrayV3(node.of, input, budget, scope);
+        // The schema statically guarantees the index is within the known
+        // length; a shrunk runtime array would be a schema-validator bug, so
+        // fail loudly instead of inventing a value.
+        if (node.index >= values.length) {
+          throw new RuleRuntimeError(
+            "INVALID_NODE",
+            `\`at\` index ${node.index} out of bounds at runtime`,
+          );
+        }
+        return values[node.index]!;
+      }
+      case "arith":
+        return applyArith(
+          node.op,
+          evalScalarV3(node.left, input, budget, scope),
+          evalScalarV3(node.right, input, budget, scope),
+        );
+      case "abs":
+        return guardScalar(Math.abs(evalScalarV3(node.of, input, budget, scope)));
+      case "ite":
+        return evalPredicateV3(node.if, input, budget, scope)
+          ? evalScalarV3(node.then, input, budget, scope)
+          : evalScalarV3(node.else, input, budget, scope);
+      case "elem": {
+        const up = node.up ?? 0;
+        const frame = scope[scope.length - 1 - up];
+        if (!frame || frame.kind !== "elem") {
+          throw new RuleRuntimeError(
+            "INVALID_NODE",
+            `\`elem\` (up:${up}) has no element binder in scope`,
+          );
+        }
+        return frame.value;
+      }
+      case "pair": {
+        const frame = scope[scope.length - 1];
+        if (!frame || frame.kind !== "pair") {
+          throw new RuleRuntimeError(
+            "INVALID_NODE",
+            "`pair` has no pair binder in scope",
+          );
+        }
+        return node.side === "left" ? frame.left : frame.right;
+      }
+      default: {
+        const _exhaustive: never = node;
+        throw new RuleRuntimeError(
+          "INVALID_NODE",
+          `unknown v3 scalar node ${JSON.stringify(_exhaustive)}`,
+        );
+      }
+    }
+  } finally {
+    leave(budget);
+  }
+}
+
+function evalPredicateV3(
+  node: PredicateNodeV3,
+  input: RuleRuntimeInput,
+  budget: Budget,
+  scope: BinderFrame[],
+): boolean {
+  tick(budget);
+  enter(budget);
+  try {
+    switch (node.kind) {
+      case "compare":
+        return compareValues(
+          evalScalarV3(node.left, input, budget, scope),
+          node.op,
+          evalScalarV3(node.right, input, budget, scope),
+        );
+      case "contains": {
+        const values = evalArrayV3(node.array, input, budget, scope);
+        const target = evalScalarV3(node.value, input, budget, scope);
+        return values.includes(target);
+      }
+      case "forall": {
+        for (const value of evalArrayV3(node.of, input, budget, scope)) {
+          scope.push({ kind: "elem", value });
+          try {
+            if (!evalPredicateV3(node.where, input, budget, scope)) {
+              return false;
+            }
+          } finally {
+            scope.pop();
+          }
+        }
+        return true;
+      }
+      case "exists": {
+        for (const value of evalArrayV3(node.of, input, budget, scope)) {
+          scope.push({ kind: "elem", value });
+          try {
+            if (evalPredicateV3(node.where, input, budget, scope)) {
+              return true;
+            }
+          } finally {
+            scope.pop();
+          }
+        }
+        return false;
+      }
+      case "pairs_forall":
+      case "pairs_exists": {
+        const left = evalArrayV3(node.left, input, budget, scope);
+        const right = evalArrayV3(node.right, input, budget, scope);
+        const length = Math.min(left.length, right.length);
+        for (let index = 0; index < length; index += 1) {
+          scope.push({ kind: "pair", left: left[index]!, right: right[index]! });
+          try {
+            const holds = evalPredicateV3(node.where, input, budget, scope);
+            if (node.kind === "pairs_forall" && !holds) return false;
+            if (node.kind === "pairs_exists" && holds) return true;
+          } finally {
+            scope.pop();
+          }
+        }
+        return node.kind === "pairs_forall";
+      }
+      case "and":
+        return node.clauses.every((clause) =>
+          evalPredicateV3(clause, input, budget, scope),
+        );
+      case "or":
+        return node.clauses.some((clause) =>
+          evalPredicateV3(clause, input, budget, scope),
+        );
+      case "not":
+        return !evalPredicateV3(node.clause, input, budget, scope);
+      default: {
+        const _exhaustive: never = node;
+        throw new RuleRuntimeError(
+          "INVALID_NODE",
+          `unknown v3 predicate node ${JSON.stringify(_exhaustive)}`,
+        );
+      }
+    }
+  } finally {
+    leave(budget);
+  }
+}
+
 // Legacy v1 grammar (the original 3 kinds). Kept so frozen v1 artifacts execute
 // unchanged.
 function evaluateLegacy(
@@ -575,6 +905,14 @@ export function evaluatePredicate(
       "evaluatePredicate called on a ranking rule",
     );
   }
+  if (safeAst.schemaVersion === 3) {
+    const win = evalPredicateV3(safeAst.result.predicate, safeInput, budget, []);
+    return {
+      result: win ? "WIN" : "LOSE",
+      runtimeSteps: budget.ops,
+      matchedRuleBranch: `predicate:${safeAst.result.predicate.kind}`,
+    };
+  }
   const win = evalPredicate(safeAst.result.predicate, safeInput, budget);
   return {
     result: win ? "WIN" : "LOSE",
@@ -590,14 +928,16 @@ export function evaluatePredicate(
 export function scoreGuess(ast: RuleAst, input: RuleRuntimeInput): number {
   const safeAst = parseRuntimeAst(ast);
   const safeInput = normalizeInput(input);
-  if (safeAst.schemaVersion !== 2 || safeAst.result.type !== "ranking") {
+  if (safeAst.schemaVersion === 1 || safeAst.result.type !== "ranking") {
     throw new RuleRuntimeError(
       "NOT_A_RANKING_RULE",
-      "scoreGuess requires a v2 ranking rule",
+      "scoreGuess requires a v2/v3 ranking rule",
     );
   }
   const budget: Budget = { ops: 0, depth: 0 };
-  return evalScalar(safeAst.result.score, safeInput, budget);
+  return safeAst.schemaVersion === 3
+    ? evalScalarV3(safeAst.result.score, safeInput, budget, [])
+    : evalScalar(safeAst.result.score, safeInput, budget);
 }
 
 export interface RankingEntry<T = string> {

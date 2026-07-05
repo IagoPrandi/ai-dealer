@@ -242,7 +242,312 @@ test("serialization round-trips through JSON", () => {
 });
 
 test("exposes a JSON schema and the current version", () => {
-  assert.equal(CURRENT_SCHEMA_VERSION, 2);
+  assert.equal(CURRENT_SCHEMA_VERSION, 3);
   const js = getRuleAstJsonSchema() as Record<string, unknown>;
   assert.ok(js && typeof js === "object");
+});
+
+// ---------------------------------------------------------------------------
+// schemaVersion 3 — compositional core.
+// ---------------------------------------------------------------------------
+
+const guess = { kind: "source", source: "guess" } as const;
+const draw = { kind: "source", source: "draw" } as const;
+
+test("v3 accepts novel compositions without dedicated node kinds", () => {
+  // "At least four picks within 3 of the same-slot drawn number."
+  const countedNearSlots = {
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "compare",
+        op: "gte",
+        left: {
+          kind: "reduce",
+          op: "sum",
+          of: {
+            kind: "pairs_map",
+            left: guess,
+            right: draw,
+            expr: {
+              kind: "ite",
+              if: {
+                kind: "compare",
+                op: "lte",
+                left: {
+                  kind: "abs",
+                  of: {
+                    kind: "arith",
+                    op: "sub",
+                    left: { kind: "pair", side: "left" },
+                    right: { kind: "pair", side: "right" },
+                  },
+                },
+                right: { kind: "lit", value: 3 },
+              },
+              then: { kind: "lit", value: 1 },
+              else: { kind: "lit", value: 0 },
+            },
+          },
+        },
+        right: { kind: "lit", value: 4 },
+      },
+    },
+  };
+  assert.equal(ruleAstSchema.safeParse(countedNearSlots).success, true);
+
+  // "My picks include two consecutive numbers" — the shifted-zip idiom.
+  const sortedAsc = { kind: "sort", order: "asc", of: guess } as const;
+  const consecutive = {
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "pairs_exists",
+        left: { kind: "slice", of: sortedAsc, start: 0, end: -1 },
+        right: { kind: "slice", of: sortedAsc, start: 1 },
+        where: {
+          kind: "compare",
+          op: "eq",
+          left: {
+            kind: "arith",
+            op: "sub",
+            left: { kind: "pair", side: "right" },
+            right: { kind: "pair", side: "left" },
+          },
+          right: { kind: "lit", value: 1 },
+        },
+      },
+    },
+  };
+  assert.equal(ruleAstSchema.safeParse(consecutive).success, true);
+
+  // Cross-array quantification with one outer reference (up:1).
+  const everyPickNearSomeDraw = {
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "forall",
+        of: guess,
+        where: {
+          kind: "exists",
+          of: draw,
+          where: {
+            kind: "compare",
+            op: "lte",
+            left: {
+              kind: "abs",
+              of: {
+                kind: "arith",
+                op: "sub",
+                left: { kind: "elem", up: 1 },
+                right: { kind: "elem", up: 0 },
+              },
+            },
+            right: { kind: "lit", value: 10 },
+          },
+        },
+      },
+    },
+  };
+  assert.equal(ruleAstSchema.safeParse(everyPickNearSomeDraw).success, true);
+
+  // Ranking over a composed score: sum of units digits.
+  const unitsDigitSumRanking = {
+    schemaVersion: 3,
+    result: {
+      type: "ranking",
+      direction: "max",
+      tieBreak: "share_pool",
+      score: {
+        kind: "reduce",
+        op: "sum",
+        of: { kind: "digits", place: "units", of: guess },
+      },
+    },
+  };
+  assert.equal(ruleAstSchema.safeParse(unitsDigitSumRanking).success, true);
+});
+
+test("v3 rejects unresolved binder references", () => {
+  // elem with no binder in scope.
+  assert.equal(
+    ruleAstSchema.safeParse({
+      schemaVersion: 3,
+      result: {
+        type: "predicate",
+        predicate: {
+          kind: "compare",
+          op: "eq",
+          left: { kind: "elem" },
+          right: { kind: "lit", value: 1 },
+        },
+      },
+    }).success,
+    false,
+  );
+  // pair inside an element binder scope.
+  assert.equal(
+    ruleAstSchema.safeParse({
+      schemaVersion: 3,
+      result: {
+        type: "predicate",
+        predicate: {
+          kind: "exists",
+          of: guess,
+          where: {
+            kind: "compare",
+            op: "eq",
+            left: { kind: "pair", side: "left" },
+            right: { kind: "lit", value: 1 },
+          },
+        },
+      },
+    }).success,
+    false,
+  );
+  // elem up:1 with only one binder frame.
+  assert.equal(
+    ruleAstSchema.safeParse({
+      schemaVersion: 3,
+      result: {
+        type: "predicate",
+        predicate: {
+          kind: "exists",
+          of: guess,
+          where: {
+            kind: "compare",
+            op: "eq",
+            left: { kind: "elem", up: 1 },
+            right: { kind: "lit", value: 1 },
+          },
+        },
+      },
+    }).success,
+    false,
+  );
+});
+
+test("v3 rejects binder nesting beyond depth 2", () => {
+  assert.equal(
+    ruleAstSchema.safeParse({
+      schemaVersion: 3,
+      result: {
+        type: "predicate",
+        predicate: {
+          kind: "exists",
+          of: guess,
+          where: {
+            kind: "exists",
+            of: draw,
+            where: {
+              kind: "exists",
+              of: draw,
+              where: {
+                kind: "compare",
+                op: "eq",
+                left: { kind: "elem" },
+                right: { kind: "lit", value: 1 },
+              },
+            },
+          },
+        },
+      },
+    }).success,
+    false,
+  );
+});
+
+test("v3 rejects statically unsafe `at` and literal-zero divisors", () => {
+  // at on a filtered array (unknown runtime length).
+  assert.equal(
+    ruleAstSchema.safeParse({
+      schemaVersion: 3,
+      result: {
+        type: "predicate",
+        predicate: {
+          kind: "compare",
+          op: "eq",
+          left: {
+            kind: "at",
+            index: 0,
+            of: {
+              kind: "filter",
+              of: guess,
+              where: {
+                kind: "compare",
+                op: "gt",
+                left: { kind: "elem" },
+                right: { kind: "lit", value: 50 },
+              },
+            },
+          },
+          right: { kind: "lit", value: 1 },
+        },
+      },
+    }).success,
+    false,
+  );
+  // at beyond the statically known length.
+  assert.equal(
+    ruleAstSchema.safeParse({
+      schemaVersion: 3,
+      result: {
+        type: "predicate",
+        predicate: {
+          kind: "compare",
+          op: "eq",
+          left: { kind: "at", index: 6, of: guess },
+          right: { kind: "lit", value: 1 },
+        },
+      },
+    }).success,
+    false,
+  );
+  // division by literal zero.
+  assert.equal(
+    ruleAstSchema.safeParse({
+      schemaVersion: 3,
+      result: {
+        type: "ranking",
+        direction: "max",
+        tieBreak: "share_pool",
+        score: {
+          kind: "arith",
+          op: "div",
+          left: { kind: "reduce", op: "sum", of: guess },
+          right: { kind: "lit", value: 0 },
+        },
+      },
+    }).success,
+    false,
+  );
+});
+
+test("v3 `at` stays legal on length-preserving pipelines", () => {
+  assert.equal(
+    ruleAstSchema.safeParse({
+      schemaVersion: 3,
+      result: {
+        type: "predicate",
+        predicate: {
+          kind: "compare",
+          op: "gt",
+          left: {
+            kind: "at",
+            index: 1,
+            of: { kind: "sort", order: "desc", of: guess },
+          },
+          right: {
+            kind: "at",
+            index: 0,
+            of: { kind: "slice", of: draw, start: 4 },
+          },
+        },
+      },
+    }).success,
+    true,
+  );
 });

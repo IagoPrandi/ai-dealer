@@ -17,8 +17,14 @@ import { z } from "zod";
 //
 // schemaVersion 1 is the legacy 3-kind grammar; it is kept so already-frozen
 // artifacts still validate and execute unchanged (no silent re-hash).
+//
+// schemaVersion 3 is the orthogonal compositional core (docs/
+// rule-algebra-core-design.md): a small closed node set (map/filter/quantifiers
+// with implicit element binders + pairwise zips) in which every v2 specialized
+// predicate kind is a macro (see desugar.ts). Novel rules become expressible by
+// COMPOSING core nodes instead of adding new node kinds.
 
-export const CURRENT_SCHEMA_VERSION = 2 as const;
+export const CURRENT_SCHEMA_VERSION = 3 as const;
 
 // Runtime/compile bounds (mirrors @idealer/constants.MAX_REMOVABLE_NUMBERS = 4;
 // kept local so rule-schema stays dependency-free besides zod). The compiler
@@ -158,7 +164,71 @@ export type RuleAstV1 = {
   };
 };
 
-export type RuleAst = RuleAstV1 | RuleAstV2;
+// ---------------------------------------------------------------------------
+// schemaVersion 3 — the orthogonal compositional core.
+//
+// Element scopes: `map`/`filter`/`forall`/`exists` bind one implicit element
+// (referenced by {"kind":"elem"}), `pairs_map`/`pairs_forall`/`pairs_exists`
+// bind an implicit (left,right) pair (referenced by {"kind":"pair"}). One level
+// of outer reference is allowed via {"kind":"elem","up":1}. Binder nesting is
+// capped at 2, so worst-case evaluation is <= 6x6 element visits per quantifier
+// pair — strictly bounded. Scope validity is enforced statically (see
+// validateV3StaticIssues), never patched at runtime.
+// ---------------------------------------------------------------------------
+
+export const MAX_V3_BINDER_DEPTH = 2;
+
+export type ReduceOp = "sum" | "product" | "count" | "min" | "max" | "range_span";
+
+export type ArrayExprV3 =
+  | { kind: "source"; source: "guess" | "draw" }
+  | { kind: "sort"; order: "asc" | "desc"; of: ArrayExprV3 }
+  | { kind: "reverse"; of: ArrayExprV3 }
+  | { kind: "slice"; of: ArrayExprV3; start: number; end?: number | undefined }
+  | { kind: "distinct"; of: ArrayExprV3 }
+  | { kind: "intersection"; left: ArrayExprV3; right: ArrayExprV3 }
+  | { kind: "difference"; left: ArrayExprV3; right: ArrayExprV3 }
+  | { kind: "digits"; place: "units" | "tens"; of: ArrayExprV3 }
+  | { kind: "map"; of: ArrayExprV3; expr: ScalarExprV3 }
+  | { kind: "filter"; of: ArrayExprV3; where: PredicateNodeV3 }
+  | { kind: "pairs_map"; left: ArrayExprV3; right: ArrayExprV3; expr: ScalarExprV3 };
+
+export type ScalarExprV3 =
+  | { kind: "lit"; value: number }
+  | { kind: "reduce"; op: ReduceOp; of: ArrayExprV3 }
+  | { kind: "at"; index: number; of: ArrayExprV3 }
+  | { kind: "arith"; op: ArithOp; left: ScalarExprV3; right: ScalarExprV3 }
+  | { kind: "abs"; of: ScalarExprV3 }
+  | { kind: "ite"; if: PredicateNodeV3; then: ScalarExprV3; else: ScalarExprV3 }
+  | { kind: "elem"; up?: 0 | 1 | undefined }
+  | { kind: "pair"; side: "left" | "right" };
+
+export type PredicateNodeV3 =
+  | { kind: "compare"; op: CompareOp; left: ScalarExprV3; right: ScalarExprV3 }
+  | { kind: "contains"; array: ArrayExprV3; value: ScalarExprV3 }
+  | { kind: "forall"; of: ArrayExprV3; where: PredicateNodeV3 }
+  | { kind: "exists"; of: ArrayExprV3; where: PredicateNodeV3 }
+  | { kind: "pairs_forall"; left: ArrayExprV3; right: ArrayExprV3; where: PredicateNodeV3 }
+  | { kind: "pairs_exists"; left: ArrayExprV3; right: ArrayExprV3; where: PredicateNodeV3 }
+  | { kind: "and"; clauses: PredicateNodeV3[] }
+  | { kind: "or"; clauses: PredicateNodeV3[] }
+  | { kind: "not"; clause: PredicateNodeV3 };
+
+export type RuleResultV3 =
+  | { type: "predicate"; predicate: PredicateNodeV3 }
+  | {
+      type: "ranking";
+      score: ScalarExprV3;
+      direction: "max" | "min";
+      tieBreak: "share_pool";
+    };
+
+export type RuleAstV3 = {
+  schemaVersion: 3;
+  result: RuleResultV3;
+};
+
+export type RuleAst = RuleAstV1 | RuleAstV2 | RuleAstV3;
 
 // ---------------------------------------------------------------------------
 // Zod schemas.
@@ -389,25 +459,405 @@ const ruleAstV1Schema: z.ZodType<RuleAstV1> = z.object({
   }),
 });
 
+// ---------------------------------------------------------------------------
+// v3 zod schemas (structural) + static totality/scope validation.
+// ---------------------------------------------------------------------------
+
+// Comparison thresholds never legitimately exceed the sum/product ranges the
+// game can produce; bounding literals keeps constrained decoding tight.
+const v3LitValue = intSchema.min(-1_000_000).max(1_000_000);
+
+const arrayExprV3Schema: z.ZodType<ArrayExprV3> = z.lazy(() =>
+  z.union([
+    z.object({ kind: z.literal("source"), source: z.enum(["guess", "draw"]) }),
+    z.object({
+      kind: z.literal("sort"),
+      order: z.enum(["asc", "desc"]),
+      of: arrayExprV3Schema,
+    }),
+    z.object({ kind: z.literal("reverse"), of: arrayExprV3Schema }),
+    z.object({
+      kind: z.literal("slice"),
+      of: arrayExprV3Schema,
+      start: intSchema.min(0).max(12),
+      // Negative end means "from the end" (JS slice semantics).
+      end: intSchema.min(-12).max(12).optional(),
+    }),
+    z.object({ kind: z.literal("distinct"), of: arrayExprV3Schema }),
+    z.object({
+      kind: z.literal("intersection"),
+      left: arrayExprV3Schema,
+      right: arrayExprV3Schema,
+    }),
+    z.object({
+      kind: z.literal("difference"),
+      left: arrayExprV3Schema,
+      right: arrayExprV3Schema,
+    }),
+    z.object({
+      kind: z.literal("digits"),
+      place: z.enum(["units", "tens"]),
+      of: arrayExprV3Schema,
+    }),
+    z.object({
+      kind: z.literal("map"),
+      of: arrayExprV3Schema,
+      expr: scalarExprV3Schema,
+    }),
+    z.object({
+      kind: z.literal("filter"),
+      of: arrayExprV3Schema,
+      where: predicateNodeV3Schema,
+    }),
+    z.object({
+      kind: z.literal("pairs_map"),
+      left: arrayExprV3Schema,
+      right: arrayExprV3Schema,
+      expr: scalarExprV3Schema,
+    }),
+  ]),
+);
+
+const scalarExprV3Schema: z.ZodType<ScalarExprV3> = z.lazy(() =>
+  z.union([
+    z.object({ kind: z.literal("lit"), value: v3LitValue }),
+    z.object({
+      kind: z.literal("reduce"),
+      op: z.enum(["sum", "product", "count", "min", "max", "range_span"]),
+      of: arrayExprV3Schema,
+    }),
+    z.object({
+      kind: z.literal("at"),
+      index: intSchema.min(0).max(11),
+      of: arrayExprV3Schema,
+    }),
+    z.object({
+      kind: z.literal("arith"),
+      op: arithOpSchema,
+      left: scalarExprV3Schema,
+      right: scalarExprV3Schema,
+    }),
+    z.object({ kind: z.literal("abs"), of: scalarExprV3Schema }),
+    z.object({
+      kind: z.literal("ite"),
+      if: predicateNodeV3Schema,
+      then: scalarExprV3Schema,
+      else: scalarExprV3Schema,
+    }),
+    z.object({
+      kind: z.literal("elem"),
+      up: z.union([z.literal(0), z.literal(1)]).optional(),
+    }),
+    z.object({ kind: z.literal("pair"), side: z.enum(["left", "right"]) }),
+  ]),
+);
+
+const predicateNodeV3Schema: z.ZodType<PredicateNodeV3> = z.lazy(() =>
+  z.union([
+    z.object({
+      kind: z.literal("compare"),
+      op: compareOpSchema,
+      left: scalarExprV3Schema,
+      right: scalarExprV3Schema,
+    }),
+    z.object({
+      kind: z.literal("contains"),
+      array: arrayExprV3Schema,
+      value: scalarExprV3Schema,
+    }),
+    z.object({
+      kind: z.literal("forall"),
+      of: arrayExprV3Schema,
+      where: predicateNodeV3Schema,
+    }),
+    z.object({
+      kind: z.literal("exists"),
+      of: arrayExprV3Schema,
+      where: predicateNodeV3Schema,
+    }),
+    z.object({
+      kind: z.literal("pairs_forall"),
+      left: arrayExprV3Schema,
+      right: arrayExprV3Schema,
+      where: predicateNodeV3Schema,
+    }),
+    z.object({
+      kind: z.literal("pairs_exists"),
+      left: arrayExprV3Schema,
+      right: arrayExprV3Schema,
+      where: predicateNodeV3Schema,
+    }),
+    z.object({
+      kind: z.literal("and"),
+      clauses: z.array(predicateNodeV3Schema).min(1).max(8),
+    }),
+    z.object({
+      kind: z.literal("or"),
+      clauses: z.array(predicateNodeV3Schema).min(1).max(8),
+    }),
+    z.object({ kind: z.literal("not"), clause: predicateNodeV3Schema }),
+  ]),
+);
+
+const ruleResultV3Schema: z.ZodType<RuleResultV3> = z.union([
+  z.object({ type: z.literal("predicate"), predicate: predicateNodeV3Schema }),
+  z.object({
+    type: z.literal("ranking"),
+    score: scalarExprV3Schema,
+    direction: z.enum(["max", "min"]),
+    tieBreak: z.literal("share_pool"),
+  }),
+]);
+
+const ruleAstV3StructuralSchema: z.ZodType<RuleAstV3> = z.object({
+  schemaVersion: z.literal(3),
+  result: ruleResultV3Schema,
+});
+
+type BinderFrame = "elem" | "pair";
+
+// Static totality + scope checks the recursive zod grammar cannot express.
+// Every violation is a SCHEMA REJECTION — never a silent runtime fallback:
+// - elem/pair references must resolve to a binder frame of the right kind;
+// - binder nesting depth is capped at MAX_V3_BINDER_DEPTH;
+// - `at` requires a statically known array length that covers the index
+//   (post-filter/intersection lengths are unknown -> use sort+slice+reduce).
+// Division/modulo keep the v1/v2 documented algebraic identities (x div 0 = 0,
+// x mod m = 0 for m <= 0, min/max/span of [] = 0, product of [] = 1, sum/count
+// of [] = 0) so v2 artifacts desugar to semantically identical v3 trees;
+// literal zero divisors are still rejected here as author mistakes.
+export function validateV3StaticIssues(ast: RuleAstV3): string[] {
+  const issues: string[] = [];
+
+  const staticLength = (node: ArrayExprV3): number | null => {
+    switch (node.kind) {
+      case "source":
+        return 6;
+      case "sort":
+      case "reverse":
+      case "digits":
+        return staticLength(node.of);
+      case "map":
+        return staticLength(node.of);
+      case "slice": {
+        const len = staticLength(node.of);
+        if (len === null) return null;
+        const end =
+          node.end === undefined
+            ? len
+            : node.end < 0
+              ? Math.max(0, len + node.end)
+              : Math.min(node.end, len);
+        return Math.max(0, end - Math.min(node.start, len));
+      }
+      case "pairs_map": {
+        const left = staticLength(node.left);
+        const right = staticLength(node.right);
+        return left === null || right === null ? null : Math.min(left, right);
+      }
+      case "distinct":
+      case "intersection":
+      case "difference":
+      case "filter":
+        return null;
+    }
+  };
+
+  const visitScalar = (node: ScalarExprV3, stack: BinderFrame[]): void => {
+    switch (node.kind) {
+      case "lit":
+        return;
+      case "reduce":
+        visitArray(node.of, stack);
+        return;
+      case "at": {
+        visitArray(node.of, stack);
+        const len = staticLength(node.of);
+        if (len === null) {
+          issues.push(
+            "`at` on an array without statically known length (filter/intersection/difference/distinct shrink); use sort+slice+reduce instead",
+          );
+        } else if (node.index >= len) {
+          issues.push(
+            `\`at\` index ${node.index} is out of bounds for a length-${len} array`,
+          );
+        }
+        return;
+      }
+      case "arith": {
+        visitScalar(node.left, stack);
+        visitScalar(node.right, stack);
+        if (node.op === "div" && node.right.kind === "lit" && node.right.value === 0) {
+          issues.push("division by literal zero");
+        }
+        if (node.op === "mod" && node.right.kind === "lit" && node.right.value <= 0) {
+          issues.push("modulo by non-positive literal");
+        }
+        return;
+      }
+      case "abs":
+        visitScalar(node.of, stack);
+        return;
+      case "ite":
+        visitPredicate(node.if, stack);
+        visitScalar(node.then, stack);
+        visitScalar(node.else, stack);
+        return;
+      case "elem": {
+        const up = node.up ?? 0;
+        const frame = stack[stack.length - 1 - up];
+        if (frame !== "elem") {
+          issues.push(
+            `\`elem\` (up:${up}) does not resolve to an element binder scope`,
+          );
+        }
+        return;
+      }
+      case "pair": {
+        if (stack[stack.length - 1] !== "pair") {
+          issues.push("`pair` used outside a pairs_* binder scope");
+        }
+        return;
+      }
+    }
+  };
+
+  const enterBinder = (stack: BinderFrame[], frame: BinderFrame): BinderFrame[] | null => {
+    if (stack.length >= MAX_V3_BINDER_DEPTH) {
+      issues.push(
+        `binder nesting exceeds the maximum depth of ${MAX_V3_BINDER_DEPTH}`,
+      );
+      return null;
+    }
+    return [...stack, frame];
+  };
+
+  const visitArray = (node: ArrayExprV3, stack: BinderFrame[]): void => {
+    switch (node.kind) {
+      case "source":
+        return;
+      case "sort":
+      case "reverse":
+      case "distinct":
+      case "digits":
+        visitArray(node.of, stack);
+        return;
+      case "slice":
+        visitArray(node.of, stack);
+        return;
+      case "intersection":
+      case "difference":
+        visitArray(node.left, stack);
+        visitArray(node.right, stack);
+        return;
+      case "map": {
+        visitArray(node.of, stack);
+        const inner = enterBinder(stack, "elem");
+        if (inner) visitScalar(node.expr, inner);
+        return;
+      }
+      case "filter": {
+        visitArray(node.of, stack);
+        const inner = enterBinder(stack, "elem");
+        if (inner) visitPredicate(node.where, inner);
+        return;
+      }
+      case "pairs_map": {
+        visitArray(node.left, stack);
+        visitArray(node.right, stack);
+        const inner = enterBinder(stack, "pair");
+        if (inner) visitScalar(node.expr, inner);
+        return;
+      }
+    }
+  };
+
+  const visitPredicate = (node: PredicateNodeV3, stack: BinderFrame[]): void => {
+    switch (node.kind) {
+      case "compare":
+        visitScalar(node.left, stack);
+        visitScalar(node.right, stack);
+        return;
+      case "contains":
+        visitArray(node.array, stack);
+        visitScalar(node.value, stack);
+        return;
+      case "forall":
+      case "exists": {
+        visitArray(node.of, stack);
+        const inner = enterBinder(stack, "elem");
+        if (inner) visitPredicate(node.where, inner);
+        return;
+      }
+      case "pairs_forall":
+      case "pairs_exists": {
+        visitArray(node.left, stack);
+        visitArray(node.right, stack);
+        const inner = enterBinder(stack, "pair");
+        if (inner) visitPredicate(node.where, inner);
+        return;
+      }
+      case "and":
+      case "or":
+        for (const clause of node.clauses) visitPredicate(clause, stack);
+        return;
+      case "not":
+        visitPredicate(node.clause, stack);
+        return;
+    }
+  };
+
+  if (ast.result.type === "predicate") {
+    visitPredicate(ast.result.predicate, []);
+  } else {
+    visitScalar(ast.result.score, []);
+  }
+  return issues;
+}
+
+const ruleAstV3Schema: z.ZodType<RuleAstV3> = ruleAstV3StructuralSchema.superRefine(
+  (ast, ctx) => {
+    for (const issue of validateV3StaticIssues(ast)) {
+      ctx.addIssue({ code: "custom", message: issue });
+    }
+  },
+);
+
 export const ruleAstSchema: z.ZodType<RuleAst> = z.union([
   ruleAstV1Schema,
   ruleAstV2Schema,
+  ruleAstV3Schema,
 ]);
 
 // JSON Schema used for constrained decoding (Ollama `format`, vLLM guided_json,
 // OpenAI response_format json_schema). Computed lazily + memoized so a zod
-// conversion edge case can never break module import. Only v2 is emitted by the
-// LLM, so we expose the v2 schema for the compile step.
+// conversion edge case can never break module import. New rules are emitted by
+// the LLM in the v3 compositional core, so we expose the v3 structural schema
+// for the compile step (scope/totality checks run in zod after decoding).
 let cachedJsonSchema: unknown;
 export function getRuleAstJsonSchema(): unknown {
-  cachedJsonSchema ??= z.toJSONSchema(ruleAstV2Schema, { target: "draft-7" });
+  cachedJsonSchema ??= z.toJSONSchema(ruleAstV3StructuralSchema, {
+    target: "draft-7",
+  });
   return cachedJsonSchema;
 }
 
 export function isRankingRule(ast: RuleAst): boolean {
-  return ast.schemaVersion === 2 && ast.result.type === "ranking";
+  return ast.schemaVersion !== 1 && ast.result.type === "ranking";
+}
+
+// Direction of a ranking rule (max wins by default for non-ranking callers that
+// only need a defined value, e.g. the test harness).
+export function rankingDirection(ast: RuleAst): "max" | "min" {
+  return ast.schemaVersion !== 1 && ast.result.type === "ranking"
+    ? ast.result.direction
+    : "max";
 }
 
 export function parseRuleAst(value: unknown): RuleAst {
   return ruleAstSchema.parse(value);
 }
+
+// Executable v1/v2 -> v3 macro expansion (type-only import above, so this
+// re-export cannot create a runtime cycle).
+export { desugarToV3 } from "./desugar.js";

@@ -1,5 +1,5 @@
 import type { RuleAst } from "@idealer/rule-schema";
-import { isRankingRule, ruleAstSchema } from "@idealer/rule-schema";
+import { isRankingRule, rankingDirection, ruleAstSchema } from "@idealer/rule-schema";
 import {
   evaluatePredicate,
   resolveRankingWinners,
@@ -117,7 +117,7 @@ export function classifyDifficulty(ast: RuleAst): RuleDifficultyResult {
           score: scoreGuess(ast, { guess: sixUnique(rng), draw }),
         }),
       );
-      const winners = resolveRankingWinners(scores, ast.schemaVersion === 2 && ast.result.type === "ranking" ? ast.result.direction : "max");
+      const winners = resolveRankingWinners(scores, rankingDirection(ast));
       fractionSum += winners.size / MONTE_CARLO.rankingFieldSize;
     }
     const estimatedWinRate = fractionSum / MONTE_CARLO.rankingDraws;
@@ -162,12 +162,7 @@ export function generateAndRunTests(ast: RuleAst): RuleTestSummary {
           player: index,
           score: scoreGuess(ast, { guess: sixUnique(rng), draw }),
         }));
-        const winners = resolveRankingWinners(
-          scores,
-          ast.schemaVersion === 2 && ast.result.type === "ranking"
-            ? ast.result.direction
-            : "max",
-        );
+        const winners = resolveRankingWinners(scores, rankingDirection(ast));
         if (winners.size > 0) foundWin = true;
         if (winners.size < scores.length) foundLose = true;
       } else {

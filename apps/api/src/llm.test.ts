@@ -197,13 +197,14 @@ test("compile harness prompt includes selected prompt-set examples", async () =>
   assert.match(systemPrompt, /largest guessed number is greater than the largest drawn number/i);
   assert.match(systemPrompt, /four or more of my picked numbers show up/i);
   assert.match(systemPrompt, /second guessed number equals second drawn number/i);
-  assert.match(systemPrompt, /all_ordered_abs_diff_lte/i);
-  assert.match(systemPrompt, /ordered_position_match_count_eq/i);
-  assert.match(systemPrompt, /total_ordered_abs_diff_lte/i);
-  assert.match(systemPrompt, /reversed_position_match_count_at_least/i);
-  assert.match(systemPrompt, /remove_up_to_n/i);
-  assert.match(systemPrompt, /map_with_guard/i);
+  // v3 compositional core: pairwise zips, quantifiers, and the novel-rule idioms.
+  assert.match(systemPrompt, /"schemaVersion":3/);
+  assert.match(systemPrompt, /pairs_forall/);
+  assert.match(systemPrompt, /pairs_map/);
+  assert.match(systemPrompt, /"kind":"filter"/);
+  assert.match(systemPrompt, /"kind":"ite"/);
+  assert.match(systemPrompt, /Shifted zip/i);
   assert.match(systemPrompt, /below-50 split/i);
-  assert.match(systemPrompt, /value_within_any_count_at_least/i);
+  assert.match(systemPrompt, /"up":1/);
   assert.match(systemPrompt, /sum\(guess\) mod 10/i);
 });
