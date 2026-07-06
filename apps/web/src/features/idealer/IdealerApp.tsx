@@ -94,6 +94,7 @@ export function IdealerApp({
 
   const [screen, setScreen] = useState<Screen>(initialScreen);
   const [seed, setSeed] = useState("");
+  const [chatId, setChatId] = useState<null | string>(null);
   const [detail, setDetail] = useState<{ canAgainst: boolean; rank: number | null; ruleId: number } | null>(null);
   const [showConnect, setShowConnect] = useState(initialConnect);
   const [voteBusyRuleId, setVoteBusyRuleId] = useState<null | number>(null);
@@ -104,6 +105,7 @@ export function IdealerApp({
     if (params && "seed" in params && params.seed !== undefined) {
       setSeed(params.seed);
     }
+    setChatId(params?.chatId ?? null);
     setDetail(null);
     setScreen(next);
   }, []);
@@ -289,6 +291,7 @@ export function IdealerApp({
     actionError,
     approvedIds: rules.approvedIds,
     bet: receipt?.numbers ?? null,
+    chatId,
     client,
     connect: requestConnect,
     connected,

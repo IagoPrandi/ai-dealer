@@ -5,6 +5,7 @@
  * Idempotente: chamar installMockFetch() mais de uma vez não empilha patches.
  */
 import {
+  MOCK_CONVERSATION_DRAFTS,
   MOCK_GUESS_RECEIPT,
   MOCK_PLAYER_CLAIMS,
   MOCK_ROUND,
@@ -40,6 +41,9 @@ function resolveMock(url: string): unknown | undefined {
   if (url.includes("/elimination")) {
     // Sem estado de eliminação ativo: as telas tratam isto como opcional.
     return {};
+  }
+  if (url.includes("/conversation-drafts")) {
+    return MOCK_CONVERSATION_DRAFTS;
   }
   if (url.includes("/guess-receipts")) {
     return MOCK_GUESS_RECEIPT;

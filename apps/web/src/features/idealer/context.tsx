@@ -34,6 +34,7 @@ export interface IdealerContextValue {
   actionError: null | string;
   approvedIds: number[];
   bet: null | number[];
+  chatId: null | string;
   client: SolanaClient;
   connect: () => void;
   connected: boolean;

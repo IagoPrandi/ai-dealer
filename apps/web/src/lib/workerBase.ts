@@ -3,6 +3,11 @@
 const CONFIGURED_WORKER_BASE_URL =
   process.env.NEXT_PUBLIC_IDEALER_WORKER_URL?.trim();
 
+// Served on the Next origin and rewritten to the worker by next.config.ts. Keeps
+// worker calls same-origin so an HTTPS tunnel (used to install the PWA on a
+// phone) works without mixed-content or CORS issues. Mirrors the API proxy.
+const SAME_ORIGIN_WORKER_PROXY = "/__worker";
+
 function stripTrailingSlash(value: string) {
   return value.replace(/\/+$/, "");
 }
@@ -33,7 +38,6 @@ export function getWorkerBaseUrl() {
     return `${protocol}//${hostname}:3003`;
   }
 
-  throw new Error(
-    "NEXT_PUBLIC_IDEALER_WORKER_URL must be set outside local development.",
-  );
+  // Public origin (e.g. a Cloudflare tunnel): go through the same-origin proxy.
+  return SAME_ORIGIN_WORKER_PROXY;
 }

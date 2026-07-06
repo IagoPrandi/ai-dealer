@@ -34,6 +34,7 @@ import {
   getTransparencySnapshot,
   getConsoleSafetyBoundary,
   isRuleRemoved,
+  isValidConversationDraft,
   ruleSignature,
   getRuleElimination,
   listClaimRecords,
@@ -2125,6 +2126,80 @@ test("conversation drafts are saved per wallet and newest draft is listed first"
   assert.equal(drafts.length, 1);
   assert.equal(drafts[0]?.status, "submitted");
   assert.equal(drafts[0]?.createdAt, first.createdAt);
+});
+
+test("conversation draft persists the full message transcript", () => {
+  resetApiStateForTests();
+  const saved = saveConversationDraft({
+    lastMessage: "Rule submitted.",
+    messages: [
+      { text: "Win if at least 4 numbers match", who: "user" },
+      { text: "I can compile this rule.", who: "ai" },
+    ],
+    normalizedText: null,
+    officialInterpretation: null,
+    prompt: "Win if at least 4 numbers match",
+    ruleId: 101,
+    status: "submitted",
+    tokenCount: 7,
+    turnId: 245,
+    wallet,
+  });
+
+  const drafts = listConversationDrafts(wallet);
+
+  assert.equal(drafts.length, 1);
+  assert.equal(drafts[0]?.messages?.length, 2);
+  assert.deepEqual(drafts[0]?.messages, saved.messages);
+});
+
+test("conversation draft validation accepts, tolerates, and rejects transcripts", () => {
+  const base = {
+    lastMessage: "I can compile this rule.",
+    normalizedText: "Win if at least four numbers match.",
+    officialInterpretation: "Count matching numbers between guess and draw.",
+    prompt: "Win if at least 4 numbers match",
+    ruleId: 101,
+    status: "draft" as const,
+    tokenCount: 7,
+    turnId: 245,
+    wallet,
+  };
+
+  // Valid transcript.
+  assert.equal(
+    isValidConversationDraft({
+      ...base,
+      messages: [
+        { text: "Win if at least 4 numbers match", who: "user" },
+        { text: "I can compile this rule.", who: "ai" },
+      ],
+    }),
+    true,
+  );
+  // Retro-compatible: drafts without a transcript stay valid.
+  assert.equal(isValidConversationDraft(base), true);
+  // Invalid author.
+  assert.equal(
+    isValidConversationDraft({ ...base, messages: [{ text: "x", who: "bot" }] }),
+    false,
+  );
+  // Too many messages.
+  assert.equal(
+    isValidConversationDraft({
+      ...base,
+      messages: Array.from({ length: 101 }, () => ({ text: "x", who: "user" as const })),
+    }),
+    false,
+  );
+  // Oversized message text.
+  assert.equal(
+    isValidConversationDraft({
+      ...base,
+      messages: [{ text: "x".repeat(4001), who: "user" }],
+    }),
+    false,
+  );
 });
 
 test("claim flow exposes failed wallet approval and below-threshold unavailable claims", () => {

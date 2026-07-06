@@ -148,6 +148,45 @@ export const MOCK_GUESS_RECEIPT = {
   },
 };
 
+// Resposta de GET /players/{wallet}/conversation-drafts — rascunho salvo com a
+// transcrição completa, para exercitar o "retomar conversa" (histórico do chat).
+export const MOCK_CONVERSATION_DRAFTS = {
+  drafts: [
+    {
+      createdAt: "2026-06-21T10:15:00.000Z",
+      draftId: "draft-mock-0001",
+      lastMessage:
+        "Clear and verifiable. Players win when at least four guessed numbers are drawn.",
+      messages: [
+        {
+          text: "Hey! Tell me in one sentence how your rule decides the round winner. Be creative - I turn it into a valid rule.",
+          who: "ai" as const,
+        },
+        { text: "examples", who: "user" as const },
+        {
+          text: "Try one of these:\nWin if at least 4 of your numbers appear in the draw.\nWin if the sum of your numbers equals the sum of the drawn numbers.",
+          who: "ai" as const,
+        },
+        { text: "Win if at least 4 of your numbers appear in the draw.", who: "user" as const },
+        {
+          text: "Clear and verifiable. Players win when at least four guessed numbers are drawn.",
+          who: "ai" as const,
+        },
+      ],
+      normalizedText:
+        "Win if at least 4 of your guess numbers appear in the drawn numbers.",
+      officialInterpretation: "Win when count(guess ∩ draw) >= 4.",
+      prompt: "Win if at least 4 of your numbers appear in the draw.",
+      ruleId: 4,
+      status: "draft" as const,
+      tokenCount: 12,
+      turnId: MOCK_ACTIVE_TURN_ID,
+      updatedAt: "2026-06-21T10:20:00.000Z",
+      wallet: MOCK_WALLET_ADDRESS,
+    },
+  ],
+};
+
 // Resposta de GET /rounds/{turnId} (shape RoundSummary do RoundPage).
 export const MOCK_ROUND = {
   round: {

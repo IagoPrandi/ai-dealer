@@ -66,6 +66,10 @@ if (existsSync(ROOT_ENV_PATH)) {
 
 const { Pool } = pg;
 const MAX_RULE_TEXT_BYTES = 6000;
+// Conversation transcripts are UI-facing chat logs, not rule text, so they are
+// bounded by count and per-message byte length rather than sanitized.
+const MAX_CONVERSATION_MESSAGES = 100;
+const MAX_CONVERSATION_MESSAGE_BYTES = 4000;
 const RULE_PREVENTED_PATTERNS = [
   /\bignore\b.{0,40}\b(instructions?|rules?|prompt|polic\w+|safety)\b/i,
   /\b(system|developer)\s+(prompt|message|instruction)\b/i,
@@ -678,10 +682,18 @@ export interface PlayerHistoryPage {
 
 export type ConversationDraftStatus = "draft" | "submitted";
 
+export type ConversationMessageAuthor = "ai" | "user";
+
+export interface ConversationMessage {
+  text: string;
+  who: ConversationMessageAuthor;
+}
+
 export interface ConversationDraftRecord {
   createdAt: string;
   draftId: string;
   lastMessage: string;
+  messages?: ConversationMessage[];
   normalizedText: string | null;
   officialInterpretation: string | null;
   prompt: string;
@@ -2310,7 +2322,27 @@ function isValidClaimCompleteRequest(value: unknown): value is {
   );
 }
 
-function isValidConversationDraft(value: unknown): value is Omit<
+function isValidConversationMessages(value: unknown): value is ConversationMessage[] {
+  if (!Array.isArray(value)) {
+    return false;
+  }
+  if (value.length > MAX_CONVERSATION_MESSAGES) {
+    return false;
+  }
+  return value.every((entry) => {
+    if (!entry || typeof entry !== "object") {
+      return false;
+    }
+    const message = entry as Partial<ConversationMessage>;
+    return (
+      (message.who === "ai" || message.who === "user") &&
+      typeof message.text === "string" &&
+      Buffer.byteLength(message.text, "utf8") <= MAX_CONVERSATION_MESSAGE_BYTES
+    );
+  });
+}
+
+export function isValidConversationDraft(value: unknown): value is Omit<
   ConversationDraftRecord,
   "createdAt" | "draftId" | "updatedAt"
 > & {
@@ -2348,6 +2380,7 @@ function isValidConversationDraft(value: unknown): value is Omit<
       typeof draft.officialInterpretation === "string") &&
     typeof draft.lastMessage === "string" &&
     Buffer.byteLength(draft.lastMessage, "utf8") <= MAX_RULE_TEXT_BYTES &&
+    (draft.messages === undefined || isValidConversationMessages(draft.messages)) &&
     (draft.createdAt === undefined ||
       (typeof draft.createdAt === "string" &&
         !Number.isNaN(Date.parse(draft.createdAt)))) &&

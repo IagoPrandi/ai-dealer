@@ -16,7 +16,7 @@ import {
   type RulePreflightResult,
 } from "../../../solana/idealerProgram";
 import { useIdealer } from "../context";
-import { ApiRequestError, postConversationDraft, postRuleProposal, postRulePreflight } from "../data/apiClient";
+import { ApiRequestError, getConversationDrafts, postConversationDraft, postRuleProposal, postRulePreflight } from "../data/apiClient";
 import { fmtSol, fmtTurnId } from "../data/format";
 import { describeTxError, sendInstruction } from "../data/tx";
 import {
@@ -280,14 +280,14 @@ function ClarificationPrompt({
 }
 
 export function CreateScreen() {
-  const { client, connected, fees, go, played, reloadAll, seed, turnId, wallet, walletAddress } = useIdealer();
+  const { chatId, client, connected, fees, go, played, reloadAll, seed, turnId, wallet, walletAddress } = useIdealer();
 
-  return <CreateChat key={seed || "new"} {...{ client, connected, fees, go, played, reloadAll, seed, turnId, wallet, walletAddress }} />;
+  return <CreateChat key={chatId || seed || "new"} {...{ chatId, client, connected, fees, go, played, reloadAll, seed, turnId, wallet, walletAddress }} />;
 }
 
-type ChatProps = Pick<ReturnType<typeof useIdealer>, "client" | "connected" | "fees" | "go" | "played" | "reloadAll" | "seed" | "turnId" | "wallet" | "walletAddress">;
+type ChatProps = Pick<ReturnType<typeof useIdealer>, "chatId" | "client" | "connected" | "fees" | "go" | "played" | "reloadAll" | "seed" | "turnId" | "wallet" | "walletAddress">;
 
-function CreateChat({ client, connected, fees, go, played, reloadAll, seed, turnId, wallet, walletAddress }: ChatProps) {
+function CreateChat({ chatId, client, connected, fees, go, played, reloadAll, seed, turnId, wallet, walletAddress }: ChatProps) {
   const [msgs, setMsgs] = useState<ChatMessage[]>([
     { text: "Hey! Tell me in one sentence how your rule decides the round winner. Be creative - I turn it into a valid rule.", who: "ai" },
   ]);
@@ -390,29 +390,35 @@ function CreateChat({ client, connected, fees, go, played, reloadAll, seed, turn
     setVal("");
     setError(null);
     setGuidance(null);
-    setMsgs((m) => [...m, { text: t, who: "user" }]);
+    // Track the running transcript locally so the persisted draft carries the
+    // full exchange (setMsgs is async and can't be read back synchronously).
+    let transcript: ChatMessage[] = [...msgs, { text: t, who: "user" }];
+    setMsgs(transcript);
     setTyping(true);
     setRule(null);
     try {
       if (!refinedDraft && !likelyRuleDraft) {
-        setMsgs((m) => [...m, { text: getDealerChatReply(t, fees), who: "ai" }]);
+        transcript = [...transcript, { text: getDealerChatReply(t, fees), who: "ai" }];
+        setMsgs(transcript);
         return;
       }
 
       if (refinedDraft) {
-        setMsgs((m) => [
-          ...m,
+        transcript = [
+          ...transcript,
           { text: `I applied that to your previous draft: ${refinedDraft}`, who: "ai" },
-        ]);
+        ];
+        setMsgs(transcript);
       }
 
       const body = await postRulePreflight(ruleText);
       const preflight = body.preflight as unknown as RulePreflightResult;
       const valid = preflight.decision === "VALID" && !preflight.needsClarification;
-      setMsgs((m) => [
-        ...m,
+      transcript = [
+        ...transcript,
         { text: preflight.dealerMessage || (valid ? "Done! I compiled your rule. Review it — if you like it, submit it to the round." : "Almost there! Try describing the win condition in a few clear words."), who: "ai" },
-      ]);
+      ];
+      setMsgs(transcript);
       setRule(preflight);
       if (valid) {
         setGuidance(null);
@@ -430,7 +436,9 @@ function CreateChat({ client, connected, fees, go, played, reloadAll, seed, turn
       if (walletAddress) {
         try {
           const saved = await postConversationDraft(walletAddress, {
+            ...(activeDraftId ? { draftId: activeDraftId } : {}),
             lastMessage: preflight.dealerMessage,
+            messages: transcript,
             normalizedText: preflight.normalizedText || null,
             officialInterpretation: preflight.officialInterpretation || null,
             prompt: preflight.sanitizedText,
@@ -473,9 +481,47 @@ function CreateChat({ client, connected, fees, go, played, reloadAll, seed, turn
     }
   }
 
+  // Resume an existing conversation: rehydrate the full transcript from the
+  // saved draft instead of restarting the chat. Runs once on mount.
+  useEffect(() => {
+    if (!chatId || !walletAddress) {
+      return undefined;
+    }
+    // Prevent the seed effect from auto-sending when we are resuming.
+    autoSentRef.current = true;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const body = await getConversationDrafts(walletAddress);
+        const draft = body?.drafts.find((d) => d.draftId === chatId);
+        if (cancelled || !draft) {
+          return;
+        }
+        setActiveDraftId(draft.draftId);
+        if (draft.messages && draft.messages.length > 0) {
+          setMsgs(draft.messages);
+        } else {
+          // Older drafts predate transcript persistence — reconstruct from the
+          // stored summary so the conversation still reads coherently.
+          setMsgs([
+            { text: draft.prompt, who: "user" as const },
+            ...(draft.lastMessage ? [{ text: draft.lastMessage, who: "ai" as const }] : []),
+          ]);
+        }
+      } catch (cause) {
+        if (!cancelled) {
+          setError(`Could not load this conversation. ${describeTxError(cause)}`);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [chatId, walletAddress]);
+
   // Auto-send the seed coming from the home prompt (once).
   useEffect(() => {
-    if (seed && !autoSentRef.current) {
+    if (seed && !chatId && !autoSentRef.current) {
       autoSentRef.current = true;
       const id = window.setTimeout(() => void send(seed), 350);
       return () => window.clearTimeout(id);
@@ -509,6 +555,7 @@ function CreateChat({ client, connected, fees, go, played, reloadAll, seed, turn
         await postConversationDraft(walletAddress, {
           ...(activeDraftId ? { draftId: activeDraftId } : {}),
           lastMessage: "Rule submitted to the round.",
+          messages: [...msgs, { text: "Rule submitted to the round.", who: "ai" }],
           normalizedText: rule.normalizedText || null,
           officialInterpretation: rule.officialInterpretation || null,
           prompt: rule.sanitizedText,
@@ -637,7 +684,7 @@ function CreateChat({ client, connected, fees, go, played, reloadAll, seed, turn
                 }
               }}
               placeholder={guidance ? "Choose an option or write your own clarification..." : rule ? "Ask for a tweak or describe another rule..." : "Describe your rule..."}
-              style={{ flex: 1, resize: "none", background: "var(--surface)", border: "1px solid var(--line-2)", borderRadius: 16, padding: "13px 15px", color: "var(--text)", fontSize: 15, fontFamily: "Outfit", outline: "none", maxHeight: 90 }}
+              style={{ flex: 1, minWidth: 0, resize: "none", background: "var(--surface)", border: "1px solid var(--line-2)", borderRadius: 16, padding: "13px 15px", color: "var(--text)", fontSize: 15, fontFamily: "Outfit", outline: "none", maxHeight: 90 }}
             />
             <button aria-label="Send message" onClick={() => void send()} className="ide-btn" style={{ width: 48, height: 48, padding: 0, borderRadius: 15, flexShrink: 0 }} type="button"><Ico.send style={{ color: "#08110C" }} /></button>
           </div>

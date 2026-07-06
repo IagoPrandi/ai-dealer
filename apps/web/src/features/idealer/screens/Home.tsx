@@ -38,7 +38,7 @@ function PromptInput() {
           onChange={(e) => setVal(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") { go("create", { seed: val }); } }}
           placeholder="e.g. the sum closest to 100 wins…"
-          style={{ flex: 1, background: "var(--bg)", border: "1px solid var(--line-2)", borderRadius: 13, padding: "13px 14px", color: "var(--text)", fontSize: 14.5, fontFamily: "Outfit", outline: "none" }}
+          style={{ flex: 1, minWidth: 0, background: "var(--bg)", border: "1px solid var(--line-2)", borderRadius: 13, padding: "13px 14px", color: "var(--text)", fontSize: 14.5, fontFamily: "Outfit", outline: "none" }}
         />
         <button onClick={() => go("create", { seed: val })} className="ide-btn" style={{ padding: 13, borderRadius: 13, flexShrink: 0 }} title="Create rule" type="button">
           <Ico.send style={{ color: "#08110C" }} />
@@ -50,7 +50,7 @@ function PromptInput() {
 
 export function HomeScreen() {
   const {
-    endSeconds, fees, go, guessCutoffEndsAt, openDetail, played, players, prizeSol, rules, turnId,
+    bet, endSeconds, fees, go, guessCutoffEndsAt, openDetail, played, players, prizeSol, rules, turnId,
     resultTurnId, round, turnReadyToPlay, turnStatusMessage,
   } = useIdealer();
 
@@ -119,13 +119,22 @@ export function HomeScreen() {
 
         {/* MAIN ACTION */}
         {played ? (
-          <div className="ide-card" style={{ padding: "13px 16px", marginBottom: 14, display: "flex", alignItems: "center", gap: 11, borderColor: "rgba(20,241,149,0.3)", background: "linear-gradient(100deg, rgba(20,241,149,0.1), var(--surface))" }}>
-            <span style={{ width: 30, height: 30, borderRadius: 10, background: "var(--green)", color: "#08110C", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.check /></span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 14.5 }}>You&apos;re in this round</div>
-              <div style={{ fontSize: 12.5, color: "var(--muted)" }}>Good luck! You can now vote and create rules.</div>
+          <div className="ide-card" style={{ padding: "13px 16px", marginBottom: 14, display: "grid", gap: 12, borderColor: "rgba(20,241,149,0.3)", background: "linear-gradient(100deg, rgba(20,241,149,0.1), var(--surface))" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
+              <span style={{ width: 30, height: 30, borderRadius: 10, background: "var(--green)", color: "#08110C", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.check /></span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 14.5 }}>You&apos;re in this round</div>
+                <div style={{ fontSize: 12.5, color: "var(--muted)" }}>Good luck! You can now vote and create rules.</div>
+              </div>
             </div>
-            <button onClick={() => go("play")} className="ide-votebtn" style={{ flexShrink: 0 }} type="button">view guess</button>
+            {bet && bet.length > 0 ? (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+                {bet.map((n) => <span key={n} className="ide-chip" style={{ width: 40, height: 40, fontSize: 15 }}>{n}</span>)}
+              </div>
+            ) : null}
+            <button onClick={() => go("play")} className="ide-btn-ghost ide-btn" style={{ width: "100%", padding: 11 }} type="button">
+              <Ico.bolt style={{ color: "var(--green)" }} /> Play again - {fees.playNext === 0 ? "Free" : `${fmtSol(fees.playNext)} SOL`}
+            </button>
           </div>
         ) : (
           <button onClick={() => go("play")} disabled={!turnReadyToPlay} className="ide-btn" style={{ width: "100%", padding: "17px", fontSize: 17, marginBottom: 14, opacity: turnReadyToPlay ? 1 : 0.5 }} type="button">

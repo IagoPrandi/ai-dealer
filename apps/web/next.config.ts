@@ -13,6 +13,13 @@ const mockEnabled =
 // used to install the PWA on a phone — without mixed-content or CORS problems.
 const apiProxyTarget = process.env.IDEALER_API_PROXY_TARGET ?? "http://localhost:3002";
 
+// Same-origin proxy to the worker (apps/worker, default :3003). Mirrors the API
+// proxy so the DApp can read live turn status from any origin the browser is
+// served on — notably an HTTPS Cloudflare tunnel used to install the PWA on a
+// phone — without mixed-content or CORS problems.
+const workerProxyTarget =
+  process.env.IDEALER_WORKER_PROXY_TARGET ?? "http://localhost:3003";
+
 const nextConfig: NextConfig = {
   env: {
     NEXT_PUBLIC_UI_MOCK: mockEnabled ? "1" : "0",
@@ -22,6 +29,10 @@ const nextConfig: NextConfig = {
       {
         source: "/__api/:path*",
         destination: `${apiProxyTarget}/:path*`,
+      },
+      {
+        source: "/__worker/:path*",
+        destination: `${workerProxyTarget}/:path*`,
       },
     ];
   },

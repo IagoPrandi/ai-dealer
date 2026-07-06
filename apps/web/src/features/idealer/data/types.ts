@@ -173,10 +173,16 @@ export interface PlayerHistoryApi {
 
 export type ConversationDraftStatus = "draft" | "submitted";
 
+export interface ConversationMessage {
+  text: string;
+  who: "ai" | "user";
+}
+
 export interface ConversationDraftApi {
   createdAt: string;
   draftId: string;
   lastMessage: string;
+  messages?: ConversationMessage[];
   normalizedText: string | null;
   officialInterpretation: string | null;
   prompt: string;
