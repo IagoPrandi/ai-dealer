@@ -215,6 +215,25 @@ export interface RuleEliminationRecord {
   turnId: number;
 }
 
+/**
+ * Worker-published elimination decision-window projection (PRD §6.12). The
+ * worker sends the authoritative on-chain window timestamps and finalist
+ * outcome; the API merges in its own vote tallies to build the full
+ * `RuleEliminationRecord` the round summary serves.
+ */
+export interface RuleEliminationProjectionInput {
+  closedAt: string | null;
+  decisionWindowClosesAt: string;
+  decisionWindowOpenedAt: string;
+  eliminatedFinalistHash: string | null;
+  eliminatedRuleIds: number[];
+  finalistRuleIds: number[];
+  status: "closed" | "open";
+  survivorFinalistHash: string | null;
+  survivorRuleIds: number[];
+  turnId: number;
+}
+
 export interface PaidRuleRemovalRecord {
   feeLamports?: number;
   removalKind: "creator_self" | "third_party";
@@ -1848,6 +1867,35 @@ function isValidRuleElectionCandidateCommitment(
     isHexHash(candidate.compiledArtifactHash) &&
     typeof candidate.isEligibleState === "boolean" &&
     typeof candidate.isPrecompiledValid === "boolean"
+  );
+}
+
+function isValidRuleEliminationProjection(
+  value: unknown,
+): value is RuleEliminationProjectionInput {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const projection = value as Partial<RuleEliminationProjectionInput>;
+  const isIsoDate = (candidate: unknown) =>
+    typeof candidate === "string" && !Number.isNaN(Date.parse(candidate));
+
+  return (
+    Number.isInteger(projection.turnId) &&
+    Number(projection.turnId) > 0 &&
+    (projection.status === "closed" || projection.status === "open") &&
+    isIsoDate(projection.decisionWindowOpenedAt) &&
+    isIsoDate(projection.decisionWindowClosesAt) &&
+    (projection.closedAt === null || isIsoDate(projection.closedAt)) &&
+    isPositiveIntegerArray(projection.finalistRuleIds) &&
+    (projection.finalistRuleIds as number[]).length > 0 &&
+    isPositiveIntegerArray(projection.eliminatedRuleIds) &&
+    isPositiveIntegerArray(projection.survivorRuleIds) &&
+    (projection.eliminatedFinalistHash === null ||
+      isHexHash(projection.eliminatedFinalistHash)) &&
+    (projection.survivorFinalistHash === null ||
+      isHexHash(projection.survivorFinalistHash))
   );
 }
 
@@ -4902,6 +4950,52 @@ export function getRuleElimination(turnId: number): RuleEliminationRecord {
     survivorRuleIds: finalistRuleIds,
     turnId,
   };
+}
+
+/**
+ * Save a worker-published elimination projection: the on-chain decision-window
+ * timestamps and outcome, merged with the API's vote tallies per finalist.
+ */
+export function projectRuleElimination(
+  input: RuleEliminationProjectionInput,
+): RuleEliminationRecord {
+  const election = getRuleElection(input.turnId);
+  const { counts: approvalCounts } = listRuleVotes(input.turnId);
+  const { counts: eliminationCounts } = listRuleEliminationVotes(input.turnId);
+  const eliminated = new Set(input.eliminatedRuleIds);
+
+  const finalists = input.finalistRuleIds.map((ruleId) => {
+    const approvalVotes =
+      approvalCounts[String(ruleId)] ??
+      (election?.topVotedRuleIds.includes(ruleId) ? 1 : 0);
+    const eliminationVotes = eliminationCounts[String(ruleId)] ?? 0;
+    const isEliminated = eliminated.has(ruleId);
+    return {
+      approvalVotes,
+      eliminated: isEliminated,
+      eliminationVotes,
+      ruleId,
+      status: isEliminated ? ("eliminated" as const) : ("survived" as const),
+      threshold: approvalVotes + 1,
+    };
+  });
+
+  return saveRuleElimination({
+    closedAt: input.closedAt,
+    decisionWindowClosesAt: input.decisionWindowClosesAt,
+    decisionWindowOpenedAt: input.decisionWindowOpenedAt,
+    eliminatedFinalistHash:
+      input.eliminatedFinalistHash ??
+      hashRuleIdsForAudit("eliminated_finalists_v1", input.eliminatedRuleIds),
+    eliminatedRuleIds: input.eliminatedRuleIds,
+    finalists,
+    status: input.status,
+    survivorFinalistHash:
+      input.survivorFinalistHash ??
+      hashRuleIdsForAudit("survivor_finalists_v1", input.survivorRuleIds),
+    survivorRuleIds: input.survivorRuleIds,
+    turnId: input.turnId,
+  });
 }
 
 function isUniqueDrawResult(value: unknown): value is number[] {
@@ -8177,6 +8271,29 @@ if (isMainModule()) {
       }
 
       sendJson(request, response, 200, listRuleEliminationVotes(turnId));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/rule-eliminations") {
+      void readJsonBody(request)
+        .then((body) => {
+          if (!isValidRuleEliminationProjection(body)) {
+            sendJson(request, response, 400, {
+              error: "invalid_rule_elimination",
+            });
+            return;
+          }
+
+          sendJson(request, response, 201, {
+            elimination: projectRuleElimination(body),
+          });
+        })
+        .catch((error: unknown) => {
+          sendJson(request, response, 400, {
+            error: "invalid_json",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
       return;
     }
 

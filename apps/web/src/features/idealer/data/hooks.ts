@@ -141,10 +141,20 @@ export function useRound(turnId: null | number) {
     [turnId],
   );
 
+  // Poll so post-window phases (finalist shortlist, decision window, draw,
+  // claims) surface live without a manual reload — same cadence as
+  // `useActiveTurn`.
   useEffect(() => {
     const controller = new AbortController();
-    reload(controller.signal);
-    return () => controller.abort();
+    const run = () => reload(controller.signal);
+    run();
+    const id = window.setInterval(run, 10_000);
+    window.addEventListener("focus", run);
+    return () => {
+      controller.abort();
+      window.clearInterval(id);
+      window.removeEventListener("focus", run);
+    };
   }, [reload]);
 
   return { error, loading, reload, round };
@@ -437,10 +447,19 @@ export function usePlayerClaims(walletAddress: string | undefined) {
     [walletAddress],
   );
 
+  // Poll so newly recorded claims (post-settlement) appear without a manual
+  // reload — e.g. the Home claim banner right after a turn settles.
   useEffect(() => {
     const controller = new AbortController();
-    reload(controller.signal);
-    return () => controller.abort();
+    const run = () => reload(controller.signal);
+    run();
+    const id = window.setInterval(run, 10_000);
+    window.addEventListener("focus", run);
+    return () => {
+      controller.abort();
+      window.clearInterval(id);
+      window.removeEventListener("focus", run);
+    };
   }, [reload]);
 
   return { claims, error, loading, reload: () => reload() };

@@ -4,7 +4,8 @@
 import { useState } from "react";
 
 import { useIdealer } from "../context";
-import { fmtInt, fmtSol, fmtTurnId, truncateAddress } from "../data/format";
+import { fmtInt, fmtSol, fmtTurnId, lamportsToSol, truncateAddress } from "../data/format";
+import { usePlayerClaims } from "../data/hooks";
 import { Dealer, Ico, Medal, VoteTally, useCountdownTo, useLivePrize } from "../shared";
 
 function WalletBtn() {
@@ -50,12 +51,15 @@ function PromptInput() {
 
 export function HomeScreen() {
   const {
-    bet, endSeconds, fees, go, guessCutoffEndsAt, openDetail, played, players, prizeSol, rules, turnId,
-    resultTurnId, round, turnReadyToPlay, turnStatusMessage,
+    bet, decisionEndsAt, decisionPhase, endSeconds, fees, go, guessCutoffEndsAt, openDetail, played, players, prizeSol, rules, turnId,
+    resultTurnId, round, turnReadyToPlay, turnStatusMessage, walletAddress,
   } = useIdealer();
 
   const [h, m, s] = useCountdownTo(endSeconds);
   const [ch, cm, cs] = useCountdownTo(guessCutoffEndsAt);
+  const [dh, dm, ds] = useCountdownTo(decisionEndsAt);
+  const { claims } = usePlayerClaims(walletAddress);
+  const claimableSol = lamportsToSol(claims?.availableLamports ?? 0);
   const nowSec = Math.floor(Date.now() / 1000);
   const showCutoff =
     turnReadyToPlay && !played && guessCutoffEndsAt !== null && guessCutoffEndsAt > nowSec;
@@ -116,6 +120,43 @@ export function HomeScreen() {
             ) : null}
           </div>
         </div>
+
+        {/* SHORTLIST DECISION WINDOW */}
+        {decisionPhase ? (
+          <button onClick={() => go("vote")} className="ide-tap" style={{
+            width: "100%", textAlign: "left", marginBottom: 14, padding: "13px 16px", borderRadius: 16, cursor: "pointer", color: "var(--text)",
+            border: "1px solid rgba(255,210,63,0.4)", background: "linear-gradient(110deg, rgba(255,210,63,0.13), var(--surface))",
+            display: "flex", alignItems: "center", gap: 12,
+          }} type="button">
+            <span style={{ width: 38, height: 38, borderRadius: 12, background: "var(--yellow)", color: "#0B0910", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.vote style={{ color: "#0B0910" }} /></span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14.5, fontWeight: 700 }}>Shortlist decision window</div>
+              <div style={{ fontSize: 12.5, color: "var(--muted)" }}>
+                Vote finalists out
+                {decisionEndsAt ? (
+                  <> - closes in <span className="ide-num" style={{ color: "var(--text)", fontWeight: 700 }}>{dh}:{dm}:{ds}</span></>
+                ) : null}
+              </div>
+            </div>
+            <Ico.arrow style={{ color: "var(--yellow)", flexShrink: 0 }} />
+          </button>
+        ) : null}
+
+        {/* PRIZE READY TO CLAIM */}
+        {claimableSol > 0 ? (
+          <button onClick={() => go("claims")} className="ide-tap" style={{
+            width: "100%", textAlign: "left", marginBottom: 14, padding: "13px 16px", borderRadius: 16, cursor: "pointer", color: "var(--text)",
+            border: "1px solid rgba(20,241,149,0.4)", background: "linear-gradient(110deg, rgba(20,241,149,0.13), var(--surface))",
+            display: "flex", alignItems: "center", gap: 12,
+          }} type="button">
+            <span style={{ width: 38, height: 38, borderRadius: 12, background: "var(--green)", color: "#08110C", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.gift style={{ color: "#08110C" }} /></span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14.5, fontWeight: 700 }}>Prize ready to claim</div>
+              <div style={{ fontSize: 12.5, color: "var(--muted)" }}><span className="ide-num" style={{ color: "var(--green)", fontWeight: 700 }}>{fmtSol(claimableSol)} SOL</span> available - claim before it expires</div>
+            </div>
+            <Ico.arrow style={{ color: "var(--green)", flexShrink: 0 }} />
+          </button>
+        ) : null}
 
         {/* MAIN ACTION */}
         {played ? (

@@ -6,7 +6,7 @@ import {
   type RuleElectionConfig,
   runRuleElection,
 } from "./election.js";
-import type { ApiBridge } from "./api-bridge.js";
+import type { ApiBridge, PublishedRuleElimination } from "./api-bridge.js";
 import type {
   SettleVrfResult,
   SettlementSenders,
@@ -357,13 +357,26 @@ async function executeAction(args: ExecuteArgs): Promise<string | null> {
           status: "requested",
         }),
       );
+      // Settling the finalist VRF opens the on-chain elimination window;
+      // project it so the read side can surface the decision phase with its
+      // real start/end timestamps.
+      const opened = buildEliminationProjection(next ?? onChain, null);
+      if (opened) {
+        await deps.bridge.publishRuleElimination(opened);
+      }
       return result.signature;
     }
     case "close_elimination_window": {
       const finalists = candidates.filter((candidate) =>
         onChain.finalistRuleIds.includes(candidate.ruleId),
       );
-      return senders.closeEliminationWindow(turnId, finalists);
+      const signature = await senders.closeEliminationWindow(turnId, finalists);
+      const next = await senders.fetchState(turnId);
+      const closed = buildEliminationProjection(next ?? onChain, deps.nowIso());
+      if (closed) {
+        await deps.bridge.publishRuleElimination(closed);
+      }
+      return signature;
     }
     case "request_active_vrf": {
       const { randomnessAccount } = await senders.createCommittedRandomness();
@@ -600,6 +613,46 @@ function buildElectionProjection(args: {
   }
 
   return election;
+}
+
+/**
+ * Elimination decision-window projection from the on-chain turn state. Returns
+ * `null` before the window exists (finalist VRF not settled yet). `closedAtIso`
+ * marks the close projection; the open projection passes `null`.
+ */
+function buildEliminationProjection(
+  state: SettlementTurnState,
+  closedAtIso: string | null,
+): PublishedRuleElimination | null {
+  if (
+    state.finalistRuleIds.length === 0 ||
+    state.eliminationWindowEndSeconds <= 0
+  ) {
+    return null;
+  }
+  const eliminatedRuleIds = state.finalistRuleIds.filter(
+    (_, index) => state.finalistEliminated[index],
+  );
+  const survivorRuleIds = state.finalistRuleIds.filter(
+    (_, index) => !state.finalistEliminated[index],
+  );
+  const closed = closedAtIso !== null || state.survivorFinalistHash !== null;
+  return {
+    closedAt: closed ? closedAtIso : null,
+    decisionWindowClosesAt: new Date(
+      state.eliminationWindowEndSeconds * 1_000,
+    ).toISOString(),
+    decisionWindowOpenedAt: new Date(
+      state.eliminationWindowStartSeconds * 1_000,
+    ).toISOString(),
+    eliminatedFinalistHash: state.eliminatedFinalistHash,
+    eliminatedRuleIds,
+    finalistRuleIds: state.finalistRuleIds,
+    status: closed ? "closed" : "open",
+    survivorFinalistHash: state.survivorFinalistHash,
+    survivorRuleIds,
+    turnId: state.turnId,
+  };
 }
 
 function buildOriginalOnlyElection(

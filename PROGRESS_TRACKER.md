@@ -68,6 +68,17 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-07-06 (Shortlist decision window + claim visibility; conversation history overflow)
+
+- Opened required documents/context before working: `PRD.md`, `.claude/CLAUDE.md`, `.claude/skills`, `.claude/skills/idealer-ui-coherence/SKILL.md`, `.claude/skills/playwright/SKILL.md`, and the active plan `groovy-sleeping-comet.md`.
+- Diagnosed the manual-test report that a turn ends without ever showing the shortlist/elimination phase or the claim period. Root causes: (1) no code path ever populated the API `RuleEliminationRecord` — `saveRuleElimination` was only called from tests, so `decisionWindowClosesAt/OpenedAt` were always `null` and the web `decisionEndsAt`/countdown never rendered; (2) `useRound` fetched the round summary once (no polling), so post-window phases could never surface live; (3) `decisionPhase` was computed in context but unused by any screen, and Home had no claim surface.
+- Worker: `settlement-scheduler.ts` now projects the elimination decision window to the API — publishes an `open` record (with the real on-chain `elimination_window_start/end` timestamps) when the finalist VRF settles, and a `closed` record (with `closedAt`, eliminated/survivor rule ids and hashes) after `close_elimination_window`. Added `ApiBridge.publishRuleElimination` and the `PublishedRuleElimination` shape.
+- API: added `POST /rule-eliminations` with `isValidRuleEliminationProjection` validation and `projectRuleElimination`, which merges the worker's on-chain window/outcome with the API's per-finalist vote tallies and saves via `saveRuleElimination`.
+- Web: `useRound` and `usePlayerClaims` now poll every 10s (plus window focus), matching `useActiveTurn`; Home shows a yellow "Shortlist decision window" banner (countdown + link to the finalists tab) while `elimination.status === "open"` and a green "Prize ready to claim" banner when the wallet has `availableLamports > 0`; the Rules screen auto-switches to the Finalists tab when the decision window opens.
+- Conversation history overflow: `ConversationRow` in `Profile.tsx` now clamps `lastMessage` to two lines (`-webkit-box` line clamp), fixing cards growing unbounded after full transcripts began persisting.
+- Verified: `tsc --noEmit`, `eslint --max-warnings=0`, and `node --test` all green for `apps/api` (61/61), `apps/worker` (86/86), `apps/web` (8/8); live round-trip smoke test of `POST /rule-eliminations` → `GET /api/v1/turns/{id}/elimination` against the running dev API; browser render check of Home at 390px (`output/playwright/home-390.png`) with no console errors. The temporary web dev server was stopped afterward.
+- Notes: the natively-run worker (`tsx src/index.ts`, no watch) must be restarted to pick up the projection change; the API runs under `tsx watch` and reloaded itself (which also resets its in-memory state). No milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
 ### 2026-07-03 (Rule proposal prompt test set 2 prompts 1-20)
 
 - Reopened required documents/context before working: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/idealer-test-and-verify/SKILL.md`, `packages/rule-compiler/rule-authoring/SKILL.md`, `packages/rule-compiler/rule-authoring/references/patterns.md`, `packages/rule-compiler/rule-authoring/references/examples.md`, and `docs/rule-proposal-prompt-test-set-2.md`.

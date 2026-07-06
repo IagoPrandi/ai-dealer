@@ -65,7 +65,7 @@ function ConversationRow({ draft, onResume }: { draft: ConversationDraftApi; onR
               {draft.normalizedText || draft.prompt}
             </div>
           </div>
-          <div style={{ color: "var(--muted)", fontSize: 13, lineHeight: 1.45, overflowWrap: "anywhere" }}>
+          <div style={{ color: "var(--muted)", fontSize: 13, lineHeight: 1.45, overflowWrap: "anywhere", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
             {draft.lastMessage || draft.prompt}
           </div>
         </div>

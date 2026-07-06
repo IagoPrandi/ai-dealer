@@ -71,6 +71,25 @@ export interface VerificationProjectionResult {
   turnId: number;
 }
 
+/**
+ * Elimination decision-window projection (PRD §6.12). Published when the
+ * finalist VRF settles (window opens on-chain) and again when
+ * `close_elimination_window` lands, so the read side can surface the shortlist
+ * voting phase with its real on-chain start/end timestamps.
+ */
+export interface PublishedRuleElimination {
+  closedAt: string | null;
+  decisionWindowClosesAt: string;
+  decisionWindowOpenedAt: string;
+  eliminatedFinalistHash: string | null;
+  eliminatedRuleIds: number[];
+  finalistRuleIds: number[];
+  status: "closed" | "open";
+  survivorFinalistHash: string | null;
+  survivorRuleIds: number[];
+  turnId: number;
+}
+
 export class ApiBridge {
   private readonly apiBaseUrl: string;
   private readonly fetchImpl: typeof fetch;
@@ -86,6 +105,12 @@ export class ApiBridge {
 
   async publishElection(election: PublishedRuleElection): Promise<void> {
     await this.post("/elections", election);
+  }
+
+  async publishRuleElimination(
+    elimination: PublishedRuleElimination,
+  ): Promise<void> {
+    await this.post("/rule-eliminations", elimination);
   }
 
   /** Create the per-guess verification jobs for a fulfilled draw. */

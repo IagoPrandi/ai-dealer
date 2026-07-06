@@ -1,7 +1,7 @@
 "use client";
 
 /** Rules: two-phase voting hub. Ported from app-vote.jsx, wired to live data. */
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { VOTE_FEE_START_TURN } from "@idealer/constants";
 
@@ -104,9 +104,19 @@ function FinalistRow({ rule }: { rule: UiRule }) {
 }
 
 export function VoteScreen() {
-  const { actionError, decisionEndsAt, fees, played, rules, turnId } = useIdealer();
-  const [tab, setTab] = useState<"abertas" | "finalistas">("abertas");
+  const { actionError, decisionEndsAt, decisionPhase, fees, played, rules, turnId } = useIdealer();
+  const [tab, setTab] = useState<"abertas" | "finalistas">(decisionPhase ? "finalistas" : "abertas");
   const [h, m, s] = useCountdownTo(decisionEndsAt);
+
+  // When the decision window opens while this screen is mounted, jump to the
+  // finalists tab once; the user can still switch back manually.
+  const prevDecisionPhase = useRef(decisionPhase);
+  useEffect(() => {
+    if (decisionPhase && !prevDecisionPhase.current) {
+      setTab("finalistas");
+    }
+    prevDecisionPhase.current = decisionPhase;
+  }, [decisionPhase]);
 
   const all = rules.rules;
   const finalists = all.filter((r) => r.finalist);

@@ -37,6 +37,7 @@ import {
   isValidConversationDraft,
   ruleSignature,
   getRuleElimination,
+  projectRuleElimination,
   listClaimRecords,
   listCreatorRewardRecords,
   listPaidRuleRemovals,
@@ -1126,6 +1127,62 @@ test("rule elimination votes and closed decision state are projected for audit",
   assert.deepEqual(elimination.survivorRuleIds, [2]);
   assert.equal(summary.elimination.finalists[0]?.status, "eliminated");
   assert.equal(summary.pool.eliminationVoteFees, 1);
+});
+
+test("worker elimination projection drives the decision window in the round summary", () => {
+  resetApiStateForTests();
+  saveRuleElection({
+    ...settledElection(261, 2),
+    activeRuleArtifactHash: null,
+    activeRuleHash: null,
+    activeRuleId: null,
+    finalistRuleIds: [1, 2],
+    status: "requested",
+  });
+
+  const open = projectRuleElimination({
+    closedAt: null,
+    decisionWindowClosesAt: "2026-06-12T12:02:00.000Z",
+    decisionWindowOpenedAt: "2026-06-12T12:00:00.000Z",
+    eliminatedFinalistHash: null,
+    eliminatedRuleIds: [],
+    finalistRuleIds: [1, 2],
+    status: "open",
+    survivorFinalistHash: null,
+    survivorRuleIds: [1, 2],
+    turnId: 261,
+  });
+  assert.equal(open.status, "open");
+  assert.equal(open.finalists.length, 2);
+
+  const openSummary = getRoundSummary(261, 261);
+  assert.equal(openSummary.elimination.status, "open");
+  assert.equal(
+    openSummary.elimination.decisionWindowClosesAt,
+    "2026-06-12T12:02:00.000Z",
+  );
+
+  projectRuleElimination({
+    closedAt: "2026-06-12T12:02:05.000Z",
+    decisionWindowClosesAt: "2026-06-12T12:02:00.000Z",
+    decisionWindowOpenedAt: "2026-06-12T12:00:00.000Z",
+    eliminatedFinalistHash: "6".repeat(64),
+    eliminatedRuleIds: [1],
+    finalistRuleIds: [1, 2],
+    status: "closed",
+    survivorFinalistHash: "7".repeat(64),
+    survivorRuleIds: [2],
+    turnId: 261,
+  });
+
+  const closed = getRuleElimination(261);
+  assert.equal(closed.status, "closed");
+  assert.equal(closed.closedAt, "2026-06-12T12:02:05.000Z");
+  assert.deepEqual(closed.eliminatedRuleIds, [1]);
+  assert.equal(
+    closed.finalists.find((finalist) => finalist.ruleId === 1)?.status,
+    "eliminated",
+  );
 });
 
 test("round summary exposes tracked accounting sources and visible pool", () => {

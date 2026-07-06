@@ -307,6 +307,9 @@ function fakeBridge() {
     async publishElection() {
       calls.push("publishElection");
     },
+    async publishRuleElimination() {
+      calls.push("publishRuleElimination");
+    },
     async recordSettlementTransition(input: { idempotencyKey: string; toState: string }) {
       calls.push(`record:${input.toState}`);
       recorded.add(input.toState);
@@ -323,12 +326,20 @@ test("orchestrator publishes finalist and active election proof randomness", asy
     eligibleCandidateCommitments?: ElectionCandidate[];
     randomnessValue: string | null;
   }> = [];
+  const eliminations: Array<{
+    decisionWindowClosesAt: string;
+    decisionWindowOpenedAt: string;
+    status: string;
+  }> = [];
   const bridge = {
     async fetchRecordedStates() {
       return new Set<string>();
     },
     async publishElection(election: (typeof published)[number]) {
       published.push(election);
+    },
+    async publishRuleElimination(elimination: (typeof eliminations)[number]) {
+      eliminations.push(elimination);
     },
     async recordSettlementTransition() {},
   } as unknown as ApiBridge;
@@ -395,6 +406,18 @@ test("orchestrator publishes finalist and active election proof randomness", asy
     Buffer.from(finalistRandomness).toString("hex"),
   );
   assert.deepEqual(published[0]?.eligibleCandidateCommitments, [candidate]);
+  // Settling the finalist VRF opens the elimination window on-chain; the
+  // decision-window projection must go out with the real timestamps.
+  assert.equal(eliminations.length, 1);
+  assert.equal(eliminations[0]?.status, "open");
+  assert.equal(
+    eliminations[0]?.decisionWindowOpenedAt,
+    new Date(2_000 * 1_000).toISOString(),
+  );
+  assert.equal(
+    eliminations[0]?.decisionWindowClosesAt,
+    new Date(3_000 * 1_000).toISOString(),
+  );
 
   state = makeState({
     activeElectionVrfRequest: SET,
@@ -409,6 +432,73 @@ test("orchestrator publishes finalist and active election proof randomness", asy
     published[1]?.activeElectionRandomnessValue,
     Buffer.from(activeRandomness).toString("hex"),
   );
+});
+
+test("orchestrator projects the closed elimination window with the on-chain outcome", async () => {
+  const eliminations: Array<{
+    closedAt: string | null;
+    eliminatedRuleIds: number[];
+    status: string;
+    survivorRuleIds: number[];
+  }> = [];
+  const bridge = {
+    async fetchRecordedStates() {
+      return new Set<string>();
+    },
+    async publishRuleElimination(elimination: (typeof eliminations)[number]) {
+      eliminations.push(elimination);
+    },
+    async recordSettlementTransition() {},
+  } as unknown as ApiBridge;
+
+  const windowOpen = makeState({
+    eligibleRulePoolHash: HASH,
+    eliminationWindowEndSeconds: 1_500,
+    eliminationWindowStartSeconds: 500,
+    finalistCount: 2,
+    finalistEliminated: [false, false],
+    finalistRuleIds: [7, 9],
+    finalistSetHash: "11".repeat(32),
+  });
+  const windowClosed = makeState({
+    eligibleRulePoolHash: HASH,
+    eliminatedFinalistHash: "55".repeat(32),
+    eliminationWindowEndSeconds: 1_500,
+    eliminationWindowStartSeconds: 500,
+    finalistCount: 2,
+    finalistEliminated: [true, false],
+    finalistRuleIds: [7, 9],
+    finalistSetHash: "11".repeat(32),
+    survivorFinalistHash: "44".repeat(32),
+  });
+  let state = windowOpen;
+  const senders = {
+    async closeEliminationWindow() {
+      state = windowClosed;
+      return "close-sig";
+    },
+    async fetchState() {
+      return state;
+    },
+  } as unknown as SettlementSenders;
+  const deps: SettlementCycleDeps = {
+    bridge,
+    electionConfig,
+    fetchCandidates: async () => [candidate],
+    nowIso: () => "2026-06-23T00:00:00.000Z",
+    nowSeconds: () => 2_000,
+    recordClaims: async () => 0,
+    senders,
+  };
+
+  const result = await runSettlementCycle(1, deps);
+  assert.equal(result.action, "close_elimination_window");
+  assert.equal(result.signature, "close-sig");
+  assert.equal(eliminations.length, 1);
+  assert.equal(eliminations[0]?.status, "closed");
+  assert.equal(eliminations[0]?.closedAt, "2026-06-23T00:00:00.000Z");
+  assert.deepEqual(eliminations[0]?.eliminatedRuleIds, [7]);
+  assert.deepEqual(eliminations[0]?.survivorRuleIds, [9]);
 });
 
 test("orchestrator drives a closed no-rule turn through CLOSED idempotently", async () => {
