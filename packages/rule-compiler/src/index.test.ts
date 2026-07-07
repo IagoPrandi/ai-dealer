@@ -196,6 +196,64 @@ test("validates unordered same-set rules as all six numbers matched", () => {
   assert.match(result.artifactHash ?? "", /^[0-9a-f]{64}$/);
 });
 
+test("deterministically compiles the canonical most/fewest-matches ranking family", () => {
+  const maximizing = [
+    "win who guess more number",
+    "whoever guesses more numbers wins",
+    "The guess with the most drawn numbers wins.",
+    "Win if the player matches more numbers than anyone else.",
+    "most matches wins",
+    "quem acertar mais números ganha",
+  ];
+  for (const prompt of maximizing) {
+    const result = validateAndPrecompileRule({
+      prompt,
+      tokenCount: prompt.split(/\s+/).length,
+    });
+    assert.equal(result.decision, "VALID", prompt);
+    const ast = result.artifact?.ast;
+    assert.ok(
+      ast?.schemaVersion === 2 &&
+        ast.result.type === "ranking" &&
+        ast.result.direction === "max",
+      `expected a max ranking for: ${prompt}`,
+    );
+    assert.equal(result.artifact?.ruleMode, "ranking", prompt);
+    assert.match(result.artifactHash ?? "", /^[0-9a-f]{64}$/, prompt);
+    assert.equal(result.log.reasonCodes.includes("UNSUPPORTED_RULE"), false, prompt);
+  }
+
+  const minimizing = validateAndPrecompileRule({
+    prompt: "the winner is whoever matches the fewest drawn numbers",
+    tokenCount: 8,
+  });
+  const minAst = minimizing.artifact?.ast;
+  assert.equal(minimizing.decision, "VALID");
+  assert.ok(
+    minAst?.schemaVersion === 2 &&
+      minAst.result.type === "ranking" &&
+      minAst.result.direction === "min",
+  );
+
+  // Absolute thresholds and guess-vs-draw comparatives stay predicates, never a
+  // ranking; a specific score qualifier (digits) is left to the LLM path.
+  const threshold = validateAndPrecompileRule({
+    prompt: "Win if at least 4 guessed numbers appear in the draw, regardless of order.",
+    tokenCount: 12,
+  }).artifact?.ast;
+  assert.ok(threshold?.schemaVersion === 1 && threshold.node.kind === "match_count_at_least");
+
+  const versusDraw = validateAndPrecompileRule({
+    prompt: "Win if the guessed numbers contain more multiples of 5 than the drawn numbers.",
+    tokenCount: 13,
+  }).artifact?.ast;
+  assert.ok(
+    versusDraw?.schemaVersion === 2 &&
+      versusDraw.result.type === "predicate",
+    "guess-vs-draw comparative must remain a predicate",
+  );
+});
+
 test("handles the first 10 VALID prompts from the rule proposal test set", () => {
   const prompts = readPromptRows("VALID", 10);
 

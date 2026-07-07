@@ -1017,6 +1017,14 @@ function hasPattern(value: string, patterns: readonly RegExp[]) {
 }
 
 function compileSupportedRule(text: string): RuleAst | null {
+  // Comparative "most/fewest matching numbers wins" ranking. Guarded to fire only
+  // on genuine ranking intent, so it never steals absolute-threshold or
+  // guess-vs-draw predicates handled below.
+  const mostMatchesRanking = parseMostMatchesRankingRule(text);
+  if (mostMatchesRanking) {
+    return mostMatchesRanking;
+  }
+
   // Newly-supported deterministic shapes (prompt-set 24/25/26/27/82/84). Placed
   // first so their specific wording wins over the broader generic fallbacks.
   const removedHighestSum = parseRemovedHighestSumComparisonRule(text);
@@ -1654,6 +1662,108 @@ function predicateRule(predicate: PredicateNode): RuleAst {
   return { schemaVersion: 2, result: { type: "predicate", predicate } };
 }
 
+function rankingRule(direction: "max" | "min", score: ScalarExpr): RuleAst {
+  return {
+    schemaVersion: 2,
+    result: { direction, score, tieBreak: "share_pool", type: "ranking" },
+  };
+}
+
+// The single most common ranking a player asks for: "whoever matches the most
+// (or fewest) drawn numbers wins". The deterministic predicate compiler has no
+// ranking branch, so every phrasing of it — including the app's own suggested
+// example and telegraphic inputs like "win who guess more number" — used to fall
+// through to the LLM and, with a small local model, dead-end as UNSUPPORTED /
+// needs-clarification. This compiles the canonical match-count ranking
+// deterministically and tolerantly, scoring each guess by how many of its numbers
+// appear in the official draw (the same guess-vs-draw sandbox as every rule); the
+// runtime then ranks those independent scores. Fires ONLY for comparative intent,
+// never for absolute thresholds or guess-vs-draw comparisons (those are
+// predicates, handled elsewhere).
+function parseMostMatchesRankingRule(text: string): RuleAst | null {
+  // Absolute thresholds ("at least 4", "four or more", "exactly 3") are per-guess
+  // predicates, not a comparison between players — keep them out of ranking.
+  if (
+    /\b(at least|at most|no more than|no fewer than|exactly)\b/i.test(text) ||
+    /\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+or\s+more\b/i.test(
+      text,
+    )
+  ) {
+    return null;
+  }
+
+  // "more ... than the draw" is a guess-vs-draw predicate (e.g. "more multiples
+  // of 5 than the drawn numbers"), never a ranking among players. Reject any
+  // comparative whose reference point is the draw itself.
+  if (/\bthan\b[^.]{0,40}\b(draw|drawn)\b/i.test(text)) {
+    return null;
+  }
+
+  // A score qualified by a more specific quantity (digits, sums, parity,
+  // positions, multiples, ...) is NOT plain whole-number match counting — the
+  // generic count ranking would misread it. Leave those to the full compiler /
+  // LLM path so they compile to their real score (e.g. a units-digit ranking).
+  if (
+    /\b(digits?|units?|tens?|sums?|totals?|even|odd|parity|multiples?|positions?|reversed?|slots?|places?)\b/i.test(
+      text,
+    )
+  ) {
+    return null;
+  }
+
+  // Direction: "fewest / least / menos" minimize; "most / more / mais" maximize.
+  const minimize =
+    /\b(fewest|least|smallest\s+number\s+of|menos)\b/i.test(text);
+  const maximize =
+    /\b(most|more|mais|greatest\s+number\s+of|largest\s+number\s+of)\b/i.test(
+      text,
+    );
+  if (!minimize && !maximize) {
+    return null;
+  }
+
+  // The score must be about MATCHING drawn numbers (count of the guess's numbers
+  // that appear in the draw), expressed as a comparative over "numbers/matches/
+  // hits/acertos". Guessing a number IS matching a drawn number in this game, so
+  // "guess more numbers" counts too. "picks" is intentionally excluded so vague
+  // rules like "the most interesting mix of high and low picks" do not qualify.
+  const comparative = "(?:most|more|fewest|least|mais|menos)";
+  const scoreNoun = "(?:matching\\s+)?(?:numbers?|matches|hits|acertos|n[uú]meros?)";
+  const scoreConcept =
+    new RegExp(`\\b${comparative}\\b[^.]{0,30}\\b${scoreNoun}\\b`, "i").test(
+      text,
+    ) ||
+    new RegExp(
+      `\\b(?:match(?:es|ed|ing)?|hits?|guess(?:es|ed)?|acert\\w*|correct)\\b[^.]{0,20}\\b${comparative}\\b`,
+      "i",
+    ).test(text);
+  if (!scoreConcept) {
+    return null;
+  }
+
+  // Competition context: an explicit win/winner cue, a superlative ("the most/
+  // the fewest"), or a comparison against the other players ("than anyone",
+  // "than everybody else"). Without one of these the comparative is not a
+  // winner-selecting ranking (e.g. "low numbers should matter more than high
+  // numbers, somehow" stays ambiguous).
+  const competition =
+    /\b(win|wins|winner|winning|takes the round|ganha|ganhar|vence|vencer|vencedor)\b/i.test(
+      text,
+    ) ||
+    /\bthe\s+(most|fewest|least)\b/i.test(text) ||
+    /\bthan\b[^.]{0,20}\b(any\s?one|any\s?body|every\s?one|every\s?body)\b/i.test(
+      text,
+    );
+  if (!competition) {
+    return null;
+  }
+
+  return rankingRule(
+    minimize ? "min" : "max",
+    count(intersection(source("guess"), source("draw"))),
+  );
+}
+
 function looksLikeAmbiguousReverseRule(text: string) {
   return (
     /\bmatch(?:es)?\b.{0,40}\b(draw|drawn)\b.{0,40}\breverse\b/i.test(text) &&
@@ -1721,7 +1831,25 @@ function describeRuleAst(ast: RuleAst): string | null {
     }
   }
 
-  if (ast.schemaVersion !== 2 || ast.result.type !== "predicate") {
+  if (ast.schemaVersion !== 2) {
+    return null;
+  }
+
+  if (ast.result.type === "ranking") {
+    const { direction, score } = ast.result;
+    if (
+      score.kind === "reduce" &&
+      score.op === "count" &&
+      isIntersectionOfSources(score.of, "guess", "draw")
+    ) {
+      return direction === "min"
+        ? "The winning guess is the one whose numbers include the FEWEST of the official draw's numbers; the lowest match count wins (ties share the pool)."
+        : "The winning guess is the one whose numbers include the MOST of the official draw's numbers; the highest match count wins (ties share the pool).";
+    }
+    return null;
+  }
+
+  if (ast.result.type !== "predicate") {
     return null;
   }
 
