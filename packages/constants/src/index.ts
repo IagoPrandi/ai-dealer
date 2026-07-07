@@ -39,4 +39,24 @@ export const MINIMUM_CLAIM_THRESHOLD_SOL = 0.005;
 export const CLAIM_WINDOW_TURNS = 12;
 export const CLAIM_WINDOW_DAYS = 7;
 
+export function countRuleTokens(value: string) {
+  return value.match(/\p{L}+|\p{N}+|[^\s\p{L}\p{N}]/gu)?.length ?? 0;
+}
+
+function removeControlCharacters(value: string) {
+  return Array.from(value)
+    .map((character) => {
+      const codePoint = character.codePointAt(0);
+
+      return codePoint !== undefined && (codePoint < 32 || codePoint === 127)
+        ? " "
+        : character;
+    })
+    .join("");
+}
+
+export function sanitizeRuleText(value: string) {
+  return removeControlCharacters(value).replace(/\s+/g, " ").trim();
+}
+
 export { SHARED_ERROR_CODES, type SharedErrorCode } from "./error-codes.js";

@@ -2145,6 +2145,60 @@ test("player history aggregates guesses, proposals, votes, and claims", () => {
   );
 });
 
+test("player history event ids include repeated vote sequence", () => {
+  resetApiStateForTests();
+  saveRuleVote({
+    ruleId: 7,
+    ruleProposal: base58,
+    ruleVote: base58,
+    sequence: 1,
+    signature: base58,
+    submittedAt: "2026-06-12T12:02:00.000Z",
+    turnId: 244,
+    voter: wallet,
+  });
+  saveRuleVote({
+    ruleId: 7,
+    ruleProposal: base58,
+    ruleVote: walletTwo,
+    sequence: 2,
+    signature: walletTwo,
+    submittedAt: "2026-06-12T12:03:00.000Z",
+    turnId: 244,
+    voter: wallet,
+  });
+  saveRuleEliminationVote({
+    eliminationVote: base58,
+    ruleId: 7,
+    ruleProposal: base58,
+    sequence: 1,
+    signature: walletThree,
+    submittedAt: "2026-06-12T12:04:00.000Z",
+    turnId: 244,
+    voter: wallet,
+  });
+  saveRuleEliminationVote({
+    eliminationVote: walletTwo,
+    ruleId: 7,
+    ruleProposal: base58,
+    sequence: 2,
+    signature: wallet,
+    submittedAt: "2026-06-12T12:05:00.000Z",
+    turnId: 244,
+    voter: wallet,
+  });
+
+  const ids = listPlayerHistory({ limit: 10, wallet }).events.map(
+    (event) => event.id,
+  );
+
+  assert.equal(new Set(ids).size, ids.length);
+  assert.ok(ids.includes(`vote:244:7:1:${wallet}`));
+  assert.ok(ids.includes(`vote:244:7:2:${wallet}`));
+  assert.ok(ids.includes(`elimination:244:7:1:${wallet}`));
+  assert.ok(ids.includes(`elimination:244:7:2:${wallet}`));
+});
+
 test("conversation drafts are saved per wallet and newest draft is listed first", () => {
   resetApiStateForTests();
   const first = saveConversationDraft({
@@ -2208,6 +2262,29 @@ test("conversation draft persists the full message transcript", () => {
   assert.equal(drafts.length, 1);
   assert.equal(drafts[0]?.messages?.length, 2);
   assert.deepEqual(drafts[0]?.messages, saved.messages);
+});
+
+test("conversation draft validation accepts a pending user-only transcript", () => {
+  assert.equal(
+    isValidConversationDraft({
+      lastMessage: "Win if exactly 2 guessed numbers match in the same position.",
+      messages: [
+        {
+          text: "Win if exactly 2 guessed numbers match in the same position.",
+          who: "user",
+        },
+      ],
+      normalizedText: null,
+      officialInterpretation: null,
+      prompt: "Win if exactly 2 guessed numbers match in the same position.",
+      ruleId: null,
+      status: "draft",
+      tokenCount: 12,
+      turnId: 245,
+      wallet,
+    }),
+    true,
+  );
 });
 
 test("conversation draft validation accepts, tolerates, and rejects transcripts", () => {

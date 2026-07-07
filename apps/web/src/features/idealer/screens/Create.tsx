@@ -1,11 +1,11 @@
 "use client";
 
 /**
- * CRIAR REGRA — chat with the AI dealer. Real flow: POST /rule-preflight to
+ * CRIAR REGRA - chat with the AI dealer. Real flow: POST /rule-preflight to
  * compile/validate, then propose on-chain (createProposeRuleInstruction) and
  * POST /rule-proposals. Ported from app-create.jsx (local stub removed).
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { address } from "@solana/kit";
 
 import { RULE_MAX_TOKENS } from "@idealer/constants";
@@ -16,7 +16,7 @@ import {
   type RulePreflightResult,
 } from "../../../solana/idealerProgram";
 import { useIdealer } from "../context";
-import { ApiRequestError, getConversationDrafts, postConversationDraft, postRuleProposal, postRulePreflight } from "../data/apiClient";
+import { getConversationDrafts, postRuleProposal } from "../data/apiClient";
 import { fmtSol, fmtTurnId } from "../data/format";
 import { describeTxError, sendInstruction } from "../data/tx";
 import {
@@ -27,6 +27,15 @@ import {
   isRuleRefinementPatch,
   type RuleGuidanceOption,
 } from "../ruleRefinement";
+import { saveConversationDraftSnapshot, startConversationRun } from "../conversationRun";
+import {
+  forgetLatestConversationRun,
+  getConversationRun,
+  getLatestConversationRun,
+  rememberLatestConversationRun,
+  subscribeConversationRun,
+  type ConversationRunSnapshot,
+} from "../conversationRunStore";
 import { Dealer, Ico, SectionLabel } from "../shared";
 
 interface ChatMessage {
@@ -106,6 +115,14 @@ function getDealerChatReply(
     return "A valid rule can only use the player's guess and the official draw. Write the condition in one sentence, and I will compile it before payment.";
   }
   return "I need a winner condition based on the guess and draw. Try: Win if at least 4 of your numbers appear in the draw.";
+}
+
+function createClientDraftId(turnId: number) {
+  const suffix =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `client:${turnId}:${suffix}`;
 }
 
 function RulePreview({ rule }: { rule: RulePreflightResult }) {
@@ -341,14 +358,62 @@ function CreateChat({ chatId, client, connected, fees, go, played, reloadAll, se
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [guidance]);
 
-  function openGuidance(context: Parameters<typeof buildRuleGuidanceOptions>[0]) {
+  const openGuidance = useCallback((context: Parameters<typeof buildRuleGuidanceOptions>[0]) => {
     const options = buildRuleGuidanceOptions(context);
     setGuidance({
       options,
       title: getRuleGuidanceTitle(context),
     });
     setSelectedGuidanceIndex(options.length > 0 ? 0 : null);
-  }
+  }, []);
+
+  const applyRunSnapshot = useCallback((snapshot: ConversationRunSnapshot) => {
+    setMsgs(snapshot.messages);
+    setTyping(snapshot.status === "pending");
+    setRule(snapshot.rule);
+    setError(snapshot.error);
+    if (snapshot.status === "pending") {
+      setGuidance(null);
+      return;
+    }
+    if (snapshot.guidanceContext) {
+      openGuidance(snapshot.guidanceContext);
+      return;
+    }
+    if (!snapshot.rule) {
+      setGuidance(null);
+      return;
+    }
+    const valid = snapshot.rule.decision === "VALID" && !snapshot.rule.needsClarification;
+    if (valid) {
+      setGuidance(null);
+      return;
+    }
+    openGuidance({
+      clarityNote: snapshot.rule.clarityNote,
+      currentRuleText: snapshot.rule.sanitizedText,
+      needsClarification: snapshot.rule.needsClarification,
+      reasonSummary: snapshot.rule.reasonSummary ?? null,
+      refinementQuestions: snapshot.rule.refinementQuestions ?? null,
+      sanitizedText: snapshot.rule.sanitizedText,
+      suggestedRewrite: snapshot.rule.suggestedRewrite ?? null,
+    });
+  }, [openGuidance]);
+
+  useEffect(() => subscribeConversationRun(activeDraftId, applyRunSnapshot), [activeDraftId, applyRunSnapshot]);
+
+  useEffect(() => {
+    if (activeDraftId || chatId || seed) {
+      return;
+    }
+    const run = getLatestConversationRun(walletAddress, turnId);
+    if (!run) {
+      return;
+    }
+    autoSentRef.current = true;
+    setActiveDraftId(run.draftId);
+    applyRunSnapshot(run);
+  }, [activeDraftId, applyRunSnapshot, chatId, seed, turnId, walletAddress]);
 
   function submitGuidance() {
     if (!guidance || typing) {
@@ -365,7 +430,7 @@ function CreateChat({ chatId, client, connected, fees, go, played, reloadAll, se
     void send(selectedText);
   }
 
-  async function send(text?: string) {
+  function send(text?: string) {
     const t = (text ?? val).trim();
     if (!t || typing) {
       return;
@@ -390,95 +455,25 @@ function CreateChat({ chatId, client, connected, fees, go, played, reloadAll, se
     setVal("");
     setError(null);
     setGuidance(null);
-    // Track the running transcript locally so the persisted draft carries the
-    // full exchange (setMsgs is async and can't be read back synchronously).
-    let transcript: ChatMessage[] = [...msgs, { text: t, who: "user" }];
+    const transcript: ChatMessage[] = [...msgs, { text: t, who: "user" }];
     setMsgs(transcript);
     setTyping(true);
     setRule(null);
-    try {
-      if (!refinedDraft && !likelyRuleDraft) {
-        transcript = [...transcript, { text: getDealerChatReply(t, fees), who: "ai" }];
-        setMsgs(transcript);
-        return;
-      }
-
-      if (refinedDraft) {
-        transcript = [
-          ...transcript,
-          { text: `I applied that to your previous draft: ${refinedDraft}`, who: "ai" },
-        ];
-        setMsgs(transcript);
-      }
-
-      const body = await postRulePreflight(ruleText);
-      const preflight = body.preflight as unknown as RulePreflightResult;
-      const valid = preflight.decision === "VALID" && !preflight.needsClarification;
-      transcript = [
-        ...transcript,
-        { text: preflight.dealerMessage || (valid ? "Done! I compiled your rule. Review it — if you like it, submit it to the round." : "Almost there! Try describing the win condition in a few clear words."), who: "ai" },
-      ];
-      setMsgs(transcript);
-      setRule(preflight);
-      if (valid) {
-        setGuidance(null);
-      } else {
-        openGuidance({
-          clarityNote: preflight.clarityNote,
-          currentRuleText: preflight.sanitizedText,
-          needsClarification: preflight.needsClarification,
-          reasonSummary: preflight.reasonSummary ?? null,
-          refinementQuestions: preflight.refinementQuestions ?? null,
-          sanitizedText: preflight.sanitizedText,
-          suggestedRewrite: preflight.suggestedRewrite ?? null,
-        });
-      }
-      if (walletAddress) {
-        try {
-          const saved = await postConversationDraft(walletAddress, {
-            ...(activeDraftId ? { draftId: activeDraftId } : {}),
-            lastMessage: preflight.dealerMessage,
-            messages: transcript,
-            normalizedText: preflight.normalizedText || null,
-            officialInterpretation: preflight.officialInterpretation || null,
-            prompt: preflight.sanitizedText,
-            ruleId: preflight.ruleId,
-            status: "draft",
-            tokenCount: preflight.tokenCount,
-            turnId,
-            wallet: walletAddress,
-          });
-          setActiveDraftId(saved.draft.draftId);
-        } catch (draftError) {
-          setError(`Rule compiled, but the draft could not be saved. ${describeTxError(draftError)}`);
-        }
-      }
-    } catch (cause) {
-      if (
-        cause instanceof ApiRequestError &&
-        cause.status < 500 &&
-        cause.code !== "invalid_json" &&
-        cause.code !== "invalid_rule_text"
-      ) {
-        const blockedMessage =
-          cause.code === "RULE_PROMPT_INJECTION"
-            ? "That is blocked because it asks the compiler to ignore or hide the app rules. Choose a clean measurable rule instead."
-            : cause.code === "RULE_EXTERNAL_DEPENDENCY"
-              ? "That is blocked because it depends on information outside this guess and draw. Choose a rewrite that only compares your guess with the official draw."
-              : cause.message;
-        setMsgs((m) => [...m, { text: blockedMessage, who: "ai" }]);
-        openGuidance({
-          apiCode: cause.code,
-          reasonSummary: cause.message,
-          sanitizedText: ruleText,
-        });
-        return;
-      }
-      setMsgs((m) => [...m, { text: "Dealer engine unavailable. The compiler must be online before I can lock a rule.", who: "ai" }]);
-      setError(describeTxError(cause));
-    } finally {
-      setTyping(false);
+    let draftIdForThisSend = activeDraftId;
+    if (!draftIdForThisSend) {
+      draftIdForThisSend = createClientDraftId(turnId);
+      setActiveDraftId(draftIdForThisSend);
     }
+    startConversationRun({
+      draftId: draftIdForThisSend,
+      initialMessages: transcript,
+      lastUserMessage: t,
+      localDealerReply: !refinedDraft && !likelyRuleDraft ? getDealerChatReply(t, fees) : null,
+      refinedDraft,
+      ruleText,
+      turnId,
+      wallet: walletAddress,
+    });
   }
 
   // Resume an existing conversation: rehydrate the full transcript from the
@@ -498,10 +493,20 @@ function CreateChat({ chatId, client, connected, fees, go, played, reloadAll, se
           return;
         }
         setActiveDraftId(draft.draftId);
+        rememberLatestConversationRun({
+          draftId: draft.draftId,
+          turnId,
+          wallet: walletAddress,
+        });
+        const run = getConversationRun(draft.draftId);
+        if (run) {
+          applyRunSnapshot(run);
+          return;
+        }
         if (draft.messages && draft.messages.length > 0) {
           setMsgs(draft.messages);
         } else {
-          // Older drafts predate transcript persistence — reconstruct from the
+          // Older drafts predate transcript persistence - reconstruct from the
           // stored summary so the conversation still reads coherently.
           setMsgs([
             { text: draft.prompt, who: "user" as const },
@@ -517,7 +522,7 @@ function CreateChat({ chatId, client, connected, fees, go, played, reloadAll, se
     return () => {
       cancelled = true;
     };
-  }, [chatId, walletAddress]);
+  }, [applyRunSnapshot, chatId, turnId, walletAddress]);
 
   // Auto-send the seed coming from the home prompt (once).
   useEffect(() => {
@@ -552,8 +557,8 @@ function CreateChat({ chatId, client, connected, fees, go, played, reloadAll, se
       setSubmitted(true);
       reloadAll();
       try {
-        await postConversationDraft(walletAddress, {
-          ...(activeDraftId ? { draftId: activeDraftId } : {}),
+        await saveConversationDraftSnapshot({
+          draftId: activeDraftId,
           lastMessage: "Rule submitted to the round.",
           messages: [...msgs, { text: "Rule submitted to the round.", who: "ai" }],
           normalizedText: rule.normalizedText || null,
@@ -561,7 +566,11 @@ function CreateChat({ chatId, client, connected, fees, go, played, reloadAll, se
           prompt: rule.sanitizedText,
           ruleId: rule.ruleId,
           status: "submitted",
-          tokenCount: rule.tokenCount,
+          turnId,
+          wallet: walletAddress,
+        });
+        forgetLatestConversationRun({
+          draftId: activeDraftId,
           turnId,
           wallet: walletAddress,
         });
@@ -576,6 +585,11 @@ function CreateChat({ chatId, client, connected, fees, go, played, reloadAll, se
   }
 
   function reset() {
+    forgetLatestConversationRun({
+      draftId: activeDraftId,
+      turnId,
+      wallet: walletAddress,
+    });
     setRule(null);
     setSubmitted(false);
     setError(null);
@@ -644,7 +658,7 @@ function CreateChat({ chatId, client, connected, fees, go, played, reloadAll, se
             </div>
           ) : played ? (
             <button onClick={submit} disabled={busy} className="ide-btn" style={{ padding: 15, fontSize: 15.5, animation: "ide-rise .3s ease both", opacity: busy ? 0.7 : 1 }} type="button">
-              <Ico.check style={{ color: "#08110C" }} /> {busy ? "Submitting…" : `Submit to the round - ${fees.ruleNext === 0 ? "Free" : `${fmtSol(fees.ruleNext)} SOL`}`}
+              <Ico.check style={{ color: "#08110C" }} /> {busy ? "Submitting..." : `Submit to the round - ${fees.ruleNext === 0 ? "Free" : `${fmtSol(fees.ruleNext)} SOL`}`}
             </button>
           ) : (
             <div className="ide-card" style={{ padding: 16, borderColor: "rgba(255,210,63,0.35)", background: "linear-gradient(120deg, rgba(255,210,63,0.1), var(--surface))", animation: "ide-rise .3s ease both" }}>

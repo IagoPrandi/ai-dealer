@@ -68,6 +68,25 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-07-06 (Pending AI dealer conversation draft persistence)
+
+- Opened required documents/context before working: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/idealer-ui-coherence/SKILL.md`, `.claude/skills/idealer-design-system/SKILL.md`, `.claude/skills/idealer-design-system/references/01-tokens.md`, `.claude/skills/idealer-design-system/references/02-components.md`, `.claude/skills/idealer-design-system/references/03-screens-and-state.md`, `.claude/skills/idealer-design-system/references/04-new-screen-recipe.md`, and `.claude/skills/idealer-test-and-verify/SKILL.md`.
+- Fixed the rule composer race where leaving the AI Dealer screen before preflight/agent response could lose the user's latest message. `Create.tsx` now saves a conversation draft snapshot immediately after adding the user message, before calling `/rule-preflight`, then updates the same `draftId` when the dealer/preflight response arrives.
+- Added a shared canonical `countRuleTokens` and `sanitizeRuleText` export in `@idealer/constants` so pending drafts use the same prompt normalization and token count that the API validates; removed the duplicated API-local implementation.
+- Added `conversationDraft.ts` in the web feature layer to build valid draft payloads for pending user-only transcripts, with unit coverage for newline sanitization, token count, and empty prompt rejection. Added API coverage that validates pending user-only transcripts.
+- Verified: `pnpm --filter @idealer/constants typecheck/test/lint/build`; `pnpm --filter @idealer/api typecheck/test` (63/63), `lint`, `build`; `pnpm --filter @idealer/web typecheck/test` (10/10), `lint`, `build`.
+- Reviewed the result for inconsistencies: UI copy remains English, draft persistence errors remain visible instead of hidden, walletless free chat still runs without pretending to persist, the same draft id is reused for the eventual dealer response, and no milestone checkbox/status was changed because milestone marking requires explicit user confirmation.
+
+### 2026-07-06 (Profile conversation overflow and repeated vote history keys)
+
+- Opened required documents/context before working: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/develop-frontend/SKILL.md`, `.claude/skills/idealer-ui-coherence/SKILL.md`, `.claude/skills/idealer-design-system/SKILL.md`, `.claude/skills/idealer-design-system/references/01-tokens.md`, `.claude/skills/idealer-design-system/references/02-components.md`, `.claude/skills/idealer-design-system/references/03-screens-and-state.md`, `.claude/skills/idealer-design-system/references/04-new-screen-recipe.md`, `.claude/skills/idealer-test-and-verify/SKILL.md`, and the Next.js skill.
+- Fixed the Profile conversation draft card so long rule titles and the resume CTA stay inside the mobile card: the row/card now preserve `minWidth: 0`, the title truncates within `maxWidth: 100%`, metadata rows can wrap without forcing wider layout, and the CTA is constrained to the card width.
+- Fixed repeated approval/elimination vote history identifiers in `listPlayerHistory`: event ids now include vote `sequence`, matching the existing storage key and preventing repeated same-wallet same-rule votes from producing duplicate React keys.
+- Added a regression test proving repeated vote and repeated elimination vote history event ids are unique and include sequence. The Profile history list also uses a render key with `createdAt` plus index as a compatibility tie-breaker for any already-served legacy duplicated ids.
+- Verified: `pnpm --filter @idealer/api typecheck`, `test` (62/62), `lint`, `build`; `pnpm --filter @idealer/web typecheck`, `test` (8/8), `lint`, `build`.
+- Visual check: could not start a second mocked `next dev` because an existing Next dev server for `apps/web` was already running on `localhost:3000`; did not stop the user's process. Ran a Playwright harness at 430px using the real `idealer.css` and representative Profile conversation markup; result: `documentScrollWidth=430`, `horizontalOverflow=false`, `buttonContained=true`, `titleClamped=true`. Screenshot saved at `output/playwright/profile-conversation-row-overflow-430.png`.
+- Reviewed the result for inconsistencies: UI copy remains English, no fallback hides API/history issues, repeated-vote ids remain audit-readable, the existing unrelated `apps/web/next-env.d.ts` worktree change was left untouched, and no milestone checkbox/status was changed because milestone marking requires explicit user confirmation.
+
 ### 2026-07-06 (Shortlist decision window + claim visibility; conversation history overflow)
 
 - Opened required documents/context before working: `PRD.md`, `.claude/CLAUDE.md`, `.claude/skills`, `.claude/skills/idealer-ui-coherence/SKILL.md`, `.claude/skills/playwright/SKILL.md`, and the active plan `groovy-sleeping-comet.md`.
@@ -3058,3 +3077,24 @@ Passed:
 - Final real LLM harness run mirrored the API flow by compiling from the original prompt text, not the LLM-normalized text. All prompts `#21`-`#30` returned `VALID`, `failures=0`, and deterministic AST kinds were: `compare`, `count_at_least`, `count_at_least`, `compare`, `compare`, `compare`, `all_equal_ordered`, `value_within_any_count_at_least`, `compare`, and `ordered_position_match_count_eq`.
 - Verified: `pnpm --filter @idealer/rule-schema typecheck`, `test` (7/7), `lint`, `build`; `pnpm --filter @idealer/rule-runtime typecheck`, `test` (13/13), `lint`, `build`; `pnpm --filter @idealer/rule-compiler typecheck`, `test` (34/34), `lint`, `build`; `pnpm --filter @idealer/api typecheck`, `test` (58/58), `lint`, `build`.
 - Reviewed the result for inconsistencies: all new semantics remain inside the bounded `guess`/`draw` DSL, ambiguous/external rules still fail closed, no prompt reference file was edited for convenience, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-06 (Dealer conversation in-progress reattach)
+
+- Reopened required context before working: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/idealer-ui-coherence/SKILL.md`, `.claude/skills/idealer-test-and-verify/SKILL.md`, `.claude/skills/idealer-design-system/SKILL.md`, and the design-system reference markdown files.
+- Fixed the create-rule dealer conversation so a message is saved as a draft before preflight, including pending user-only transcripts, instead of waiting for the AI dealer response.
+- Added a client-side conversation run store with subscription and wallet/turn reattach support so in-app navigation away from the Create screen can rejoin an in-progress dealer response without requiring the player to resend the message.
+- Updated the Create screen to create a stable client draft id before the first request, publish pending/done/error snapshots to the run store, resume snapshots when reopening by draft id, and reattach the latest wallet/turn run when opening Create without a saved `chatId` yet.
+- Shared canonical rule text sanitization/token counting through `@idealer/constants`, removed duplicated API logic, and added regression tests for pending transcript draft bodies and run-store reattachment.
+- Preserved honest error handling: failed draft saves and compiler/API failures are still surfaced in the chat instead of being hidden by fallback behavior.
+- Verified: `pnpm --filter @idealer/constants typecheck`, `test`, `lint`, `build`; `pnpm --filter @idealer/api typecheck`, `test` (63/63), `lint`, `build`; `pnpm --filter @idealer/web typecheck`, `test` (12/12), `lint`, `build`.
+- Reviewed the result for inconsistencies: UI copy added by this task is English, pending run state is scoped by wallet and turn, submitted/reset conversations clear the latest-run pointer, existing generated `apps/web/next-env.d.ts` output was left as generated, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-06 (Dealer background response continuity)
+
+- Reopened required context before working: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/idealer-ui-coherence/SKILL.md`, `.claude/skills/idealer-test-and-verify/SKILL.md`, `.claude/skills/idealer-design-system/SKILL.md`, and the design-system reference markdown files.
+- Decoupled dealer response progress from the mounted `CreateChat` component by adding a background conversation runner that owns in-flight preflight/autosave tasks at module scope.
+- Updated `CreateChat` so sending a message only creates the pending transcript and starts the background run; all response, error, blocked-rule guidance, and final rule-preview state now arrive through store snapshots.
+- Extended the run store to support guidance context and anonymous session reattach, so leaving and returning inside the app can recover an in-progress response even before a wallet-backed draft is available.
+- Added regression coverage proving a conversation run continues to completion while no screen is subscribed.
+- Verified: `pnpm --filter @idealer/web test` (13/13), `lint`, `build`, and `typecheck` after the build regenerated `.next/types`.
+- Reviewed the result for inconsistencies: no visible UI pattern changed, UI copy remains English, the temporary encoding issue introduced during mechanical cleanup was corrected, response progress is no longer owned by a mounted screen, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.

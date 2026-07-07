@@ -9,12 +9,14 @@ import {
   CREATOR_REWARD_CAP_SOL,
   CREATOR_REWARD_RATE_BPS,
   CREATOR_REWARD_RESERVE_SHARE_BPS,
+  countRuleTokens,
   LAMPORTS_PER_SOL,
   MINIMUM_CLAIM_THRESHOLD_SOL,
   MVP_FEES_SOL,
   REPEATED_ACTION_FEE_MULTIPLIER,
   RULE_MAX_TOKENS,
   RULE_REMOVAL_CONFIG,
+  sanitizeRuleText,
   TREASURY_FEE_BPS,
   TURN_DURATION_CYCLE_HOURS,
   TURN_DURATION_CYCLE_SECONDS,
@@ -1102,26 +1104,6 @@ function isBase58Like(value: unknown) {
   return (
     typeof value === "string" && /^[1-9A-HJ-NP-Za-km-z]{32,88}$/.test(value)
   );
-}
-
-function countRuleTokens(value: string) {
-  return value.match(/\p{L}+|\p{N}+|[^\s\p{L}\p{N}]/gu)?.length ?? 0;
-}
-
-function removeControlCharacters(value: string) {
-  return Array.from(value)
-    .map((character) => {
-      const codePoint = character.codePointAt(0);
-
-      return codePoint !== undefined && (codePoint < 32 || codePoint === 127)
-        ? " "
-        : character;
-    })
-    .join("");
-}
-
-function sanitizeRuleText(value: string) {
-  return removeControlCharacters(value).replace(/\s+/g, " ").trim();
 }
 
 function hashBytes(value: string) {
@@ -4203,7 +4185,7 @@ export function listPlayerHistory(args: {
       .map(
         (vote): PlayerHistoryEvent => ({
           createdAt: vote.submittedAt,
-          id: `vote:${vote.turnId}:${vote.ruleId}:${vote.voter}`,
+          id: `vote:${vote.turnId}:${vote.ruleId}:${vote.sequence ?? 1}:${vote.voter}`,
           ruleId: vote.ruleId,
           status: "cast",
           summary: `Voted for rule #${vote.ruleId}.`,
@@ -4217,7 +4199,7 @@ export function listPlayerHistory(args: {
       .map(
         (vote): PlayerHistoryEvent => ({
           createdAt: vote.submittedAt,
-          id: `elimination:${vote.turnId}:${vote.ruleId}:${vote.voter}`,
+          id: `elimination:${vote.turnId}:${vote.ruleId}:${vote.sequence ?? 1}:${vote.voter}`,
           ruleId: vote.ruleId,
           status: "cast",
           summary: `Voted to eliminate rule #${vote.ruleId}.`,

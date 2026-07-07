@@ -54,14 +54,14 @@ function StatusPill({ children, tone = "purple" }: { children: React.ReactNode; 
 
 function ConversationRow({ draft, onResume }: { draft: ConversationDraftApi; onResume: () => void }) {
   return (
-    <div className="ide-card" style={{ padding: "13px 15px", display: "grid", gap: 10 }}>
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+    <div className="ide-card" style={{ padding: "13px 15px", display: "grid", gap: 10, minWidth: 0, maxWidth: "100%" }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10, minWidth: 0 }}>
         <div style={{ width: 34, height: 34, borderRadius: 12, background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--purple-soft)", display: "grid", placeItems: "center", flexShrink: 0 }}>
           <Ico.chat style={{ width: 17, height: 17, color: "var(--purple-soft)" }} />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-            <div style={{ fontWeight: 800, fontSize: 15.5, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <div style={{ marginBottom: 4, minWidth: 0 }}>
+            <div style={{ fontWeight: 800, fontSize: 15.5, maxWidth: "100%", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {draft.normalizedText || draft.prompt}
             </div>
           </div>
@@ -70,17 +70,21 @@ function ConversationRow({ draft, onResume }: { draft: ConversationDraftApi; onR
           </div>
         </div>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", minWidth: 0 }}>
         <StatusPill tone={draft.status === "submitted" ? "green" : "yellow"}>{draft.status}</StatusPill>
         <span className="ide-pill"><span className="ide-num">{fmtTurnId(draft.turnId)}</span></span>
         <span className="ide-pill"><span className="ide-num">{draft.tokenCount}</span> tokens</span>
         <span style={{ color: "var(--dim)", fontSize: 12.5, marginLeft: "auto" }}>{timeAgo(draft.updatedAt)}</span>
       </div>
-      <button onClick={onResume} className="ide-btn-ghost ide-btn" style={{ width: "100%", padding: 11 }} type="button">
+      <button onClick={onResume} className="ide-btn-ghost ide-btn" style={{ width: "100%", maxWidth: "100%", minWidth: 0, padding: 11 }} type="button">
         <Ico.spark style={{ color: "var(--purple-soft)" }} /> {draft.status === "submitted" ? "Open conversation" : "Resume draft"}
       </button>
     </div>
   );
+}
+
+function historyRowKey(event: PlayerHistoryEventApi, index: number) {
+  return `${event.id}:${event.createdAt}:${index}`;
 }
 
 function historyIcon(type: PlayerHistoryEventApi["type"]) {
@@ -290,7 +294,7 @@ export function ProfileScreen() {
             </div>
           ) : (
             <div style={{ display: "grid", gap: 9, gridTemplateColumns: "minmax(0, 1fr)" }}>
-              {history.history?.events.map((event) => <HistoryRow key={event.id} event={event} />)}
+              {history.history?.events.map((event, index) => <HistoryRow key={historyRowKey(event, index)} event={event} />)}
               {history.history?.nextCursor ? (
                 <div style={{ color: "var(--dim)", fontSize: 12.5, textAlign: "center", padding: "4px 0" }}>
                   Showing latest <span className="ide-num">{history.history.events.length}</span> events.
