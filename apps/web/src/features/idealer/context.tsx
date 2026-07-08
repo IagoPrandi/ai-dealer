@@ -24,6 +24,7 @@ export type Screen =
 
 export interface NavParams {
   chatId?: null | string;
+  newConversation?: boolean;
   seed?: string;
 }
 
@@ -46,6 +47,7 @@ export interface IdealerContextValue {
   fees: { play: number; playNext: number; remove: number; rule: number; ruleNext: number; vote: number };
   guessCutoffEndsAt: null | number;
   go: (screen: Screen, params?: NavParams) => void;
+  newConversationKey: number;
   openDetail: (ruleId: number, opts?: { canAgainst?: boolean; rank?: number | null }) => void;
   players: number;
   playCount: number;

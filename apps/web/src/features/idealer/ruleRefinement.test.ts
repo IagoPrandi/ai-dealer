@@ -5,6 +5,7 @@ import {
   composeRefinedRuleDraft,
   getRuleRefinementBase,
   isExplicitRuleRefinementPatch,
+  isRuleCreationHelpRequest,
   isRuleRefinementPatch,
 } from "./ruleRefinement.js";
 
@@ -99,6 +100,26 @@ test("keeps complete win-if rules standalone after clarification turns", () => {
 
   assert.equal(isExplicitRuleRefinementPatch(message), false);
   assert.equal(isRuleRefinementPatch(message, context), false);
+});
+
+test("treats requests for another rule as help requests, not draft patches", () => {
+  const context = {
+    currentRuleText:
+      "Win if at least 4 of your numbers appear in the draw.",
+  };
+
+  assert.equal(isRuleCreationHelpRequest("quero criar outra regra"), true);
+  assert.equal(isRuleCreationHelpRequest("Create another rule"), true);
+  assert.equal(isRuleRefinementPatch("quero criar outra regra", context), false);
+  assert.equal(isRuleRefinementPatch("Create another rule", context), false);
+  assert.equal(isExplicitRuleRefinementPatch("Create another rule"), false);
+});
+
+test("does not treat selectable clean-rule rewrites as help-only requests", () => {
+  const message =
+    "New clean rule: win if exactly 2 guessed numbers match in the same position.";
+
+  assert.equal(isRuleCreationHelpRequest(message), false);
 });
 
 test("suggests removing other-player dependency before objective distance clarification", () => {

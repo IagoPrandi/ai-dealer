@@ -95,6 +95,7 @@ export function IdealerApp({
   const [screen, setScreen] = useState<Screen>(initialScreen);
   const [seed, setSeed] = useState("");
   const [chatId, setChatId] = useState<null | string>(null);
+  const [newConversationKey, setNewConversationKey] = useState(0);
   const [detail, setDetail] = useState<{ canAgainst: boolean; rank: number | null; ruleId: number } | null>(null);
   const [showConnect, setShowConnect] = useState(initialConnect);
   const [voteBusyRuleId, setVoteBusyRuleId] = useState<null | number>(null);
@@ -102,10 +103,16 @@ export function IdealerApp({
   const [actionError, setActionError] = useState<null | string>(null);
 
   const go = useCallback((next: Screen, params?: NavParams) => {
-    if (params && "seed" in params && params.seed !== undefined) {
+    if (params?.newConversation) {
+      setSeed("");
+      setChatId(null);
+      setNewConversationKey((key) => key + 1);
+    } else if (params && "seed" in params && params.seed !== undefined) {
       setSeed(params.seed);
+      setChatId(params?.chatId ?? null);
+    } else {
+      setChatId(params?.chatId ?? null);
     }
-    setChatId(params?.chatId ?? null);
     setDetail(null);
     setScreen(next);
   }, []);
@@ -305,6 +312,7 @@ export function IdealerApp({
     fees,
     guessCutoffEndsAt,
     go,
+    newConversationKey,
     openDetail,
     players: round?.pool?.guesses ?? 0,
     playCount,
@@ -374,7 +382,7 @@ export function IdealerApp({
                 <button className={"ide-nav-btn" + (screen === "vote" ? " on" : "")} onClick={() => go("vote")} type="button">
                   <Ico.vote style={{ color: "currentColor" }} /> Rules
                 </button>
-                <button className="ide-nav-fab" onClick={() => go("create", { chatId: null, seed: "" })} title="Create rule" type="button"><Ico.plus style={{ color: "#08110C" }} /></button>
+                <button className="ide-nav-fab" onClick={() => go("create", { newConversation: true })} title="Create rule" type="button"><Ico.plus style={{ color: "#08110C" }} /></button>
                 <button className={"ide-nav-btn" + (screen === "profile" ? " on" : "")} onClick={() => go("profile")} type="button">
                   <Ico.user style={{ color: "currentColor" }} /> Account
                 </button>

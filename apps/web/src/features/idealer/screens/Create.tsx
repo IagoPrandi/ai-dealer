@@ -24,6 +24,7 @@ import {
   composeRefinedRuleDraft,
   getRuleGuidanceTitle,
   isExplicitRuleRefinementPatch,
+  isRuleCreationHelpRequest,
   isRuleRefinementPatch,
   type RuleGuidanceOption,
 } from "../ruleRefinement";
@@ -78,6 +79,9 @@ const ALLOWED_TOPIC_PATTERN =
 const SECURITY_RULE_DRAFT_PATTERN =
   /\b(ignore\b.{0,40}\b(app\s+)?rules?|previous instructions?|compile\b.{0,40}\bvalid|secretly|hide\b.{0,40}\b(blocked|invalid|rejected))\b/i;
 
+const RULE_TIPS_TOPIC_PATTERN =
+  /\b(tip|tips|improve|better|strategy|strategies|odds|popular|dica|dicas|melhorar|melhor|estrategia|estratÃ©gia|estrategias|estratÃ©gias|chance|chances|popular)\b/i;
+
 function isLikelyRuleDraft(text: string) {
   const trimmed = text.trim();
   if (!trimmed || GREETING_PATTERN.test(trimmed)) {
@@ -99,6 +103,9 @@ function getDealerChatReply(
   if (GREETING_PATTERN.test(trimmed)) {
     return "Hey. Send me one winner condition based on the guess and the official draw.";
   }
+  if (isRuleCreationHelpRequest(trimmed)) {
+    return "To create a different rule, send a complete winner condition in one sentence, starting with something like: Win if... I will treat questions as chat, not as edits, unless you send a clear correction or a complete rule.";
+  }
   if (COST_TOPIC_PATTERN.test(trimmed)) {
     return `Submitting this rule costs ${fees.ruleNext === 0 ? "Free" : `${fmtSol(fees.ruleNext)} SOL`}. Chat and preflight are free; payment only happens after the compiler returns a valid rule and you confirm submission.`;
   }
@@ -110,6 +117,9 @@ function getDealerChatReply(
   }
   if (ALLOWED_TOPIC_PATTERN.test(trimmed)) {
     return "A valid rule can compare the player's guess with the official draw: matches, misses, sums, order, positions, parity, ranges, digits, or closest/highest/lowest scores. It cannot use wallet history, time, randomness outside the draw, or off-chain events.";
+  }
+  if (RULE_TIPS_TOPIC_PATTERN.test(trimmed)) {
+    return "Strong rules are clear, measurable, and easy for voters to understand. Use only the guess and official draw, define exact thresholds, avoid off-chain facts, and say whether order or positions matter.";
   }
   if (QUESTION_PATTERN.test(trimmed) || trimmed.endsWith("?")) {
     return "A valid rule can only use the player's guess and the official draw. Write the condition in one sentence, and I will compile it before payment.";
@@ -297,14 +307,14 @@ function ClarificationPrompt({
 }
 
 export function CreateScreen() {
-  const { chatId, client, connected, fees, go, played, reloadAll, seed, turnId, wallet, walletAddress } = useIdealer();
+  const { chatId, client, connected, fees, go, newConversationKey, played, reloadAll, seed, turnId, wallet, walletAddress } = useIdealer();
 
-  return <CreateChat key={chatId || seed || "new"} {...{ chatId, client, connected, fees, go, played, reloadAll, seed, turnId, wallet, walletAddress }} />;
+  return <CreateChat key={`${newConversationKey}:${chatId || seed || "new"}`} {...{ chatId, client, connected, fees, go, newConversationKey, played, reloadAll, seed, turnId, wallet, walletAddress }} />;
 }
 
-type ChatProps = Pick<ReturnType<typeof useIdealer>, "chatId" | "client" | "connected" | "fees" | "go" | "played" | "reloadAll" | "seed" | "turnId" | "wallet" | "walletAddress">;
+type ChatProps = Pick<ReturnType<typeof useIdealer>, "chatId" | "client" | "connected" | "fees" | "go" | "newConversationKey" | "played" | "reloadAll" | "seed" | "turnId" | "wallet" | "walletAddress">;
 
-function CreateChat({ chatId, client, connected, fees, go, played, reloadAll, seed, turnId, wallet, walletAddress }: ChatProps) {
+function CreateChat({ chatId, client, connected, fees, go, newConversationKey, played, reloadAll, seed, turnId, wallet, walletAddress }: ChatProps) {
   const [msgs, setMsgs] = useState<ChatMessage[]>([
     { text: "Hey! Tell me in one sentence how your rule decides the round winner. Be creative - I turn it into a valid rule.", who: "ai" },
   ]);
@@ -403,17 +413,17 @@ function CreateChat({ chatId, client, connected, fees, go, played, reloadAll, se
   useEffect(() => subscribeConversationRun(activeDraftId, applyRunSnapshot), [activeDraftId, applyRunSnapshot]);
 
   useEffect(() => {
-    if (activeDraftId || chatId || seed) {
+    if (activeDraftId || chatId || seed || newConversationKey > 0) {
       return;
     }
     const run = getLatestConversationRun(walletAddress, turnId);
-    if (!run) {
+    if (!run || run.status !== "pending") {
       return;
     }
     autoSentRef.current = true;
     setActiveDraftId(run.draftId);
     applyRunSnapshot(run);
-  }, [activeDraftId, applyRunSnapshot, chatId, seed, turnId, walletAddress]);
+  }, [activeDraftId, applyRunSnapshot, chatId, newConversationKey, seed, turnId, walletAddress]);
 
   function submitGuidance() {
     if (!guidance || typing) {
@@ -584,7 +594,7 @@ function CreateChat({ chatId, client, connected, fees, go, played, reloadAll, se
     }
   }
 
-  function reset() {
+  function reset(message = "On to the next one! How does your new rule decide the winner?") {
     forgetLatestConversationRun({
       draftId: activeDraftId,
       turnId,
@@ -592,11 +602,12 @@ function CreateChat({ chatId, client, connected, fees, go, played, reloadAll, se
     });
     setRule(null);
     setSubmitted(false);
+    setTyping(false);
     setError(null);
     setActiveDraftId(null);
     setGuidance(null);
     setSelectedGuidanceIndex(0);
-    setMsgs([{ text: "On to the next one! How does your new rule decide the winner?", who: "ai" }]);
+    setMsgs([{ text: message, who: "ai" }]);
   }
 
   const valid = rule?.decision === "VALID" && !rule.needsClarification;
@@ -652,7 +663,7 @@ function CreateChat({ chatId, client, connected, fees, go, played, reloadAll, se
               </div>
               <p style={{ margin: "0 0 14px", color: "var(--muted)", fontSize: 14, lineHeight: 1.5 }}>In voting for round {fmtTurnId(turnId)}. If elected, you earn <b style={{ color: "var(--text)" }}>15%</b> of each prize.</p>
               <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={reset} className="ide-btn-ghost ide-btn" style={{ flex: 1, padding: 13 }} type="button">Create another</button>
+                <button onClick={() => reset()} className="ide-btn-ghost ide-btn" style={{ flex: 1, padding: 13 }} type="button">Create another</button>
                 <button onClick={() => go("vote")} className="ide-btn" style={{ flex: 1, padding: 13 }} type="button">See in voting</button>
               </div>
             </div>

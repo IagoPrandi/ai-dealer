@@ -3098,3 +3098,26 @@ Passed:
 - Added regression coverage proving a conversation run continues to completion while no screen is subscribed.
 - Verified: `pnpm --filter @idealer/web test` (13/13), `lint`, `build`, and `typecheck` after the build regenerated `.next/types`.
 - Reviewed the result for inconsistencies: no visible UI pattern changed, UI copy remains English, the temporary encoding issue introduced during mechanical cleanup was corrected, response progress is no longer owned by a mounted screen, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-08 (Dealer new-rule composer entry points)
+
+- Reopened required context before working: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/develop-frontend/SKILL.md`, `.claude/skills/idealer-ui-coherence/SKILL.md`, `.claude/skills/idealer-test-and-verify/SKILL.md`, `.claude/skills/idealer-design-system/SKILL.md`, and the design-system reference markdown files.
+- Initial pass separated explicit create-rule entry points from automatic draft resumption; the natural-language chat intent behavior from this pass was superseded by the scope clarification entry below.
+- Added a `newConversation` navigation signal and remount key so empty create-rule entry points start a fresh composer instead of reopening the previous completed conversation.
+- Limited automatic latest-run reattachment to pending background runs only; completed drafts remain available from the account conversation list without hijacking a new create action.
+- Updated empty create-rule CTAs from the bottom nav, home prompt, and account empty state to use the explicit new-conversation path, while typed seed text still starts a seeded compiler chat.
+- Added regression tests for Portuguese and English create-rule help phrases and for selectable `New clean rule: ...` rewrites so guidance options still compile instead of resetting the chat.
+- Verified: `pnpm --filter @idealer/web typecheck`; `pnpm --filter @idealer/web test` (15/15); `pnpm --filter @idealer/web lint`; `pnpm --filter @idealer/web build`.
+- Attempted focused Playwright verification with `pnpm --filter @idealer/web exec playwright test e2e/rule-proposal.spec.ts`, but it could not start because an existing Next dev server for `apps/web` was already running (PID `41060`) and the command path did not resolve `playwright`; the existing server was left untouched.
+- Reviewed the result for inconsistencies: UI copy added by this task is English, no fallback hides compiler/API failures, pending background response continuity is preserved, saved conversations are still resumable by explicit draft id, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-08 (Dealer chat scope clarification)
+
+- Reopened required context before working: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/develop-frontend/SKILL.md`, `.claude/skills/idealer-ui-coherence/SKILL.md`, `.claude/skills/idealer-test-and-verify/SKILL.md`, `.claude/skills/idealer-design-system/SKILL.md`, and the design-system reference markdown files.
+- Corrected the previous new-rule intent handling: natural-language messages like `quero criar outra regra` and `Create another rule` are now treated as help/chat requests, not as commands to reset or create a new conversation.
+- Kept explicit UI actions such as the `Create another` button and empty create-rule CTAs on the new-composer path; typed chat messages no longer trigger that path by inference.
+- Added a dealer chat reply for new-rule help requests that explains how to proceed with a complete winner-condition sentence and makes clear that questions are chat, not edits.
+- Added a tips/strategy chat reply so users can ask how to improve a rule idea without compiling or modifying the current draft.
+- Updated regression test wording and behavior so these messages are asserted as help requests that do not patch the current draft, while selectable `New clean rule: ...` rewrites still compile as rule text.
+- Verified: `pnpm --filter @idealer/web test` (15/15); `pnpm --filter @idealer/web typecheck`; `pnpm --filter @idealer/web lint`; `pnpm --filter @idealer/web build`.
+- Reviewed the result for inconsistencies: UI copy remains English, no compiler/API fallback was added, the agent no longer changes draft state from out-of-scope chat questions, explicit UI-based new conversation remains available, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.

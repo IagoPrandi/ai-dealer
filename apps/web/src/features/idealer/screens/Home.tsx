@@ -26,6 +26,10 @@ function WalletBtn() {
 function PromptInput() {
   const { fees, go } = useIdealer();
   const [val, setVal] = useState("");
+  const openComposer = () => {
+    const seed = val.trim();
+    go("create", seed ? { seed } : { newConversation: true });
+  };
   return (
     <div className="ide-card" style={{ padding: 12, borderColor: "var(--line-2)", background: "linear-gradient(180deg, var(--surface-2), var(--surface))" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
@@ -37,11 +41,11 @@ function PromptInput() {
         <input
           value={val}
           onChange={(e) => setVal(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") { go("create", { seed: val }); } }}
+          onKeyDown={(e) => { if (e.key === "Enter") { openComposer(); } }}
           placeholder="e.g. the sum closest to 100 wins…"
           style={{ flex: 1, minWidth: 0, background: "var(--bg)", border: "1px solid var(--line-2)", borderRadius: 13, padding: "13px 14px", color: "var(--text)", fontSize: 14.5, fontFamily: "Outfit", outline: "none" }}
         />
-        <button onClick={() => go("create", { seed: val })} className="ide-btn" style={{ padding: 13, borderRadius: 13, flexShrink: 0 }} title="Create rule" type="button">
+        <button onClick={openComposer} className="ide-btn" style={{ padding: 13, borderRadius: 13, flexShrink: 0 }} title="Create rule" type="button">
           <Ico.send style={{ color: "#08110C" }} />
         </button>
       </div>

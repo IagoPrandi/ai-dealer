@@ -266,7 +266,7 @@ export function ProfileScreen() {
               <div style={{ display: "grid", placeItems: "center", marginBottom: 10 }}><Ico.chat style={{ color: "var(--dim)", width: 22, height: 22 }} /></div>
               <div style={{ fontWeight: 700, fontSize: 15 }}>No AI drafts yet</div>
               <p style={{ margin: "6px 0 14px", fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>Drafts appear here after the dealer compiles a rule preview.</p>
-              <button onClick={() => go("create", { seed: "" })} className="ide-btn-ghost ide-btn" style={{ padding: 12 }} type="button"><Ico.spark style={{ color: "var(--purple-soft)" }} /> Create a rule</button>
+              <button onClick={() => go("create", { newConversation: true })} className="ide-btn-ghost ide-btn" style={{ padding: 12 }} type="button"><Ico.spark style={{ color: "var(--purple-soft)" }} /> Create a rule</button>
             </div>
           ) : (
             <div style={{ display: "grid", gap: 9, gridTemplateColumns: "minmax(0, 1fr)" }}>

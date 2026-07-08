@@ -29,12 +29,28 @@ const NEW_RULE_PATTERN =
 const EXPLICIT_PATCH_PATTERN =
   /^(add|also|change|make|require|requires|count|remove|with|without|instead)\b/i;
 
+const RULE_CREATION_HELP_REQUEST_PATTERNS = [
+  /^(i\s+)?(want|wanna|would like)\s+to\s+(create|start|write|make)\s+(a\s+)?(new|another)\s+rule[.!?\s]*$/i,
+  /^(create|start|write|make)\s+(a\s+)?(new|another)\s+rule[.!?\s]*$/i,
+  /^(new|another)\s+rule[.!?\s]*$/i,
+  /^(eu\s+)?(quero|queria|gostaria de|vou)\s+(criar|comecar|fazer|escrever)\s+(uma\s+)?(nova|outra)\s+regra[.!?\s]*$/i,
+  /^(criar|comecar|fazer|escrever)\s+(uma\s+)?(nova|outra)\s+regra[.!?\s]*$/i,
+  /^(nova|outra)\s+regra[.!?\s]*$/i,
+];
+
 function cleanSentence(value: string) {
   return value.trim().replace(/[.!?\s]+$/u, "");
 }
 
 function countWords(value: string) {
   return value.trim().split(/\s+/u).filter(Boolean).length;
+}
+
+function normalizeIntentText(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
 }
 
 function dedupeOptions(options: RuleGuidanceOption[]) {
@@ -64,13 +80,24 @@ export function isExplicitRuleRefinementPatch(message: string) {
   return Boolean(trimmed) && !NEW_RULE_PATTERN.test(trimmed) && EXPLICIT_PATCH_PATTERN.test(trimmed);
 }
 
+export function isRuleCreationHelpRequest(message: string) {
+  const normalized = normalizeIntentText(message);
+  return RULE_CREATION_HELP_REQUEST_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
 export function isRuleRefinementPatch(
   message: string,
   context: RuleRefinementContext,
 ) {
   const trimmed = message.trim();
   const base = getRuleRefinementBase(context);
-  if (!base || !trimmed || CHAT_TOPIC_PATTERN.test(trimmed) || NEW_RULE_PATTERN.test(trimmed)) {
+  if (
+    !base ||
+    !trimmed ||
+    CHAT_TOPIC_PATTERN.test(trimmed) ||
+    NEW_RULE_PATTERN.test(trimmed) ||
+    isRuleCreationHelpRequest(trimmed)
+  ) {
     return false;
   }
 
