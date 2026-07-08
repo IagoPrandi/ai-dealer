@@ -137,7 +137,7 @@ export function isBlockingWalletAction(action: WalletPendingAction | null): bool
 }
 
 export function txErrorCode(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = getTxDiagnosticText(error);
   const lower = message.toLowerCase();
 
   if (lower.includes("reject") || lower.includes("declin") || lower.includes("cancel")) {
@@ -157,9 +157,91 @@ export function txErrorCode(error: unknown): string {
   return "TRANSACTION_FAILED";
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function findNestedProperty(value: unknown, property: string, depth = 0): unknown {
+  if (depth > 6) {
+    return undefined;
+  }
+  const record = asRecord(value);
+  if (!record) {
+    return undefined;
+  }
+  if (property in record) {
+    return record[property];
+  }
+  for (const nested of Object.values(record)) {
+    const found = findNestedProperty(nested, property, depth + 1);
+    if (found !== undefined) {
+      return found;
+    }
+  }
+  return undefined;
+}
+
+function collectDiagnosticStrings(value: unknown, output: string[], depth = 0): void {
+  if (depth > 5 || output.length >= 12) {
+    return;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed) {
+      output.push(trimmed);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectDiagnosticStrings(item, output, depth + 1);
+    }
+    return;
+  }
+  const record = asRecord(value);
+  if (!record) {
+    return;
+  }
+
+  for (const key of ["message", "error", "errorMessage", "logs", "logMessages", "instructionError", "reason"]) {
+    if (key in record) {
+      collectDiagnosticStrings(record[key], output, depth + 1);
+    }
+  }
+  for (const nested of Object.values(record)) {
+    if (output.length >= 12) {
+      return;
+    }
+    collectDiagnosticStrings(nested, output, depth + 1);
+  }
+}
+
+function getTransactionPlanDiagnostic(error: unknown): string | null {
+  const planResult = findNestedProperty(error, "transactionPlanResult");
+  if (planResult === undefined) {
+    return null;
+  }
+
+  const diagnostics: string[] = [];
+  collectDiagnosticStrings(planResult, diagnostics);
+  const unique = [...new Set(diagnostics)]
+    .filter((entry) => !/provided transaction plan failed to execute|cause.*deprecated/i.test(entry))
+    .slice(0, 5);
+  return unique.length > 0 ? unique.join(" ") : null;
+}
+
+function getTxDiagnosticText(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const planDiagnostic = getTransactionPlanDiagnostic(error);
+  return planDiagnostic ? `${message} ${planDiagnostic}` : message;
+}
+
 /** Human-readable, English error message for a failed wallet/program action. */
 export function describeTxError(error: unknown): string {
   const code = txErrorCode(error);
+  const planDiagnostic = getTransactionPlanDiagnostic(error);
 
   if (code === "TRANSACTION_REJECTED") {
     return "The wallet request was rejected. Nothing was submitted.";
@@ -169,6 +251,9 @@ export function describeTxError(error: unknown): string {
   }
   if (code === "INSUFFICIENT_FUNDS") {
     return "This wallet needs more devnet SOL for the fee, account rent, and network fee.";
+  }
+  if (planDiagnostic) {
+    return `The transaction simulation failed before wallet submission. ${planDiagnostic}`;
   }
   return error instanceof Error ? error.message : String(error);
 }

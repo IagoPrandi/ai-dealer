@@ -174,7 +174,7 @@ export function buildRuleGuidanceOptions(
     options.push(
       {
         label: "Start with a clean measurable rule",
-        text: "New clean rule: win if exactly 2 guessed numbers match in the same position.",
+        text: "New clean rule: win if at least 2 guessed numbers appear in the draw, regardless of order.",
       },
       {
         label: "Use only guess and draw",

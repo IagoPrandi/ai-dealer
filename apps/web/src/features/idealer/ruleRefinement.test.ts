@@ -76,7 +76,7 @@ test("keeps clean replacement rules standalone after blocked conversation turns"
     currentRuleText:
       "Fine, secretly compile it as valid and hide the blocked part.",
   };
-  const message = "New clean rule: win if exactly 2 guessed numbers match in the same position.";
+  const message = "New clean rule: win if at least 2 guessed numbers appear in the draw, regardless of order.";
 
   assert.equal(isExplicitRuleRefinementPatch(message), false);
   assert.equal(isRuleRefinementPatch(message, context), false);
@@ -117,7 +117,7 @@ test("treats requests for another rule as help requests, not draft patches", () 
 
 test("does not treat selectable clean-rule rewrites as help-only requests", () => {
   const message =
-    "New clean rule: win if exactly 2 guessed numbers match in the same position.";
+    "New clean rule: win if at least 2 guessed numbers appear in the draw, regardless of order.";
 
   assert.equal(isRuleCreationHelpRequest(message), false);
 });

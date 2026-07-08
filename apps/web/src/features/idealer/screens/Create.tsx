@@ -12,9 +12,11 @@ import { RULE_MAX_TOKENS } from "@idealer/constants";
 
 import {
   createProposeRuleInstruction,
+  deriveSubmitGuessAccounts,
   deriveRuleProposalAddress,
   type RulePreflightResult,
 } from "../../../solana/idealerProgram";
+import { fetchActiveTurnSnapshotFromWorker } from "../../../solana/activeTurnApi";
 import { useIdealer } from "../context";
 import { getConversationDrafts, postRuleProposal } from "../data/apiClient";
 import { fmtSol, fmtTurnId } from "../data/format";
@@ -552,9 +554,37 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
     setError(null);
     try {
       const player = address(walletAddress);
+      const [freshTurn, accounts] = await Promise.all([
+        fetchActiveTurnSnapshotFromWorker(),
+        deriveSubmitGuessAccounts({ player, sequence: 1, turnId }),
+      ]);
+      if (freshTurn.globalConfig.activeTurnId !== turnId) {
+        throw new Error("The active round changed before rule submission. Reopen the rule composer for the current round.");
+      }
+      const ruleProposalAddress = await deriveRuleProposalAddress({ ruleId: rule.ruleId, turnId });
+      const [gameTokenAccount, existingRuleProposal] = await Promise.all([
+        client.runtime.rpc
+          .getAccountInfo(accounts.gameToken, {
+            commitment: "confirmed",
+            encoding: "base64",
+          })
+          .send(),
+        client.runtime.rpc
+          .getAccountInfo(ruleProposalAddress, {
+            commitment: "confirmed",
+            encoding: "base64",
+          })
+          .send(),
+      ]);
+      if (!gameTokenAccount.value) {
+        throw new Error("Your round pass is not confirmed on devnet yet. Wait for the guess confirmation to finish, then submit the rule again.");
+      }
+      if (existingRuleProposal.value) {
+        throw new Error("This compiled rule id is already used on devnet. Send the same rule text again so the dealer can issue a fresh preflight before payment.");
+      }
       const instruction = await createProposeRuleInstruction({ player, preflight: rule, turnId });
       const signature = await sendInstruction(client, wallet, instruction);
-      const ruleProposal = (await deriveRuleProposalAddress({ ruleId: rule.ruleId, turnId })).toString();
+      const ruleProposal = ruleProposalAddress.toString();
       await postRuleProposal({
         ...rule,
         feeLamports: Math.round(fees.ruleNext * 1_000_000_000),

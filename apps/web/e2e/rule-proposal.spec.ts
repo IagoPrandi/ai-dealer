@@ -153,7 +153,7 @@ test("sequence 8 shows Codex-style blocked-rule options and accepts the clean ru
     await route.fulfill({
       contentType: "application/json",
       json: validPreflight(
-        "New clean rule: win if exactly 2 guessed numbers match in the same position.",
+        "New clean rule: win if at least 2 guessed numbers appear in the draw, regardless of order.",
         94,
       ),
       status: 200,
@@ -173,7 +173,7 @@ test("sequence 8 shows Codex-style blocked-rule options and accepts the clean ru
   const guidanceHeading = page.getByRole("heading", { name: "Fix this blocked rule?" });
   await expect(guidanceHeading).toBeVisible();
   await expect(guidanceHeading).toHaveCSS("font-size", "17px");
-  const primarySuggestion = page.getByRole("button", { name: /1 New clean rule: win if exactly 2 guessed numbers match in the same position/ });
+  const primarySuggestion = page.getByRole("button", { name: /1 New clean rule: win if at least 2 guessed numbers appear in the draw, regardless of order/ });
   await expect(primarySuggestion).toBeVisible();
   await expect(primarySuggestion.locator("span").last()).toHaveCSS("font-size", "15px");
   await expect(primarySuggestion.locator("span").last()).toHaveCSS("font-weight", "400");
@@ -194,7 +194,7 @@ test("sequence 8 shows Codex-style blocked-rule options and accepts the clean ru
   await expect(
     page.locator(".ide-card").filter({ hasText: "valid rule" }).filter({
       hasText:
-        "New clean rule: win if exactly 2 guessed numbers match in the same position.",
+        "New clean rule: win if at least 2 guessed numbers appear in the draw, regardless of order.",
     }),
   ).toBeVisible();
 });
