@@ -61,7 +61,7 @@ The current-turn Game Token is an on-chain PDA issued by `submit_guess`. It is r
 
 ## Paid Rule Removal
 
-Paid rule removal is included in MVP. The removal fee destination is fixed to the prize pool. Removal protection differs between creator self-removal and third-party removal.
+Paid rule removal is included in MVP. The removal fee destination is fixed to the prize pool. Only the rule creator can remove their own rule, and third-party removal attempts are rejected.
 
 ## Economy And Rewards
 

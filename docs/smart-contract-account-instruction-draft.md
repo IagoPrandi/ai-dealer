@@ -47,7 +47,7 @@ Instructions that require a current-turn Game Token must verify:
 | `submit_guess` | Player | Turn open, valid six unique numbers, sequence valid, fee paid; first successful guess creates `GameToken`. |
 | `propose_rule` | Player | Game Token valid, token count valid, preflight commitment valid, proposal fee paid. |
 | `vote_rule` | Player | Game Token valid, rule proposed/eligible, sequence valid and unique for that wallet/rule/turn, repeated-vote fee paid when required. |
-| `remove_rule` | Player | Game Token valid, removal threshold passed, removal fee paid to prize pool, before eligible pool lock. |
+| `remove_rule` | Rule creator | Game Token valid, remover matches rule creator, creator self-removal threshold passed, removal fee paid to prize pool, before eligible pool lock. |
 | `report_rule` | Player/API commitment | Game Token valid, report rate limit observed off-chain. |
 | `lock_eligible_rule_pool` | Automation | Election cutoff reached, eligible pool hash committed. |
 | `request_election_vrf` | Automation | Eligible pool locked, Switchboard request recorded. |

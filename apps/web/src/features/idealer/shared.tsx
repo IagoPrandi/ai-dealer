@@ -178,6 +178,12 @@ export interface RuleDetailVote {
   removeFeeSol: number;
 }
 
+export function canShowRuleRemovalAction(
+  rule: Pick<UiRule, "finalist" | "mine" | "removed">,
+) {
+  return rule.mine && !rule.finalist && !rule.removed;
+}
+
 export function RuleDetail({
   onClose,
   rank,
@@ -256,7 +262,7 @@ export function RuleDetail({
               {vote.removeBusy ? "Removing..." : `Remove · ${fmtSol(vote.removeFeeSol)} SOL`}
             </button>
             <p style={{ margin: "10px 2px 0", fontSize: 12, color: "var(--muted)", lineHeight: 1.45 }}>
-              Paid removal keeps the rule in the ledger and marks it as removed.
+              Creator removal keeps the rule in the ledger and marks it as removed.
             </p>
           </div>
         ) : null}
@@ -264,7 +270,7 @@ export function RuleDetail({
         {removalGated ? (
           <div style={{ margin: "0 0 20px", padding: "13px", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 16 }}>
             <p style={{ margin: "0 0 10px", fontSize: 12.5, color: "var(--muted)", display: "flex", alignItems: "center", gap: 6 }}>
-              <Ico.lock style={{ color: "var(--dim)" }} /> Play this round before removing a rule.
+              <Ico.lock style={{ color: "var(--dim)" }} /> Play this round before removing your rule.
             </p>
             <button className="ide-btn" onClick={() => vote.onPlayToRemove()} style={{ width: "100%", justifyContent: "center" }} type="button">
               Play to remove

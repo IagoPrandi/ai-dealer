@@ -803,7 +803,7 @@ async function fetchCommittedRandomness({
 }: {
   context: SettlementContext;
   randomnessAccount: PublicKey;
-  staleReveal: "failed" | "throw";
+  staleReveal: "failed" | "ready" | "throw";
 }): Promise<ElectionRandomnessState | RandomnessState | null> {
   if (isZeroPubkey(randomnessAccount)) {
     return null;
@@ -819,7 +819,7 @@ async function fetchCommittedRandomness({
   const currentSlot = await context.connection.getSlot(context.commitment);
 
   if (revealSlot > 0) {
-    if (revealSlot === currentSlot) {
+    if (revealSlot === currentSlot || staleReveal === "ready") {
       return {
         randomness: extractSwitchboardRandomnessValue(data),
         source: randomnessAccount.toBase58(),
@@ -1239,7 +1239,7 @@ export interface SettlementSenders {
   failDraw: (turnId: number, failureCode: number) => Promise<string>;
   fetchRandomnessFor: (
     randomnessAccount: PublicKey,
-    staleReveal: "failed" | "throw",
+    staleReveal: "failed" | "ready" | "throw",
   ) => Promise<ElectionRandomnessState | RandomnessState | null>;
   fetchState: (turnId: number) => Promise<SettlementTurnState | null>;
   lockEligiblePool: (

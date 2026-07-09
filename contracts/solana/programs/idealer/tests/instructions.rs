@@ -687,11 +687,20 @@ async fn remove_rule_enforces_protection_and_routes_fee_to_prize_pool() {
         .await
         .unwrap();
 
-    // Third party removes the creator's still-live rule. Fee → prize pool.
+    // A third party cannot remove the creator's still-live rule.
     let rule_id = 5_u64;
     propose_rule(&mut context, &creator, turn_id, rule_id, "Win if odds win.")
         .await
         .unwrap();
+    assert!(process(
+        &mut context,
+        remove_rule_instruction(turn_id, rule_id, third_party.pubkey()),
+        &[&third_party],
+    )
+    .await
+    .is_err());
+
+    // The creator can remove their own still-live rule. Fee -> prize pool.
     let prize_vault = pda(&[b"prize_vault", &turn_id.to_le_bytes()]);
     let prize_before = read_anchor_account::<idealer::PrizeVault>(&mut context, prize_vault)
         .await
@@ -699,8 +708,8 @@ async fn remove_rule_enforces_protection_and_routes_fee_to_prize_pool() {
 
     process(
         &mut context,
-        remove_rule_instruction(turn_id, rule_id, third_party.pubkey()),
-        &[&third_party],
+        remove_rule_instruction(turn_id, rule_id, creator.pubkey()),
+        &[&creator],
     )
     .await
     .unwrap();
@@ -712,10 +721,10 @@ async fn remove_rule_enforces_protection_and_routes_fee_to_prize_pool() {
         b"rule_removal",
         &turn_id.to_le_bytes(),
         &rule_id.to_le_bytes(),
-        third_party.pubkey().as_ref(),
+        creator.pubkey().as_ref(),
     ]);
     let removal: idealer::RuleRemoval = read_anchor_account(&mut context, removal_address).await;
-    assert_eq!(removal.removal_kind, idealer::RuleRemovalKind::ThirdParty);
+    assert_eq!(removal.removal_kind, idealer::RuleRemovalKind::CreatorSelf);
     let prize_after = read_anchor_account::<idealer::PrizeVault>(&mut context, prize_vault)
         .await
         .total_collected_lamports;

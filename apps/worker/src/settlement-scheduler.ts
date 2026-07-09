@@ -272,6 +272,15 @@ export async function runSettlementCycle(
   });
 
   if (plan.kind === "wait" || plan.kind === "done") {
+    if (plan.kind === "wait") {
+      await syncVisibleWaitState({
+        deps,
+        eligible,
+        onChain,
+        plan,
+        turnId,
+      });
+    }
     if (plan.kind === "done" && plan.toState === SETTLEMENT_STATES.CLOSED) {
       await recordTransition(deps, turnId, plan, onChain, null);
       return { action: "done", reason: plan.reason, toState: plan.toState, turnId };
@@ -390,6 +399,10 @@ async function executeAction(args: ExecuteArgs): Promise<string | null> {
       if (!ready) {
         return null;
       }
+      const finalistRandomness = await readRevealedRandomness(
+        senders,
+        onChain.electionVrfFulfillment,
+      );
       const finalists = candidates.filter((candidate) =>
         onChain.finalistRuleIds.includes(candidate.ruleId),
       );
@@ -404,6 +417,7 @@ async function executeAction(args: ExecuteArgs): Promise<string | null> {
           activeRandomness: result.randomness,
           config: deps.electionConfig,
           eligible,
+          ...(finalistRandomness ? { finalistRandomness } : {}),
           nowIso: deps.nowIso(),
           state: next ?? onChain,
           status: "settled",
@@ -473,6 +487,40 @@ async function executeAction(args: ExecuteArgs): Promise<string | null> {
   }
 }
 
+async function syncVisibleWaitState(args: {
+  deps: SettlementCycleDeps;
+  eligible: ElectionCandidate[];
+  onChain: SettlementTurnState;
+  plan: SettlementPlan;
+  turnId: number;
+}) {
+  const { deps, eligible, onChain, plan } = args;
+  if (plan.reason !== "elimination_window_open") {
+    return;
+  }
+
+  const opened = buildEliminationProjection(onChain, null);
+  if (!opened || opened.status !== "open") {
+    return;
+  }
+
+  const finalistRandomness = await readRevealedRandomness(
+    deps.senders,
+    onChain.electionVrfFulfillment,
+  );
+  await deps.bridge.publishElection(
+    buildElectionProjection({
+      config: deps.electionConfig,
+      eligible,
+      ...(finalistRandomness ? { finalistRandomness } : {}),
+      nowIso: deps.nowIso(),
+      state: onChain,
+      status: "requested",
+    }),
+  );
+  await deps.bridge.publishRuleElimination(opened);
+}
+
 async function isRevealable(
   senders: SettlementSenders,
   account: { toBase58(): string },
@@ -496,6 +544,22 @@ async function isRevealable(
     );
   }
   return true;
+}
+
+async function readRevealedRandomness(
+  senders: SettlementSenders,
+  account: { toBase58(): string },
+) {
+  if (account.toBase58() === "11111111111111111111111111111111") {
+    return undefined;
+  }
+  const state = await senders.fetchRandomnessFor(
+    account as Parameters<SettlementSenders["fetchRandomnessFor"]>[0],
+    "ready",
+  );
+  return state?.status === "ready" && state.randomness
+    ? state.randomness
+    : undefined;
 }
 
 // Projection-only steps and the atomic reveal+settle (whose signature is the

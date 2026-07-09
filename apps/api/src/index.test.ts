@@ -2714,16 +2714,16 @@ function addVotes(turnId: number, ruleId: number, count: number) {
   }
 }
 
-test("paid removal by a third party routes fee to the prize pool and records an audit log", () => {
+test("paid removal by the creator routes fee to the prize pool and records an audit log", () => {
   resetApiStateForTests();
   const turnId = 400;
   saveRuleProposal({ ...proposal(turnId, 1), proposer: wallet });
 
   const { auditLog, removal } = removeRule(
-    removalInput(turnId, 1, walletTwo, "third_party"),
+    removalInput(turnId, 1, wallet, "creator_self"),
   );
 
-  assert.equal(removal.removalKind, "third_party");
+  assert.equal(removal.removalKind, "creator_self");
   assert.equal(removal.feeLamports, 50_000_000);
   assert.equal(removal.voteCountAtRemoval, 0);
   assert.equal(isRuleRemoved(turnId, 1), true);
@@ -2772,26 +2772,25 @@ test("creator self-removal is allowed below the threshold and blocked once suppo
   );
 });
 
-test("third-party removal is protected at the higher vote threshold", () => {
+test("third-party removal is rejected regardless of vote count", () => {
   resetApiStateForTests();
   const turnId = 402;
   saveRuleProposal({ ...proposal(turnId, 1), proposer: wallet });
 
-  // 14 votes: a third party may still remove (below 15).
-  addVotes(turnId, 1, 14);
-  const allowed = removeRule(removalInput(turnId, 1, walletTwo, "third_party"));
-  assert.equal(allowed.removal.voteCountAtRemoval, 14);
-
-  // A different rule at 15 votes is protected from third-party removal.
-  resetApiStateForTests();
-  saveRuleProposal({ ...proposal(turnId, 2), proposer: wallet });
-  addVotes(turnId, 2, 15);
   assert.throws(
-    () => removeRule(removalInput(turnId, 2, walletTwo, "third_party")),
+    () => removeRule(removalInput(turnId, 1, walletTwo, "third_party")),
     (error: unknown) =>
       error instanceof RuleRemovalRejectedError &&
-      error.code === "RULE_REMOVAL_PROTECTED" &&
-      error.threshold === 15,
+      error.code === "RULE_REMOVAL_NOT_CREATOR",
+  );
+
+  // 14 votes: the old third-party threshold no longer grants removal rights.
+  addVotes(turnId, 1, 14);
+  assert.throws(
+    () => removeRule(removalInput(turnId, 1, walletTwo, "third_party")),
+    (error: unknown) =>
+      error instanceof RuleRemovalRejectedError &&
+      error.code === "RULE_REMOVAL_NOT_CREATOR",
   );
 });
 
@@ -2799,11 +2798,11 @@ test("a rule cannot be removed twice and removal closes after the eligible pool 
   resetApiStateForTests();
   const turnId = 403;
   saveRuleProposal({ ...proposal(turnId, 1), proposer: wallet });
-  removeRule(removalInput(turnId, 1, walletTwo, "third_party"));
+  removeRule(removalInput(turnId, 1, wallet, "creator_self"));
 
   // Duplicate removal (any remover) is rejected because the rule is gone.
   assert.throws(
-    () => removeRule(removalInput(turnId, 1, walletThree, "third_party")),
+    () => removeRule(removalInput(turnId, 1, wallet, "creator_self")),
     (error: unknown) =>
       error instanceof RuleRemovalRejectedError &&
       error.code === "RULE_ALREADY_REMOVED",
@@ -2814,7 +2813,7 @@ test("a rule cannot be removed twice and removal closes after the eligible pool 
   saveRuleProposal({ ...proposal(turnId, 2), proposer: wallet });
   saveRuleElection(settledElection(turnId, 2));
   assert.throws(
-    () => removeRule(removalInput(turnId, 2, walletTwo, "third_party")),
+    () => removeRule(removalInput(turnId, 2, wallet, "creator_self")),
     (error: unknown) =>
       error instanceof RuleRemovalRejectedError &&
       error.code === "RULE_REMOVAL_WINDOW_CLOSED",
@@ -2825,14 +2824,14 @@ test("removing an unknown rule is rejected and combined activity feed includes r
   resetApiStateForTests();
   const turnId = 404;
   assert.throws(
-    () => removeRule(removalInput(turnId, 99, walletTwo, "third_party")),
+    () => removeRule(removalInput(turnId, 99, wallet, "creator_self")),
     (error: unknown) =>
       error instanceof RuleRemovalRejectedError &&
       error.code === "RULE_NOT_FOUND",
   );
 
   saveRuleProposal({ ...proposal(turnId, 1), proposer: wallet });
-  removeRule(removalInput(turnId, 1, walletTwo, "third_party"));
+  removeRule(removalInput(turnId, 1, wallet, "creator_self"));
   const events = getRuleRemovalActivityEvents(turnId);
   assert.equal(events.length, 1);
   assert.equal(events[0]?.ruleId, 1);

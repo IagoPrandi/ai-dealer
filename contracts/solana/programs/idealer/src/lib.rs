@@ -651,15 +651,11 @@ pub mod idealer {
             IdealerError::RuleNotRemovable
         );
 
-        // Differentiated vote protection: the creator cannot self-remove a rule
-        // that already has community momentum, and third parties have an even
-        // higher threshold (PRD §6.11 / RULE_REMOVAL_CONFIG).
         let is_creator = ctx.accounts.rule_proposal.proposer == ctx.accounts.remover.key();
-        let threshold = if is_creator {
-            config.min_votes_creator_self_remove
-        } else {
-            config.min_votes_third_party_remove
-        };
+        require!(is_creator, IdealerError::RuleRemovalNotCreator);
+
+        // Creator self-removal is blocked once the rule has community momentum.
+        let threshold = config.min_votes_creator_self_remove;
         require!(
             ctx.accounts.rule_proposal.vote_count < threshold,
             IdealerError::RuleRemovalProtected
@@ -679,11 +675,7 @@ pub mod idealer {
         )?;
         let (treasury_amount, prize_amount) = split_fee(fee, config.treasury_fee_bps)?;
 
-        let removal_kind = if is_creator {
-            RuleRemovalKind::CreatorSelf
-        } else {
-            RuleRemovalKind::ThirdParty
-        };
+        let removal_kind = RuleRemovalKind::CreatorSelf;
         let vote_count_at_removal = ctx.accounts.rule_proposal.vote_count;
 
         let removal = &mut ctx.accounts.rule_removal;
@@ -3381,4 +3373,6 @@ pub enum IdealerError {
     ClaimKindMismatch,
     #[msg("The vault has insufficient lamports above its rent-exempt minimum.")]
     InsufficientVaultBalance,
+    #[msg("Only the rule creator can remove this rule.")]
+    RuleRemovalNotCreator,
 }

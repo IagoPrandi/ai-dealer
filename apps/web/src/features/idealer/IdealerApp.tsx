@@ -35,9 +35,18 @@ import {
 } from "./context";
 import { lamportsToSol } from "./data/format";
 import { usePlayerGuess, useActiveTurn, useRound, useRules } from "./data/hooks";
-import { postRuleEliminationVote, postRuleRemoval, postRuleVote } from "./data/apiClient";
+import {
+  postRuleEliminationVote,
+  postRuleRemoval,
+  postRuleVote,
+} from "./data/apiClient";
 import { describeTxError, sendInstruction } from "./data/tx";
-import { Ico, RuleDetail, type RuleDetailVote } from "./shared";
+import {
+  canShowRuleRemovalAction,
+  Ico,
+  RuleDetail,
+  type RuleDetailVote,
+} from "./shared";
 import { HomeScreen } from "./screens/Home";
 import { PlayScreen } from "./screens/Play";
 import { VoteScreen } from "./screens/Vote";
@@ -48,6 +57,7 @@ import { RewardsScreen } from "./screens/Rewards";
 import { ResultScreen } from "./screens/Result";
 import { ShareScreen } from "./screens/Share";
 import { ConnectOverlay } from "./screens/Connect";
+import { DrawResultPopup } from "./screens/DrawResult";
 
 function PhoneChrome() {
   return (
@@ -216,6 +226,10 @@ export function IdealerApp({
         setActionError("Finalist rules cannot be removed from this screen.");
         return;
       }
+      if (!rule.mine) {
+        setActionError("Only the rule creator can remove this rule.");
+        return;
+      }
       if (!played) {
         go("play");
         return;
@@ -232,7 +246,7 @@ export function IdealerApp({
         const instruction = await createRemoveRuleInstruction({ player, ruleId, turnId });
         const signature = await sendInstruction(client, wallet, instruction);
         await postRuleRemoval({
-          removalKind: rule.mine ? "creator_self" : "third_party",
+          removalKind: "creator_self",
           removedAt: new Date().toISOString(),
           remover: walletAddress,
           ruleId,
@@ -364,7 +378,7 @@ export function IdealerApp({
           approved: rules.approvedIds.includes(detailRule.ruleId),
           busy: voteBusyRuleId === detailRule.ruleId,
           canAgainst: Boolean(detail?.canAgainst) && detailRule.finalist,
-          canRemove: !detailRule.finalist && !detailRule.removed,
+          canRemove: canShowRuleRemovalAction(detailRule),
           eliminated: rules.eliminatedIds.includes(detailRule.ruleId),
           onApprove: () => void sendVote(detailRule.ruleId, "approve"),
           onEliminate: () => void sendVote(detailRule.ruleId, "eliminate"),
@@ -410,6 +424,8 @@ export function IdealerApp({
             {detail && detailRule ? (
               <RuleDetail rule={detailRule} rank={detail.rank} vote={detailVote} onClose={() => setDetail(null)} />
             ) : null}
+
+            {screen === "home" ? <DrawResultPopup /> : null}
 
             {showConnect ? (
               <ConnectOverlay

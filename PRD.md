@@ -1406,11 +1406,12 @@ This prevents changing interpretation after the draw result is known.
 
 Paid rule removal is part of the MVP.
 
-The purpose of paid removal is to let current-turn participants suppress low-quality, abusive, or clearly bad rules before the election pool is locked, without allowing free griefing against popular rules.
+The purpose of paid removal is to let a rule creator withdraw their own low-quality, mistaken, or no-longer-wanted rule before the election pool is locked, without allowing third-party griefing against another creator's rule.
 
 Paid removal requirements:
 
 - only wallets with a current-turn Game Token may remove rules;
+- only the wallet that created the rule may remove it;
 - removal is allowed only while the turn is `OPEN` and before the eligible rule pool is locked;
 - active, frozen, VRF-elected, finalist-set, expired, invalidated, and already removed rules cannot be removed by paid player action;
 - removal requires a paid `RULE_REMOVAL_FEE` transaction;
@@ -1421,12 +1422,13 @@ Paid removal requirements:
 - removal is idempotent and cannot be applied twice to the same rule;
 - removal must not delete historical data; it only changes rule status to `REMOVED_PAID`.
 
-Differentiated vote protection:
+Creator-only vote protection:
 
 ```typescript
 const RULE_REMOVAL_CONFIG = {
   removalFeeDestination: "prize_pool",
   minVotesCreatorSelfRemove: 5,
+  // retained for older account/config compatibility; not used for new removals
   minVotesThirdPartyRemove: 15,
   requireGameToken: true,
   allowedBeforeEligiblePoolLockOnly: true,
@@ -1435,18 +1437,18 @@ const RULE_REMOVAL_CONFIG = {
 
 Removal protection rules:
 
+- a third party cannot remove another user’s rule;
 - the creator cannot remove their own rule once it has at least `MIN_VOTES_CREATOR_SELF_REMOVE` votes;
-- a third party cannot remove another user’s rule once it has at least `MIN_VOTES_THIRD_PARTY_REMOVE` votes;
 - the system may still invalidate a rule for formal/security reasons through validation, abuse scoring, or restricted operator/security review;
 - system invalidation is separate from paid player removal and must be logged with a reason.
 
 UX requirements:
 
+- show the remove action only to the creator wallet;
 - show the removal fee before wallet confirmation;
-- show whether the user is the creator or a third-party remover;
-- show current vote count and the applicable protection threshold;
+- show current vote count and the creator self-removal protection threshold;
 - block removal before payment if the rule is protected by threshold;
-- show clear copy: “Remover esta regra custa X SOL. Esse valor vai para o pool de prêmios.”;
+- show clear copy: “Removing this rule costs X SOL. This value goes to the prize pool.”;
 - after removal, show the rule as `Removed` rather than deleting it from history.
 
 The product also supports:
@@ -1460,6 +1462,7 @@ The product also supports:
 Rationale:
 
 - requiring payment discourages casual griefing;
+- creator-only authorization prevents third-party removals from suppressing another creator's rule;
 - vote thresholds protect rules that already have community momentum;
 - fixing the fee destination to the prize pool avoids UX/compliance mismatch;
 - invalidation remains based on formal constraints and safety policy, not social conflict.
@@ -2990,7 +2993,7 @@ Stores:
 - creator reward cap per turn lamports;
 - rate-limit configuration references;
 - `MIN_VOTES_CREATOR_SELF_REMOVE`;
-- `MIN_VOTES_THIRD_PARTY_REMOVE`;
+- legacy `MIN_VOTES_THIRD_PARTY_REMOVE` retained for older config compatibility but not used for new removal decisions;
 - emergency pause flag.
 
 ### 9.3 TurnState
@@ -5580,13 +5583,14 @@ Implement prize pool accounting, treasury/platform monetization, payouts, rollov
 - [x] Require current-turn GameToken PDA.
 - [x] Require removal fee payment.
 - [x] Route 100% of removal fee to the current turn prize pool. _(Destination is the prize pool; the standard protocol treasury fee is still retained before distribution, per §2.5 and §6.11 "follows normal treasury/prize-pool accounting" — the same split applied to every prize-pool source and to M4.1 accounting.)_
+- [x] Require the remover to be the rule creator.
 - [x] Enforce `MIN_VOTES_CREATOR_SELF_REMOVE`.
-- [x] Enforce `MIN_VOTES_THIRD_PARTY_REMOVE`.
+- [x] Reject third-party removal attempts.
 - [x] Block removal after eligible pool lock.
 - [x] Block removal of finalist, elected, frozen, active, expired, invalidated, or already removed rules.
 - [x] Store `RuleRemovalRecord`.
 - [x] Add audit log and activity feed event.
-- [x] Test self-removal, third-party removal, protected rules, duplicate removal, and post-lock removal.
+- [x] Test self-removal, third-party rejection, protected rules, duplicate removal, and post-lock removal.
 
 **Approval criteria:**
 
@@ -6697,7 +6701,7 @@ This PRD revision integrates the technical review findings into the product and 
 |   1 | Chainlink VRF is not native to Solana                    | Switchboard VRF is the only MVP randomness provider for both number draw and rule election.                                                   |
 |   2 | Random finalists used request entropy before fulfillment | Random finalists are derived only from fulfilled Switchboard VRF randomness.                                                                  |
 |   3 | Fallback finalist invalidates VRF guarantee              | Finalists must be precompiled before election; deterministic fallback to the next finalist is disallowed.                                     |
-|   4 | Removal protection conflict                              | Paid removal is included in MVP with differentiated vote protection: creator self-removal threshold and higher third-party removal threshold. |
+|   4 | Removal protection conflict                              | Paid removal is included in MVP as creator-only self-removal, with a creator self-removal vote threshold and third-party removal rejected. |
 |   5 | Dedup after payment creates UX/compliance issue          | Dedup is moved to `/api/v1/rules/preflight` before payment, with short-lived `preflight_token`.                                               |
 |   6 | Game Token security unresolved                           | Game Token is defined as an on-chain PDA issued by `submit_guess`.                                                                            |
 |   7 | Re-proposal vs historical dedup conflict                 | Re-proposals are allowed after `REPROPOSAL_COOLDOWN_TURNS = 5`.                                                                               |

@@ -25,11 +25,12 @@ export const MVP_FEES_SOL = {
   report: 0
 } as const;
 
-// Paid rule removal protections (PRD §6.11 RULE_REMOVAL_CONFIG). A rule with
-// community momentum cannot be removed by paid player action: the creator may
-// not self-remove once it reaches `minVotesCreatorSelfRemove` votes, and a
-// third party faces the higher `minVotesThirdPartyRemove` threshold. The
-// removal fee always goes to the current turn prize pool.
+// Paid rule removal protections. Only the rule creator may remove their rule,
+// and creator self-removal is blocked once it reaches
+// `minVotesCreatorSelfRemove` votes. `minVotesThirdPartyRemove` is retained for
+// account/config compatibility with older deployments but is no longer used for
+// new removal decisions. The removal fee always goes to the current turn prize
+// pool.
 export const RULE_REMOVAL_CONFIG = {
   minVotesCreatorSelfRemove: 5,
   minVotesThirdPartyRemove: 15,

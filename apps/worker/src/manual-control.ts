@@ -4,8 +4,8 @@
  * The production worker advances turns automatically on a timer
  * (`turn-automation.ts`). During testing on devnet that means screens stay
  * empty until a turn happens to be open, and ending a turn means waiting out
- * its full duration. This module lets an operator open turns and end the
- * phase-1 play window on demand instead.
+ * its full duration. This module lets an operator open turns, end the phase-1
+ * play window, or cycle immediately to a fresh turn.
  *
  * It reuses the exact same on-chain instructions as the automatic loop, so the
  * data the UI reads is real devnet state, not a fabricated mock.
@@ -24,9 +24,10 @@
  * (possibly a shrunken value left by a previous manual end), so right after
  * opening we reset the whole cycle to a comfortable, playable duration.
  *
- * `forceCloseTurnManually` keeps the old shrink-to-1s + `close_turn` behavior
- * as an explicit operator escape hatch for a wedged pipeline. It skips the
- * shortlist/elimination/draw phase, so it must never be the normal path.
+ * `forceCloseTurnManually` closes immediately by shrinking to 1s and calling
+ * `close_turn`, skipping the shortlist/elimination/draw phase. `/manual/cycle`
+ * uses that behavior intentionally as a dev/test shortcut: close the current
+ * turn and open the next one in a single operator action.
  *
  * This is intentionally NOT wired into production: it is gated behind
  * `IDEALER_TURN_MANUAL_CONTROL_ENABLED` and must stay off outside testing.
@@ -548,25 +549,27 @@ export async function migrateGlobalConfigManually(
   };
 }
 
+export function shouldOpenAfterManualCycleClose(close: ManualControlResult) {
+  return (
+    close.action === "closed_turn" ||
+    close.action === "skipped_legacy_turn" ||
+    close.action === "no_active_turn"
+  );
+}
+
 /**
- * Advance the round in a single step during testing. While a turn is open this
- * ends its play window (phase 1) so the settlement scheduler runs phase 2
- * (shortlist → elimination voting → draw) and closes the turn; once no turn is
- * active (settlement finished), the same call opens the next one. Two-step by
- * design: phase 2 must actually happen between turns, never be skipped.
+ * Advance the round in a single step during testing. This is the fast operator
+ * shortcut: if a turn exists, close it immediately, then open the next turn.
+ * Use `/manual/close` plus `/manual/settle` when the full phase-2 pipeline must
+ * be exercised instead.
  */
 export async function cycleTurnManually(
   config: ManualControlConfig,
 ): Promise<ManualCycleResult> {
-  const close = await closeTurnManually(config);
-
-  // Only open when the close left no active turn behind. `ended_play_window` /
-  // `settlement_in_progress` keep the turn active on purpose — the settlement
-  // pipeline closes it after the draw.
-  const open =
-    close.action === "skipped_legacy_turn" || close.action === "no_active_turn"
-      ? await openTurnManually(config)
-      : null;
+  const close = await forceCloseTurnManually(config);
+  const open = shouldOpenAfterManualCycleClose(close)
+    ? await openTurnManually(config)
+    : null;
 
   return { action: "cycled_turn", close, open };
 }

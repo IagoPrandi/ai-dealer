@@ -76,6 +76,17 @@ export function HomeScreen() {
     round?.election?.status !== "original_only";
   const inPhase2 = turnOpen && !inPhase1 && hasFinalists && endSeconds !== null && nowSec < endSeconds;
   const drawingNow = turnOpen && !inPhase1 && !inPhase2;
+  // Once phase 2 ends the rule is elected first, then the numbers are drawn.
+  // While the draw runs, surface the elected rule on the main screen; once the
+  // draw is fulfilled the result pop-up takes over.
+  const drawFulfilled = round?.draw?.status === "fulfilled";
+  const activeRuleId = round?.election?.activeRuleId ?? null;
+  const electedRule =
+    drawingNow && !drawFulfilled && round?.election?.status === "settled" && activeRuleId !== null
+      ? round.rules.find((r) => r.ruleId === activeRuleId) ?? null
+      : null;
+  const electingRuleNow =
+    drawingNow && !drawFulfilled && !electedRule && round?.election?.status !== "original_only";
   const showResultLink =
     resultTurnId > 0 &&
     (resultTurnId < turnId ||
@@ -116,8 +127,12 @@ export function HomeScreen() {
                 <span className="ide-pill" style={{ color: "var(--muted)", borderColor: "rgba(199,125,255,0.3)" }}><Ico.dice style={{ color: "var(--purple-soft)", width: 14, height: 14 }} /> Shortlist draw in progress</span>
               ) : inPhase2 ? (
                 <span className="ide-pill" style={{ color: "var(--muted)", borderColor: "rgba(255,210,63,0.3)" }}><Ico.vote style={{ color: "var(--yellow)", width: 14, height: 14 }} /> Shortlist &amp; draw · ends in <span className="ide-num" style={{ color: "var(--text)", fontWeight: 700, marginLeft: 2 }}>{h}:{m}:{s}</span></span>
+              ) : electingRuleNow ? (
+                <span className="ide-pill" style={{ color: "var(--muted)", borderColor: "rgba(255,210,63,0.3)" }}><Ico.spark style={{ color: "var(--yellow)", width: 14, height: 14 }} /> Electing the rule</span>
+              ) : drawingNow && drawFulfilled ? (
+                <span className="ide-pill" style={{ color: "var(--muted)", borderColor: "rgba(20,241,149,0.3)" }}><Ico.check style={{ color: "var(--green)", width: 14, height: 14 }} /> Numbers drawn · settling the turn</span>
               ) : drawingNow ? (
-                <span className="ide-pill" style={{ color: "var(--muted)", borderColor: "rgba(199,125,255,0.3)" }}><Ico.dice style={{ color: "var(--purple-soft)", width: 14, height: 14 }} /> Draw in progress</span>
+                <span className="ide-pill" style={{ color: "var(--muted)", borderColor: "rgba(199,125,255,0.3)" }}><Ico.dice style={{ color: "var(--purple-soft)", width: 14, height: 14 }} /> Drawing the numbers</span>
               ) : (
                 <span className="ide-pill" style={{ color: "var(--yellow)", borderColor: "rgba(255,210,63,0.3)" }}><Ico.clock style={{ color: "var(--yellow)" }} /> {turnStatusMessage}</span>
               )}
@@ -134,6 +149,33 @@ export function HomeScreen() {
             </div>
           </div>
         </div>
+
+        {/* ELECTED RULE — shown on the main screen while the numbers are drawn */}
+        {drawingNow && electedRule ? (
+          <div className="ide-card" style={{ padding: 15, marginBottom: 14, borderColor: "rgba(255,210,63,0.35)", background: "linear-gradient(120deg, rgba(255,210,63,0.1), var(--surface))" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
+              <span style={{ width: 28, height: 28, borderRadius: 9, background: "var(--gold)", color: "#0B0910", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.spark style={{ color: "#0B0910", width: 16, height: 16 }} /></span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 11.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--dim)" }}>Elected rule</div>
+                <div style={{ fontWeight: 800, fontSize: 16 }}>{electedRule.title}</div>
+              </div>
+            </div>
+            <p style={{ margin: "0 0 10px", fontSize: 13.5, color: "var(--muted)", lineHeight: 1.5 }}>{electedRule.sanitizedText}</p>
+            <div style={{ fontSize: 12.5, color: "var(--muted)", display: "flex", alignItems: "center", gap: 6 }}>
+              <Ico.dice style={{ color: "var(--purple-soft)", width: 14, height: 14 }} /> The numbers are being drawn — the result lands here.
+            </div>
+          </div>
+        ) : drawingNow && !drawFulfilled && round?.election?.status === "original_only" ? (
+          <div className="ide-card" style={{ padding: 15, marginBottom: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+              <span style={{ width: 28, height: 28, borderRadius: 9, background: "var(--surface-2)", color: "var(--muted)", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.dice style={{ color: "var(--muted)", width: 16, height: 16 }} /></span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 14.5 }}>Original rule only this round</div>
+                <div style={{ fontSize: 12.5, color: "var(--muted)" }}>No alternative rule was elected — the numbers are being drawn.</div>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {/* SHORTLIST DECISION WINDOW */}
         {decisionPhase ? (

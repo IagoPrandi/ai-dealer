@@ -239,6 +239,10 @@ Local compatibility endpoints added for M4.1 projections:
 - `GET /prize-pool-rollovers?turnId={turn_id}`
 - `GET /prize-pool-accounting/{turn_id}`
 
+`POST /rule-removals` accepts only creator self-removal for new records. If
+`remover` is not the rule proposer, the API returns `rule_removal_rejected` with
+code `RULE_REMOVAL_NOT_CREATOR`.
+
 ## Results
 
 `GET /api/v1/turns/{turn_id}/results`

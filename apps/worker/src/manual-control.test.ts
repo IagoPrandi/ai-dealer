@@ -8,6 +8,7 @@ import {
   forceCloseTurnManually,
   migrateGlobalConfigManually,
   openTurnManually,
+  shouldOpenAfterManualCycleClose,
   type ManualControlConfig,
 } from "./manual-control.js";
 
@@ -95,5 +96,43 @@ test("enabled manual control requires an authority keypair", async () => {
   await assert.rejects(
     forceCloseTurnManually(config),
     /IDEALER_TURN_AUTHORITY_KEYPAIR/,
+  );
+});
+
+test("manual cycle opens a new turn only after a terminal close result", () => {
+  assert.equal(
+    shouldOpenAfterManualCycleClose({
+      action: "closed_turn",
+      shrinkSignature: "shrink",
+      signature: "close",
+      turnId: 7,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldOpenAfterManualCycleClose({
+      action: "skipped_legacy_turn",
+      signature: "skip",
+      turnId: 7,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldOpenAfterManualCycleClose({ action: "no_active_turn" }),
+    true,
+  );
+  assert.equal(
+    shouldOpenAfterManualCycleClose({
+      action: "settlement_in_progress",
+      turnId: 7,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldOpenAfterManualCycleClose({
+      action: "turn_already_closed",
+      turnId: 7,
+    }),
+    false,
   );
 });

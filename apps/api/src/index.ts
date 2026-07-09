@@ -252,6 +252,7 @@ export interface PaidRuleRemovalRecord {
 export type RuleRemovalRejectionCode =
   | "RULE_NOT_FOUND"
   | "RULE_NOT_REMOVABLE"
+  | "RULE_REMOVAL_NOT_CREATOR"
   | "RULE_REMOVAL_WINDOW_CLOSED"
   | "RULE_REMOVAL_PROTECTED"
   | "RULE_ALREADY_REMOVED";
@@ -1980,8 +1981,7 @@ function isValidPaidRuleRemoval(
     Number(removal.turnId) > 0 &&
     Number.isInteger(removal.ruleId) &&
     Number(removal.ruleId) > 0 &&
-    (removal.removalKind === "creator_self" ||
-      removal.removalKind === "third_party") &&
+    removal.removalKind === "creator_self" &&
     isBase58Like(removal.remover) &&
     isBase58Like(removal.ruleProposal) &&
     isBase58Like(removal.ruleRemoval) &&
@@ -2884,7 +2884,7 @@ export function isRuleRemoved(turnId: number, ruleId: number): boolean {
   return false;
 }
 
-// Enforces the PRD §6.11 paid-removal protections, then records the removal and
+// Enforces creator-only paid-removal protections, then records the removal and
 // appends a hash-chained audit log. Throws RuleRemovalRejectedError when a
 // protection blocks the removal so the API responds with a typed error instead
 // of silently storing an invalid removal.
@@ -2928,22 +2928,22 @@ export function removeRule(input: PaidRuleRemovalRecord): {
     );
   }
 
-  // Differentiated vote-threshold protection.
+  const isCreator = proposal.proposer === input.remover;
+  if (!isCreator) {
+    throw new RuleRemovalRejectedError(
+      "RULE_REMOVAL_NOT_CREATOR",
+      "Only the rule creator can remove this rule.",
+    );
+  }
+
   const voteCount =
     listRuleVotes(input.turnId).counts[String(input.ruleId)] ?? 0;
-  const isCreator = proposal.proposer === input.remover;
-  const removalKind: PaidRuleRemovalRecord["removalKind"] = isCreator
-    ? "creator_self"
-    : "third_party";
-  const threshold = isCreator
-    ? RULE_REMOVAL_CONFIG.minVotesCreatorSelfRemove
-    : RULE_REMOVAL_CONFIG.minVotesThirdPartyRemove;
+  const removalKind: PaidRuleRemovalRecord["removalKind"] = "creator_self";
+  const threshold = RULE_REMOVAL_CONFIG.minVotesCreatorSelfRemove;
   if (voteCount >= threshold) {
     throw new RuleRemovalRejectedError(
       "RULE_REMOVAL_PROTECTED",
-      isCreator
-        ? "The creator cannot remove a rule that already has community support."
-        : "This rule has too much community support to be removed by a third party.",
+      "The creator cannot remove a rule that already has community support.",
       { threshold, voteCount },
     );
   }

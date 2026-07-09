@@ -508,6 +508,74 @@ test("orchestrator projects the closed elimination window with the on-chain outc
   assert.deepEqual(eliminations[0]?.survivorRuleIds, [9]);
 });
 
+test("orchestrator republishes the open shortlist window while waiting", async () => {
+  const finalistRandomness = new Uint8Array(32).fill(0x0a);
+  const published: Array<{
+    finalistRuleIds: number[];
+    randomnessValue: string | null;
+    status: string;
+  }> = [];
+  const eliminations: Array<{
+    finalistRuleIds: number[];
+    status: string;
+  }> = [];
+  const bridge = {
+    async fetchRecordedStates() {
+      return new Set<string>();
+    },
+    async publishElection(election: (typeof published)[number]) {
+      published.push(election);
+    },
+    async publishRuleElimination(elimination: (typeof eliminations)[number]) {
+      eliminations.push(elimination);
+    },
+  } as unknown as ApiBridge;
+  const state = makeState({
+    eligibleRulePoolHash: HASH,
+    electionVrfFulfillment: SET,
+    electionVrfRequest: SET,
+    eliminationWindowEndSeconds: 3_000,
+    eliminationWindowStartSeconds: 2_000,
+    finalistCount: 1,
+    finalistEliminated: [false],
+    finalistRuleIds: [7],
+    finalistSetHash: "11".repeat(32),
+    randomFinalistHash: "22".repeat(32),
+    topVotedFinalistHash: "33".repeat(32),
+  });
+  const senders = {
+    async fetchRandomnessFor() {
+      return { randomness: finalistRandomness, source: SET.toBase58(), status: "ready" };
+    },
+    async fetchState() {
+      return state;
+    },
+  } as unknown as SettlementSenders;
+  const deps: SettlementCycleDeps = {
+    bridge,
+    electionConfig,
+    fetchCandidates: async () => [candidate],
+    nowIso: () => "2026-06-23T00:00:00.000Z",
+    nowSeconds: () => 2_500,
+    recordClaims: async () => 0,
+    senders,
+  };
+
+  const result = await runSettlementCycle(1, deps);
+  assert.equal(result.action, "wait");
+  assert.equal(result.reason, "elimination_window_open");
+  assert.equal(published.length, 1);
+  assert.equal(published[0]?.status, "requested");
+  assert.deepEqual(published[0]?.finalistRuleIds, [7]);
+  assert.equal(
+    published[0]?.randomnessValue,
+    Buffer.from(finalistRandomness).toString("hex"),
+  );
+  assert.equal(eliminations.length, 1);
+  assert.equal(eliminations[0]?.status, "open");
+  assert.deepEqual(eliminations[0]?.finalistRuleIds, [7]);
+});
+
 test("orchestrator drives a closed no-rule turn through CLOSED idempotently", async () => {
   const { bridge, calls, recorded } = fakeBridge();
   const state = makeState({
