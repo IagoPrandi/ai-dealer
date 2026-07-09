@@ -98,7 +98,7 @@ export function IdealerApp({
 
   const activeTurn = useActiveTurn();
   const turnId = activeTurn.activeTurnId;
-  const { reload: reloadRound, round, loading: roundLoading } = useRound(turnId);
+  const { reload: reloadRound, round, loading: roundLoading } = useRound(turnId, turnId);
   const rules = useRules(turnId, round);
   const { playCount, played, receipt, reload: reloadPlayer } = usePlayerGuess(turnId, walletAddress);
 

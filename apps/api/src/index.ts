@@ -9105,20 +9105,39 @@ if (isMainModule()) {
 
     if (request.method === "GET" && url.pathname.startsWith("/rounds/")) {
       const turnId = Number(url.pathname.slice("/rounds/".length));
+      const activeTurnIdParam = url.searchParams.get("activeTurnId");
+      const activeTurnId =
+        activeTurnIdParam === null ? undefined : Number(activeTurnIdParam);
 
-      if (!Number.isInteger(turnId) || turnId <= 0) {
+      if (
+        !Number.isInteger(turnId) ||
+        turnId <= 0 ||
+        (activeTurnId !== undefined &&
+          (!Number.isInteger(activeTurnId) || activeTurnId <= 0))
+      ) {
         sendJson(request, response, 400, { error: "invalid_turn_id" });
         return;
       }
 
-      sendJson(request, response, 200, { round: getRoundSummary(turnId) });
+      sendJson(request, response, 200, {
+        round: getRoundSummary(turnId, activeTurnId),
+      });
       return;
     }
 
     if (request.method === "GET" && url.pathname === "/rounds") {
+      const activeTurnIdParam = url.searchParams.get("activeTurnId");
+      const activeTurnId =
+        activeTurnIdParam === null
+          ? IDEALER_ACTIVE_TURN_ID
+          : Number(activeTurnIdParam);
+      if (!Number.isInteger(activeTurnId) || activeTurnId <= 0) {
+        sendJson(request, response, 400, { error: "invalid_turn_id" });
+        return;
+      }
       sendJson(request, response, 200, {
-        activeTurnId: IDEALER_ACTIVE_TURN_ID,
-        round: getRoundSummary(IDEALER_ACTIVE_TURN_ID),
+        activeTurnId,
+        round: getRoundSummary(activeTurnId, activeTurnId),
       });
       return;
     }

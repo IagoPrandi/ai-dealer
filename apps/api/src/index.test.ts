@@ -1254,6 +1254,13 @@ test("round summary marks fulfilled settlement turns as completed", () => {
   assert.equal(summary.draw?.status, "fulfilled");
 });
 
+test("round summary uses the caller-provided active turn id for current status", () => {
+  resetApiStateForTests();
+
+  assert.equal(getRoundSummary(101, 1).status, "upcoming");
+  assert.equal(getRoundSummary(101, 101).status, "current");
+});
+
 test("winner calculation handles zero winners with full bucket rollover remainder", () => {
   resetApiStateForTests();
   saveReceiptForWallet(220, wallet, [1, 2, 3, 4, 5, 6]);

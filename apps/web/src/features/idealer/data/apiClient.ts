@@ -142,10 +142,18 @@ export function getRuleEliminationVotes(turnId: number, signal?: AbortSignal) {
   );
 }
 
-export function getRound(turnId: number, signal?: AbortSignal) {
+export function getRound(
+  turnId: number,
+  options: { activeTurnId?: number; signal?: AbortSignal } = {},
+) {
+  const params = new URLSearchParams();
+  if (options.activeTurnId !== undefined) {
+    params.set("activeTurnId", String(options.activeTurnId));
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
   return getJson<{ round: RoundSummaryApi }>(
-    `/rounds/${turnId}`,
-    signal ? { signal } : {},
+    `/rounds/${turnId}${suffix}`,
+    options.signal ? { signal: options.signal } : {},
   );
 }
 

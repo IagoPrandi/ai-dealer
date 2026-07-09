@@ -111,7 +111,7 @@ export function useActiveTurn(): ActiveTurnView {
 }
 
 /** GET /rounds/{turnId}. `turnId <= 0` is treated as "no round yet". */
-export function useRound(turnId: null | number) {
+export function useRound(turnId: null | number, activeTurnId?: number) {
   const [round, setRound] = useState<RoundSummaryApi | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<null | string>(null);
@@ -124,7 +124,10 @@ export function useRound(turnId: null | number) {
         return;
       }
       setLoading(true);
-      getRound(turnId, signal)
+      getRound(turnId, {
+        ...(activeTurnId ? { activeTurnId } : {}),
+        ...(signal ? { signal } : {}),
+      })
         .then((body) => {
           setRound(body?.round ?? null);
           setError(null);
@@ -138,7 +141,7 @@ export function useRound(turnId: null | number) {
         })
         .finally(() => setLoading(false));
     },
-    [turnId],
+    [activeTurnId, turnId],
   );
 
   // Poll so post-window phases (finalist shortlist, decision window, draw,
