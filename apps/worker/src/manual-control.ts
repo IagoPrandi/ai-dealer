@@ -3,23 +3,30 @@
  *
  * The production worker advances turns automatically on a timer
  * (`turn-automation.ts`). During testing on devnet that means screens stay
- * empty until a turn happens to be open, and closing a turn means waiting out
- * its full duration. This module lets an operator open and close turns on
- * demand instead.
+ * empty until a turn happens to be open, and ending a turn means waiting out
+ * its full duration. This module lets an operator open turns and end the
+ * phase-1 play window on demand instead.
  *
  * It reuses the exact same on-chain instructions as the automatic loop, so the
  * data the UI reads is real devnet state, not a fabricated mock.
  *
- * Closing early: the on-chain `close_turn` requires
- * `clock.unix_timestamp >= turn.end_timestamp` (IdealerError::TurnNotEnded), so
- * a turn cannot be closed before it ends. We work around this for testing by
- * first shrinking the active turn's duration to 1 second via
- * `set_turn_duration_cycle` (which recomputes `end_timestamp = start + 1`,
- * moving it into the past) and only then calling `close_turn`. `open_turn` has
- * no time gate, so opening on demand needs no workaround — but a freshly opened
- * turn inherits whatever duration slot is currently configured (possibly the
- * 1-second value left by a previous manual close), so right after opening we
- * reset the whole cycle to a comfortable, playable duration.
+ * Ending early: a turn is phase 1 (create rules + pick numbers) followed by
+ * phase 2 (finalist shortlist → elimination voting → active rule → draw), and
+ * phase 2 is driven by the settlement scheduler while the turn stays `Open`
+ * (PRD §5.4/§5.5). Manually calling the on-chain `close_turn` would skip
+ * phase 2 entirely — no shortlist, no elimination votes, no draw — so
+ * `closeTurnManually` instead shrinks the active turn's duration to the time
+ * already elapsed via `set_turn_duration_cycle` (recomputing
+ * `end_timestamp ≈ now`, which also moves the phase-1 cutoffs into the past)
+ * and lets the settlement loop run the whole phase-2 pipeline and issue the
+ * real `close_turn` at the end. `openTurnManually` has no time gate — but a
+ * freshly opened turn inherits whatever duration slot is currently configured
+ * (possibly a shrunken value left by a previous manual end), so right after
+ * opening we reset the whole cycle to a comfortable, playable duration.
+ *
+ * `forceCloseTurnManually` keeps the old shrink-to-1s + `close_turn` behavior
+ * as an explicit operator escape hatch for a wedged pipeline. It skips the
+ * shortlist/elimination/draw phase, so it must never be the normal path.
  *
  * This is intentionally NOT wired into production: it is gated behind
  * `IDEALER_TURN_MANUAL_CONTROL_ENABLED` and must stay off outside testing.
@@ -73,6 +80,13 @@ export type ManualControlResult =
       signature: string;
       turnId: number;
     }
+  | {
+      action: "ended_play_window";
+      playWindowSeconds: number;
+      signature: string;
+      turnId: number;
+    }
+  | { action: "settlement_in_progress"; turnId: number }
   | {
       action: "skipped_legacy_turn";
       signature: string;
@@ -275,10 +289,15 @@ export async function openTurnManually(
 }
 
 /**
- * Close the active turn immediately by shrinking its duration to 1 second
- * (moving `end_timestamp` into the past) and then calling `close_turn`. Falls
- * back to `force_skip_legacy_active_turn` when the active turn is a legacy
- * account the current program cannot deserialize.
+ * End the active turn's phase-1 play window immediately by shrinking its
+ * duration to the time already elapsed (moving `end_timestamp` — and the
+ * proportional rule/guess cutoffs — into the past). The turn stays `Open` so
+ * the settlement scheduler runs the full phase-2 pipeline (finalist shortlist
+ * → elimination decision window → active-rule election → draw) and issues the
+ * real `close_turn` at the end. Returns `settlement_in_progress` when the play
+ * window already ended and phase 2 is underway. Falls back to
+ * `force_skip_legacy_active_turn` when the active turn is a legacy account the
+ * current program cannot deserialize.
  */
 export async function closeTurnManually(
   config: ManualControlConfig,
@@ -311,10 +330,104 @@ export async function closeTurnManually(
     return { action: "turn_already_closed", turnId };
   }
 
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  if (nowSeconds >= activeTurn.snapshot.endTimestamp) {
+    // The play window already ended; phase 2 (shortlist → elimination →
+    // draw → close) belongs to the settlement scheduler. Do not interfere.
+    return { action: "settlement_in_progress", turnId };
+  }
+
   try {
     // Shrink only the active turn's duration slot so future turns keep their
     // configured duration; the per-turn `end_timestamp` is recomputed from
-    // `start + slot[cycle_index]`, moving it into the past.
+    // `start + slot[cycle_index]`. Using the elapsed time moves the end (and
+    // the bps-proportional phase-1 cutoffs) into the past without closing the
+    // turn, so the settlement pipeline can start phase 2 right away.
+    const elapsedSeconds = Math.max(
+      SHRINK_DURATION_SECONDS,
+      nowSeconds - activeTurn.snapshot.startTimestamp,
+    );
+    const shrunkCycle = [...globalConfig.snapshot.turnDurationCycle] as [
+      number,
+      number,
+      number,
+      number,
+    ];
+    shrunkCycle[activeTurn.snapshot.cycleIndex] = elapsedSeconds;
+    const shrinkInstruction = await createSetTurnDurationCycleInstruction({
+      authority,
+      programId: config.programId,
+      turnDurationCycle: shrunkCycle,
+      turnState: activeTurn.address,
+    });
+    const signature = await simulateAndSend({
+      authorityKeypairBytes: config.authorityKeypairBytes,
+      instruction: shrinkInstruction,
+      rpc,
+    });
+
+    return {
+      action: "ended_play_window",
+      playWindowSeconds: elapsedSeconds,
+      signature: signature.toString(),
+      turnId,
+    };
+  } catch (error) {
+    if (!isLegacyTurnDeserializationError(error)) {
+      throw error;
+    }
+
+    return forceSkipLegacyActiveTurn({
+      authority,
+      authorityKeypairBytes: config.authorityKeypairBytes,
+      programId: config.programId,
+      rpc,
+      turnId,
+      turnState: activeTurn.address,
+    });
+  }
+}
+
+/**
+ * ESCAPE HATCH — close the active turn immediately by shrinking its duration
+ * to 1 second and calling `close_turn`, SKIPPING the phase-2 pipeline
+ * (shortlist, elimination voting, draw). Only for recovering a wedged turn
+ * during testing; the normal path is `closeTurnManually` + the settlement
+ * scheduler. Falls back to `force_skip_legacy_active_turn` when the active
+ * turn is a legacy account the current program cannot deserialize.
+ */
+export async function forceCloseTurnManually(
+  config: ManualControlConfig,
+): Promise<ManualControlResult> {
+  assertEnabled(config);
+
+  const rpc = createSolanaRpc(config.rpcUrl);
+  const globalConfig = await fetchGlobalConfig({
+    programId: config.programId,
+    rpc,
+  });
+
+  if (globalConfig.snapshot.paused) {
+    return { action: "paused" };
+  }
+
+  if (!globalConfig.snapshot.hasActiveTurn) {
+    return { action: "no_active_turn" };
+  }
+
+  const authority = deriveAuthorityAddress(config.authorityKeypairBytes);
+  const turnId = globalConfig.snapshot.activeTurnId;
+  const activeTurn = await fetchTurnState({
+    programId: config.programId,
+    rpc,
+    turnId,
+  });
+
+  if (activeTurn.snapshot.status !== "open") {
+    return { action: "turn_already_closed", turnId };
+  }
+
+  try {
     const shrunkCycle = [...globalConfig.snapshot.turnDurationCycle] as [
       number,
       number,
@@ -436,19 +549,22 @@ export async function migrateGlobalConfigManually(
 }
 
 /**
- * Close the active turn (if any) and immediately open the next one. Handy for
- * advancing the round in a single step during testing.
+ * Advance the round in a single step during testing. While a turn is open this
+ * ends its play window (phase 1) so the settlement scheduler runs phase 2
+ * (shortlist → elimination voting → draw) and closes the turn; once no turn is
+ * active (settlement finished), the same call opens the next one. Two-step by
+ * design: phase 2 must actually happen between turns, never be skipped.
  */
 export async function cycleTurnManually(
   config: ManualControlConfig,
 ): Promise<ManualCycleResult> {
   const close = await closeTurnManually(config);
 
-  // Only open when the close left no active turn behind.
+  // Only open when the close left no active turn behind. `ended_play_window` /
+  // `settlement_in_progress` keep the turn active on purpose — the settlement
+  // pipeline closes it after the draw.
   const open =
-    close.action === "closed_turn" ||
-    close.action === "skipped_legacy_turn" ||
-    close.action === "no_active_turn"
+    close.action === "skipped_legacy_turn" || close.action === "no_active_turn"
       ? await openTurnManually(config)
       : null;
 

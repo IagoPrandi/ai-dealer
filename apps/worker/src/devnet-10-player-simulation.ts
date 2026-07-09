@@ -36,7 +36,10 @@ import {
   createSettlementSchedulerConfig,
   runSettlementSchedulerOnce,
 } from "./settlement-loop.js";
-import { decodeSettlementTurnState } from "./settlement.js";
+import {
+  decodeSettlementTurnState,
+  fetchRuleElectionCutoffBps,
+} from "./settlement.js";
 import {
   createSetTurnDurationCycleInstruction,
   createTurnAutomationConfig,
@@ -463,7 +466,11 @@ async function fetchSettlementState({
   if (!account) {
     throw new Error(`TurnState ${turnId} not found.`);
   }
-  return decodeSettlementTurnState(account.data);
+  const ruleElectionCutoffBps = await fetchRuleElectionCutoffBps({
+    connection,
+    programId,
+  });
+  return decodeSettlementTurnState(account.data, ruleElectionCutoffBps);
 }
 
 async function runSettlementUntil({

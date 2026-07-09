@@ -294,6 +294,22 @@ export function IdealerApp({
     });
   }, [activeTurn.snapshot]);
 
+  // Phase 1 → phase 2 boundary: the rule-election cutoff. Phase 1 is create
+  // rules + pick numbers; phase 2 is the finalist shortlist, elimination
+  // voting, active rule and the draw at the turn's end (PRD §5.4).
+  const phase1EndsAt = useMemo(() => {
+    const snap = activeTurn.snapshot;
+    if (!snap?.turnState) {
+      return null;
+    }
+    return getActionCutoffTimestamp({
+      cutoffBps: snap.globalConfig.ruleElectionCutoffBps,
+      turn: snap.turnState,
+    });
+  }, [activeTurn.snapshot]);
+
+  const turnOpen = activeTurn.snapshot?.turnState?.status === "open";
+
   const value: IdealerContextValue = {
     actionError,
     approvedIds: rules.approvedIds,
@@ -311,6 +327,8 @@ export function IdealerApp({
     endSeconds: activeTurn.endTimestamp,
     fees,
     guessCutoffEndsAt,
+    phase1EndsAt,
+    turnOpen,
     go,
     newConversationKey,
     openDetail,

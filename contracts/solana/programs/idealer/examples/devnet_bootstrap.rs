@@ -23,7 +23,10 @@ use solana_system_interface::program as system_program;
 const PLAYER_BALANCE_LAMPORTS: u64 = 1_000_000_000;
 const BASIS_POINTS_DENOMINATOR: u32 = 10_000;
 const DEFAULT_TEST_TURN_DURATION_SCALE_BPS: u32 = 1_500;
-const PRODUCTION_TURN_DURATION_CYCLE_SECONDS: [u32; 4] = [7_200, 7_200, 28_800, 28_800];
+// Production turn = 24h: ~22h phase 1 (create rules + pick numbers) up to the
+// 9167-bps cutoff, ~2h phase 2 (finalist shortlist, elimination voting, active
+// rule, draw at turn end). See PRD §5.4.
+const PRODUCTION_TURN_DURATION_CYCLE_SECONDS: [u32; 4] = [86_400, 86_400, 86_400, 86_400];
 
 fn pda(seeds: &[&[u8]]) -> solana_sdk::pubkey::Pubkey {
     solana_sdk::pubkey::Pubkey::find_program_address(seeds, &idealer::ID).0
@@ -127,8 +130,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                     vote_fee_lamports: 5_000_000,
                     treasury_fee_bps: 500,
                     turn_duration_cycle,
-                    rule_election_cutoff_bps: 7_500,
-                    guess_cutoff_bps: 9_670,
+                    rule_election_cutoff_bps: 9_167,
+                    guess_cutoff_bps: 9_167,
                     max_rule_tokens: 1000,
                     top_voted_finalist_count: 3,
                     random_finalist_count: 7,

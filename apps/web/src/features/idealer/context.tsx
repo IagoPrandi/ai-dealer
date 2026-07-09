@@ -46,6 +46,14 @@ export interface IdealerContextValue {
   endSeconds: null | number;
   fees: { play: number; playNext: number; remove: number; rule: number; ruleNext: number; vote: number };
   guessCutoffEndsAt: null | number;
+  /**
+   * When phase 1 (create rules + pick numbers) ends and phase 2 (finalist
+   * shortlist, elimination voting, active rule, draw) begins — the on-chain
+   * rule-election cutoff of the active turn. `null` while no turn is loaded.
+   */
+  phase1EndsAt: null | number;
+  /** True while the active on-chain turn account exists with status `open`. */
+  turnOpen: boolean;
   go: (screen: Screen, params?: NavParams) => void;
   newConversationKey: number;
   openDetail: (ruleId: number, opts?: { canAgainst?: boolean; rank?: number | null }) => void;

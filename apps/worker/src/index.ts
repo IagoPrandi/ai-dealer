@@ -10,9 +10,12 @@ import {
   closeTurnManually,
   createManualControlConfig,
   cycleTurnManually,
+  forceCloseTurnManually,
   migrateGlobalConfigManually,
   openTurnManually,
   type ManualControlConfig,
+  type ManualControlResult,
+  type ManualCycleResult,
 } from "./manual-control.js";
 import {
   fetchGlobalConfig,
@@ -264,6 +267,8 @@ async function getActiveTurnStatus() {
 const MANUAL_CONTROL_ACTIONS = {
   "/manual/close": closeTurnManually,
   "/manual/cycle": cycleTurnManually,
+  // Escape hatch: closes the turn skipping the phase-2 pipeline. Testing only.
+  "/manual/force-close": forceCloseTurnManually,
   "/manual/migrate": migrateGlobalConfigManually,
   "/manual/open": openTurnManually,
 } as const;
@@ -303,6 +308,9 @@ function handleManualControlRequest(
   void action(manualConfig)
     .then((result) => {
       console.log(`manual turn control ${path}`, result);
+      if (endedPlayWindow(result)) {
+        kickSettlementPass();
+      }
       sendJson(request, response, 200, { result });
     })
     .catch((error: unknown) => {
@@ -313,6 +321,29 @@ function handleManualControlRequest(
       });
     });
   return true;
+}
+
+function endedPlayWindow(result: ManualControlResult | ManualCycleResult) {
+  return result.action === "cycled_turn"
+    ? result.close.action === "ended_play_window"
+    : result.action === "ended_play_window";
+}
+
+/**
+ * Fire one settlement scheduler pass right after a manual play-window end so
+ * phase 2 (finalist shortlist → elimination window → draw) starts immediately
+ * instead of waiting for the next loop tick. Fire-and-forget: the periodic
+ * settlement loop keeps driving the pipeline either way.
+ */
+function kickSettlementPass() {
+  void createSettlementSchedulerConfig()
+    .then((config) => runSettlementSchedulerOnce({ ...config, enabled: true }))
+    .then((result) => {
+      console.log("manual settlement kick", JSON.stringify(result));
+    })
+    .catch((error: unknown) => {
+      console.error("manual settlement kick failed", error);
+    });
 }
 
 /**

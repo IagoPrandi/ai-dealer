@@ -41,6 +41,7 @@ function makeState(
     finalistRuleIds: [],
     finalistSetHash: null,
     randomFinalistHash: null,
+    startTimestampSeconds: 0,
     status: "open",
     survivorFinalistHash: null,
     topVotedFinalistHash: null,

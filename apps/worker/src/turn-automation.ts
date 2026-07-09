@@ -36,8 +36,12 @@ const SET_TURN_DURATION_CYCLE_DISCRIMINATOR = new Uint8Array([
   163, 41, 240, 31, 94, 126, 122, 36,
 ]);
 const BASIS_POINTS_DENOMINATOR = 10_000;
+// Production turn = 24h: ~22h phase 1 (create rules + pick numbers, up to the
+// rule-election/guess cutoff) + ~2h phase 2 (finalist shortlist, elimination
+// voting, active rule, draw at turn end). Equal slots keep the on-chain 4-slot
+// cycle machinery valid (PRD §5.4).
 const PRODUCTION_TURN_DURATION_CYCLE_SECONDS = [
-  7_200, 7_200, 28_800, 28_800,
+  86_400, 86_400, 86_400, 86_400,
 ] as const;
 // Byte length of a current-layout `TurnState` account (8-byte discriminator +
 // trustless settlement fields; matches the 788-byte live devnet turn from

@@ -24,8 +24,11 @@ declare_id!("6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4");
 pub const TURN_DURATION_CYCLE_LEN: usize = 4;
 pub const MAX_FINALISTS: usize = 10;
 pub const REPEATED_ACTION_FEE_MULTIPLIER: u64 = 2;
-/// Fixed 1-hour decision/elimination window (PRD §5.4/§6.14a). Under the
-/// test-only `devnet-test` feature it collapses to a few seconds so the full
+/// Fixed 1-hour decision/elimination window (PRD §5.4/§6.14a). It runs inside
+/// phase 2 of the turn — the ~2h tail after the rule/guess cutoff in which the
+/// finalist shortlist is formed, elimination votes are cast, the active rule is
+/// elected, and the draw fires at the turn's end. Under the test-only
+/// `devnet-test` feature it collapses to a few seconds so the full
 /// election → elimination → active-election pipeline can be validated end-to-end
 /// on devnet without a real 1-hour wait; production builds keep the full hour.
 /// The `manual-test` feature sets a human-scale 2-minute window for hands-on
@@ -1543,10 +1546,14 @@ pub mod idealer {
             rule_removal_fee_lamports: 50_000_000,
             vote_fee_lamports: 5_000_000,
             treasury_fee_bps: 500,
-            turn_duration_cycle: [7_200, 7_200, 28_800, 28_800],
+            // Production turn = 24h: phase 1 (create rules + pick numbers)
+            // runs until the 9167-bps cutoff (~22h), phase 2 (finalist
+            // shortlist, elimination voting, active rule, draw at turn end)
+            // fills the remaining ~2h (PRD §5.4).
+            turn_duration_cycle: [86_400, 86_400, 86_400, 86_400],
             active_turn_duration_index: 0,
-            rule_election_cutoff_bps: 7_500,
-            guess_cutoff_bps: 9_670,
+            rule_election_cutoff_bps: 9_167,
+            guess_cutoff_bps: 9_167,
             max_rule_tokens: 1_000,
             top_voted_finalist_count: 3,
             random_finalist_count: 7,

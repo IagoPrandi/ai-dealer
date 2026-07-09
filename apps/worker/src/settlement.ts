@@ -32,6 +32,7 @@ import {
 import { extractSwitchboardRandomnessValue } from "./switchboard.js";
 import {
   type TurnAutomationConfig,
+  decodeGlobalConfigAccount,
   stringifySimulationError,
 } from "./turn-automation.js";
 
@@ -622,6 +623,7 @@ export interface SettlementTurnState {
   eliminationWindowStartSeconds: number;
   eliminatedFinalistHash: string | null;
   endTimestampSeconds: number;
+  startTimestampSeconds: number;
   finalistCount: number;
   finalistEliminated: boolean[];
   finalistRuleIds: number[];
@@ -633,9 +635,29 @@ export interface SettlementTurnState {
   turnId: number;
 }
 
-export function decodeSettlementTurnState(data: Uint8Array): SettlementTurnState {
+/**
+ * Decode a `TurnState` account into the settlement view. The rule-election
+ * cutoff (`ruleElectionCutoffBps` from `GlobalConfig`) marks the phase-1 →
+ * phase-2 boundary of the turn (PRD §5.4): the election pipeline (finalist
+ * shortlist → decision/elimination window → active rule) runs during phase 2,
+ * inside the turn, and the draw fires at the turn's end. The cutoff timestamp
+ * is derived with the exact on-chain formula (`require_election_cutoff_reached`)
+ * so the scheduler never plans a `lock_pool` the program would reject.
+ */
+export function decodeSettlementTurnState(
+  data: Uint8Array,
+  ruleElectionCutoffBps: number,
+): SettlementTurnState {
+  if (
+    !Number.isInteger(ruleElectionCutoffBps) ||
+    ruleElectionCutoffBps <= 0 ||
+    ruleElectionCutoffBps > 10_000
+  ) {
+    throw new Error("ruleElectionCutoffBps must be an integer between 1 and 10000.");
+  }
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const turnId = u64Number(view, 8);
+  const startTimestampSeconds = i64Number(view, 16);
   const endTimestampSeconds = i64Number(view, 24);
   const status = view.getUint8(32) === 0 ? "open" : "closed";
   const drawResult = Array.from(data.slice(46, 52));
@@ -678,7 +700,12 @@ export function decodeSettlementTurnState(data: Uint8Array): SettlementTurnState
     drawStatus,
     drawVrfRequest,
     drawnAtSeconds,
-    electionCutoffTimestampSeconds: endTimestampSeconds,
+    electionCutoffTimestampSeconds:
+      startTimestampSeconds +
+      Math.floor(
+        ((endTimestampSeconds - startTimestampSeconds) * ruleElectionCutoffBps) /
+          10_000,
+      ),
     electionVrfFulfillment,
     electionVrfRequest,
     eligibleRulePoolHash: hashOrNull(eligibleRulePoolHash),
@@ -686,6 +713,7 @@ export function decodeSettlementTurnState(data: Uint8Array): SettlementTurnState
     eliminationWindowStartSeconds,
     eliminatedFinalistHash: hashOrNull(eliminatedFinalistHash),
     endTimestampSeconds,
+    startTimestampSeconds,
     finalistCount,
     finalistEliminated,
     finalistRuleIds,
@@ -712,12 +740,47 @@ async function fetchTurnAccountData(context: SettlementContext, turnId: number) 
   return account.data;
 }
 
+/**
+ * Read `rule_election_cutoff_bps` from the on-chain `GlobalConfig` so the
+ * settlement view derives the phase-1 → phase-2 boundary from the same value
+ * the program enforces.
+ */
+export async function fetchRuleElectionCutoffBps({
+  commitment = DEFAULT_COMMITMENT,
+  connection,
+  programId,
+}: {
+  commitment?: Commitment;
+  connection: Connection;
+  programId: PublicKey;
+}) {
+  const account = await connection.getAccountInfo(
+    globalConfigPda(programId),
+    commitment,
+  );
+  if (!account) {
+    throw new Error("GlobalConfig account was not found on-chain.");
+  }
+  if (!account.owner.equals(programId)) {
+    throw new Error("GlobalConfig account owner does not match the Idealer program.");
+  }
+  return decodeGlobalConfigAccount(account.data).ruleElectionCutoffBps;
+}
+
 async function fetchSettlementTurnState(
   context: SettlementContext,
   turnId: number,
 ) {
   const data = await fetchTurnAccountData(context, turnId);
-  return data ? decodeSettlementTurnState(data) : null;
+  if (!data) {
+    return null;
+  }
+  const ruleElectionCutoffBps = await fetchRuleElectionCutoffBps({
+    commitment: context.commitment,
+    connection: context.connection,
+    programId: context.programId,
+  });
+  return decodeSettlementTurnState(data, ruleElectionCutoffBps);
 }
 
 function asSwitchboardData(data: unknown): SwitchboardRandomnessData {
@@ -1275,8 +1338,7 @@ export function createSettlementSenders(
     },
     async fetchState(turnId) {
       const context = await getContext();
-      const data = await fetchTurnAccountData(context, turnId);
-      return data ? decodeSettlementTurnState(data) : null;
+      return fetchSettlementTurnState(context, turnId);
     },
     async lockEligiblePool(turnId, candidates) {
       const context = await getContext();

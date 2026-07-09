@@ -65,8 +65,9 @@ test("turn automation resolves shortened devnet duration cycle", async () => {
     IDEALER_DEVNET_TURN_DURATION_SCALE_BPS: "1500",
   });
 
+  // 15% of the 24h production turn (86400s) = 12960s per slot.
   assert.deepEqual(config.desiredTurnDurationCycle, [
-    1_080, 1_080, 4_320, 4_320,
+    12_960, 12_960, 12_960, 12_960,
   ]);
 });
 

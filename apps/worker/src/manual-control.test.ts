@@ -5,6 +5,7 @@ import {
   closeTurnManually,
   createManualControlConfig,
   cycleTurnManually,
+  forceCloseTurnManually,
   migrateGlobalConfigManually,
   openTurnManually,
   type ManualControlConfig,
@@ -61,6 +62,7 @@ const DISABLED_CONFIG: ManualControlConfig = {
 test("manual open/close/cycle/migrate reject when disabled with no RPC side effects", async () => {
   await assert.rejects(openTurnManually(DISABLED_CONFIG), /disabled/);
   await assert.rejects(closeTurnManually(DISABLED_CONFIG), /disabled/);
+  await assert.rejects(forceCloseTurnManually(DISABLED_CONFIG), /disabled/);
   await assert.rejects(cycleTurnManually(DISABLED_CONFIG), /disabled/);
   await assert.rejects(
     migrateGlobalConfigManually(DISABLED_CONFIG),
@@ -88,6 +90,10 @@ test("enabled manual control requires an authority keypair", async () => {
   );
   await assert.rejects(
     closeTurnManually(config),
+    /IDEALER_TURN_AUTHORITY_KEYPAIR/,
+  );
+  await assert.rejects(
+    forceCloseTurnManually(config),
     /IDEALER_TURN_AUTHORITY_KEYPAIR/,
   );
 });

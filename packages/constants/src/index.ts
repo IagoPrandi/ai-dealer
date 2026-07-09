@@ -2,8 +2,17 @@ export const RULE_MAX_TOKENS = 1000;
 export const MAX_REMOVABLE_NUMBERS = 4;
 export const LAMPORTS_PER_SOL = 1_000_000_000;
 
-export const TURN_DURATION_CYCLE_HOURS = [2, 2, 8, 8] as const;
-export const TURN_DURATION_CYCLE_SECONDS = [7_200, 7_200, 28_800, 28_800] as const;
+// Production turn timing (PRD §5.4): every turn lasts 24h and is composed of
+// phase 1 (create rules + pick numbers, ~22h) followed by phase 2 (finalist
+// shortlist, elimination voting, active rule, draw at turn end, ~2h). The
+// phase-1 → phase-2 boundary is RULE_ELECTION_CUTOFF_BPS of the turn duration;
+// guesses close at the same boundary (GUESS_CUTOFF_BPS). 9167 bps of 24h =
+// 79202s ≈ 22h (basis points cannot express 22/24 exactly; the ~2s drift is
+// accepted). The 4-slot cycle machinery is retained with equal slots.
+export const TURN_DURATION_CYCLE_HOURS = [24, 24, 24, 24] as const;
+export const TURN_DURATION_CYCLE_SECONDS = [86_400, 86_400, 86_400, 86_400] as const;
+export const RULE_ELECTION_CUTOFF_BPS = 9_167;
+export const GUESS_CUTOFF_BPS = 9_167;
 export const TEST_TURN_DURATION_SCALE_BPS = 1_500;
 export const VOTE_FEE_START_TURN = 100;
 export const REPEATED_ACTION_FEE_MULTIPLIER = 2;

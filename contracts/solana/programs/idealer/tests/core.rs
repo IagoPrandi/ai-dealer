@@ -242,6 +242,17 @@ fn invalid_config_and_vote_windows_are_rejected() {
     invalid_cutoff.rule_election_cutoff_bps = 9_700;
     assert!(validate_config(&invalid_cutoff).is_err());
 
+    // Equal cutoffs are valid: phase 1 (create rules + pick numbers) ends at a
+    // single boundary and phase 2 (shortlist → elimination → draw) follows.
+    let mut equal_cutoffs = valid_config(&cycle);
+    equal_cutoffs.rule_election_cutoff_bps = 9_167;
+    equal_cutoffs.guess_cutoff_bps = 9_167;
+    validate_config(&equal_cutoffs).unwrap();
+
+    let mut zero_cutoff = valid_config(&cycle);
+    zero_cutoff.rule_election_cutoff_bps = 0;
+    assert!(validate_config(&zero_cutoff).is_err());
+
     assert!(validate_config(&valid_config(&invalid_duration_cycle)).is_err());
 
     assert!(validate_action_window(7_500, 0, 10_000, 7_500).is_err());

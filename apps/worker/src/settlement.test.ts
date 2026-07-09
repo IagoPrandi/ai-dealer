@@ -197,6 +197,7 @@ test("settlement close_turn writes global config and turn state", () => {
 function buildTurnStateBuffer(): Uint8Array {
   const data = Buffer.alloc(788);
   data.writeBigUInt64LE(42n, 8); // turn_id
+  data.writeBigInt64LE(200n, 16); // start_timestamp
   data.writeBigInt64LE(1_000n, 24); // end_timestamp
   data.writeUInt8(1, 32); // status = closed
   Buffer.from([1, 2, 3, 4, 5, 6]).copy(data, 46); // draw_result
@@ -222,11 +223,14 @@ function buildTurnStateBuffer(): Uint8Array {
 }
 
 test("decodeSettlementTurnState reads the trustless TurnState layout", () => {
-  const state = decodeSettlementTurnState(buildTurnStateBuffer());
+  const state = decodeSettlementTurnState(buildTurnStateBuffer(), 9_167);
 
   assert.equal(state.turnId, 42);
   assert.equal(state.status, "closed");
+  assert.equal(state.startTimestampSeconds, 200);
   assert.equal(state.endTimestampSeconds, 1_000);
+  // Phase-1 → phase-2 boundary: start + floor((end - start) * bps / 10000).
+  assert.equal(state.electionCutoffTimestampSeconds, 933);
   assert.equal(state.drawStatus, "fulfilled");
   assert.deepEqual(state.drawResult, [1, 2, 3, 4, 5, 6]);
   assert.equal(state.activeRuleId, 7);
@@ -246,7 +250,7 @@ test("decodeSettlementTurnState reads the trustless TurnState layout", () => {
 test("decodeSettlementTurnState reports all-zero hashes as null", () => {
   const data = Buffer.alloc(788);
   data.writeBigUInt64LE(1n, 8);
-  const state = decodeSettlementTurnState(data);
+  const state = decodeSettlementTurnState(data, 9_167);
 
   assert.equal(state.status, "open");
   assert.equal(state.drawStatus, "not_requested");

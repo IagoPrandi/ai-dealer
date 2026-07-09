@@ -14,14 +14,16 @@ import type {
 } from "./settlement.js";
 
 /**
- * M5.3 settlement scheduler — drives the full post-play-window pipeline as an
- * idempotent, state-machine-ordered loop (PRD §5.5) and projects results to the
- * API so the read side populates.
+ * M5.3 settlement scheduler — drives the turn's phase-2 pipeline (finalist
+ * shortlist → elimination window → active rule → draw) as an idempotent,
+ * state-machine-ordered loop (PRD §5.4/§5.5) and projects results to the API
+ * so the read side populates.
  *
  * On-chain is the source of truth: the election pipeline (lock → finalist VRF →
  * elimination window → close → active VRF → freeze) requires the turn to stay
- * `Open` (`validate_live_turn`), so it runs after the election cutoff but before
- * `close_turn`; the draw runs once the play window ends; `close_turn` is issued
+ * `Open` (`validate_live_turn`), so it runs during phase 2 — after the
+ * rule-election cutoff (the phase-1 → phase-2 boundary) but before
+ * `close_turn`; the draw runs once the turn ends; `close_turn` is issued
  * only after settlement so the pipeline is never wedged (the M5.2 follow-up).
  * The off-chain projection steps (verification → winners/rewards → claims →
  * closed) are sequenced by the set of §5.5 transitions already recorded in the

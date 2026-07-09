@@ -98,8 +98,12 @@ pub fn validate_config(config: &ConfigValidation<'_>) -> Result<()> {
         config.treasury_fee_bps <= 10_000,
         IdealerError::InvalidBasisPoints
     );
+    // The rule-election cutoff marks the phase-1 → phase-2 boundary of the
+    // turn (PRD §5.4). Guess submission must not outlive it: equal cutoffs
+    // close rule creation and number picking together at the end of phase 1.
     require!(
-        config.rule_election_cutoff_bps < config.guess_cutoff_bps
+        config.rule_election_cutoff_bps > 0
+            && config.rule_election_cutoff_bps <= config.guess_cutoff_bps
             && config.guess_cutoff_bps <= 10_000,
         IdealerError::InvalidCutoff
     );

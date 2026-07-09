@@ -55,18 +55,26 @@ function PromptInput() {
 
 export function HomeScreen() {
   const {
-    bet, decisionEndsAt, decisionPhase, endSeconds, fees, go, guessCutoffEndsAt, openDetail, played, players, prizeSol, rules, turnId,
-    resultTurnId, round, turnReadyToPlay, turnStatusMessage, walletAddress,
+    bet, decisionEndsAt, decisionPhase, endSeconds, fees, go, guessCutoffEndsAt, openDetail, phase1EndsAt, played, players, prizeSol, rules, turnId,
+    resultTurnId, round, turnOpen, turnReadyToPlay, turnStatusMessage, walletAddress,
   } = useIdealer();
 
   const [h, m, s] = useCountdownTo(endSeconds);
+  const [p1h, p1m, p1s] = useCountdownTo(phase1EndsAt);
   const [ch, cm, cs] = useCountdownTo(guessCutoffEndsAt);
   const [dh, dm, ds] = useCountdownTo(decisionEndsAt);
   const { claims } = usePlayerClaims(walletAddress);
   const claimableSol = lamportsToSol(claims?.availableLamports ?? 0);
   const nowSec = Math.floor(Date.now() / 1000);
+  // Turn = phase 1 (create rules + pick numbers, until the rule-election
+  // cutoff) + phase 2 (finalist shortlist, elimination voting, active rule,
+  // draw at the turn's end). The hero timer counts down the current phase.
+  const inPhase1 = turnOpen && phase1EndsAt !== null && nowSec < phase1EndsAt;
+  const inPhase2 = turnOpen && !inPhase1 && endSeconds !== null && nowSec < endSeconds;
+  const drawingNow = turnOpen && !inPhase1 && !inPhase2;
   const showCutoff =
-    turnReadyToPlay && !played && guessCutoffEndsAt !== null && guessCutoffEndsAt > nowSec;
+    turnReadyToPlay && !played && guessCutoffEndsAt !== null && guessCutoffEndsAt > nowSec &&
+    guessCutoffEndsAt !== phase1EndsAt;
   const showResultLink =
     resultTurnId > 0 &&
     (resultTurnId < turnId ||
@@ -101,8 +109,12 @@ export function HomeScreen() {
           <div style={{ position: "absolute", inset: "-26px 16px auto", height: 210, background: "radial-gradient(circle, rgba(20,241,149,0.2), transparent 68%)", filter: "blur(14px)", animation: "ide-pulse 3.6s ease-in-out infinite", zIndex: 0 }} />
           <div style={{ position: "relative", zIndex: 1 }}>
             <div style={{ display: "flex", justifyContent: "center", gap: 8, marginBottom: 14 }}>
-              {turnReadyToPlay ? (
-                <span className="ide-pill" style={{ color: "var(--muted)" }}><Ico.clock style={{ color: "var(--green)" }} /> Ends in <span className="ide-num" style={{ color: "var(--text)", fontWeight: 700, marginLeft: 2 }}>{h}:{m}:{s}</span></span>
+              {inPhase1 ? (
+                <span className="ide-pill" style={{ color: "var(--muted)" }}><Ico.clock style={{ color: "var(--green)" }} /> Phase 1 · Create &amp; play · ends in <span className="ide-num" style={{ color: "var(--text)", fontWeight: 700, marginLeft: 2 }}>{p1h}:{p1m}:{p1s}</span></span>
+              ) : inPhase2 ? (
+                <span className="ide-pill" style={{ color: "var(--muted)", borderColor: "rgba(255,210,63,0.3)" }}><Ico.vote style={{ color: "var(--yellow)", width: 14, height: 14 }} /> Phase 2 · Shortlist &amp; draw · ends in <span className="ide-num" style={{ color: "var(--text)", fontWeight: 700, marginLeft: 2 }}>{h}:{m}:{s}</span></span>
+              ) : drawingNow ? (
+                <span className="ide-pill" style={{ color: "var(--muted)", borderColor: "rgba(199,125,255,0.3)" }}><Ico.dice style={{ color: "var(--purple-soft)", width: 14, height: 14 }} /> Draw in progress</span>
               ) : (
                 <span className="ide-pill" style={{ color: "var(--yellow)", borderColor: "rgba(255,210,63,0.3)" }}><Ico.clock style={{ color: "var(--yellow)" }} /> {turnStatusMessage}</span>
               )}

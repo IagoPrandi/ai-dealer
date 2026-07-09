@@ -116,15 +116,21 @@ Those are trust and execution layers. The user-facing product is a live mobile g
 
 A **turn** is the atomic unit of the game.
 
-One turn equals one fixed time window.
-
-Turn duration is not constant. Idealer uses a repeating duration cycle:
+One turn equals one fixed time window composed of **two sequential phases**:
 
 ```text
-2h → 2h → 8h → 8h → restart at 2h
+Phase 1 — create & play: propose rules, vote on rules, and pick numbers.
+Phase 2 — shortlist & draw: the eligible pool is locked and filtered into the
+          10-rule finalist shortlist, players vote finalists out during the
+          decision/elimination window, the active rule is elected from the
+          survivors, and the draw fires at the end of the turn.
 ```
 
-After the second 8-hour turn ends, the next turn restarts the cycle at 2 hours.
+In production every turn lasts **24 hours**: **22 hours of phase 1** followed by
+**2 hours of phase 2**. The phase boundary is the on-chain rule-election/guess
+cutoff (9167 bps of the turn duration ≈ 22h; basis points cannot express 22/24
+exactly, so a drift of a few seconds is accepted). Test environments scale the
+turn down (e.g. 8-minute turns) while keeping the same two-phase shape.
 
 Each turn is independent:
 
@@ -196,7 +202,7 @@ Default treasury fee:
 
 The **Rule of the Hour** is the elected and validated alternative rule for the current turn.
 
-It is elected from the **surviving finalists** after the community decision/elimination window: once the 10-rule finalist set is formed at the end of the play window, a fixed 1-hour decision phase lets players cast paid elimination votes against finalists; up to 5 finalists may be eliminated, and the Rule of the Hour is then selected only from the survivors (see sections 5.4, 6.12, and 6.14a).
+It is elected from the **surviving finalists** after the community decision/elimination window: once the 10-rule finalist set is formed at the start of phase 2 (the end of the create & play phase), a fixed 1-hour decision window lets players cast paid elimination votes against finalists; up to 5 finalists may be eliminated, and the Rule of the Hour is then selected only from the survivors, before the draw at the turn's end (see sections 5.4, 6.12, and 6.14a).
 
 It is the main narrative object of the game.
 
@@ -494,7 +500,7 @@ UX copy example:
 
 ```text
 Vote for the rule you want to see in the finalist set.
-At the end of the play window, the system locks 3 top-voted eligible rules and uses Switchboard VRF fulfillment to select 7 additional eligible rules, forming the 10 finalists.
+When the create & play phase ends, the system locks 3 top-voted eligible rules and uses Switchboard VRF fulfillment to select 7 additional eligible rules, forming the 10 finalists.
 ```
 
 Voting is gated by a turn Game Token in MVP. Users without a submitted guess can still browse, share, and follow rules, but voting requires playing the current turn first. This keeps governance tied to actual game participation and reduces low-cost Sybil manipulation.
@@ -712,89 +718,72 @@ Play first → receive a turn credential → unlock rule governance for that sam
 
 This avoids a purely off-chain governance gate and prevents the backend from becoming the sole authority that decides who may propose or vote.
 
-### 5.3 Turn Duration Cycle
+### 5.3 Turn Duration and Phases
 
-Idealer uses a repeating cycle of turn durations:
+> **Revision (2026-07):** the earlier variable duration cycle (`2h → 2h → 8h → 8h`)
+> was replaced by a fixed 24-hour turn split into two phases. Milestone entries
+> written before this revision still reference the old cycle; the model below is
+> the binding one.
+
+Every production turn lasts **24 hours** and is composed of two sequential phases:
 
 ```text
-2h → 2h → 8h → 8h
+Phase 1 — create & play (~22h): rule proposals, approval voting, and guess
+          (number picking) submission. Closes at the rule-election/guess
+          cutoff: 9167 bps of the turn duration (≈ 22h).
+Phase 2 — shortlist & draw (~2h): eligible pool locked, 10-rule finalist
+          shortlist formed (3 top-voted + 7 VRF-random), fixed 1-hour
+          decision/elimination window, active rule elected from the
+          survivors, and the VRF draw at the turn's end.
 ```
 
-After the second 8-hour turn ends, the next turn restarts at 2 hours.
-
-```text
-Turn 1: 2 hours
-Turn 2: 2 hours
-Turn 3: 8 hours
-Turn 4: 8 hours
-Turn 5: 2 hours
-Turn 6: 2 hours
-Turn 7: 8 hours
-Turn 8: 8 hours
-...
-```
+The on-chain 4-slot duration-cycle machinery is retained with equal slots
+(`[86400, 86400, 86400, 86400]` seconds), so existing accounts, instructions,
+and automation keep working. Test/devnet environments scale the turn duration
+down at runtime (`IDEALER_DEVNET_TURN_DURATION_SCALE_BPS`) and shrink the
+decision window at build time (`manual-test` → 2 minutes, `devnet-test` → 5
+seconds) while preserving the same two-phase shape.
 
 #### Product Rationale
 
-This cycle balances fast engagement with longer accumulation windows:
+- one turn per day creates a predictable daily appointment: play during the day, come back for the shortlist vote and the draw;
+- a long phase 1 gives rules time to gather votes and creators time to campaign;
+- a short, concentrated phase 2 turns the shortlist, the elimination voting, and the draw into a single climactic event;
+- the fixed schedule removes the confusion of variable turn lengths.
 
-- the 2-hour turns give rules more time to gather votes;
-- the 2-hour turns create faster feedback loops and frequent return moments;
-- the 8-hour turns create larger prize pools, more anticipation, and stronger shareable events;
-- restarting after the second 8-hour turn prevents the game from becoming too slow or feeling inactive.
+#### Retention Requirements
 
-#### Retention Impact
-
-Expected positive effects:
-
-- more varied session cadence;
-- more reasons to return at different times of day;
-- larger narrative moments in longer turns;
-- better opportunity for rule creators to campaign for their rules;
-- improved prize-pool anticipation.
-
-Potential negative effects:
-
-- some users may prefer a predictable fixed schedule;
-- 8-hour turns may feel slow if the activity feed is weak;
-- players may miss the draw if reminders and countdowns are not clear.
-
-Mitigations:
-
-- always show the current turn duration and next turn duration;
-- display a “cycle position” indicator;
-- add return prompts for long turns;
-- keep the activity feed active during longer turns;
-- use share cards and rule status updates to maintain momentum.
+- always show which phase is active and its own countdown (phase 1 → time to the cutoff; phase 2 → time to the draw at turn end);
+- surface the decision/elimination window prominently when it opens;
+- add return prompts near the end of each phase;
+- use share cards and rule status updates to maintain momentum during phase 1.
 
 ### 5.4 Turn Lifecycle
 
-The lifecycle has two parts: a **play & create-rules window** whose length follows the turn-duration cycle (`2h → 2h → 8h → 8h`), and a **fixed 1-hour decision/elimination window** appended after it. Proportional cutoffs inside the play window keep the same logic across all play-window durations, while rule compilation is amortized during the play window instead of being concentrated only after the finalist set is formed.
+A turn's total duration is the sum of its two phases: **phase 1 — create & play** (rule proposals, approval voting, and guess submission) followed by **phase 2 — shortlist & draw** (finalist shortlist, decision/elimination window, active-rule election, and the draw at the turn's end). The phase boundary is the proportional rule-election/guess cutoff, so the same logic holds at any turn duration (24h in production, minutes on devnet). Rule compilation is amortized during phase 1 instead of being concentrated after the finalist set is formed.
 
-The current turn-duration intervals represent only the time to **play and create rules**. They do not include the decision window. A turn's end-to-end wall-clock is therefore `play-window duration + 1 hour decision window + final selection + draw`.
+The timer shown to players always counts down the **current phase**: during phase 1 it counts to the cutoff; during phase 2 it counts to the turn's end, when the draw fires.
 
-Recommended default:
+Recommended default (production: 24h turn = 22h phase 1 + 2h phase 2):
 
 ```text
-Rule preflight and background precompilation run continuously while the play window is open.
-Rule proposals and approval voting close at 75% of the play-window duration.
-Guess submission closes at 96.7% of the play-window duration.
-Finalist set of 10 is locked at 100% of the play-window duration (eligible pool lock + 3 top-voted + finalist-election VRF for 7 random). No active rule is chosen yet.
-Decision/elimination window runs for a fixed 60 minutes after the play window closes.
+Rule preflight and background precompilation run continuously while phase 1 is open.
+Rule proposals, approval voting, and guess submission close together at the phase-1 cutoff (9167 bps ≈ 22h).
+Phase 2 starts at the cutoff: the eligible pool is locked and the finalist set of 10 is formed (3 top-voted + finalist-election VRF for 7 random). No active rule is chosen yet.
+Decision/elimination window runs for a fixed 60 minutes inside phase 2.
 At the end of the decision window: eliminations are applied, the active-election VRF selects one rule from the survivors, and the artifact is frozen.
-VRF draw occurs immediately after the active rule is frozen.
+The VRF draw fires at the end of the turn (24h mark), right after which the turn closes and settlement projects results.
 ```
 
-For a 2-hour play window, this maps to:
+For the production 24-hour turn, this maps to:
 
 ```text
-Rule preflight/precompilation: 0–120 minutes, continuously after each proposal.
-Rule proposals and approval voting close at 90 minutes.
-Guess submission closes at ~116 minutes.
-Finalist set of 10 locked at 120 minutes (end of play window).
-Decision/elimination window: 120–180 minutes (fixed 1 hour).
-Active rule elected from survivors and frozen at ~180 minutes.
-Draw occurs right after the active rule is frozen (~180 minutes).
+Rule preflight/precompilation: 0–22h, continuously after each proposal.
+Rule proposals, approval voting, and guess submission close at ~22h (9167 bps).
+Eligible pool locked and finalist set of 10 formed shortly after 22h (phase-2 start).
+Decision/elimination window: ~22h → ~23h (fixed 1 hour).
+Active rule elected from survivors and frozen at ~23h.
+Draw fires at 24h (turn end); the turn then closes and settles.
 ```
 
 Generic flow:
@@ -802,9 +791,9 @@ Generic flow:
 ```text
 Turn N begins
 │
-├── PLAY & CREATE-RULES WINDOW (duration follows the 2h/2h/8h/8h cycle)
+├── PHASE 1 — CREATE & PLAY (~22h of a 24h production turn)
 │   │
-│   ├── [0%] Play window opens
+│   ├── [0%] Phase 1 opens
 │   │   ├── Players submit guesses
 │   │   ├── submit_guess issues a turn-scoped Game Token PDA
 │   │   ├── Game Token holders may propose natural-language rules
@@ -823,54 +812,55 @@ Turn N begins
 │   │       ├── classify difficulty
 │   │       └── cache precompiled artifact and status
 │   │
-│   ├── [75%] Rule proposals and approval voting close
-│   │   └── Each finalist's approval (positive) vote count is the value locked here
+│   └── [~91.7% = 9167 bps] Phase 1 closes: rule proposals, approval voting,
+│       and guess submission end together
+│       └── Each finalist's approval (positive) vote count is the value locked here
+│
+├── PHASE 2 — SHORTLIST & DRAW (~2h)
 │   │
-│   ├── [96.7%] Guess submission window closes
+│   ├── Finalist set of 10 is locked (no active rule chosen yet)
+│   │   ├── Eligible pool is locked from rules with valid precompiled artifacts
+│   │   ├── Top-voted finalist subset is locked: 3 rules by default
+│   │   ├── Eligible pool hash and top finalist hash are committed
+│   │   ├── Switchboard finalist-election VRF request is submitted
+│   │   ├── On VRF fulfillment, random finalist subset is derived from the VRF word
+│   │   │   └── 7 additional rules by default from the remaining eligible pool
+│   │   └── Finalist set is formed: 3 top-voted + 7 VRF-random = 10 by default
 │   │
-│   └── [100%] Finalist set of 10 is locked (no active rule chosen yet)
-│       ├── Eligible pool is locked from rules with valid precompiled artifacts
-│       ├── Top-voted finalist subset is locked: 3 rules by default
-│       ├── Eligible pool hash and top finalist hash are committed
-│       ├── Switchboard finalist-election VRF request is submitted
-│       ├── On VRF fulfillment, random finalist subset is derived from the VRF word
-│       │   └── 7 additional rules by default from the remaining eligible pool
-│       └── Finalist set is formed: 3 top-voted + 7 VRF-random = 10 by default
+│   ├── DECISION / ELIMINATION WINDOW (fixed 60 minutes, inside phase 2)
+│   │   ├── Game Token holders may cast elimination votes against finalists
+│   │   │   └── first vote may be free before turn 100; repeated votes use escalating paid fees → prize pool
+│   │   ├── A finalist qualifies for elimination when elimination_votes > approval_votes
+│   │   ├── At window close, up to 5 finalists are eliminated
+│   │   │   ├── if more than 5 qualify, the 5 with the most elimination votes are eliminated
+│   │   │   ├── tie-break: fewest approval votes, then lowest rule_id
+│   │   │   └── at least 1 survivor is always kept
+│   │   └── Eliminated finalists move to ELIMINATED and are excluded from the active election
+│   │
+│   ├── ACTIVE RULE ELECTION
+│   │   ├── Switchboard active-election VRF request is submitted over the survivors
+│   │   ├── One rule is selected uniformly from the survivors using ranged VRF output
+│   │   ├── Selected precompiled artifact is verified against stored hashes
+│   │   └── Valid artifact is frozen before draw
+│   │       ├── Active → frozen DSL/AST becomes Rule of the Hour
+│   │       └── Invalid/hash mismatch → no alternative rule for that turn; no deterministic fallback to the next survivor
+│   │
+│   └── Switchboard VRF draw fires at the end of the turn
+│       ├── 6 unique numbers published
+│       ├── Original rule evaluated deterministically
+│       ├── Alternative rule evaluated by rule runtime if active
+│       ├── Winners determined by game engine
+│       └── Prize distribution initiated
 │
-├── DECISION / ELIMINATION WINDOW (fixed 60 minutes)
-│   ├── Game Token holders may cast elimination votes against finalists
-│   │   └── first vote may be free before turn 100; repeated votes use escalating paid fees → prize pool
-│   ├── A finalist qualifies for elimination when elimination_votes > approval_votes
-│   ├── At window close, up to 5 finalists are eliminated
-│   │   ├── if more than 5 qualify, the 5 with the most elimination votes are eliminated
-│   │   ├── tie-break: fewest approval votes, then lowest rule_id
-│   │   └── at least 1 survivor is always kept
-│   └── Eliminated finalists move to ELIMINATED and are excluded from the active election
-│
-├── ACTIVE RULE ELECTION
-│   ├── Switchboard active-election VRF request is submitted over the survivors
-│   ├── One rule is selected uniformly from the survivors using ranged VRF output
-│   ├── Selected precompiled artifact is verified against stored hashes
-│   └── Valid artifact is frozen before draw
-│       ├── Active → frozen DSL/AST becomes Rule of the Hour
-│       └── Invalid/hash mismatch → no alternative rule for that turn; no deterministic fallback to the next survivor
-│
-├── Switchboard VRF draw occurs (right after the active rule is frozen)
-│   ├── 6 unique numbers published
-│   ├── Original rule evaluated deterministically
-│   ├── Alternative rule evaluated by rule runtime if active
-│   ├── Winners determined by game engine
-│   └── Prize distribution initiated
-│
-└── Turn N+1 begins using the next duration in the cycle
+└── Turn N ends → close + settlement, and Turn N+1 begins
 ```
 
 The UI must clearly explain the election mechanic:
 
 ```text
-At the end of the play window, the finalist set is formed from 3 top-voted eligible rules plus 7 eligible rules selected by Switchboard VRF.
+When the create & play phase ends, the finalist set is formed from 3 top-voted eligible rules plus 7 eligible rules selected by Switchboard VRF.
 A 1-hour decision window then lets players pay to vote out finalists: a finalist is eliminated when its elimination votes pass its approval votes, and up to 5 of the 10 can be eliminated.
-Finally, Switchboard VRF selects one rule from the surviving finalists to become the Rule of the Hour.
+Finally, Switchboard VRF selects one rule from the surviving finalists to become the Rule of the Hour, and the numbers are drawn at the end of the turn.
 ```
 
 Default finalist count is **10**, because the selected policy is `3 top-voted + 7 random`. The PRD must not describe `3 + 6` as 10. After the decision window, between **5 and 10** finalists survive into the final active-rule selection (up to 5 may be eliminated, and at least 1 survivor is always kept).
@@ -1465,7 +1455,7 @@ Rationale:
 
 The Rule of the Hour is elected in **two VRF-backed steps separated by the decision/elimination window** (section 6.14a):
 
-1. **Finalist election** — at the end of the play window, a Switchboard finalist-election VRF request forms the 10-rule finalist set (3 top-voted + 7 random). No active rule is chosen here.
+1. **Finalist election** — at the start of phase 2 (the end of the create & play phase), a Switchboard finalist-election VRF request forms the 10-rule finalist set (3 top-voted + 7 random). No active rule is chosen here.
 2. **Active election** — after the fixed 1-hour decision window closes and eliminations are applied, a second Switchboard active-election VRF request selects one active rule from the surviving finalists.
 
 Default finalist-election configuration:
@@ -1642,11 +1632,11 @@ The MVP does not need perfect Sybil resistance, but it must make manipulation vi
 
 ### 6.14a Rule Elimination Voting (Decision Window)
 
-After the 10-rule finalist set is locked at the end of the play window, a fixed **1-hour decision/elimination window** opens before the active rule is elected. During this window, players can pay to vote finalists out of contention. This gives the community a veto over the finalist set while preserving the role of approval voting and verified randomness.
+After the 10-rule finalist set is locked at the start of phase 2 (the end of the create & play phase), a fixed **1-hour decision/elimination window** opens before the active rule is elected. During this window, players can pay to vote finalists out of contention. This gives the community a veto over the finalist set while preserving the role of approval voting and verified randomness.
 
 Elimination voting rules:
 
-- the decision window lasts a fixed 60 minutes and is separate from the play window (it does not consume turn-cycle duration);
+- the decision window lasts a fixed 60 minutes and runs inside phase 2 of the turn (the ~2h tail between the phase-1 cutoff and the draw at the turn's end), so the turn's total duration already includes it;
 - only wallets holding a valid current-turn Game Token may cast elimination votes;
 - elimination votes may only target rules in the current finalist set, and only while the window is open;
 - each wallet may cast repeated elimination votes against the same finalist rule in the same turn;
@@ -3209,20 +3199,17 @@ Responsibilities:
 
 Responsibilities:
 
-- maintain the repeating play-window duration cycle: `2h → 2h → 8h → 8h`;
-- assign the correct play-window duration to each new turn;
-- store the current cycle index;
-- calculate proportional cutoff times for proposals/approval voting and guess submission within the play window;
-- continuously enqueue rule precompilation jobs while the play window is open;
-- close rule proposals and approval voting at 75% of the play-window duration;
-- close guess submission at 96.7% of the play-window duration;
-- lock the eligible precompiled rule pool at the end of the play window;
+- maintain the fixed 24-hour turn duration (equal-slot duration cycle `[86400, 86400, 86400, 86400]`);
+- assign the correct duration to each new turn and store the current cycle index;
+- calculate the proportional phase-1 cutoff (rule-election/guess cutoff, 9167 bps ≈ 22h) for each turn;
+- continuously enqueue rule precompilation jobs while phase 1 is open;
+- close rule proposals, approval voting, and guess submission together at the phase-1 cutoff;
+- lock the eligible precompiled rule pool at the start of phase 2 (the phase-1 cutoff);
 - request Switchboard finalist-election VRF and form the 10-rule finalist set on fulfillment;
-- open the fixed 60-minute decision/elimination window after the finalist set is locked;
+- open the fixed 60-minute decision/elimination window (inside phase 2) after the finalist set is locked;
 - close the decision window after 60 minutes, tally elimination votes, and apply up to 5 eliminations;
 - request Switchboard active-election VRF over the survivors and freeze the elected rule on fulfillment;
-- trigger Switchboard VRF draw immediately after the active rule is frozen;
-- reset the cycle to 2 hours after the second 8-hour turn completes.
+- trigger the Switchboard VRF draw at the end of the turn (phase-2 end), then close and settle the turn.
 
 ### 10.4 Token Counter Service
 
@@ -6551,7 +6538,7 @@ This section replaces the former open questions list. The following decisions ar
 4. Full sanitized original rule text is stored on-chain in the `RuleProposal` account. Off-chain copies may exist only for indexing, search, analytics, and UI performance.
 5. Rule votes are on-chain through `RuleVote` accounts or an equivalent on-chain account model. MVP does not use off-chain vote commitments as the primary voting record.
 6. The finalist set is exactly 10 rules whenever at least 10 eligible rules exist: 3 top-voted eligible rules plus 7 VRF-random eligible rules. If fewer than 10 eligible rules exist, all available eligible rules form the finalist set.
-7. Turn duration starts at 2 hours and follows the fixed repeating cycle `2h → 2h → 8h → 8h → repeat`.
+7. Every production turn lasts 24 hours: ~22h of phase 1 (create rules + pick numbers, closing at the 9167-bps rule-election/guess cutoff) followed by ~2h of phase 2 (finalist shortlist, 1-hour decision/elimination window, active-rule election, draw at turn end). (Revised 2026-07; replaces the former `2h → 2h → 8h → 8h` cycle.)
 8. The alternative rule pool remains 50% of the post-treasury playable prize pool. If no alternative rule is active or no alternative-rule winners exist, the alternative bucket follows the rollover rules.
 9. Creator rewards remain fixed at 15% of each individual alternative-rule winner payout, funded from the creator reward reserve sourced from platform monetization and subject to reserve and cap.
 10. MVP reserves 20% of platform monetization for the creator reward reserve. This is a configurable treasury policy, but winner-visible payouts must never be reduced to fund creator rewards.
