@@ -14,6 +14,7 @@ import {
   createProposeRuleInstruction,
   deriveSubmitGuessAccounts,
   deriveRuleProposalAddress,
+  waitForConfirmedProgramAccount,
   type RulePreflightResult,
 } from "../../../solana/idealerProgram";
 import { fetchActiveTurnSnapshotFromWorker } from "../../../solana/activeTurnApi";
@@ -562,26 +563,20 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
         throw new Error("The active round changed before rule submission. Reopen the rule composer for the current round.");
       }
       const ruleProposalAddress = await deriveRuleProposalAddress({ ruleId: rule.ruleId, turnId });
-      const [gameTokenAccount, existingRuleProposal] = await Promise.all([
-        client.runtime.rpc
-          .getAccountInfo(accounts.gameToken, {
-            commitment: "confirmed",
-            encoding: "base64",
-          })
-          .send(),
-        client.runtime.rpc
-          .getAccountInfo(ruleProposalAddress, {
-            commitment: "confirmed",
-            encoding: "base64",
-          })
-          .send(),
-      ]);
-      if (!gameTokenAccount.value) {
-        throw new Error("Your round pass is not confirmed on devnet yet. Wait for the guess confirmation to finish, then submit the rule again.");
-      }
+      const existingRuleProposal = await client.runtime.rpc
+        .getAccountInfo(ruleProposalAddress, {
+          commitment: "confirmed",
+          encoding: "base64",
+        })
+        .send();
       if (existingRuleProposal.value) {
         throw new Error("This compiled rule id is already used on devnet. Send the same rule text again so the dealer can issue a fresh preflight before payment.");
       }
+      await waitForConfirmedProgramAccount({
+        account: accounts.gameToken,
+        client,
+        label: "Your round pass",
+      });
       const instruction = await createProposeRuleInstruction({ player, preflight: rule, turnId });
       const signature = await sendInstruction(client, wallet, instruction);
       const ruleProposal = ruleProposalAddress.toString();

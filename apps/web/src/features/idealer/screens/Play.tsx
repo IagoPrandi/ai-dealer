@@ -13,6 +13,7 @@ import {
   deriveSubmitGuessAccounts,
   IDEALER_PROGRAM_ID,
   validateGuessNumbers,
+  waitForConfirmedProgramAccount,
   type GuessReceipt,
 } from "../../../solana/idealerProgram";
 import { fetchActiveTurnSnapshotFromWorker } from "../../../solana/activeTurnApi";
@@ -330,6 +331,36 @@ function PlayFlow() {
         turnId,
         walletAddress,
       });
+
+      try {
+        await Promise.all([
+          waitForConfirmedProgramAccount({
+            account: accounts.gameToken,
+            client,
+            label: "Your round pass",
+          }),
+          waitForConfirmedProgramAccount({
+            account: accounts.playerGuess,
+            client,
+            label: "Your guess",
+          }),
+        ]);
+      } catch (confirmationError) {
+        saveAction({
+          action: "submit_guess",
+          createdAt: startedAt,
+          errorCode: "CONFIRMATION_UNVERIFIED",
+          errorMessage: describeTxError(confirmationError),
+          numbers: sel,
+          signature,
+          status: "delayed_confirmation",
+          turnId,
+          walletAddress,
+        });
+        reloadAll();
+        setError("The wallet signed the guess, but Idealer could not verify the on-chain round pass yet. Wait a moment, then refresh before retrying.");
+        return;
+      }
 
       const receipt: GuessReceipt = {
         feeLamports: Math.round(fees.playNext * 1_000_000_000),

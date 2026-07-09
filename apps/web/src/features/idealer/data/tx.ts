@@ -151,6 +151,13 @@ export function txErrorCode(error: unknown): string {
   ) {
     return "DUPLICATE_ACTION";
   }
+  if (
+    lower.includes("account: game_token") &&
+    (lower.includes("accountnotinitialized") ||
+      lower.includes("account not initialized"))
+  ) {
+    return "ROUND_PASS_NOT_CONFIRMED";
+  }
   if (lower.includes("insufficient") || lower.includes("lamports") || lower.includes("funds")) {
     return "INSUFFICIENT_FUNDS";
   }
@@ -248,6 +255,9 @@ export function describeTxError(error: unknown): string {
   }
   if (code === "DUPLICATE_ACTION") {
     return "This wallet has already performed this action for the current turn.";
+  }
+  if (code === "ROUND_PASS_NOT_CONFIRMED") {
+    return "Your round pass is not confirmed on devnet yet. Wait for the guess confirmation to finish, then submit again.";
   }
   if (code === "INSUFFICIENT_FUNDS") {
     return "This wallet needs more devnet SOL for the fee, account rent, and network fee.";

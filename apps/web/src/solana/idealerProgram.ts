@@ -206,6 +206,63 @@ type AccountInfoRpcReader = {
   };
 };
 
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => globalThis.setTimeout(resolve, ms));
+}
+
+export async function confirmedProgramAccountExists({
+  account,
+  client,
+  label,
+}: {
+  account: ReturnType<typeof address>;
+  client: AccountInfoRpcReader;
+  label: string;
+}) {
+  const result = await client.runtime.rpc
+    .getAccountInfo(account, {
+      commitment: "confirmed",
+      encoding: "base64",
+    })
+    .send();
+
+  if (!result.value) {
+    return false;
+  }
+
+  if (result.value.owner !== IDEALER_PROGRAM_ID.toString()) {
+    throw new Error(`${label} account owner does not match the Idealer program.`);
+  }
+
+  return true;
+}
+
+export async function waitForConfirmedProgramAccount({
+  account,
+  attempts = 12,
+  client,
+  intervalMs = 1_000,
+  label,
+}: {
+  account: ReturnType<typeof address>;
+  attempts?: number;
+  client: AccountInfoRpcReader;
+  intervalMs?: number;
+  label: string;
+}) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (await confirmedProgramAccountExists({ account, client, label })) {
+      return;
+    }
+
+    if (attempt < attempts - 1) {
+      await sleep(intervalMs);
+    }
+  }
+
+  throw new Error(`${label} is not confirmed on devnet yet. Wait for confirmation, then try again.`);
+}
+
 function pushU16Le(bytes: number[], value: number) {
   bytes.push(value & 0xff, (value >> 8) & 0xff);
 }

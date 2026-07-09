@@ -3172,3 +3172,20 @@ Passed:
 - Verified: `pnpm --filter @idealer/web typecheck`; `pnpm --filter @idealer/web lint`; Playwright smoke against the existing `http://localhost:3000` dev server confirmed the home renders, `Phase 1` is absent, and `Guessing closes in` is absent. The local server had no active turn, so the active phase timer itself was not visible in that smoke state.
 - Attempted to start a separate `NEXT_PUBLIC_UI_MOCK=1` dev server on port `3001` for richer active-turn visual verification, but Next.js blocked a second dev server for the same `apps/web` directory because an existing server was already running; the existing server was left untouched.
 - Reviewed the result for inconsistencies: UI copy remains English, existing pill/numeric styles are reused, no fallback was added, no milestone status was changed, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-09 (Draw result location check)
+
+- Reopened required context before answering: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, and `.claude/skills`.
+- Checked the result and public round UI paths for where settled draw numbers are exposed: `apps/web/src/features/idealer/screens/Result.tsx`, `apps/web/src/features/idealer/screens/Home.tsx`, `apps/web/src/app/round/[turnId]/page.tsx`, and `apps/web/src/features/round-page/RoundPage.tsx`.
+- Confirmed the current app exposes drawn numbers through the home card `Result of round ...` -> `Result` screen, and directly through the public route `/round/{turnId}` in the `Draw & result` section.
+- Reviewed the result for inconsistencies: no source code was changed, no fallback was added, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-09 (Rule-submit round-pass confirmation gate)
+
+- Reopened required context before working: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/develop-frontend/SKILL.md`, `.claude/skills/solana-dev/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/references/frontend-framework-kit.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/references/kit-web3-interop.md`, `.claude/skills/idealer-test-and-verify/SKILL.md`, `.claude/skills/best-practices/SKILL.md`, and `.claude/skills/best-practices/references/agent-principles.md`.
+- Tightened the play -> create return flow so `Play` waits for both the `PlayerGuess` and `GameToken` PDAs to be visible with confirmed commitment before posting `/guess-receipts`; this prevents the API from marking the wallet as played before the on-chain round pass exists.
+- Reused the same confirmed-program-account gate in `Create` before building/simulating `propose_rule`, so a returned composer fails with explicit round-pass copy instead of opening the wallet against an uninitialized `game_token`.
+- Normalized nested simulation logs for `AnchorError caused by account: game_token. Error Code: AccountNotInitialized` into actionable round-pass text, while preserving raw diagnostics for other simulation failures.
+- Added focused regression tests for confirmed account polling and missing-game-token error normalization.
+- Verified: `pnpm --filter @idealer/web typecheck`; `pnpm --filter @idealer/web test` (24/24); `pnpm --filter @idealer/web lint`; `pnpm --filter @idealer/web build`.
+- Reviewed the result for inconsistencies: UI copy remains English, the fix does not add fallbacks that hide Solana/RPC failures, delayed signed guesses remain blocked as pending wallet actions rather than being silently retried, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
