@@ -51,6 +51,18 @@ export interface ActiveTurnView {
   state: TurnState;
 }
 
+export function resolveVisibleTurnId(snapshot: ActiveTurnSnapshot) {
+  if (
+    snapshot.globalConfig.hasActiveTurn &&
+    snapshot.globalConfig.activeTurnId > 0
+  ) {
+    return snapshot.globalConfig.activeTurnId;
+  }
+
+  const latestKnownTurnId = snapshot.globalConfig.nextTurnId - 1;
+  return latestKnownTurnId > 0 ? latestKnownTurnId : IDEALER_ACTIVE_TURN_ID;
+}
+
 /** Polls the on-chain GlobalConfig + active TurnState every 10s (and on focus). */
 export function useActiveTurn(): ActiveTurnView {
   const [view, setView] = useState<Omit<ActiveTurnView, "refresh">>({
@@ -70,7 +82,7 @@ export function useActiveTurn(): ActiveTurnView {
         turn: snapshot.turnState,
       });
       setView({
-        activeTurnId: snapshot.globalConfig.activeTurnId || IDEALER_ACTIVE_TURN_ID,
+        activeTurnId: resolveVisibleTurnId(snapshot),
         endTimestamp: snapshot.turnState?.endTimestamp ?? null,
         message: readiness.ok ? "The active turn is accepting plays." : readiness.message,
         snapshot,
@@ -78,7 +90,7 @@ export function useActiveTurn(): ActiveTurnView {
         ...(readiness.ok ? {} : { readinessCode: readiness.code }),
       });
     } catch (error) {
-      console.error("Failed to load the active turn.", error);
+      console.warn("Failed to load the active turn.", error);
       setView({
         activeTurnId: IDEALER_ACTIVE_TURN_ID,
         endTimestamp: null,

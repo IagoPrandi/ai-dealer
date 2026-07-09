@@ -3282,3 +3282,19 @@ Passed:
 - Live verification: restarted the local worker, observed it rehydrate and advance turn 101 through `VERIFYING -> FINALIZED -> CLAIMABLE -> CLOSED`; `GET /rounds` now returns `activeTurnId: 101`, `status: completed`, draw `[10,56,77,94,42,51]`, and `settlementAutomation: enabled` appears in worker health. `pnpm --filter @idealer/worker settlement:run` now loads `.env` and reports `plannedAction: done/already_closed` for turn 101.
 - Verified: `pnpm --filter @idealer/api typecheck`; `pnpm --filter @idealer/api test` (65/65); `pnpm --filter @idealer/api lint`; `pnpm --filter @idealer/api build`; `pnpm --filter @idealer/worker typecheck`; `pnpm --filter @idealer/worker test` (88/88); `pnpm --filter @idealer/worker lint`; `pnpm --filter @idealer/worker build`.
 - Reviewed the result for inconsistencies: no fallback invents randomness or hides VRF/API divergence, UI-facing behavior remains English, the remaining local limitation is that full guess/rule projection still depends on the API process not being restarted because those records are in-memory, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-09 (On-chain rule storage clarification)
+
+- Reopened required context before answering: `PRD.md`, `PROGRESS_TRACKER.md`, and `.claude/skills`.
+- Confirmed from `PRD.md` that MVP stores the full sanitized original rule text on-chain in the `RuleProposal` account, stores rule/vote records on-chain, and uses off-chain mirrors only for indexing, search, analytics, and UI performance.
+- Reviewed the result for inconsistencies: no source code changed, no fallback behavior introduced, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-09 (Active-turn console error after closed round)
+
+- Reopened required context before working: `PRD.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, and `.claude/skills/idealer-test-and-verify/SKILL.md`.
+- Verified the live worker and Next proxy state: `GET /turn/active` and `GET /__worker/turn/active` both returned HTTP 200; the real on-chain state had no active turn (`activeTurnId: 0`, `hasActiveTurn: false`, `nextTurnId: 102`) after round 101 closed.
+- Web: changed the active-turn hook to display the latest known completed turn (`nextTurnId - 1`) when no active turn exists, instead of falling back to bootstrap turn 1. Treated active-turn fetch failures as handled UI warnings rather than `console.error`, which prevents Next dev overlay from surfacing a recovered state as a console error.
+- Added focused tests for active turn, no-active-turn, and pre-bootstrap visible-turn resolution.
+- Restarted the stale local Next dev server on port 3000 and verified with Playwright: `/play` loads, no Next error overlay, `consoleErrors: []`, and the UI shows the settled round 101 draw `[10,56,77,94,42,51]` with the no-active-turn message.
+- Verified: `pnpm --filter @idealer/web test` (33/33); `pnpm --filter @idealer/web lint`; `pnpm --filter @idealer/web build`; `pnpm --filter @idealer/web typecheck` after `next build` regenerated `.next/types`.
+- Reviewed the result for inconsistencies: UI copy remains English, the app still surfaces the real no-active-turn state instead of hiding it, no chain/settlement behavior changed, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
