@@ -91,6 +91,7 @@ export interface TurnStateSnapshot {
   endTimestamp: number;
   startTimestamp: number;
   status: "open" | "closed";
+  turnDurationSeconds: number;
   turnId: number;
 }
 
@@ -463,10 +464,14 @@ export function decodeTurnStateAccount(data: Uint8Array): TurnStateSnapshot {
     throw new Error("TurnState status is invalid.");
   }
 
+  reader.skip(8);
+  const turnDurationSeconds = reader.readU32();
+
   return {
     endTimestamp,
     startTimestamp,
     status: statusIndex === 0 ? "open" : "closed",
+    turnDurationSeconds,
     turnId,
   };
 }
@@ -478,7 +483,7 @@ export function getActionCutoffTimestamp({
   cutoffBps: number;
   turn: TurnStateSnapshot;
 }) {
-  const duration = turn.endTimestamp - turn.startTimestamp;
+  const duration = turn.turnDurationSeconds;
   return turn.startTimestamp + Math.floor((duration * cutoffBps) / 10_000);
 }
 

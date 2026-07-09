@@ -22,6 +22,7 @@ interface ActiveTurnApiResponse {
     endTimestamp: number;
     startTimestamp: number;
     status: "closed" | "open";
+    turnDurationSeconds: number;
     turnId: number;
   };
   turnStateAddress: null | string;

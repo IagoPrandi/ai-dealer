@@ -5,6 +5,7 @@ import { address } from "@solana/kit";
 
 import {
   confirmedProgramAccountExists,
+  getActionCutoffTimestamp,
   IDEALER_PROGRAM_ID,
   waitForConfirmedProgramAccount,
 } from "./idealerProgram.js";
@@ -92,5 +93,21 @@ test("waitForConfirmedProgramAccount rejects unexpected account owners", async (
       label: "Your round pass",
     }),
     /owner does not match/,
+  );
+});
+
+test("getActionCutoffTimestamp uses the base turn duration, not an extended draw end", () => {
+  assert.equal(
+    getActionCutoffTimestamp({
+      cutoffBps: 5_000,
+      turn: {
+        endTimestamp: 1_000,
+        startTimestamp: 100,
+        status: "open",
+        turnDurationSeconds: 200,
+        turnId: 1,
+      },
+    }),
+    200,
   );
 });

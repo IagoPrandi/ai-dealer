@@ -153,9 +153,10 @@ export function planSettlementAction(
     (electionInProgress || hasEligible)
   ) {
     if (!s.eligibleRulePoolHash) {
-      return now >= s.electionCutoffTimestampSeconds
-        ? plan("VOTING_CLOSED", "lock_pool", SETTLEMENT_STATES.ELIGIBLE_RULE_POOL_LOCKED)
-        : waitPlan("OPEN", "before_election_cutoff");
+      if (now < s.electionCutoffTimestampSeconds) {
+        return waitPlan("OPEN", "before_election_cutoff");
+      }
+      return plan("VOTING_CLOSED", "lock_pool", SETTLEMENT_STATES.ELIGIBLE_RULE_POOL_LOCKED);
     }
     if (!s.finalistSetHash) {
       return isSetPubkey(s.electionVrfRequest)

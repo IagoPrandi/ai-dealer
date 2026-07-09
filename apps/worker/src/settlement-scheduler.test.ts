@@ -45,6 +45,7 @@ function makeState(
     status: "open",
     survivorFinalistHash: null,
     topVotedFinalistHash: null,
+    turnDurationSeconds: 1_000,
     turnId: 1,
     ...overrides,
   };
@@ -66,19 +67,24 @@ function snapshot(
   };
 }
 
-test("planner waits before the election cutoff and locks the pool after it", () => {
+test("planner starts shortlist VRF only after phase 1 closes and the pool is locked", () => {
   const eligible = { eligibleCandidateCount: 2 };
-  assert.equal(
-    planSettlementAction(
-      snapshot(makeState(), { ...eligible, nowSeconds: 500 }),
-    ).kind,
-    "wait",
+  const beforeCutoff = planSettlementAction(
+    snapshot(makeState(), { ...eligible, nowSeconds: 500 }),
   );
+  assert.equal(beforeCutoff.kind, "wait");
+  assert.equal(beforeCutoff.reason, "before_election_cutoff");
   assert.equal(
     planSettlementAction(
       snapshot(makeState(), { ...eligible, nowSeconds: 1_500 }),
     ).kind,
     "lock_pool",
+  );
+  assert.equal(
+    planSettlementAction(
+      snapshot(makeState({ eligibleRulePoolHash: HASH }), { ...eligible, nowSeconds: 1_500 }),
+    ).kind,
+    "request_finalist_vrf",
   );
 });
 

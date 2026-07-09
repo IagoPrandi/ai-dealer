@@ -10,6 +10,81 @@ import { fmtSol, fmtTurnId } from "../data/format";
 import type { UiRule } from "../data/types";
 import { Ico, Medal, VoteTally, finalistStatus, useCountdownTo } from "../shared";
 
+type FinalistPhaseKind = "decision" | "locked" | "original_only" | "pending" | "waiting";
+
+export function getFinalistPhaseView({
+  decisionPhase,
+  electionStatus,
+  finalistsCount,
+  roundLoading,
+  shortlistPending,
+}: {
+  decisionPhase: boolean;
+  electionStatus: null | "locked" | "original_only" | "requested" | "settled";
+  finalistsCount: number;
+  roundLoading: boolean;
+  shortlistPending: boolean;
+}): {
+  body: string;
+  emptyBody: string;
+  emptyTitle: string;
+  kind: FinalistPhaseKind;
+  label: string;
+} {
+  if (finalistsCount > 0) {
+    return decisionPhase
+      ? {
+          body:
+            "10 finalists - 3 most voted + 7 by VRF. Vote against to eliminate (max 5). A rule falls when down-votes overtake up-votes. Survivors go to the active rule draw.",
+          emptyBody: "",
+          emptyTitle: "",
+          kind: "decision",
+          label: "Decision window",
+        }
+      : {
+          body:
+            "The finalist set is published for this round. The decision window is closed or not accepting elimination votes right now.",
+          emptyBody: "",
+          emptyTitle: "",
+          kind: "locked",
+          label: "Finalist set",
+        };
+  }
+
+  if (electionStatus === "original_only") {
+    return {
+      body:
+        "No eligible alternative rule was available for this round, so the original draw is the only active path.",
+      emptyBody:
+        "No eligible alternative rule was available when the play window closed.",
+      emptyTitle: "Original draw only",
+      kind: "original_only",
+      label: "Original only",
+    };
+  }
+
+  if (roundLoading || shortlistPending || electionStatus === "locked" || electionStatus === "requested") {
+    return {
+      body:
+        "Phase 1 is closed. The shortlist draw is in progress, and phase 2 starts when finalist IDs are published.",
+      emptyBody:
+        "The eligible pool is locked. Waiting for the VRF result that publishes the finalist shortlist.",
+      emptyTitle: "Shortlist draw in progress",
+      kind: "pending",
+      label: "Shortlist draw",
+    };
+  }
+
+  return {
+    body:
+      "Finalists are created after the play window closes and the eligible rule pool is locked.",
+    emptyBody: "Finalists are locked when the play window closes.",
+    emptyTitle: "No finalists yet",
+    kind: "waiting",
+    label: "Waiting for phase 2",
+  };
+}
+
 function VoteGate() {
   const { fees, go } = useIdealer();
   return (
@@ -104,23 +179,54 @@ function FinalistRow({ rule }: { rule: UiRule }) {
 }
 
 export function VoteScreen() {
-  const { actionError, decisionEndsAt, decisionPhase, fees, played, rules, turnId } = useIdealer();
+  const {
+    actionError,
+    decisionEndsAt,
+    decisionPhase,
+    fees,
+    phase1EndsAt,
+    played,
+    reloadAll,
+    round,
+    roundLoading,
+    rules,
+    turnId,
+    turnOpen,
+  } = useIdealer();
   const [tab, setTab] = useState<"abertas" | "finalistas">(decisionPhase ? "finalistas" : "abertas");
   const [h, m, s] = useCountdownTo(decisionEndsAt);
+  const nowSec = Math.floor(Date.now() / 1000);
+  const phase1Closed =
+    turnOpen &&
+    phase1EndsAt !== null &&
+    nowSec >= phase1EndsAt;
+  const all = rules.rules;
+  const finalists = all.filter((r) => r.finalist);
+  const shortlistPending =
+    phase1Closed &&
+    finalists.length === 0 &&
+    round?.election?.status !== "original_only";
 
-  // When the decision window opens while this screen is mounted, jump to the
-  // finalists tab once; the user can still switch back manually.
+  // When the play window closes or the decision window opens while this screen
+  // is mounted, jump to the finalists tab once so the settlement state is clear.
   const prevDecisionPhase = useRef(decisionPhase);
+  const prevPhase1Closed = useRef(phase1Closed);
   useEffect(() => {
-    if (decisionPhase && !prevDecisionPhase.current) {
+    if ((decisionPhase && !prevDecisionPhase.current) || (phase1Closed && !prevPhase1Closed.current)) {
       setTab("finalistas");
     }
     prevDecisionPhase.current = decisionPhase;
-  }, [decisionPhase]);
+    prevPhase1Closed.current = phase1Closed;
+  }, [decisionPhase, phase1Closed]);
 
-  const all = rules.rules;
-  const finalists = all.filter((r) => r.finalist);
   const eliminatedCount = finalists.filter((r) => finalistStatus(r) === "eliminada").length;
+  const finalistPhase = getFinalistPhaseView({
+    decisionPhase,
+    electionStatus: round?.election?.status ?? null,
+    finalistsCount: finalists.length,
+    roundLoading,
+    shortlistPending,
+  });
   const gated = !played;
   // Before turn 100, only the first same-wallet/same-rule vote is free.
   const firstVoteFree = turnId < VOTE_FEE_START_TURN;
@@ -171,15 +277,15 @@ export function VoteScreen() {
           <>
             <div className="ide-card" style={{ padding: "13px 15px", marginBottom: 14, borderColor: "rgba(255,210,63,0.3)", background: "linear-gradient(110deg, rgba(255,210,63,0.08), var(--surface))" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span className="ide-phase decision"><span className="dot" /> Decision window</span>
-                {decisionEndsAt ? (
+                <span className="ide-phase decision"><span className="dot" /> {finalistPhase.label}</span>
+                {decisionEndsAt && finalistPhase.kind === "decision" ? (
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 13, color: "var(--muted)" }}>
                     <Ico.clock style={{ color: "var(--yellow)" }} /> <span className="ide-num" style={{ fontWeight: 700, color: "var(--text)" }}>{h}:{m}:{s}</span>
                   </span>
                 ) : null}
               </div>
               <p style={{ margin: "10px 0 0", fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5 }}>
-                10 finalists - 3 most voted + 7 by VRF. Vote <b style={{ color: "var(--red)" }}>against</b> to eliminate (max 5). A rule falls when down-votes overtake up-votes. Survivors go to the <b style={{ color: "var(--text)" }}>active rule</b> draw.
+                {finalistPhase.body}
               </p>
               <div style={{ marginTop: 11, display: "flex", gap: 7, flexWrap: "wrap" }}>
                 <span className="ide-pill" style={{ padding: "4px 10px", fontSize: 11 }}>{eliminatedCount} eliminated - {Math.max(0, 5 - eliminatedCount)} left</span>
@@ -189,8 +295,24 @@ export function VoteScreen() {
             </div>
 
             {finalists.length === 0 ? (
-              <div className="ide-card" style={{ padding: 18, textAlign: "center", color: "var(--muted)", fontSize: 14 }}>
-                Finalists are locked when the play window closes.
+              <div className="ide-card" style={{ padding: 18, color: "var(--muted)", fontSize: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: finalistPhase.kind === "pending" ? 12 : 0 }}>
+                  <Ico.clock style={{ color: finalistPhase.kind === "pending" ? "var(--yellow)" : "var(--dim)", flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: "var(--text)", fontWeight: 700, marginBottom: 3 }}>{finalistPhase.emptyTitle}</div>
+                    <div style={{ lineHeight: 1.45 }}>{finalistPhase.emptyBody}</div>
+                  </div>
+                </div>
+                {finalistPhase.kind === "pending" ? (
+                  <button
+                    className="ide-btn-ghost ide-btn"
+                    onClick={reloadAll}
+                    style={{ width: "100%", minHeight: 44, justifyContent: "center", padding: 12 }}
+                    type="button"
+                  >
+                    Refresh shortlist state
+                  </button>
+                ) : null}
               </div>
             ) : (
               <div style={{ display: "grid", gap: 9, gridTemplateColumns: "minmax(0, 1fr)" }}>

@@ -200,6 +200,7 @@ function buildTurnStateBuffer(): Uint8Array {
   data.writeBigInt64LE(200n, 16); // start_timestamp
   data.writeBigInt64LE(1_000n, 24); // end_timestamp
   data.writeUInt8(1, 32); // status = closed
+  data.writeUInt32LE(800, 41); // turn_duration_seconds
   Buffer.from([1, 2, 3, 4, 5, 6]).copy(data, 46); // draw_result
   data.writeBigUInt64LE(7n, 52); // active_rule_id
   Buffer.alloc(32, 0xaa).copy(data, 60); // active_rule_hash
@@ -229,6 +230,7 @@ test("decodeSettlementTurnState reads the trustless TurnState layout", () => {
   assert.equal(state.status, "closed");
   assert.equal(state.startTimestampSeconds, 200);
   assert.equal(state.endTimestampSeconds, 1_000);
+  assert.equal(state.turnDurationSeconds, 800);
   // Phase-1 → phase-2 boundary: start + floor((end - start) * bps / 10000).
   assert.equal(state.electionCutoffTimestampSeconds, 933);
   assert.equal(state.drawStatus, "fulfilled");

@@ -366,10 +366,9 @@ pub mod idealer {
         let clock = Clock::get()?;
         let config = &ctx.accounts.global_config;
         validate_live_turn(config, &ctx.accounts.turn_state)?;
-        validate_action_window(
+        validate_turn_action_window(
             clock.unix_timestamp,
-            ctx.accounts.turn_state.start_timestamp,
-            ctx.accounts.turn_state.end_timestamp,
+            &ctx.accounts.turn_state,
             config.guess_cutoff_bps,
         )?;
         validate_guess(&args.numbers)?;
@@ -455,10 +454,9 @@ pub mod idealer {
         let clock = Clock::get()?;
         let config = &ctx.accounts.global_config;
         validate_live_turn(config, &ctx.accounts.turn_state)?;
-        validate_action_window(
+        validate_turn_action_window(
             clock.unix_timestamp,
-            ctx.accounts.turn_state.start_timestamp,
-            ctx.accounts.turn_state.end_timestamp,
+            &ctx.accounts.turn_state,
             config.rule_election_cutoff_bps,
         )?;
         validate_game_token(
@@ -551,10 +549,9 @@ pub mod idealer {
         let clock = Clock::get()?;
         let config = &ctx.accounts.global_config;
         validate_live_turn(config, &ctx.accounts.turn_state)?;
-        validate_action_window(
+        validate_turn_action_window(
             clock.unix_timestamp,
-            ctx.accounts.turn_state.start_timestamp,
-            ctx.accounts.turn_state.end_timestamp,
+            &ctx.accounts.turn_state,
             config.rule_election_cutoff_bps,
         )?;
         validate_game_token(
@@ -736,10 +733,9 @@ pub mod idealer {
         let clock = Clock::get()?;
         let config = &ctx.accounts.global_config;
         validate_live_turn(config, &ctx.accounts.turn_state)?;
-        validate_action_window(
+        validate_turn_action_window(
             clock.unix_timestamp,
-            ctx.accounts.turn_state.start_timestamp,
-            ctx.accounts.turn_state.end_timestamp,
+            &ctx.accounts.turn_state,
             config.rule_election_cutoff_bps,
         )?;
 
@@ -794,6 +790,8 @@ pub mod idealer {
     /// Finalist-election VRF commit step. Verifies the supplied Switchboard
     /// account (owner + configured election queue) and records its address and
     /// committed `seed_slot` for the later `settle_rule_election` verification.
+    /// This starts only after phase 1 ends and the eligible pool is locked; the
+    /// phase-2 clock starts when the shortlist is actually settled.
     pub fn request_rule_election_vrf(ctx: Context<RequestRuleElectionVrf>) -> Result<()> {
         let config = &ctx.accounts.global_config;
         require!(!config.paused, IdealerError::ProtocolPaused);
@@ -879,6 +877,14 @@ pub mod idealer {
             .unix_timestamp
             .checked_add(ELIMINATION_WINDOW_SECONDS)
             .ok_or(IdealerError::ArithmeticOverflow)?;
+        let phase2_duration_seconds = phase_two_duration_seconds(config, turn)?;
+        let shifted_end_timestamp = clock
+            .unix_timestamp
+            .checked_add(phase2_duration_seconds)
+            .ok_or(IdealerError::ArithmeticOverflow)?;
+        if shifted_end_timestamp > turn.end_timestamp {
+            turn.end_timestamp = shifted_end_timestamp;
+        }
         turn.election_vrf_fulfillment = randomness_source;
         turn.elected_finalist_index = 0;
         turn.active_rule_id = 0;
@@ -1596,14 +1602,46 @@ fn validate_live_turn(config: &GlobalConfig, turn: &TurnState) -> Result<()> {
     Ok(())
 }
 
+fn planned_turn_end_timestamp(turn: &TurnState) -> Result<i64> {
+    turn.start_timestamp
+        .checked_add(i64::from(turn.turn_duration_seconds))
+        .ok_or(error!(IdealerError::ArithmeticOverflow))
+}
+
+fn rule_election_cutoff_timestamp(config: &GlobalConfig, turn: &TurnState) -> Result<i64> {
+    let cutoff_elapsed = i128::from(turn.turn_duration_seconds)
+        .checked_mul(i128::from(config.rule_election_cutoff_bps))
+        .ok_or(IdealerError::ArithmeticOverflow)?
+        .checked_div(i128::from(BASIS_POINTS_DENOMINATOR))
+        .ok_or(IdealerError::ArithmeticOverflow)?;
+    let cutoff_timestamp = i128::from(turn.start_timestamp)
+        .checked_add(cutoff_elapsed)
+        .ok_or(IdealerError::ArithmeticOverflow)?;
+    i64::try_from(cutoff_timestamp).map_err(|_| error!(IdealerError::ArithmeticOverflow))
+}
+
+fn phase_two_duration_seconds(config: &GlobalConfig, turn: &TurnState) -> Result<i64> {
+    planned_turn_end_timestamp(turn)?
+        .checked_sub(rule_election_cutoff_timestamp(config, turn)?)
+        .ok_or(error!(IdealerError::ArithmeticOverflow))
+}
+
+fn validate_turn_action_window(now: i64, turn: &TurnState, cutoff_bps: u16) -> Result<()> {
+    validate_action_window(
+        now,
+        turn.start_timestamp,
+        planned_turn_end_timestamp(turn)?,
+        cutoff_bps,
+    )
+}
+
 fn submit_guess_with_game_token_init(ctx: Context<SubmitGuess>, args: SubmitGuessArgs) -> Result<()> {
     let clock = Clock::get()?;
     let config = &ctx.accounts.global_config;
     validate_live_turn(config, &ctx.accounts.turn_state)?;
-    validate_action_window(
+    validate_turn_action_window(
         clock.unix_timestamp,
-        ctx.accounts.turn_state.start_timestamp,
-        ctx.accounts.turn_state.end_timestamp,
+        &ctx.accounts.turn_state,
         config.guess_cutoff_bps,
     )?;
     validate_guess(&args.numbers)?;
@@ -1784,20 +1822,8 @@ fn derive_active_survivor_index(
 fn require_election_cutoff_reached(config: &GlobalConfig, turn: &TurnState) -> Result<()> {
     validate_live_turn(config, turn)?;
     let clock = Clock::get()?;
-    let duration = turn
-        .end_timestamp
-        .checked_sub(turn.start_timestamp)
-        .ok_or(IdealerError::ArithmeticOverflow)?;
-    let cutoff_elapsed = i128::from(duration)
-        .checked_mul(i128::from(config.rule_election_cutoff_bps))
-        .ok_or(IdealerError::ArithmeticOverflow)?
-        .checked_div(i128::from(BASIS_POINTS_DENOMINATOR))
-        .ok_or(IdealerError::ArithmeticOverflow)?;
-    let cutoff_timestamp = i128::from(turn.start_timestamp)
-        .checked_add(cutoff_elapsed)
-        .ok_or(IdealerError::ArithmeticOverflow)?;
     require!(
-        i128::from(clock.unix_timestamp) >= cutoff_timestamp,
+        clock.unix_timestamp >= rule_election_cutoff_timestamp(config, turn)?,
         IdealerError::ElectionCutoffNotReached
     );
     Ok(())

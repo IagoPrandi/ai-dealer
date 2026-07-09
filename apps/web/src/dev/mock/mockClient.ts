@@ -47,6 +47,10 @@ function createAccountWriter(length: number) {
       view.setUint16(offset, value, true);
       offset += 2;
     },
+    u32(value: number) {
+      view.setUint32(offset, value, true);
+      offset += 4;
+    },
     u64(value: bigint | number) {
       view.setBigUint64(offset, BigInt(value), true);
       offset += 8;
@@ -81,11 +85,14 @@ function encodeGlobalConfig(): Uint8Array {
 }
 
 function encodeTurnState(): Uint8Array {
-  const w = createAccountWriter(33);
+  const w = createAccountWriter(46);
   w.u64(MOCK_TURN_STATE.turnId);
   w.i64(MOCK_TURN_STATE.startTimestamp);
   w.i64(MOCK_TURN_STATE.endTimestamp);
   w.u8(MOCK_TURN_STATE.status === "open" ? 0 : 1);
+  w.u64(0); // prize_pool_amount_lamports
+  w.u32(MOCK_TURN_STATE.turnDurationSeconds);
+  w.u8(0); // cycle_index
   return w.data;
 }
 

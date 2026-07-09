@@ -116,21 +116,26 @@ Those are trust and execution layers. The user-facing product is a live mobile g
 
 A **turn** is the atomic unit of the game.
 
-One turn equals one fixed time window composed of **two sequential phases**:
+One turn is composed of **two sequential player-facing phases** plus a short
+system settlement step between them:
 
 ```text
 Phase 1 — create & play: propose rules, vote on rules, and pick numbers.
-Phase 2 — shortlist & draw: the eligible pool is locked and filtered into the
-          10-rule finalist shortlist, players vote finalists out during the
-          decision/elimination window, the active rule is elected from the
-          survivors, and the draw fires at the end of the turn.
+Shortlist draw step: after phase 1 closes, the eligible pool is locked and the
+          finalist-selection VRF forms the 10-rule shortlist.
+Phase 2 — shortlist & draw: starts only when the finalist shortlist is
+          published; players vote finalists out during the decision/elimination
+          window, the active rule is elected from the survivors, and the draw
+          fires at the end of phase 2.
 ```
 
-In production every turn lasts **24 hours**: **22 hours of phase 1** followed by
-**2 hours of phase 2**. The phase boundary is the on-chain rule-election/guess
-cutoff (9167 bps of the turn duration ≈ 22h; basis points cannot express 22/24
-exactly, so a drift of a few seconds is accepted). Test environments scale the
-turn down (e.g. 8-minute turns) while keeping the same two-phase shape.
+In production, phase 1 lasts approximately **22 hours** and closes at the
+on-chain rule-election/guess cutoff (9167 bps of the base turn duration). The
+shortlist draw starts only after that cutoff. Phase 2 lasts approximately
+**2 hours** and starts when the finalist shortlist is published, so VRF reveal
+latency does not reduce the time players have to inspect finalists and vote
+against them. Test environments scale the base timings down while keeping this
+shape.
 
 Each turn is independent:
 
@@ -725,16 +730,19 @@ This avoids a purely off-chain governance gate and prevents the backend from bec
 > written before this revision still reference the old cycle; the model below is
 > the binding one.
 
-Every production turn lasts **24 hours** and is composed of two sequential phases:
+Every production turn is composed of two sequential player-facing phases, with
+the shortlist VRF draw running between them:
 
 ```text
 Phase 1 — create & play (~22h): rule proposals, approval voting, and guess
           (number picking) submission. Closes at the rule-election/guess
           cutoff: 9167 bps of the turn duration (≈ 22h).
-Phase 2 — shortlist & draw (~2h): eligible pool locked, 10-rule finalist
-          shortlist formed (3 top-voted + 7 VRF-random), fixed 1-hour
-          decision/elimination window, active rule elected from the
-          survivors, and the VRF draw at the turn's end.
+Shortlist draw step: eligible pool locked and finalist-selection VRF requested
+          after phase 1 closes. Phase 2 has not started yet.
+Phase 2 — shortlist & draw (~2h): starts when the 10-rule finalist shortlist is
+          published (3 top-voted + 7 VRF-random), then runs the fixed 1-hour
+          decision/elimination window, active-rule election from survivors, and
+          the VRF draw at the phase-2 end.
 ```
 
 The on-chain 4-slot duration-cycle machinery is retained with equal slots
@@ -742,7 +750,8 @@ The on-chain 4-slot duration-cycle machinery is retained with equal slots
 and automation keep working. Test/devnet environments scale the turn duration
 down at runtime (`IDEALER_DEVNET_TURN_DURATION_SCALE_BPS`) and shrink the
 decision window at build time (`manual-test` → 2 minutes, `devnet-test` → 5
-seconds) while preserving the same two-phase shape.
+seconds) while preserving the same phase shape. The on-chain `end_timestamp` may
+shift after finalist settlement so phase 2 receives its full configured duration.
 
 #### Product Rationale
 
@@ -753,26 +762,27 @@ seconds) while preserving the same two-phase shape.
 
 #### Retention Requirements
 
-- always show which phase is active and its own countdown (phase 1 → time to the cutoff; phase 2 → time to the draw at turn end);
+- always show which phase is active and its own countdown (phase 1 -> time to the cutoff; shortlist draw -> in-progress state; phase 2 -> time to the draw at phase-2 end);
 - surface the decision/elimination window prominently when it opens;
 - add return prompts near the end of each phase;
 - use share cards and rule status updates to maintain momentum during phase 1.
 
 ### 5.4 Turn Lifecycle
 
-A turn's total duration is the sum of its two phases: **phase 1 — create & play** (rule proposals, approval voting, and guess submission) followed by **phase 2 — shortlist & draw** (finalist shortlist, decision/elimination window, active-rule election, and the draw at the turn's end). The phase boundary is the proportional rule-election/guess cutoff, so the same logic holds at any turn duration (24h in production, minutes on devnet). Rule compilation is amortized during phase 1 instead of being concentrated after the finalist set is formed.
+A turn's player-facing duration is **phase 1 — create & play** (rule proposals, approval voting, and guess submission) followed by **phase 2 — shortlist & draw** (published finalist shortlist, decision/elimination window, active-rule election, and the draw). The phase-1 close is the proportional rule-election/guess cutoff. The finalist-selection VRF starts only after that cutoff, and phase 2 starts only when the finalist shortlist is published. Rule compilation is amortized during phase 1 instead of being concentrated after the finalist set is formed.
 
-The timer shown to players always counts down the **current phase**: during phase 1 it counts to the cutoff; during phase 2 it counts to the turn's end, when the draw fires.
+The timer shown to players always counts down the **current player-facing phase**: during phase 1 it counts to the cutoff; during the shortlist VRF step it shows an in-progress state; during phase 2 it counts to the draw at the phase-2 end.
 
 Recommended default (production: 24h turn = 22h phase 1 + 2h phase 2):
 
 ```text
 Rule preflight and background precompilation run continuously while phase 1 is open.
 Rule proposals, approval voting, and guess submission close together at the phase-1 cutoff (9167 bps ≈ 22h).
-Phase 2 starts at the cutoff: the eligible pool is locked and the finalist set of 10 is formed (3 top-voted + finalist-election VRF for 7 random). No active rule is chosen yet.
+After the cutoff, the eligible pool is locked and finalist-selection VRF forms the finalist set of 10 (3 top-voted + finalist-election VRF for 7 random). Phase 2 has not started yet.
+Phase 2 starts when the finalist set is published. No active rule is chosen yet.
 Decision/elimination window runs for a fixed 60 minutes inside phase 2.
 At the end of the decision window: eliminations are applied, the active-election VRF selects one rule from the survivors, and the artifact is frozen.
-The VRF draw fires at the end of the turn (24h mark), right after which the turn closes and settlement projects results.
+The VRF draw fires at the end of phase 2, right after which the turn closes and settlement projects results.
 ```
 
 For the production 24-hour turn, this maps to:
@@ -780,10 +790,11 @@ For the production 24-hour turn, this maps to:
 ```text
 Rule preflight/precompilation: 0–22h, continuously after each proposal.
 Rule proposals, approval voting, and guess submission close at ~22h (9167 bps).
-Eligible pool locked and finalist set of 10 formed shortly after 22h (phase-2 start).
-Decision/elimination window: ~22h → ~23h (fixed 1 hour).
-Active rule elected from survivors and frozen at ~23h.
-Draw fires at 24h (turn end); the turn then closes and settles.
+Eligible pool locked and finalist-selection VRF starts shortly after ~22h.
+Phase 2 starts when the finalist set of 10 is published.
+Decision/elimination window: first fixed 1 hour of phase 2.
+Active rule elected from survivors and frozen after the decision window.
+Draw fires at the end of phase 2; the turn then closes and settles.
 ```
 
 Generic flow:
@@ -816,7 +827,7 @@ Turn N begins
 │       and guess submission end together
 │       └── Each finalist's approval (positive) vote count is the value locked here
 │
-├── PHASE 2 — SHORTLIST & DRAW (~2h)
+├── SHORTLIST DRAW STEP
 │   │
 │   ├── Finalist set of 10 is locked (no active rule chosen yet)
 │   │   ├── Eligible pool is locked from rules with valid precompiled artifacts
@@ -826,6 +837,8 @@ Turn N begins
 │   │   ├── On VRF fulfillment, random finalist subset is derived from the VRF word
 │   │   │   └── 7 additional rules by default from the remaining eligible pool
 │   │   └── Finalist set is formed: 3 top-voted + 7 VRF-random = 10 by default
+│
+├── PHASE 2 — SHORTLIST & DRAW (~2h, starts when finalists are published)
 │   │
 │   ├── DECISION / ELIMINATION WINDOW (fixed 60 minutes, inside phase 2)
 │   │   ├── Game Token holders may cast elimination votes against finalists
@@ -6538,7 +6551,7 @@ This section replaces the former open questions list. The following decisions ar
 4. Full sanitized original rule text is stored on-chain in the `RuleProposal` account. Off-chain copies may exist only for indexing, search, analytics, and UI performance.
 5. Rule votes are on-chain through `RuleVote` accounts or an equivalent on-chain account model. MVP does not use off-chain vote commitments as the primary voting record.
 6. The finalist set is exactly 10 rules whenever at least 10 eligible rules exist: 3 top-voted eligible rules plus 7 VRF-random eligible rules. If fewer than 10 eligible rules exist, all available eligible rules form the finalist set.
-7. Every production turn lasts 24 hours: ~22h of phase 1 (create rules + pick numbers, closing at the 9167-bps rule-election/guess cutoff) followed by ~2h of phase 2 (finalist shortlist, 1-hour decision/elimination window, active-rule election, draw at turn end). (Revised 2026-07; replaces the former `2h → 2h → 8h → 8h` cycle.)
+7. Every production turn has ~22h of phase 1 (create rules + pick numbers, closing at the 9167-bps rule-election/guess cutoff). The shortlist VRF starts only after phase 1 closes. Phase 2 starts when the finalist shortlist is published and then runs for ~2h (1-hour decision/elimination window, active-rule election, draw at phase-2 end). (Revised 2026-07; replaces the former `2h → 2h → 8h → 8h` cycle.)
 8. The alternative rule pool remains 50% of the post-treasury playable prize pool. If no alternative rule is active or no alternative-rule winners exist, the alternative bucket follows the rollover rules.
 9. Creator rewards remain fixed at 15% of each individual alternative-rule winner payout, funded from the creator reward reserve sourced from platform monetization and subject to reserve and cap.
 10. MVP reserves 20% of platform monetization for the creator reward reserve. This is a configurable treasury policy, but winner-visible payouts must never be reduced to fund creator rewards.

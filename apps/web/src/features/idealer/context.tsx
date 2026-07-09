@@ -47,9 +47,9 @@ export interface IdealerContextValue {
   fees: { play: number; playNext: number; remove: number; rule: number; ruleNext: number; vote: number };
   guessCutoffEndsAt: null | number;
   /**
-   * When phase 1 (create rules + pick numbers) ends and phase 2 (finalist
-   * shortlist, elimination voting, active rule, draw) begins — the on-chain
-   * rule-election cutoff of the active turn. `null` while no turn is loaded.
+   * When phase 1 (create rules + pick numbers) ends. The shortlist draw starts
+   * after this cutoff; phase 2 starts only once finalist IDs are published.
+   * `null` while no turn is loaded.
    */
   phase1EndsAt: null | number;
   /** True while the active on-chain turn account exists with status `open`. */

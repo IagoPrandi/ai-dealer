@@ -65,11 +65,16 @@ export function HomeScreen() {
   const { claims } = usePlayerClaims(walletAddress);
   const claimableSol = lamportsToSol(claims?.availableLamports ?? 0);
   const nowSec = Math.floor(Date.now() / 1000);
-  // Turn = phase 1 (create rules + pick numbers, until the rule-election
-  // cutoff) + phase 2 (finalist shortlist, elimination voting, active rule,
-  // draw at the turn's end). The hero timer counts down the current phase.
+  // Phase 1 is fixed by the rule-election cutoff. The shortlist draw happens
+  // after it closes; phase 2 starts when finalists are published.
   const inPhase1 = turnOpen && phase1EndsAt !== null && nowSec < phase1EndsAt;
-  const inPhase2 = turnOpen && !inPhase1 && endSeconds !== null && nowSec < endSeconds;
+  const hasFinalists = rules.rules.some((rule) => rule.finalist);
+  const shortlistDrawPending =
+    turnOpen &&
+    !inPhase1 &&
+    !hasFinalists &&
+    round?.election?.status !== "original_only";
+  const inPhase2 = turnOpen && !inPhase1 && hasFinalists && endSeconds !== null && nowSec < endSeconds;
   const drawingNow = turnOpen && !inPhase1 && !inPhase2;
   const showResultLink =
     resultTurnId > 0 &&
@@ -107,6 +112,8 @@ export function HomeScreen() {
             <div style={{ display: "flex", justifyContent: "center", gap: 8, marginBottom: 14 }}>
               {inPhase1 ? (
                 <span className="ide-pill" style={{ color: "var(--muted)" }}><Ico.clock style={{ color: "var(--green)" }} /> Create &amp; play · ends in <span className="ide-num" style={{ color: "var(--text)", fontWeight: 700, marginLeft: 2 }}>{p1h}:{p1m}:{p1s}</span></span>
+              ) : shortlistDrawPending ? (
+                <span className="ide-pill" style={{ color: "var(--muted)", borderColor: "rgba(199,125,255,0.3)" }}><Ico.dice style={{ color: "var(--purple-soft)", width: 14, height: 14 }} /> Shortlist draw in progress</span>
               ) : inPhase2 ? (
                 <span className="ide-pill" style={{ color: "var(--muted)", borderColor: "rgba(255,210,63,0.3)" }}><Ico.vote style={{ color: "var(--yellow)", width: 14, height: 14 }} /> Shortlist &amp; draw · ends in <span className="ide-num" style={{ color: "var(--text)", fontWeight: 700, marginLeft: 2 }}>{h}:{m}:{s}</span></span>
               ) : drawingNow ? (

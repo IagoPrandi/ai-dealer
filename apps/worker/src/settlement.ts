@@ -624,6 +624,7 @@ export interface SettlementTurnState {
   eliminatedFinalistHash: string | null;
   endTimestampSeconds: number;
   startTimestampSeconds: number;
+  turnDurationSeconds: number;
   finalistCount: number;
   finalistEliminated: boolean[];
   finalistRuleIds: number[];
@@ -660,6 +661,7 @@ export function decodeSettlementTurnState(
   const startTimestampSeconds = i64Number(view, 16);
   const endTimestampSeconds = i64Number(view, 24);
   const status = view.getUint8(32) === 0 ? "open" : "closed";
+  const turnDurationSeconds = view.getUint32(41, true);
   const drawResult = Array.from(data.slice(46, 52));
   const activeRuleId = u64Number(view, 52);
   const activeRuleHash = hex32At(data, 60);
@@ -702,10 +704,7 @@ export function decodeSettlementTurnState(
     drawnAtSeconds,
     electionCutoffTimestampSeconds:
       startTimestampSeconds +
-      Math.floor(
-        ((endTimestampSeconds - startTimestampSeconds) * ruleElectionCutoffBps) /
-          10_000,
-      ),
+      Math.floor((turnDurationSeconds * ruleElectionCutoffBps) / 10_000),
     electionVrfFulfillment,
     electionVrfRequest,
     eligibleRulePoolHash: hashOrNull(eligibleRulePoolHash),
@@ -714,6 +713,7 @@ export function decodeSettlementTurnState(
     eliminatedFinalistHash: hashOrNull(eliminatedFinalistHash),
     endTimestampSeconds,
     startTimestampSeconds,
+    turnDurationSeconds,
     finalistCount,
     finalistEliminated,
     finalistRuleIds,

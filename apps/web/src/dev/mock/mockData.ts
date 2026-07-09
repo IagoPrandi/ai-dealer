@@ -30,6 +30,7 @@ export const MOCK_TURN_STATE = {
   endTimestamp: Math.floor(Date.now() / 1000) + 3600,
   startTimestamp: Math.floor(Date.now() / 1000) - 1800,
   status: "open" as const,
+  turnDurationSeconds: 5400,
   turnId: MOCK_ACTIVE_TURN_ID,
 };
 

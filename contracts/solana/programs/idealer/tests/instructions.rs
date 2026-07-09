@@ -743,7 +743,7 @@ async fn advance_clock_to_turn_end(context: &mut ProgramTestContext, turn_id: u6
 async fn advance_clock_to_election_cutoff(context: &mut ProgramTestContext, turn_id: u64) {
     let turn_address = pda(&[b"turn", &turn_id.to_le_bytes()]);
     let turn: TurnState = read_anchor_account(context, turn_address).await;
-    let cutoff_elapsed = (turn.end_timestamp - turn.start_timestamp) * 7_500 / 10_000;
+    let cutoff_elapsed = i64::from(turn.turn_duration_seconds) * 7_500 / 10_000;
     let mut clock: Clock = context.banks_client.get_sysvar().await.unwrap();
     clock.unix_timestamp = turn.start_timestamp + cutoff_elapsed;
     context.set_sysvar(&clock);
@@ -874,9 +874,10 @@ async fn rule_election_locks_requests_and_settles_active_rule() {
     assert_eq!(proposal.state, RuleState::Eligible);
     assert_eq!(proposal.precompilation_status, PrecompilationStatus::Passed);
 
-    advance_clock_to_election_cutoff(&mut context, turn_id).await;
     let authority = context.payer.pubkey();
     let turn_address = pda(&[b"turn", &turn_id.to_le_bytes()]);
+
+    advance_clock_to_election_cutoff(&mut context, turn_id).await;
     let election_cutoff_ts = context
         .banks_client
         .get_sysvar::<Clock>()
@@ -904,10 +905,11 @@ async fn rule_election_locks_requests_and_settles_active_rule() {
     .unwrap();
     let turn: TurnState = read_anchor_account(&mut context, turn_address).await;
     assert_ne!(turn.eligible_rule_pool_hash, [0; 32]);
+    assert_eq!(turn.election_vrf_request, Pubkey::default());
+    let original_end_timestamp = turn.end_timestamp;
 
-    // Finalist-election VRF commit using the genesis-registered Switchboard
-    // account from the configured election queue. Its committed seed slot is
-    // recorded for the trustless settle.
+    // The shortlist VRF starts only after phase 1 closes and the eligible pool
+    // is locked. Phase 2 starts later, when the finalist set is settled.
     process(
         &mut context,
         Instruction {
@@ -925,10 +927,14 @@ async fn rule_election_locks_requests_and_settles_active_rule() {
     )
     .await
     .unwrap();
+    let turn: TurnState = read_anchor_account(&mut context, turn_address).await;
+    assert_eq!(turn.election_vrf_request, election_randomness_account);
 
-    // Warp to the reveal slot (keeping the election cutoff timestamp) and settle
-    // the finalist election from the verified Switchboard value.
-    warp_with_timestamp(&mut context, election_reveal_slot, election_cutoff_ts).await;
+    // Warp to the reveal slot with a small post-cutoff delay and settle the
+    // finalist election from the verified Switchboard value. That delay should
+    // shift the turn end so phase 2 keeps its full planned duration.
+    let election_settle_ts = election_cutoff_ts + 2;
+    warp_with_timestamp(&mut context, election_reveal_slot, election_settle_ts).await;
     let mut settle_accounts = accounts::SettleRuleElection {
         authority,
         global_config: pda(&[b"global_config"]),
@@ -958,6 +964,7 @@ async fn rule_election_locks_requests_and_settles_active_rule() {
     assert_eq!(turn.finalist_count, 1);
     assert_eq!(turn.finalist_rule_ids[0], rule_id);
     assert_eq!(turn.active_rule_id, 0);
+    assert!(turn.end_timestamp > original_end_timestamp);
     assert!(turn.elimination_window_end_timestamp > turn.elimination_window_start_timestamp);
 
     // No elimination votes are cast, so the sole finalist survives. Advance past

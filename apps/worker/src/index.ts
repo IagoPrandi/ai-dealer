@@ -257,6 +257,7 @@ async function getActiveTurnStatus() {
           endTimestamp: turnState.snapshot.endTimestamp,
           startTimestamp: turnState.snapshot.startTimestamp,
           status: turnState.snapshot.status,
+          turnDurationSeconds: turnState.snapshot.turnDurationSeconds,
           turnId: turnState.snapshot.turnId,
         }
       : null,
