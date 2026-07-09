@@ -68,6 +68,17 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-07-09 (Live rule precompilation loop — fixes always-`original_only` election)
+
+- Opened required documents/context before working: `PRD.md` (§6.6/§6.12/§7.9 background precompilation and original-only path), `PROGRESS_TRACKER.md`, `.claude/skills`, and `.claude/skills/idealer-test-and-verify/SKILL.md`.
+- Diagnosed a real gap in the live flow: a rule submitted through the app lands on-chain as `RuleProposal { state: Proposed, precompilation: Pending }`, but nothing in the running app moved it to `Eligible`. The AI validation (`runRuleValidationCycle` / API `/rule-validations/run`) and the on-chain `precompile_rule` instruction were only ever exercised by the devnet seed operators (`devnet-seed-real-inputs.ts`, `devnet-10-player-simulation.ts`); the web app only displays precompile status and the worker's two loops (turn-automation, settlement) never validate/precompile. Result: every turn with real user rules had an empty eligible pool and the election correctly fell to `original_only` (observed live on turn 105 with 1 submitted rule + 1 vote).
+- Added `apps/worker/src/precompile-loop.ts`: an env-gated (`IDEALER_RULE_PRECOMPILE_ENABLED`, OFF by default), authority-signed loop that runs during phase 1 (before the on-chain `rule_election_cutoff_bps`). Each pass fetches the active turn's still-`proposed`/`pending` rules from the API, runs the deterministic compiler via `/rule-validations/run` (stores the artifact + projects `eligible`), and records the real on-chain `precompile_rule` with the API-returned artifact hash so on-chain state, the frozen election hash, and the stored artifact reconcile. Idempotent (skips rules already moved out of proposed/pending), re-checks the cutoff before every send, and never precompiles an `INVALID` rule. No mocks, no fallbacks; reuses the tested `createPrecompileRuleInstruction`.
+- Wired the loop into the worker entrypoint (`apps/worker/src/index.ts`) alongside the settlement loop, and enabled it in `.env` for local/devnet dev.
+- Added `apps/worker/src/precompile-loop.test.ts` (7 cases): precompiles a valid proposed rule, validates-but-never-sends for invalid, idempotent skip of already-eligible/invalidated, cutoff-passed guard, mid-pass cutoff break, no-active-turn, and disabled-flag.
+- Verified locally: `pnpm --filter @idealer/worker typecheck`, `test` (95/95), `lint` (0 warnings), `build`.
+- Verified live on devnet (turn 106): proposed one real rule on-chain in `Proposed`/`Pending` WITHOUT precompiling it, then the running loop precompiled it — `precompile turn=106 rule=1783638979079769 signature=BmCEyt8J…`; API projection moved to `state: eligible` / `precompilationStatus: passed`; and the on-chain election candidate now reads `isEligibleState: true` / `isPrecompiledValid: true` (source of truth), so it will enter the shortlist/election instead of `original_only`.
+- Separately observed (not fixed here): the full LLM rule-preflight harness (`/rule-preflight`) can exceed Node's undici 300s headers timeout when the local Ollama model is cold/slow; the precompile loop itself uses the fast deterministic compiler and is unaffected. No milestone checkbox/status was changed — milestone marking requires explicit user confirmation.
+
 ### 2026-07-09 (Shortlist draw wait-state reconciliation)
 
 - Opened required documents/context before working: `PRD.md`, `.claude/skills`, `.claude/skills/idealer-test-and-verify/SKILL.md`, and `.claude/skills/solana-dev/SKILL.md`.

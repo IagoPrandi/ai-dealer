@@ -30,12 +30,17 @@ import {
   runSettlementSchedulerOnce,
   startSettlementLoop,
 } from "./settlement-loop.js";
+import {
+  createPrecompileLoopConfig,
+  startPrecompileLoop,
+} from "./precompile-loop.js";
 
 export * from "./api-bridge.js";
 export * from "./claims.js";
 export * from "./draw.js";
 export * from "./guess-verification.js";
 export * from "./manual-control.js";
+export * from "./precompile-loop.js";
 export * from "./rule-validation.js";
 export * from "./settlement.js";
 export * from "./settlement-loop.js";
@@ -486,6 +491,21 @@ if (
 
   void createSettlementSchedulerConfig().then((settlementConfig) => {
     const timer = startSettlementLoop(settlementConfig);
+
+    if (!timer) {
+      return;
+    }
+
+    const stop = () => {
+      clearInterval(timer);
+    };
+
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+  });
+
+  void createPrecompileLoopConfig().then((precompileConfig) => {
+    const timer = startPrecompileLoop(precompileConfig);
 
     if (!timer) {
       return;
