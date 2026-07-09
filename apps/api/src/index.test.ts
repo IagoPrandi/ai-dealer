@@ -26,6 +26,7 @@ import {
   getRepeatedVoteFeeReconciliation,
   getRewardSummary,
   getActivityEvents,
+  getDefaultActiveTurnId,
   getRolloverActivityEvents,
   getRoundSummary,
   getRuleRemovalActivityEvents,
@@ -1252,6 +1253,40 @@ test("round summary marks fulfilled settlement turns as completed", () => {
 
   assert.equal(summary.status, "completed");
   assert.equal(summary.draw?.status, "fulfilled");
+});
+
+test("default active turn follows the newest projected round", () => {
+  resetApiStateForTests();
+
+  assert.equal(getDefaultActiveTurnId(), 1);
+
+  saveDraw({
+    drawResult: [10, 56, 77, 94, 42, 51],
+    drawnAt: "2026-07-09T20:06:42.994Z",
+    failureCode: null,
+    randomnessAccount: base58,
+    randomnessSource: base58,
+    randomnessValue: "7".repeat(64),
+    requestedAt: "2026-07-09T20:06:36.607Z",
+    settleSignature: base58,
+    status: "fulfilled",
+    turnId: 101,
+  });
+  recordSettlementTransition({
+    fromState: "CLAIMABLE",
+    idempotencyKey: "101:CLOSED",
+    inputHash: "1".repeat(64),
+    outputHash: "2".repeat(64),
+    recordedAt: "2026-07-09T20:06:52.768Z",
+    signature: null,
+    toState: "CLOSED",
+    transitionReason: "done",
+    turnId: 101,
+  });
+
+  assert.equal(getDefaultActiveTurnId(), 101);
+  assert.equal(getRoundSummary(getDefaultActiveTurnId()).turnId, 101);
+  assert.equal(getRoundSummary(getDefaultActiveTurnId()).status, "completed");
 });
 
 test("round summary uses the caller-provided active turn id for current status", () => {

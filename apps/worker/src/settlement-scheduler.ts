@@ -271,6 +271,15 @@ export async function runSettlementCycle(
     recordedStates,
   });
 
+  if (plan.kind !== "done") {
+    await syncClosedTurnReadSide({
+      deps,
+      eligible,
+      onChain,
+      turnId,
+    });
+  }
+
   if (plan.kind === "wait" || plan.kind === "done") {
     if (plan.kind === "wait") {
       await syncVisibleWaitState({
@@ -310,6 +319,48 @@ export async function runSettlementCycle(
     ...(plan.toState ? { toState: plan.toState } : {}),
     turnId,
   };
+}
+
+async function syncClosedTurnReadSide(args: {
+  deps: SettlementCycleDeps;
+  eligible: ElectionCandidate[];
+  onChain: SettlementTurnState;
+  turnId: number;
+}) {
+  const { deps, eligible, onChain, turnId } = args;
+  if (onChain.status !== "closed" || onChain.drawStatus !== "fulfilled") {
+    return;
+  }
+
+  if (onChain.activeRuleId === null) {
+    await deps.bridge.publishElection(
+      buildOriginalOnlyElection(turnId, deps.electionConfig),
+    );
+  } else {
+    const finalistRandomness = await readRevealedRandomness(
+      deps.senders,
+      onChain.electionVrfFulfillment,
+    );
+    const activeRandomness = await readRevealedRandomness(
+      deps.senders,
+      onChain.activeElectionVrfFulfillment,
+    );
+    await deps.bridge.publishElection(
+      buildElectionProjection({
+        ...(activeRandomness ? { activeRandomness } : {}),
+        config: deps.electionConfig,
+        eligible,
+        ...(finalistRandomness ? { finalistRandomness } : {}),
+        nowIso: deps.nowIso(),
+        state: onChain,
+        status: "settled",
+      }),
+    );
+  }
+
+  await deps.bridge.publishDraw(
+    await buildFulfilledDrawFromState(onChain, deps, turnId),
+  );
 }
 
 interface ExecuteArgs {
@@ -775,6 +826,43 @@ function buildFulfilledDraw(
     randomnessValue: Buffer.from(result.randomness).toString("hex"),
     requestedAt: nowIso,
     settleSignature: result.signature,
+    status: "fulfilled",
+    turnId,
+  };
+}
+
+async function buildFulfilledDrawFromState(
+  state: SettlementTurnState,
+  deps: SettlementCycleDeps,
+  turnId: number,
+): Promise<PublishedDraw> {
+  if (!state.drawResult) {
+    throw new Error("Cannot rehydrate fulfilled draw without on-chain draw result.");
+  }
+  const randomness = await readRevealedRandomness(deps.senders, state.drawVrfRequest);
+  if (!randomness) {
+    throw new Error(
+      `Cannot rehydrate fulfilled draw because randomness ${state.drawVrfRequest.toBase58()} is not readable.`,
+    );
+  }
+  const derivedDraw = deriveDrawNumbers(randomness, turnId);
+  if (derivedDraw.some((number, index) => number !== state.drawResult?.[index])) {
+    throw new Error("On-chain draw result does not match revealed randomness.");
+  }
+  const drawnAt =
+    state.drawnAtSeconds > 0
+      ? new Date(state.drawnAtSeconds * 1_000).toISOString()
+      : deps.nowIso();
+  const randomnessAccount = state.drawVrfRequest.toBase58();
+  return {
+    drawResult: derivedDraw,
+    drawnAt,
+    failureCode: null,
+    randomnessAccount,
+    randomnessSource: randomnessAccount,
+    randomnessValue: Buffer.from(randomness).toString("hex"),
+    requestedAt: drawnAt,
+    settleSignature: null,
     status: "fulfilled",
     turnId,
   };

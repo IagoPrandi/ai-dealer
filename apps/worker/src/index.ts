@@ -26,6 +26,7 @@ import {
 } from "./turn-automation.js";
 import {
   createSettlementSchedulerConfig,
+  type SettlementSchedulerConfig,
   runSettlementSchedulerOnce,
   startSettlementLoop,
 } from "./settlement-loop.js";
@@ -64,6 +65,7 @@ export interface WorkerStatus {
   redis: "ok" | "error";
   turnAutomation: "disabled" | "enabled" | "error";
   manualControl: "disabled" | "enabled" | "error";
+  settlementAutomation: "disabled" | "enabled" | "error";
 }
 
 async function checkPostgres(databaseUrl: string): Promise<"ok" | "error"> {
@@ -96,6 +98,9 @@ export async function getWorkerStatus(): Promise<WorkerStatus> {
   const redisUrl = process.env.REDIS_URL;
   const turnAutomation = await createTurnAutomationConfig().catch(() => null);
   const manualControl = await createManualControlConfig().catch(() => null);
+  const settlementAutomation = await createSettlementSchedulerConfig().catch(
+    () => null,
+  );
 
   if (!databaseUrl || !redisUrl) {
     const firstTurnDurationSeconds =
@@ -108,6 +113,7 @@ export async function getWorkerStatus(): Promise<WorkerStatus> {
       manualControl: getManualControlStatus(manualControl),
       postgres: databaseUrl ? "ok" : "error",
       redis: redisUrl ? "ok" : "error",
+      settlementAutomation: getSettlementAutomationStatus(settlementAutomation),
       turnAutomation: getTurnAutomationStatus(turnAutomation),
     };
   }
@@ -126,6 +132,7 @@ export async function getWorkerStatus(): Promise<WorkerStatus> {
     manualControl: getManualControlStatus(manualControl),
     postgres,
     redis,
+    settlementAutomation: getSettlementAutomationStatus(settlementAutomation),
     turnAutomation: getTurnAutomationStatus(turnAutomation),
   };
 }
@@ -160,6 +167,20 @@ function getTurnAutomationStatus(
   }
 
   return config.authorityKeypairBytes ? "enabled" : "error";
+}
+
+function getSettlementAutomationStatus(
+  config: null | SettlementSchedulerConfig,
+): WorkerStatus["settlementAutomation"] {
+  if (!config) {
+    return "error";
+  }
+
+  if (!config.enabled) {
+    return "disabled";
+  }
+
+  return config.automation.authorityKeypairBytes ? "enabled" : "error";
 }
 
 const LOCAL_WEB_ORIGIN_PATTERN = /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3})(:\d+)?$/;

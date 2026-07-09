@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { PublicKey } from "@solana/web3.js";
 import type { ApiBridge } from "./api-bridge.js";
+import { deriveDrawNumbers } from "./draw.js";
 import type { ElectionCandidate, RuleElectionConfig } from "./election.js";
 import type { SettlementSenders, SettlementTurnState } from "./settlement.js";
 import {
@@ -578,12 +579,17 @@ test("orchestrator republishes the open shortlist window while waiting", async (
 
 test("orchestrator drives a closed no-rule turn through CLOSED idempotently", async () => {
   const { bridge, calls, recorded } = fakeBridge();
+  const drawRandomness = new Uint8Array(32).fill(0x0c);
   const state = makeState({
     drawStatus: "fulfilled",
-    drawResult: [1, 2, 3, 4, 5, 6],
+    drawResult: deriveDrawNumbers(drawRandomness, 1),
+    drawVrfRequest: SET,
     status: "closed",
   });
   const senders = {
+    async fetchRandomnessFor() {
+      return { randomness: drawRandomness, source: SET.toBase58(), status: "ready" };
+    },
     async fetchState() {
       return state;
     },
@@ -621,5 +627,7 @@ test("orchestrator drives a closed no-rule turn through CLOSED idempotently", as
   // CLOSED transition recorded exactly once (idempotent terminal).
   assert.equal(calls.filter((call) => call === "record:CLOSED").length, 1);
   assert.equal(recordedClaims, 1);
+  assert.ok(calls.includes("publishDraw"));
+  assert.ok(calls.includes("publishElection"));
   assert.ok(calls.includes("calculateWinners"));
 });

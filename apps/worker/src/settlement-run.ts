@@ -1,4 +1,6 @@
-import { pathToFileURL } from "node:url";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   createSettlementCycleDeps,
   createSettlementSchedulerConfig,
@@ -23,6 +25,14 @@ import {
  * worker container so it can sign with the on-chain authority keypair, and it
  * needs the API reachable (set `IDEALER_API_BASE_URL`).
  */
+
+const ROOT_ENV_PATH = resolve(
+  fileURLToPath(new URL("../../..", import.meta.url)),
+  ".env",
+);
+if (existsSync(ROOT_ENV_PATH)) {
+  process.loadEnvFile(ROOT_ENV_PATH);
+}
 
 const BROADCAST = process.env.IDEALER_SETTLE_BROADCAST === "1";
 const TIMEOUT_MS = 15 * 60_000;

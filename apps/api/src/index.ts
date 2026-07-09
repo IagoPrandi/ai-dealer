@@ -6141,6 +6141,10 @@ function getPublicTurnIds() {
   return [...turnIds].sort((left, right) => left - right);
 }
 
+export function getDefaultActiveTurnId() {
+  return getPublicTurnIds().at(-1) ?? IDEALER_ACTIVE_TURN_ID;
+}
+
 function addNumber(total: number, value: number | undefined) {
   return total + (Number.isSafeInteger(value) ? Number(value) : 0);
 }
@@ -9129,7 +9133,7 @@ if (isMainModule()) {
       const activeTurnIdParam = url.searchParams.get("activeTurnId");
       const activeTurnId =
         activeTurnIdParam === null
-          ? IDEALER_ACTIVE_TURN_ID
+          ? getDefaultActiveTurnId()
           : Number(activeTurnIdParam);
       if (!Number.isInteger(activeTurnId) || activeTurnId <= 0) {
         sendJson(request, response, 400, { error: "invalid_turn_id" });
