@@ -3163,3 +3163,12 @@ Passed:
 - Added regression tests for the worker base URL helper covering browser proxy default, explicit browser override, server loopback default, and explicit server URL.
 - Verified: `pnpm --filter @idealer/web test` (20/20), `pnpm --filter @idealer/web typecheck`, `pnpm --filter @idealer/web lint`, and `pnpm --filter @idealer/web build`.
 - Reviewed the result for inconsistencies: the fix does not add a fallback that hides worker errors, failed worker responses still surface as errors, UI copy was not changed, `.env` with local values was left untouched, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-09 (Home hero single countdown)
+
+- Reopened required context before working: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/develop-frontend/SKILL.md`, `.claude/skills/idealer-design-system/SKILL.md`, `.claude/skills/idealer-design-system/references/01-tokens.md`, `.claude/skills/idealer-design-system/references/02-components.md`, `.claude/skills/idealer-design-system/references/03-screens-and-state.md`, and `.claude/skills/idealer-ui-coherence/SKILL.md`.
+- Updated the home hero so phase 1 shows only the upper countdown pill and the copy now reads `Create & play · ends in ...`, without the `Phase 1` prefix.
+- Removed the lower `Guessing closes in` countdown pill and its now-unused phase-cutoff countdown calculation from `apps/web/src/features/idealer/screens/Home.tsx`.
+- Verified: `pnpm --filter @idealer/web typecheck`; `pnpm --filter @idealer/web lint`; Playwright smoke against the existing `http://localhost:3000` dev server confirmed the home renders, `Phase 1` is absent, and `Guessing closes in` is absent. The local server had no active turn, so the active phase timer itself was not visible in that smoke state.
+- Attempted to start a separate `NEXT_PUBLIC_UI_MOCK=1` dev server on port `3001` for richer active-turn visual verification, but Next.js blocked a second dev server for the same `apps/web` directory because an existing server was already running; the existing server was left untouched.
+- Reviewed the result for inconsistencies: UI copy remains English, existing pill/numeric styles are reused, no fallback was added, no milestone status was changed, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.

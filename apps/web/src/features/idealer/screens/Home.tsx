@@ -55,13 +55,12 @@ function PromptInput() {
 
 export function HomeScreen() {
   const {
-    bet, decisionEndsAt, decisionPhase, endSeconds, fees, go, guessCutoffEndsAt, openDetail, phase1EndsAt, played, players, prizeSol, rules, turnId,
+    bet, decisionEndsAt, decisionPhase, endSeconds, fees, go, openDetail, phase1EndsAt, played, players, prizeSol, rules, turnId,
     resultTurnId, round, turnOpen, turnReadyToPlay, turnStatusMessage, walletAddress,
   } = useIdealer();
 
   const [h, m, s] = useCountdownTo(endSeconds);
   const [p1h, p1m, p1s] = useCountdownTo(phase1EndsAt);
-  const [ch, cm, cs] = useCountdownTo(guessCutoffEndsAt);
   const [dh, dm, ds] = useCountdownTo(decisionEndsAt);
   const { claims } = usePlayerClaims(walletAddress);
   const claimableSol = lamportsToSol(claims?.availableLamports ?? 0);
@@ -72,9 +71,6 @@ export function HomeScreen() {
   const inPhase1 = turnOpen && phase1EndsAt !== null && nowSec < phase1EndsAt;
   const inPhase2 = turnOpen && !inPhase1 && endSeconds !== null && nowSec < endSeconds;
   const drawingNow = turnOpen && !inPhase1 && !inPhase2;
-  const showCutoff =
-    turnReadyToPlay && !played && guessCutoffEndsAt !== null && guessCutoffEndsAt > nowSec &&
-    guessCutoffEndsAt !== phase1EndsAt;
   const showResultLink =
     resultTurnId > 0 &&
     (resultTurnId < turnId ||
@@ -110,9 +106,9 @@ export function HomeScreen() {
           <div style={{ position: "relative", zIndex: 1 }}>
             <div style={{ display: "flex", justifyContent: "center", gap: 8, marginBottom: 14 }}>
               {inPhase1 ? (
-                <span className="ide-pill" style={{ color: "var(--muted)" }}><Ico.clock style={{ color: "var(--green)" }} /> Phase 1 · Create &amp; play · ends in <span className="ide-num" style={{ color: "var(--text)", fontWeight: 700, marginLeft: 2 }}>{p1h}:{p1m}:{p1s}</span></span>
+                <span className="ide-pill" style={{ color: "var(--muted)" }}><Ico.clock style={{ color: "var(--green)" }} /> Create &amp; play · ends in <span className="ide-num" style={{ color: "var(--text)", fontWeight: 700, marginLeft: 2 }}>{p1h}:{p1m}:{p1s}</span></span>
               ) : inPhase2 ? (
-                <span className="ide-pill" style={{ color: "var(--muted)", borderColor: "rgba(255,210,63,0.3)" }}><Ico.vote style={{ color: "var(--yellow)", width: 14, height: 14 }} /> Phase 2 · Shortlist &amp; draw · ends in <span className="ide-num" style={{ color: "var(--text)", fontWeight: 700, marginLeft: 2 }}>{h}:{m}:{s}</span></span>
+                <span className="ide-pill" style={{ color: "var(--muted)", borderColor: "rgba(255,210,63,0.3)" }}><Ico.vote style={{ color: "var(--yellow)", width: 14, height: 14 }} /> Shortlist &amp; draw · ends in <span className="ide-num" style={{ color: "var(--text)", fontWeight: 700, marginLeft: 2 }}>{h}:{m}:{s}</span></span>
               ) : drawingNow ? (
                 <span className="ide-pill" style={{ color: "var(--muted)", borderColor: "rgba(199,125,255,0.3)" }}><Ico.dice style={{ color: "var(--purple-soft)", width: 14, height: 14 }} /> Draw in progress</span>
               ) : (
@@ -129,11 +125,6 @@ export function HomeScreen() {
               <span className="ide-pill"><Ico.users style={{ color: "var(--purple-soft)" }} /> <span className="ide-num">{fmtInt(players)}</span> playing</span>
               <span className="ide-pill"><Ico.spark style={{ color: "var(--yellow)" }} /> {rules.rules.length} rules</span>
             </div>
-            {showCutoff ? (
-              <div style={{ display: "flex", justifyContent: "center", marginTop: 8 }}>
-                <span className="ide-pill" style={{ color: "var(--muted)" }}><Ico.bolt style={{ color: "var(--yellow)", width: 13, height: 13 }} /> Guessing closes in <span className="ide-num" style={{ color: "var(--text)", fontWeight: 700, marginLeft: 2 }}>{ch}:{cm}:{cs}</span></span>
-              </div>
-            ) : null}
           </div>
         </div>
 
