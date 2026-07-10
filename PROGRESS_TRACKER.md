@@ -3327,3 +3327,22 @@ Passed:
 - Restarted the stale local Next dev server on port 3000 and verified with Playwright: `/play` loads, no Next error overlay, `consoleErrors: []`, and the UI shows the settled round 101 draw `[10,56,77,94,42,51]` with the no-active-turn message.
 - Verified: `pnpm --filter @idealer/web test` (33/33); `pnpm --filter @idealer/web lint`; `pnpm --filter @idealer/web build`; `pnpm --filter @idealer/web typecheck` after `next build` regenerated `.next/types`.
 - Reviewed the result for inconsistencies: UI copy remains English, the app still surfaces the real no-active-turn state instead of hiding it, no chain/settlement behavior changed, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-10 (Rules fetch failed from non-localhost origins)
+
+- Reopened required context before working: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/develop-frontend/SKILL.md`, `.claude/skills/idealer-test-and-verify/SKILL.md`, and `vercel:nextjs` skill guidance.
+- Diagnosed the `TypeError: Failed to fetch` at `getRuleProposals`: the API route and CORS headers exist, but the browser API base could still resolve to `http://<browser-host>:3002`, and Docker forced `NEXT_PUBLIC_IDEALER_API_URL=http://localhost:3002`. That breaks from phones, LAN IPs, HTTPS tunnels, and Docker proxy mode instead of returning a normal HTTP API error.
+- Web: changed `getApiBaseUrl()` so browser calls default to the same-origin `/__api` rewrite, matching the existing worker proxy behavior and avoiding CORS/mixed-content/unreachable-host failures without hiding backend errors.
+- Docker: changed the `web` service to publish `NEXT_PUBLIC_IDEALER_API_URL=/__api` and `NEXT_PUBLIC_IDEALER_WORKER_URL=/__worker`, with internal rewrite targets `http://api:3002` and `http://worker:3003`; added a healthy worker dependency so active-turn proxying is available when web starts.
+- Added regression coverage in `apps/web/src/lib/apiBase.test.ts` for same-origin browser defaults, HTTPS origins, explicit browser overrides, and server-side direct API URLs.
+- Verified: `pnpm --filter @idealer/web typecheck`; `pnpm --filter @idealer/web test` (42/42); `pnpm --filter @idealer/web lint`; `pnpm --filter @idealer/web build`.
+- Reviewed the result for inconsistencies: no fallback was added, API failures still surface as real errors, browser and Docker behavior now matches `.env.example`, UI copy was untouched and remains English, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-10 (Player claims proxy 500 diagnosis)
+
+- Reopened required context before working: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/develop-frontend/SKILL.md`, and `.claude/skills/idealer-test-and-verify/SKILL.md`.
+- Diagnosed the reported `GET /players/{wallet}/claims returned HTTP 500`: local port `3002` was not listening, and `GET /__api/health` through Next returned plain `HTTP 500 Internal Server Error`, confirming the Next rewrite could not reach the API target rather than the claims handler throwing.
+- Started the local API dev server on port `3002` and verified both direct and proxied paths: `GET /health` returned `200`, and `GET /players/EAoZrh8TtZCYtUdKpkuMaNSrConsQoUQvzjZ7cuQGqdW/claims` returned `200` with an empty claims summary through both `3002` and `3000/__api`.
+- Web: changed handled player-claims polling failures from `console.error` to `console.warn`; the UI still sets `claims_unavailable`, so API/proxy failures remain visible without triggering the Next dev error overlay for an already-handled polling state.
+- Verified: `pnpm --filter @idealer/web typecheck`; `pnpm --filter @idealer/web test` (42/42); `pnpm --filter @idealer/web lint`; `pnpm --filter @idealer/web build`.
+- Reviewed the result for inconsistencies: no fallback or fake claim data was added, API unavailability still surfaces in UI state, the claims endpoint returns real JSON once the API is running, UI copy remains English, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.

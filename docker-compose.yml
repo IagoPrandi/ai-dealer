@@ -199,8 +199,13 @@ services:
     depends_on:
       api:
         condition: service_healthy
+      worker:
+        condition: service_healthy
     environment:
-      NEXT_PUBLIC_IDEALER_API_URL: http://localhost:3002
+      IDEALER_API_PROXY_TARGET: http://api:3002
+      IDEALER_WORKER_PROXY_TARGET: http://worker:3003
+      NEXT_PUBLIC_IDEALER_API_URL: /__api
+      NEXT_PUBLIC_IDEALER_WORKER_URL: /__worker
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s

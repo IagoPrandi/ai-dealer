@@ -454,7 +454,7 @@ export function usePlayerClaims(walletAddress: string | undefined) {
           if (cause instanceof DOMException && cause.name === "AbortError") {
             return;
           }
-          console.error("Failed to load player claims.", cause);
+          console.warn("Failed to load player claims.", cause);
           setError("claims_unavailable");
         })
         .finally(() => setLoading(false));

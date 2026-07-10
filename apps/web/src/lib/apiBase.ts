@@ -1,21 +1,7 @@
 "use client";
 
-const CONFIGURED_API_BASE_URL = process.env.NEXT_PUBLIC_IDEALER_API_URL?.trim();
-
 function stripTrailingSlash(value: string) {
   return value.replace(/\/+$/, "");
-}
-
-function isPrivateDevelopmentHost(hostname: string) {
-  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") {
-    return true;
-  }
-  if (hostname.startsWith("192.168.") || hostname.startsWith("10.")) {
-    return true;
-  }
-
-  const match = /^172\.(\d{1,2})\./.exec(hostname);
-  return Boolean(match && Number(match[1]) >= 16 && Number(match[1]) <= 31);
 }
 
 // Served on the Next origin and rewritten to the API by next.config.ts. Keeps
@@ -24,6 +10,8 @@ function isPrivateDevelopmentHost(hostname: string) {
 const SAME_ORIGIN_API_PROXY = "/__api";
 
 export function getApiBaseUrl() {
+  const configuredApiBaseUrl = process.env.NEXT_PUBLIC_IDEALER_API_URL?.trim();
+
   // Server-side rendering: reach the API directly over loopback.
   if (typeof window === "undefined") {
     return stripTrailingSlash(
@@ -32,15 +20,12 @@ export function getApiBaseUrl() {
   }
 
   // Explicit override (absolute URL or a same-origin proxy prefix like "/__api").
-  if (CONFIGURED_API_BASE_URL) {
-    return stripTrailingSlash(CONFIGURED_API_BASE_URL);
+  if (configuredApiBaseUrl) {
+    return stripTrailingSlash(configuredApiBaseUrl);
   }
 
-  const { hostname, protocol } = window.location;
-  if (isPrivateDevelopmentHost(hostname)) {
-    return `${protocol}//${hostname}:3002`;
-  }
-
-  // Public origin (e.g. a Cloudflare tunnel): go through the same-origin proxy.
+  // Browser calls always go through Next's same-origin rewrite. This works from
+  // localhost, LAN IPs, Docker, and HTTPS tunnels without CORS or mixed-content
+  // failures.
   return SAME_ORIGIN_API_PROXY;
 }
