@@ -217,14 +217,26 @@ const NUMBER_WORDS = new Map<string, number>([
   ["ten", 10],
   ["um", 1],
   ["uma", 1],
+  ["hum", 1],
   ["dois", 2],
   ["duas", 2],
   ["tres", 3],
-  ["três", 3],
   ["quatro", 4],
   ["cinco", 5],
   ["seis", 6],
 ]);
+
+const MATCH_COUNT_NUMBER_1_TO_6 =
+  "(?:[1-6]|one|two|three|four|five|six|um|uma|hum|dois|duas|tres|quatro|cinco|seis)";
+const MATCH_COUNT_NUMBER_0_TO_6 =
+  "(?:[0-6]|zero|one|two|three|four|five|six|um|uma|hum|dois|duas|tres|quatro|cinco|seis)";
+const MATCH_COUNT_NOUN =
+  "(?:numbers?|matches|hits|overlaps?|acertos?|numeros?|dezenas?)";
+const MATCH_COUNT_ACTION =
+  "(?:match(?:es|ed|ing)?|hits?|appear(?:s|ed|ing)?|drawn|in the draw|acert\\w*|aparec\\w*|sortead\\w*|sorteio|coincid\\w*|bat\\w*)";
+const EXACT_COUNT_CUE = "(?:exactly|only|exatamente|apenas|somente|so)";
+const THRESHOLD_COUNT_CUE =
+  "(?:at least|no fewer than|pelo menos|no minimo|minimo de|>=)";
 
 const AMBIGUOUS_PATTERNS = [
   /\b(close|closest|near|nearest|almost)\b/i,
@@ -1018,7 +1030,12 @@ function providerDecisionSignature(attempt: ProviderEvaluation) {
 }
 
 function normalizeRuleText(value: string) {
-  return value.replace(/\s+/g, " ").trim().toLowerCase();
+  return value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
 }
 
 function hasPattern(value: string, patterns: readonly RegExp[]) {
@@ -1179,19 +1196,19 @@ function compileSupportedRule(text: string): RuleAst | null {
     });
   }
 
+  const exactMatchCount = parseExactMatchCountRule(text);
+  if (exactMatchCount !== null) {
+    return predicateRule(
+      compare(count(intersection(source("guess"), source("draw"))), "eq", lit(exactMatchCount)),
+    );
+  }
+
   const matchCount = parseMatchCountRule(text);
   if (matchCount) {
     return {
       schemaVersion: 1,
       node: { kind: "match_count_at_least", value: matchCount },
     };
-  }
-
-  const exactMatchCount = parseExactMatchCountRule(text);
-  if (exactMatchCount !== null) {
-    return predicateRule(
-      compare(count(intersection(source("guess"), source("draw"))), "eq", lit(exactMatchCount)),
-    );
   }
 
   if (
@@ -1311,6 +1328,10 @@ function arith(op: "add" | "sub" | "mul" | "div" | "mod", left: ScalarExpr, righ
 
 function intersection(left: ArrayExpr, right: ArrayExpr): ArrayExpr {
   return { kind: "intersection", left, right };
+}
+
+function difference(left: ArrayExpr, right: ArrayExpr): ArrayExpr {
+  return { kind: "difference", left, right };
 }
 
 function sortArray(of: ArrayExpr, order: "asc" | "desc"): ArrayExpr {
@@ -1693,10 +1714,14 @@ function parseMostMatchesRankingRule(text: string): RuleAst | null {
   // Absolute thresholds ("at least 4", "four or more", "exactly 3") are per-guess
   // predicates, not a comparison between players — keep them out of ranking.
   if (
-    /\b(at least|at most|no more than|no fewer than|exactly)\b/i.test(text) ||
-    /\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+or\s+more\b/i.test(
-      text,
-    )
+    new RegExp(
+      `\\b(?:at least|at most|no more than|no fewer than|exactly|only|pelo menos|no minimo|minimo de|exatamente|apenas|somente)\\b|\\bso\\s+${MATCH_COUNT_NUMBER_1_TO_6}\\b`,
+      "i",
+    ).test(text) ||
+    new RegExp(
+      `\\b(?:\\d+|one|two|three|four|five|six|seven|eight|nine|ten|um|uma|hum|dois|duas|tres|quatro|cinco|seis)\\s+(?:or more|ou mais)\\b`,
+      "i",
+    ).test(text)
   ) {
     return null;
   }
@@ -1737,13 +1762,21 @@ function parseMostMatchesRankingRule(text: string): RuleAst | null {
   // "guess more numbers" counts too. "picks" is intentionally excluded so vague
   // rules like "the most interesting mix of high and low picks" do not qualify.
   const comparative = "(?:most|more|fewest|least|mais|menos)";
-  const scoreNoun = "(?:matching\\s+)?(?:numbers?|matches|hits|acertos|n[uú]meros?)";
+  const scoreNoun =
+    "(?:matching\\s+)?(?:numbers?|matches|hits|misses|wrong|acertos?|erros?|numeros?)";
+  const matchVerb = "(?:match(?:es|ed|ing)?|hits?|guess(?:es|ed)?|acert\\w*|correct)";
+  const missVerb = "(?:miss(?:es|ed|ing)?|wrong|errar|erra|errou|errad\\w*|fora)";
+  const hasMissIntent = new RegExp(`\\b${missVerb}\\b`, "i").test(text);
   const scoreConcept =
     new RegExp(`\\b${comparative}\\b[^.]{0,30}\\b${scoreNoun}\\b`, "i").test(
       text,
     ) ||
     new RegExp(
-      `\\b(?:match(?:es|ed|ing)?|hits?|guess(?:es|ed)?|acert\\w*|correct)\\b[^.]{0,20}\\b${comparative}\\b`,
+      `\\b(?:${matchVerb}|${missVerb})\\b[^.]{0,20}\\b${comparative}\\b`,
+      "i",
+    ).test(text) ||
+    new RegExp(
+      `\\b${comparative}\\b[^.]{0,20}\\b(?:${matchVerb}|${missVerb})\\b`,
       "i",
     ).test(text);
   if (!scoreConcept) {
@@ -1760,6 +1793,7 @@ function parseMostMatchesRankingRule(text: string): RuleAst | null {
       text,
     ) ||
     /\bthe\s+(most|fewest|least)\b/i.test(text) ||
+    /\bquem\b[^.]{0,40}\b(?:mais|menos|maior|menor)\b/i.test(text) ||
     /\bthan\b[^.]{0,20}\b(any\s?one|any\s?body|every\s?one|every\s?body)\b/i.test(
       text,
     );
@@ -1769,7 +1803,11 @@ function parseMostMatchesRankingRule(text: string): RuleAst | null {
 
   return rankingRule(
     minimize ? "min" : "max",
-    count(intersection(source("guess"), source("draw"))),
+    count(
+      hasMissIntent
+        ? difference(source("guess"), source("draw"))
+        : intersection(source("guess"), source("draw")),
+    ),
   );
 }
 
@@ -2157,9 +2195,25 @@ function isIntersectionOfSources(
 }
 
 function parseExactMatchCountRule(text: string): number | null {
-  const match = text.match(
-    /\bexactly\s+([0-6]|zero|one|two|three|four|five|six)\b.{0,80}\b(match|matches|appear|appears|overlaps?|drawn|in the draw)\b/i,
-  );
+  const match =
+    text.match(
+      new RegExp(
+        `\\b${EXACT_COUNT_CUE}\\s+(${MATCH_COUNT_NUMBER_0_TO_6})\\b.{0,80}\\b${MATCH_COUNT_NOUN}\\b.{0,80}\\b(?:${MATCH_COUNT_ACTION}|certos?|corretos?|acertados?)\\b`,
+        "i",
+      ),
+    ) ??
+    text.match(
+      new RegExp(
+        `\\b(${MATCH_COUNT_NUMBER_0_TO_6})\\b.{0,30}\\b${MATCH_COUNT_NOUN}\\b.{0,50}\\b(?:${EXACT_COUNT_CUE}|exatos?)\\b`,
+        "i",
+      ),
+    ) ??
+    text.match(
+      new RegExp(
+        `\\b${EXACT_COUNT_CUE}\\s+(${MATCH_COUNT_NUMBER_0_TO_6})\\b.{0,40}\\b(?:matches|hits|overlaps?|acertos?)\\b`,
+        "i",
+      ),
+    );
   const rawValue = match?.[1] ?? null;
   if (!rawValue) {
     return null;
@@ -2601,19 +2655,49 @@ function parseMinMaxComparisonRule(text: string): PredicateNode | null {
 
 function parseMatchCountRule(text: string) {
   const numericMatch = text.match(
-    /\bat least\s+([1-6]|one|two|three|four|five|six)\b.{0,80}\b(match|matches|appear|appears|hits?|in the draw|drawn)\b/i,
+    new RegExp(
+      `\\b${THRESHOLD_COUNT_CUE}\\s+(${MATCH_COUNT_NUMBER_1_TO_6})\\b.{0,80}\\b(?:${MATCH_COUNT_NOUN}|${MATCH_COUNT_ACTION})\\b`,
+      "i",
+    ),
   );
-  const portugueseThresholdMatch = text.match(
-    /\b(?:pelo\s+menos|no\s+m[ií]nimo|m[ií]nimo\s+de)\s+([1-6]|um|uma|dois|duas|tres|três|quatro|cinco|seis)\b.{0,80}\b(?:n[uú]meros?|dezenas?|acertos?)\b.{0,80}\b(?:acert|aparec|sortead|sorteio|draw|match)/i,
-  );
-  const portugueseAcertarMatch = text.match(
-    /\bacert\w*\b.{0,40}\b([1-6]|um|uma|dois|duas|tres|três|quatro|cinco|seis)\b.{0,30}\b(?:n[uú]meros?|dezenas?|acertos?)\b/i,
+  const verbThresholdMatch = text.match(
+    new RegExp(
+      `\\b${MATCH_COUNT_ACTION}\\b.{0,40}\\b${THRESHOLD_COUNT_CUE}\\s+(${MATCH_COUNT_NUMBER_1_TO_6})\\b.{0,40}\\b${MATCH_COUNT_NOUN}\\b`,
+      "i",
+    ),
   );
   const orMoreMatch = text.match(
-    /\b([1-6]|one|two|three|four|five|six)\s+or\s+more\b.{0,80}\b(guessed?|picked|ticket|my|your)?\s*numbers?\b.{0,100}\b(show up|appear|appears|match|matches|somewhere in the draw|in the draw|drawn)\b/i,
+    new RegExp(
+      `\\b(${MATCH_COUNT_NUMBER_1_TO_6})\\s+(?:or more|ou mais)\\b.{0,80}\\b(?:${MATCH_COUNT_NOUN}|${MATCH_COUNT_ACTION})\\b`,
+      "i",
+    ),
   );
-  const portugueseOrMoreMatch = text.match(
-    /\b([1-6]|um|uma|dois|duas|tres|três|quatro|cinco|seis)\s+ou\s+mais\b.{0,80}\b(?:n[uú]meros?|dezenas?|acertos?)\b.{0,80}\b(?:acert|aparec|sortead|sorteio|draw|match)/i,
+  const verbOrMoreMatch = text.match(
+    new RegExp(
+      `\\b${MATCH_COUNT_ACTION}\\b.{0,40}\\b(${MATCH_COUNT_NUMBER_1_TO_6})\\s+(?:or more|ou mais)\\b.{0,40}\\b${MATCH_COUNT_NOUN}\\b`,
+      "i",
+    ),
+  );
+  const verbCountMatch = text.match(
+    new RegExp(
+      `\\b${MATCH_COUNT_ACTION}\\b.{0,40}\\b(${MATCH_COUNT_NUMBER_1_TO_6})\\b.{0,35}\\b${MATCH_COUNT_NOUN}\\b`,
+      "i",
+    ),
+  );
+  const haveCountMatch = text.match(
+    new RegExp(
+      `\\b(?:with|has|have|having|contains?|contain|com|ter|tiver|tenha|precisa(?:r)?\\s+de|vale\\s+com)\\b.{0,20}\\b(${MATCH_COUNT_NUMBER_1_TO_6})\\b.{0,35}\\b${MATCH_COUNT_NOUN}\\b`,
+      "i",
+    ),
+  );
+  const adjectiveCountMatch = text.match(
+    new RegExp(
+      `\\b(${MATCH_COUNT_NUMBER_1_TO_6})\\b.{0,25}\\b(?:${MATCH_COUNT_NOUN}|bilhete|palpite)\\b.{0,35}\\b(?:certos?|corretos?|acertados?|${MATCH_COUNT_ACTION})\\b`,
+      "i",
+    ),
+  );
+  const nounOnlyCountMatch = text.match(
+    new RegExp(`\\b(${MATCH_COUNT_NUMBER_1_TO_6})\\b\\s+acertos?\\b`, "i"),
   );
   const directMatch = text.match(
     /\b([1-6]|one|two|three|four|five|six)\b.{0,30}\b(picks?|guessed?|ticket|my|your)\b.{0,60}\b(show up|appear|appears|match|matches|hits?)\b/i,
@@ -2621,10 +2705,13 @@ function parseMatchCountRule(text: string) {
   const compactMatch = text.match(/\b([1-6])\s+numbers?\s+(match|appear)\b/i);
   const rawValue =
     numericMatch?.[1] ??
-    portugueseThresholdMatch?.[1] ??
-    portugueseAcertarMatch?.[1] ??
+    verbThresholdMatch?.[1] ??
     orMoreMatch?.[1] ??
-    portugueseOrMoreMatch?.[1] ??
+    verbOrMoreMatch?.[1] ??
+    verbCountMatch?.[1] ??
+    haveCountMatch?.[1] ??
+    adjectiveCountMatch?.[1] ??
+    nounOnlyCountMatch?.[1] ??
     directMatch?.[1] ??
     compactMatch?.[1] ??
     null;

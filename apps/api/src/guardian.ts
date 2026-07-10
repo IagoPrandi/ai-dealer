@@ -152,6 +152,7 @@ const SMALL_NUMBER_WORDS = new Map<string, number>([
   ["six", 6],
   ["um", 1],
   ["uma", 1],
+  ["hum", 1],
   ["dois", 2],
   ["duas", 2],
   ["tres", 3],
@@ -159,6 +160,10 @@ const SMALL_NUMBER_WORDS = new Map<string, number>([
   ["cinco", 5],
   ["seis", 6],
 ]);
+
+const MATCH_THRESHOLD_NUMBER = "(?:[1-6]|one|two|three|four|five|six|um|uma|hum|dois|duas|tres|quatro|cinco|seis)";
+const MATCH_COUNT_NOUN = "(?:number|numbers|numero|numeros|dezena|dezenas|acerto|acertos|match|matches|hit|hits|overlap|overlaps)";
+const MATCH_COUNT_ACTION = "(?:appear|appears|appearing|match|matches|matching|matched|hit|hits|overlap|overlaps|acert\\w*|cert\\w*|corret\\w*|coincid\\w*|intersect\\w*|contain\\w*|contem|aparec\\w*|bat\\w*)";
 
 function normalizeForComparison(value: string) {
   return value
@@ -181,12 +186,24 @@ function numberFromToken(token: string) {
 
 function extractAtLeastMatchThreshold(value: string) {
   const normalized = normalizeForComparison(value);
+  if (/\b(?:exactly|only|exatamente|apenas|somente)\b|\bso\s+[a-z0-9]+\b/u.test(normalized)) {
+    return null;
+  }
   const threshold =
     normalized.match(
       /\b(?:at least|pelo menos|no minimo|minimum of|minimo de|>=)\s+([a-z0-9]+)\b/u,
     ) ??
     normalized.match(/\b([a-z0-9]+)\s+(?:or more|ou mais)\b/u) ??
-    normalized.match(/\bacert\w*\s+([a-z0-9]+)\s+(?:numero|numeros|dezena|dezenas|acerto|acertos)\b/u);
+    normalized.match(
+      new RegExp(`\\b${MATCH_COUNT_ACTION}\\b.{0,40}\\b(${MATCH_THRESHOLD_NUMBER})\\b.{0,35}\\b${MATCH_COUNT_NOUN}\\b`, "u"),
+    ) ??
+    normalized.match(
+      new RegExp(`\\b(?:with|has|have|having|contains?|contain|com|ter|tiver|tenha|precisa(?:r)?\\s+de|vale\\s+com)\\b.{0,20}\\b(${MATCH_THRESHOLD_NUMBER})\\b.{0,35}\\b${MATCH_COUNT_NOUN}\\b`, "u"),
+    ) ??
+    normalized.match(
+      new RegExp(`\\b(${MATCH_THRESHOLD_NUMBER})\\b.{0,25}\\b(?:numero|numeros|dezena|dezenas)\\b.{0,35}\\b(?:certo|certos|correto|corretos|acertado|acertados|${MATCH_COUNT_ACTION})\\b`, "u"),
+    ) ??
+    normalized.match(new RegExp(`\\b(${MATCH_THRESHOLD_NUMBER})\\b\\s+acertos?\\b`, "u"));
   const amount = threshold ? numberFromToken(threshold[1]!) : undefined;
   if (!amount || amount < 1 || amount > 6) {
     return null;
@@ -195,21 +212,17 @@ function extractAtLeastMatchThreshold(value: string) {
   const mentionsGuessNumbers =
     (/\b(?:guess|guessed|player|your|seus?|suas?|palpite|apostad[ao])\b/u.test(
       normalized,
-    ) && /\b(?:number|numbers|numero|numeros|dezena|dezenas)\b/u.test(normalized)) ||
-    /\bacert\w*\s+[a-z0-9]+\s+(?:numero|numeros|dezena|dezenas|acerto|acertos)\b/u.test(
-      normalized,
-    );
+    ) && new RegExp(`\\b${MATCH_COUNT_NOUN}\\b`, "u").test(normalized)) ||
+    new RegExp(`\\b${MATCH_COUNT_ACTION}\\b`, "u").test(normalized) ||
+    /\b(?:acerto|acertos|dezena|dezenas)\b/u.test(normalized);
   const mentionsDraw =
     /\b(?:draw|drawn|drawing|sorteio|sorteados?|sorteadas?)\b/u.test(
       normalized,
     ) ||
-    /\bacert\w*\s+[a-z0-9]+\s+(?:numero|numeros|dezena|dezenas|acerto|acertos)\b/u.test(
-      normalized,
-    );
+    new RegExp(`\\b${MATCH_COUNT_ACTION}\\b`, "u").test(normalized) ||
+    /\b(?:acerto|acertos|dezena|dezenas)\b/u.test(normalized);
   const comparesMembership =
-    /\b(?:appear|appears|appearing|match|matches|matching|matched|acert|coincid|intersect|contain|contains|containing|contem|aparec)\w*\b/u.test(
-      normalized,
-    );
+    new RegExp(`\\b${MATCH_COUNT_ACTION}\\b|\\b(?:acerto|acertos)\\b`, "u").test(normalized);
 
   return mentionsGuessNumbers && mentionsDraw && comparesMembership ? amount : null;
 }

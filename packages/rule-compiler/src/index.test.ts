@@ -204,6 +204,8 @@ test("deterministically compiles the canonical most/fewest-matches ranking famil
     "Win if the player matches more numbers than anyone else.",
     "most matches wins",
     "quem acertar mais números ganha",
+    "quem tiver mais acertos ganha",
+    "vence quem mais acertar",
   ];
   for (const prompt of maximizing) {
     const result = validateAndPrecompileRule({
@@ -235,6 +237,27 @@ test("deterministically compiles the canonical most/fewest-matches ranking famil
       minAst.result.direction === "min",
   );
 
+  const missRankings = [
+    "ganha quem errar mais números",
+    "whoever misses the most numbers",
+  ];
+  for (const prompt of missRankings) {
+    const result = validateAndPrecompileRule({
+      prompt,
+      tokenCount: tokenCount(prompt),
+    });
+    const ast = result.artifact?.ast;
+    assert.equal(result.decision, "VALID", prompt);
+    assert.ok(
+      ast?.schemaVersion === 2 &&
+        ast.result.type === "ranking" &&
+        ast.result.direction === "max" &&
+        ast.result.score.kind === "reduce" &&
+        ast.result.score.of.kind === "difference",
+      `expected a max ranking over missed numbers for: ${prompt}`,
+    );
+  }
+
   // Absolute thresholds and guess-vs-draw comparatives stay predicates, never a
   // ranking; a specific score qualifier (digits) is left to the LLM path.
   const threshold = validateAndPrecompileRule({
@@ -252,19 +275,36 @@ test("deterministically compiles the canonical most/fewest-matches ranking famil
       versusDraw.result.type === "predicate",
     "guess-vs-draw comparative must remain a predicate",
   );
+  const portugueseThreshold = validateAndPrecompileRule({
+    prompt: "ganha quem acertar pelo menos um numero",
+    tokenCount: 6,
+  }).artifact?.ast;
+  assert.ok(
+    portugueseThreshold?.schemaVersion === 1 &&
+      portugueseThreshold.node.kind === "match_count_at_least",
+    "Portuguese threshold wording must stay predicate, not ranking",
+  );
 });
 
-test("accepts Portuguese unordered match-count threshold wording", () => {
-  const prompts = [
-    "ganha quem acertar 1 número em qualquer ordem",
-    "premia quem acertar 1 número em qualquer ordem",
-    "prêmeia quer acertar 1 número em qualquer ordem",
-    "ganha quem acertar uma dezena em qualquer ordem",
-    "pelo menos dois números acertados no sorteio",
-    "dois ou mais números acertados no sorteio",
-  ];
+test("accepts broad Portuguese match-count threshold variations", () => {
+  const prompts = new Map<string, number>([
+    ["ganha quem acertar 1 número em qualquer ordem", 1],
+    ["premia quem acertar 1 número em qualquer ordem", 1],
+    ["prêmeia quer acertar 1 número em qualquer ordem", 1],
+    ["ganha quem acertar uma dezena em qualquer ordem", 1],
+    ["ganha quem acertar pelo menos um numero", 1],
+    ["se tiver um acerto ganha", 1],
+    ["um numero certo em qualquer ordem ganha", 1],
+    ["acertou uma dezena ganha", 1],
+    ["premia qualquer bilhete com 1 acerto", 1],
+    ["pelo menos dois números acertados no sorteio", 2],
+    ["dois ou mais números acertados no sorteio", 2],
+    ["vence com dois ou mais acertos", 2],
+    ["acertar duas dezenas vale", 2],
+    ["tenha tres numeros corretos", 3],
+  ]);
 
-  for (const prompt of prompts) {
+  for (const [prompt, expectedValue] of prompts) {
     const result = validateAndPrecompileRule({
       prompt,
       tokenCount: tokenCount(prompt),
@@ -274,21 +314,36 @@ test("accepts Portuguese unordered match-count threshold wording", () => {
     assert.equal(result.artifact?.ruleMode, "predicate", prompt);
     assert.equal(result.log.reasonCodes.includes("UNSUPPORTED_RULE"), false, prompt);
     assert.match(result.artifactHash ?? "", /^[0-9a-f]{64}$/, prompt);
+    const ast = result.artifact?.ast;
+    assert.ok(ast?.schemaVersion === 1 && ast.node.kind === "match_count_at_least", prompt);
+    assert.equal(ast.node.value, expectedValue, prompt);
   }
+});
 
-  const oneMatch = validateAndPrecompileRule({
-    prompt: prompts[0]!,
-    tokenCount: tokenCount(prompts[0]!),
-  }).artifact?.ast;
-  assert.ok(oneMatch?.schemaVersion === 1 && oneMatch.node.kind === "match_count_at_least");
-  assert.equal(oneMatch.node.value, 1);
+test("accepts exact Portuguese and English match-count wording as equality", () => {
+  const prompts = new Map<string, number>([
+    ["exatamente um numero acertado ganha", 1],
+    ["apenas uma dezena acertada", 1],
+    ["somente 2 acertos", 2],
+    ["Win if exactly 3 guessed numbers appear in the draw.", 3],
+  ]);
 
-  const twoOrMore = validateAndPrecompileRule({
-    prompt: prompts.at(-1)!,
-    tokenCount: tokenCount(prompts.at(-1)!),
-  }).artifact?.ast;
-  assert.ok(twoOrMore?.schemaVersion === 1 && twoOrMore.node.kind === "match_count_at_least");
-  assert.equal(twoOrMore.node.value, 2);
+  for (const [prompt, expectedValue] of prompts) {
+    const result = validateAndPrecompileRule({
+      prompt,
+      tokenCount: tokenCount(prompt),
+    });
+    const ast = result.artifact?.ast;
+    const predicate =
+      ast?.schemaVersion === 2 && ast.result.type === "predicate"
+        ? ast.result.predicate
+        : null;
+
+    assert.equal(result.decision, "VALID", prompt);
+    assert.equal(predicate?.kind, "compare", prompt);
+    assert.equal(predicate?.op, "eq", prompt);
+    assert.deepEqual(predicate?.right, { kind: "lit", value: expectedValue });
+  }
 });
 
 test("handles the first 10 VALID prompts from the rule proposal test set", () => {

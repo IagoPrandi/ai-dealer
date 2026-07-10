@@ -35,18 +35,37 @@ test("accepts an equivalent at-least-N match interpretation without guardian sco
   assert.equal(grounded, true);
 });
 
-test("accepts equivalent Portuguese short match-count interpretation without guardian scoring", async () => {
+test("accepts equivalent Portuguese match-count variations without guardian scoring", async () => {
   globalThis.fetch = (async () => {
     throw new Error("guardian should not be called for a clear equivalent rule");
   }) as typeof fetch;
 
-  const grounded = await checkGroundedness(
-    "Premia quem acertar 1 número em qualquer ordem.",
-    "A guess wins if at least 1 of its numbers appear in the official draw, regardless of order.",
-    GUARDIAN_CONFIG,
-  );
+  const cases = [
+    [
+      "Premia quem acertar 1 número em qualquer ordem.",
+      "A guess wins if at least 1 of its numbers appear in the official draw, regardless of order.",
+    ],
+    [
+      "Ganha quem acertar pelo menos um numero.",
+      "A guess wins if at least one of its numbers appear in the official draw.",
+    ],
+    [
+      "Vence com dois ou mais acertos.",
+      "A guess wins if at least 2 of its numbers appear in the official draw.",
+    ],
+    [
+      "Se tiver um acerto ganha.",
+      "A guess wins if at least one number matches the official draw.",
+    ],
+    [
+      "Um numero certo em qualquer ordem ganha.",
+      "A guess wins if at least one number appears in the official draw.",
+    ],
+  ] as const;
 
-  assert.equal(grounded, true);
+  for (const [rule, interpretation] of cases) {
+    assert.equal(await checkGroundedness(rule, interpretation, GUARDIAN_CONFIG), true, rule);
+  }
 });
 
 test("does not treat a changed match threshold as clearly grounded", () => {
@@ -61,6 +80,20 @@ test("does not treat a changed match threshold as clearly grounded", () => {
     isClearlyGroundedRuleInterpretation(
       "Premia quem acertar 1 número em qualquer ordem.",
       "A guess wins if at least 2 of its numbers appear in the official draw, regardless of order.",
+    ),
+    false,
+  );
+  assert.equal(
+    isClearlyGroundedRuleInterpretation(
+      "Vence com dois ou mais acertos.",
+      "A guess wins if at least 3 of its numbers appear in the official draw.",
+    ),
+    false,
+  );
+  assert.equal(
+    isClearlyGroundedRuleInterpretation(
+      "Exatamente um numero acertado ganha.",
+      "A guess wins if at least 1 of its numbers appear in the official draw.",
     ),
     false,
   );
