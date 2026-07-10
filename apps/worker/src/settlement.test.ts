@@ -16,7 +16,7 @@ import {
 } from "./settlement.js";
 import type { ElectionCandidate } from "./election.js";
 
-const PROGRAM_ID = new PublicKey("6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4");
+const PROGRAM_ID = new PublicKey("ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd");
 const AUTHORITY = new PublicKey("4bY5krt2VnnSNB1R4c1bhiWdQYkTc1FvFTN1LaV5JxCH");
 const RANDOMNESS = new PublicKey("FWBa3Ubjyv7niKs3cxQkccmBvym3yoH9bYCXmUB5W1oq");
 

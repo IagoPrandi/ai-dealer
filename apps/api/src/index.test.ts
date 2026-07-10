@@ -82,7 +82,7 @@ import {
 const wallet = "4bYqf3rJ7m2nQh9sV1xCH8kLpWtD6eZaUg5oNbMcXyTH";
 const walletTwo = "5bYqf3rJ7m2nQh9sV1xCH8kLpWtD6eZaUg5oNbMcXyTJ";
 const walletThree = "6bYqf3rJ7m2nQh9sV1xCH8kLpWtD6eZaUg5oNbMcXyTK";
-const base58 = "6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4";
+const base58 = "ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd";
 
 function hashArray(byte: number) {
   return Array.from({ length: 32 }, () => byte);

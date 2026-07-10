@@ -12,7 +12,7 @@ test("transaction plan diagnostics are surfaced from nested client errors", () =
   error.transactionPlanResult = {
     error: {
       logs: [
-        "Program 6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4 invoke [1]",
+        "Program ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd invoke [1]",
         "AnchorError caused by account: rule_proposal. Error Code: AccountNotInitialized.",
       ],
     },
@@ -21,7 +21,7 @@ test("transaction plan diagnostics are surfaced from nested client errors", () =
   assert.equal(txErrorCode(error), "TRANSACTION_FAILED");
   assert.equal(
     describeTxError(error),
-    "The transaction simulation failed before wallet submission. Program 6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4 invoke [1] AnchorError caused by account: rule_proposal. Error Code: AccountNotInitialized.",
+    "The transaction simulation failed before wallet submission. Program ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd invoke [1] AnchorError caused by account: rule_proposal. Error Code: AccountNotInitialized.",
   );
 });
 
@@ -32,7 +32,7 @@ test("missing game token simulation errors are normalized to round-pass copy", (
   error.transactionPlanResult = {
     error: {
       logs: [
-        "Program 6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4 invoke [1]",
+        "Program ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd invoke [1]",
         "AnchorError caused by account: game_token. Error Code: AccountNotInitialized.",
       ],
     },

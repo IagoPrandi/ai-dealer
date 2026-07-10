@@ -56,7 +56,7 @@ const DISABLED_CONFIG: ManualControlConfig = {
   enabled: false,
   migrateNextTurnId: null,
   openDurationSeconds: 3_600,
-  programId: "6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4" as never,
+  programId: "ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd" as never,
   rpcUrl: "http://127.0.0.1:9",
 };
 

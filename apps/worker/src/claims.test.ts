@@ -10,7 +10,7 @@ import {
 } from "./claims.js";
 import type { TurnAutomationConfig } from "./turn-automation.js";
 
-const PROGRAM_ID = address("6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4");
+const PROGRAM_ID = address("ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd");
 const AUTHORITY = address("4bY5krt2VnnSNB1R4c1bhiWdQYkTc1FvFTN1LaV5JxCH");
 const CLAIMANT = address("BUo2vYwYvj2UWYFgryrMF7bBTrLQQFYVU6xHuoTJbJBD");
 const RECORD_CLAIM_DISCRIMINATOR = [111, 123, 69, 192, 195, 228, 137, 30];

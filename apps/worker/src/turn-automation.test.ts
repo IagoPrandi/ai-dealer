@@ -143,7 +143,7 @@ test("turn automation disabled check has no RPC side effects", async () => {
     desiredTurnDurationCycle: null,
     enabled: false,
     intervalMs: 30_000,
-    programId: address("6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4"),
+    programId: address("ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd"),
     rpcUrl: "http://127.0.0.1:9",
   });
 
@@ -172,7 +172,7 @@ test("global config decoder exposes configured VRF addresses", () => {
 
 test("set VRF config instruction uses Anchor discriminator and queue accounts", async () => {
   const authority = address("4bY5krt2VnnSNB1R4c1bhiWdQYkTc1FvFTN1LaV5JxCH");
-  const programId = address("6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4");
+  const programId = address("ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd");
   const drawVrfConfig = address("EYiAmGSdsQTuCw413V5BzaruWuCCSDgTPtBGvLkXHbe7");
   const electionVrfConfig = address(
     "EYiAmGSdsQTuCw413V5BzaruWuCCSDgTPtBGvLkXHbe7",
@@ -200,7 +200,7 @@ test("set VRF config instruction uses Anchor discriminator and queue accounts", 
   assert.deepEqual(instruction.accounts, [
     { address: authority, role: AccountRole.READONLY_SIGNER },
     {
-      address: address("EtZ5ZyHKb8wZmMHFDLM6LtVmZV1WUMvFPER72eFE4qob"),
+      address: address("8eAwKD514LK6rJYLLFZh92g3V5a5MwbyLZMU83EpWWZ"),
       role: AccountRole.WRITABLE,
     },
   ]);
@@ -214,7 +214,7 @@ test("enabled turn automation requires an authority keypair", async () => {
     desiredTurnDurationCycle: null,
       enabled: true,
       intervalMs: 10_000,
-      programId: address("6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4"),
+      programId: address("ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd"),
       rpcUrl: "http://127.0.0.1:9",
     }),
     /IDEALER_TURN_AUTHORITY_KEYPAIR/,
