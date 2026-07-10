@@ -14,6 +14,7 @@ import {
   createProposeRuleInstruction,
   deriveSubmitGuessAccounts,
   deriveRuleProposalAddress,
+  getActionCutoffTimestamp,
   waitForConfirmedProgramAccount,
   type RulePreflightResult,
 } from "../../../solana/idealerProgram";
@@ -310,14 +311,14 @@ function ClarificationPrompt({
 }
 
 export function CreateScreen() {
-  const { chatId, client, connected, fees, go, newConversationKey, played, reloadAll, seed, turnId, wallet, walletAddress } = useIdealer();
+  const { chatId, client, connected, fees, go, newConversationKey, phase1EndsAt, played, reloadAll, seed, turnId, wallet, walletAddress } = useIdealer();
 
-  return <CreateChat key={`${newConversationKey}:${chatId || seed || "new"}`} {...{ chatId, client, connected, fees, go, newConversationKey, played, reloadAll, seed, turnId, wallet, walletAddress }} />;
+  return <CreateChat key={`${newConversationKey}:${chatId || seed || "new"}`} {...{ chatId, client, connected, fees, go, newConversationKey, phase1EndsAt, played, reloadAll, seed, turnId, wallet, walletAddress }} />;
 }
 
-type ChatProps = Pick<ReturnType<typeof useIdealer>, "chatId" | "client" | "connected" | "fees" | "go" | "newConversationKey" | "played" | "reloadAll" | "seed" | "turnId" | "wallet" | "walletAddress">;
+type ChatProps = Pick<ReturnType<typeof useIdealer>, "chatId" | "client" | "connected" | "fees" | "go" | "newConversationKey" | "phase1EndsAt" | "played" | "reloadAll" | "seed" | "turnId" | "wallet" | "walletAddress">;
 
-function CreateChat({ chatId, client, connected, fees, go, newConversationKey, played, reloadAll, seed, turnId, wallet, walletAddress }: ChatProps) {
+function CreateChat({ chatId, client, connected, fees, go, newConversationKey, phase1EndsAt, played, reloadAll, seed, turnId, wallet, walletAddress }: ChatProps) {
   const [msgs, setMsgs] = useState<ChatMessage[]>([
     { text: "Hey! Tell me in one sentence how your rule decides the round winner. Be creative - I turn it into a valid rule.", who: "ai" },
   ]);
@@ -577,6 +578,19 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
       if (freshTurn.globalConfig.activeTurnId !== turnId) {
         throw new Error("The active round changed before rule submission. Reopen the rule composer for the current round.");
       }
+      // Phase 1 (create rules + pick numbers) closes at the rule-election
+      // cutoff; the program rejects proposals past it (ActionWindowClosed). Gate
+      // the submission here from the freshly-fetched turn so a rule drafted
+      // during phase 1 can't be sent once the create phase has closed.
+      if (freshTurn.turnState) {
+        const cutoffSeconds = getActionCutoffTimestamp({
+          cutoffBps: freshTurn.globalConfig.ruleElectionCutoffBps,
+          turn: freshTurn.turnState,
+        });
+        if (Math.floor(Date.now() / 1000) >= cutoffSeconds) {
+          throw new Error("Rule creation has closed for this round. New rules open when the next round starts.");
+        }
+      }
       const ruleProposalAddress = await deriveRuleProposalAddress({ ruleId: rule.ruleId, turnId });
       const existingRuleProposal = await client.runtime.rpc
         .getAccountInfo(ruleProposalAddress, {
@@ -651,6 +665,11 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
   }
 
   const valid = rule?.decision === "VALID" && !rule.needsClarification;
+  // Phase 1 (create rules) closes at the rule-election cutoff (phase1EndsAt).
+  // Past it the program rejects proposals, so hide the submit affordance and
+  // tell the player rule creation is closed for the round.
+  const ruleCreationClosed =
+    phase1EndsAt !== null && Math.floor(Date.now() / 1000) >= phase1EndsAt;
 
   return (
     <div className="ide-app ide-screen" style={{ height: "100%", position: "relative", overflow: "hidden", display: "flex", flexDirection: "column" }}>
@@ -706,6 +725,17 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
                 <button onClick={() => reset()} className="ide-btn-ghost ide-btn" style={{ flex: 1, padding: 13 }} type="button">Create another</button>
                 <button onClick={() => go("vote")} className="ide-btn" style={{ flex: 1, padding: 13 }} type="button">See in voting</button>
               </div>
+            </div>
+          ) : ruleCreationClosed ? (
+            <div className="ide-card" style={{ padding: 16, borderColor: "rgba(255,210,63,0.35)", background: "linear-gradient(120deg, rgba(255,210,63,0.1), var(--surface))", animation: "ide-rise .3s ease both" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 7 }}>
+                <Ico.lock style={{ color: "var(--yellow)", width: 16, height: 16 }} />
+                <b style={{ fontSize: 15 }}>Rule creation closed</b>
+              </div>
+              <p style={{ margin: "0 0 13px", color: "var(--muted)", fontSize: 13.5, lineHeight: 1.5 }}>The create phase for round {fmtTurnId(turnId)} has ended, so new rules can&apos;t be submitted. Your draft is saved and you can submit it when the next round opens.</p>
+              <button onClick={() => go("home")} className="ide-btn" style={{ width: "100%", padding: 13 }} type="button">
+                <Ico.back style={{ color: "#08110C", transform: "rotate(180deg)" }} /> Back to the round
+              </button>
             </div>
           ) : played ? (
             <button onClick={submit} disabled={busy} className="ide-btn" style={{ padding: 15, fontSize: 15.5, animation: "ide-rise .3s ease both", opacity: busy ? 0.7 : 1 }} type="button">

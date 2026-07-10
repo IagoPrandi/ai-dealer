@@ -68,6 +68,14 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-07-10 (Voter reward calculation verification)
+
+- Opened required documents/context before verification: `PRD.md`, `AGENTS.md` instructions from the prompt, `.claude/skills`, and `.claude/skills/idealer-test-and-verify/SKILL.md`.
+- Verified the elected-rule voter/supporter reward rule against implementation: eligible voters are unique wallets with at least one recorded approval `RuleVote` for the elected active rule; repeated approval votes do not create additional reward shares.
+- Confirmed the implemented voter reward pool is `15%` of one individual alternative-rule winner payout, capped by `VOTER_REWARD_CONFIG.capPerTurnLamports`, then capped by the reserve remaining after creator reward funding.
+- Confirmed the final voter pool is split equally across unique voters with integer lamport division; any division remainder is recorded as `remainderLamports` and is not assigned to a voter claim.
+- Verification passed: `pnpm --filter @idealer/api typecheck` and `pnpm --filter @idealer/api test` (65/65). No milestone checkbox/status was changed.
+
 ### 2026-07-10 (Creator reward unit-payout correction)
 
 - Opened required documents/context before working: `PRD.md`, `AGENTS.md` instructions from the prompt, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/develop-frontend/SKILL.md`, `.claude/skills/idealer-ui-coherence/SKILL.md`, `.claude/skills/idealer-test-and-verify/SKILL.md`, `.claude/skills/idealer-design-system/SKILL.md`, and design-system references `01-tokens.md`, `02-components.md`, `03-screens-and-state.md`, and `04-new-screen-recipe.md`.

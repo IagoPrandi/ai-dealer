@@ -1128,6 +1128,96 @@ pub mod idealer {
         Ok(())
     }
 
+    /// Recovery escape hatch for a lost Switchboard randomness account. A VRF
+    /// request is two txs: (A) create+commit the randomness account, then (B)
+    /// record its pubkey on the turn. If B lands but A's account is later gone
+    /// (create rolled back, or the account was closed / rent-reclaimed on
+    /// devnet), the matching `settle_*` can never reveal it and the settlement
+    /// pipeline wedges forever — the request slot is non-default so the
+    /// `request_*` instruction refuses to re-request.
+    ///
+    /// This clears the unsettled request slot for the given stage so the
+    /// pipeline re-requests a fresh account. It is safe because it requires the
+    /// supplied `randomness` account to be the exact one recorded on the turn
+    /// AND to be genuinely non-existent on-chain (no lamports, empty data):
+    /// a live pending or revealed account cannot be reset, so no in-flight
+    /// randomness is ever discarded.
+    pub fn reset_stale_vrf_request(
+        ctx: Context<ResetStaleVrfRequest>,
+        args: ResetStaleVrfRequestArgs,
+    ) -> Result<()> {
+        let config = &ctx.accounts.global_config;
+        require!(!config.paused, IdealerError::ProtocolPaused);
+
+        let recorded = match args.stage {
+            VrfStage::FinalistElection => {
+                require!(
+                    ctx.accounts.turn_state.election_vrf_fulfillment == Pubkey::default(),
+                    IdealerError::VrfAlreadySettled
+                );
+                ctx.accounts.turn_state.election_vrf_request
+            }
+            VrfStage::ActiveElection => {
+                require!(
+                    ctx.accounts.turn_state.active_election_vrf_fulfillment == Pubkey::default(),
+                    IdealerError::VrfAlreadySettled
+                );
+                ctx.accounts.turn_state.active_election_vrf_request
+            }
+            VrfStage::Draw => {
+                require!(
+                    ctx.accounts.turn_state.draw_status == DrawStatus::Requested,
+                    IdealerError::VrfAlreadySettled
+                );
+                ctx.accounts.turn_state.draw_vrf_request
+            }
+        };
+
+        require!(
+            recorded != Pubkey::default(),
+            IdealerError::ElectionVrfNotRequested
+        );
+        require_keys_eq!(
+            ctx.accounts.randomness.key(),
+            recorded,
+            IdealerError::RandomnessSourceMismatch
+        );
+        // Only a genuinely lost account may be reset. A live Switchboard
+        // randomness account is rent-funded and owned by the Switchboard
+        // program; an absent account is owned by the System program with zero
+        // lamports and no data. Refuse to reset anything that still exists.
+        require!(
+            ctx.accounts.randomness.lamports() == 0
+                && ctx.accounts.randomness.data_is_empty(),
+            IdealerError::RandomnessAccountStillExists
+        );
+
+        let turn = &mut ctx.accounts.turn_state;
+        match args.stage {
+            VrfStage::FinalistElection => {
+                turn.election_vrf_request = Pubkey::default();
+                turn.election_commit_slot = 0;
+            }
+            VrfStage::ActiveElection => {
+                turn.active_election_vrf_request = Pubkey::default();
+                turn.active_election_commit_slot = 0;
+            }
+            VrfStage::Draw => {
+                turn.draw_status = DrawStatus::NotRequested;
+                turn.draw_vrf_request = Pubkey::default();
+                turn.draw_commit_slot = 0;
+                turn.draw_requested_at = 0;
+            }
+        }
+
+        emit!(StaleVrfRequestReset {
+            turn_id: turn.turn_id,
+            stage: args.stage,
+            randomness_account: recorded,
+        });
+        Ok(())
+    }
+
     pub fn close_turn(ctx: Context<CloseTurn>) -> Result<()> {
         let clock = Clock::get()?;
         let config = &mut ctx.accounts.global_config;
@@ -1959,6 +2049,19 @@ pub struct PrecompileRuleArgs {
     pub passed: bool,
 }
 
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VrfStage {
+    FinalistElection,
+    ActiveElection,
+    Draw,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct ResetStaleVrfRequestArgs {
+    /// Which unsettled VRF request slot to clear so the pipeline re-requests.
+    pub stage: VrfStage,
+}
+
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct RecordClaimArgs {
     /// The turn the claim belongs to.
@@ -2542,6 +2645,27 @@ pub struct RequestActiveElectionVrf<'info> {
     /// CHECK: Switchboard On-Demand randomness account, verified in the handler
     /// (owner is the Switchboard program and queue matches the configured
     /// election VRF queue).
+    pub randomness: AccountInfo<'info>,
+}
+
+#[derive(Accounts)]
+pub struct ResetStaleVrfRequest<'info> {
+    pub authority: Signer<'info>,
+    #[account(
+        seeds = [b"global_config"],
+        bump = global_config.bump,
+        has_one = authority @ IdealerError::Unauthorized
+    )]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        mut,
+        seeds = [b"turn".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
+        bump = turn_state.bump
+    )]
+    pub turn_state: Box<Account<'info, TurnState>>,
+    /// CHECK: the randomness account recorded on the turn for the reset stage;
+    /// the handler requires its key to match the recorded request and the
+    /// account to be non-existent (zero lamports, empty data) before clearing.
     pub randomness: AccountInfo<'info>,
 }
 
@@ -3180,6 +3304,13 @@ pub struct ActiveElectionSettled {
 }
 
 #[event]
+pub struct StaleVrfRequestReset {
+    pub turn_id: u64,
+    pub stage: VrfStage,
+    pub randomness_account: Pubkey,
+}
+
+#[event]
 pub struct RuleElectionSettled {
     pub turn_id: u64,
     pub active_rule_id: u64,
@@ -3337,6 +3468,10 @@ pub enum IdealerError {
     ElectionVrfAlreadyRequested,
     #[msg("The rule election VRF has not been requested.")]
     ElectionVrfNotRequested,
+    #[msg("The VRF stage has already been settled and cannot be reset.")]
+    VrfAlreadySettled,
+    #[msg("The recorded randomness account still exists on-chain and cannot be reset.")]
+    RandomnessAccountStillExists,
     #[msg("The recomputed eligible pool hash does not match the locked hash.")]
     ElectionPoolHashMismatch,
     #[msg("The election candidate list includes a duplicate rule.")]

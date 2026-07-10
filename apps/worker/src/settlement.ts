@@ -72,6 +72,18 @@ const CLOSE_ELIMINATION_WINDOW_DISCRIMINATOR = Buffer.from([
 const CLOSE_TURN_DISCRIMINATOR = Buffer.from([
   100, 243, 10, 218, 116, 61, 49, 153,
 ]);
+const RESET_STALE_VRF_REQUEST_DISCRIMINATOR = Buffer.from([
+  214, 152, 173, 238, 23, 58, 139, 33,
+]);
+
+/** Anchor variant index of the on-chain `VrfStage` enum. */
+export const VRF_STAGE = {
+  activeElection: 1,
+  draw: 2,
+  finalistElection: 0,
+} as const;
+
+export type VrfStage = (typeof VRF_STAGE)[keyof typeof VRF_STAGE];
 
 type SignableTransaction = Transaction | VersionedTransaction;
 
@@ -386,6 +398,36 @@ export function createSettleActiveElectionInstruction({
       ...accountKeysForAuthorityTurn({ authority, programId, turnId }),
       { isSigner: false, isWritable: false, pubkey: randomnessAccount },
       ...candidateAccountKeys(programId, turnId, candidates),
+    ],
+    programId,
+  });
+}
+
+/**
+ * `reset_stale_vrf_request` clears an unsettled VRF request slot whose recorded
+ * Switchboard randomness account no longer exists on-chain, so the settlement
+ * pipeline can re-request a fresh one instead of wedging forever on a reveal
+ * that can never happen. The program refuses to reset a stage that is already
+ * settled or whose recorded account still exists.
+ */
+export function createResetStaleVrfRequestInstruction({
+  authority,
+  programId,
+  randomnessAccount,
+  stage,
+  turnId,
+}: {
+  authority: PublicKey;
+  programId: PublicKey;
+  randomnessAccount: PublicKey;
+  stage: VrfStage;
+  turnId: number;
+}) {
+  return new TransactionInstruction({
+    data: Buffer.from([...RESET_STALE_VRF_REQUEST_DISCRIMINATOR, stage]),
+    keys: [
+      ...accountKeysForAuthorityTurn({ authority, programId, turnId }),
+      { isSigner: false, isWritable: false, pubkey: randomnessAccount },
     ],
     programId,
   });
@@ -1246,6 +1288,11 @@ export interface SettlementSenders {
     turnId: number,
     candidates: readonly ElectionCandidate[],
   ) => Promise<string>;
+  /**
+   * True when the given account currently exists on-chain (non-null, funded).
+   * Used to detect a lost committed-randomness account before its `settle_*`.
+   */
+  randomnessAccountExists: (randomnessAccount: PublicKey) => Promise<boolean>;
   requestActiveElectionVrf: (
     turnId: number,
     randomnessAccount: string,
@@ -1269,6 +1316,15 @@ export interface SettlementSenders {
     randomnessAccount: string,
     candidates: readonly ElectionCandidate[],
   ) => Promise<SettleVrfResult>;
+  /**
+   * Clear an unsettled VRF request slot whose recorded randomness account is
+   * gone on-chain, so the pipeline can re-request. Returns the tx signature.
+   */
+  resetStaleVrfRequest: (
+    turnId: number,
+    stage: VrfStage,
+    randomnessAccount: string,
+  ) => Promise<string>;
 }
 
 export function createSettlementSenders(
@@ -1354,6 +1410,17 @@ export function createSettlementSenders(
         ],
         label: "lock_rule_election_pool",
       });
+    },
+    async randomnessAccountExists(randomnessAccount) {
+      if (isZeroPubkey(randomnessAccount)) {
+        return false;
+      }
+      const context = await getContext();
+      const account = await context.connection.getAccountInfo(
+        randomnessAccount,
+        context.commitment,
+      );
+      return account !== null && account.lamports > 0;
     },
     async requestActiveElectionVrf(turnId, randomnessAccount) {
       const context = await getContext();
@@ -1448,6 +1515,22 @@ export function createSettlementSenders(
         context,
         label: "settle_rule_election",
         randomnessAccount: new PublicKey(randomnessAccount),
+      });
+    },
+    async resetStaleVrfRequest(turnId, stage, randomnessAccount) {
+      const context = await getContext();
+      return sendInstructions({
+        context,
+        instructions: [
+          createResetStaleVrfRequestInstruction({
+            authority: context.authority.publicKey,
+            programId: context.programId,
+            randomnessAccount: new PublicKey(randomnessAccount),
+            stage,
+            turnId,
+          }),
+        ],
+        label: "reset_stale_vrf_request",
       });
     },
   };

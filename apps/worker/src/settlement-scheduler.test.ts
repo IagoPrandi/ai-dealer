@@ -387,6 +387,9 @@ test("orchestrator publishes finalist and active election proof randomness", asy
     async fetchState() {
       return state;
     },
+    async randomnessAccountExists() {
+      return true;
+    },
     async settleActiveElection() {
       state = activeSettled;
       return { randomness: activeRandomness, signature: "active-sig" };
@@ -439,6 +442,64 @@ test("orchestrator publishes finalist and active election proof randomness", asy
     published[1]?.activeElectionRandomnessValue,
     Buffer.from(activeRandomness).toString("hex"),
   );
+});
+
+test("orchestrator resets a lost finalist randomness account instead of wedging", async () => {
+  const bridge = {
+    async fetchRecordedStates() {
+      return new Set<string>();
+    },
+    async publishElection() {},
+    async publishRuleElimination() {},
+    async recordSettlementTransition() {},
+  } as unknown as ApiBridge;
+  // Finalist VRF requested (electionVrfRequest set) but never fulfilled, and the
+  // recorded randomness account is gone on-chain: the planner reaches
+  // settle_finalist_vrf, but the settle can never reveal. The cycle must reset
+  // the stale request, NOT throw.
+  const state = makeState({
+    eligibleRulePoolHash: HASH,
+    electionVrfRequest: SET,
+  });
+  const resetCalls: Array<{ account: string; stage: number; turnId: number }> = [];
+  let settleCalled = false;
+  const senders = {
+    async fetchState() {
+      return state;
+    },
+    async randomnessAccountExists() {
+      return false;
+    },
+    async resetStaleVrfRequest(turnId: number, stage: number, account: string) {
+      resetCalls.push({ account, stage, turnId });
+      return "reset-sig";
+    },
+    async settleElection() {
+      settleCalled = true;
+      return { randomness: new Uint8Array(32), signature: "should-not-happen" };
+    },
+  } as unknown as SettlementSenders;
+  const deps: SettlementCycleDeps = {
+    bridge,
+    electionConfig,
+    fetchCandidates: async () => [candidate],
+    nowIso: () => "2026-06-23T00:00:00.000Z",
+    nowSeconds: () => 2_000,
+    recordClaims: async () => 0,
+    senders,
+  };
+
+  const result = await runSettlementCycle(1, deps);
+  assert.equal(settleCalled, false, "settle must not run when randomness is gone");
+  assert.equal(resetCalls.length, 1);
+  assert.deepEqual(resetCalls[0], {
+    account: SET.toBase58(),
+    stage: 0,
+    turnId: 1,
+  });
+  // The reset is not a pipeline transition; the cycle reports a wait so the next
+  // cycle sees the cleared slot and re-requests.
+  assert.equal(result.action, "wait");
 });
 
 test("orchestrator projects the closed elimination window with the on-chain outcome", async () => {

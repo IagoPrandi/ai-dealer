@@ -3,9 +3,10 @@ use anchor_lang::{
     AccountDeserialize, InstructionData, ToAccountMetas,
 };
 use idealer::{
-    accounts, instruction, DrawStatus, GlobalConfig, InitializeGlobalConfigArgs, PlayerGuess,
-    PrecompilationStatus, PrecompileRuleArgs, ProposeRuleArgs, RuleProposal, RuleState, RuleVote,
-    SetVrfConfigArgs, SubmitGuessArgs, TurnState, TurnStatus, VoteRuleArgs,
+    accounts, instruction, DrawStatus, GlobalConfig, IdealerError, InitializeGlobalConfigArgs,
+    PlayerGuess, PrecompilationStatus, PrecompileRuleArgs, ProposeRuleArgs, ResetStaleVrfRequestArgs,
+    RuleProposal, RuleState, RuleVote, SetVrfConfigArgs, SubmitGuessArgs, TurnState, TurnStatus,
+    VoteRuleArgs, VrfStage,
 };
 use solana_account_info::AccountInfo;
 use solana_program_error::ProgramResult;
@@ -30,6 +31,20 @@ const RANDOMNESS_DISCRIMINATOR: [u8; 8] = [10, 66, 229, 135, 220, 239, 217, 114]
 
 fn pda(seeds: &[&[u8]]) -> Pubkey {
     Pubkey::find_program_address(seeds, &idealer::ID).0
+}
+
+/// Assert a processed instruction failed with the given Anchor custom error
+/// (error codes start at 6000). Anchor maps `#[error_code]` variants in order.
+fn assert_custom_error(result: Result<(), BanksClientError>, expected_code: u32) {
+    use solana_sdk::instruction::InstructionError;
+    use solana_sdk::transaction::TransactionError;
+    match result {
+        Err(BanksClientError::TransactionError(TransactionError::InstructionError(
+            _,
+            InstructionError::Custom(code),
+        ))) => assert_eq!(code, expected_code, "unexpected custom error code"),
+        other => panic!("expected custom error {expected_code}, got {other:?}"),
+    }
 }
 
 fn switchboard_program_id() -> Pubkey {
@@ -1056,6 +1071,215 @@ async fn rule_election_locks_requests_and_settles_active_rule() {
     );
     assert_eq!(turn.frozen_rule_artifact_hash, compiled_artifact_hash);
     assert_ne!(turn.finalist_set_hash, [0; 32]);
+}
+
+/// The settlement recovery escape hatch (`reset_stale_vrf_request`) must never
+/// discard a still-live randomness request: if the recorded account still
+/// exists on-chain, the reset is rejected. It also rejects a mismatched
+/// randomness account. (The happy path — recorded account genuinely gone — is
+/// exercised by the worker settlement unit test, since ProgramTest cannot
+/// delete a genesis account mid-run.)
+#[tokio::test]
+#[ignore = "requires an SBF build and SBF_OUT_DIR; run the explicit SBF integration suite"]
+async fn reset_stale_vrf_request_refuses_a_live_or_mismatched_account() {
+    let turn_id = 1_u64;
+    let election_randomness_account = Pubkey::new_unique();
+    let mut program_test = idealer_program_test();
+    add_randomness_account(
+        &mut program_test,
+        election_randomness_account,
+        randomness_account_data(election_queue(), 60, 100, [9; 32]),
+    );
+    let mut context = program_test.start_with_context().await;
+    initialize_and_open_turn(&mut context, turn_id).await;
+
+    let player = Keypair::new();
+    fund(&mut context, &player.pubkey()).await;
+    submit_guess(&mut context, &player, turn_id, [1, 2, 3, 4, 5, 6])
+        .await
+        .unwrap();
+
+    // Propose + precompile a single eligible rule, then lock the pool.
+    let rule_id = 70_u64;
+    let text = "Win if at least four numbers match.".to_string();
+    let rule_address = pda(&[b"rule", &turn_id.to_le_bytes(), &rule_id.to_le_bytes()]);
+    process(
+        &mut context,
+        Instruction {
+            program_id: idealer::ID,
+            accounts: accounts::ProposeRule {
+                proposer: player.pubkey(),
+                global_config: pda(&[b"global_config"]),
+                turn_state: pda(&[b"turn", &turn_id.to_le_bytes()]),
+                game_token: pda(&[
+                    b"game_token",
+                    &turn_id.to_le_bytes(),
+                    player.pubkey().as_ref(),
+                ]),
+                rule_proposal: rule_address,
+                treasury_vault: pda(&[b"treasury_vault"]),
+                prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(None),
+            data: instruction::ProposeRule {
+                args: ProposeRuleArgs {
+                    rule_id,
+                    sanitized_text_hash: hash(text.as_bytes()).to_bytes(),
+                    sanitized_text: text,
+                    normalized_text_hash: [2; 32],
+                    official_interpretation_hash: [3; 32],
+                    preflight_result_hash: [4; 32],
+                    token_count: 8,
+                },
+            }
+            .data(),
+        },
+        &[&player],
+    )
+    .await
+    .unwrap();
+
+    let authority = context.payer.pubkey();
+    process(
+        &mut context,
+        Instruction {
+            program_id: idealer::ID,
+            accounts: accounts::PrecompileRule {
+                authority,
+                global_config: pda(&[b"global_config"]),
+                turn_state: pda(&[b"turn", &turn_id.to_le_bytes()]),
+                rule_proposal: rule_address,
+            }
+            .to_account_metas(None),
+            data: instruction::PrecompileRule {
+                args: PrecompileRuleArgs {
+                    compiled_artifact_hash: [8; 32],
+                    passed: true,
+                },
+            }
+            .data(),
+        },
+        &[],
+    )
+    .await
+    .unwrap();
+
+    let turn_address = pda(&[b"turn", &turn_id.to_le_bytes()]);
+    advance_clock_to_election_cutoff(&mut context, turn_id).await;
+
+    let mut lock_accounts = accounts::LockRuleElectionPool {
+        authority,
+        global_config: pda(&[b"global_config"]),
+        turn_state: turn_address,
+    }
+    .to_account_metas(None);
+    lock_accounts.push(AccountMeta::new_readonly(rule_address, false));
+    process(
+        &mut context,
+        Instruction {
+            program_id: idealer::ID,
+            accounts: lock_accounts,
+            data: instruction::LockRuleElectionPool {}.data(),
+        },
+        &[],
+    )
+    .await
+    .unwrap();
+
+    // Reset before any request exists is rejected: nothing to clear.
+    let reset_before_request = process(
+        &mut context,
+        reset_stale_vrf_instruction(
+            turn_id,
+            authority,
+            election_randomness_account,
+            VrfStage::FinalistElection,
+        ),
+        &[],
+    )
+    .await;
+    assert_custom_error(
+        reset_before_request,
+        u32::from(IdealerError::ElectionVrfNotRequested),
+    );
+
+    // Record the finalist VRF request pointing at the real, still-present account.
+    process(
+        &mut context,
+        Instruction {
+            program_id: idealer::ID,
+            accounts: accounts::RequestRuleElectionVrf {
+                authority,
+                global_config: pda(&[b"global_config"]),
+                turn_state: turn_address,
+                randomness: election_randomness_account,
+            }
+            .to_account_metas(None),
+            data: instruction::RequestRuleElectionVrf {}.data(),
+        },
+        &[],
+    )
+    .await
+    .unwrap();
+
+    // Passing a different account than the recorded one is rejected.
+    let mismatched = process(
+        &mut context,
+        reset_stale_vrf_instruction(
+            turn_id,
+            authority,
+            Pubkey::new_unique(),
+            VrfStage::FinalistElection,
+        ),
+        &[],
+    )
+    .await;
+    assert_custom_error(mismatched, u32::from(IdealerError::RandomnessSourceMismatch));
+
+    // Passing the recorded account, which STILL EXISTS on-chain, is rejected:
+    // the reset must never discard a live randomness request.
+    let still_exists = process(
+        &mut context,
+        reset_stale_vrf_instruction(
+            turn_id,
+            authority,
+            election_randomness_account,
+            VrfStage::FinalistElection,
+        ),
+        &[],
+    )
+    .await;
+    assert_custom_error(
+        still_exists,
+        u32::from(IdealerError::RandomnessAccountStillExists),
+    );
+
+    // The recorded request slot is untouched by the rejected resets.
+    let turn: TurnState = read_anchor_account(&mut context, turn_address).await;
+    assert_eq!(turn.election_vrf_request, election_randomness_account);
+}
+
+fn reset_stale_vrf_instruction(
+    turn_id: u64,
+    authority: Pubkey,
+    randomness_account: Pubkey,
+    stage: VrfStage,
+) -> Instruction {
+    Instruction {
+        program_id: idealer::ID,
+        accounts: accounts::ResetStaleVrfRequest {
+            authority,
+            global_config: pda(&[b"global_config"]),
+            turn_state: pda(&[b"turn", &turn_id.to_le_bytes()]),
+            randomness: randomness_account,
+        }
+        .to_account_metas(None),
+        data: instruction::ResetStaleVrfRequest {
+            args: ResetStaleVrfRequestArgs { stage },
+        }
+        .data(),
+    }
 }
 
 fn settle_draw_instruction(

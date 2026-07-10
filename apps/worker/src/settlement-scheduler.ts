@@ -7,10 +7,12 @@ import {
   runRuleElection,
 } from "./election.js";
 import type { ApiBridge, PublishedRuleElimination } from "./api-bridge.js";
-import type {
-  SettleVrfResult,
-  SettlementSenders,
-  SettlementTurnState,
+import {
+  VRF_STAGE,
+  type SettleVrfResult,
+  type SettlementSenders,
+  type SettlementTurnState,
+  type VrfStage,
 } from "./settlement.js";
 
 /**
@@ -377,6 +379,36 @@ interface ExecuteArgs {
  * signature (or an empty string for projection-only steps), or `null` when a
  * `settle_*` step must wait for the VRF reveal slot.
  */
+/**
+ * Guard a `settle_*` step against a lost committed-randomness account. A VRF
+ * request records its randomness pubkey on the turn in one tx and settles in a
+ * later one; if that account is gone on-chain (create rolled back, or the
+ * account was closed / rent-reclaimed on devnet) the reveal can never happen
+ * and the pipeline would wedge forever. When the recorded account is missing we
+ * clear the stale request slot on-chain (`reset_stale_vrf_request`) so the next
+ * cycle re-requests a fresh account, and return `true` to signal the settle was
+ * NOT performed (the caller treats it as a recovered wait, not a transition).
+ */
+async function recoverIfRandomnessMissing(
+  deps: SettlementCycleDeps,
+  turnId: number,
+  stage: VrfStage,
+  recordedRequest: { toBase58(): string },
+): Promise<boolean> {
+  if (await deps.senders.randomnessAccountExists(recordedRequest as never)) {
+    return false;
+  }
+  const signature = await deps.senders.resetStaleVrfRequest(
+    turnId,
+    stage,
+    recordedRequest.toBase58(),
+  );
+  console.warn(
+    `settlement turn=${turnId} recovered lost randomness account=${recordedRequest.toBase58()} stage=${stage} reset=${signature}`,
+  );
+  return true;
+}
+
 async function executeAction(args: ExecuteArgs): Promise<string | null> {
   const { candidates, deps, eligible, onChain, plan, turnId } = args;
   const { senders } = deps;
@@ -400,6 +432,16 @@ async function executeAction(args: ExecuteArgs): Promise<string | null> {
       return senders.requestElectionVrf(turnId, randomnessAccount);
     }
     case "settle_finalist_vrf": {
+      if (
+        await recoverIfRandomnessMissing(
+          deps,
+          turnId,
+          VRF_STAGE.finalistElection,
+          onChain.electionVrfRequest,
+        )
+      ) {
+        return null;
+      }
       const ready = await isRevealable(senders, onChain.electionVrfRequest);
       if (!ready) {
         return null;
@@ -446,6 +488,16 @@ async function executeAction(args: ExecuteArgs): Promise<string | null> {
       return senders.requestActiveElectionVrf(turnId, randomnessAccount);
     }
     case "settle_active_vrf": {
+      if (
+        await recoverIfRandomnessMissing(
+          deps,
+          turnId,
+          VRF_STAGE.activeElection,
+          onChain.activeElectionVrfRequest,
+        )
+      ) {
+        return null;
+      }
       const ready = await isRevealable(senders, onChain.activeElectionVrfRequest);
       if (!ready) {
         return null;
@@ -491,6 +543,16 @@ async function executeAction(args: ExecuteArgs): Promise<string | null> {
       return signature;
     }
     case "settle_draw": {
+      if (
+        await recoverIfRandomnessMissing(
+          deps,
+          turnId,
+          VRF_STAGE.draw,
+          onChain.drawVrfRequest,
+        )
+      ) {
+        return null;
+      }
       const ready = await isRevealable(senders, onChain.drawVrfRequest);
       if (!ready) {
         return null;
