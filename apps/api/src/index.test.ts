@@ -1400,6 +1400,20 @@ test("M9.3 no alternative rule pays only original winners and creates no rewards
   assert.equal(rewards.voters.length, 0);
 });
 
+test("reward summary does not require a missing active proposal when no alternative winners exist", () => {
+  resetApiStateForTests();
+  saveRuleElection(settledElection(224, 7));
+
+  const rewards = getRewardSummary(224);
+  const summary = getRoundSummary(224, 224);
+
+  assert.equal(rewards.activeRuleId, 7);
+  assert.equal(rewards.creator, null);
+  assert.equal(rewards.voters.length, 0);
+  assert.equal(summary.rewards.creator, null);
+  assert.equal(summary.rewards.voters.length, 0);
+});
+
 test("M9.3 invalidated alternative rule behaves as no active alternative", () => {
   resetApiStateForTests();
   saveRuleProposal({

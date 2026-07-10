@@ -148,7 +148,7 @@ export function useRound(turnId: null | number, activeTurnId?: number) {
           if (cause instanceof DOMException && cause.name === "AbortError") {
             return;
           }
-          console.error("Failed to load round.", cause);
+          console.warn("Failed to load round.", cause);
           setError("round_unavailable");
         })
         .finally(() => setLoading(false));
@@ -307,7 +307,7 @@ export function useRules(turnId: number, round: RoundSummaryApi | null): RulesVi
           if (cause instanceof DOMException && cause.name === "AbortError") {
             return;
           }
-          console.error("Failed to load rules.", cause);
+          console.warn("Failed to load rules.", cause);
           setError("rules_unavailable");
         })
         .finally(() => setLoading(false));
@@ -409,7 +409,7 @@ export function usePlayerGuess(turnId: number, walletAddress: string | undefined
           if (cause instanceof DOMException && cause.name === "AbortError") {
             return;
           }
-          console.error("Failed to load guess receipt.", cause);
+          console.warn("Failed to load guess receipt.", cause);
         })
         .finally(() => setLoading(false));
     },
@@ -505,7 +505,7 @@ export function usePlayerHistory(walletAddress: string | undefined) {
           if (cause instanceof DOMException && cause.name === "AbortError") {
             return;
           }
-          console.error("Failed to load player history.", cause);
+          console.warn("Failed to load player history.", cause);
           setError("history_unavailable");
         })
         .finally(() => setLoading(false));
@@ -544,7 +544,7 @@ export function useConversationDrafts(walletAddress: string | undefined) {
           if (cause instanceof DOMException && cause.name === "AbortError") {
             return;
           }
-          console.error("Failed to load conversation drafts.", cause);
+          console.warn("Failed to load conversation drafts.", cause);
           setError("drafts_unavailable");
         })
         .finally(() => setLoading(false));

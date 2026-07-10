@@ -3651,11 +3651,6 @@ export function calculateAndStoreRewardRecords(
     };
   }
 
-  const proposal = ruleProposals.get(getRuleProposalKey(turnId, activeRuleId));
-  if (!proposal) {
-    throw new Error("ACTIVE_RULE_PROPOSAL_NOT_FOUND");
-  }
-
   const winners = getWinnerSummary(turnId);
   const winnerCount = winners.alternative.winnerCount;
   const individualAltPayoutLamports =
@@ -3671,6 +3666,11 @@ export function calculateAndStoreRewardRecords(
       voterRewardPool: emptyVoterRewardPool,
       voters: [],
     };
+  }
+
+  const proposal = ruleProposals.get(getRuleProposalKey(turnId, activeRuleId));
+  if (!proposal) {
+    throw new Error("ACTIVE_RULE_PROPOSAL_NOT_FOUND");
   }
 
   const distribution = calculateRewardDistribution({
