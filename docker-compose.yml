@@ -125,7 +125,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-idealer}:${POSTGRES_PASSWORD:-idealer_dev_password}@postgres:5432/${POSTGRES_DB:-idealer_dev}
       REDIS_URL: redis://redis:6379
       IDEALER_SOLANA_RPC_URL: ${IDEALER_SOLANA_RPC_URL:-https://api.devnet.solana.com}
-      IDEALER_PROGRAM_ID: ${IDEALER_PROGRAM_ID:-6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4}
+      IDEALER_PROGRAM_ID: ${IDEALER_PROGRAM_ID:-ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd}
       IDEALER_TURN_AUTOMATION_ENABLED: ${IDEALER_TURN_AUTOMATION_ENABLED:-true}
       IDEALER_TURN_AUTOMATION_INTERVAL_MS: ${IDEALER_TURN_AUTOMATION_INTERVAL_MS:-10000}
       # TEST-ONLY manual turn control (POST /manual/open|close|cycle on the worker).
