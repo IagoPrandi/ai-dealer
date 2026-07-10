@@ -3535,11 +3535,9 @@ export function calculateRewardDistribution(args: {
     left.localeCompare(right),
   );
   const creatorRewardCapLamports = solToLamports(CREATOR_REWARD_CAP_SOL);
-  const perWinnerCreatorRewardLamports = Math.floor(
+  const calculatedCreatorRewardLamports = Math.floor(
     (args.individualAltPayoutLamports * CREATOR_REWARD_RATE_BPS) / 10_000,
   );
-  const calculatedCreatorRewardLamports =
-    perWinnerCreatorRewardLamports * args.winnerCount;
   const creatorRewardBeforeReserve = Math.min(
     calculatedCreatorRewardLamports,
     creatorRewardCapLamports,

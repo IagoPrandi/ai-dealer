@@ -974,7 +974,9 @@ async fn rule_election_locks_requests_and_settles_active_rule() {
     assert_eq!(turn.finalist_rule_ids[0], rule_id);
     assert_eq!(turn.active_rule_id, 0);
     assert!(turn.end_timestamp > original_end_timestamp);
-    assert!(turn.elimination_window_end_timestamp > turn.elimination_window_start_timestamp);
+    // The elimination window now spans the whole of phase 2, so it closes at the
+    // turn end rather than after a fixed sub-window.
+    assert_eq!(turn.elimination_window_end_timestamp, turn.end_timestamp);
 
     // No elimination votes are cast, so the sole finalist survives. Advance past
     // the elimination window and close it. The turn is still Open, so live-turn

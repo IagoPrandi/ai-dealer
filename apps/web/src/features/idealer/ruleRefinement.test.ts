@@ -3,11 +3,14 @@ import { test } from "node:test";
 import {
   buildRuleGuidanceOptions,
   composeRefinedRuleDraft,
+  getRuleGuidanceTitle,
   getRuleRefinementBase,
   isExplicitRuleRefinementPatch,
   isRuleCreationHelpRequest,
   isRuleRefinementPatch,
 } from "./ruleRefinement.js";
+
+const lower = (value: string) => value.trim().toLowerCase();
 
 test("uses the suggested rewrite as the refinement base when present", () => {
   assert.equal(
@@ -23,6 +26,7 @@ test("uses the suggested rewrite as the refinement base when present", () => {
 
 test("turns a short order correction into a complete revised rule", () => {
   const context = {
+    baseWasValid: true,
     currentRuleText:
       "Win if the guess and draw contain the same set of numbers.",
     refinementQuestions: ["Should order be ignored completely?"],
@@ -38,6 +42,7 @@ test("turns a short order correction into a complete revised rule", () => {
 test("turns a yes answer to an order question into a complete revised rule", () => {
   assert.equal(
     composeRefinedRuleDraft("yes", {
+      baseWasValid: true,
       currentRuleText:
         "Win if the guess and draw contain the same set of numbers.",
       refinementQuestions: ["Should order be ignored completely?"],
@@ -58,6 +63,7 @@ test("does not treat help or cost questions as rule refinements", () => {
 
 test("treats sequence reverse threshold as a patch to the previous valid rule", () => {
   const context = {
+    baseWasValid: true,
     currentRuleText:
       "Win if guessed position 1 equals drawn position 6, position 2 equals drawn position 5, and so on.",
   };
@@ -68,6 +74,42 @@ test("treats sequence reverse threshold as a patch to the previous valid rule", 
   assert.equal(
     composeRefinedRuleDraft(message, context),
     "Win if guessed position 1 equals drawn position 6, position 2 equals drawn position 5, and so on. Add that at least 4 of the 6 reversed positions must match.",
+  );
+});
+
+test("does not patch a clarification answer onto a base that was never valid", () => {
+  // Regression: answering a clarification when the current draft is still
+  // invalid (and there is no suggested rewrite) must NOT append to it, or the
+  // rebuilt text stays invalid and the same clarification re-asks forever.
+  const context = {
+    baseWasValid: false,
+    currentRuleText: "Win if my guess is close to the draw.",
+    refinementQuestions: ["Should order be ignored completely?"],
+  };
+
+  assert.equal(getRuleRefinementBase(context), null);
+  assert.equal(isRuleRefinementPatch("ignore order", context), false);
+  assert.equal(composeRefinedRuleDraft("ignore order", context), null);
+});
+
+test("still patches an invalid base when the dealer offered a suggested rewrite", () => {
+  // With a concrete suggested rewrite the base IS usable even if the raw draft
+  // was not valid, so a short correction still composes onto the rewrite.
+  const context = {
+    baseWasValid: false,
+    currentRuleText: "Win if my guess is close to the draw.",
+    refinementQuestions: ["Should order be ignored completely?"],
+    suggestedRewrite:
+      "Win if at least 4 guessed numbers appear in the draw.",
+  };
+
+  assert.equal(
+    getRuleRefinementBase(context),
+    "Win if at least 4 guessed numbers appear in the draw.",
+  );
+  assert.equal(
+    composeRefinedRuleDraft("ignore order", context),
+    "Win if at least 4 guessed numbers appear in the draw. Order is ignored.",
   );
 });
 
@@ -120,6 +162,38 @@ test("does not treat selectable clean-rule rewrites as help-only requests", () =
     "New clean rule: win if at least 2 guessed numbers appear in the draw, regardless of order.";
 
   assert.equal(isRuleCreationHelpRequest(message), false);
+});
+
+test("re-proposal-blocked rule is offered differentiating conditions, never the same rule", () => {
+  // Regression: a rule whose canonical meaning already held a mandate is blocked
+  // verbatim (PRD 6.13). Guidance must ADD a differentiating condition, not
+  // re-offer the identical rule or the generic fallback (itself a commonly
+  // mandated rule) — otherwise every suggestion is re-blocked in a loop.
+  const blockedRule = "Win if at least 4 of your numbers appear in the draw.";
+  const genericFallback =
+    "Win if at least 4 guessed numbers appear in the draw, regardless of order.";
+  const options = buildRuleGuidanceOptions({
+    reproposalBlocked: true,
+    sanitizedText: blockedRule,
+    reasonSummary:
+      "This rule was already the Rule of the Hour in a previous turn. To reuse it, add a condition that differentiates it.",
+  });
+
+  assert.ok(options.length > 0, "expected differentiating suggestions");
+  for (const option of options) {
+    assert.notEqual(lower(option.text), lower(blockedRule));
+    assert.notEqual(lower(option.text), lower(genericFallback));
+    assert.ok(
+      option.text.startsWith("Win if at least 4 of your numbers appear in the draw"),
+      `expected a differentiated variant of the blocked rule, got: ${option.text}`,
+    );
+    assert.ok(/\band\b/i.test(option.text), `expected an added condition in: ${option.text}`);
+  }
+
+  assert.equal(
+    getRuleGuidanceTitle({ reproposalBlocked: true, sanitizedText: blockedRule }),
+    "Differentiate this rule?",
+  );
 });
 
 test("suggests removing other-player dependency before objective distance clarification", () => {

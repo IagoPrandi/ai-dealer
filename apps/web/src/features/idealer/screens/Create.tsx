@@ -333,6 +333,11 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const autoSentRef = useRef(false);
+  // Safety net against a clarification loop: after too many consecutive
+  // still-needs-clarification results, stop auto-merging the reply into the
+  // draft so the raw answer is sent standalone and the loop cannot continue.
+  const clarificationAttemptsRef = useRef(0);
+  const MAX_CLARIFICATION_ATTEMPTS = 2;
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -399,15 +404,18 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
     }
     const valid = snapshot.rule.decision === "VALID" && !snapshot.rule.needsClarification;
     if (valid) {
+      clarificationAttemptsRef.current = 0;
       setGuidance(null);
       return;
     }
+    clarificationAttemptsRef.current += 1;
     openGuidance({
       clarityNote: snapshot.rule.clarityNote,
       currentRuleText: snapshot.rule.sanitizedText,
       needsClarification: snapshot.rule.needsClarification,
       reasonSummary: snapshot.rule.reasonSummary ?? null,
       refinementQuestions: snapshot.rule.refinementQuestions ?? null,
+      reproposalBlocked: snapshot.rule.reproposalBlocked ?? false,
       sanitizedText: snapshot.rule.sanitizedText,
       suggestedRewrite: snapshot.rule.suggestedRewrite ?? null,
     });
@@ -451,18 +459,25 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
     const pendingRule = rule;
     const likelyRuleDraft = isLikelyRuleDraft(t);
     const explicitPatch = isExplicitRuleRefinementPatch(t);
+    // A fresh rule draft restarts the clarification budget.
+    if (likelyRuleDraft && !explicitPatch) {
+      clarificationAttemptsRef.current = 0;
+    }
+    // Past the clarification budget, stop merging: send the raw answer on its
+    // own so a misbehaving clarification cycle cannot loop indefinitely.
+    const clarificationBudgetExhausted =
+      clarificationAttemptsRef.current >= MAX_CLARIFICATION_ATTEMPTS;
+    const refinementContext = {
+      baseWasValid: pendingRule?.decision === "VALID",
+      currentRuleText: pendingRule?.sanitizedText ?? null,
+      refinementQuestions: pendingRule?.refinementQuestions ?? null,
+      suggestedRewrite: pendingRule?.suggestedRewrite ?? null,
+    };
     const refinedDraft =
+      !clarificationBudgetExhausted &&
       pendingRule && !submitted && (!likelyRuleDraft || explicitPatch) &&
-      isRuleRefinementPatch(t, {
-        currentRuleText: pendingRule.sanitizedText,
-        refinementQuestions: pendingRule.refinementQuestions ?? null,
-        suggestedRewrite: pendingRule.suggestedRewrite ?? null,
-      })
-        ? composeRefinedRuleDraft(t, {
-            currentRuleText: pendingRule.sanitizedText,
-            refinementQuestions: pendingRule.refinementQuestions ?? null,
-            suggestedRewrite: pendingRule.suggestedRewrite ?? null,
-          })
+      isRuleRefinementPatch(t, refinementContext)
+        ? composeRefinedRuleDraft(t, refinementContext)
         : null;
     const ruleText = refinedDraft ?? t;
     setVal("");
@@ -686,7 +701,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
                 <span style={{ width: 28, height: 28, borderRadius: 9, background: "var(--green)", color: "#08110C", display: "grid", placeItems: "center" }}><Ico.check /></span>
                 <b style={{ fontSize: 15.5 }}>Rule in the round</b>
               </div>
-              <p style={{ margin: "0 0 14px", color: "var(--muted)", fontSize: 14, lineHeight: 1.5 }}>In voting for round {fmtTurnId(turnId)}. If elected, you earn <b style={{ color: "var(--text)" }}>15%</b> of each prize.</p>
+              <p style={{ margin: "0 0 14px", color: "var(--muted)", fontSize: 14, lineHeight: 1.5 }}>In voting for round {fmtTurnId(turnId)}. If elected and winners exist, you earn <b style={{ color: "var(--text)" }}>15%</b> of one winner's payout.</p>
               <div style={{ display: "flex", gap: 8 }}>
                 <button onClick={() => reset()} className="ide-btn-ghost ide-btn" style={{ flex: 1, padding: 13 }} type="button">Create another</button>
                 <button onClick={() => go("vote")} className="ide-btn" style={{ flex: 1, padding: 13 }} type="button">See in voting</button>

@@ -12,7 +12,7 @@ This registry records binding MVP decisions from `PRD.md` version 1.5.0. Changes
 | 6 | The finalist set is exactly 10 rules when at least 10 eligible rules exist: 3 top-voted eligible rules plus 7 VRF-random eligible rules. | Locked | PRD section 16 |
 | 7 | Turn duration starts at 2 hours and follows `2h -> 2h -> 8h -> 8h -> repeat`. | Locked | PRD section 16 |
 | 8 | The alternative rule pool remains 50% of the post-treasury playable prize pool. If no alternative rule is active or no alternative-rule winners exist, the bucket follows rollover rules. | Locked | PRD section 16 |
-| 9 | Creator rewards remain fixed at 15% of each individual alternative-rule winner payout, funded from the creator reward reserve sourced from platform monetization and subject to reserve and cap. | Locked | PRD section 16 |
+| 9 | Creator rewards remain fixed at 15% of a single individual alternative-rule winner payout, funded from the creator reward reserve sourced from platform monetization and subject to reserve and cap. | Locked | PRD section 16 |
 | 10 | MVP reserves 20% of platform monetization for the creator reward reserve. Winner-visible payouts must never be reduced to fund creator rewards. | Locked | PRD section 16 |
 | 11 | Normal users see simple explanations, status, difficulty labels, and audit links. Detailed compiler reasoning appears only in expandable audit panels and admin/audit views. | Locked | PRD section 16 |
 | 12 | Proposed rules cannot be edited after on-chain submission. A user must submit a new paid proposal to change rule text. | Locked | PRD section 16 |

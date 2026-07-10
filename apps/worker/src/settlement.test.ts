@@ -195,7 +195,7 @@ test("settlement close_turn writes global config and turn state", () => {
 });
 
 function buildTurnStateBuffer(): Uint8Array {
-  const data = Buffer.alloc(788);
+  const data = Buffer.alloc(780);
   data.writeBigUInt64LE(42n, 8); // turn_id
   data.writeBigInt64LE(200n, 16); // start_timestamp
   data.writeBigInt64LE(1_000n, 24); // end_timestamp
@@ -216,10 +216,9 @@ function buildTurnStateBuffer(): Uint8Array {
   data.writeUInt8(1, 414); // finalist_eliminated[1]
   Buffer.alloc(32, 0x22).copy(data, 423); // eliminated_finalist_hash
   Buffer.alloc(32, 0x33).copy(data, 455); // survivor_finalist_hash
-  data.writeBigInt64LE(900n, 487); // elimination_window_start
-  data.writeBigInt64LE(4_500n, 495); // elimination_window_end
-  data.writeUInt8(2, 649); // draw_status = fulfilled
-  data.writeBigInt64LE(1_234n, 762); // drawn_at
+  data.writeBigInt64LE(4_500n, 487); // elimination_window_end (spans all of phase 2)
+  data.writeUInt8(2, 641); // draw_status = fulfilled
+  data.writeBigInt64LE(1_234n, 754); // drawn_at
   return data;
 }
 
@@ -250,7 +249,7 @@ test("decodeSettlementTurnState reads the trustless TurnState layout", () => {
 });
 
 test("decodeSettlementTurnState reports all-zero hashes as null", () => {
-  const data = Buffer.alloc(788);
+  const data = Buffer.alloc(780);
   data.writeBigUInt64LE(1n, 8);
   const state = decodeSettlementTurnState(data, 9_167);
 

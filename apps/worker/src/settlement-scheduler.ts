@@ -757,11 +757,14 @@ function buildEliminationProjection(
   const closed = closedAtIso !== null || state.survivorFinalistHash !== null;
   return {
     closedAt: closed ? closedAtIso : null,
+    // The window spans the whole of phase 2: it opens at the phase-1 -> phase-2
+    // boundary (the rule-election cutoff, when the finalist set is locked) and
+    // closes at the turn end.
     decisionWindowClosesAt: new Date(
       state.eliminationWindowEndSeconds * 1_000,
     ).toISOString(),
     decisionWindowOpenedAt: new Date(
-      state.eliminationWindowStartSeconds * 1_000,
+      state.electionCutoffTimestampSeconds * 1_000,
     ).toISOString(),
     eliminatedFinalistHash: state.eliminatedFinalistHash,
     eliminatedRuleIds,

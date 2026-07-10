@@ -207,7 +207,7 @@ export interface GuessReceiptApi {
 /* ----------------------------- UI shapes ----------------------------- */
 
 /** A rule as the voting / detail UI needs it. `against` only exists for
- * finalists during the decision window (elimination votes); 0 otherwise. */
+ * finalists while elimination voting is open (all of phase 2); 0 otherwise. */
 export interface UiRule {
   against: number;
   approve: number;
@@ -235,7 +235,6 @@ export interface UiRule {
 
 /** Aggregated, screen-facing view of the active round. */
 export interface UiRound {
-  decisionEndsAt: number | null;
   decisionPhase: boolean;
   players: number;
   prizeSol: number;

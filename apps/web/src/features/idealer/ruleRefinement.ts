@@ -1,4 +1,8 @@
 export interface RuleRefinementContext {
+  /** Whether `currentRuleText` was itself a previously-VALID rule. A patch may
+   * only build on a usable base; appending a correction to a still-invalid draft
+   * cannot fix it and re-triggers the same clarification (an infinite loop). */
+  baseWasValid?: boolean;
   currentRuleText?: string | null;
   refinementQuestions?: readonly string[] | null;
   suggestedRewrite?: string | null;
@@ -9,6 +13,10 @@ export interface RuleGuidanceContext extends RuleRefinementContext {
   clarityNote?: string | null;
   needsClarification?: boolean;
   reasonSummary?: string | null;
+  /** The rule's canonical meaning already held a mandate (was Rule of the Hour)
+   * and is blocked verbatim (PRD 6.13). Suggestions must ADD a differentiating
+   * condition rather than re-offer the same rule, or the block never clears. */
+  reproposalBlocked?: boolean;
   sanitizedText?: string | null;
 }
 
@@ -68,11 +76,17 @@ function dedupeOptions(options: RuleGuidanceOption[]) {
 }
 
 export function getRuleRefinementBase(context: RuleRefinementContext) {
-  return (
-    context.suggestedRewrite?.trim() ||
-    context.currentRuleText?.trim() ||
-    null
-  );
+  // Prefer the dealer's concrete suggested rewrite. Only fall back to the raw
+  // current rule text when it was previously VALID — otherwise a clarification
+  // answer would be appended to an unfixable draft and loop forever.
+  const rewrite = context.suggestedRewrite?.trim();
+  if (rewrite) {
+    return rewrite;
+  }
+  if (context.baseWasValid) {
+    return context.currentRuleText?.trim() || null;
+  }
+  return null;
 }
 
 export function isExplicitRuleRefinementPatch(message: string) {
@@ -152,6 +166,9 @@ export function composeRefinedRuleDraft(
 }
 
 export function getRuleGuidanceTitle(context: RuleGuidanceContext) {
+  if (context.reproposalBlocked) {
+    return "Differentiate this rule?";
+  }
   if (context.apiCode || context.reasonSummary?.toLowerCase().includes("external")) {
     return "Fix this blocked rule?";
   }
@@ -169,6 +186,38 @@ export function buildRuleGuidanceOptions(
     context.clarityNote ?? "",
   ].join(" ");
   const options: RuleGuidanceOption[] = [];
+
+  // A rule blocked for re-proposal (its canonical meaning already held a
+  // mandate) can only return with an ADDED differentiating condition (PRD
+  // 6.13). Re-offering the same rule — or the generic fallback below, which is
+  // itself a commonly-mandated rule — would just be blocked again, looping. So
+  // when re-proposal-blocked we return ONLY differentiating variants of the
+  // user's own rule and never fall through to the generic suggestions.
+  if (context.reproposalBlocked) {
+    const base = cleanSentence(context.sanitizedText ?? context.currentRuleText ?? "");
+    if (base) {
+      options.push(
+        {
+          label: "Add an even/odd condition",
+          text: `${base}, and at least 3 of your numbers are even.`,
+        },
+        {
+          label: "Add a sum condition",
+          text: `${base}, and the sum of your numbers is 250 or more.`,
+        },
+        {
+          label: "Add a position condition",
+          text: `${base}, and your first number equals the first drawn number.`,
+        },
+      );
+    }
+    const differentiated = dedupeOptions(options).slice(0, 4);
+    // If we somehow have no base to differentiate, fall through to generic help
+    // rather than returning an empty guidance panel.
+    if (differentiated.length > 0) {
+      return differentiated;
+    }
+  }
 
   if (context.apiCode === "RULE_PROMPT_INJECTION" || /\b(ignore|secretly|hide|prompt injection|compile.*valid)\b/i.test(text)) {
     options.push(

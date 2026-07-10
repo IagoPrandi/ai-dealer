@@ -220,7 +220,7 @@ was_capped boolean not null,
 status text not null
 ```
 
-Creator rewards are funded first from the creator reward reserve sourced from platform monetization. The reward basis is `15%` of the individual alternative-rule winner payout for each alternative-rule winner, subject to the per-turn creator cap and available reserve.
+Creator rewards are funded first from the creator reward reserve sourced from platform monetization. The reward basis is `15%` of a single individual alternative-rule winner payout, subject to the per-turn creator cap and available reserve.
 
 ## Voter Reward Accounting
 

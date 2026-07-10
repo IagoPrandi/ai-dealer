@@ -1758,7 +1758,7 @@ test("ranking alternative rule picks the best-score guesses as winners (ties sha
   assert.ok(!altPlayers.includes(walletThree));
 });
 
-test("reward distribution uses individual alternative payout basis and splits elected-rule voters", () => {
+test("reward distribution uses one individual alternative payout basis and splits elected-rule voters", () => {
   const rewards = calculateRewardDistribution({
     activeRuleId: 7,
     calculatedAt: "2026-06-12T12:18:00.000Z",
@@ -1770,14 +1770,14 @@ test("reward distribution uses individual alternative payout basis and splits el
     winnerCount: 10,
   });
 
-  assert.equal(rewards.creator?.calculatedRewardLamports, 10);
-  assert.equal(rewards.creator?.finalRewardLamports, 10);
+  assert.equal(rewards.creator?.calculatedRewardLamports, 1);
+  assert.equal(rewards.creator?.finalRewardLamports, 1);
   assert.equal(rewards.voterRewardPool.calculatedPoolLamports, 1);
   assert.equal(rewards.voterRewardPool.finalPoolLamports, 1);
   assert.equal(rewards.voterRewardPool.individualRewardLamports, 0);
   assert.equal(rewards.voterRewardPool.remainderLamports, 1);
   assert.equal(rewards.voters.length, 3);
-  assert.equal(rewards.remainingReserveLamports, 19);
+  assert.equal(rewards.remainingReserveLamports, 28);
 });
 
 test("creator and voter reward records are stored without reducing winner payouts", () => {
@@ -1860,7 +1860,7 @@ test("creator and voter reward records are stored without reducing winner payout
   assert.equal(winners.alternative.individualPayoutLamports, 14_250_000);
   assert.equal(rewards.creatorRewardReserveLamports, 600_000);
   assert.equal(rewards.creator?.creatorWallet, wallet);
-  assert.equal(rewards.creator?.calculatedRewardLamports, 4_275_000);
+  assert.equal(rewards.creator?.calculatedRewardLamports, 2_137_500);
   assert.equal(rewards.creator?.finalRewardLamports, 600_000);
   assert.equal(rewards.voterRewardPool.calculatedPoolLamports, 2_137_500);
   assert.equal(rewards.voterRewardPool.finalPoolLamports, 0);

@@ -333,9 +333,9 @@ export function IdealerApp({
     connect: requestConnect,
     connected,
     connecting,
-    decisionEndsAt: round?.elimination?.decisionWindowClosesAt
-      ? Math.floor(Date.parse(round.elimination.decisionWindowClosesAt) / 1000)
-      : null,
+    // Elimination voting is open for the whole of phase 2; it has no separate
+    // countdown — the single visible phase-2 timer (endSeconds) governs it, and
+    // it closes at the turn end.
     decisionPhase: round?.elimination?.status === "open",
     eliminatedIds: rules.eliminatedIds,
     endSeconds: activeTurn.endTimestamp,

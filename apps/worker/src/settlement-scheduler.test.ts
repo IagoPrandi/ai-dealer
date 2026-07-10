@@ -35,7 +35,6 @@ function makeState(
     eligibleRulePoolHash: null,
     eliminatedFinalistHash: null,
     eliminationWindowEndSeconds: 0,
-    eliminationWindowStartSeconds: 0,
     endTimestampSeconds: 1_000,
     finalistCount: 0,
     finalistEliminated: [],
@@ -361,7 +360,6 @@ test("orchestrator publishes finalist and active election proof randomness", asy
     electionVrfFulfillment: SET,
     electionVrfRequest: SET,
     eliminationWindowEndSeconds: 3_000,
-    eliminationWindowStartSeconds: 2_000,
     finalistCount: 1,
     finalistRuleIds: [7],
     finalistSetHash: "11".repeat(32),
@@ -414,13 +412,14 @@ test("orchestrator publishes finalist and active election proof randomness", asy
     Buffer.from(finalistRandomness).toString("hex"),
   );
   assert.deepEqual(published[0]?.eligibleCandidateCommitments, [candidate]);
-  // Settling the finalist VRF opens the elimination window on-chain; the
-  // decision-window projection must go out with the real timestamps.
+  // Settling the finalist VRF opens the elimination window on-chain; the window
+  // spans all of phase 2, so it opens at the rule-election cutoff (phase-1 ->
+  // phase-2 boundary) and closes at the turn end.
   assert.equal(eliminations.length, 1);
   assert.equal(eliminations[0]?.status, "open");
   assert.equal(
     eliminations[0]?.decisionWindowOpenedAt,
-    new Date(2_000 * 1_000).toISOString(),
+    new Date(1_000 * 1_000).toISOString(),
   );
   assert.equal(
     eliminations[0]?.decisionWindowClosesAt,
@@ -462,7 +461,6 @@ test("orchestrator projects the closed elimination window with the on-chain outc
   const windowOpen = makeState({
     eligibleRulePoolHash: HASH,
     eliminationWindowEndSeconds: 1_500,
-    eliminationWindowStartSeconds: 500,
     finalistCount: 2,
     finalistEliminated: [false, false],
     finalistRuleIds: [7, 9],
@@ -472,7 +470,6 @@ test("orchestrator projects the closed elimination window with the on-chain outc
     eligibleRulePoolHash: HASH,
     eliminatedFinalistHash: "55".repeat(32),
     eliminationWindowEndSeconds: 1_500,
-    eliminationWindowStartSeconds: 500,
     finalistCount: 2,
     finalistEliminated: [true, false],
     finalistRuleIds: [7, 9],
@@ -536,7 +533,6 @@ test("orchestrator republishes the open shortlist window while waiting", async (
     electionVrfFulfillment: SET,
     electionVrfRequest: SET,
     eliminationWindowEndSeconds: 3_000,
-    eliminationWindowStartSeconds: 2_000,
     finalistCount: 1,
     finalistEliminated: [false],
     finalistRuleIds: [7],

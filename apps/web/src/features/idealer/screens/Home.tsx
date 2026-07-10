@@ -55,13 +55,12 @@ function PromptInput() {
 
 export function HomeScreen() {
   const {
-    bet, decisionEndsAt, decisionPhase, endSeconds, fees, go, openDetail, phase1EndsAt, played, players, prizeSol, rules, turnId,
+    bet, decisionPhase, endSeconds, fees, go, openDetail, phase1EndsAt, played, players, prizeSol, rules, turnId,
     resultTurnId, round, turnOpen, turnReadyToPlay, turnStatusMessage, walletAddress,
   } = useIdealer();
 
   const [h, m, s] = useCountdownTo(endSeconds);
   const [p1h, p1m, p1s] = useCountdownTo(phase1EndsAt);
-  const [dh, dm, ds] = useCountdownTo(decisionEndsAt);
   const { claims } = usePlayerClaims(walletAddress);
   const claimableSol = lamportsToSol(claims?.availableLamports ?? 0);
   const nowSec = Math.floor(Date.now() / 1000);
@@ -177,7 +176,7 @@ export function HomeScreen() {
           </div>
         ) : null}
 
-        {/* SHORTLIST DECISION WINDOW */}
+        {/* ELIMINATION VOTING (open for all of phase 2) */}
         {decisionPhase ? (
           <button onClick={() => go("vote")} className="ide-tap" style={{
             width: "100%", textAlign: "left", marginBottom: 14, padding: "13px 16px", borderRadius: 16, cursor: "pointer", color: "var(--text)",
@@ -186,12 +185,9 @@ export function HomeScreen() {
           }} type="button">
             <span style={{ width: 38, height: 38, borderRadius: 12, background: "var(--yellow)", color: "#0B0910", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.vote style={{ color: "#0B0910" }} /></span>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 14.5, fontWeight: 700 }}>Shortlist decision window</div>
+              <div style={{ fontSize: 14.5, fontWeight: 700 }}>Vote finalists out</div>
               <div style={{ fontSize: 12.5, color: "var(--muted)" }}>
-                Vote finalists out
-                {decisionEndsAt ? (
-                  <> - closes in <span className="ide-num" style={{ color: "var(--text)", fontWeight: 700 }}>{dh}:{dm}:{ds}</span></>
-                ) : null}
+                Open all phase 2 - eliminate up to 5 of the 10 finalists
               </div>
             </div>
             <Ico.arrow style={{ color: "var(--yellow)", flexShrink: 0 }} />

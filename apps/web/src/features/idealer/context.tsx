@@ -40,7 +40,6 @@ export interface IdealerContextValue {
   connect: () => void;
   connected: boolean;
   connecting: boolean;
-  decisionEndsAt: null | number;
   decisionPhase: boolean;
   eliminatedIds: number[];
   endSeconds: null | number;

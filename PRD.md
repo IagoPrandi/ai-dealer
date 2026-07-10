@@ -180,7 +180,7 @@ If no alternative rule is active, only the original rule is evaluated and the al
 
 If no winner exists in either category, that category's share accumulates into the next turn's pool.
 
-When an alternative rule is active and produces winners, the creator of the active rule receives a creator reward equal to 15% of each individual alternative-rule winner payout. In addition, the wallets that voted for the elected rule share equally a voter reward equal to 15% of a single individual alternative-rule winner payout. Both rewards are funded from the creator reward reserve sourced from platform monetization and must not reduce the winner payout.
+When an alternative rule is active and produces winners, the creator of the active rule receives a creator reward equal to 15% of a single individual alternative-rule winner payout. In addition, the wallets that voted for the elected rule share equally a voter reward equal to 15% of a single individual alternative-rule winner payout. Both rewards are funded from the creator reward reserve sourced from platform monetization and must not reduce the winner payout.
 
 ### 2.5 Prize Pool
 
@@ -207,7 +207,7 @@ Default treasury fee:
 
 The **Rule of the Hour** is the elected and validated alternative rule for the current turn.
 
-It is elected from the **surviving finalists** after the community decision/elimination window: once the 10-rule finalist set is formed at the start of phase 2 (the end of the create & play phase), a fixed 1-hour decision window lets players cast paid elimination votes against finalists; up to 5 finalists may be eliminated, and the Rule of the Hour is then selected only from the survivors, before the draw at the turn's end (see sections 5.4, 6.12, and 6.14a).
+It is elected from the **surviving finalists** after the community decision/elimination window: once the 10-rule finalist set is formed at the start of phase 2 (the end of the create & play phase), the decision window stays open for the whole of phase 2 and lets players cast paid elimination votes against finalists; up to 5 finalists may be eliminated. When phase 2 ends the window closes, and the Rule of the Hour is then selected only from the survivors in an untimed settlement stage, before the draw at the turn's end (see sections 5.4, 6.12, and 6.14a).
 
 It is the main narrative object of the game.
 
@@ -512,7 +512,7 @@ Voting is gated by a turn Game Token in MVP. Users without a submitted guess can
 
 #### Decision-window (elimination) voting
 
-Once the 10 finalists are locked, a separate 1-hour decision window lets players vote finalists out before the Rule of the Hour is chosen (section 6.14a).
+Once the 10 finalists are locked, the decision window stays open for the whole of phase 2 and lets players vote finalists out before the Rule of the Hour is chosen (section 6.14a). It closes at the turn end.
 
 Requirements:
 
@@ -526,9 +526,9 @@ Requirements:
 UX copy example:
 
 ```text
-These 10 rules are finalists. You have 1 hour to vote some out.
+These 10 rules are finalists. You can vote some out for the rest of phase 2, until this turn ends.
 A rule is eliminated if its "vote out" count passes its support count — up to 5 of the 10 can go.
-Your first vote out may be free before turn 100. Repeat votes cost more each time. One surviving rule is then drawn as the Rule of the Hour.
+Your first vote out may be free before turn 100. Repeat votes cost more each time. When phase 2 ends, one surviving rule is then drawn as the Rule of the Hour.
 ```
 
 ### 4.7 Retention Loops
@@ -680,7 +680,7 @@ Each player may perform the following actions per turn.
 | Submit a guess | Unlimited; each guess is sequenced per wallet/turn | `2^n * GUESS_FEE`, where `n` is previous guesses by that wallet/turn; first guess is free before turn 100 | No; the first successful guess issues the token |
 | Propose a rule | Unlimited; each proposal is sequenced per wallet/turn | `2^n * RULE_PROPOSAL_FEE`, where `n` is previous proposals by that wallet/turn; first proposal is free before turn 100 |                              Yes |
 | Vote on a rule | Unlimited; each approval vote is sequenced per wallet/rule/side | `2^n * VOTE_FEE`, where `n` is prior same-side votes by that wallet/rule/turn; first approval vote is free before turn 100 |                              Yes |
-| Vote to eliminate a rule | Unlimited per finalist rule during the 1-hour decision window | Same `2^n * VOTE_FEE` schedule on the `vote out` side; first elimination vote is free before turn 100 |                              Yes |
+| Vote to eliminate a rule | Unlimited per finalist rule throughout phase 2, while the decision window is open | Same `2^n * VOTE_FEE` schedule on the `vote out` side; first elimination vote is free before turn 100 |                              Yes |
 | Remove a rule  |  2x per wallet per turn by default; only before election lock |  Yes, removal fee |                              Yes |
 | Report a rule  |                            20x per wallet per turn by default |                No |                              Yes |
 
@@ -740,18 +740,20 @@ Phase 1 — create & play (~22h): rule proposals, approval voting, and guess
 Shortlist draw step: eligible pool locked and finalist-selection VRF requested
           after phase 1 closes. Phase 2 has not started yet.
 Phase 2 — shortlist & draw (~2h): starts when the 10-rule finalist shortlist is
-          published (3 top-voted + 7 VRF-random), then runs the fixed 1-hour
-          decision/elimination window, active-rule election from survivors, and
-          the VRF draw at the phase-2 end.
+          published (3 top-voted + 7 VRF-random). The decision/elimination window
+          stays open for the whole of phase 2 and closes at the turn end; the
+          active-rule election from survivors and the VRF draw then run as an
+          untimed post-phase-2 settlement stage.
 ```
 
 The on-chain 4-slot duration-cycle machinery is retained with equal slots
 (`[86400, 86400, 86400, 86400]` seconds), so existing accounts, instructions,
 and automation keep working. Test/devnet environments scale the turn duration
-down at runtime (`IDEALER_DEVNET_TURN_DURATION_SCALE_BPS`) and shrink the
-decision window at build time (`manual-test` → 2 minutes, `devnet-test` → 5
-seconds) while preserving the same phase shape. The on-chain `end_timestamp` may
-shift after finalist settlement so phase 2 receives its full configured duration.
+down at runtime (`IDEALER_DEVNET_TURN_DURATION_SCALE_BPS`) while preserving the
+same phase shape. The decision window has no duration constant to scale: it
+simply spans phase 2 and closes at the turn end in all builds. The on-chain
+`end_timestamp` may shift after finalist settlement so phase 2 receives its full
+configured duration.
 
 #### Product Rationale
 
@@ -780,9 +782,9 @@ Rule preflight and background precompilation run continuously while phase 1 is o
 Rule proposals, approval voting, and guess submission close together at the phase-1 cutoff (9167 bps ≈ 22h).
 After the cutoff, the eligible pool is locked and finalist-selection VRF forms the finalist set of 10 (3 top-voted + finalist-election VRF for 7 random). Phase 2 has not started yet.
 Phase 2 starts when the finalist set is published. No active rule is chosen yet.
-Decision/elimination window runs for a fixed 60 minutes inside phase 2.
-At the end of the decision window: eliminations are applied, the active-election VRF selects one rule from the survivors, and the artifact is frozen.
-The VRF draw fires at the end of phase 2, right after which the turn closes and settlement projects results.
+Decision/elimination window stays open for the whole of phase 2 and closes at the turn end.
+As an untimed post-phase-2 settlement stage: eliminations are applied, the active-election VRF selects one rule from the survivors, and the artifact is frozen.
+The VRF draw fires right after, at the turn close, after which settlement projects results.
 ```
 
 For the production 24-hour turn, this maps to:
@@ -792,9 +794,9 @@ Rule preflight/precompilation: 0–22h, continuously after each proposal.
 Rule proposals, approval voting, and guess submission close at ~22h (9167 bps).
 Eligible pool locked and finalist-selection VRF starts shortly after ~22h.
 Phase 2 starts when the finalist set of 10 is published.
-Decision/elimination window: first fixed 1 hour of phase 2.
-Active rule elected from survivors and frozen after the decision window.
-Draw fires at the end of phase 2; the turn then closes and settles.
+Decision/elimination window: the whole of phase 2, closing at the turn end.
+Active rule elected from survivors and frozen after the window closes, as an untimed settlement stage.
+Draw fires right after, at the turn close, and the turn then settles.
 ```
 
 Generic flow:
@@ -840,15 +842,17 @@ Turn N begins
 │
 ├── PHASE 2 — SHORTLIST & DRAW (~2h, starts when finalists are published)
 │   │
-│   ├── DECISION / ELIMINATION WINDOW (fixed 60 minutes, inside phase 2)
+│   ├── DECISION / ELIMINATION WINDOW (spans the whole of phase 2, closes at the turn end)
 │   │   ├── Game Token holders may cast elimination votes against finalists
 │   │   │   └── first vote may be free before turn 100; repeated votes use escalating paid fees → prize pool
 │   │   ├── A finalist qualifies for elimination when elimination_votes > approval_votes
-│   │   ├── At window close, up to 5 finalists are eliminated
+│   │   ├── At window close (turn end), up to 5 finalists are eliminated
 │   │   │   ├── if more than 5 qualify, the 5 with the most elimination votes are eliminated
 │   │   │   ├── tie-break: fewest approval votes, then lowest rule_id
 │   │   │   └── at least 1 survivor is always kept
-│   │   └── Eliminated finalists move to ELIMINATED and are excluded from the active election
+│       └── Eliminated finalists move to ELIMINATED and are excluded from the active election
+│
+├── POST-PHASE-2 SETTLEMENT (untimed, after the window closes at the turn end)
 │   │
 │   ├── ACTIVE RULE ELECTION
 │   │   ├── Switchboard active-election VRF request is submitted over the survivors
@@ -872,8 +876,8 @@ The UI must clearly explain the election mechanic:
 
 ```text
 When the create & play phase ends, the finalist set is formed from 3 top-voted eligible rules plus 7 eligible rules selected by Switchboard VRF.
-A 1-hour decision window then lets players pay to vote out finalists: a finalist is eliminated when its elimination votes pass its approval votes, and up to 5 of the 10 can be eliminated.
-Finally, Switchboard VRF selects one rule from the surviving finalists to become the Rule of the Hour, and the numbers are drawn at the end of the turn.
+Throughout phase 2, the decision window lets players pay to vote out finalists: a finalist is eliminated when its elimination votes pass its approval votes, and up to 5 of the 10 can be eliminated. The window closes at the turn end.
+Finally, once the window closes, Switchboard VRF selects one rule from the surviving finalists to become the Rule of the Hour, and the numbers are drawn at the end of the turn.
 ```
 
 Default finalist count is **10**, because the selected policy is `3 top-voted + 7 random`. The PRD must not describe `3 + 6` as 10. After the decision window, between **5 and 10** finalists survive into the final active-rule selection (up to 5 may be eliminated, and at least 1 survivor is always kept).
@@ -907,7 +911,7 @@ OPEN
 → CLOSED
 ```
 
-`ELECTION_VRF_REQUESTED` / `ELECTION_VRF_FULFILLED` are the **finalist-election** VRF (used to derive the 7 random finalists and form the 10-rule finalist set). `ACTIVE_ELECTION_VRF_REQUESTED` / `ACTIVE_ELECTION_VRF_FULFILLED` are the **active-election** VRF, run only after the elimination window closes, to select one active rule from the surviving finalists. `ELIMINATION_WINDOW_OPEN` → `ELIMINATION_WINDOW_CLOSED` bound the fixed 1-hour decision phase.
+`ELECTION_VRF_REQUESTED` / `ELECTION_VRF_FULFILLED` are the **finalist-election** VRF (used to derive the 7 random finalists and form the 10-rule finalist set). `ACTIVE_ELECTION_VRF_REQUESTED` / `ACTIVE_ELECTION_VRF_FULFILLED` are the **active-election** VRF, run only after the elimination window closes, to select one active rule from the surviving finalists. `ELIMINATION_WINDOW_OPEN` → `ELIMINATION_WINDOW_CLOSED` bound the decision phase, which spans the whole of phase 2 and closes at the turn end.
 
 Failure and exception states:
 
@@ -1472,7 +1476,7 @@ Rationale:
 The Rule of the Hour is elected in **two VRF-backed steps separated by the decision/elimination window** (section 6.14a):
 
 1. **Finalist election** — at the start of phase 2 (the end of the create & play phase), a Switchboard finalist-election VRF request forms the 10-rule finalist set (3 top-voted + 7 random). No active rule is chosen here.
-2. **Active election** — after the fixed 1-hour decision window closes and eliminations are applied, a second Switchboard active-election VRF request selects one active rule from the surviving finalists.
+2. **Active election** — after the decision window closes at the turn end and eliminations are applied, a second Switchboard active-election VRF request selects one active rule from the surviving finalists, as an untimed post-phase-2 settlement stage.
 
 Default finalist-election configuration:
 
@@ -1496,7 +1500,7 @@ Default elimination configuration (decision window, section 6.14a):
 
 ```typescript
 const RULE_ELIMINATION_CONFIG = {
-  decisionWindowMinutes: 60,                          // fixed 1-hour window, separate from the play window
+  decisionWindowSpan: "phase_two",                    // elimination voting is open for the whole of phase 2; it closes at the turn end, and the active-rule election + draw then run as an untimed settlement stage (mirroring the shortlist-draw stage between phase 1 and phase 2)
   maxEliminatedRules: 5,                              // up to 5 of the 10 finalists may be eliminated
   eliminationCriterion: "elimination_votes > approval_votes",
   overflowSelection: "most_elimination_votes",        // when more than 5 qualify, eliminate the 5 with the most elimination votes
@@ -1525,9 +1529,9 @@ Finalist-election flow (end of play window):
 6. after VRF fulfillment, derive 7 additional random finalists from the remaining eligible pool using the fulfilled VRF word, not request entropy;
 7. form the finalist set from `top_voted_finalists + random_finalists` and persist `finalist_set_hash`;
 8. lock each finalist's **approval (positive) vote count** as the value used by the elimination criterion;
-9. open the decision/elimination window (no active rule chosen yet).
+9. open the decision/elimination window for the remainder of phase 2 — its close time is the turn end, so elimination voting stays open for the whole of phase 2 (no active rule chosen yet).
 
-Active-election flow (after the decision window closes):
+Active-election flow (after the decision window closes at the turn end — an untimed settlement stage, mirroring the shortlist draw between phase 1 and phase 2):
 
 1. compute eliminations from the elimination votes (section 6.14a): a finalist qualifies when `elimination_votes > approval_votes`; eliminate up to 5, choosing the 5 with the most elimination votes when more than 5 qualify, always keeping at least 1 survivor;
 2. mark eliminated finalists as `ELIMINATED` and persist `eliminated_finalist_hash`;
@@ -1553,7 +1557,7 @@ The UI must clearly communicate:
 ```text
 The highest-voted rule overall does not automatically win.
 Three top-voted eligible rules enter the finalist set, seven more are selected by verified randomness.
-A 1-hour decision window then lets players pay to vote finalists out (up to 5 of 10), and one surviving finalist is randomly elected.
+Throughout phase 2 players can pay to vote finalists out (up to 5 of 10); when phase 2 ends, one surviving finalist is randomly elected.
 ```
 
 ### 6.13 Rule Scope and Mandate-Based Re-Proposal Gate
@@ -1648,11 +1652,11 @@ The MVP does not need perfect Sybil resistance, but it must make manipulation vi
 
 ### 6.14a Rule Elimination Voting (Decision Window)
 
-After the 10-rule finalist set is locked at the start of phase 2 (the end of the create & play phase), a fixed **1-hour decision/elimination window** opens before the active rule is elected. During this window, players can pay to vote finalists out of contention. This gives the community a veto over the finalist set while preserving the role of approval voting and verified randomness.
+After the 10-rule finalist set is locked at the start of phase 2 (the end of the create & play phase), the **decision/elimination window** opens and stays open for the whole of phase 2, closing at the turn end, before the active rule is elected. During this window, players can pay to vote finalists out of contention. This gives the community a veto over the finalist set while preserving the role of approval voting and verified randomness.
 
 Elimination voting rules:
 
-- the decision window lasts a fixed 60 minutes and runs inside phase 2 of the turn (the ~2h tail between the phase-1 cutoff and the draw at the turn's end), so the turn's total duration already includes it;
+- the decision window spans the whole of phase 2 (the ~2h tail between the phase-1 cutoff and the draw at the turn's end) and closes at the turn end; there is no fixed duration constant, and the active-election VRF and draw run as an untimed post-phase-2 settlement stage;
 - only wallets holding a valid current-turn Game Token may cast elimination votes;
 - elimination votes may only target rules in the current finalist set, and only while the window is open;
 - each wallet may cast repeated elimination votes against the same finalist rule in the same turn;
@@ -2618,7 +2622,7 @@ If no alternative rule is active, if the alternative rule is invalidated, or if 
 
 ### 8.4 Active Rule Creator Reward and Elected-Rule Voter Reward
 
-When an alternative rule is active in a turn and that rule produces winners, the creator of the active rule receives a reward equal to **15% of each individual alternative-rule winner payout**.
+When an alternative rule is active in a turn and that rule produces winners, the creator of the active rule receives a reward equal to **15% of a single individual alternative-rule winner payout**.
 
 This reward is calculated from the individual payout but funded from the creator reward reserve sourced from platform monetization. It must not reduce the winner's individual payout.
 
@@ -2635,7 +2639,7 @@ Default assumption:
 
 ```text
 Winner individual payout remains unchanged.
-Creator reward is calculated as 15% of each individual alternative-rule winner payout.
+Creator reward is calculated as 15% of a single individual alternative-rule winner payout.
 Voter reward pool is calculated as 15% of a single individual alternative-rule winner payout.
 Both rewards are paid from the creator reward reserve sourced from platform monetization.
 ```
@@ -2648,8 +2652,7 @@ Alternative-rule winners: 10
 Individual payout: 100 / 10 = 10
 Final payout per winner: 10 (unchanged)
 
-Creator reward per individual payout: 15% × 10 = 1.5
-Total creator reward funded by creator reward reserve: 1.5 × 10 = 15
+Creator reward: 15% × 10 = 1.5 (from a single individual payout)
 
 Voter reward pool: 15% × 10 = 1.5 (from a single individual payout)
 Elected-rule voters: 4
@@ -2974,7 +2977,7 @@ Stores:
 - active turn duration index;
 - rule proposal/approval voting cutoff ratio (within the play window);
 - guess cutoff ratio (within the play window);
-- decision/elimination window duration minutes (fixed, default 60);
+- decision/elimination window span (spans the whole of phase 2, closes at the turn end; no fixed duration constant);
 - max eliminated rules per turn (default 5);
 - elimination vote base fee multiplier (default `1× VOTE_FEE`; escalation is per side);
 - repeated vote fee multiplier (default exponent base `2`, applied as `2^n * VOTE_FEE`);
@@ -3222,9 +3225,9 @@ Responsibilities:
 - close rule proposals, approval voting, and guess submission together at the phase-1 cutoff;
 - lock the eligible precompiled rule pool at the start of phase 2 (the phase-1 cutoff);
 - request Switchboard finalist-election VRF and form the 10-rule finalist set on fulfillment;
-- open the fixed 60-minute decision/elimination window (inside phase 2) after the finalist set is locked;
-- close the decision window after 60 minutes, tally elimination votes, and apply up to 5 eliminations;
-- request Switchboard active-election VRF over the survivors and freeze the elected rule on fulfillment;
+- open the decision/elimination window (spanning the whole of phase 2) after the finalist set is locked;
+- close the decision window at the turn end (end of phase 2), tally elimination votes, and apply up to 5 eliminations;
+- as an untimed post-phase-2 settlement stage, request Switchboard active-election VRF over the survivors and freeze the elected rule on fulfillment;
 - trigger the Switchboard VRF draw at the end of the turn (phase-2 end), then close and settle the turn.
 
 ### 10.4 Token Counter Service
@@ -4588,11 +4591,11 @@ Establish the product baseline, architecture baseline, monorepo structure, Docke
 - [x] Confirm two winning conditions: original rule and active alternative rule.
 - [x] Confirm current-turn Game Token requirement for proposing, voting, removing, and reporting rules.
 - [x] Confirm rule election policy: exactly 10 finalists, composed of 3 top-voted eligible + 7 VRF-random eligible, formed by a finalist-election VRF at the end of the play window.
-- [x] Confirm rule elimination decision phase: a fixed 1-hour decision window after the finalist set is locked, in which Game-Token holders cast paid elimination votes (2× the effective vote fee → prize pool); a finalist is eliminated when its elimination votes exceed its frozen approval votes; up to 5 of the 10 may be eliminated (when more than 5 qualify, the 5 with the most elimination votes are eliminated, ties broken by fewest approval votes then lowest rule_id); the active rule is then VRF-selected from the survivors. Historical baseline; superseded only for repeated elimination-vote fee handling by PRD v1.5.1 sections 6.14a and 8.2.
+- [x] Confirm rule elimination decision phase: a decision window that spans the whole of phase 2 and closes at the turn end after the finalist set is locked, in which Game-Token holders cast paid elimination votes (2× the effective vote fee → prize pool); a finalist is eliminated when its elimination votes exceed its frozen approval votes; up to 5 of the 10 may be eliminated (when more than 5 qualify, the 5 with the most elimination votes are eliminated, ties broken by fewest approval votes then lowest rule_id); the active rule is then VRF-selected from the survivors. Historical baseline; superseded only for repeated elimination-vote fee handling by PRD v1.5.1 sections 6.14a and 8.2.
 - [x] Confirm Switchboard VRF is used for the draw, the finalist election, and the active election.
 - [x] Confirm no deterministic fallback finalist activation.
 - [x] Confirm paid rule removal is included in MVP with fixed prize-pool fee destination.
-- [x] Confirm active rule creator reward: 15% of each individual alternative-rule winner payout.
+- [x] Confirm active rule creator reward: 15% of a single individual alternative-rule winner payout.
 - [x] Confirm creator reward is funded from the creator reward reserve sourced from platform monetization, not deducted from the winner-visible payout.
 - [x] Confirm elected-rule voter reward: 15% of a single individual payout, split equally among the elected rule's voters, funded from the same reserve with its own per-turn cap.
 - [x] Confirm vote fee from turn 100 onward, destination prize pool, with the current-turn Game Token requirement retained. Historical baseline; superseded by PRD v1.5.1 repeated approval-vote fee handling in sections 6.14 and 8.2.
@@ -5392,13 +5395,13 @@ Implement draw generation, rule election, AI rule validation, guess verification
 
 #### M3.8 — Rule Elimination Decision Phase
 
-**Objective:** insert the fixed 1-hour decision/elimination window between finalist-set formation and active-rule election, with paid elimination voting and survivor-only selection (sections 5.4, 6.12, 6.14a).
+**Objective:** insert the decision/elimination window (spanning the whole of phase 2 and closing at the turn end) between finalist-set formation and active-rule election, with paid elimination voting and survivor-only selection (sections 5.4, 6.12, 6.14a).
 
 **Checklist:**
 
 - [x] Split rule election into finalist-election VRF (forms the 10) and active-election VRF (selects from survivors).
 - [x] Lock each finalist's approval (positive) vote count when the finalist set is formed.
-- [x] Open a fixed 60-minute decision/elimination window after the finalist set is locked.
+- [x] Open the decision/elimination window (spanning the whole of phase 2, closing at the turn end) after the finalist set is locked.
 - [x] Implement `eliminate_vote_rule` (Game Token gate, finalist-only target, decision-window-only, sequenced same-wallet/finalist votes, `VOTE_FEE`-based escalating payment to prize pool) and the `RuleEliminationVote` account/projection. Historical baseline originally used one-per-finalist and 2x fee; superseded by PRD v1.5.1 repeated elimination-vote requirements in section 6.14a.
 - [x] Charge the elimination vote at 2× the effective vote fee for the turn (free before turn 100, 0.01 SOL from turn 100). Historical baseline; superseded by PRD v1.5.1 escalating repeated-vote fee policy in section 8.2.
 - [x] Implement repeated elimination votes for the same `(turn, wallet, finalist_rule)` with sequenced/idempotent vote records.
@@ -5414,7 +5417,7 @@ Implement draw generation, rule election, AI rule validation, guess verification
 - [x] Active rule is only ever elected from non-eliminated finalists.
 - [x] Elimination criterion, cap of 5, and deterministic tie-break are enforced and auditable.
 - [x] Elimination vote fee and Game Token gate are enforced on-chain.
-- [x] Decision window timing is independent of the play-window duration cycle.
+- [x] Decision window spans the whole of phase 2 and closes at the turn end (no fixed duration constant); the active election and draw run as an untimed post-phase-2 settlement stage.
 
 ---
 
@@ -5497,7 +5500,7 @@ Implement prize pool accounting, treasury/platform monetization, payouts, rollov
 - [x] Identify creator of active rule in the turn.
 - [x] Check whether active rule produced alternative-rule winners.
 - [x] Calculate individual alternative-rule winner payout.
-- [x] Calculate creator reward as `15% × individual alternative-rule winner payout` per winner.
+- [x] Calculate creator reward as `15% × a single individual alternative-rule winner payout`.
 - [x] Resolve the elected-rule voter set from recorded `RuleVote` accounts. Historical baseline; PRD v1.5.1 requires wallet-unique voter resolution even when repeated `RuleVote` records exist.
 - [ ] Resolve the elected-rule voter reward set from unique wallets, not from total repeated vote records.
 - [x] Calculate voter reward pool as `15% × a single individual alternative-rule winner payout` and split it equally among elected-rule voters. Historical baseline; PRD v1.5.1 requires equal split among unique voter wallets only.
@@ -5509,7 +5512,7 @@ Implement prize pool accounting, treasury/platform monetization, payouts, rollov
 - [x] Handle no alternative-rule winner case (no creator or voter reward).
 - [x] Handle multiple alternative-rule winner case.
 - [x] Handle elected rule with zero recorded voters (no voter reward).
-- [x] Add example test: total prize 100, 10 winners, individual payout 10, creator reward basis 15% of 10 per winner, voter reward pool 15% of 10 split among voters.
+- [x] Add example test: total prize 100, 10 winners, individual payout 10, creator reward basis 15% of 10 once, voter reward pool 15% of 10 split among voters.
 - [x] Add accounting tests to ensure the reserve covers creator reward first, then voter reward.
 
 **Approval criteria:**
@@ -6555,9 +6558,9 @@ This section replaces the former open questions list. The following decisions ar
 4. Full sanitized original rule text is stored on-chain in the `RuleProposal` account. Off-chain copies may exist only for indexing, search, analytics, and UI performance.
 5. Rule votes are on-chain through `RuleVote` accounts or an equivalent on-chain account model. MVP does not use off-chain vote commitments as the primary voting record.
 6. The finalist set is exactly 10 rules whenever at least 10 eligible rules exist: 3 top-voted eligible rules plus 7 VRF-random eligible rules. If fewer than 10 eligible rules exist, all available eligible rules form the finalist set.
-7. Every production turn has ~22h of phase 1 (create rules + pick numbers, closing at the 9167-bps rule-election/guess cutoff). The shortlist VRF starts only after phase 1 closes. Phase 2 starts when the finalist shortlist is published and then runs for ~2h (1-hour decision/elimination window, active-rule election, draw at phase-2 end). (Revised 2026-07; replaces the former `2h → 2h → 8h → 8h` cycle.)
+7. Every production turn has ~22h of phase 1 (create rules + pick numbers, closing at the 9167-bps rule-election/guess cutoff). The shortlist VRF starts only after phase 1 closes. Phase 2 starts when the finalist shortlist is published and then runs for ~2h; the decision/elimination window spans the whole of phase 2 and closes at the turn end, after which the active-rule election and draw run as an untimed post-phase-2 settlement stage. (Revised 2026-07; replaces the former `2h → 2h → 8h → 8h` cycle.)
 8. The alternative rule pool remains 50% of the post-treasury playable prize pool. If no alternative rule is active or no alternative-rule winners exist, the alternative bucket follows the rollover rules.
-9. Creator rewards remain fixed at 15% of each individual alternative-rule winner payout, funded from the creator reward reserve sourced from platform monetization and subject to reserve and cap.
+9. Creator rewards remain fixed at 15% of a single individual alternative-rule winner payout, funded from the creator reward reserve sourced from platform monetization and subject to reserve and cap.
 10. MVP reserves 20% of platform monetization for the creator reward reserve. This is a configurable treasury policy, but winner-visible payouts must never be reduced to fund creator rewards.
 11. Normal users see simple rule explanations, status, difficulty labels, and audit links. Detailed AI/compiler reasoning appears only in expandable audit panels, public-safe audit views, or restricted operator views when it contains non-public operational detail.
 12. Proposed rules cannot be edited after on-chain submission. A user must submit a new paid proposal if they want a different rule text. Preflight and precompilation artifacts are therefore immutable per proposal.
@@ -6612,7 +6615,7 @@ This section replaces the former open questions list. The following decisions ar
 10. Rule may enter the finalist set as a top-voted or VRF-random finalist.
 11. Rule may be VRF-elected and frozen.
 12. Creator receives status if rule becomes active.
-13. If the active rule produced winners, creator receives 15% of each individual alternative-rule winner payout funded from the creator reward reserve sourced from platform monetization.
+13. If the active rule produced winners, creator receives 15% of a single individual alternative-rule winner payout funded from the creator reward reserve sourced from platform monetization.
 14. Creator profile updates after round.
 
 ---

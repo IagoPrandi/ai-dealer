@@ -620,7 +620,6 @@ export interface SettlementTurnState {
   electionVrfRequest: PublicKey;
   eligibleRulePoolHash: string | null;
   eliminationWindowEndSeconds: number;
-  eliminationWindowStartSeconds: number;
   eliminatedFinalistHash: string | null;
   endTimestampSeconds: number;
   startTimestampSeconds: number;
@@ -679,15 +678,17 @@ export function decodeSettlementTurnState(
   }
   const eliminatedFinalistHash = hex32At(data, 423);
   const survivorFinalistHash = hex32At(data, 455);
-  const eliminationWindowStartSeconds = i64Number(view, 487);
-  const eliminationWindowEndSeconds = i64Number(view, 495);
-  const electionVrfRequest = readPubkey(data, 503);
-  const electionVrfFulfillment = readPubkey(data, 535);
-  const activeElectionVrfRequest = readPubkey(data, 576);
-  const activeElectionVrfFulfillment = readPubkey(data, 608);
-  const drawStatus = decodeDrawStatus(view.getUint8(649));
-  const drawVrfRequest = readPubkey(data, 650);
-  const drawnAtSeconds = i64Number(view, 762);
+  // `elimination_window_start_timestamp` was removed from `TurnState` (the
+  // window now spans the whole of phase 2, so only the close time is stored).
+  // All offsets from here on shift down by 8 bytes versus the old layout.
+  const eliminationWindowEndSeconds = i64Number(view, 487);
+  const electionVrfRequest = readPubkey(data, 495);
+  const electionVrfFulfillment = readPubkey(data, 527);
+  const activeElectionVrfRequest = readPubkey(data, 568);
+  const activeElectionVrfFulfillment = readPubkey(data, 600);
+  const drawStatus = decodeDrawStatus(view.getUint8(641));
+  const drawVrfRequest = readPubkey(data, 642);
+  const drawnAtSeconds = i64Number(view, 754);
 
   const hashOrNull = (value: string) =>
     value === ZERO_HASH_HEX ? null : value;
@@ -709,7 +710,6 @@ export function decodeSettlementTurnState(
     electionVrfRequest,
     eligibleRulePoolHash: hashOrNull(eligibleRulePoolHash),
     eliminationWindowEndSeconds,
-    eliminationWindowStartSeconds,
     eliminatedFinalistHash: hashOrNull(eliminatedFinalistHash),
     endTimestampSeconds,
     startTimestampSeconds,

@@ -68,6 +68,16 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-07-10 (Creator reward unit-payout correction)
+
+- Opened required documents/context before working: `PRD.md`, `AGENTS.md` instructions from the prompt, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/develop-frontend/SKILL.md`, `.claude/skills/idealer-ui-coherence/SKILL.md`, `.claude/skills/idealer-test-and-verify/SKILL.md`, `.claude/skills/idealer-design-system/SKILL.md`, and design-system references `01-tokens.md`, `02-components.md`, `03-screens-and-state.md`, and `04-new-screen-recipe.md`.
+- Corrected creator reward accounting so the creator reward is `15%` of a single individual alternative-rule winner payout, not `15% × individual payout × winner_count`. The voter reward pool already used the single-unit payout basis and remains unchanged.
+- Updated the ambiguous rule-submission success copy to "15% of one winner's payout" to avoid implying that the creator takes a share from every displayed prize.
+- Updated PRD and supporting docs (`docs/product-rule-summary.md`, `docs/data-model-draft.md`, `docs/mvp-decision-registry.md`) to align the product rule with the corrected unit-payout basis.
+- Updated API reward tests so a 10-winner case proves the creator reward does not scale with winner count.
+- Verification passed: `pnpm --filter @idealer/api typecheck`, `test` (65/65), `lint`, `build`; `pnpm --filter @idealer/web typecheck`, `test` (37/37), `lint`, `build`.
+- Reviewed the result for inconsistencies: stale creator-reward wording was removed from the touched docs and app code, winner-visible payouts are still not reduced, the creator-first reserve draw order remains unchanged, and no milestone checkbox/status was changed because milestone marking requires explicit user confirmation.
+
 ### 2026-07-09 (Live rule precompilation loop — fixes always-`original_only` election)
 
 - Opened required documents/context before working: `PRD.md` (§6.6/§6.12/§7.9 background precompilation and original-only path), `PROGRESS_TRACKER.md`, `.claude/skills`, and `.claude/skills/idealer-test-and-verify/SKILL.md`.
@@ -1266,7 +1276,7 @@ Opened before starting `M0.1`:
 - Opened `PRD.md` before changing creator reward terms, as required.
 - Opened `AGENTS.md` and `.claude/skills` before changing documentation, as required.
 - Opened `.claude/skills/best-practices/SKILL.md` and its required `references/agent-principles.md`.
-- Updated creator reward documentation in `PRD.md`, `docs/product-rule-summary.md`, and `docs/mvp-decision-registry.md` from 2% to 15% of each individual alternative-rule winner payout.
+- Updated creator reward documentation in `PRD.md`, `docs/product-rule-summary.md`, and `docs/mvp-decision-registry.md` from 2% to 15% of a single individual alternative-rule winner payout.
 - Confirmed the reward source as the creator reward reserve sourced from platform monetization, with winner-visible payouts unchanged.
 - Did not tick milestone approval items because user confirmation is still required.
 
@@ -1304,7 +1314,7 @@ Opened before starting `M0.1`:
 | Randomness provider                                | Confirmed as Switchboard VRF for draw and rule election.                                                                                       |
 | Fallback behavior                                  | Confirmed no deterministic fallback finalist activation.                                                                                       |
 | Paid rule removal                                  | Confirmed as included in MVP with prize-pool fee destination.                                                                                  |
-| Creator reward                                     | Confirmed as 15% of each individual alternative-rule winner payout, funded from the creator reward reserve sourced from platform monetization. |
+| Creator reward                                     | Confirmed as 15% of a single individual alternative-rule winner payout, funded from the creator reward reserve sourced from platform monetization. |
 | Admin console scope                                | Confirmed separate from public DApp and limited to insights, not direct game manipulation.                                                     |
 | Implementation constraints                         | Confirmed monorepo and Docker Compose as required constraints.                                                                                 |
 

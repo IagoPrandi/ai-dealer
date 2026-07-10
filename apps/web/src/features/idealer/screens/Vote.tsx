@@ -8,7 +8,7 @@ import { VOTE_FEE_START_TURN } from "@idealer/constants";
 import { useIdealer } from "../context";
 import { fmtSol, fmtTurnId } from "../data/format";
 import type { UiRule } from "../data/types";
-import { Ico, Medal, VoteTally, finalistStatus, useCountdownTo } from "../shared";
+import { Ico, Medal, VoteTally, finalistStatus } from "../shared";
 
 type FinalistPhaseKind = "decision" | "locked" | "original_only" | "pending" | "waiting";
 
@@ -35,19 +35,19 @@ export function getFinalistPhaseView({
     return decisionPhase
       ? {
           body:
-            "10 finalists - 3 most voted + 7 by VRF. Vote against to eliminate (max 5). A rule falls when down-votes overtake up-votes. Survivors go to the active rule draw.",
+            "10 finalists - 3 most voted + 7 by VRF. Vote against to eliminate (max 5) any time this phase. A rule falls when down-votes overtake up-votes. Survivors go to the active rule draw.",
           emptyBody: "",
           emptyTitle: "",
           kind: "decision",
-          label: "Decision window",
+          label: "Elimination voting open",
         }
       : {
           body:
-            "The finalist set is published for this round. The decision window is closed or not accepting elimination votes right now.",
-          emptyBody: "",
-          emptyTitle: "",
+            "Elimination voting has closed for this round. The active rule is now being elected from the surviving finalists.",
+          emptyBody: "Elimination voting has closed. Electing the active rule from the survivors.",
+          emptyTitle: "Active rule election in progress",
           kind: "locked",
-          label: "Finalist set",
+          label: "Active rule election",
         };
   }
 
@@ -181,7 +181,6 @@ function FinalistRow({ rule }: { rule: UiRule }) {
 export function VoteScreen() {
   const {
     actionError,
-    decisionEndsAt,
     decisionPhase,
     fees,
     phase1EndsAt,
@@ -194,7 +193,6 @@ export function VoteScreen() {
     turnOpen,
   } = useIdealer();
   const [tab, setTab] = useState<"abertas" | "finalistas">(decisionPhase ? "finalistas" : "abertas");
-  const [h, m, s] = useCountdownTo(decisionEndsAt);
   const nowSec = Math.floor(Date.now() / 1000);
   const phase1Closed =
     turnOpen &&
@@ -278,11 +276,6 @@ export function VoteScreen() {
             <div className="ide-card" style={{ padding: "13px 15px", marginBottom: 14, borderColor: "rgba(255,210,63,0.3)", background: "linear-gradient(110deg, rgba(255,210,63,0.08), var(--surface))" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <span className="ide-phase decision"><span className="dot" /> {finalistPhase.label}</span>
-                {decisionEndsAt && finalistPhase.kind === "decision" ? (
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 13, color: "var(--muted)" }}>
-                    <Ico.clock style={{ color: "var(--yellow)" }} /> <span className="ide-num" style={{ fontWeight: 700, color: "var(--text)" }}>{h}:{m}:{s}</span>
-                  </span>
-                ) : null}
               </div>
               <p style={{ margin: "10px 0 0", fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5 }}>
                 {finalistPhase.body}

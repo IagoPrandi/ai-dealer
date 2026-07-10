@@ -53,8 +53,8 @@ The current-turn Game Token is an on-chain PDA issued by `submit_guess`. It is r
 - Selection must use ranged VRF output or rejection sampling, not raw modulo reduction.
 - Deterministic fallback finalist activation is disallowed.
 - Finalists must be precompiled before election.
-- After the finalist set is locked, a fixed 1-hour decision/elimination window opens.
-- Game Token holders may cast one elimination vote per finalist rule during that window.
+- After the finalist set is locked, the decision/elimination window opens and stays open for the whole of phase 2, closing at the turn end.
+- Game Token holders may cast one elimination vote per finalist rule any time during that window (all of phase 2).
 - A finalist is eliminated when elimination votes exceed its frozen approval votes.
 - At most 5 finalists can be eliminated, ties broken by most elimination votes, then fewest approval votes, then lowest rule id.
 - The active rule is selected by a separate active-election VRF over survivors only.
@@ -72,7 +72,7 @@ Paid rule removal is included in MVP. The removal fee destination is fixed to th
 - Elimination vote fee: same side-specific `2^n * VOTE_FEE` schedule as approval votes, therefore free for the first vote-out before turn 100 and `0.005 SOL` for the first vote-out from turn 100 onward.
 - Report fee: `0 SOL`.
 - Default treasury fee: `500 bps`.
-- Active rule creator reward: 15% of each individual alternative-rule winner payout.
+- Active rule creator reward: 15% of a single individual alternative-rule winner payout.
 - Creator rewards are funded from the creator reward reserve sourced from platform monetization and must not reduce winner-visible payouts.
 - Elected-rule voter reward: 15% of a single individual alternative-rule winner payout, split equally among the elected rule's voters and funded from the creator reward reserve under its own cap.
 - MVP reserves 20% of platform monetization for the creator reward reserve.

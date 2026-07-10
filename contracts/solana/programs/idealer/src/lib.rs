@@ -24,22 +24,12 @@ declare_id!("6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4");
 pub const TURN_DURATION_CYCLE_LEN: usize = 4;
 pub const MAX_FINALISTS: usize = 10;
 pub const REPEATED_ACTION_FEE_MULTIPLIER: u64 = 2;
-/// Fixed 1-hour decision/elimination window (PRD §5.4/§6.14a). It runs inside
-/// phase 2 of the turn — the ~2h tail after the rule/guess cutoff in which the
-/// finalist shortlist is formed, elimination votes are cast, the active rule is
-/// elected, and the draw fires at the turn's end. Under the test-only
-/// `devnet-test` feature it collapses to a few seconds so the full
-/// election → elimination → active-election pipeline can be validated end-to-end
-/// on devnet without a real 1-hour wait; production builds keep the full hour.
-/// The `manual-test` feature sets a human-scale 2-minute window for hands-on
-/// devnet playtesting (turn duration itself is runtime-scaled off-chain), and
-/// takes precedence over `devnet-test` when both are enabled.
-#[cfg(feature = "manual-test")]
-pub const ELIMINATION_WINDOW_SECONDS: i64 = 120;
-#[cfg(all(feature = "devnet-test", not(feature = "manual-test")))]
-pub const ELIMINATION_WINDOW_SECONDS: i64 = 5;
-#[cfg(all(not(feature = "devnet-test"), not(feature = "manual-test")))]
-pub const ELIMINATION_WINDOW_SECONDS: i64 = 3_600;
+// The decision/elimination window is no longer a fixed sub-window: it spans the
+// whole of phase 2 (the ~2h tail after the rule/guess cutoff), opening when the
+// finalist set is locked and closing at the turn end. Its close time is stored
+// on `TurnState.elimination_window_end_timestamp` (= the turn end), so there is
+// no standalone window-duration constant. The active-rule election and draw run
+// as an untimed settlement stage once the window closes.
 pub const MAX_RULE_TEXT_BYTES: usize = 6000;
 pub const BASIS_POINTS_DENOMINATOR: u16 = 10_000;
 
@@ -262,7 +252,6 @@ pub mod idealer {
         turn.finalist_eliminated = [false; MAX_FINALISTS];
         turn.eliminated_finalist_hash = [0; 32];
         turn.survivor_finalist_hash = [0; 32];
-        turn.elimination_window_start_timestamp = 0;
         turn.elimination_window_end_timestamp = 0;
         turn.election_vrf_request = Pubkey::default();
         turn.election_vrf_fulfillment = Pubkey::default();
@@ -864,11 +853,6 @@ pub mod idealer {
             turn.finalist_rule_ids[index] = *rule_id;
             turn.finalist_approval_vote_counts[index] = candidate.vote_count;
         }
-        turn.elimination_window_start_timestamp = clock.unix_timestamp;
-        turn.elimination_window_end_timestamp = clock
-            .unix_timestamp
-            .checked_add(ELIMINATION_WINDOW_SECONDS)
-            .ok_or(IdealerError::ArithmeticOverflow)?;
         let phase2_duration_seconds = phase_two_duration_seconds(config, turn)?;
         let shifted_end_timestamp = clock
             .unix_timestamp
@@ -877,6 +861,11 @@ pub mod idealer {
         if shifted_end_timestamp > turn.end_timestamp {
             turn.end_timestamp = shifted_end_timestamp;
         }
+        // The elimination/decision window spans the whole of phase 2: voting is
+        // open from now (finalist set locked) until the turn end, and the
+        // active-rule election + draw run as an untimed settlement stage after
+        // it closes (mirroring the shortlist draw between phase 1 and phase 2).
+        turn.elimination_window_end_timestamp = turn.end_timestamp;
         turn.election_vrf_fulfillment = randomness_source;
         turn.elected_finalist_index = 0;
         turn.active_rule_id = 0;
@@ -907,14 +896,16 @@ pub mod idealer {
             ctx.accounts.turn_state.turn_id,
             ctx.accounts.voter.key(),
         )?;
+        // The window opens when the finalist set is locked (finalist_count > 0,
+        // which also stamps elimination_window_end_timestamp = turn end) and
+        // stays open for the whole of phase 2, i.e. until the turn end.
         require!(
             ctx.accounts.turn_state.finalist_count > 0
-                && ctx.accounts.turn_state.elimination_window_start_timestamp > 0,
+                && ctx.accounts.turn_state.elimination_window_end_timestamp > 0,
             IdealerError::EliminationWindowNotOpen
         );
         require!(
-            clock.unix_timestamp >= ctx.accounts.turn_state.elimination_window_start_timestamp
-                && clock.unix_timestamp < ctx.accounts.turn_state.elimination_window_end_timestamp,
+            clock.unix_timestamp < ctx.accounts.turn_state.elimination_window_end_timestamp,
             IdealerError::EliminationWindowNotOpen
         );
         let index = finalist_index(&ctx.accounts.turn_state, ctx.accounts.rule_proposal.rule_id)
@@ -2846,7 +2837,10 @@ pub struct TurnState {
     pub finalist_eliminated: [bool; MAX_FINALISTS],
     pub eliminated_finalist_hash: [u8; 32],
     pub survivor_finalist_hash: [u8; 32],
-    pub elimination_window_start_timestamp: i64,
+    /// Close time of the elimination/decision window. The window spans the whole
+    /// of phase 2, so this equals the turn `end_timestamp`; it is stamped when
+    /// the finalist set is locked in `settle_rule_election`. Voting is open until
+    /// this instant; the active-rule election + draw then run untimed.
     pub elimination_window_end_timestamp: i64,
     pub election_vrf_request: Pubkey,
     pub election_vrf_fulfillment: Pubkey,
