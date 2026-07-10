@@ -35,11 +35,32 @@ test("accepts an equivalent at-least-N match interpretation without guardian sco
   assert.equal(grounded, true);
 });
 
+test("accepts equivalent Portuguese short match-count interpretation without guardian scoring", async () => {
+  globalThis.fetch = (async () => {
+    throw new Error("guardian should not be called for a clear equivalent rule");
+  }) as typeof fetch;
+
+  const grounded = await checkGroundedness(
+    "Premia quem acertar 1 número em qualquer ordem.",
+    "A guess wins if at least 1 of its numbers appear in the official draw, regardless of order.",
+    GUARDIAN_CONFIG,
+  );
+
+  assert.equal(grounded, true);
+});
+
 test("does not treat a changed match threshold as clearly grounded", () => {
   assert.equal(
     isClearlyGroundedRuleInterpretation(
       "Win if at least 4 of your numbers appear in the draw.",
       "A guess wins when at least five of its numbers appear in the draw.",
+    ),
+    false,
+  );
+  assert.equal(
+    isClearlyGroundedRuleInterpretation(
+      "Premia quem acertar 1 número em qualquer ordem.",
+      "A guess wins if at least 2 of its numbers appear in the official draw, regardless of order.",
     ),
     false,
   );

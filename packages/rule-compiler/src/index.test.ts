@@ -254,6 +254,43 @@ test("deterministically compiles the canonical most/fewest-matches ranking famil
   );
 });
 
+test("accepts Portuguese unordered match-count threshold wording", () => {
+  const prompts = [
+    "ganha quem acertar 1 número em qualquer ordem",
+    "premia quem acertar 1 número em qualquer ordem",
+    "prêmeia quer acertar 1 número em qualquer ordem",
+    "ganha quem acertar uma dezena em qualquer ordem",
+    "pelo menos dois números acertados no sorteio",
+    "dois ou mais números acertados no sorteio",
+  ];
+
+  for (const prompt of prompts) {
+    const result = validateAndPrecompileRule({
+      prompt,
+      tokenCount: tokenCount(prompt),
+    });
+
+    assert.equal(result.decision, "VALID", prompt);
+    assert.equal(result.artifact?.ruleMode, "predicate", prompt);
+    assert.equal(result.log.reasonCodes.includes("UNSUPPORTED_RULE"), false, prompt);
+    assert.match(result.artifactHash ?? "", /^[0-9a-f]{64}$/, prompt);
+  }
+
+  const oneMatch = validateAndPrecompileRule({
+    prompt: prompts[0]!,
+    tokenCount: tokenCount(prompts[0]!),
+  }).artifact?.ast;
+  assert.ok(oneMatch?.schemaVersion === 1 && oneMatch.node.kind === "match_count_at_least");
+  assert.equal(oneMatch.node.value, 1);
+
+  const twoOrMore = validateAndPrecompileRule({
+    prompt: prompts.at(-1)!,
+    tokenCount: tokenCount(prompts.at(-1)!),
+  }).artifact?.ast;
+  assert.ok(twoOrMore?.schemaVersion === 1 && twoOrMore.node.kind === "match_count_at_least");
+  assert.equal(twoOrMore.node.value, 2);
+});
+
 test("handles the first 10 VALID prompts from the rule proposal test set", () => {
   const prompts = readPromptRows("VALID", 10);
 

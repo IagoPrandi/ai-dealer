@@ -185,18 +185,25 @@ function extractAtLeastMatchThreshold(value: string) {
     normalized.match(
       /\b(?:at least|pelo menos|no minimo|minimum of|minimo de|>=)\s+([a-z0-9]+)\b/u,
     ) ??
-    normalized.match(/\b([a-z0-9]+)\s+(?:or more|ou mais)\b/u);
+    normalized.match(/\b([a-z0-9]+)\s+(?:or more|ou mais)\b/u) ??
+    normalized.match(/\bacert\w*\s+([a-z0-9]+)\s+(?:numero|numeros|dezena|dezenas|acerto|acertos)\b/u);
   const amount = threshold ? numberFromToken(threshold[1]!) : undefined;
   if (!amount || amount < 1 || amount > 6) {
     return null;
   }
 
   const mentionsGuessNumbers =
-    /\b(?:guess|guessed|player|your|seus?|suas?|palpite|apostad[ao])\b/u.test(
+    (/\b(?:guess|guessed|player|your|seus?|suas?|palpite|apostad[ao])\b/u.test(
       normalized,
-    ) && /\b(?:number|numbers|numero|numeros)\b/u.test(normalized);
+    ) && /\b(?:number|numbers|numero|numeros|dezena|dezenas)\b/u.test(normalized)) ||
+    /\bacert\w*\s+[a-z0-9]+\s+(?:numero|numeros|dezena|dezenas|acerto|acertos)\b/u.test(
+      normalized,
+    );
   const mentionsDraw =
     /\b(?:draw|drawn|drawing|sorteio|sorteados?|sorteadas?)\b/u.test(
+      normalized,
+    ) ||
+    /\bacert\w*\s+[a-z0-9]+\s+(?:numero|numeros|dezena|dezenas|acerto|acertos)\b/u.test(
       normalized,
     );
   const comparesMembership =

@@ -215,6 +215,15 @@ const NUMBER_WORDS = new Map<string, number>([
   ["eight", 8],
   ["nine", 9],
   ["ten", 10],
+  ["um", 1],
+  ["uma", 1],
+  ["dois", 2],
+  ["duas", 2],
+  ["tres", 3],
+  ["três", 3],
+  ["quatro", 4],
+  ["cinco", 5],
+  ["seis", 6],
 ]);
 
 const AMBIGUOUS_PATTERNS = [
@@ -2594,8 +2603,17 @@ function parseMatchCountRule(text: string) {
   const numericMatch = text.match(
     /\bat least\s+([1-6]|one|two|three|four|five|six)\b.{0,80}\b(match|matches|appear|appears|hits?|in the draw|drawn)\b/i,
   );
+  const portugueseThresholdMatch = text.match(
+    /\b(?:pelo\s+menos|no\s+m[ií]nimo|m[ií]nimo\s+de)\s+([1-6]|um|uma|dois|duas|tres|três|quatro|cinco|seis)\b.{0,80}\b(?:n[uú]meros?|dezenas?|acertos?)\b.{0,80}\b(?:acert|aparec|sortead|sorteio|draw|match)/i,
+  );
+  const portugueseAcertarMatch = text.match(
+    /\bacert\w*\b.{0,40}\b([1-6]|um|uma|dois|duas|tres|três|quatro|cinco|seis)\b.{0,30}\b(?:n[uú]meros?|dezenas?|acertos?)\b/i,
+  );
   const orMoreMatch = text.match(
     /\b([1-6]|one|two|three|four|five|six)\s+or\s+more\b.{0,80}\b(guessed?|picked|ticket|my|your)?\s*numbers?\b.{0,100}\b(show up|appear|appears|match|matches|somewhere in the draw|in the draw|drawn)\b/i,
+  );
+  const portugueseOrMoreMatch = text.match(
+    /\b([1-6]|um|uma|dois|duas|tres|três|quatro|cinco|seis)\s+ou\s+mais\b.{0,80}\b(?:n[uú]meros?|dezenas?|acertos?)\b.{0,80}\b(?:acert|aparec|sortead|sorteio|draw|match)/i,
   );
   const directMatch = text.match(
     /\b([1-6]|one|two|three|four|five|six)\b.{0,30}\b(picks?|guessed?|ticket|my|your)\b.{0,60}\b(show up|appear|appears|match|matches|hits?)\b/i,
@@ -2603,7 +2621,10 @@ function parseMatchCountRule(text: string) {
   const compactMatch = text.match(/\b([1-6])\s+numbers?\s+(match|appear)\b/i);
   const rawValue =
     numericMatch?.[1] ??
+    portugueseThresholdMatch?.[1] ??
+    portugueseAcertarMatch?.[1] ??
     orMoreMatch?.[1] ??
+    portugueseOrMoreMatch?.[1] ??
     directMatch?.[1] ??
     compactMatch?.[1] ??
     null;
