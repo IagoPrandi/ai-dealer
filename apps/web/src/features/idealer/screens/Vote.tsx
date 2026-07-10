@@ -35,11 +35,11 @@ export function getFinalistPhaseView({
     return decisionPhase
       ? {
           body:
-            "10 finalists - 3 most voted + 7 by VRF. Vote against to eliminate (max 5) any time this phase. A rule falls when down-votes overtake up-votes. Survivors go to the active rule draw.",
+            "10 finalists - 3 most voted + 7 by VRF. Vote in favor to defend a finalist or vote against to eliminate one (max 5) any time this phase. A rule falls when down-votes overtake up-votes. Survivors go to the active rule draw.",
           emptyBody: "",
           emptyTitle: "",
           kind: "decision",
-          label: "Elimination voting open",
+          label: "Shortlist voting open",
         }
       : {
           body:
@@ -132,14 +132,17 @@ function RuleVoteRow({ rank, rule }: { rank: number; rule: UiRule }) {
   );
 }
 function FinalistRow({ rule }: { rule: UiRule }) {
-  const { eliminatedIds, openDetail, played, voteBusyRuleId, voteEliminate } = useIdealer();
+  const { approvedIds, eliminatedIds, openDetail, played, voteApprove, voteBusyRuleId, voteEliminate } = useIdealer();
+  const approved = approvedIds.includes(rule.ruleId);
   const eliminated = eliminatedIds.includes(rule.ruleId);
   const st = finalistStatus(rule);
   const total = rule.approve + rule.against;
   const forPct = total ? Math.round((rule.approve / total) * 100) : 50;
   const dead = st === "eliminada";
   const busy = voteBusyRuleId === rule.ruleId;
-  const feeLabel =
+  const approveFeeLabel =
+    rule.nextApproveFeeSol === 0 ? "Free" : `${fmtSol(rule.nextApproveFeeSol)} SOL`;
+  const againstFeeLabel =
     rule.nextAgainstFeeSol === 0 ? "Free" : `${fmtSol(rule.nextAgainstFeeSol)} SOL`;
   return (
     <div className="ide-card" style={{
@@ -161,18 +164,30 @@ function FinalistRow({ rule }: { rule: UiRule }) {
 
       <div className="ide-balance"><span style={{ width: `${forPct}%` }} /></div>
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 11 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 11, flexWrap: "wrap" }}>
         <span style={{ fontSize: 11.5, color: "var(--dim)" }} className="ide-num">{forPct}% in favor</span>
-        <button
-          onClick={() => (played ? voteEliminate(rule.ruleId) : openDetail(rule.ruleId, { canAgainst: true }))}
-          disabled={busy}
-          className={"ide-votebtn against" + (eliminated ? " on" : "")}
-          style={{ opacity: played && !busy ? 1 : 0.5 }}
-          type="button"
-        >
-          <Ico.down style={{ color: "currentColor" }} /> {eliminated ? "again" : "vote against"} -{" "}
-          <span className="ide-num">{feeLabel}</span>
-        </button>
+        <div style={{ display: "flex", gap: 7, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <button
+            onClick={() => (played ? voteApprove(rule.ruleId) : openDetail(rule.ruleId, { canAgainst: true }))}
+            disabled={busy}
+            className={"ide-votebtn for" + (approved ? " on" : "")}
+            style={{ opacity: played && !busy ? 1 : 0.5 }}
+            type="button"
+          >
+            <Ico.up style={{ color: "currentColor" }} /> {approved ? "again" : "in favor"} -{" "}
+            <span className="ide-num">{approveFeeLabel}</span>
+          </button>
+          <button
+            onClick={() => (played ? voteEliminate(rule.ruleId) : openDetail(rule.ruleId, { canAgainst: true }))}
+            disabled={busy}
+            className={"ide-votebtn against" + (eliminated ? " on" : "")}
+            style={{ opacity: played && !busy ? 1 : 0.5 }}
+            type="button"
+          >
+            <Ico.down style={{ color: "currentColor" }} /> {eliminated ? "again" : "against"} -{" "}
+            <span className="ide-num">{againstFeeLabel}</span>
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -229,8 +244,8 @@ export function VoteScreen() {
   // Before turn 100, only the first same-wallet/same-rule vote is free.
   const firstVoteFree = turnId < VOTE_FEE_START_TURN;
   const voteFeeLabel = firstVoteFree ? "First vote free" : `${fmtSol(fees.vote)} SOL`;
-  const displayedElimFeeLabel = firstVoteFree
-    ? "First vote out free"
+  const displayedShortlistFeeLabel = firstVoteFree
+    ? "First vote per side free"
     : `${fmtSol(fees.vote)} SOL`;
 
   return (
@@ -283,7 +298,7 @@ export function VoteScreen() {
               <div style={{ marginTop: 11, display: "flex", gap: 7, flexWrap: "wrap" }}>
                 <span className="ide-pill" style={{ padding: "4px 10px", fontSize: 11 }}>{eliminatedCount} eliminated - {Math.max(0, 5 - eliminatedCount)} left</span>
                 <span className="ide-pill" style={{ padding: "4px 10px", fontSize: 11, color: "var(--green)" }}>{finalists.length - eliminatedCount} survivors</span>
-                <span className="ide-pill" style={{ padding: "4px 10px", fontSize: 11, color: firstVoteFree ? "var(--green)" : "var(--red)" }}><Ico.down style={{ color: "currentColor", width: 12, height: 12 }} /> Down-vote - <span className="ide-num">{displayedElimFeeLabel}</span></span>
+                <span className="ide-pill" style={{ padding: "4px 10px", fontSize: 11, color: firstVoteFree ? "var(--green)" : "var(--muted)" }}><Ico.up style={{ color: "currentColor", width: 12, height: 12 }} /> Shortlist vote - <span className="ide-num">{displayedShortlistFeeLabel}</span></span>
               </div>
             </div>
 

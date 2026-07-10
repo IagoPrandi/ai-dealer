@@ -807,13 +807,14 @@ export function RoundPage({ turnId: rawTurnId }: { turnId: string }) {
               {round.elimination.status === "closed"
                 ? "Elimination decision closed"
                 : round.elimination.status === "open"
-                  ? "Elimination voting open"
+                  ? "Shortlist voting open"
                   : "Elimination not started"}
             </h2>
             <p>
-              Finalists can be voted out when elimination votes pass their
-              frozen approval votes. At most five finalists can be eliminated,
-              and the active rule is selected only from survivors.
+              Finalists can receive approval votes during the shortlist window
+              and can be voted out when elimination votes pass approval votes.
+              At most five finalists can be eliminated, and the active rule is
+              selected only from survivors.
             </p>
             <dl className="round-stat-grid">
               <div>

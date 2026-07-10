@@ -26,7 +26,9 @@ test("finalist phase opens elimination voting as soon as finalists are published
   });
 
   assert.equal(view.kind, "decision");
-  assert.equal(view.label, "Elimination voting open");
+  assert.equal(view.label, "Shortlist voting open");
+  assert.match(view.body, /Vote in favor to defend a finalist/);
+  assert.match(view.body, /vote against to eliminate one/);
 });
 
 test("finalist phase reports the untimed active-election stage after voting closes", () => {

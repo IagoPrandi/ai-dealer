@@ -538,10 +538,11 @@ pub mod idealer {
         let clock = Clock::get()?;
         let config = &ctx.accounts.global_config;
         validate_live_turn(config, &ctx.accounts.turn_state)?;
-        validate_turn_action_window(
+        let finalist_index = validate_approval_vote_window(
             clock.unix_timestamp,
+            config,
             &ctx.accounts.turn_state,
-            config.rule_election_cutoff_bps,
+            ctx.accounts.rule_proposal.rule_id,
         )?;
         validate_game_token(
             &ctx.accounts.game_token,
@@ -584,6 +585,12 @@ pub mod idealer {
             .vote_count
             .checked_add(1)
             .ok_or(IdealerError::ArithmeticOverflow)?;
+        if let Some(index) = finalist_index {
+            ctx.accounts.turn_state.finalist_approval_vote_counts[index] =
+                ctx.accounts.turn_state.finalist_approval_vote_counts[index]
+                    .checked_add(1)
+                    .ok_or(IdealerError::ArithmeticOverflow)?;
+        }
         ctx.accounts.game_token.used_for_vote_count = ctx
             .accounts
             .game_token
@@ -1706,6 +1713,32 @@ fn validate_turn_action_window(now: i64, turn: &TurnState, cutoff_bps: u16) -> R
         planned_turn_end_timestamp(turn)?,
         cutoff_bps,
     )
+}
+
+fn validate_approval_vote_window(
+    now: i64,
+    config: &GlobalConfig,
+    turn: &TurnState,
+    rule_id: u64,
+) -> Result<Option<usize>> {
+    if validate_turn_action_window(now, turn, config.rule_election_cutoff_bps).is_ok() {
+        return Ok(None);
+    }
+
+    let index = finalist_index(turn, rule_id).ok_or(IdealerError::RuleNotVoteable)?;
+    require!(
+        turn.finalist_count > 0 && turn.elimination_window_end_timestamp > 0,
+        IdealerError::EliminationWindowNotOpen
+    );
+    require!(
+        now < turn.elimination_window_end_timestamp,
+        IdealerError::EliminationWindowNotOpen
+    );
+    require!(
+        !turn.finalist_eliminated[index],
+        IdealerError::RuleAlreadyEliminated
+    );
+    Ok(Some(index))
 }
 
 fn submit_guess_with_game_token_init(ctx: Context<SubmitGuess>, args: SubmitGuessArgs) -> Result<()> {

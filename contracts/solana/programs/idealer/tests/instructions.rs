@@ -992,6 +992,49 @@ async fn rule_election_locks_requests_and_settles_active_rule() {
     // The elimination window now spans the whole of phase 2, so it closes at the
     // turn end rather than after a fixed sub-window.
     assert_eq!(turn.elimination_window_end_timestamp, turn.end_timestamp);
+    assert_eq!(turn.finalist_approval_vote_counts[0], 0);
+
+    // Shortlist finalists remain open to approval-side votes during phase 2.
+    // Those votes update the frozen finalist approval tally used by
+    // close_elimination_window, so players can defend a finalist as well as
+    // vote it out.
+    let shortlist_vote_address = pda(&[
+        b"vote",
+        &turn_id.to_le_bytes(),
+        &rule_id.to_le_bytes(),
+        player.pubkey().as_ref(),
+        &1_u64.to_le_bytes(),
+    ]);
+    process(
+        &mut context,
+        Instruction {
+            program_id: idealer::ID,
+            accounts: accounts::VoteRule {
+                voter: player.pubkey(),
+                global_config: pda(&[b"global_config"]),
+                turn_state: turn_address,
+                game_token: pda(&[
+                    b"game_token",
+                    &turn_id.to_le_bytes(),
+                    player.pubkey().as_ref(),
+                ]),
+                rule_proposal: rule_address,
+                rule_vote: shortlist_vote_address,
+                prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(None),
+            data: instruction::VoteRule {
+                args: VoteRuleArgs { sequence: 1 },
+            }
+            .data(),
+        },
+        &[&player],
+    )
+    .await
+    .unwrap();
+    let turn: TurnState = read_anchor_account(&mut context, turn_address).await;
+    assert_eq!(turn.finalist_approval_vote_counts[0], 1);
 
     // No elimination votes are cast, so the sole finalist survives. Advance past
     // the elimination window and close it. The turn is still Open, so live-turn
