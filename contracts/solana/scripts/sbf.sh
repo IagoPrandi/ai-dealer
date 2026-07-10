@@ -12,11 +12,20 @@
 set -euo pipefail
 
 AGAVE_VERSION="${AGAVE_VERSION:-2.1.21}"
-PROGRAM_ID="6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4"
 DEPLOY_DIR="/root/.config/idealer/devnet"
+PROGRAM_KEYPAIR_PATH="${PROGRAM_KEYPAIR_PATH:-${DEPLOY_DIR}/idealer-program-keypair.json}"
+PROGRAM_ID="${PROGRAM_ID:-}"
 SBF_OUT_DIR="/sbf-target/deploy"
 SO_PATH="${SBF_OUT_DIR}/idealer.so"
 export PATH="/root/.local/share/solana/install/active_release/bin:${PATH}"
+
+resolve_program_id() {
+  if [ -n "${PROGRAM_ID}" ]; then
+    echo "${PROGRAM_ID}"
+    return 0
+  fi
+  solana-keygen pubkey "${PROGRAM_KEYPAIR_PATH}"
+}
 
 ensure_toolchain() {
   if ! command -v cargo-build-sbf >/dev/null 2>&1; then
@@ -57,10 +66,13 @@ cmd_deploy() {
   ensure_toolchain
   solana config set --url devnet >/dev/null
   local deployer="${DEPLOY_DIR}/idealer-deployer-keypair.json"
-  local program_kp="${DEPLOY_DIR}/idealer-program-keypair.json"
+  local program_kp="${PROGRAM_KEYPAIR_PATH}"
+  local program_id
+  program_id="$(resolve_program_id)"
   local deployer_pub
   deployer_pub="$(solana-keygen pubkey "${deployer}")"
   echo "[deploy] deployer ${deployer_pub}"
+  echo "[deploy] program ${program_id}"
   echo "[deploy] balance $(solana balance "${deployer_pub}" --url devnet)"
 
   if [ ! -f "${SO_PATH}" ]; then
@@ -68,14 +80,14 @@ cmd_deploy() {
     cmd_build
   fi
 
-  echo "[deploy] upgrading program ${PROGRAM_ID}..."
+  echo "[deploy] deploying program ${program_id}..."
   solana program deploy "${SO_PATH}" \
     --program-id "${program_kp}" \
     --upgrade-authority "${deployer}" \
     --keypair "${deployer}" \
     --url devnet
   echo "[verify]"
-  solana program show "${PROGRAM_ID}" --url devnet -k "${deployer}"
+  solana program show "${program_id}" --url devnet -k "${deployer}"
 }
 
 cmd_fund() {

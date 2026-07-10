@@ -7,10 +7,10 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-idealer = "6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4"
+idealer = "ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd"
 
 [programs.devnet]
-idealer = "6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4"
+idealer = "ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd"
 
 [provider]
 cluster = "devnet"

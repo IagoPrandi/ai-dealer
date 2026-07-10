@@ -68,6 +68,14 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-07-10 (Turn counter reset safety check)
+
+- Reopened required context before working: `PRD.md`, `AGENTS.md` instructions from the prompt, `.claude/skills`, `.claude/skills/solana-dev/SKILL.md`, and `.claude/skills/idealer-test-and-verify/SKILL.md`.
+- Checked live worker state through `GET /turn/active`: no active turn is open, `activeTurnId: 0`, `hasActiveTurn: false`, and `nextTurnId: 114`.
+- Checked whether canonical on-chain turn counting could be reset to `1`; the existing turn-1 PDA is already allocated on devnet, and `open_turn` initializes turn PDAs with `#[account(init)]`, so resetting `global_config.next_turn_id` to `1` would make the next turn open fail with an account-collision instead of producing a usable first turn.
+- Did not broadcast `reinitialize_global_config_for_migration(next_turn_id=1)` because it would create an invalid devnet state for the current program/account namespace.
+- Reviewed the result for inconsistencies: no chain state, source code, UI copy, or fallback behavior was changed; no milestone checkbox/status was changed because milestone marking requires explicit user confirmation.
+
 ### 2026-07-10 (Voter reward calculation verification)
 
 - Opened required documents/context before verification: `PRD.md`, `AGENTS.md` instructions from the prompt, `.claude/skills`, and `.claude/skills/idealer-test-and-verify/SKILL.md`.
@@ -3387,3 +3395,17 @@ Passed:
 - Restarted the local API on port `3002` and verified direct and proxied paths: `GET /health` and `GET /__api/health` return `200`; `GET /__api/rounds/101?activeTurnId=101` returns `200` JSON instead of crashing the API.
 - Verified: `pnpm --filter @idealer/api typecheck`; `pnpm --filter @idealer/api test` (67/67); `pnpm --filter @idealer/api lint`; `pnpm --filter @idealer/api build`; `pnpm --filter @idealer/web typecheck`; `pnpm --filter @idealer/web test` (42/42); `pnpm --filter @idealer/web lint`; `pnpm --filter @idealer/web build`; Playwright smoke for `/play` returned HTTP 200 with no browser console errors and no visible `Failed to fetch` overlay text.
 - Reviewed the result for inconsistencies: no fallback creates fake rewards or hides a real alternative-winner accounting issue, API failures still surface through existing UI unavailable states, UI copy remains English, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-10 (Fresh devnet namespace reset to turn 1)
+
+- Reopened required context before working: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/solana-dev/SKILL.md`, `.claude/skills/idealer-test-and-verify/SKILL.md`, and the relevant Solana deployment documentation.
+- Confirmed that the existing devnet program `6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4` could not truly return to canonical turn 1 because the old turn-1 PDA already existed and the live config had advanced to later turns. A clean program namespace was required.
+- Updated the SBF deploy script so the program keypair path/program id can be provided through `PROGRAM_KEYPAIR_PATH`/`PROGRAM_ID` instead of being locked to the old devnet program id. Updated the program declaration, Anchor config, worker/web program id constants, `.env`, `.env.example`, and `deployments/solana-devnet.json` to the new namespace.
+- Deployed the final clean devnet program namespace as `ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd` (deploy signature `2JzNSiReSHbjeNAa9ipB99DED467iLMA833URiGvQRcG8tBiQcTCkTLmUHJ6VT41pSbH4tHKGEaevsb9xdeXqPkj`, slot `475350418`, program data `AWGUseV1DEsoSvdW7CDMxxBDUPQXAKqTXyxHVzeTnL8g`). An earlier fresh namespace `Ck2K5vgJYqsiFBhqZYGaeHPGsTdNNzpDwqpq8AfwCYh8` was abandoned because it was bootstrapped with a shortened test duration and advanced past turn 1.
+- Bootstrapped the final namespace without smoke guesses/rules/votes using a 24-hour turn duration: `initialize_global_config` signature `4T23QfdZffmicSQKHLcBE7c37Qy9Bpg7ZDSUmCE7cAiQPDhkjvh2cek6i9QXfvAqLhJegC75WEdcWdidsn413zW3`; `open_turn` signature `2Y6h9uhPQ77BbByQygG6SDRtVSZSzTrWjTZr2GT2Su1upiop9rp9JREFzAeMu19avZC8DWimYgiELCWULctP8N3G`.
+- Configured Switchboard devnet VRF for both draw and election on the new namespace (`EYiAmGSdsQTuCw413V5BzaruWuCCSDgTPtBGvLkXHbe7`, signature `3gHcgC3CXCWDQkXpFxgvDsw8diGjLfnPUa9g5sVA47Dnxym4qyZNxQEd4XLNphnqn1LpNLAvPW486DMUzM9u2BCx`).
+- Verified live state: global config `8eAwKD514LK6rJYLLFZh92g3V5a5MwbyLZMU83EpWWZ`, active turn `1`, `hasActiveTurn=true`, `nextTurnId=1`, turn state `2CvtQ8414UzG2731zZEfTTPUBbbJ3YyGq55dKwyaDM6V`, status `open`, `turnDurationSeconds=86400`, and no bootstrap smoke inputs.
+- Corrected local `.env` and `.env.example` to `IDEALER_DEVNET_TURN_DURATION_SCALE_BPS=10000`, then restarted API and worker so local health reports the same 24-hour cycle as the on-chain turn instead of the earlier short-test 483-second duration.
+- Restarted the local API, worker, and web dev servers so projections point at the new namespace. Verified `GET http://127.0.0.1:3003/turn/active`, `GET http://127.0.0.1:3000/__worker/turn/active`, and `GET http://127.0.0.1:3000/__api/rounds/1?activeTurnId=1` return turn 1 as the current open round. Playwright smoke for `http://localhost:3000/play` returned HTTP 200 with no Next overlay, no browser console errors, the open-turn UI visible, and no stale settled-round text.
+- Verified after the final program-id swap: `pnpm --filter @idealer/worker typecheck`; `pnpm --filter @idealer/worker lint`; `pnpm --filter @idealer/worker build`; `pnpm --filter @idealer/web typecheck`; `pnpm --filter @idealer/web lint`; `pnpm --filter @idealer/web build`; `pnpm --filter @idealer/solana-programs typecheck`; final Docker SBF suite `sbf.sh test-sbf` passed 8/8 against program id `ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd`.
+- Reviewed the result for inconsistencies: no fallback was added to hide deploy/bootstrap failures, program ids are aligned across contract/config/worker/web/env files, UI copy remains English, deployment secrets were not written to the worktree, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.

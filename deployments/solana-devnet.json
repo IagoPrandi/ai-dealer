@@ -1,7 +1,7 @@
 {
   "chainId": "solana-devnet",
   "cluster": "devnet",
-  "idealerProgramId": "6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4",
+  "idealerProgramId": "ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd",
   "switchboard": {
     "onDemandProgramId": "Aio4gaXjXzJNVLtzwtNVmSqGKpANtXhybbkhtAC94ji2",
     "queueAddress": "EYiAmGSdsQTuCw413V5BzaruWuCCSDgTPtBGvLkXHbe7",

@@ -18,7 +18,7 @@ import {
 
 const DEFAULT_DEVNET_RPC_URL = "https://api.devnet.solana.com";
 const DEFAULT_IDEALER_PROGRAM_ID =
-  "6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4";
+  "ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd";
 export const SYSTEM_PROGRAM_ID = address("11111111111111111111111111111111");
 const OPEN_TURN_DISCRIMINATOR = new Uint8Array([
   78, 206, 19, 149, 237, 34, 191, 82,

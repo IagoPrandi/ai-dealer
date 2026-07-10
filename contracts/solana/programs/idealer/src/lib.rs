@@ -19,7 +19,7 @@ use domain::{
 use solana_sha256_hasher::hash;
 use switchboard_on_demand::RandomnessAccountData;
 
-declare_id!("6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4");
+declare_id!("ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd");
 
 pub const TURN_DURATION_CYCLE_LEN: usize = 4;
 pub const MAX_FINALISTS: usize = 10;

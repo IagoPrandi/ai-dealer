@@ -9,7 +9,7 @@ import {
 
 export const IDEALER_PROGRAM_ID = address(
   process.env.NEXT_PUBLIC_IDEALER_PROGRAM_ID ??
-    "6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4",
+    "ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd",
 );
 export const IDEALER_ACTIVE_TURN_ID = Number(
   process.env.NEXT_PUBLIC_IDEALER_ACTIVE_TURN_ID ?? "1",

@@ -97,6 +97,9 @@ fn devnet_turn_duration_cycle() -> Result<[u32; 4], Box<dyn Error>> {
 fn main() -> Result<(), Box<dyn Error>> {
     let rpc_url = env::var("IDEALER_DEVNET_RPC_URL")
         .unwrap_or_else(|_| "https://api.devnet.solana.com".to_string());
+    let seed_smoke_inputs = env::var("IDEALER_DEVNET_BOOTSTRAP_SMOKE")
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(true);
     let keypair_path = env::var_os("IDEALER_DEVNET_KEYPAIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
@@ -212,6 +215,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("open_turn {}", send(&rpc, &payer, open_ix)?);
     } else {
         println!("open_turn skipped");
+    }
+
+    if !seed_smoke_inputs {
+        println!("smoke inputs skipped");
+        return Ok(());
     }
 
     let player_guess = pda(&[
