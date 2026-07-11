@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { describeTxError, txErrorCode } from "./tx.js";
+import {
+  describeTxError,
+  txErrorCode,
+  WalletApprovalTimeoutError,
+  WALLET_APPROVAL_TIMEOUT_ERROR_CODE,
+} from "./tx.js";
 
 test("transaction plan diagnostics are surfaced from nested client errors", () => {
   const error = new Error(
@@ -42,5 +47,15 @@ test("missing game token simulation errors are normalized to round-pass copy", (
   assert.equal(
     describeTxError(error),
     "Your round pass is not confirmed on devnet yet. Wait for the guess confirmation to finish, then submit again.",
+  );
+});
+
+test("wallet approval timeout errors are normalized", () => {
+  const error = new WalletApprovalTimeoutError(120_000);
+
+  assert.equal(txErrorCode(error), WALLET_APPROVAL_TIMEOUT_ERROR_CODE);
+  assert.equal(
+    describeTxError(error),
+    "The wallet approval timed out after 2 minutes. Check your wallet status before retrying.",
   );
 });

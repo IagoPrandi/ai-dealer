@@ -5,13 +5,16 @@
  * Idempotente: chamar installMockFetch() mais de uma vez não empilha patches.
  */
 import {
+  MOCK_ACTIVE_TURN_ID,
   MOCK_CONVERSATION_DRAFTS,
   MOCK_GUESS_RECEIPT,
+  MOCK_GLOBAL_CONFIG,
   MOCK_PLAYER_CLAIMS,
   MOCK_ROUND,
   MOCK_RULE_ELIMINATION_VOTES,
   MOCK_RULE_PREFLIGHT,
   MOCK_RULE_PROPOSALS,
+  MOCK_TURN_STATE,
   MOCK_RULE_VOTES,
 } from "./mockData";
 
@@ -26,6 +29,29 @@ function jsonResponse(body: unknown): Response {
 
 function resolveMock(url: string): unknown | undefined {
   // Ordem importa: rotas mais específicas primeiro.
+  if (url.includes("/turn/active")) {
+    return {
+      globalConfig: {
+        activeTurnId: MOCK_GLOBAL_CONFIG.activeTurnId,
+        guessCutoffBps: MOCK_GLOBAL_CONFIG.guessCutoffBps,
+        guessSubmissionFeeLamports: String(MOCK_GLOBAL_CONFIG.guessSubmissionFeeLamports),
+        hasActiveTurn: MOCK_GLOBAL_CONFIG.hasActiveTurn,
+        nextTurnId: MOCK_GLOBAL_CONFIG.nextTurnId,
+        paused: MOCK_GLOBAL_CONFIG.paused,
+        ruleElectionCutoffBps: MOCK_GLOBAL_CONFIG.ruleElectionCutoffBps,
+        ruleRemovalFeeLamports: String(MOCK_GLOBAL_CONFIG.ruleRemovalFeeLamports),
+        voteFeeLamports: String(MOCK_GLOBAL_CONFIG.voteFeeLamports),
+      },
+      globalConfigAddress: "EtZ5ZyHKb8wZmMHFDLM6LtVmZV1WUMvFPER72eFE4qob",
+      turnState: {
+        ...MOCK_TURN_STATE,
+        endTimestamp: Math.floor(Date.now() / 1000) + 3600,
+        startTimestamp: Math.floor(Date.now() / 1000) - 1800,
+        turnId: MOCK_ACTIVE_TURN_ID,
+      },
+      turnStateAddress: "8xUJHW97K55qCMPNv6kaRMaiRnnkKFKhJKYDZKhsMk3R",
+    };
+  }
   if (url.includes("/rule-preflight")) {
     return MOCK_RULE_PREFLIGHT;
   }

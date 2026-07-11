@@ -16,6 +16,20 @@ type PrepareAndSendInput = Parameters<SolanaClient["transaction"]["prepareAndSen
 type ProgramInstruction = PrepareAndSendInput["instructions"][number];
 
 export const WALLET_PENDING_ACTION_KEY = "idealer.wallet.pending-action";
+export const WALLET_APPROVAL_TIMEOUT_MS = 120_000;
+export const WALLET_APPROVAL_TIMEOUT_ERROR_CODE =
+  "TRANSACTION_APPROVAL_TIMEOUT";
+
+export interface SendInstructionOptions {
+  approvalTimeoutMs?: number;
+}
+
+export class WalletApprovalTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`Wallet approval timed out after ${formatTimeoutMs(timeoutMs)}.`);
+    this.name = "WalletApprovalTimeoutError";
+  }
+}
 
 export type WalletPendingStatus =
   | "awaiting_approval"
@@ -45,23 +59,50 @@ export async function sendInstruction(
   client: SolanaClient,
   wallet: ConnectedWallet,
   instruction: ProgramInstruction,
+  options: SendInstructionOptions = {},
 ): Promise<string> {
   const walletSigner = createWalletTransactionSigner(wallet, {
     commitment: "confirmed",
   }).signer;
+  const approvalTimeoutMs =
+    options.approvalTimeoutMs ?? WALLET_APPROVAL_TIMEOUT_MS;
+  const approvalController = new AbortController();
+  const timeoutId = globalThis.setTimeout(() => {
+    approvalController.abort(
+      new WalletApprovalTimeoutError(approvalTimeoutMs),
+    );
+  }, approvalTimeoutMs);
 
-  const signature = await client.transaction.prepareAndSend(
-    {
-      authority: walletSigner,
-      commitment: "confirmed",
-      feePayer: walletSigner,
-      instructions: [instruction],
-      version: 0,
-    },
-    { commitment: "confirmed", maxRetries: 3, skipPreflight: false },
-  );
+  try {
+    const signature = await client.transaction.prepareAndSend(
+      {
+        abortSignal: approvalController.signal,
+        authority: walletSigner,
+        commitment: "confirmed",
+        feePayer: walletSigner,
+        instructions: [instruction],
+        version: 0,
+      },
+      {
+        abortSignal: approvalController.signal,
+        commitment: "confirmed",
+        maxRetries: 3,
+        skipPreflight: false,
+      },
+    );
 
-  return signature.toString();
+    return signature.toString();
+  } catch (error) {
+    if (approvalController.signal.aborted) {
+      const reason = approvalController.signal.reason;
+      throw reason instanceof WalletApprovalTimeoutError
+        ? reason
+        : new WalletApprovalTimeoutError(approvalTimeoutMs);
+    }
+    throw error;
+  } finally {
+    globalThis.clearTimeout(timeoutId);
+  }
 }
 
 export function readPendingWalletAction(): WalletPendingAction | null {
@@ -140,6 +181,13 @@ export function txErrorCode(error: unknown): string {
   const message = getTxDiagnosticText(error);
   const lower = message.toLowerCase();
 
+  if (
+    error instanceof WalletApprovalTimeoutError ||
+    lower.includes("approval timed out") ||
+    lower.includes("transaction_approval_timeout")
+  ) {
+    return WALLET_APPROVAL_TIMEOUT_ERROR_CODE;
+  }
   if (lower.includes("reject") || lower.includes("declin") || lower.includes("cancel")) {
     return "TRANSACTION_REJECTED";
   }
@@ -245,11 +293,28 @@ function getTxDiagnosticText(error: unknown): string {
   return planDiagnostic ? `${message} ${planDiagnostic}` : message;
 }
 
+function formatTimeoutMs(timeoutMs: number) {
+  if (timeoutMs % 60_000 === 0) {
+    const minutes = timeoutMs / 60_000;
+    return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+  }
+
+  if (timeoutMs % 1_000 === 0) {
+    const seconds = timeoutMs / 1_000;
+    return `${seconds} second${seconds === 1 ? "" : "s"}`;
+  }
+
+  return `${timeoutMs} ms`;
+}
+
 /** Human-readable, English error message for a failed wallet/program action. */
 export function describeTxError(error: unknown): string {
   const code = txErrorCode(error);
   const planDiagnostic = getTransactionPlanDiagnostic(error);
 
+  if (code === WALLET_APPROVAL_TIMEOUT_ERROR_CODE) {
+    return "The wallet approval timed out after 2 minutes. Check your wallet status before retrying.";
+  }
   if (code === "TRANSACTION_REJECTED") {
     return "The wallet request was rejected. Nothing was submitted.";
   }

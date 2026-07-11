@@ -3464,3 +3464,24 @@ Passed:
 - Added regression coverage proving Solana wallets remain discoverable, non-Solana wallets are rejected, and MetaMask is rejected even if it advertises Solana features.
 - Verified: `pnpm --filter @idealer/web typecheck`; `pnpm --filter @idealer/web test` (53/53); `pnpm --filter @idealer/web lint`; `pnpm --filter @idealer/web build`.
 - Reviewed the result for inconsistencies: unsupported wallet connectors now fail closed before UI display or persisted auto-connect, no fallback/mock behavior was added, UI copy remains English, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-11 (Play wallet approval not opening)
+
+- Opened required context before working: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/solana-dev/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/references/frontend-framework-kit.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/references/kit-web3-interop.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/references/payments.md`, `.claude/skills/develop-frontend/SKILL.md`, `.claude/skills/checkout-batch-flow/SKILL.md`, and `.claude/skills/idealer-test-and-verify/SKILL.md`.
+- Diagnosed the play submit path: `PlayScreen.confirm()` was persisting `awaiting_approval` before the worker/RPC prechecks and before `sendInstruction()`, so a precheck failure could show wallet-approval recovery state even though the wallet was never actually asked to sign.
+- Web: moved `awaiting_approval` persistence to immediately before `sendInstruction(client, wallet, instruction)`, after turn-change/duplicate checks and instruction construction. Precheck failures now fail explicitly instead of looking like an interrupted wallet approval.
+- Web: moved the delayed-confirmation timer to start only after `sendInstruction()` returns a signature, keeping `awaiting_approval` visible while the wallet approval is actually pending.
+- Web mock: added `/turn/active` handling to the UI mock fetch path so mock/gallery play flows have an open active-turn snapshot instead of being blocked by an unavailable turn before transaction submission.
+- Added regression coverage for the mocked active-turn endpoint.
+- Verified: `pnpm --filter @idealer/web typecheck`; `pnpm --filter @idealer/web test` (54/54); `pnpm --filter @idealer/web lint`; `pnpm --filter @idealer/web build`.
+- Reviewed the result for inconsistencies: wallet approval state now matches the actual signing boundary, no production fallback was added, UI copy remains English, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-11 (Two-minute wallet approval timeout)
+
+- Opened required context before working: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/solana-dev/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/references/frontend-framework-kit.md`, and `.claude/skills/idealer-test-and-verify/SKILL.md`.
+- Web: added `WALLET_APPROVAL_TIMEOUT_MS = 120_000` to the shared `sendInstruction()` helper and passed its `AbortSignal` into `client.transaction.prepareAndSend()` request/options, so wallet approval is aborted after 2 minutes instead of waiting indefinitely.
+- Web: added explicit `TRANSACTION_APPROVAL_TIMEOUT` normalization and user-facing copy: `The wallet approval timed out after 2 minutes. Check your wallet status before retrying.`
+- Play UI: updated the awaiting-approval message to tell the player to approve within 2 minutes.
+- Added regression coverage for wallet approval timeout error normalization.
+- Verified: `pnpm --filter @idealer/web typecheck`; `pnpm --filter @idealer/web test` (55/55); `pnpm --filter @idealer/web lint`; `pnpm --filter @idealer/web build`.
+- Reviewed the result for inconsistencies: the timeout uses the wallet transaction helper's real abort path, no fallback/mock production behavior was added, UI copy remains English, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.

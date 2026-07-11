@@ -56,7 +56,7 @@ function walletActionCopy(action: WalletPendingAction) {
     return {
       tone: "var(--purple-soft)",
       title: "Awaiting wallet approval",
-      message: "The approval request opened in your wallet. Return here after signing, or retry if the wallet app closed it.",
+      message: "The approval request opened in your wallet. Approve within 2 minutes, then return here after signing.",
     };
   }
   if (action.status === "pending_confirmation") {
@@ -264,14 +264,6 @@ function PlayFlow() {
       }
       const sequence = playCount + 1;
       const accounts = await deriveSubmitGuessAccounts({ player, sequence, turnId });
-      saveAction({
-        action: "submit_guess",
-        createdAt: startedAt,
-        numbers: sel,
-        status: "awaiting_approval",
-        turnId,
-        walletAddress,
-      });
       const [freshTurn, existingGuess] = await Promise.all([
         fetchActiveTurnSnapshotFromWorker(),
         client.runtime.rpc
@@ -310,17 +302,15 @@ function PlayFlow() {
         reloadAll();
         return;
       }
-      delayTimer = window.setTimeout(() => {
-        saveAction({
-          action: "submit_guess",
-          createdAt: startedAt,
-          numbers: sel,
-          status: "delayed_confirmation",
-          turnId,
-          walletAddress,
-        });
-      }, 15_000);
       const instruction = await createSubmitGuessInstruction({ numbers: sel, player, sequence, turnId });
+      saveAction({
+        action: "submit_guess",
+        createdAt: startedAt,
+        numbers: sel,
+        status: "awaiting_approval",
+        turnId,
+        walletAddress,
+      });
       const signature = await sendInstruction(client, wallet, instruction);
       saveAction({
         action: "submit_guess",
@@ -331,6 +321,17 @@ function PlayFlow() {
         turnId,
         walletAddress,
       });
+      delayTimer = window.setTimeout(() => {
+        saveAction({
+          action: "submit_guess",
+          createdAt: startedAt,
+          numbers: sel,
+          signature,
+          status: "delayed_confirmation",
+          turnId,
+          walletAddress,
+        });
+      }, 15_000);
 
       try {
         await Promise.all([
