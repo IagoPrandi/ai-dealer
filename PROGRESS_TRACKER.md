@@ -3426,3 +3426,12 @@ Passed:
 - Confirmed `.npmrc` does not require a repo-local pnpm store, so the folder is local dependency cache output and should not be committed.
 - Added `.pnpm-store/` to `.gitignore` so accidental commits do not include the local pnpm store.
 - Reviewed the result for inconsistencies: no product/runtime behavior changed, no fallback was added, `.pnpm-store/` now appears as ignored in Git status, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-11 (Restore selected round and rules layout)
+
+- Opened required context before working: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/develop-frontend/SKILL.md`, `.claude/skills/idealer-design-system/SKILL.md`, `.claude/skills/idealer-ui-coherence/SKILL.md`, `.claude/skills/idealer-test-and-verify/SKILL.md`, `.claude/skills/playwright/SKILL.md`, and the relevant design-system references (`01-tokens.md`, `02-components.md`, `03-screens-and-state.md`, `04-new-screen-recipe.md`).
+- Web: restored only the requested UI surfaces toward the prior commit layout: the home round/timer information group uses the prior pill/card rhythm again, the home `The rules` list uses compact rule cards again, and the Rules screen rule rows/finalist rows use card rows again.
+- Kept unrelated editorial changes intact after user clarification: the rule composer, result row, played-state CTA, Rules tabs, vote gate, and decision-window info block were returned to the current pre-task layout.
+- Verified: `pnpm --filter @idealer/web typecheck`; `pnpm --filter @idealer/web test` (42/42); `pnpm --filter @idealer/web lint`; `pnpm --filter @idealer/web build`.
+- Browser check: `agent-browser` verified `/play` loads with content and no Next error overlay; final scoped screenshot saved at `output/playwright/layout-home-final-scoped.png`. Mock gallery verification was blocked because an existing Next dev server for `apps/web` was already running on port `3000`; no process was killed.
+- Reviewed the result for inconsistencies: UI copy remains English, no fallback/mock production behavior was added, the final diff is scoped to the requested layout components, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.

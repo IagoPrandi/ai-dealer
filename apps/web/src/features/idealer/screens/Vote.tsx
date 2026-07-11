@@ -105,12 +105,13 @@ function VoteGate() {
 function RuleVoteRow({ rank, rule }: { rank: number; rule: UiRule }) {
   const { approvedIds, openDetail, played, voteApprove, voteBusyRuleId } = useIdealer();
   const approved = approvedIds.includes(rule.ruleId);
+  const isTop = rank <= 3;
   const busy = voteBusyRuleId === rule.ruleId;
   const feeLabel =
     rule.nextApproveFeeSol === 0 ? "Free" : `${fmtSol(rule.nextApproveFeeSol)} SOL`;
   return (
-    <div className="ide-listrow" style={{ cursor: "default" }}>
-      <div onClick={() => openDetail(rule.ruleId, { canAgainst: false, rank })} style={{ display: "flex", alignItems: "center", gap: 13, flex: 1, minWidth: 0, cursor: "pointer" }}>
+    <div className="ide-rulerow ide-tap" style={{ borderColor: isTop ? "var(--line-2)" : "var(--line)" }}>
+      <div onClick={() => openDetail(rule.ruleId, { canAgainst: false, rank })} style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
         <Medal pos={rank} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 700, fontSize: 15.5, lineHeight: 1.2 }}>{rule.title}</div>
@@ -144,8 +145,12 @@ function FinalistRow({ rule }: { rule: UiRule }) {
   const againstFeeLabel =
     rule.nextAgainstFeeSol === 0 ? "Free" : `${fmtSol(rule.nextAgainstFeeSol)} SOL`;
   return (
-    <div style={{ padding: "16px 2px", opacity: dead ? 0.7 : 1 }}>
-      <div onClick={() => openDetail(rule.ruleId, { canAgainst: true })} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 11, cursor: "pointer" }}>
+    <div className="ide-card" style={{
+      padding: "13px 15px",
+      borderColor: dead ? "rgba(255,107,107,0.3)" : st === "risco" ? "rgba(255,210,63,0.3)" : "var(--line)",
+      opacity: dead ? 0.72 : 1,
+    }}>
+      <div onClick={() => openDetail(rule.ruleId, { canAgainst: true })} className="ide-tap" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 11 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontWeight: 700, fontSize: 15.5, lineHeight: 1.2, textDecoration: dead ? "line-through" : "none", color: dead ? "var(--muted)" : "var(--text)" }}>{rule.title}</span>
@@ -278,7 +283,7 @@ export function VoteScreen() {
             {all.length === 0 ? (
               <div className="ide-notice" style={{ textAlign: "center", color: "var(--muted)", fontSize: 14 }}>No rules to vote on yet.</div>
             ) : (
-              <div className="ide-list">
+              <div style={{ display: "grid", gap: 9, gridTemplateColumns: "minmax(0, 1fr)" }}>
                 {all.map((r, i) => <RuleVoteRow key={r.id} rule={r} rank={i + 1} />)}
               </div>
             )}
@@ -326,7 +331,7 @@ export function VoteScreen() {
                 ) : null}
               </div>
             ) : (
-              <div className="ide-list">
+              <div style={{ display: "grid", gap: 9, gridTemplateColumns: "minmax(0, 1fr)" }}>
                 {finalists.map((r) => <FinalistRow key={r.id} rule={r} />)}
               </div>
             )}
