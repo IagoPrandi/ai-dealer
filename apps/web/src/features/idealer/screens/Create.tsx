@@ -147,7 +147,7 @@ function RulePreview({ rule }: { rule: RulePreflightResult }) {
       ? Math.round(rule.finalConfidence * 100)
       : null;
   return (
-    <div className="ide-card" style={{ padding: 16, borderColor: "var(--line-2)", background: "linear-gradient(160deg, var(--surface-2), var(--surface))", animation: "ide-rise .3s ease both" }}>
+    <div style={{ padding: 16, border: "1px solid var(--line)", borderRadius: 16, background: "var(--surface)", animation: "ide-rise .3s ease both" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
         <span className="ide-pill" style={{ color: valid ? "var(--green)" : "var(--yellow)", padding: "4px 10px" }}>
           {valid ? <><Ico.check style={{ width: 13, height: 13, color: "var(--green)" }} /> valid rule</> : "needs adjustment"}
@@ -676,7 +676,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
       <div className="ide-ambient" />
       <div style={{ position: "relative", zIndex: 2, padding: "52px 18px 12px", borderBottom: "1px solid var(--line)", background: "rgba(11,9,16,0.6)", backdropFilter: "blur(10px)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <button onClick={() => go("home")} style={{ width: 40, height: 40, borderRadius: 13, background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--text)", display: "grid", placeItems: "center", cursor: "pointer" }} type="button"><Ico.back /></button>
+          <button onClick={() => go(chatId ? "profile" : "home")} style={{ width: 40, height: 40, borderRadius: 13, background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--text)", display: "grid", placeItems: "center", cursor: "pointer" }} type="button"><Ico.back /></button>
           <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
             <Dealer size={30} />
             <div>
@@ -715,7 +715,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
 
         {rule && valid && !typing ? (
           submitted ? (
-            <div className="ide-card" style={{ padding: 16, borderColor: "rgba(20,241,149,0.35)", background: "linear-gradient(120deg, rgba(20,241,149,0.12), var(--surface))", animation: "ide-rise .3s ease both" }}>
+            <div style={{ padding: "16px 2px", borderTop: "1px solid rgba(20,241,149,0.3)", borderBottom: "1px solid var(--line)", animation: "ide-rise .3s ease both" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
                 <span style={{ width: 28, height: 28, borderRadius: 9, background: "var(--green)", color: "#08110C", display: "grid", placeItems: "center" }}><Ico.check /></span>
                 <b style={{ fontSize: 15.5 }}>Rule in the round</b>
@@ -727,7 +727,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
               </div>
             </div>
           ) : ruleCreationClosed ? (
-            <div className="ide-card" style={{ padding: 16, borderColor: "rgba(255,210,63,0.35)", background: "linear-gradient(120deg, rgba(255,210,63,0.1), var(--surface))", animation: "ide-rise .3s ease both" }}>
+            <div style={{ padding: "16px 2px", borderTop: "1px solid rgba(255,210,63,0.3)", borderBottom: "1px solid var(--line)", animation: "ide-rise .3s ease both" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 7 }}>
                 <Ico.lock style={{ color: "var(--yellow)", width: 16, height: 16 }} />
                 <b style={{ fontSize: 15 }}>Rule creation closed</b>
@@ -739,17 +739,17 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
             </div>
           ) : played ? (
             <button onClick={submit} disabled={busy} className="ide-btn" style={{ padding: 15, fontSize: 15.5, animation: "ide-rise .3s ease both", opacity: busy ? 0.7 : 1 }} type="button">
-              <Ico.check style={{ color: "#08110C" }} /> {busy ? "Submitting..." : `Submit to the round - ${fees.ruleNext === 0 ? "Free" : `${fmtSol(fees.ruleNext)} SOL`}`}
+              <Ico.check style={{ color: "#08110C" }} /> {busy ? "Submitting..." : `Submit to the round · ${fees.ruleNext === 0 ? "Free" : `${fmtSol(fees.ruleNext)} SOL`}`}
             </button>
           ) : (
-            <div className="ide-card" style={{ padding: 16, borderColor: "rgba(255,210,63,0.35)", background: "linear-gradient(120deg, rgba(255,210,63,0.1), var(--surface))", animation: "ide-rise .3s ease both" }}>
+            <div style={{ padding: "16px 2px", borderTop: "1px solid rgba(255,210,63,0.3)", borderBottom: "1px solid var(--line)", animation: "ide-rise .3s ease both" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 7 }}>
                 <Ico.lock style={{ color: "var(--yellow)", width: 16, height: 16 }} />
                 <b style={{ fontSize: 15 }}>Play to submit</b>
               </div>
               <p style={{ margin: "0 0 13px", color: "var(--muted)", fontSize: 13.5, lineHeight: 1.5 }}>Make a guess this round to unlock submitting. Your draft stays here.</p>
               <button onClick={() => go("play")} className="ide-btn" style={{ width: "100%", padding: 13 }} type="button">
-                <Ico.bolt style={{ color: "#08110C" }} /> Play now - {fees.playNext === 0 ? "Free" : `${fmtSol(fees.playNext)} SOL`}
+                <Ico.bolt style={{ color: "#08110C" }} /> Play now · {fees.playNext === 0 ? "Free" : `${fmtSol(fees.playNext)} SOL`}
               </button>
             </div>
           )

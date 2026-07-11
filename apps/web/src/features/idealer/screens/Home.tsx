@@ -31,10 +31,10 @@ function PromptInput() {
     go("create", seed ? { seed } : { newConversation: true });
   };
   return (
-    <div className="ide-card" style={{ padding: 12, borderColor: "var(--line-2)", background: "linear-gradient(180deg, var(--surface-2), var(--surface))" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 13.5, fontWeight: 700, whiteSpace: "nowrap" }}>Create your rule</span>
-        <span className="ide-pill" style={{ padding: "3px 8px", fontSize: 11 }}><Ico.spark style={{ width: 12, height: 12, color: "var(--purple-soft)" }} /> with AI</span>
+    <div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 16, fontWeight: 800, whiteSpace: "nowrap", letterSpacing: "-0.02em" }}>Create your rule</span>
+        <span style={{ fontSize: 12.5, color: "var(--purple-soft)", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}><Ico.spark style={{ width: 12, height: 12, color: "var(--purple-soft)" }} /> with AI</span>
         <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--dim)" }}>cost <span className="ide-num" style={{ color: "var(--muted)" }}>{fees.ruleNext === 0 ? "Free" : `${fmtSol(fees.ruleNext)} SOL`}</span></span>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -43,9 +43,9 @@ function PromptInput() {
           onChange={(e) => setVal(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") { openComposer(); } }}
           placeholder="e.g. the sum closest to 100 wins…"
-          style={{ flex: 1, minWidth: 0, background: "var(--bg)", border: "1px solid var(--line-2)", borderRadius: 13, padding: "13px 14px", color: "var(--text)", fontSize: 14.5, fontFamily: "Outfit", outline: "none" }}
+          style={{ flex: 1, minWidth: 0, background: "var(--bg-2)", border: "1px solid var(--line-2)", borderRadius: 14, padding: "14px 15px", color: "var(--text)", fontSize: 14.5, fontFamily: "Outfit", outline: "none" }}
         />
-        <button onClick={openComposer} className="ide-btn" style={{ padding: 13, borderRadius: 13, flexShrink: 0 }} title="Create rule" type="button">
+        <button onClick={openComposer} className="ide-btn" style={{ padding: 14, borderRadius: 14, flexShrink: 0 }} title="Create rule" type="button">
           <Ico.send style={{ color: "#08110C" }} />
         </button>
       </div>
@@ -100,7 +100,7 @@ export function HomeScreen() {
   return (
     <div className="ide-app ide-screen" style={{ height: "100%", position: "relative", overflow: "hidden" }}>
       <div className="ide-ambient" />
-      <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", padding: "52px 18px 96px" }}>
+      <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", padding: "52px 20px 96px" }}>
 
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 22 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
@@ -116,24 +116,24 @@ export function HomeScreen() {
         </div>
 
         {/* HERO */}
-        <div style={{ textAlign: "center", position: "relative", marginBottom: 24 }}>
+        <div style={{ textAlign: "center", position: "relative", marginBottom: 26 }}>
           <div style={{ position: "absolute", inset: "-26px 16px auto", height: 210, background: "radial-gradient(circle, rgba(20,241,149,0.2), transparent 68%)", filter: "blur(14px)", animation: "ide-pulse 3.6s ease-in-out infinite", zIndex: 0 }} />
           <div style={{ position: "relative", zIndex: 1 }}>
-            <div style={{ display: "flex", justifyContent: "center", gap: 8, marginBottom: 14 }}>
+            <div style={{ display: "flex", justifyContent: "center", gap: 8, marginBottom: 14, alignItems: "center", color: "var(--muted)", fontSize: 13 }}>
               {inPhase1 ? (
-                <span className="ide-pill" style={{ color: "var(--muted)" }}><Ico.clock style={{ color: "var(--green)" }} /> Create &amp; play · ends in <span className="ide-num" style={{ color: "var(--text)", fontWeight: 700, marginLeft: 2 }}>{p1h}:{p1m}:{p1s}</span></span>
+                <><Ico.clock style={{ color: "var(--green)" }} /> Create &amp; play · ends in <span className="ide-num" style={{ color: "var(--text)", fontWeight: 700 }}>{p1h}:{p1m}:{p1s}</span></>
               ) : shortlistDrawPending ? (
-                <span className="ide-pill" style={{ color: "var(--muted)", borderColor: "rgba(199,125,255,0.3)" }}><Ico.dice style={{ color: "var(--purple-soft)", width: 14, height: 14 }} /> Shortlist draw in progress</span>
+                <><Ico.dice style={{ color: "var(--purple-soft)", width: 14, height: 14 }} /> Shortlist draw in progress</>
               ) : inPhase2 ? (
-                <span className="ide-pill" style={{ color: "var(--muted)", borderColor: "rgba(255,210,63,0.3)" }}><Ico.vote style={{ color: "var(--yellow)", width: 14, height: 14 }} /> Shortlist &amp; draw · ends in <span className="ide-num" style={{ color: "var(--text)", fontWeight: 700, marginLeft: 2 }}>{h}:{m}:{s}</span></span>
+                <><Ico.vote style={{ color: "var(--yellow)", width: 14, height: 14 }} /> Shortlist &amp; draw · ends in <span className="ide-num" style={{ color: "var(--text)", fontWeight: 700 }}>{h}:{m}:{s}</span></>
               ) : electingRuleNow ? (
-                <span className="ide-pill" style={{ color: "var(--muted)", borderColor: "rgba(255,210,63,0.3)" }}><Ico.spark style={{ color: "var(--yellow)", width: 14, height: 14 }} /> Electing the rule</span>
+                <><Ico.spark style={{ color: "var(--yellow)", width: 14, height: 14 }} /> Electing the rule</>
               ) : drawingNow && drawFulfilled ? (
-                <span className="ide-pill" style={{ color: "var(--muted)", borderColor: "rgba(20,241,149,0.3)" }}><Ico.check style={{ color: "var(--green)", width: 14, height: 14 }} /> Numbers drawn · settling the turn</span>
+                <><Ico.check style={{ color: "var(--green)", width: 14, height: 14 }} /> Numbers drawn · settling the turn</>
               ) : drawingNow ? (
-                <span className="ide-pill" style={{ color: "var(--muted)", borderColor: "rgba(199,125,255,0.3)" }}><Ico.dice style={{ color: "var(--purple-soft)", width: 14, height: 14 }} /> Drawing the numbers</span>
+                <><Ico.dice style={{ color: "var(--purple-soft)", width: 14, height: 14 }} /> Drawing the numbers</>
               ) : (
-                <span className="ide-pill" style={{ color: "var(--yellow)", borderColor: "rgba(255,210,63,0.3)" }}><Ico.clock style={{ color: "var(--yellow)" }} /> {turnStatusMessage}</span>
+                <><Ico.clock style={{ color: "var(--yellow)" }} /> <span style={{ color: "var(--yellow)" }}>{turnStatusMessage}</span></>
               )}
             </div>
             <div style={{ fontSize: 13, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--dim)", fontWeight: 700, marginBottom: 2 }}>Accumulated prize</div>
@@ -142,9 +142,10 @@ export function HomeScreen() {
               <span className="ide-grad-text" style={{ fontSize: 34, fontWeight: 700, marginTop: 6 }}>{decStr}</span>
               <span style={{ fontSize: 21, fontWeight: 700, color: "var(--purple-soft)", marginTop: 11, marginLeft: 4 }}>SOL</span>
             </div>
-            <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 18, flexWrap: "wrap" }}>
-              <span className="ide-pill"><Ico.users style={{ color: "var(--purple-soft)" }} /> <span className="ide-num">{fmtInt(players)}</span> playing</span>
-              <span className="ide-pill"><Ico.spark style={{ color: "var(--yellow)" }} /> {rules.rules.length} rules</span>
+            <div style={{ display: "flex", gap: 18, justifyContent: "center", marginTop: 16, fontSize: 13, color: "var(--muted)" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Ico.users style={{ color: "var(--purple-soft)" }} /> <span className="ide-num" style={{ color: "var(--text)", fontWeight: 700 }}>{fmtInt(players)}</span> playing</span>
+              <span style={{ width: 1, background: "var(--line)" }} />
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Ico.spark style={{ color: "var(--yellow)" }} /> <span className="ide-num" style={{ color: "var(--text)", fontWeight: 700 }}>{rules.rules.length}</span> rules</span>
             </div>
           </div>
         </div>
@@ -212,52 +213,48 @@ export function HomeScreen() {
 
         {/* MAIN ACTION */}
         {played ? (
-          <div className="ide-card" style={{ padding: "13px 16px", marginBottom: 14, display: "grid", gap: 12, borderColor: "rgba(20,241,149,0.3)", background: "linear-gradient(100deg, rgba(20,241,149,0.1), var(--surface))" }}>
+          <div className="ide-notice" style={{ display: "grid", gap: 12, marginBottom: 22 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
               <span style={{ width: 30, height: 30, borderRadius: 10, background: "var(--green)", color: "#08110C", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.check /></span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 700, fontSize: 14.5 }}>You&apos;re in this round</div>
                 <div style={{ fontSize: 12.5, color: "var(--muted)" }}>Good luck! You can now vote and create rules.</div>
               </div>
+              <button onClick={() => go("play")} className="ide-votebtn" style={{ flexShrink: 0 }} type="button">
+                play again · {fees.playNext === 0 ? "free" : `${fmtSol(fees.playNext)} SOL`}
+              </button>
             </div>
             {bet && bet.length > 0 ? (
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
                 {bet.map((n) => <span key={n} className="ide-chip" style={{ width: 40, height: 40, fontSize: 15 }}>{n}</span>)}
               </div>
             ) : null}
-            <button onClick={() => go("play")} className="ide-btn-ghost ide-btn" style={{ width: "100%", padding: 11 }} type="button">
-              <Ico.bolt style={{ color: "var(--green)" }} /> Play again - {fees.playNext === 0 ? "Free" : `${fmtSol(fees.playNext)} SOL`}
-            </button>
           </div>
         ) : (
-          <button onClick={() => go("play")} disabled={!turnReadyToPlay} className="ide-btn" style={{ width: "100%", padding: "17px", fontSize: 17, marginBottom: 14, opacity: turnReadyToPlay ? 1 : 0.5 }} type="button">
-            <Ico.bolt style={{ color: "#08110C" }} /> {turnReadyToPlay ? `Play now - ${fees.playNext === 0 ? "Free" : `${fmtSol(fees.playNext)} SOL`}` : "Waiting for next turn"}
+          <button onClick={() => go("play")} disabled={!turnReadyToPlay} className="ide-btn" style={{ width: "100%", padding: "17px", fontSize: 17, marginBottom: 18, opacity: turnReadyToPlay ? 1 : 0.5 }} type="button">
+            <Ico.bolt style={{ color: "#08110C" }} /> {turnReadyToPlay ? `Play now · ${fees.playNext === 0 ? "Free" : `${fmtSol(fees.playNext)} SOL`}` : "Waiting for next turn"}
           </button>
         )}
 
-        {/* PREVIOUS ROUND RESULT */}
+        {/* PREVIOUS ROUND RESULT — hairline row, not a balloon */}
         {showResultLink ? (
-          <button onClick={() => go("result")} className="ide-tap" style={{
-            width: "100%", textAlign: "left", marginBottom: 22, padding: "13px 16px", borderRadius: 16, cursor: "pointer", color: "var(--text)",
-            border: "1px solid rgba(255,210,63,0.4)", background: "linear-gradient(110deg, rgba(255,210,63,0.13), var(--surface))",
-            display: "flex", alignItems: "center", gap: 12,
-          }} type="button">
-            <span style={{ width: 38, height: 38, borderRadius: 12, background: "var(--gold)", color: "#0B0910", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.trophy style={{ color: "#0B0910" }} /></span>
+          <button onClick={() => go("result")} className="ide-listrow" style={{ marginBottom: 26, padding: "15px 2px", borderTop: "1px solid var(--line)", borderBottom: "1px solid var(--line)" }} type="button">
+            <span style={{ width: 36, height: 36, borderRadius: 11, background: "var(--gold)", color: "#0B0910", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.trophy style={{ color: "#0B0910" }} /></span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 14.5, fontWeight: 700 }}>Result of round {fmtTurnId(resultTurnId)}</div>
-              <div style={{ fontSize: 12.5, color: "var(--muted)" }}>See the drawn numbers and the elected rule</div>
+              <div style={{ fontSize: 12.5, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>See the drawn numbers and the elected rule</div>
             </div>
             <Ico.arrow style={{ color: "var(--gold)", flexShrink: 0 }} />
           </button>
         ) : null}
 
-        {/* CREATE RULE — prompt entry */}
-        <div style={{ marginBottom: 22 }}>
+        {/* CREATE RULE — prompt entry, no box (only the input has a border) */}
+        <div style={{ marginBottom: 28 }}>
           <PromptInput />
         </div>
 
         {/* RULE PREVIEW → voting */}
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", margin: "0 2px 12px" }}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", margin: "0 2px 4px" }}>
           <span style={{ fontWeight: 800, fontSize: 22, letterSpacing: "-0.025em", whiteSpace: "nowrap" }}>The rules</span>
           <button onClick={() => go("vote")} style={{ background: "none", border: "none", color: "var(--purple-soft)", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "Outfit", display: "inline-flex", alignItems: "center", gap: 4 }} type="button">
             vote <Ico.arrow style={{ color: "var(--purple-soft)", width: 15, height: 15 }} />
@@ -265,24 +262,24 @@ export function HomeScreen() {
         </div>
 
         {rules.loading && top.length === 0 ? (
-          <div style={{ display: "grid", gap: 9, marginBottom: 14 }}>
-            {[0, 1, 2].map((i) => <div key={i} className="ide-card" style={{ height: 64 }} />)}
+          <div className="ide-list" style={{ marginBottom: 20 }}>
+            {[0, 1, 2].map((i) => <div key={i} style={{ height: 62 }} />)}
           </div>
         ) : top.length === 0 ? (
-          <div className="ide-card" style={{ padding: 18, marginBottom: 14, textAlign: "center", color: "var(--muted)", fontSize: 14 }}>
+          <div className="ide-notice" style={{ marginBottom: 20, textAlign: "center", color: "var(--muted)", fontSize: 14 }}>
             No rules proposed yet — be the first to create one.
           </div>
         ) : (
-          <div style={{ display: "grid", gap: 9, marginBottom: 14, gridTemplateColumns: "minmax(0, 1fr)" }}>
+          <div className="ide-list" style={{ marginBottom: 20 }}>
             {top.map((r, i) => (
-              <div key={r.id} onClick={() => openDetail(r.ruleId, { rank: i + 1 })} className="ide-rulerow ide-tap" style={{ borderColor: i === 0 ? "var(--line-2)" : "var(--line)", boxShadow: i === 0 ? "0 0 24px -14px rgba(255,210,63,0.6)" : "none" }}>
+              <button key={r.id} onClick={() => openDetail(r.ruleId, { rank: i + 1 })} className="ide-listrow" type="button">
                 <Medal pos={i + 1} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 700, fontSize: 15.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title}</div>
                   <div style={{ marginTop: 4 }}><VoteTally approve={r.approve} against={r.against} size="sm" /></div>
                 </div>
                 <Ico.chevron style={{ color: "var(--dim)", transform: "rotate(-90deg)", flexShrink: 0 }} />
-              </div>
+              </button>
             ))}
           </div>
         )}

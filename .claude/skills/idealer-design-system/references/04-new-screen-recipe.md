@@ -11,7 +11,7 @@ Comece pelo esqueleto canônico (ver `03-screens-and-state.md`):
 
 ```jsx
 /* ============================================================
-   <NOME> — descrição curta em en
+   <NOME> — descrição curta em pt-BR
    ============================================================ */
 function ScreenNome({ go, st, setSt }) {
   return (
@@ -74,7 +74,7 @@ Adicione uma entrada em `Ico` (em `shared.jsx`), mesmo padrão dos demais:
 1. Some a chave em `TWEAK_DEFAULTS` (dentro dos marcadores `EDITMODE`).
 2. Aplique no `useEffect` que escreve nas CSS vars de `#phone-shell`.
 3. Adicione o controle no `<TweaksPanel>` (`TweakColor`/`TweakRadio`/
-   `TweakToggle`/`TweakSection`), com label em inglês.
+   `TweakToggle`/`TweakSection`), com label em pt-BR.
 
 ---
 
@@ -96,7 +96,7 @@ que `.ide-noglow` o desligue.
 - [ ] Layout com flex/grid + `gap`; hit targets ≥ 44px; corpo ≥ 13.5px.
 - [ ] Exportei no `window`; registrei o `<script>`; pluguei a navegação.
 - [ ] Animações transform-only; respeitam `.ide-calm` / `.ide-noglow`.
-- [ ] HTML canônico; sem `scrollIntoView`; UI em inglês.
+- [ ] HTML canônico; sem `scrollIntoView`; UI em pt-BR.
 - [ ] Abri `Idealer.html` no preview: monta, sem erros de console, Tweaks aplicam.
 
 ---

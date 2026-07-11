@@ -112,7 +112,7 @@ export function Medal({ pos }: { pos: number }) {
   return (
     <span className="ide-num" style={{
       width: 26, height: 26, borderRadius: 9, display: "grid", placeItems: "center",
-      fontSize: 11, fontWeight: 800, color: "#0B0910",
+      fontSize: 12, fontWeight: 800, color: "#0B0910",
       background: m.c, boxShadow: `0 0 14px -2px ${m.c}`,
     }}>{m.l}</span>
   );
@@ -154,8 +154,8 @@ export function SectionLabel({ children }: { children: React.ReactNode }) {
 
 export function Meta({ label, value, mono }: { label: string; mono?: boolean; value: React.ReactNode }) {
   return (
-    <div style={{ padding: "12px 14px", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 14 }}>
-      <div style={{ fontSize: 11.5, color: "var(--dim)", marginBottom: 4, letterSpacing: "0.03em" }}>{label}</div>
+    <div className="ide-metric">
+      <div style={{ fontSize: 11.5, color: "var(--dim)", marginBottom: 5, letterSpacing: "0.03em" }}>{label}</div>
       <div className={mono ? "ide-num" : ""} style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>{value}</div>
     </div>
   );
@@ -230,7 +230,7 @@ export function RuleDetail({
         <h2 style={{ margin: "0 0 6px", fontSize: 26, fontWeight: 800, letterSpacing: "-0.02em" }}>{rule.title}</h2>
         <p style={{ margin: "0 0 16px", color: "var(--muted)", fontSize: 16, lineHeight: 1.5 }}>{rule.summary}</p>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 16, padding: "12px 16px", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 14, marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 16, padding: "14px 0", borderTop: "1px solid var(--line)", borderBottom: "1px solid var(--line)", marginBottom: 18 }}>
           <VoteTally approve={rule.approve} against={rule.against} />
           {rule.finalist ? <span style={{ marginLeft: "auto", fontSize: 12, color: st === "eliminada" ? "var(--red)" : "var(--dim)" }}>{st === "eliminada" ? "down-votes overtook" : "balance " + (balance >= 0 ? "+" : "") + balance}</span> : null}
         </div>
@@ -290,19 +290,18 @@ export function RuleDetail({
         {rule.seed ? (
           <>
             <SectionLabel>Prompt seed</SectionLabel>
-            <div style={{ margin: "8px 0 22px", padding: "14px 16px", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 14, fontSize: 14.5, lineHeight: 1.55, color: "var(--purple-soft)", fontStyle: "italic" }}>
+            <div style={{ margin: "10px 0 24px", fontSize: 16, lineHeight: 1.6, color: "var(--purple-soft)", fontStyle: "italic" }}>
               “{rule.seed}”
             </div>
           </>
         ) : null}
 
         <SectionLabel>Details</SectionLabel>
-        <div style={{ margin: "10px 0 22px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <div className="ide-metrics rows2" style={{ margin: "10px 0 22px" }}>
           <Meta label="Created by" value={rule.handle} />
           <Meta label="Wallet" value={rule.wallet} mono />
           <Meta label="When" value={rule.created} />
           <Meta label="Balance" value={`${balance >= 0 ? "+" : ""}${balance}`} mono />
-          <Meta label="Status" value={rule.removed ? "Removed" : rule.finalist ? "Finalist" : "Active"} />
         </div>
       </div>
     </div>

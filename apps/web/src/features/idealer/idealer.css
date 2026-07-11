@@ -60,12 +60,12 @@
   position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0;
 }
 .ide-ambient::before, .ide-ambient::after {
-  content: ""; position: absolute; border-radius: 50%; filter: blur(70px); opacity: 0.5;
+  content: ""; position: absolute; border-radius: 50%; filter: blur(80px); opacity: 0.32;
 }
-.ide-ambient::before { width: 360px; height: 360px; top: -120px; left: -90px;
-  background: radial-gradient(circle, rgba(153,69,255,0.55), transparent 65%); }
-.ide-ambient::after { width: 380px; height: 380px; top: 120px; right: -140px;
-  background: radial-gradient(circle, rgba(20,241,149,0.34), transparent 65%);
+.ide-ambient::before { width: 340px; height: 340px; top: -140px; left: -110px;
+  background: radial-gradient(circle, rgba(153,69,255,0.5), transparent 66%); }
+.ide-ambient::after { width: 360px; height: 360px; top: 140px; right: -160px;
+  background: radial-gradient(circle, rgba(20,241,149,0.3), transparent 66%);
   animation: ide-drift 11s ease-in-out infinite alternate; }
 @keyframes ide-drift { from { transform: translateY(0) } to { transform: translateY(40px) } }
 
@@ -209,6 +209,7 @@
   border-radius: 11px; padding: 8px 12px; font-family: 'Outfit', sans-serif;
   font-weight: 700; font-size: 13.5px; transition: transform .1s ease, background .15s, border-color .15s, color .15s;
   border: 1px solid var(--line-2); background: var(--surface-2); color: var(--muted);
+  white-space: nowrap;
 }
 .ide-votebtn:active { transform: scale(0.95); }
 .ide-votebtn:disabled { cursor: default; }
@@ -244,6 +245,56 @@
   border: 1px solid var(--line); background: var(--surface);
   display: flex; align-items: center; gap: 12px;
 }
+
+/* ============================================================
+   EDITORIAL PRIMITIVES
+   Grouping via hairlines, eyebrows, alignment and whitespace —
+   not filled/bordered boxes. Surfaces are reserved for genuine
+   emphasis (primary buttons, the modal sheet, inputs, chips).
+   ============================================================ */
+
+/* hairline divider */
+.ide-hr { height: 0; border: none; border-top: 1px solid var(--line); margin: 0; }
+
+/* eyebrow / section label */
+.ide-eyebrow {
+  font-size: 12px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase;
+  color: var(--dim);
+}
+
+/* divided list — rows separated by hairlines, no per-row box */
+.ide-list { display: flex; flex-direction: column; }
+.ide-list > * { border-bottom: 1px solid var(--line); }
+.ide-list > *:last-child { border-bottom: none; }
+
+/* generic list row: sits directly on the background */
+.ide-listrow {
+  display: flex; align-items: center; gap: 13px; width: 100%; box-sizing: border-box;
+  padding: 15px 2px; background: none; border: none; text-align: left;
+  color: var(--text); font-family: 'Outfit', sans-serif; cursor: pointer;
+}
+.ide-listrow:active { background: rgba(255,255,255,0.02); }
+
+/* underline tabs — replaces the filled segmented control for section switching */
+.ide-tabs { display: flex; gap: 22px; border-bottom: 1px solid var(--line); }
+.ide-tabs button {
+  background: none; border: none; padding: 0 0 12px; margin-bottom: -1px;
+  color: var(--dim); font-family: 'Outfit', sans-serif; font-weight: 700; font-size: 14.5px;
+  cursor: pointer; border-bottom: 2px solid transparent; transition: color .15s, border-color .15s;
+  letter-spacing: -0.01em; white-space: nowrap;
+}
+.ide-tabs button.on { color: var(--text); border-bottom-color: var(--purple-soft); }
+
+/* metric grid — cells divided by internal hairlines, no boxes.
+   4 items → 2x2 with an inner cross of hairlines. */
+.ide-metrics { display: grid; grid-template-columns: 1fr 1fr; }
+.ide-metrics > .ide-metric { padding: 16px 2px 16px 0; min-width: 0; }
+.ide-metrics > .ide-metric:nth-child(even) { padding-left: 18px; border-left: 1px solid var(--line); }
+.ide-metrics.rows2 > .ide-metric:nth-child(-n+2) { border-bottom: 1px solid var(--line); padding-top: 2px; }
+.ide-metrics.rows2 > .ide-metric:nth-child(n+3) { padding-bottom: 2px; padding-top: 16px; }
+
+/* flat notice — an inline callout bounded by hairlines, not a filled card */
+.ide-notice { padding: 16px 2px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 
 /* tweak-driven modifiers (kept for parity; tweaks panel itself is dropped) */
 .ide-noglow [style*="ide-pulse"], .ide-noglow .ide-glow { animation: none !important; }

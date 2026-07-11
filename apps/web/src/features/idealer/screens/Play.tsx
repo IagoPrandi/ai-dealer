@@ -37,7 +37,7 @@ const MAXN = 100;
 
 function ReviewRow({ label, last, mono, value }: { label: string; last?: boolean; mono?: boolean; value: string }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 0", borderBottom: last ? "none" : "1px solid var(--line)" }}>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 2px", borderBottom: last ? "none" : "1px solid var(--line)" }}>
       <span style={{ fontSize: 14, color: "var(--muted)" }}>{label}</span>
       <span className={mono ? "ide-num" : ""} style={{ fontSize: 14.5, fontWeight: 700, color: "var(--text)" }}>{value}</span>
     </div>
@@ -444,21 +444,24 @@ function PlayFlow() {
     return (
       <div className="ide-app ide-screen" style={{ height: "100%", position: "relative", overflow: "hidden" }}>
         <div className="ide-ambient" />
-        <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", padding: "52px 18px 150px" }}>
+        <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", padding: "52px 20px 150px" }}>
           <ScreenHead onBack={() => setStep("pick")} title="Review guess" />
-          <p style={{ margin: "2px 2px 18px", fontSize: 14, color: "var(--muted)", lineHeight: 1.5 }}>
+          <p style={{ margin: "2px 2px 22px", fontSize: 14, color: "var(--muted)", lineHeight: 1.5 }}>
             Check your numbers before confirming. Once submitted, the guess <b style={{ color: "var(--text)" }}>cannot be edited</b>.
           </p>
-          <div className="ide-card" style={{ padding: 18, marginBottom: 14 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+          {/* your numbers — chips over the background, no box */}
+          <div style={{ borderTop: "1px solid var(--line)", paddingTop: 16, marginBottom: 4 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
               <SectionLabel>Your numbers</SectionLabel>
               <button onClick={() => setStep("pick")} className="ide-votebtn" style={{ padding: "6px 11px" }} type="button"><Ico.edit style={{ color: "currentColor" }} /> edit</button>
             </div>
-            <div style={{ display: "flex", gap: 9, flexWrap: "wrap", justifyContent: "center" }}>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center", marginBottom: 22 }}>
               {sel.map((n) => <span key={n} className="ide-chip">{n}</span>)}
             </div>
           </div>
-          <div className="ide-card" style={{ padding: "4px 16px", marginBottom: 14 }}>
+          {/* summary — hairline-divided list, no box */}
+          <div style={{ marginBottom: 22 }}>
+            <ReviewRow label="Round" value={fmtTurnId(turnId)} mono />
             <ReviewRow label="Numbers chosen" value={`${sel.length} of ${PICK}`} mono />
             <ReviewRow label="Entry fee" value={fees.playNext === 0 ? "Free" : `${fmtSol(fees.playNext)} SOL`} mono />
             <ReviewRow label="Account rent + network fee" value="shown by wallet" last />
@@ -469,13 +472,13 @@ function PlayFlow() {
           {error ? (
             <div className="ide-card" style={{ padding: "11px 14px", marginBottom: 14, borderColor: "rgba(255,107,107,0.3)", color: "var(--red)", fontSize: 13 }}>{error}</div>
           ) : (
-            <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 4px", fontSize: 12.5, color: "var(--dim)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 2px", fontSize: 12.5, color: "var(--dim)" }}>
               <Ico.info style={{ color: "var(--purple-soft)", flexShrink: 0 }} />
               <span>Playing issues your round pass — unlocks creating rules and voting.</span>
             </div>
           )}
         </div>
-        <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 30, padding: "16px 18px calc(20px + env(safe-area-inset-bottom,0px))", background: "linear-gradient(180deg, transparent, var(--bg) 36%)" }}>
+        <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 30, padding: "16px 20px calc(20px + env(safe-area-inset-bottom,0px))", background: "linear-gradient(180deg, transparent, var(--bg) 36%)" }}>
           <button onClick={confirm} disabled={busy || submitBlocked} className="ide-btn" style={{ width: "100%", padding: 17, fontSize: 17, opacity: busy || submitBlocked ? 0.7 : 1 }} type="button">
             {busy ? <><span className="ide-spin" style={{ width: 18, height: 18, border: "2px solid #08110C", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block" }} /> Submitting…</>
               : submitBlocked ? <><Ico.clock style={{ color: "#08110C" }} /> Wallet action pending</>
@@ -491,7 +494,7 @@ function PlayFlow() {
   return (
     <div className="ide-app ide-screen" style={{ height: "100%", position: "relative", overflow: "hidden" }}>
       <div className="ide-ambient" />
-      <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", padding: "52px 18px 150px" }}>
+      <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", padding: "52px 20px 150px" }}>
         <ScreenHead onBack={() => go("home")} title="Make a guess"
           right={sel.length > 0 ? <button onClick={() => setSel([])} style={{ background: "none", border: "none", color: "var(--dim)", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "Outfit" }} type="button">clear</button> : undefined} />
 
@@ -524,7 +527,7 @@ function PlayFlow() {
         </div>
       </div>
 
-      <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 30, padding: "16px 18px calc(20px + env(safe-area-inset-bottom,0px))", background: "linear-gradient(180deg, transparent, var(--bg) 36%)" }}>
+      <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 30, padding: "16px 20px calc(20px + env(safe-area-inset-bottom,0px))", background: "linear-gradient(180deg, transparent, var(--bg) 36%)" }}>
         <button onClick={() => complete && setStep("review")} disabled={!complete || !turnReadyToPlay} className="ide-btn" style={{ width: "100%", padding: 17, fontSize: 17, opacity: complete && turnReadyToPlay ? 1 : 0.4 }} type="button">
           {complete ? <>Review guess <Ico.arrow style={{ color: "#08110C" }} /></> : `${PICK - sel.length} number${PICK - sel.length === 1 ? "" : "s"} left`}
         </button>
