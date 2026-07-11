@@ -3456,3 +3456,11 @@ Passed:
 - Verified: `pnpm --filter @idealer/web typecheck`; `pnpm --filter @idealer/web test` (49/49); `pnpm --filter @idealer/web lint`; `pnpm --filter @idealer/web build`.
 - Runtime verification: `GET http://127.0.0.1:3000/api/proxy/health` and `GET http://127.0.0.1:3000/__api/health` returned `200`; `POST http://127.0.0.1:3000/api/proxy/rule-preflight` with the reported Portuguese rule returned `200` after about 151 seconds instead of the previous 30-second `500`.
 - Reviewed the result for inconsistencies: no fallback/mock production behavior was added, the real compiler still runs and errors still surface explicitly, UI copy remains English, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-11 (MetaMask connector blocked from Solana wallet flow)
+
+- Opened required context before working: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/develop-frontend/SKILL.md`, `.claude/skills/solana-dev/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/SKILL.md`, `.claude/skills/solana-dev/ext/solana-dev/skill/references/frontend-framework-kit.md`, `.claude/skills/solana-dev/ext/sendai/skills/phantom-connect/SKILL.md`, and `.claude/skills/idealer-test-and-verify/SKILL.md`.
+- Web: added an explicit wallet discovery policy for Idealer that requires Solana Wallet Standard chain and feature support and blocks MetaMask by wallet name, then wired it into `autoDiscover` before the wallet registry is created.
+- Added regression coverage proving Solana wallets remain discoverable, non-Solana wallets are rejected, and MetaMask is rejected even if it advertises Solana features.
+- Verified: `pnpm --filter @idealer/web typecheck`; `pnpm --filter @idealer/web test` (53/53); `pnpm --filter @idealer/web lint`; `pnpm --filter @idealer/web build`.
+- Reviewed the result for inconsistencies: unsupported wallet connectors now fail closed before UI display or persisted auto-connect, no fallback/mock behavior was added, UI copy remains English, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.

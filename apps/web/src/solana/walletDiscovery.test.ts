@@ -1,0 +1,59 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+import { isSupportedIdealerWallet } from "./walletDiscovery";
+
+test("supports Solana wallet-standard wallets", () => {
+  assert.equal(
+    isSupportedIdealerWallet({
+      chains: ["solana:devnet"],
+      features: {
+        "solana:signTransaction": {},
+        "standard:connect": {},
+      },
+      name: "Phantom",
+    }),
+    true,
+  );
+});
+
+test("rejects non-Solana wallets", () => {
+  assert.equal(
+    isSupportedIdealerWallet({
+      chains: ["eip155:1"],
+      features: {
+        "standard:connect": {},
+      },
+      name: "Ethereum Wallet",
+    }),
+    false,
+  );
+});
+
+test("rejects MetaMask even if it advertises Solana features", () => {
+  assert.equal(
+    isSupportedIdealerWallet({
+      chains: ["solana:devnet"],
+      features: {
+        "solana:signTransaction": {},
+        "standard:connect": {},
+      },
+      name: "MetaMask",
+    }),
+    false,
+  );
+});
+
+test("rejects MetaMask name variants", () => {
+  assert.equal(
+    isSupportedIdealerWallet({
+      chains: ["solana:devnet"],
+      features: {
+        "solana:signTransaction": {},
+        "standard:connect": {},
+      },
+      name: "Meta Mask Wallet",
+    }),
+    false,
+  );
+});

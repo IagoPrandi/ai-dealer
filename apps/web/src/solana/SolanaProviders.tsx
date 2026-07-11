@@ -10,6 +10,8 @@ import {
 import { autoDiscover, createClient } from "@solana/client";
 import { SolanaProvider } from "@solana/react-hooks";
 
+import { isSupportedIdealerWallet } from "./walletDiscovery";
+
 const DEVNET_RPC_ENDPOINT =
   process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
 const DEVNET_WEBSOCKET_ENDPOINT =
@@ -48,6 +50,7 @@ function createIdealerSolanaClient() {
     commitment: "confirmed",
     endpoint: DEVNET_RPC_ENDPOINT,
     walletConnectors: autoDiscover({
+      filter: isSupportedIdealerWallet,
       overrides: () => ({
         defaultChain: DEVNET_CHAIN,
       }),
