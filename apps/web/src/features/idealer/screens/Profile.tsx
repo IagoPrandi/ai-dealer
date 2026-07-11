@@ -18,12 +18,12 @@ import { describeTxError, sendInstruction } from "../data/tx";
 import { Dealer, Ico, VoteTally } from "../shared";
 import type { ClaimRecordApi, ConversationDraftApi, PlayerHistoryEventApi } from "../data/types";
 
-/* withdraw-breakdown item — no box, divided by the grid's hairline */
+/* withdraw-breakdown tile */
 function BreakdownItem({ icon, label, value }: { icon: React.ReactNode; label: string; value: number }) {
   return (
-    <div className="ide-metric">
-      <div style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--muted)", fontSize: 12.5, marginBottom: 6 }}>{icon} {label}</div>
-      <div className="ide-num" style={{ fontSize: 20, fontWeight: 800 }}>{fmtSol(value)} <span style={{ fontSize: 11, color: "var(--purple-soft)", fontWeight: 700 }}>SOL</span></div>
+    <div style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: "10px 12px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--muted)", fontSize: 12, marginBottom: 5 }}>{icon} {label}</div>
+      <div className="ide-num" style={{ fontSize: 18, fontWeight: 800 }}>{fmtSol(value)} <span style={{ fontSize: 11, color: "var(--purple-soft)", fontWeight: 700 }}>SOL</span></div>
     </div>
   );
 }
@@ -177,26 +177,26 @@ export function ProfileScreen() {
           </div>
         </div>
 
-        {/* CLAIM HERO — no box, anchored by an ambient glow */}
-        <div style={{ position: "relative", marginBottom: 20 }}>
-          <div style={{ position: "absolute", inset: "-30px -10px auto", height: 150, background: "radial-gradient(circle, rgba(20,241,149,0.16), transparent 68%)", filter: "blur(12px)", zIndex: 0 }} />
-          <div style={{ position: "relative", zIndex: 1 }}>
-            <div className="ide-eyebrow">Available to claim</div>
-            <div className="ide-num" style={{ display: "flex", alignItems: "flex-end", gap: 7, margin: "8px 0 18px" }}>
-              <span className="ide-grad-text" style={{ fontSize: 52, fontWeight: 700, lineHeight: 0.9 }}>{fmtSol(wd)}</span>
-              <span style={{ fontSize: 17, fontWeight: 700, color: "var(--purple-soft)", marginBottom: 6 }}>SOL</span>
+        {/* CLAIM HERO */}
+        <div className="ide-card" style={{ padding: 18, marginBottom: 14, position: "relative", overflow: "hidden", borderColor: "var(--line-2)", background: "linear-gradient(150deg, var(--surface-2), var(--surface))" }}>
+          <div style={{ position: "absolute", top: -30, right: -20, width: 130, height: 130, background: "radial-gradient(circle, rgba(20,241,149,0.28), transparent 65%)", filter: "blur(8px)" }} />
+          <div style={{ position: "relative" }}>
+            <div style={{ fontSize: 12.5, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--dim)", fontWeight: 700 }}>Available to claim</div>
+            <div className="ide-num" style={{ display: "flex", alignItems: "flex-end", gap: 6, margin: "6px 0 14px" }}>
+              <span className="ide-grad-text" style={{ fontSize: 40, fontWeight: 700, lineHeight: 1 }}>{fmtSol(wd)}</span>
+              <span style={{ fontSize: 16, fontWeight: 700, color: "var(--purple-soft)", marginBottom: 4 }}>SOL</span>
             </div>
 
-            {/* prize | reward breakdown — divided by a hairline, no tiles */}
-            <div className="ide-metrics" style={{ marginBottom: 18 }}>
-              <BreakdownItem icon={<Ico.trophy style={{ color: "var(--gold)", width: 14, height: 14 }} />} label="Prize" value={wdPrize} />
-              <BreakdownItem icon={<Ico.gift style={{ color: "var(--green)", width: 14, height: 14 }} />} label="Reward" value={wdReward} />
+            {/* prize | reward breakdown */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9, marginBottom: 14 }}>
+              <BreakdownItem icon={<Ico.trophy style={{ color: "var(--gold)", width: 15, height: 15 }} />} label="Prize" value={wdPrize} />
+              <BreakdownItem icon={<Ico.gift style={{ color: "var(--green)", width: 15, height: 15 }} />} label="Reward" value={wdReward} />
             </div>
 
-            <button onClick={withdrawAll} disabled={wd <= 0 || busy} className="ide-btn" style={{ width: "100%", padding: 15, opacity: wd > 0 && !busy ? 1 : 0.45, pointerEvents: wd > 0 && !busy ? "auto" : "none" }} type="button">
+            <button onClick={withdrawAll} disabled={wd <= 0 || busy} className="ide-btn" style={{ width: "100%", padding: 14, opacity: wd > 0 && !busy ? 1 : 0.45, pointerEvents: wd > 0 && !busy ? "auto" : "none" }} type="button">
               <Ico.withdraw style={{ color: "#08110C" }} /> {busy ? "Claiming…" : wd > 0 ? "Claim to wallet" : "Nothing to claim"}
             </button>
-            {done && walletAddress ? <div style={{ marginTop: 11, fontSize: 13, color: "var(--green)", display: "flex", alignItems: "center", gap: 6, justifyContent: "center" }}><Ico.check style={{ color: "var(--green)" }} /> Claim sent to {truncateAddress(walletAddress)}</div> : null}
+            {done && walletAddress ? <div style={{ marginTop: 10, fontSize: 13, color: "var(--green)", display: "flex", alignItems: "center", gap: 6, justifyContent: "center" }}><Ico.check style={{ color: "var(--green)" }} /> Claim sent to {truncateAddress(walletAddress)}</div> : null}
             {txError ? <div style={{ marginTop: 10, fontSize: 13, color: "var(--red)", textAlign: "center" }}>{txError}</div> : null}
             {error ? <div style={{ marginTop: 10, fontSize: 12.5, color: "var(--dim)", textAlign: "center" }}>Could not load your claim ledger. Pull to retry.</div> : null}
           </div>

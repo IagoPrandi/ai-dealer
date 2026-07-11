@@ -8,10 +8,8 @@ const mockEnabled =
   process.env.npm_lifecycle_event === "dev:mock" ||
   process.env.NEXT_PUBLIC_UI_MOCK === "1";
 
-// Same-origin proxy to the API (apps/api, default :3002). Lets the DApp reach
-// the API from any origin the browser is served on — notably an HTTPS tunnel
-// used to install the PWA on a phone — without mixed-content or CORS problems.
-const apiProxyTarget = process.env.IDEALER_API_PROXY_TARGET ?? "http://localhost:3002";
+// Legacy /__api requests are routed to the App Router proxy, which forwards
+// long-running compiler calls to apps/api without the rewrite proxy timeout.
 
 // Same-origin proxy to the worker (apps/worker, default :3003). Mirrors the API
 // proxy so the DApp can read live turn status from any origin the browser is
@@ -28,7 +26,7 @@ const nextConfig: NextConfig = {
     return [
       {
         source: "/__api/:path*",
-        destination: `${apiProxyTarget}/:path*`,
+        destination: "/api/proxy/:path*",
       },
       {
         source: "/__worker/:path*",

@@ -283,7 +283,7 @@ export function VoteScreen() {
             {all.length === 0 ? (
               <div className="ide-notice" style={{ textAlign: "center", color: "var(--muted)", fontSize: 14 }}>No rules to vote on yet.</div>
             ) : (
-              <div style={{ display: "grid", gap: 9, gridTemplateColumns: "minmax(0, 1fr)" }}>
+              <div className="ide-rule-stack" style={{ margin: "0 -20px" }}>
                 {all.map((r, i) => <RuleVoteRow key={r.id} rule={r} rank={i + 1} />)}
               </div>
             )}
@@ -331,7 +331,7 @@ export function VoteScreen() {
                 ) : null}
               </div>
             ) : (
-              <div style={{ display: "grid", gap: 9, gridTemplateColumns: "minmax(0, 1fr)" }}>
+              <div className="ide-rule-stack" style={{ margin: "0 -20px" }}>
                 {finalists.map((r) => <FinalistRow key={r.id} rule={r} />)}
               </div>
             )}

@@ -55,7 +55,7 @@ function withBrowserLocation(
 test("api base defaults browser calls to the same-origin proxy", () => {
   withEnv({ NEXT_PUBLIC_IDEALER_API_URL: undefined }, () => {
     withBrowserLocation({ hostname: "localhost", protocol: "http:" }, () => {
-      assert.equal(getApiBaseUrl(), "/__api");
+      assert.equal(getApiBaseUrl(), "/api/proxy");
     });
   });
 });
@@ -65,9 +65,17 @@ test("api base uses the same-origin proxy from public HTTPS origins", () => {
     withBrowserLocation(
       { hostname: "example.trycloudflare.com", protocol: "https:" },
       () => {
-        assert.equal(getApiBaseUrl(), "/__api");
+        assert.equal(getApiBaseUrl(), "/api/proxy");
       },
     );
+  });
+});
+
+test("api base maps the legacy same-origin proxy override to the route handler", () => {
+  withEnv({ NEXT_PUBLIC_IDEALER_API_URL: "/__api" }, () => {
+    withBrowserLocation({ hostname: "localhost", protocol: "http:" }, () => {
+      assert.equal(getApiBaseUrl(), "/api/proxy");
+    });
   });
 });
 

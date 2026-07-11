@@ -246,6 +246,20 @@
   display: flex; align-items: center; gap: 12px;
 }
 
+.ide-rule-stack {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+.ide-rule-stack > * {
+  width: 100%;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+.ide-rule-stack > * + * {
+  border-top: 0 !important;
+}
+
 /* ============================================================
    EDITORIAL PRIMITIVES
    Grouping via hairlines, eyebrows, alignment and whitespace —

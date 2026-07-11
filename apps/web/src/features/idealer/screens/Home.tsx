@@ -31,10 +31,10 @@ function PromptInput() {
     go("create", seed ? { seed } : { newConversation: true });
   };
   return (
-    <div>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 16, fontWeight: 800, whiteSpace: "nowrap", letterSpacing: "-0.02em" }}>Create your rule</span>
-        <span style={{ fontSize: 12.5, color: "var(--purple-soft)", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}><Ico.spark style={{ width: 12, height: 12, color: "var(--purple-soft)" }} /> with AI</span>
+    <div className="ide-card" style={{ padding: 12, borderColor: "var(--line-2)", background: "linear-gradient(180deg, var(--surface-2), var(--surface))" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 13.5, fontWeight: 700, whiteSpace: "nowrap" }}>Create your rule</span>
+        <span className="ide-pill" style={{ padding: "3px 8px", fontSize: 11 }}><Ico.spark style={{ width: 12, height: 12, color: "var(--purple-soft)" }} /> with AI</span>
         <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--dim)" }}>cost <span className="ide-num" style={{ color: "var(--muted)" }}>{fees.ruleNext === 0 ? "Free" : `${fmtSol(fees.ruleNext)} SOL`}</span></span>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -43,9 +43,9 @@ function PromptInput() {
           onChange={(e) => setVal(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") { openComposer(); } }}
           placeholder="e.g. the sum closest to 100 wins…"
-          style={{ flex: 1, minWidth: 0, background: "var(--bg-2)", border: "1px solid var(--line-2)", borderRadius: 14, padding: "14px 15px", color: "var(--text)", fontSize: 14.5, fontFamily: "Outfit", outline: "none" }}
+          style={{ flex: 1, minWidth: 0, background: "var(--bg)", border: "1px solid var(--line-2)", borderRadius: 13, padding: "13px 14px", color: "var(--text)", fontSize: 14.5, fontFamily: "Outfit", outline: "none" }}
         />
-        <button onClick={openComposer} className="ide-btn" style={{ padding: 14, borderRadius: 14, flexShrink: 0 }} title="Create rule" type="button">
+        <button onClick={openComposer} className="ide-btn" style={{ padding: 13, borderRadius: 13, flexShrink: 0 }} title="Create rule" type="button">
           <Ico.send style={{ color: "#08110C" }} />
         </button>
       </div>
@@ -261,15 +261,15 @@ export function HomeScreen() {
         </div>
 
         {rules.loading && top.length === 0 ? (
-          <div style={{ display: "grid", gap: 9, marginBottom: 14 }}>
+          <div className="ide-rule-stack" style={{ margin: "0 -18px 14px" }}>
             {[0, 1, 2].map((i) => <div key={i} className="ide-card" style={{ height: 64 }} />)}
           </div>
         ) : top.length === 0 ? (
-          <div className="ide-card" style={{ padding: 18, marginBottom: 14, textAlign: "center", color: "var(--muted)", fontSize: 14 }}>
+          <div className="ide-card" style={{ padding: 18, margin: "0 -18px 14px", textAlign: "center", color: "var(--muted)", fontSize: 14, borderRadius: 0 }}>
             No rules proposed yet - be the first to create one.
           </div>
         ) : (
-          <div style={{ display: "grid", gap: 9, marginBottom: 14, gridTemplateColumns: "minmax(0, 1fr)" }}>
+          <div className="ide-rule-stack" style={{ margin: "0 -18px 14px" }}>
             {top.map((r, i) => (
               <button key={r.id} onClick={() => openDetail(r.ruleId, { rank: i + 1 })} className="ide-rulerow ide-tap" style={{ borderColor: i === 0 ? "var(--line-2)" : "var(--line)", boxShadow: i === 0 ? "0 0 24px -14px rgba(255,210,63,0.6)" : "none" }} type="button">
                 <Medal pos={i + 1} />

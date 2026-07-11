@@ -3435,3 +3435,24 @@ Passed:
 - Verified: `pnpm --filter @idealer/web typecheck`; `pnpm --filter @idealer/web test` (42/42); `pnpm --filter @idealer/web lint`; `pnpm --filter @idealer/web build`.
 - Browser check: `agent-browser` verified `/play` loads with content and no Next error overlay; final scoped screenshot saved at `output/playwright/layout-home-final-scoped.png`. Mock gallery verification was blocked because an existing Next dev server for `apps/web` was already running on port `3000`; no process was killed.
 - Reviewed the result for inconsistencies: UI copy remains English, no fallback/mock production behavior was added, the final diff is scoped to the requested layout components, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-11 (Restore rule composer, account claim card, and flat rule lists)
+
+- Opened required context before working: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/idealer-design-system/SKILL.md`, `.claude/skills/idealer-ui-coherence/SKILL.md`, `.claude/skills/idealer-test-and-verify/SKILL.md`, the relevant design-system references (`01-tokens.md`, `02-components.md`, `03-screens-and-state.md`, `04-new-screen-recipe.md`), and `vercel:agent-browser-verify` guidance for the local visual smoke check.
+- Web: restored the Home `Create your rule` composer as an `ide-card` with the prior compact header, AI pill, input surface, and send button sizing.
+- Web: restored the Account claim area to a card and returned `Prize`/`Reward` to bordered tiles inside that card, without changing claim logic.
+- Web: changed the Home and Rules rule lists to a flat full-width stack (`ide-rule-stack`) with no rounded row corners and no gaps between rows; the Home list expands to the screen edges of its scroll padding and the Rules tab lists expand across their page padding.
+- Verified: `pnpm --filter @idealer/web typecheck`; `pnpm --filter @idealer/web test` (49/49); `pnpm --filter @idealer/web lint`; `pnpm --filter @idealer/web build`.
+- Browser check: Playwright verified `http://127.0.0.1:3000/play` renders content with no Next error overlay. `/dev/gallery` is disabled on the currently running non-mock dev server; a temporary mock server on port `3001` was blocked by Next because the same `apps/web` dev server is already running on port `3000`, so no process was killed.
+- Reviewed the result for inconsistencies: UI copy remains English, no fallback/mock production behavior was added, unrelated worktree changes were left untouched, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-11 (Rule preflight same-origin proxy timeout)
+
+- Opened required context before working: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, and `.claude/skills/idealer-test-and-verify/SKILL.md`.
+- Reproduced the reported rule composer error: direct `POST http://127.0.0.1:3002/rule-preflight` for `ganhar quer acertar pelo menos 1 número em qualquer ordem` returned `200`, but the browser same-origin path `POST http://127.0.0.1:3000/__api/rule-preflight` returned `500` after about 30 seconds because the Next rewrite proxy timed out before the real local LLM preflight completed.
+- Web: added an explicit App Router proxy at `/api/proxy/[...path]` with a configurable `IDEALER_API_PROXY_TIMEOUT_MS` defaulting to 300 seconds, allowlisted request-header forwarding, upstream status/body preservation, and structured 502/504 errors for backend reachability/timeout failures.
+- Web: changed the browser API base default to `/api/proxy` and mapped the legacy configured `/__api` value to the new route handler. Legacy `/__api/*` rewrites now route to `/api/proxy/*`, so stale callers avoid the old rewrite-proxy timeout.
+- Added regression coverage for API proxy target normalization, URL construction, long timeout default, safe forwarded headers, and response metadata preservation.
+- Verified: `pnpm --filter @idealer/web typecheck`; `pnpm --filter @idealer/web test` (49/49); `pnpm --filter @idealer/web lint`; `pnpm --filter @idealer/web build`.
+- Runtime verification: `GET http://127.0.0.1:3000/api/proxy/health` and `GET http://127.0.0.1:3000/__api/health` returned `200`; `POST http://127.0.0.1:3000/api/proxy/rule-preflight` with the reported Portuguese rule returned `200` after about 151 seconds instead of the previous 30-second `500`.
+- Reviewed the result for inconsistencies: no fallback/mock production behavior was added, the real compiler still runs and errors still surface explicitly, UI copy remains English, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
