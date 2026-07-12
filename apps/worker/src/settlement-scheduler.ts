@@ -27,8 +27,8 @@ import {
  * rule-election cutoff (the phase-1 → phase-2 boundary) but before
  * `close_turn`; the draw runs once the turn ends; `close_turn` is issued
  * only after settlement so the pipeline is never wedged (the M5.2 follow-up).
- * The off-chain projection steps (verification → winners/rewards → claims →
- * closed) are sequenced by the set of §5.5 transitions already recorded in the
+ * The off-chain projection steps (verification → winners/rewards/rollover →
+ * claims → closed) are sequenced by the set of §5.5 transitions already recorded in the
  * M3.7 hash-chained audit log, so a retried cycle never double-projects or
  * double-pays (PRD §10.13).
  */
@@ -586,6 +586,9 @@ async function executeAction(args: ExecuteArgs): Promise<string | null> {
     case "project_winners_rewards": {
       await deps.bridge.calculateWinners(turnId);
       await deps.bridge.calculateRewards(turnId);
+      // With winners final, settle the prize-pool rollover so a no-winner
+      // bucket (and rounding dust) carries into the next turn's visible pool.
+      await deps.bridge.settleTurnRollover(turnId);
       return projectionSignature();
     }
     case "record_claims": {

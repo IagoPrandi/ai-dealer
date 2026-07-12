@@ -25,6 +25,7 @@ import {
   describeTxError,
   isBlockingWalletAction,
   readPendingWalletAction,
+  releaseActionFromOtherTurn,
   sendInstruction,
   txErrorCode,
   type WalletPendingAction,
@@ -34,6 +35,9 @@ import { Confetti, Dealer, Ico, ScreenHead, SectionLabel } from "../shared";
 
 const PICK = 6;
 const MAXN = 100;
+// Bounds the worker + RPC reads that run before the wallet is asked to sign;
+// without it a stalled endpoint leaves the submit spinner hanging forever.
+const PREFLIGHT_TIMEOUT_MS = 30_000;
 
 function ReviewRow({ label, last, mono, value }: { label: string; last?: boolean; mono?: boolean; value: string }) {
   return (
@@ -201,8 +205,11 @@ function PlayFlow() {
   const [pendingAction, setPendingAction] = useState<WalletPendingAction | null>(null);
   const complete = sel.length === PICK;
   const visiblePendingAction = useMemo(
-    () => (isSubmitGuessAction(pendingAction, walletAddress) ? pendingAction : null),
-    [pendingAction, walletAddress],
+    () =>
+      pendingAction && isSubmitGuessAction(pendingAction, walletAddress)
+        ? releaseActionFromOtherTurn(pendingAction, turnId)
+        : null,
+    [pendingAction, turnId, walletAddress],
   );
   const submitBlocked = isBlockingWalletAction(visiblePendingAction);
 
@@ -264,15 +271,28 @@ function PlayFlow() {
       }
       const sequence = playCount + 1;
       const accounts = await deriveSubmitGuessAccounts({ player, sequence, turnId });
-      const [freshTurn, existingGuess] = await Promise.all([
-        fetchActiveTurnSnapshotFromWorker(),
-        client.runtime.rpc
-          .getAccountInfo(accounts.playerGuess, {
-            commitment: "confirmed",
-            encoding: "base64",
-          })
-          .send(),
-      ]);
+      const preflightSignal = AbortSignal.timeout(PREFLIGHT_TIMEOUT_MS);
+      const loadPreflight = () =>
+        Promise.all([
+          fetchActiveTurnSnapshotFromWorker(preflightSignal),
+          client.runtime.rpc
+            .getAccountInfo(accounts.playerGuess, {
+              commitment: "confirmed",
+              encoding: "base64",
+            })
+            .send({ abortSignal: preflightSignal }),
+        ]);
+      let preflight: Awaited<ReturnType<typeof loadPreflight>>;
+      try {
+        preflight = await loadPreflight();
+      } catch (preflightError) {
+        if (preflightSignal.aborted) {
+          setError("Live round status did not respond within 30 seconds, so the wallet was not called. Check that the API and worker are running, then retry.");
+          return;
+        }
+        throw preflightError;
+      }
+      const [freshTurn, existingGuess] = preflight;
       if (freshTurn.globalConfig.activeTurnId !== turnId) {
         saveAction({
           action: "submit_guess",

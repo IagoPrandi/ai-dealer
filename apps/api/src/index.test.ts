@@ -1667,6 +1667,54 @@ test("rollover settlement pays accumulated pool to a winner after rollover witho
   assert.equal(getTurnRolloverSettlement(311)?.totalRolloverLamports, 0);
 });
 
+test("re-settling a turn's rollover returns the first settlement and preserves later expired-claim additions", () => {
+  resetApiStateForTests();
+  recordNoWinnerTurn(330, wallet);
+  const first = settleTurnRollover(330, "2026-06-12T12:18:00.000Z");
+  assert.equal(first.original.rolloverLamports, 4_750_000);
+
+  // An expired unclaimed claim from an older turn lands on turn 331's record
+  // after the settlement (mirrors the expiry path's additive write).
+  saveTurnRollover({
+    alternativeRolloverLamports: 4_750_000,
+    originalRolloverLamports: 4_750_000 + 1_000_000,
+    recordedAt: "2026-06-12T13:00:00.000Z",
+    sourceTurnId: 305,
+    turnId: 331,
+  });
+
+  // A retried settlement is a no-op: it returns the first settlement and must
+  // not recompute and clobber the expired-claim lamports added since.
+  const again = settleTurnRollover(330, "2026-06-12T14:00:00.000Z");
+  assert.deepEqual(again, first);
+  const accounting331 = getPrizePoolAccounting(331);
+  assert.equal(accounting331.buckets.original.rolloverLamports, 5_750_000);
+  assert.equal(accounting331.buckets.alternative.rolloverLamports, 4_750_000);
+});
+
+test("rollover settlement adds to a pre-existing next-turn record instead of overwriting it", () => {
+  resetApiStateForTests();
+  // e.g. claims from an old turn already expired into turn 341 before turn
+  // 340 settled its rollover.
+  saveTurnRollover({
+    alternativeRolloverLamports: 0,
+    originalRolloverLamports: 2_000_000,
+    recordedAt: "2026-06-12T10:00:00.000Z",
+    sourceTurnId: 200,
+    turnId: 341,
+  });
+  recordNoWinnerTurn(340, wallet);
+
+  const settlement = settleTurnRollover(340, "2026-06-12T12:18:00.000Z");
+
+  // The settlement reports this turn's contribution; the stored record sums
+  // both sources so no lamport is dropped.
+  assert.equal(settlement.original.rolloverLamports, 4_750_000);
+  const accounting341 = getPrizePoolAccounting(341);
+  assert.equal(accounting341.buckets.original.rolloverLamports, 6_750_000);
+  assert.equal(accounting341.buckets.alternative.rolloverLamports, 4_750_000);
+});
+
 test("M9.3 rounding dust rolls over partially while no-winner bucket rolls over totally", () => {
   resetApiStateForTests();
   saveTurnRollover({

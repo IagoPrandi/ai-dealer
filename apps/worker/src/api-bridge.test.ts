@@ -116,6 +116,17 @@ test("projectVerificationResults verifies pending jobs and posts hex resultIds",
   assert.equal(body.status, "completed");
 });
 
+test("settleTurnRollover POSTs the turn to /turn-rollovers/settle", async () => {
+  const { calls, fetchImpl } = fakeFetch({});
+  const bridge = new ApiBridge({ apiBaseUrl: BASE, fetchImpl });
+
+  await bridge.settleTurnRollover(7);
+
+  assert.equal(calls[0]?.url, `${BASE}/turn-rollovers/settle`);
+  assert.equal(calls[0]?.method, "POST");
+  assert.deepEqual(calls[0]?.body, { turnId: 7 });
+});
+
 test("non-2xx responses throw with the status code", async () => {
   const fetchImpl = (async () =>
     new Response("nope", { status: 500 })) as unknown as typeof fetch;

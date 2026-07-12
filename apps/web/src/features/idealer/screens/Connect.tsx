@@ -12,11 +12,13 @@ interface Connector {
 export function ConnectOverlay({
   connecting,
   connectors,
+  error,
   onClose,
   onConnect,
 }: {
   connecting: boolean;
   connectors: readonly Connector[];
+  error?: null | string;
   onClose: () => void;
   onConnect: (id: string) => void;
 }) {
@@ -49,6 +51,12 @@ export function ConnectOverlay({
             <Ico.close />
           </button>
         </div>
+
+        {error ? (
+          <div className="ide-card" style={{ padding: "11px 14px", marginTop: 14, borderColor: "rgba(255,107,107,0.3)", color: "var(--red)", fontSize: 13 }}>
+            {error}
+          </div>
+        ) : null}
 
         <div style={{ display: "grid", gap: 9, marginTop: 14 }}>
           {connectors.length === 0 ? (

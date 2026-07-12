@@ -321,6 +321,9 @@ function fakeBridge() {
       calls.push(`record:${input.toState}`);
       recorded.add(input.toState);
     },
+    async settleTurnRollover() {
+      calls.push("settleTurnRollover");
+    },
   };
   return { bridge: bridge as unknown as ApiBridge, calls, recorded };
 }
@@ -687,4 +690,10 @@ test("orchestrator drives a closed no-rule turn through CLOSED idempotently", as
   assert.ok(calls.includes("publishDraw"));
   assert.ok(calls.includes("publishElection"));
   assert.ok(calls.includes("calculateWinners"));
+  // The winners step also settles the prize-pool rollover (exactly once), and
+  // only after the winners are final.
+  assert.equal(calls.filter((call) => call === "settleTurnRollover").length, 1);
+  assert.ok(
+    calls.indexOf("settleTurnRollover") > calls.indexOf("calculateWinners"),
+  );
 });

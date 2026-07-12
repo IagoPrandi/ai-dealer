@@ -5764,14 +5764,29 @@ export function settleTurnRollover(
     throw new Error("INVALID_TURN_ID");
   }
 
+  // Idempotent: a turn's rollover settles exactly once. A retried settlement
+  // step must not recompute and overwrite the next turn's rollover record —
+  // expired unclaimed claims may have been added to it since the first pass.
+  const existingSettlement = turnRolloverSettlements.get(turnId);
+  if (existingSettlement) {
+    return existingSettlement;
+  }
+
   const winners = getWinnerSummary(turnId);
   const original = buildRolloverBucketSettlement(winners.original);
   const alternative = buildRolloverBucketSettlement(winners.alternative);
   const nextTurnId = turnId + 1;
 
+  // Merge additively with anything already recorded for the next turn (the
+  // expired-unclaimed-claims path writes there too); overwriting would drop it.
+  const recordedForNext = getTurnRollover(nextTurnId);
   saveTurnRollover({
-    alternativeRolloverLamports: alternative.rolloverLamports,
-    originalRolloverLamports: original.rolloverLamports,
+    alternativeRolloverLamports:
+      (recordedForNext?.alternativeRolloverLamports ?? 0) +
+      alternative.rolloverLamports,
+    originalRolloverLamports:
+      (recordedForNext?.originalRolloverLamports ?? 0) +
+      original.rolloverLamports,
     recordedAt: settledAt,
     sourceTurnId: turnId,
     turnId: nextTurnId,

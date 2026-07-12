@@ -162,6 +162,16 @@ export class ApiBridge {
     await this.post("/reward-records/calculate-turn", { turnId });
   }
 
+  /**
+   * Settle the turn's prize-pool rollover: each bucket's unallocated remainder
+   * (the FULL bucket when it had no winner, integer-division dust otherwise)
+   * is recorded as the next turn's inbound rollover, so a no-winner prize
+   * accumulates across turns (PRD §8). Must run after `calculateWinners`.
+   */
+  async settleTurnRollover(turnId: number): Promise<void> {
+    await this.post("/turn-rollovers/settle", { turnId });
+  }
+
   async createClaims(turnId: number, availableAt?: string): Promise<void> {
     await this.post("/claim-records/create-turn", {
       turnId,

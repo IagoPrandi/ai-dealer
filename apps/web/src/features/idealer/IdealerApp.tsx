@@ -40,7 +40,7 @@ import {
   postRuleRemoval,
   postRuleVote,
 } from "./data/apiClient";
-import { describeTxError, sendInstruction } from "./data/tx";
+import { describeTxError, describeWalletConnectError, sendInstruction } from "./data/tx";
 import {
   canShowRuleRemovalAction,
   Ico,
@@ -111,6 +111,7 @@ export function IdealerApp({
   const [voteBusyRuleId, setVoteBusyRuleId] = useState<null | number>(null);
   const [removeBusyRuleId, setRemoveBusyRuleId] = useState<null | number>(null);
   const [actionError, setActionError] = useState<null | string>(null);
+  const [connectError, setConnectError] = useState<null | string>(null);
 
   const go = useCallback((next: Screen, params?: NavParams) => {
     if (params?.newConversation) {
@@ -141,7 +142,10 @@ export function IdealerApp({
     reloadPlayer();
   }, [activeTurn, reloadRound, rules, reloadPlayer]);
 
-  const requestConnect = useCallback(() => setShowConnect(true), []);
+  const requestConnect = useCallback(() => {
+    setConnectError(null);
+    setShowConnect(true);
+  }, []);
 
   const sendVote = useCallback(
     async (ruleId: number, kind: "approve" | "eliminate") => {
@@ -431,14 +435,16 @@ export function IdealerApp({
               <ConnectOverlay
                 connecting={connecting}
                 connectors={connectors}
+                error={connectError}
                 onClose={() => setShowConnect(false)}
                 onConnect={async (id) => {
+                  setConnectError(null);
                   try {
                     await connect(id);
                     setShowConnect(false);
                     reloadAll();
                   } catch (error) {
-                    setActionError(describeTxError(error));
+                    setConnectError(describeWalletConnectError(error));
                   }
                 }}
               />

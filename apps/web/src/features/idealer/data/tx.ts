@@ -19,6 +19,9 @@ export const WALLET_PENDING_ACTION_KEY = "idealer.wallet.pending-action";
 export const WALLET_APPROVAL_TIMEOUT_MS = 120_000;
 export const WALLET_APPROVAL_TIMEOUT_ERROR_CODE =
   "TRANSACTION_APPROVAL_TIMEOUT";
+const WALLET_APPROVAL_TIMEOUT_MESSAGE =
+  "The wallet approval timed out after 2 minutes. Check your wallet status before retrying.";
+const WALLET_APPROVAL_EXPIRY_GRACE_MS = 10_000;
 
 export interface SendInstructionOptions {
   approvalTimeoutMs?: number;
@@ -73,27 +76,32 @@ export async function sendInstruction(
     );
   }, approvalTimeoutMs);
 
-  try {
-    const signature = await client.transaction.prepareAndSend(
-      {
-        abortSignal: approvalController.signal,
-        authority: walletSigner,
-        commitment: "confirmed",
-        feePayer: walletSigner,
-        instructions: [instruction],
-        version: 0,
-      },
-      {
-        abortSignal: approvalController.signal,
-        commitment: "confirmed",
-        maxRetries: 3,
-        skipPreflight: false,
-      },
-    );
+  const sendPromise = client.transaction.prepareAndSend(
+    {
+      authority: walletSigner,
+      commitment: "confirmed",
+      feePayer: walletSigner,
+      instructions: [instruction],
+      version: 0,
+    },
+    {
+      commitment: "confirmed",
+      maxRetries: 3,
+      skipPreflight: false,
+    },
+  );
 
+  try {
+    const signature = await raceWithAbort(
+      sendPromise,
+      approvalController.signal,
+    );
     return signature.toString();
   } catch (error) {
     if (approvalController.signal.aborted) {
+      // The abandoned send may still settle later; swallow its outcome so it
+      // does not surface as an unhandled rejection.
+      sendPromise.catch(() => {});
       const reason = approvalController.signal.reason;
       throw reason instanceof WalletApprovalTimeoutError
         ? reason
@@ -103,6 +111,94 @@ export async function sendInstruction(
   } finally {
     globalThis.clearTimeout(timeoutId);
   }
+}
+
+/**
+ * Await `promise`, but reject as soon as `signal` aborts. Passing the signal
+ * into the Wallet Standard transaction pipeline can prevent some wallet
+ * adapters from opening their approval UI. Keep cancellation outside
+ * `prepareAndSend`: the timeout releases the DApp UI without altering the
+ * wallet's signing request.
+ */
+export async function raceWithAbort<T>(
+  promise: Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  if (signal.aborted) {
+    throw signal.reason;
+  }
+  let unsubscribe = () => {};
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        const onAbort = () => reject(signal.reason);
+        signal.addEventListener("abort", onAbort, { once: true });
+        unsubscribe = () => signal.removeEventListener("abort", onAbort);
+      }),
+    ]);
+  } finally {
+    unsubscribe();
+  }
+}
+
+/**
+ * A pending action recorded for a different turn cannot duplicate anything in
+ * the active turn (guess accounts derive from turn id + sequence), so it must
+ * not keep blocking new submits; surface it as turn_changed so the player can
+ * clear it. Failed/confirmed entries keep their own copy and clear button.
+ */
+export function releaseActionFromOtherTurn(
+  action: WalletPendingAction,
+  activeTurnId: number,
+): WalletPendingAction {
+  const releasableStatus =
+    action.status === "awaiting_approval" ||
+    action.status === "pending_confirmation" ||
+    action.status === "delayed_confirmation" ||
+    action.status === "duplicate";
+  if (
+    !releasableStatus ||
+    activeTurnId <= 0 ||
+    action.turnId === undefined ||
+    action.turnId === activeTurnId
+  ) {
+    return action;
+  }
+  return {
+    ...action,
+    errorCode: "TURN_CHANGED",
+    errorMessage: "The active round changed while this wallet action was pending.",
+    status: "turn_changed",
+  };
+}
+
+/**
+ * A pending `awaiting_approval` entry older than the approval timeout can only
+ * come from an attempt that hung without resolving; report it as failed so one
+ * hung attempt cannot block submits forever.
+ */
+export function expireStaleApprovalAction(
+  action: WalletPendingAction,
+  nowMs: number,
+): WalletPendingAction {
+  if (action.status !== "awaiting_approval") {
+    return action;
+  }
+  const updatedAtMs = Date.parse(action.updatedAt);
+  if (
+    Number.isFinite(updatedAtMs) &&
+    nowMs - updatedAtMs <=
+      WALLET_APPROVAL_TIMEOUT_MS + WALLET_APPROVAL_EXPIRY_GRACE_MS
+  ) {
+    return action;
+  }
+  return {
+    ...action,
+    errorCode: WALLET_APPROVAL_TIMEOUT_ERROR_CODE,
+    errorMessage: WALLET_APPROVAL_TIMEOUT_MESSAGE,
+    status: "failed",
+  };
 }
 
 export function readPendingWalletAction(): WalletPendingAction | null {
@@ -129,19 +225,22 @@ export function readPendingWalletAction(): WalletPendingAction | null {
     ) {
       return null;
     }
-    return {
-      action: parsed.action,
-      createdAt: parsed.createdAt ?? new Date(0).toISOString(),
-      errorCode: parsed.errorCode,
-      errorMessage: parsed.errorMessage,
-      numbers: parsed.numbers,
-      signature: parsed.signature,
-      status: parsed.status,
-      turnId: parsed.turnId,
-      updatedAt: parsed.updatedAt ?? parsed.createdAt ?? new Date(0).toISOString(),
-      version: 1,
-      walletAddress: parsed.walletAddress,
-    };
+    return expireStaleApprovalAction(
+      {
+        action: parsed.action,
+        createdAt: parsed.createdAt ?? new Date(0).toISOString(),
+        errorCode: parsed.errorCode,
+        errorMessage: parsed.errorMessage,
+        numbers: parsed.numbers,
+        signature: parsed.signature,
+        status: parsed.status,
+        turnId: parsed.turnId,
+        updatedAt: parsed.updatedAt ?? parsed.createdAt ?? new Date(0).toISOString(),
+        version: 1,
+        walletAddress: parsed.walletAddress,
+      },
+      Date.now(),
+    );
   } catch {
     return null;
   }
@@ -238,13 +337,23 @@ function findNestedProperty(value: unknown, property: string, depth = 0): unknow
   return undefined;
 }
 
+// Transaction plan results embed the compiled transaction, so a naive string
+// sweep collects base58 account keys and version markers instead of the actual
+// failure cause. Those tokens carry no diagnostic value — drop them.
+function isDiagnosticText(value: string) {
+  if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value)) {
+    return false;
+  }
+  return value !== "legacy" && value !== "0";
+}
+
 function collectDiagnosticStrings(value: unknown, output: string[], depth = 0): void {
   if (depth > 5 || output.length >= 12) {
     return;
   }
   if (typeof value === "string") {
     const trimmed = value.trim();
-    if (trimmed) {
+    if (trimmed && isDiagnosticText(trimmed)) {
       output.push(trimmed);
     }
     return;
@@ -260,7 +369,10 @@ function collectDiagnosticStrings(value: unknown, output: string[], depth = 0): 
     return;
   }
 
-  for (const key of ["message", "error", "errorMessage", "logs", "logMessages", "instructionError", "reason"]) {
+  // "cause" matters: a plan that fails AT the wallet step (e.g. the user
+  // rejects in Phantom) wraps the wallet's error there — without it the
+  // rejection is misreported as a generic transaction failure.
+  for (const key of ["message", "error", "errorMessage", "cause", "logs", "logMessages", "instructionError", "reason"]) {
     if (key in record) {
       collectDiagnosticStrings(record[key], output, depth + 1);
     }
@@ -307,13 +419,28 @@ function formatTimeoutMs(timeoutMs: number) {
   return `${timeoutMs} ms`;
 }
 
+/**
+ * Message for a failed wallet connect. Connector errors often carry no usable
+ * text (the console shows "wallet connection failed {}"), so fall back to
+ * actionable copy instead of surfacing "[object Object]".
+ */
+export function describeWalletConnectError(error: unknown): string {
+  if (txErrorCode(error) === "TRANSACTION_REJECTED") {
+    return "The connection request was declined in the wallet. Approve it to connect.";
+  }
+  const message = error instanceof Error ? error.message.trim() : "";
+  return message
+    ? `The wallet connection failed: ${message}`
+    : "The wallet connection failed. Unlock your wallet, make sure it is on Solana devnet, and try again.";
+}
+
 /** Human-readable, English error message for a failed wallet/program action. */
 export function describeTxError(error: unknown): string {
   const code = txErrorCode(error);
   const planDiagnostic = getTransactionPlanDiagnostic(error);
 
   if (code === WALLET_APPROVAL_TIMEOUT_ERROR_CODE) {
-    return "The wallet approval timed out after 2 minutes. Check your wallet status before retrying.";
+    return WALLET_APPROVAL_TIMEOUT_MESSAGE;
   }
   if (code === "TRANSACTION_REJECTED") {
     return "The wallet request was rejected. Nothing was submitted.";
@@ -328,7 +455,9 @@ export function describeTxError(error: unknown): string {
     return "This wallet needs more devnet SOL for the fee, account rent, and network fee.";
   }
   if (planDiagnostic) {
-    return `The transaction simulation failed before wallet submission. ${planDiagnostic}`;
+    // A plan can fail before the wallet (blockhash/simulation), at the wallet,
+    // or on send — don't claim a specific phase, surface the actual cause.
+    return `The transaction could not be completed. ${planDiagnostic}`;
   }
   return error instanceof Error ? error.message : String(error);
 }
