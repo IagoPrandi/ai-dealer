@@ -68,6 +68,24 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-07-12 (Conversation draft save recovery)
+
+- Opened required documents/context before working: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/idealer-test-and-verify/SKILL.md`, `.claude/skills/idealer-ui-coherence/SKILL.md`, `.claude/skills/idealer-design-system/SKILL.md`, and design-system references `01-tokens.md`, `02-components.md`, and `03-screens-and-state.md`.
+- Diagnosed the reported `HTTP 502` as an unavailable local API service, not an invalid conversation-draft payload: port `3002` had no listener while the web server on `3000` and worker on `3003` were running. The Next API proxy correctly returned `502` because it could not reach its configured backend target.
+- Started the API development service on port `3002` and restarted the local web server after rebuilding. Verified `GET /players/{wallet}/conversation-drafts` returns `200` both directly and through `GET /api/proxy/players/{wallet}/conversation-drafts` on the active web server.
+- Added a visible `Retry saving` action to the existing draft-save error card. It saves the complete in-memory transcript already displayed to the player, with disabled `Saving...` feedback and an explicit error if a retry still fails; the action remains available after repeated failures. It reuses the existing card/button vocabulary and keeps all UI copy in English.
+- Added a regression test for recognizing retryable draft-save errors. Verification passed: `pnpm --filter @idealer/web typecheck`, `test` (69/69), `lint`, `build`, and `git diff --check`.
+- Reviewed the result for inconsistencies: the retry only runs on an explicit player action and does not hide API failures, the existing transcript remains visible while a retry is pending or fails, and no milestone checkbox/status was changed because milestone marking requires explicit user confirmation.
+
+### 2026-07-12 (Confirmed guess missing from the home screen)
+
+- Opened required documents/context before working: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/develop-frontend/SKILL.md`, `.claude/skills/idealer-ui-coherence/SKILL.md`, `.claude/skills/idealer-design-system/SKILL.md`, design-system references `01-tokens.md`, `02-components.md`, and `03-screens-and-state.md`, plus `.claude/skills/idealer-test-and-verify/SKILL.md`.
+- Diagnosed the inconsistent recovery state: the home screen treated a player as entered only when the API `GuessReceipt` projection existed. A confirmed `PlayerGuess` PDA could therefore trigger `DUPLICATE_ACTION` on a retry while the home still offered the first-play state.
+- Updated `usePlayerGuess` to verify the sequence-one `PlayerGuess` PDA at confirmed commitment in parallel with the receipt request. The canonical on-chain account now establishes the entered state and a minimum play count while API receipt details are delayed; API/RPC failures remain logged and no transaction or receipt error is hidden.
+- Added a visible home-state message, in English, stating that a guess is confirmed on-chain while entry details are syncing. This preserves the existing design-system card and makes voting/rule creation available immediately after the canonical confirmation.
+- Added a regression test for the on-chain-confirmed/no-receipt state. Verification passed: `pnpm --filter @idealer/web typecheck`, `test` (68/68), `lint`, and `build`; `git diff --check` passed. Visual verification was attempted against the running local server, but the configured `agent-browser` CLI and the Node-REPL browser backend are unavailable in this environment, so no screenshot was produced.
+- Reviewed the result for inconsistencies: existing API receipt details remain preferred when available, first and repeated play fee sequencing remains unchanged, the UI stays English/mobile-first, and no milestone checkbox/status was changed because milestone marking requires explicit user confirmation.
+
 ### 2026-07-10 (Turn counter reset safety check)
 
 - Reopened required context before working: `PRD.md`, `AGENTS.md` instructions from the prompt, `.claude/skills`, `.claude/skills/solana-dev/SKILL.md`, and `.claude/skills/idealer-test-and-verify/SKILL.md`.

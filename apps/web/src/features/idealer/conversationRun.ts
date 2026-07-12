@@ -46,6 +46,10 @@ const defaultDeps: ConversationRunDeps = {
 
 const activeRuns = new Map<string, Promise<void>>();
 
+export function isConversationDraftSaveError(error: null | string) {
+  return error?.toLowerCase().includes("could not be saved") ?? false;
+}
+
 export async function saveConversationDraftSnapshot({
   deps = defaultDeps,
   draftId,

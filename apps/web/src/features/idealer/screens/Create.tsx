@@ -32,7 +32,11 @@ import {
   isRuleRefinementPatch,
   type RuleGuidanceOption,
 } from "../ruleRefinement";
-import { saveConversationDraftSnapshot, startConversationRun } from "../conversationRun";
+import {
+  isConversationDraftSaveError,
+  saveConversationDraftSnapshot,
+  startConversationRun,
+} from "../conversationRun";
 import {
   forgetLatestConversationRun,
   getConversationRun,
@@ -329,6 +333,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
   const [selectedGuidanceIndex, setSelectedGuidanceIndex] = useState<number | null>(0);
   const [submitted, setSubmitted] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [retryingDraftSave, setRetryingDraftSave] = useState(false);
   const [error, setError] = useState<null | string>(null);
   const [activeDraftId, setActiveDraftId] = useState<null | string>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -648,6 +653,43 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
     }
   }
 
+  async function retryDraftSave() {
+    if (!walletAddress || !activeDraftId || retryingDraftSave) {
+      return;
+    }
+
+    const latestUserMessage = [...msgs].reverse().find((message) => message.who === "user")?.text;
+    const prompt = rule?.sanitizedText ?? latestUserMessage;
+    if (!prompt) {
+      setError("There is no rule text available to save.");
+      return;
+    }
+
+    setRetryingDraftSave(true);
+    try {
+      const savedDraftId = await saveConversationDraftSnapshot({
+        draftId: activeDraftId,
+        lastMessage: msgs.at(-1)?.text ?? prompt,
+        messages: msgs,
+        normalizedText: rule?.normalizedText ?? null,
+        officialInterpretation: rule?.officialInterpretation ?? null,
+        prompt,
+        ruleId: rule?.ruleId ?? null,
+        status: "draft",
+        turnId,
+        wallet: walletAddress,
+      });
+      if (savedDraftId) {
+        setActiveDraftId(savedDraftId);
+      }
+      setError(null);
+    } catch (cause) {
+      setError(`Draft still could not be saved. ${describeTxError(cause)}`);
+    } finally {
+      setRetryingDraftSave(false);
+    }
+  }
+
   function reset(message = "On to the next one! How does your new rule decide the winner?") {
     forgetLatestConversationRun({
       draftId: activeDraftId,
@@ -755,7 +797,22 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
           )
         ) : null}
 
-        {error ? <div className="ide-card" style={{ padding: "11px 14px", borderColor: "rgba(255,107,107,0.3)", color: "var(--red)", fontSize: 13 }}>{error}</div> : null}
+        {error ? (
+          <div className="ide-card" style={{ borderColor: "rgba(255,107,107,0.3)", color: "var(--red)", display: "grid", fontSize: 13, gap: 10, padding: "11px 14px" }}>
+            <span>{error}</span>
+            {isConversationDraftSaveError(error) ? (
+              <button
+                className="ide-votebtn"
+                disabled={retryingDraftSave}
+                onClick={() => void retryDraftSave()}
+                style={{ justifySelf: "start", opacity: retryingDraftSave ? 0.7 : 1, padding: "8px 12px" }}
+                type="button"
+              >
+                {retryingDraftSave ? "Saving..." : "Retry saving"}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         <div style={{ height: 4 }} />
       </div>
 

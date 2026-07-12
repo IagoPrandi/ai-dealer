@@ -43,6 +43,8 @@ export interface IdealerContextValue {
   decisionPhase: boolean;
   eliminatedIds: number[];
   endSeconds: null | number;
+  /** The first guess is confirmed on-chain but its API receipt is still indexing. */
+  entrySyncing: boolean;
   fees: { play: number; playNext: number; remove: number; rule: number; ruleNext: number; vote: number };
   guessCutoffEndsAt: null | number;
   /**

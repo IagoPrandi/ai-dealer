@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { getConversationRun, getLatestConversationRun } from "./conversationRunStore.js";
-import { isConversationRunActive, startConversationRun, type ConversationRunDeps } from "./conversationRun.js";
+import {
+  isConversationDraftSaveError,
+  isConversationRunActive,
+  startConversationRun,
+  type ConversationRunDeps,
+} from "./conversationRun.js";
 
 test("conversation run continues while no screen is subscribed", async () => {
   const draftId = "client:87:background-run";
@@ -52,4 +57,11 @@ test("conversation run continues while no screen is subscribed", async () => {
   assert.equal(run?.status, "done");
   assert.equal(run?.messages.at(-1)?.text, "Done! I compiled your rule.");
   assert.equal(run?.rule?.ruleId, 8701);
+});
+
+test("draft-save failures are eligible for an explicit retry", () => {
+  assert.equal(isConversationDraftSaveError("Dealer replied, but the draft could not be saved. POST returned HTTP 502."), true);
+  assert.equal(isConversationDraftSaveError("Draft still could not be saved. POST returned HTTP 502."), true);
+  assert.equal(isConversationDraftSaveError("Dealer engine unavailable."), false);
+  assert.equal(isConversationDraftSaveError(null), false);
 });

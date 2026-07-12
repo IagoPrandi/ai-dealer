@@ -5,7 +5,8 @@
  * (idealerProgram) with the HTTP API (apiClient) into the screen-facing shapes.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useWalletConnection } from "@solana/react-hooks";
+import { useSolanaClient, useWalletConnection } from "@solana/react-hooks";
+import { address } from "@solana/kit";
 import {
   MVP_FEES_SOL,
   REPEATED_ACTION_FEE_MULTIPLIER,
@@ -13,6 +14,8 @@ import {
 } from "@idealer/constants";
 
 import {
+  confirmedProgramAccountExists,
+  deriveSubmitGuessAccounts,
   getTurnActionReadiness,
   IDEALER_ACTIVE_TURN_ID,
   type ActiveTurnSnapshot,
@@ -390,30 +393,73 @@ export function useRules(turnId: number, round: RoundSummaryApi | null): RulesVi
   };
 }
 
+export function resolvePlayerGuessState(
+  receipt: GuessReceiptApi | null,
+  onChainFirstGuess: boolean,
+) {
+  return {
+    entrySyncing: receipt === null && onChainFirstGuess,
+    // The PlayerGuess PDA is the authoritative record. The API receipt supplies
+    // display details, but an indexing delay must not lock a confirmed player out
+    // of the home, voting, or rule-creation flows.
+    playCount: receipt?.sequence ?? (onChainFirstGuess ? 1 : 0),
+    played: receipt !== null || onChainFirstGuess,
+  };
+}
+
 /** Whether the connected wallet already submitted a guess for `turnId`. */
 export function usePlayerGuess(turnId: number, walletAddress: string | undefined) {
+  const client = useSolanaClient();
   const [receipt, setReceipt] = useState<GuessReceiptApi | null>(null);
+  const [onChainFirstGuess, setOnChainFirstGuess] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const reload = useCallback(
-    (signal?: AbortSignal) => {
+    async (signal?: AbortSignal) => {
       if (!walletAddress || !turnId || turnId <= 0) {
         setReceipt(null);
+        setOnChainFirstGuess(false);
         setLoading(false);
         return;
       }
       setLoading(true);
-      getGuessReceipt(turnId, walletAddress, signal)
-        .then((value) => setReceipt(value))
-        .catch((cause: unknown) => {
-          if (cause instanceof DOMException && cause.name === "AbortError") {
-            return;
-          }
-          console.warn("Failed to load guess receipt.", cause);
-        })
-        .finally(() => setLoading(false));
+
+      try {
+        const player = address(walletAddress);
+        const accounts = await deriveSubmitGuessAccounts({ player, sequence: 1, turnId });
+        const [receiptResult, onChainResult] = await Promise.allSettled([
+          getGuessReceipt(turnId, walletAddress, signal),
+          confirmedProgramAccountExists({
+            account: accounts.playerGuess,
+            client,
+            label: "Your first guess",
+          }),
+        ]);
+
+        if (signal?.aborted) {
+          return;
+        }
+
+        if (receiptResult.status === "fulfilled") {
+          setReceipt(receiptResult.value);
+        } else if (!(receiptResult.reason instanceof DOMException && receiptResult.reason.name === "AbortError")) {
+          console.warn("Failed to load guess receipt.", receiptResult.reason);
+          setReceipt(null);
+        }
+
+        if (onChainResult.status === "fulfilled") {
+          setOnChainFirstGuess(onChainResult.value);
+        } else {
+          console.warn("Failed to verify the on-chain first guess.", onChainResult.reason);
+          setOnChainFirstGuess(false);
+        }
+      } finally {
+        if (!signal?.aborted) {
+          setLoading(false);
+        }
+      }
     },
-    [turnId, walletAddress],
+    [client, turnId, walletAddress],
   );
 
   useEffect(() => {
@@ -422,13 +468,7 @@ export function usePlayerGuess(turnId: number, walletAddress: string | undefined
     return () => controller.abort();
   }, [reload]);
 
-  return {
-    loading,
-    playCount: receipt?.sequence ?? (receipt ? 1 : 0),
-    played: receipt !== null,
-    receipt,
-    reload: () => reload(),
-  };
+  return { ...resolvePlayerGuessState(receipt, onChainFirstGuess), loading, receipt, reload: () => reload() };
 }
 
 /** Cross-turn claim ledger for the connected wallet (Profile screen). */

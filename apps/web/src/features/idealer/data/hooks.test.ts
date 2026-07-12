@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { address } from "@solana/kit";
 
-import { resolveVisibleTurnId } from "./hooks.js";
+import { resolvePlayerGuessState, resolveVisibleTurnId } from "./hooks.js";
 import type { ActiveTurnSnapshot } from "../../../solana/idealerProgram.js";
 
 function snapshot(overrides: Partial<ActiveTurnSnapshot["globalConfig"]>) {
@@ -40,4 +40,12 @@ test("visible turn uses the latest completed turn when no turn is active", () =>
 
 test("visible turn falls back to the bootstrap turn before any turn exists", () => {
   assert.equal(resolveVisibleTurnId(snapshot({ nextTurnId: 0 })), 1);
+});
+
+test("on-chain guess confirmation keeps the player in the round while receipt indexing catches up", () => {
+  assert.deepEqual(resolvePlayerGuessState(null, true), {
+    entrySyncing: true,
+    playCount: 1,
+    played: true,
+  });
 });

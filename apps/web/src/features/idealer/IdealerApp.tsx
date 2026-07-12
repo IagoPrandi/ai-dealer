@@ -100,7 +100,7 @@ export function IdealerApp({
   const turnId = activeTurn.activeTurnId;
   const { reload: reloadRound, round, loading: roundLoading } = useRound(turnId, turnId);
   const rules = useRules(turnId, round);
-  const { playCount, played, receipt, reload: reloadPlayer } = usePlayerGuess(turnId, walletAddress);
+  const { entrySyncing, playCount, played, receipt, reload: reloadPlayer } = usePlayerGuess(turnId, walletAddress);
 
   const [screen, setScreen] = useState<Screen>(initialScreen);
   const [seed, setSeed] = useState("");
@@ -343,6 +343,7 @@ export function IdealerApp({
     decisionPhase: round?.elimination?.status === "open",
     eliminatedIds: rules.eliminatedIds,
     endSeconds: activeTurn.endTimestamp,
+    entrySyncing,
     fees,
     guessCutoffEndsAt,
     phase1EndsAt,

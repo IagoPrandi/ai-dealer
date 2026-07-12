@@ -55,7 +55,7 @@ function PromptInput() {
 
 export function HomeScreen() {
   const {
-    bet, decisionPhase, endSeconds, fees, go, openDetail, phase1EndsAt, played, players, prizeSol, rules, turnId,
+    bet, decisionPhase, endSeconds, entrySyncing, fees, go, openDetail, phase1EndsAt, played, players, prizeSol, rules, turnId,
     resultTurnId, round, turnOpen, turnReadyToPlay, turnStatusMessage, walletAddress,
   } = useIdealer();
 
@@ -217,7 +217,11 @@ export function HomeScreen() {
               <span style={{ width: 30, height: 30, borderRadius: 10, background: "var(--green)", color: "#08110C", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.check /></span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 700, fontSize: 14.5 }}>You&apos;re in this round</div>
-                <div style={{ fontSize: 12.5, color: "var(--muted)" }}>Good luck! You can now vote and create rules.</div>
+                <div style={{ fontSize: 12.5, color: "var(--muted)" }}>
+                  {entrySyncing
+                    ? "Your guess is confirmed on-chain. Entry details are still syncing."
+                    : "Good luck! You can now vote and create rules."}
+                </div>
               </div>
               <button onClick={() => go("play")} className="ide-votebtn" style={{ flexShrink: 0 }} type="button">
                 play again · {fees.playNext === 0 ? "free" : `${fmtSol(fees.playNext)} SOL`}
