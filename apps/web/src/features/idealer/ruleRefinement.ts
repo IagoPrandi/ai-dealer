@@ -75,6 +75,20 @@ function dedupeOptions(options: RuleGuidanceOption[]) {
   return result;
 }
 
+function guidanceText(context: RuleGuidanceContext) {
+  return normalizeIntentText([
+    context.sanitizedText ?? "",
+    context.currentRuleText ?? "",
+    context.reasonSummary ?? "",
+    context.clarityNote ?? "",
+    ...(context.refinementQuestions ?? []),
+  ].join(" "));
+}
+
+function looksLikeDigitClarification(value: string) {
+  return /\b(digit|digits|units?|tens?|algarismo|algarismos|dezena|dezenas|unidade|unidades|numero 1|numero 2)\b/i.test(value);
+}
+
 export function getRuleRefinementBase(context: RuleRefinementContext) {
   // Prefer the dealer's concrete suggested rewrite. Only fall back to the raw
   // current rule text when it was previously VALID — otherwise a clarification
@@ -185,6 +199,7 @@ export function buildRuleGuidanceOptions(
     context.reasonSummary ?? "",
     context.clarityNote ?? "",
   ].join(" ");
+  const intentText = guidanceText(context);
   const options: RuleGuidanceOption[] = [];
 
   // A rule blocked for re-proposal (its canonical meaning already held a
@@ -256,6 +271,23 @@ export function buildRuleGuidanceOptions(
     });
   }
 
+  if (looksLikeDigitClarification(intentText)) {
+    options.push(
+      {
+        label: "Match either digit",
+        text: "Win if at least one guessed number shares either its tens digit or its units digit with any drawn number, regardless of order.",
+      },
+      {
+        label: "Match tens digits",
+        text: "Win if at least one guessed number has the same tens digit as any drawn number, regardless of order.",
+      },
+      {
+        label: "Match units digits",
+        text: "Win if at least one guessed number has the same units digit as any drawn number, regardless of order.",
+      },
+    );
+  }
+
   if (/\b(close|similar|almost|near|one step away)\b/i.test(text)) {
     options.push(
       {
@@ -266,33 +298,24 @@ export function buildRuleGuidanceOptions(
         label: "Use same-position tolerance",
         text: "Win if each guessed number is within 5 of the drawn number in the same position.",
       },
-      {
-        label: "Use match count",
-        text: "Win if at least 3 guessed numbers appear in the draw, regardless of order.",
-      },
     );
   }
 
-  if (context.refinementQuestions?.some((question) => /\border\b/i.test(question))) {
+  const orderBase = cleanSentence(context.suggestedRewrite ?? context.sanitizedText ?? context.currentRuleText ?? "");
+  const onlyOrderQuestions =
+    (context.refinementQuestions?.length ?? 0) > 0 &&
+    context.refinementQuestions?.every((question) => /\border|position/i.test(question));
+  if (
+    orderBase &&
+    !looksLikeDigitClarification(intentText) &&
+    (Boolean(context.suggestedRewrite?.trim()) || onlyOrderQuestions) &&
+    context.refinementQuestions?.some((question) => /\border|position/i.test(question))
+  ) {
     options.push(
-      { label: "Ignore order", text: "Order is ignored." },
-      { label: "Keep exact positions", text: "Order matters exactly as submitted." },
+      { label: "Ignore order", text: `${orderBase}. Order is ignored.` },
+      { label: "Keep exact positions", text: `${orderBase}. Order matters exactly as submitted.` },
     );
   }
-
-  for (const question of context.refinementQuestions ?? []) {
-    if (/\bexact count|comparison|count or comparison\b/i.test(question)) {
-      options.push({
-        label: "Choose a concrete count",
-        text: "Win if at least 3 guessed numbers appear in the draw, regardless of order.",
-      });
-    }
-  }
-
-  options.push({
-    label: "Write a simple valid rule",
-    text: "Win if at least 4 guessed numbers appear in the draw, regardless of order.",
-  });
 
   return dedupeOptions(options).slice(0, 4);
 }

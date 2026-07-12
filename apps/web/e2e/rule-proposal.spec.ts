@@ -191,8 +191,9 @@ test("sequence 8 shows Codex-style blocked-rule options and accepts the clean ru
   await expect(page.getByRole("heading", { name: "Fix this blocked rule?" })).toBeVisible();
   await page.getByRole("button", { name: /Submit/ }).click();
 
+  await expect(page.getByText("valid rule", { exact: true })).toBeVisible();
   await expect(
-    page.locator(".ide-card").filter({ hasText: "valid rule" }).filter({
+    page.locator("p").filter({
       hasText:
         "New clean rule: win if at least 2 guessed numbers appear in the draw, regardless of order.",
     }),
@@ -253,12 +254,64 @@ test("sequence 9 removes other-player dependency, clarifies close, and accepts t
   await expect(page.getByRole("button", { name: /1 Win if the total absolute position-by-position difference between guess and draw is 30 or less/ })).toBeVisible();
   await page.getByRole("button", { name: /Submit/ }).click();
 
+  await expect(page.getByText("valid rule", { exact: true })).toBeVisible();
   await expect(
-    page.locator(".ide-card").filter({ hasText: "valid rule" }).filter({
+    page.locator("p").filter({
       hasText:
         "Win if the total absolute position-by-position difference between guess and draw is 30 or less.",
     }),
   ).toBeVisible();
+});
+
+test("digit ambiguity options clarify the submitted rule instead of replacing it", async ({
+  page,
+}) => {
+  await mockShellData(page);
+  const original =
+    "Venço se eu acertar qualquer número em qualquer ordem. Por exemplo, se eu jogar 12 e sair 10 e 20, eu venço tanto por ter acertado o número 1 quanto o número 2.";
+  const eitherDigitRule =
+    "Win if at least one guessed number shares either its tens digit or its units digit with any drawn number, regardless of order.";
+
+  await page.route("**/rule-preflight", async (route) => {
+    const body = (await route.request().postDataJSON()) as { text: string };
+    if (body.text === original) {
+      await route.fulfill({
+        contentType: "application/json",
+        json: {
+          preflight: {
+            ...clarifyPreflight(body.text).preflight,
+            refinementQuestions: [
+              "Should matching compare tens digits, units digits, or either digit?",
+              "How many guessed numbers must have a matching digit to win?",
+              "Should draw order and number positions be ignored?",
+            ],
+            suggestedRewrite: eitherDigitRule,
+          },
+        },
+        status: 200,
+      });
+      return;
+    }
+    await route.fulfill({
+      contentType: "application/json",
+      json: validPreflight(eitherDigitRule, 98),
+      status: 200,
+    });
+  });
+
+  await page.goto("/play/propose");
+  await page.getByLabel("Message", { exact: true }).fill(original);
+  await page.getByRole("button", { name: "Send message" }).click();
+
+  await expect(page.getByRole("heading", { name: "Clarify this rule?" })).toBeVisible();
+  await expect(page.getByRole("button", { name: new RegExp(`1 ${eitherDigitRule}`) })).toBeVisible();
+  await expect(page.getByRole("button", { name: /same tens digit/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /same units digit/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /at least 4 guessed numbers appear/i })).toHaveCount(0);
+
+  await page.getByRole("button", { name: /Submit/ }).click();
+  await expect(page.getByText("valid rule", { exact: true })).toBeVisible();
+  await expect(page.locator("p").filter({ hasText: eitherDigitRule })).toBeVisible();
 });
 
 test("an offline dealer engine is reported honestly, not as a blocked rule", async ({

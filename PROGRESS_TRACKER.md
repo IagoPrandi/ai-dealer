@@ -68,6 +68,15 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-07-12 (Intent-preserving rule clarification suggestions)
+
+- Opened required documents/context before working: `PRD.md` (especially §6.1-§6.7), `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/develop-frontend/SKILL.md`, `.claude/skills/idealer-test-and-verify/SKILL.md`, and `packages/rule-compiler/rule-authoring/SKILL.md`.
+- Corrected the clarification feedback for ambiguous digit examples such as playing `12` and treating `1`/`2` as digit matches: the API now asks whether tens digits, units digits, or either digit count; how many guessed numbers need a digit match; and whether draw order/positions are ignored. It also offers a complete intent-preserving rewrite for explicit confirmation.
+- Removed the web clarification panel's unrelated generic match-count fallback. Digit-rule suggestions now remain within the submitted objective (either digit, tens digit, or units digit); close/distance suggestions no longer switch to a match-count rule; order choices include the complete submitted rule instead of isolated clauses. When no safe intent-preserving rewrite is known, the panel requires manual clarification instead of inventing another rule.
+- Added API and web unit regressions for the reported Portuguese prompt, unknown-ambiguity fail-safe behavior, and complete order refinements. Added an E2E flow proving the clarification panel presents only digit-semantic refinements and accepts the selected complete rule; also updated two stale E2E preview locators that no longer matched the rendered component.
+- Verification passed: `pnpm --filter @idealer/api typecheck`, `test` (72/72), `lint`, `build`; `pnpm --filter @idealer/web typecheck`, `test` (73/73), `lint`, `build`; focused Playwright `e2e/rule-proposal.spec.ts` (4/4); and `git diff --check`.
+- Reviewed the result for inconsistencies: all UI/UX copy added is UTF-8 English, suggestions resolve ambiguities without changing the player's objective, no fallback hides unsupported intent, generated `next-env.d.ts` churn was removed, and no milestone checkbox/status was changed because milestone marking requires explicit user confirmation.
+
 ### 2026-07-12 (Conversation draft save recovery)
 
 - Opened required documents/context before working: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `.claude/skills/idealer-test-and-verify/SKILL.md`, `.claude/skills/idealer-ui-coherence/SKILL.md`, `.claude/skills/idealer-design-system/SKILL.md`, and design-system references `01-tokens.md`, `02-components.md`, and `03-screens-and-state.md`.

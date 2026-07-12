@@ -226,3 +226,51 @@ test("suggests removing other-player dependency before objective distance clarif
     "Win if the total absolute position-by-position difference between guess and draw is 30 or less.",
   );
 });
+
+test("clarifies the requested digit rule instead of suggesting unrelated match-count rules", () => {
+  const original =
+    "Venço se eu acertar qualquer número em qualquer ordem. Por exemplo, se eu jogar 12 e sair 10 e 20, eu venço tanto por ter acertado o número 1 quanto o número 2.";
+  const options = buildRuleGuidanceOptions({
+    needsClarification: true,
+    sanitizedText: original,
+    refinementQuestions: [
+      "Should matching compare tens digits, units digits, or either digit?",
+      "How many guessed numbers must have a matching digit to win?",
+      "Should draw order and number positions be ignored?",
+    ],
+    suggestedRewrite:
+      "Win if at least one guessed number shares either its tens digit or its units digit with any drawn number, regardless of order.",
+  });
+
+  assert.deepEqual(options.map((option) => option.text), [
+    "Win if at least one guessed number shares either its tens digit or its units digit with any drawn number, regardless of order.",
+    "Win if at least one guessed number has the same tens digit as any drawn number, regardless of order.",
+    "Win if at least one guessed number has the same units digit as any drawn number, regardless of order.",
+  ]);
+  assert.ok(options.every((option) => /digit/i.test(option.text)));
+  assert.ok(options.every((option) => !/at least [234] guessed numbers appear/i.test(option.text)));
+});
+
+test("does not invent an unrelated rule when no intent-preserving rewrite is known", () => {
+  const options = buildRuleGuidanceOptions({
+    needsClarification: true,
+    sanitizedText: "Win if my numbers feel lucky.",
+    refinementQuestions: ["What objective condition makes the guess win?"],
+  });
+
+  assert.deepEqual(options, []);
+});
+
+test("order choices are complete revisions of the user's rule", () => {
+  const original = "Win if the guess and draw contain the same set of numbers";
+  const options = buildRuleGuidanceOptions({
+    needsClarification: true,
+    sanitizedText: original,
+    refinementQuestions: ["Should order be ignored completely?"],
+  });
+
+  assert.deepEqual(options.map((option) => option.text), [
+    `${original}. Order is ignored.`,
+    `${original}. Order matters exactly as submitted.`,
+  ]);
+});

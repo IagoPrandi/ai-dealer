@@ -182,6 +182,31 @@ test("rule preflight refinement feedback explains malformed unordered same-set r
   assert.match(feedback.dealerMessage, /send(?:ing)? a revised rule/i);
 });
 
+test("rule preflight refinement feedback identifies the missing digit semantics", () => {
+  const original =
+    "Venço se eu acertar qualquer número em qualquer ordem. Por exemplo, se eu jogar 12 e sair 10 e 20, eu venço tanto por ter acertado o número 1 quanto o número 2.";
+  const feedback = buildRuleRefinementFeedback({
+    clarityNote: "The example does not specify which digit place counts.",
+    compileText:
+      "I win if I match any number in any order. For example, if I play 12 and 10 and 20 are drawn, I win for matching both digit 1 and digit 2.",
+    officialInterpretation: "",
+    reasonCodes: ["AMBIGUOUS_RULE"],
+    reasonSummary: "Rule rejected: AMBIGUOUS_RULE.",
+    sanitizedText: original,
+    tokenCount: 38,
+  });
+
+  assert.equal(
+    feedback.suggestedRewrite,
+    "Win if at least one guessed number shares either its tens digit or its units digit with any drawn number, regardless of order.",
+  );
+  assert.deepEqual(feedback.refinementQuestions, [
+    "Should matching compare tens digits, units digits, or either digit?",
+    "How many guessed numbers must have a matching digit to win?",
+    "Should draw order and number positions be ignored?",
+  ]);
+});
+
 test("rule proposal preserves the dealer-generated title", () => {
   resetApiStateForTests();
   const saved = saveRuleProposal({

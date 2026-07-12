@@ -1400,9 +1400,26 @@ function looksLikeUnorderedSameSetRule(text: string) {
   );
 }
 
+function looksLikeAmbiguousDigitExample(text: string) {
+  const normalized = text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  const mentionsUnqualifiedDigits =
+    /\b(digit|digits|algarismo|algarismos)\b/.test(normalized) &&
+    !/\b(units?|tens?|dezena|dezenas|unidade|unidades)\b/.test(normalized);
+  const splitsAPlayedNumberIntoDigits =
+    /\b(?:play|played|playing|pick|picked|guess|guessed|jogar|joguei|jogando|apostar|aposto)\s+([1-9])\d\b[\s\S]{0,180}\b(?:number|numbers|numero|numeros)\s+\1\b/.test(normalized) ||
+    /\b(?:play|played|playing|pick|picked|guess|guessed|jogar|joguei|jogando|apostar|aposto)\s+\d([0-9])\b[\s\S]{0,180}\b(?:number|numbers|numero|numeros)\s+\1\b/.test(normalized);
+  return mentionsUnqualifiedDigits || splitsAPlayedNumberIntoDigits;
+}
+
 function inferSuggestedRewrite(text: string): string | undefined {
   if (looksLikeUnorderedSameSetRule(text)) {
     return "Win if all 6 guessed numbers appear in the draw, regardless of order.";
+  }
+  if (looksLikeAmbiguousDigitExample(text)) {
+    return "Win if at least one guessed number shares either its tens digit or its units digit with any drawn number, regardless of order.";
   }
   return undefined;
 }
@@ -1455,7 +1472,11 @@ export function buildRuleRefinementFeedback(
     );
   }
 
-  if (
+  if (looksLikeAmbiguousDigitExample(input.compileText) || looksLikeAmbiguousDigitExample(input.sanitizedText)) {
+    questions.push("Should matching compare tens digits, units digits, or either digit?");
+    questions.push("How many guessed numbers must have a matching digit to win?");
+    questions.push("Should draw order and number positions be ignored?");
+  } else if (
     looksLikeUnorderedSameSetRule(input.compileText) ||
     looksLikeUnorderedSameSetRule(input.sanitizedText)
   ) {
