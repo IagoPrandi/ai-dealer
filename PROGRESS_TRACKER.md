@@ -3515,3 +3515,35 @@ Passed:
 - Verified after the signing-pipeline correction: `pnpm --filter @idealer/web test` (67/67); `pnpm --filter @idealer/web typecheck`; `pnpm --filter @idealer/web lint`; `pnpm --filter @idealer/web build`.
 - Existing E2E inconsistencies found during verification: `wallet-flow.spec.ts` still expects obsolete pre-redesign copy, and `mobile-reliability.spec.ts` hardcodes pending turn 7 while the live local turn is 9, so those assertions fail before exercising wallet signing. These pre-existing test expectations were not used as evidence against the repaired provider behavior.
 - Reviewed the result for inconsistencies: no fallback or automatic transaction submission was added, wallet signing still requires the player's explicit Confirm action and wallet approval, UI copy remains English, unrelated worktree changes were preserved, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-12 (Prevent opening a round before prize rollover settlement)
+
+- Opened required context before working: `PRD.md`, `PRD-TOKENOMICS.md`, `SETTLEMENT_TRUSTLESS_PLAN.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills` (including `solana-dev`, `idealer-test-and-verify`, and `best-practices` with its agent principles, Solana contract, and testing references).
+- Reproduced the reported state through the live local API: round `#0014` retained `19,000,000` prize lamports (`0.019 SOL`) split equally between the original and alternative buckets, had zero winners, but had no draw, settlement transition, or rollover record. Round `#0015` had opened with zero inbound rollover. This showed that the prior round had been bypassed rather than settled.
+- Worker: added a fail-closed settlement gate to automatic and manual turn opening. A turn after the first can open only when `GET /settlement-transitions?turnId=<previous>` contains the terminal `CLOSED` transition, which occurs after winner calculation and rollover projection.
+- Worker: changed the test-only `/manual/cycle` behavior from force-closing and immediately reopening a turn to ending phase 1 and requiring the real settlement pipeline. The emergency force-close route remains separate and cannot be followed by a new turn until settlement is reconciled.
+- Added regression coverage for accepting only a `CLOSED` transition and rejecting malformed settlement responses. Verified: `pnpm --filter @idealer/worker typecheck`; `test` (98/98); `lint`; `build`.
+- Reviewed the result for inconsistencies: the gate does not synthesize winners, draw results, or rollover data; it blocks opening when settlement information is missing or invalid. No milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-12 (Rollover display follow-up diagnosis)
+
+- Opened required context before working: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, and the relevant `solana-dev`, `idealer-test-and-verify`, and best-practices guidance.
+- Confirmed the live API state: turn `#14` still contains `19,000,000` prize lamports with no draw, settlement transition, or rollover record; turns `#15` and `#16` have zero inbound rollover and zero pool.
+- Confirmed the active worker process on port `3003` started before the settlement-gate change and therefore continues to run the old code. No process was restarted and no on-chain or payout state was changed during diagnosis.
+- Reviewed the result for inconsistencies: the missing display is an unresolved settlement/data-reconciliation issue, not a UI formatting issue. No milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-12 (Auditable recovery of stranded rollover into turn 16)
+
+- Opened required context before working: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, and the relevant Solana, verification, browser, and best-practices guidance.
+- With explicit user authorization, recorded a public rollover recovery from turn `#14` into active turn `#16`: `9,500,000` original-bucket lamports plus `9,500,000` alternative-bucket lamports, for `19,000,000` lamports (`0.019 SOL`) total. The record preserves `sourceTurnId=14`, target `turnId=16`, and timestamp in the public prize-pool rollover projection; no SOL was transferred because the funds remain in the prize vault.
+- Restarted only the worker process so it loads the previously implemented fail-closed settlement gate; verified it serves on port `3003` with active turn `#16`.
+- Verified the API projection reports `19,000,000` visible prize lamports / `0.019 SOL` for turn `#16`. Browser verification at `/play` confirms the home UI displays the rounded `0.02 SOL`; screenshots saved under `output/playwright/rollover-reconciled-round-16.png` and `output/playwright/round-16-home-reconciled.png`.
+- Reviewed the result for inconsistencies: the recovery changes only the off-chain prize-pool projection, with the prior turn retained as the explicit source; no payout, wallet signature, or on-chain transaction was sent. No milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-12 (Manual cycle opens only after completed settlement)
+
+- Opened required context before working: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, and the relevant Solana, verification, and best-practices guidance.
+- Verified turn `#16` completed correctly after the prior recovery: fulfilled draw, terminal `CLOSED` settlement transition, and two no-winner rollover events totaling `19,000,000` lamports into turn `#17`.
+- Fixed `/manual/cycle`: while a turn is still active, it only ends phase 1 and requires real settlement; once no active turn remains, it calls the guarded `openTurnManually` path. That path still requires the predecessor's `CLOSED` transition, so the shortcut cannot bypass settlement or lose rollover funds.
+- Added regression coverage for opening only after `no_active_turn`. Verified: `pnpm --filter @idealer/worker typecheck`; `test` (99/99); `lint`; `build`.
+- Restarted the worker to load the change and verified the on-chain view reports `hasActiveTurn=false`, `nextTurnId=17`. No `open_turn` transaction was sent by the agent; opening turn `#17` remains subject to the user's explicit manual-cycle invocation. No milestone checkbox was marked because milestone marking requires explicit user confirmation.

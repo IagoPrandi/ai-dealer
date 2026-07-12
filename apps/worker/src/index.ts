@@ -351,7 +351,10 @@ function handleManualControlRequest(
 }
 
 function endedPlayWindow(result: ManualControlResult | ManualCycleResult) {
-  return result.action === "cycled_turn"
+  if (result.action === "opened_next_turn") {
+    return false;
+  }
+  return result.action === "settlement_required"
     ? result.close.action === "ended_play_window"
     : result.action === "ended_play_window";
 }

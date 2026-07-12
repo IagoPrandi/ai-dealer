@@ -5,7 +5,8 @@
  * (`turn-automation.ts`). During testing on devnet that means screens stay
  * empty until a turn happens to be open, and ending a turn means waiting out
  * its full duration. This module lets an operator open turns, end the phase-1
- * play window, or cycle immediately to a fresh turn.
+ * play window, then let the real settlement pipeline complete before the next
+ * turn opens.
  *
  * It reuses the exact same on-chain instructions as the automatic loop, so the
  * data the UI reads is real devnet state, not a fabricated mock.
@@ -25,9 +26,10 @@
  * opening we reset the whole cycle to a comfortable, playable duration.
  *
  * `forceCloseTurnManually` closes immediately by shrinking to 1s and calling
- * `close_turn`, skipping the shortlist/elimination/draw phase. `/manual/cycle`
- * uses that behavior intentionally as a dev/test shortcut: close the current
- * turn and open the next one in a single operator action.
+ * `close_turn`, skipping the shortlist/elimination/draw phase. It remains an
+ * emergency test-only escape hatch and must never be followed by opening a new
+ * turn until the prior prize pool has been reconciled. `/manual/cycle` ends
+ * phase 1 and requires the real settlement pipeline instead.
  *
  * This is intentionally NOT wired into production: it is gated behind
  * `IDEALER_TURN_MANUAL_CONTROL_ENABLED` and must stay off outside testing.
@@ -43,6 +45,7 @@ import {
   fetchGlobalConfig,
   fetchTurnState,
   getGlobalConfigPda,
+  isTurnSettlementClosed,
   isLegacyTurnDeserializationError,
   simulateAndSend,
   SYSTEM_PROGRAM_ID,
@@ -59,6 +62,7 @@ const REINITIALIZE_GLOBAL_CONFIG_DISCRIMINATOR = new Uint8Array([
 ]);
 
 export interface ManualControlConfig {
+  apiBaseUrl?: string | undefined;
   authorityKeypairBytes: null | Uint8Array;
   enabled: boolean;
   migrateNextTurnId: null | number;
@@ -104,9 +108,9 @@ export type ManualControlResult =
   | { action: "turn_already_closed"; turnId: number };
 
 export interface ManualCycleResult {
-  action: "cycled_turn";
+  action: "opened_next_turn" | "settlement_required";
   close: ManualControlResult;
-  open: ManualControlResult | null;
+  open?: ManualControlResult;
 }
 
 function envFlag(value: string | undefined) {
@@ -136,6 +140,7 @@ export async function createManualControlConfig(
   // so the two never run at the same time.
   const automation = await createTurnAutomationConfig(env);
   return {
+    apiBaseUrl: automation.apiBaseUrl,
     authorityKeypairBytes: automation.authorityKeypairBytes,
     enabled: envFlag(env.IDEALER_TURN_MANUAL_CONTROL_ENABLED),
     migrateNextTurnId: resolveMigrateNextTurnId(
@@ -239,6 +244,16 @@ export async function openTurnManually(
       action: "active_turn_exists",
       turnId: globalConfig.snapshot.activeTurnId,
     };
+  }
+
+  const previousTurnId = globalConfig.snapshot.nextTurnId - 1;
+  if (
+    previousTurnId > 0 &&
+    !(await isTurnSettlementClosed(previousTurnId, config.apiBaseUrl))
+  ) {
+    throw new Error(
+      `Cannot open the next turn before turn ${previousTurnId} reaches CLOSED settlement.`,
+    );
   }
 
   const authority = deriveAuthorityAddress(config.authorityKeypairBytes);
@@ -549,27 +564,24 @@ export async function migrateGlobalConfigManually(
   };
 }
 
-export function shouldOpenAfterManualCycleClose(close: ManualControlResult) {
-  return (
-    close.action === "closed_turn" ||
-    close.action === "skipped_legacy_turn" ||
-    close.action === "no_active_turn"
-  );
+export function shouldOpenNextTurnAfterManualCycle(
+  close: ManualControlResult,
+) {
+  return close.action === "no_active_turn";
 }
 
 /**
- * Advance the round in a single step during testing. This is the fast operator
- * shortcut: if a turn exists, close it immediately, then open the next turn.
- * Use `/manual/close` plus `/manual/settle` when the full phase-2 pipeline must
- * be exercised instead.
+ * End phase 1 during testing and leave the turn for the real settlement
+ * pipeline. Once no active turn remains, open the next turn only after its
+ * predecessor has written the CLOSED transition and the rollover projection.
  */
 export async function cycleTurnManually(
   config: ManualControlConfig,
 ): Promise<ManualCycleResult> {
-  const close = await forceCloseTurnManually(config);
-  const open = shouldOpenAfterManualCycleClose(close)
-    ? await openTurnManually(config)
-    : null;
-
-  return { action: "cycled_turn", close, open };
+  const close = await closeTurnManually(config);
+  if (shouldOpenNextTurnAfterManualCycle(close)) {
+    const open = await openTurnManually(config);
+    return { action: "opened_next_turn", close, open };
+  }
+  return { action: "settlement_required", close };
 }

@@ -8,7 +8,7 @@ import {
   forceCloseTurnManually,
   migrateGlobalConfigManually,
   openTurnManually,
-  shouldOpenAfterManualCycleClose,
+  shouldOpenNextTurnAfterManualCycle,
   type ManualControlConfig,
 } from "./manual-control.js";
 
@@ -99,39 +99,24 @@ test("enabled manual control requires an authority keypair", async () => {
   );
 });
 
-test("manual cycle opens a new turn only after a terminal close result", () => {
+test("manual cycle opens only after the previous turn is no longer active", () => {
   assert.equal(
-    shouldOpenAfterManualCycleClose({
-      action: "closed_turn",
-      shrinkSignature: "shrink",
-      signature: "close",
-      turnId: 7,
-    }),
+    shouldOpenNextTurnAfterManualCycle({ action: "no_active_turn" }),
     true,
   );
   assert.equal(
-    shouldOpenAfterManualCycleClose({
-      action: "skipped_legacy_turn",
-      signature: "skip",
-      turnId: 7,
-    }),
-    true,
-  );
-  assert.equal(
-    shouldOpenAfterManualCycleClose({ action: "no_active_turn" }),
-    true,
-  );
-  assert.equal(
-    shouldOpenAfterManualCycleClose({
-      action: "settlement_in_progress",
-      turnId: 7,
+    shouldOpenNextTurnAfterManualCycle({
+      action: "ended_play_window",
+      playWindowSeconds: 60,
+      signature: "shrink",
+      turnId: 16,
     }),
     false,
   );
   assert.equal(
-    shouldOpenAfterManualCycleClose({
-      action: "turn_already_closed",
-      turnId: 7,
+    shouldOpenNextTurnAfterManualCycle({
+      action: "settlement_in_progress",
+      turnId: 16,
     }),
     false,
   );

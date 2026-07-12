@@ -10,6 +10,7 @@ import {
   createTurnAutomationConfig,
   decodeGlobalConfigAccount,
   isLegacyTurnDeserializationError,
+  isTurnSettlementClosed,
   loadAuthorityKeypairBytesFromEnv,
   runTurnAutomationOnce,
   stringifySimulationError,
@@ -46,6 +47,39 @@ test("turn automation defers the close when settlement automation is enabled", a
   });
 
   assert.equal(config.deferCloseToSettlement, true);
+});
+
+test("turn automation settlement gate accepts only a CLOSED transition", async () => {
+  const closed = await isTurnSettlementClosed(
+    14,
+    "http://api.test",
+    async () =>
+      new Response(
+        JSON.stringify({
+          transitions: [{ toState: "FINALIZED" }, { toState: "CLOSED" }],
+        }),
+        { status: 200 },
+      ),
+  );
+  const incomplete = await isTurnSettlementClosed(
+    14,
+    "http://api.test",
+    async () => new Response(JSON.stringify({ transitions: [{ toState: "FINALIZED" }] })),
+  );
+
+  assert.equal(closed, true);
+  assert.equal(incomplete, false);
+});
+
+test("turn automation settlement gate fails closed on an invalid API response", async () => {
+  await assert.rejects(
+    isTurnSettlementClosed(
+      14,
+      "http://api.test",
+      async () => new Response(JSON.stringify({ transitions: null })),
+    ),
+    /invalid response/,
+  );
 });
 
 test("turn automation can be explicitly enabled for the worker loop", async () => {

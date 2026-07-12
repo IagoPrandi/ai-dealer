@@ -17,6 +17,7 @@ import {
 } from "@solana/kit";
 
 const DEFAULT_DEVNET_RPC_URL = "https://api.devnet.solana.com";
+const DEFAULT_API_BASE_URL = "http://localhost:3002";
 const DEFAULT_IDEALER_PROGRAM_ID =
   "ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd";
 export const SYSTEM_PROGRAM_ID = address("11111111111111111111111111111111");
@@ -79,6 +80,7 @@ export interface TurnStateSnapshot {
 }
 
 export interface TurnAutomationConfig {
+  apiBaseUrl?: string | undefined;
   authorityKeypairBytes: null | Uint8Array;
   // When true (settlement automation owns the close), the automation loop opens
   // turns and updates durations but does NOT close ended turns — the settlement
@@ -106,6 +108,10 @@ export type TurnAutomationResult =
   | {
       action: "updated_duration_cycle";
       signature: string;
+      turnId: number;
+    }
+  | {
+      action: "awaiting_previous_settlement";
       turnId: number;
     }
   | {
@@ -245,6 +251,7 @@ export async function createTurnAutomationConfig(
   env = process.env,
 ): Promise<TurnAutomationConfig> {
   return {
+    apiBaseUrl: env.IDEALER_API_BASE_URL ?? DEFAULT_API_BASE_URL,
     authorityKeypairBytes: await loadAuthorityKeypairBytesFromEnv(env),
     deferCloseToSettlement: envFlag(env.IDEALER_SETTLEMENT_AUTOMATION_ENABLED),
     desiredTurnDurationCycle: resolveDesiredTurnDurationCycle(env),
@@ -260,6 +267,45 @@ export async function createTurnAutomationConfig(
       env.NEXT_PUBLIC_SOLANA_RPC_URL ??
       DEFAULT_DEVNET_RPC_URL,
   };
+}
+
+type SettlementTransitionResponse = {
+  transitions?: unknown;
+};
+
+/**
+ * A turn may open only after the previous turn's off-chain settlement has
+ * reached CLOSED. This includes winner calculation and rollover projection;
+ * opening earlier would expose a new round with an empty visible prize pool
+ * even though the previous round still owns unallocated lamports.
+ */
+export async function isTurnSettlementClosed(
+  turnId: number,
+  apiBaseUrl: string = DEFAULT_API_BASE_URL,
+  fetchImpl: typeof fetch = fetch,
+) {
+  const url = new URL("/settlement-transitions", apiBaseUrl);
+  url.searchParams.set("turnId", String(turnId));
+
+  const response = await fetchImpl(url);
+  if (!response.ok) {
+    throw new Error(
+      `Settlement gate could not read turn ${turnId} (HTTP ${response.status}).`,
+    );
+  }
+
+  const body = (await response.json()) as SettlementTransitionResponse;
+  if (!Array.isArray(body.transitions)) {
+    throw new Error(`Settlement gate received an invalid response for turn ${turnId}.`);
+  }
+
+  return body.transitions.some(
+    (transition) =>
+      typeof transition === "object" &&
+      transition !== null &&
+      "toState" in transition &&
+      transition.toState === "CLOSED",
+  );
 }
 
 function getAccountDataBase64(
@@ -840,6 +886,13 @@ export async function runTurnAutomationOnce(
 
   if (!globalConfig.snapshot.hasActiveTurn) {
     const turnId = globalConfig.snapshot.nextTurnId;
+    const previousTurnId = turnId - 1;
+    if (
+      previousTurnId > 0 &&
+      !(await isTurnSettlementClosed(previousTurnId, config.apiBaseUrl))
+    ) {
+      return { action: "awaiting_previous_settlement", turnId: previousTurnId };
+    }
     const instruction = await createOpenTurnInstruction({
       authority,
       programId: config.programId,
