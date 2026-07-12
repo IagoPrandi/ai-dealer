@@ -223,7 +223,7 @@ export function HomeScreen() {
                     : "Good luck! You can now vote and create rules."}
                 </div>
               </div>
-              <button onClick={() => go("play")} className="ide-votebtn" style={{ flexShrink: 0 }} type="button">
+              <button onClick={() => go("play")} className="ide-votebtn for on" style={{ flexShrink: 0 }} type="button">
                 play again · {fees.playNext === 0 ? "free" : `${fmtSol(fees.playNext)} SOL`}
               </button>
             </div>

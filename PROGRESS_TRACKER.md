@@ -3547,3 +3547,18 @@ Passed:
 - Fixed `/manual/cycle`: while a turn is still active, it only ends phase 1 and requires real settlement; once no active turn remains, it calls the guarded `openTurnManually` path. That path still requires the predecessor's `CLOSED` transition, so the shortcut cannot bypass settlement or lose rollover funds.
 - Added regression coverage for opening only after `no_active_turn`. Verified: `pnpm --filter @idealer/worker typecheck`; `test` (99/99); `lint`; `build`.
 - Restarted the worker to load the change and verified the on-chain view reports `hasActiveTurn=false`, `nextTurnId=17`. No `open_turn` transaction was sent by the agent; opening turn `#17` remains subject to the user's explicit manual-cycle invocation. No milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-12 (Play-again button aligned with approved-vote styling)
+
+- Opened required context before working: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, and the relevant `develop-frontend`, `idealer-design-system`, `idealer-ui-coherence`, `idealer-test-and-verify`, and browser-verification guidance.
+- Web: changed the home-screen `play again` action to reuse the established approved-vote state (`ide-votebtn for on`) and its upward icon. The action, fee copy, and navigation to the play screen are unchanged; the button now has the same green outlined active treatment as `again` in the rule-voting UI.
+- Verified: `pnpm --filter @idealer/web typecheck`; `test` (69/69); `lint`; `build`.
+- Browser verification note: the local dev server was available on port `3000`, but the required `agent-browser` executable was absent from PATH and the in-app browser's Node REPL tool was not available in this session. The visual treatment was therefore reviewed against the shared CSS selector and its existing rule-vote usage rather than with a new live screenshot.
+- Reviewed the result for inconsistencies: UI copy remains English, the update introduces no colors, tokens, or button variant, the original tap target/navigation behavior is preserved, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-12 (Remove play-again arrow icon)
+
+- Opened required context before working: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, and the relevant `idealer-design-system`, `idealer-ui-coherence`, and `idealer-test-and-verify` guidance.
+- Web: removed the upward arrow from the home-screen `play again` button while retaining its existing green approved-vote styling, fee label, and navigation behavior.
+- Verified: `pnpm --filter @idealer/web typecheck`; `test` (69/69); `lint`; `build`.
+- Reviewed the result for inconsistencies: UI copy remains English, no new visual primitive or fallback was introduced, the button keeps its existing active-style contrast and tap behavior, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
