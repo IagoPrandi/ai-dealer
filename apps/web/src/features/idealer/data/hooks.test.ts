@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { address } from "@solana/kit";
 
-import { resolvePlayerGuessState, resolveVisibleTurnId } from "./hooks.js";
+import {
+  buildUiRule,
+  resolvePlayerGuessState,
+  resolveVisibleTurnId,
+} from "./hooks.js";
+import type { RuleProposalApi } from "./types.js";
 import type { ActiveTurnSnapshot } from "../../../solana/idealerProgram.js";
 
 function snapshot(overrides: Partial<ActiveTurnSnapshot["globalConfig"]>) {
@@ -48,4 +53,35 @@ test("on-chain guess confirmation keeps the player in the round while receipt in
     playCount: 1,
     played: true,
   });
+});
+
+test("rule detail uses the dealer title and executable explanation, not the raw prompt", () => {
+  const proposal: RuleProposalApi = {
+    normalizedText:
+      "A guess wins if at least one of its numbers appears in the official draw.",
+    officialInterpretation:
+      "Compare each guess with the draw; it wins when at least one full number matches, regardless of order.",
+    proposer: "8xP...K2m",
+    ruleId: 7,
+    sanitizedText: "win if I get any number in any order, for example...",
+    title: "One Number Match",
+  };
+
+  const rule = buildUiRule(
+    proposal,
+    0,
+    0,
+    false,
+    0,
+    0,
+    0,
+    0,
+    null,
+    undefined,
+  );
+
+  assert.equal(rule.title, "One Number Match");
+  assert.equal(rule.summary, proposal.normalizedText);
+  assert.equal(rule.how, proposal.officialInterpretation);
+  assert.equal(rule.seed, proposal.sanitizedText);
 });

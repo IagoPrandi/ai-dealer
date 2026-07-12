@@ -178,7 +178,7 @@ export function useRound(turnId: null | number, activeTurnId?: number) {
   return { error, loading, reload, round };
 }
 
-function buildUiRule(
+export function buildUiRule(
   proposal: RuleProposalApi,
   approve: number,
   against: number,
@@ -197,7 +197,7 @@ function buildUiRule(
     created: "",
     finalist,
     handle: truncateAddress(proposal.proposer),
-    how: "The dealer evaluates every guess against this rule and the best one wins the round. The house applies it automatically after the draw (VRF).",
+    how: proposal.officialInterpretation,
     id: `r${proposal.ruleId}`,
     mine: Boolean(walletAddress && proposal.proposer === walletAddress),
     myAgainstCount,
@@ -210,8 +210,8 @@ function buildUiRule(
     seed: proposal.sanitizedText,
     src,
     state,
-    summary: proposal.sanitizedText,
-    title: proposal.title ?? `Rule #${proposal.ruleId}`,
+    summary: proposal.normalizedText,
+    title: proposal.title,
     tokens: proposal.tokenCount ?? 0,
     wallet: truncateAddress(proposal.proposer),
   };

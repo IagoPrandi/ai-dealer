@@ -153,6 +153,7 @@ export interface RulePreflightResult {
   sanitizedText: string;
   sanitizedTextHash: readonly number[];
   suggestedRewrite?: string;
+  title: string;
   tokenCount: number;
 }
 
@@ -167,7 +168,6 @@ export interface RuleProposalRecord extends RulePreflightResult {
   signature: string;
   state?: "eligible" | "invalidated" | "proposed" | "removed_paid";
   submittedAt: string;
-  title: string;
   turnId: number;
 }
 
@@ -1346,14 +1346,6 @@ export function resetApiStateForTests() {
   operatorAiAccessChallenges.clear();
 }
 
-function getRuleTitle(sanitizedText: string) {
-  const firstSentence =
-    sanitizedText.split(/[.!?]/)[0]?.trim() || sanitizedText;
-  return firstSentence.length <= 48
-    ? firstSentence
-    : `${firstSentence.slice(0, 45).trim()}...`;
-}
-
 function hasPreventedRulePattern(value: string) {
   return RULE_PREVENTED_PATTERNS.some((pattern) => pattern.test(value));
 }
@@ -1731,6 +1723,7 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
     ruleId,
     sanitizedText,
     suggestedRewrite: refinementFeedback?.suggestedRewrite ?? null,
+    title: interpretation.title,
     tokenCount,
     version: 6,
   });
@@ -1776,6 +1769,7 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
     ...(refinementFeedback?.suggestedRewrite
       ? { suggestedRewrite: refinementFeedback.suggestedRewrite }
       : {}),
+    title: interpretation.title,
     tokenCount,
   };
 }
@@ -1908,6 +1902,9 @@ function isValidRuleProposal(value: unknown): value is RuleProposalRecord {
     isHashArray(proposal.normalizedTextHash) &&
     isHashArray(proposal.officialInterpretationHash) &&
     isHashArray(proposal.preflightResultHash) &&
+    typeof proposal.title === "string" &&
+    proposal.title.trim().length > 0 &&
+    Buffer.byteLength(proposal.title, "utf8") <= 80 &&
     isBase58Like(proposal.proposer) &&
     isBase58Like(proposal.ruleProposal) &&
     isBase58Like(proposal.signature) &&
@@ -2752,7 +2749,7 @@ export function saveRuleProposal(proposal: RuleProposalRecord) {
     precompilationStatus: proposal.precompilationStatus ?? "pending",
     sequence,
     state: proposal.state ?? "proposed",
-    title: getRuleTitle(proposal.sanitizedText),
+    title: proposal.title,
   };
   ruleProposals.set(
     getRuleProposalKey(proposal.turnId, proposal.ruleId),

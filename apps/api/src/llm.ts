@@ -14,6 +14,7 @@ export interface RuleAgentInterpretation {
   needsClarification: boolean;
   normalizedText: string;
   officialInterpretation: string;
+  title: string;
 }
 
 export interface RuleAgentConfig {
@@ -142,13 +143,19 @@ const SYSTEM_PROMPT = [
   "- 'dezena' is ambiguous: it can mean a drawn number (Brazilian lottery sense)",
   "  or the tens digit of a number. If the player's intent is unclear, set",
   "  needsClarification and ask which meaning they want.",
+  "- An example where a pick such as 12 is said to win after 10 and 20 are",
+  "  drawn because of 'number 1' or 'number 2' is ambiguous. Ask whether the",
+  "  player means the tens digit, units digit, or either digit; never infer it.",
   "",
   "Respond with a single JSON object and nothing else, using exactly these keys:",
-  '{"normalizedText": string, "officialInterpretation": string,',
+  '{"title": string, "normalizedText": string, "officialInterpretation": string,',
   ' "addedOperationalClauses": string[], "needsClarification": boolean,',
   ' "clarityNote": string, "dealerMessage": string}',
-  "- normalizedText: the rule rewritten as one clear, measurable sentence.",
-  "- officialInterpretation: how the engine will compare every eligible guess.",
+  "- title: a concise 2-6 word English UI title that summarizes the executable",
+  "  condition. It must describe the normalized rule, never copy the player's",
+  "  prompt verbatim, and must not promise a winner when clarification is needed.",
+  "- normalizedText: the rule rewritten in clear English as one measurable sentence.",
+  "- officialInterpretation: clear English explaining how the engine compares every eligible guess.",
   "- addedOperationalClauses: each guard clause you added (empty array if none).",
   "- dealerMessage: a short, friendly note in English to the player about what",
   "  you understood (1-2 sentences).",
@@ -158,7 +165,7 @@ const SYSTEM_PROMPT = [
   "output.",
   "",
   "Example input: the guess with the most drawn numbers wins",
-  'Example output: {"normalizedText":"The winning guess is the one whose six',
+  'Example output: {"title":"Most Numbers Match","normalizedText":"The winning guess is the one whose six',
   ' numbers include the most numbers that also appear in the official draw.",',
   ' "officialInterpretation":"For each guess, count how many of its six numbers',
   ' appear in the six-number official draw; the highest count wins.",',
@@ -396,10 +403,18 @@ function coerceInterpretation(value: unknown): RuleAgentInterpretation {
       ? record.officialInterpretation.trim()
       : "";
 
-  if (!normalizedText || !officialInterpretation) {
+  const title = typeof record.title === "string" ? record.title.trim() : "";
+
+  if (!title || !normalizedText || !officialInterpretation) {
     throw new RuleAgentError(
       "RULE_AGENT_BAD_RESPONSE",
-      "The rule agent omitted the normalized rule or official interpretation.",
+      "The rule agent omitted the title, normalized rule, or official interpretation.",
+    );
+  }
+  if (Buffer.byteLength(title, "utf8") > 80) {
+    throw new RuleAgentError(
+      "RULE_AGENT_BAD_RESPONSE",
+      "The rule agent returned a title longer than 80 UTF-8 bytes.",
     );
   }
 
@@ -421,6 +436,7 @@ function coerceInterpretation(value: unknown): RuleAgentInterpretation {
     needsClarification: record.needsClarification === true,
     normalizedText,
     officialInterpretation,
+    title,
   };
 }
 

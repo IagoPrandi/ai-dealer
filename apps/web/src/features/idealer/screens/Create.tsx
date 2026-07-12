@@ -163,6 +163,7 @@ function RulePreview({ rule }: { rule: RulePreflightResult }) {
         ) : null}
         <span style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--dim)" }} className="ide-num">{rule.tokenCount}/{RULE_MAX_TOKENS} tokens</span>
       </div>
+      <h2 style={{ margin: "0 0 6px", fontSize: 19, lineHeight: 1.25 }}>{rule.title}</h2>
       {rule.normalizedText ? <p style={{ margin: "0 0 14px", fontSize: 15, color: "var(--text)", lineHeight: 1.45, fontWeight: 600 }}>{rule.normalizedText}</p> : null}
       {rule.officialInterpretation ? (
         <>

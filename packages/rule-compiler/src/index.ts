@@ -254,6 +254,12 @@ const AMBIGUOUS_PATTERNS = [
   /\b(satisfying|rhythm|symmetrical|clustered|forgiving|safer|strange|soft|mirrors?)\b/i,
   /\bnot\s+too\b|\btoo\s+(many|much|high|low|predictable|boring)\b/i,
   /\b(a\s+few\s+places|second\s+chance|strong\s+beginning|good\s+way|in\s+a\s+good\s+way)\b/i,
+  // A two-digit pick cannot match the one-digit values contained in it. When a
+  // player uses that as an example, they may mean tens digits, units digits, or
+  // either digit. Those are materially different rules, so require an explicit
+  // digit property instead of silently compiling a whole-number match.
+  /\b(?:play|played|playing|pick|picked|guess|guessed|jogar|joguei|jogando|apostar|aposto)\s+([1-9])\d\b[\s\S]{0,160}\b(?:number|numbers|numero|numeros)\s+\1\b/i,
+  /\b(?:play|played|playing|pick|picked|guess|guessed|jogar|joguei|jogando|apostar|aposto)\s+\d([0-9])\b[\s\S]{0,160}\b(?:number|numbers|numero|numeros)\s+\1\b/i,
 ] as const;
 
 const EXTERNAL_DEPENDENCY_PATTERNS = [

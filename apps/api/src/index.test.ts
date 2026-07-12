@@ -182,6 +182,18 @@ test("rule preflight refinement feedback explains malformed unordered same-set r
   assert.match(feedback.dealerMessage, /send(?:ing)? a revised rule/i);
 });
 
+test("rule proposal preserves the dealer-generated title", () => {
+  resetApiStateForTests();
+  const saved = saveRuleProposal({
+    ...proposal(499, 1),
+    sanitizedText: "This wording should never become the public title.",
+    title: "One Number Match",
+  });
+
+  assert.equal(saved.title, "One Number Match");
+  assert.equal(getRoundSummary(499, 499).rules[0]?.title, "One Number Match");
+});
+
 function settledElection(turnId: number, activeRuleId: number) {
   return {
     activeElectionRandomnessAccount: base58,

@@ -13,10 +13,12 @@ export interface RuleProposalApi {
   proposer: string;
   ruleId: number;
   ruleProposal?: string;
+  normalizedText: string;
+  officialInterpretation: string;
   sanitizedText: string;
   sequence?: number;
   state?: "eligible" | "invalidated" | "proposed" | "removed_paid";
-  title?: string;
+  title: string;
   tokenCount?: number;
   turnId?: number;
 }

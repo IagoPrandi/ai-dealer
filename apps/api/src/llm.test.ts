@@ -122,6 +122,7 @@ test("interpret harness teaches predicate min/max and casual threshold cases", a
                   "A guess wins if the smallest guessed number equals the smallest drawn number.",
                 officialInterpretation:
                   "A guess wins if min(guess) equals min(draw).",
+                title: "Matching Minimums",
               }),
             },
           },
@@ -147,6 +148,36 @@ test("interpret harness teaches predicate min/max and casual threshold cases", a
   assert.match(systemPrompt, /same last digit/i);
   assert.match(systemPrompt, /two smallest\/largest/i);
   assert.match(systemPrompt, /match the\s+draw in reverse/i);
+  assert.match(systemPrompt, /concise 2-6 word English UI title/i);
+  assert.match(systemPrompt, /normalizedText: the rule rewritten in clear English/i);
+});
+
+test("rule agent responses without a title fail closed", async () => {
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                addedOperationalClauses: [],
+                clarityNote: "",
+                dealerMessage: "Compiled as a predicate.",
+                needsClarification: false,
+                normalizedText: "A guess wins if one number matches.",
+                officialInterpretation: "Compare the six guess numbers with the draw.",
+              }),
+            },
+          },
+        ],
+      }),
+      { status: 200 },
+    )) as typeof fetch;
+
+  await assert.rejects(
+    interpretRuleWithAgent("Win if one number matches.", CONFIG),
+    /omitted the title/i,
+  );
 });
 
 test("compile harness prompt includes selected prompt-set examples", async () => {

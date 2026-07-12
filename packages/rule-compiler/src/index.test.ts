@@ -1104,6 +1104,18 @@ test("fails ambiguous or external-dependent rules closed", () => {
   assert.ok(external.log.reasonCodes.includes("EXTERNAL_DEPENDENCY"));
 });
 
+test("requires clarification when an example implies unspecified digit matching", () => {
+  const result = validateAndPrecompileRule({
+    prompt:
+      "Venço se eu acertar qualquer número em qualquer ordem. Por exemplo, se eu jogar 12 e sair 10 e 20, eu venço tanto por ter acertado o número 1 quanto o número 2.",
+    tokenCount: 38,
+  });
+
+  assert.equal(result.decision, "INVALID");
+  assert.equal(result.artifact, null);
+  assert.ok(result.log.reasonCodes.includes("AMBIGUOUS_RULE"));
+});
+
 test("fails unsupported rules without producing an artifact", () => {
   const result = validateAndPrecompileRule({
     prompt: "Win if all numbers are prime.",

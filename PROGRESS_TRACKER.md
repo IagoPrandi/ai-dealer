@@ -3562,3 +3562,13 @@ Passed:
 - Web: removed the upward arrow from the home-screen `play again` button while retaining its existing green approved-vote styling, fee label, and navigation behavior.
 - Verified: `pnpm --filter @idealer/web typecheck`; `test` (69/69); `lint`; `build`.
 - Reviewed the result for inconsistencies: UI copy remains English, no new visual primitive or fallback was introduced, the button keeps its existing active-style contrast and tap behavior, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
+
+### 2026-07-12 (Rule ambiguity, generated titles, and executable rule copy)
+
+- Opened required context before working: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `docs/product-rule-summary.md`, `.claude/skills`, `.claude/skills/best-practices/SKILL.md` with its agent-principles, code-quality, and testing references, `.claude/skills/develop-frontend/SKILL.md`, `.claude/skills/idealer-test-and-verify/SKILL.md`, and `packages/rule-compiler/rule-authoring/SKILL.md`.
+- Rule compiler: a rule that illustrates a two-digit pick winning through unspecified component digits (for example `12` against `10`/`20` because of `1`/`2`) is now rejected as ambiguous. The player must explicitly choose tens digit, units digit, or either digit; the compiler does not silently reinterpret it as a whole-number match.
+- Rule agent/API: the interpretation contract now requires a concise English title in addition to the normalized rule and official interpretation. Missing or oversized titles fail closed, and the title is bound into the preflight result before the proposal is stored.
+- Web: proposal cards and rule detail now use the dealer-generated title, normalized executable rule, and official deterministic explanation. The raw player prompt remains only as the labelled audit seed instead of becoming the public title or explanatory copy.
+- Added regression coverage for the ambiguous screenshot rule, missing agent titles, title persistence, and the UI mapping of title/summary/explanation.
+- Verified: `pnpm --filter @idealer/rule-compiler typecheck|test|lint|build` (42/42 tests); `pnpm --filter @idealer/api typecheck|test|lint|build` (71/71 tests); `pnpm --filter @idealer/web typecheck|test|lint|build` (70/70 tests); and `git diff --check`.
+- Reviewed the result for inconsistencies: predicate rules are no longer described as choosing the “best” guess, ranking rules retain their deterministic runtime path, UI copy is English, the original prompt remains auditable, no fallback masks malformed agent output, and no milestone checkbox was marked because milestone marking requires explicit user confirmation.
