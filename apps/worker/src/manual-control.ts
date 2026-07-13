@@ -29,7 +29,8 @@
  * `close_turn`, skipping the shortlist/elimination/draw phase. It remains an
  * emergency test-only escape hatch and must never be followed by opening a new
  * turn until the prior prize pool has been reconciled. `/manual/cycle` ends
- * phase 1 and requires the real settlement pipeline instead.
+ * phase 1, drives the real settlement pipeline through `CLOSED`, and only then
+ * opens the next turn.
  *
  * This is intentionally NOT wired into production: it is gated behind
  * `IDEALER_TURN_MANUAL_CONTROL_ENABLED` and must stay off outside testing.
@@ -111,7 +112,26 @@ export interface ManualCycleResult {
   action: "opened_next_turn" | "settlement_required";
   close: ManualControlResult;
   open?: ManualControlResult;
+  settlementPasses?: number;
 }
+
+export interface ManualCycleSettlementState {
+  activeTurnId: number;
+  hasActiveTurn: boolean;
+  paused: boolean;
+  settlementClosed: boolean;
+}
+
+export interface ManualCycleSettlementDeps {
+  nowMs: () => number;
+  openNextTurn: () => Promise<ManualControlResult>;
+  readState: (turnId: number) => Promise<ManualCycleSettlementState>;
+  runSettlementPass: () => Promise<unknown>;
+  sleep: (milliseconds: number) => Promise<void>;
+  timeoutMs: number;
+}
+
+const MANUAL_CYCLE_POLL_INTERVAL_MS = 2_000;
 
 function envFlag(value: string | undefined) {
   return value === "1" || value?.toLowerCase() === "true";
@@ -570,18 +590,90 @@ export function shouldOpenNextTurnAfterManualCycle(
   return close.action === "no_active_turn";
 }
 
+function settlementTurnId(close: ManualControlResult) {
+  if (
+    close.action === "ended_play_window" ||
+    close.action === "settlement_in_progress"
+  ) {
+    return close.turnId;
+  }
+  return null;
+}
+
+export function isRetryableManualCycleError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /HTTP error \(429\): Too Many Requests/i.test(message);
+}
+
+export async function completeManualCycleSettlement(
+  close: ManualControlResult,
+  deps: ManualCycleSettlementDeps,
+): Promise<ManualCycleResult> {
+  const turnId = settlementTurnId(close);
+  if (turnId === null) {
+    return { action: "settlement_required", close };
+  }
+
+  const deadline = deps.nowMs() + deps.timeoutMs;
+  let settlementPasses = 0;
+  while (deps.nowMs() < deadline) {
+    try {
+      await deps.runSettlementPass();
+      settlementPasses += 1;
+
+      const state = await deps.readState(turnId);
+      if (state.paused) {
+        throw new Error(`Manual cycle paused while settling turn ${turnId}.`);
+      }
+      if (state.hasActiveTurn && state.activeTurnId !== turnId) {
+        throw new Error(
+          `Manual cycle expected turn ${turnId}, but active turn ${state.activeTurnId} appeared before settlement completed.`,
+        );
+      }
+      if (!state.hasActiveTurn && state.settlementClosed) {
+        const open = await deps.openNextTurn();
+        if (open.action !== "opened_turn") {
+          throw new Error(
+            `Manual cycle settled turn ${turnId}, but opening the next turn returned ${open.action}.`,
+          );
+        }
+        return {
+          action: "opened_next_turn",
+          close,
+          open,
+          settlementPasses,
+        };
+      }
+    } catch (error) {
+      if (!isRetryableManualCycleError(error)) {
+        throw error;
+      }
+    }
+
+    await deps.sleep(MANUAL_CYCLE_POLL_INTERVAL_MS);
+  }
+
+  throw new Error(
+    `Manual cycle timed out after ${deps.timeoutMs}ms while settling turn ${turnId}; the next turn was not opened.`,
+  );
+}
+
 /**
- * End phase 1 during testing and leave the turn for the real settlement
- * pipeline. Once no active turn remains, open the next turn only after its
- * predecessor has written the CLOSED transition and the rollover projection.
+ * End phase 1 during testing. When settlement dependencies are provided, drive
+ * the real pipeline until the predecessor has written the CLOSED transition
+ * and rollover projection, then open the next turn in the same operator call.
  */
 export async function cycleTurnManually(
   config: ManualControlConfig,
+  settlementDeps?: ManualCycleSettlementDeps,
 ): Promise<ManualCycleResult> {
   const close = await closeTurnManually(config);
   if (shouldOpenNextTurnAfterManualCycle(close)) {
     const open = await openTurnManually(config);
     return { action: "opened_next_turn", close, open };
+  }
+  if (settlementDeps) {
+    return completeManualCycleSettlement(close, settlementDeps);
   }
   return { action: "settlement_required", close };
 }

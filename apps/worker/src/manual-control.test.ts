@@ -3,9 +3,11 @@ import { test } from "node:test";
 import bs58 from "bs58";
 import {
   closeTurnManually,
+  completeManualCycleSettlement,
   createManualControlConfig,
   cycleTurnManually,
   forceCloseTurnManually,
+  isRetryableManualCycleError,
   migrateGlobalConfigManually,
   openTurnManually,
   shouldOpenNextTurnAfterManualCycle,
@@ -118,6 +120,172 @@ test("manual cycle opens only after the previous turn is no longer active", () =
       action: "settlement_in_progress",
       turnId: 16,
     }),
+    false,
+  );
+});
+
+test("manual cycle drives settlement through CLOSED before opening the next turn", async () => {
+  let nowMs = 0;
+  let reads = 0;
+  let settlementPasses = 0;
+  let openCalls = 0;
+  const result = await completeManualCycleSettlement(
+    {
+      action: "ended_play_window",
+      playWindowSeconds: 60,
+      signature: "shrink",
+      turnId: 20,
+    },
+    {
+      nowMs: () => nowMs,
+      openNextTurn: async () => {
+        openCalls += 1;
+        return {
+          action: "opened_turn",
+          openDurationSeconds: 1_200,
+          setCycleSignature: "set-cycle",
+          signature: "open",
+          turnId: 21,
+        };
+      },
+      readState: async () => {
+        reads += 1;
+        return reads === 1
+          ? {
+              activeTurnId: 20,
+              hasActiveTurn: true,
+              paused: false,
+              settlementClosed: false,
+            }
+          : {
+              activeTurnId: 20,
+              hasActiveTurn: false,
+              paused: false,
+              settlementClosed: true,
+            };
+      },
+      runSettlementPass: async () => {
+        settlementPasses += 1;
+      },
+      sleep: async (milliseconds) => {
+        nowMs += milliseconds;
+      },
+      timeoutMs: 5_000,
+    },
+  );
+
+  assert.equal(result.action, "opened_next_turn");
+  assert.equal(result.open?.action, "opened_turn");
+  assert.equal(result.settlementPasses, 2);
+  assert.equal(settlementPasses, 2);
+  assert.equal(openCalls, 1);
+});
+
+test("manual cycle times out without opening when CLOSED is not recorded", async () => {
+  let nowMs = 0;
+  let openCalls = 0;
+  await assert.rejects(
+    completeManualCycleSettlement(
+      { action: "settlement_in_progress", turnId: 20 },
+      {
+        nowMs: () => nowMs,
+        openNextTurn: async () => {
+          openCalls += 1;
+          return { action: "no_active_turn" };
+        },
+        readState: async () => ({
+          activeTurnId: 20,
+          hasActiveTurn: false,
+          paused: false,
+          settlementClosed: false,
+        }),
+        runSettlementPass: async () => undefined,
+        sleep: async (milliseconds) => {
+          nowMs += milliseconds;
+        },
+        timeoutMs: 2_000,
+      },
+    ),
+    /timed out.*next turn was not opened/,
+  );
+  assert.equal(openCalls, 0);
+});
+
+test("manual cycle fails closed if a different active turn appears", async () => {
+  let openCalls = 0;
+  await assert.rejects(
+    completeManualCycleSettlement(
+      { action: "settlement_in_progress", turnId: 20 },
+      {
+        nowMs: () => 0,
+        openNextTurn: async () => {
+          openCalls += 1;
+          return { action: "no_active_turn" };
+        },
+        readState: async () => ({
+          activeTurnId: 21,
+          hasActiveTurn: true,
+          paused: false,
+          settlementClosed: true,
+        }),
+        runSettlementPass: async () => undefined,
+        sleep: async () => undefined,
+        timeoutMs: 2_000,
+      },
+    ),
+    /active turn 21 appeared/,
+  );
+  assert.equal(openCalls, 0);
+});
+
+test("manual cycle retries a transient RPC 429 and still opens after CLOSED", async () => {
+  let nowMs = 0;
+  let settlementCalls = 0;
+  const result = await completeManualCycleSettlement(
+    { action: "settlement_in_progress", turnId: 22 },
+    {
+      nowMs: () => nowMs,
+      openNextTurn: async () => ({
+        action: "opened_turn",
+        openDurationSeconds: 1_200,
+        setCycleSignature: "set-cycle",
+        signature: "open",
+        turnId: 23,
+      }),
+      readState: async () => ({
+        activeTurnId: 0,
+        hasActiveTurn: false,
+        paused: false,
+        settlementClosed: true,
+      }),
+      runSettlementPass: async () => {
+        settlementCalls += 1;
+        if (settlementCalls === 1) {
+          throw new Error("HTTP error (429): Too Many Requests");
+        }
+      },
+      sleep: async (milliseconds) => {
+        nowMs += milliseconds;
+      },
+      timeoutMs: 5_000,
+    },
+  );
+
+  assert.equal(result.action, "opened_next_turn");
+  assert.equal(settlementCalls, 2);
+});
+
+test("manual cycle retries only explicit RPC rate limiting", () => {
+  assert.equal(
+    isRetryableManualCycleError(
+      new Error("HTTP error (429): Too Many Requests"),
+    ),
+    true,
+  );
+  assert.equal(
+    isRetryableManualCycleError(
+      new Error("request_draw transaction simulation failed"),
+    ),
     false,
   );
 });

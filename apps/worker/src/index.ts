@@ -20,11 +20,13 @@ import {
 import {
   fetchGlobalConfig,
   fetchTurnState,
+  isTurnSettlementClosed,
   createTurnAutomationConfig,
   startTurnAutomationLoop,
   type TurnAutomationConfig,
 } from "./turn-automation.js";
 import {
+  createSettlementCycleDeps,
   createSettlementSchedulerConfig,
   type SettlementSchedulerConfig,
   runSettlementSchedulerOnce,
@@ -291,9 +293,42 @@ async function getActiveTurnStatus() {
   };
 }
 
+const MANUAL_CYCLE_TIMEOUT_MS = 300_000;
+
+async function cycleTurnAndSettleManually(config: ManualControlConfig) {
+  const settlementConfig = await createSettlementSchedulerConfig();
+  const enabledSettlementConfig = { ...settlementConfig, enabled: true };
+  const settlementDeps = createSettlementCycleDeps(enabledSettlementConfig);
+  return cycleTurnManually(config, {
+    nowMs: () => Date.now(),
+    openNextTurn: () => openTurnManually(config),
+    readState: async (turnId) => {
+      const rpc = createSolanaRpc(config.rpcUrl);
+      const globalConfig = await fetchGlobalConfig({
+        programId: config.programId,
+        rpc,
+      });
+      const settlementClosed = globalConfig.snapshot.hasActiveTurn
+        ? false
+        : await isTurnSettlementClosed(turnId, config.apiBaseUrl);
+      return {
+        activeTurnId: globalConfig.snapshot.activeTurnId,
+        hasActiveTurn: globalConfig.snapshot.hasActiveTurn,
+        paused: globalConfig.snapshot.paused,
+        settlementClosed,
+      };
+    },
+    runSettlementPass: () =>
+      runSettlementSchedulerOnce(enabledSettlementConfig, settlementDeps),
+    sleep: (milliseconds) =>
+      new Promise((resolveSleep) => setTimeout(resolveSleep, milliseconds)),
+    timeoutMs: MANUAL_CYCLE_TIMEOUT_MS,
+  });
+}
+
 const MANUAL_CONTROL_ACTIONS = {
   "/manual/close": closeTurnManually,
-  "/manual/cycle": cycleTurnManually,
+  "/manual/cycle": cycleTurnAndSettleManually,
   // Escape hatch: closes the turn skipping the phase-2 pipeline. Testing only.
   "/manual/force-close": forceCloseTurnManually,
   "/manual/migrate": migrateGlobalConfigManually,

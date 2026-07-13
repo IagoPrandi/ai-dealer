@@ -141,7 +141,7 @@ export async function resolveSettlementTurnId(
   return { paused: false, turnId: turnId > 0 ? turnId : null };
 }
 
-export async function runSettlementSchedulerOnce(
+async function executeSettlementSchedulerOnce(
   config: SettlementSchedulerConfig,
   deps: SettlementCycleDeps = createSettlementCycleDeps(config),
 ): Promise<SettlementSchedulerResult> {
@@ -176,6 +176,33 @@ export async function runSettlementSchedulerOnce(
   }
 
   return { action: "advanced", steps, turnId };
+}
+
+let activeSettlementPass: Promise<SettlementSchedulerResult> | null = null;
+
+/**
+ * Serialize every settlement pass in this worker process. Manual settlement,
+ * manual cycle, and the periodic loop share the same on-chain state machine;
+ * allowing them to run concurrently could commit duplicate randomness
+ * accounts or race adjacent instructions.
+ */
+export async function runSettlementSchedulerOnce(
+  config: SettlementSchedulerConfig,
+  deps: SettlementCycleDeps = createSettlementCycleDeps(config),
+): Promise<SettlementSchedulerResult> {
+  while (activeSettlementPass) {
+    await activeSettlementPass;
+  }
+
+  const pass = executeSettlementSchedulerOnce(config, deps);
+  activeSettlementPass = pass;
+  try {
+    return await pass;
+  } finally {
+    if (activeSettlementPass === pass) {
+      activeSettlementPass = null;
+    }
+  }
 }
 
 export function startSettlementLoop(config: SettlementSchedulerConfig) {
