@@ -98,7 +98,7 @@ export function IdealerApp({
 
   const activeTurn = useActiveTurn();
   const turnId = activeTurn.activeTurnId;
-  const { reload: reloadRound, round, loading: roundLoading } = useRound(turnId, turnId);
+  const { reload: reloadRound, round, loading: roundLoading, error: roundError } = useRound(turnId, turnId);
   const rules = useRules(turnId, round);
   const { entrySyncing, playCount, played, receipt, reload: reloadPlayer } = usePlayerGuess(turnId, walletAddress);
 
@@ -328,8 +328,15 @@ export function IdealerApp({
 
   const turnOpen = activeTurn.snapshot?.turnState?.status === "open";
 
+  // The round + rules come from the HTTP API; the turn status comes from the
+  // worker/on-chain snapshot. When the API is unreachable the hooks fall back to
+  // null/[], so surface that explicitly rather than letting screens render
+  // fabricated zeros next to a live turn banner.
+  const apiUnavailable = roundError !== null || rules.error !== null;
+
   const value: IdealerContextValue = {
     actionError,
+    apiUnavailable,
     approvedIds: rules.approvedIds,
     bet: receipt?.numbers ?? null,
     chatId,

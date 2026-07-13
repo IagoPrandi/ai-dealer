@@ -55,7 +55,7 @@ function PromptInput() {
 
 export function HomeScreen() {
   const {
-    bet, decisionPhase, endSeconds, entrySyncing, fees, go, openDetail, phase1EndsAt, played, players, prizeSol, rules, turnId,
+    apiUnavailable, bet, decisionPhase, endSeconds, entrySyncing, fees, go, openDetail, phase1EndsAt, played, players, prizeSol, reloadAll, rules, turnId,
     resultTurnId, round, turnOpen, turnReadyToPlay, turnStatusMessage, walletAddress,
   } = useIdealer();
 
@@ -87,6 +87,7 @@ export function HomeScreen() {
   const electingRuleNow =
     drawingNow && !drawFulfilled && !electedRule && round?.election?.status !== "original_only";
   const showResultLink =
+    !apiUnavailable &&
     resultTurnId > 0 &&
     (resultTurnId < turnId ||
       round?.status === "completed" ||
@@ -115,6 +116,24 @@ export function HomeScreen() {
           </div>
         </div>
 
+        {/* BACKEND UNAVAILABLE — the round + rules API could not be reached.
+            Surface it plainly instead of rendering zero-value fallbacks that
+            contradict the live turn status. */}
+        {apiUnavailable ? (
+          <button onClick={() => reloadAll()} className="ide-tap" style={{
+            width: "100%", textAlign: "left", marginBottom: 16, padding: "13px 16px", borderRadius: 16, cursor: "pointer", color: "var(--text)",
+            border: "1px solid rgba(255,107,107,0.45)", background: "linear-gradient(110deg, rgba(255,107,107,0.14), var(--surface))",
+            display: "flex", alignItems: "center", gap: 12,
+          }} type="button">
+            <span style={{ width: 38, height: 38, borderRadius: 12, background: "#ff6b6b", color: "#0B0910", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.clock style={{ color: "#0B0910" }} /></span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14.5, fontWeight: 700 }}>Round data unavailable</div>
+              <div style={{ fontSize: 12.5, color: "var(--muted)" }}>Cannot reach the backend right now - tap to retry.</div>
+            </div>
+            <Ico.arrow style={{ color: "#ff6b6b", flexShrink: 0 }} />
+          </button>
+        ) : null}
+
         {/* HERO */}
         <div style={{ textAlign: "center", position: "relative", marginBottom: 24 }}>
           <div style={{ position: "absolute", inset: "-26px 16px auto", height: 210, background: "radial-gradient(circle, rgba(20,241,149,0.2), transparent 68%)", filter: "blur(14px)", animation: "ide-pulse 3.6s ease-in-out infinite", zIndex: 0 }} />
@@ -142,10 +161,12 @@ export function HomeScreen() {
               <span className="ide-grad-text" style={{ fontSize: 34, fontWeight: 700, marginTop: 6 }}>{decStr}</span>
               <span style={{ fontSize: 21, fontWeight: 700, color: "var(--purple-soft)", marginTop: 11, marginLeft: 4 }}>SOL</span>
             </div>
-            <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 18, flexWrap: "wrap" }}>
-              <span className="ide-pill"><Ico.users style={{ color: "var(--purple-soft)" }} /> <span className="ide-num">{fmtInt(players)}</span> playing</span>
-              <span className="ide-pill"><Ico.spark style={{ color: "var(--yellow)" }} /> {rules.rules.length} rules</span>
-            </div>
+            {apiUnavailable ? null : (
+              <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 18, flexWrap: "wrap" }}>
+                <span className="ide-pill"><Ico.users style={{ color: "var(--purple-soft)" }} /> <span className="ide-num">{fmtInt(players)}</span> playing</span>
+                <span className="ide-pill"><Ico.spark style={{ color: "var(--yellow)" }} /> {rules.rules.length} rules</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -210,8 +231,11 @@ export function HomeScreen() {
           </button>
         ) : null}
 
-        {/* MAIN ACTION */}
-        {played ? (
+        {/* MAIN ACTION — hidden while the round API is unreachable: `played`
+            can reflect a stale on-chain guess and `entrySyncing` would be stuck
+            true (the receipt never arrives), producing a false "still syncing"
+            state. The error banner above already explains the situation. */}
+        {apiUnavailable ? null : played ? (
           <div className="ide-notice" style={{ display: "grid", gap: 12, marginBottom: 22 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
               <span style={{ width: 30, height: 30, borderRadius: 10, background: "var(--green)", color: "#08110C", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.check /></span>

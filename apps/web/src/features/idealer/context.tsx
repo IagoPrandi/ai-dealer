@@ -33,6 +33,12 @@ type ConnectedWallet = ReturnType<typeof useWalletConnection>["wallet"];
 
 export interface IdealerContextValue {
   actionError: null | string;
+  /**
+   * True when the backend API (rounds/rules) could not be reached. Surfaced so
+   * screens show an explicit "backend unavailable" state instead of rendering
+   * zero-value fallbacks that contradict the live on-chain turn status.
+   */
+  apiUnavailable: boolean;
   approvedIds: number[];
   bet: null | number[];
   chatId: null | string;
