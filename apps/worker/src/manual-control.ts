@@ -126,6 +126,7 @@ export interface ManualCycleSettlementDeps {
   nowMs: () => number;
   openNextTurn: () => Promise<ManualControlResult>;
   readState: (turnId: number) => Promise<ManualCycleSettlementState>;
+  resolveSettlementTurnId?: () => Promise<number | null>;
   runSettlementPass: () => Promise<unknown>;
   sleep: (milliseconds: number) => Promise<void>;
   timeoutMs: number;
@@ -668,12 +669,32 @@ export async function cycleTurnManually(
   settlementDeps?: ManualCycleSettlementDeps,
 ): Promise<ManualCycleResult> {
   const close = await closeTurnManually(config);
+  if (settlementDeps) {
+    return completeManualCycleAfterClose(close, settlementDeps);
+  }
   if (shouldOpenNextTurnAfterManualCycle(close)) {
     const open = await openTurnManually(config);
     return { action: "opened_next_turn", close, open };
   }
-  if (settlementDeps) {
-    return completeManualCycleSettlement(close, settlementDeps);
-  }
   return { action: "settlement_required", close };
+}
+
+export async function completeManualCycleAfterClose(
+  close: ManualControlResult,
+  deps: ManualCycleSettlementDeps,
+): Promise<ManualCycleResult> {
+  if (shouldOpenNextTurnAfterManualCycle(close)) {
+    const pendingTurnId = deps.resolveSettlementTurnId
+      ? await deps.resolveSettlementTurnId()
+      : null;
+    if (pendingTurnId !== null) {
+      return completeManualCycleSettlement(
+        { action: "settlement_in_progress", turnId: pendingTurnId },
+        deps,
+      );
+    }
+    const open = await deps.openNextTurn();
+    return { action: "opened_next_turn", close, open };
+  }
+  return completeManualCycleSettlement(close, deps);
 }

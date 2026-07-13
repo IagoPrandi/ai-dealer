@@ -1,22 +1,23 @@
 # Local Development Runbook
 
-This runbook covers the `M0.3` Docker baseline.
+This runbook covers the local development baseline.
 
 ## Required Services
 
-The default Docker Compose stack starts:
+Docker Compose starts only the local data stores:
 
 - `idealer-postgres`
 - `idealer-redis`
-- `idealer-api`
-- `idealer-worker`
-- `idealer-web`
 
-Optional profiles define:
+Run API, worker, public DApp, and admin from the host with `pnpm`; this avoids
+slow Docker rebuilds and gives each service native hot reload.
 
-- `idealer-admin` with `--profile admin`
+Optional Docker profiles define:
+
 - `idealer-prometheus` and `idealer-grafana` with `--profile observability`
 - `idealer-mailpit` with `--profile mail`
+- containerized application services with `--profile containerized` for an
+  explicit container-only diagnostic; this is not the normal local workflow.
 
 ## Startup
 
@@ -26,22 +27,25 @@ Create a local `.env` from the checked-in example if needed:
 cp .env.example .env
 ```
 
-Start the required local stack:
+Start PostgreSQL and Redis:
 
 ```bash
-docker compose up --build
+docker compose up -d postgres redis
 ```
 
-Start with admin:
+Start the application services from the host in separate terminals:
 
 ```bash
-docker compose --profile admin up --build
+pnpm --filter @idealer/api dev
+pnpm --filter @idealer/worker dev
+pnpm --filter @idealer/web dev
+pnpm --filter @idealer/admin dev
 ```
 
 Start with observability and mail tooling:
 
 ```bash
-docker compose --profile observability --profile mail up --build
+docker compose --profile observability --profile mail up -d
 ```
 
 ## Local URLs
@@ -49,7 +53,7 @@ docker compose --profile observability --profile mail up --build
 - Public DApp: `http://localhost:3000`
 - API health: `http://localhost:3002/health`
 - Worker health: `http://localhost:3003/health`
-- Admin console, with profile: `http://localhost:3001`
+- Admin console: `http://localhost:3001`
 - Prometheus, with profile: `http://localhost:9090`
 - Grafana, with profile: `http://localhost:3004`
 - Mailpit UI, with profile: `http://localhost:8025`
@@ -120,12 +124,16 @@ Inspect service health:
 docker compose ps
 ```
 
-Expected required containers:
+Expected Docker containers:
 
 - `idealer-postgres`: healthy
 - `idealer-redis`: healthy
-- `idealer-api`: healthy
-- `idealer-worker`: healthy
-- `idealer-web`: healthy
 
-API and worker health checks fail closed when Postgres or Redis is unavailable.
+Check host-run services directly:
+
+```bash
+curl http://localhost:3002/health
+curl http://localhost:3003/health
+```
+
+API and worker health checks fail closed when PostgreSQL or Redis is unavailable.

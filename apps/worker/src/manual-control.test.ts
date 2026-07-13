@@ -3,6 +3,7 @@ import { test } from "node:test";
 import bs58 from "bs58";
 import {
   closeTurnManually,
+  completeManualCycleAfterClose,
   completeManualCycleSettlement,
   createManualControlConfig,
   cycleTurnManually,
@@ -122,6 +123,39 @@ test("manual cycle opens only after the previous turn is no longer active", () =
     }),
     false,
   );
+});
+
+test("manual cycle resumes an incomplete predecessor after on-chain close", async () => {
+  let settlementPasses = 0;
+  const result = await completeManualCycleAfterClose(
+    { action: "no_active_turn" },
+    {
+      nowMs: () => 0,
+      openNextTurn: async () => ({
+        action: "opened_turn",
+        openDurationSeconds: 1_200,
+        setCycleSignature: "set-cycle",
+        signature: "open",
+        turnId: 25,
+      }),
+      readState: async () => ({
+        activeTurnId: 0,
+        hasActiveTurn: false,
+        paused: false,
+        settlementClosed: true,
+      }),
+      resolveSettlementTurnId: async () => 24,
+      runSettlementPass: async () => {
+        settlementPasses += 1;
+      },
+      sleep: async () => undefined,
+      timeoutMs: 2_000,
+    },
+  );
+
+  assert.equal(result.action, "opened_next_turn");
+  assert.equal(result.open?.action, "opened_turn");
+  assert.equal(settlementPasses, 1);
 });
 
 test("manual cycle drives settlement through CLOSED before opening the next turn", async () => {

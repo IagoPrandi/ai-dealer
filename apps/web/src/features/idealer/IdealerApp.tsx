@@ -34,7 +34,13 @@ import {
   type Screen,
 } from "./context";
 import { lamportsToSol } from "./data/format";
-import { usePlayerGuess, useActiveTurn, useRound, useRules } from "./data/hooks";
+import {
+  resolveResultSelection,
+  usePlayerGuess,
+  useActiveTurn,
+  useRound,
+  useRules,
+} from "./data/hooks";
 import {
   postRuleEliminationVote,
   postRuleRemoval,
@@ -103,6 +109,13 @@ export function IdealerApp({
   const { entrySyncing, playCount, played, receipt, reload: reloadPlayer } = usePlayerGuess(turnId, walletAddress);
 
   const [screen, setScreen] = useState<Screen>(initialScreen);
+  const [selectedResultTurnId, setSelectedResultTurnId] = useState<null | number>(
+    initialResultTurnId &&
+      Number.isInteger(initialResultTurnId) &&
+      initialResultTurnId > 0
+      ? initialResultTurnId
+      : null,
+  );
   const [seed, setSeed] = useState("");
   const [chatId, setChatId] = useState<null | string>(null);
   const [newConversationKey, setNewConversationKey] = useState(0);
@@ -114,6 +127,15 @@ export function IdealerApp({
   const [connectError, setConnectError] = useState<null | string>(null);
 
   const go = useCallback((next: Screen, params?: NavParams) => {
+    setSelectedResultTurnId((currentResultTurnId) =>
+      resolveResultSelection({
+        currentResultTurnId,
+        navigatingToResult: next === "result",
+        ...(params?.resultTurnId === undefined
+          ? {}
+          : { requestedResultTurnId: params.resultTurnId }),
+      }),
+    );
     if (params?.newConversation) {
       setSeed("");
       setChatId(null);
@@ -288,17 +310,15 @@ export function IdealerApp({
     };
   }, [activeTurn.snapshot, playCount, rules.rules, turnId]);
 
-  const resultTurnId = useMemo(() => {
-    if (initialResultTurnId && Number.isInteger(initialResultTurnId) && initialResultTurnId > 0) {
-      return initialResultTurnId;
-    }
+  const latestResultTurnId = useMemo(() => {
     const currentTurnHasResult =
       round?.turnId === turnId &&
       (round.status === "completed" ||
         round.draw?.status === "fulfilled" ||
         Boolean(round.winners?.records.length));
     return currentTurnHasResult ? turnId : Math.max(1, turnId - 1);
-  }, [initialResultTurnId, round, turnId]);
+  }, [round, turnId]);
+  const resultTurnId = selectedResultTurnId ?? latestResultTurnId;
 
   // When does guess submission close? (guessCutoffBps into the turn window.)
   const guessCutoffEndsAt = useMemo(() => {

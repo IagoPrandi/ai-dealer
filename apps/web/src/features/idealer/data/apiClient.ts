@@ -43,6 +43,7 @@ async function getJson<T>(
   options: { allow404?: boolean; signal?: AbortSignal } = {},
 ): Promise<T | null> {
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
+    cache: "no-store",
     ...(options.signal ? { signal: options.signal } : {}),
   });
 

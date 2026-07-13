@@ -20,6 +20,7 @@ import {
 import {
   fetchGlobalConfig,
   fetchTurnState,
+  getTurnOpeningGate,
   isTurnSettlementClosed,
   createTurnAutomationConfig,
   startTurnAutomationLoop,
@@ -28,6 +29,7 @@ import {
 import {
   createSettlementCycleDeps,
   createSettlementSchedulerConfig,
+  resolveSettlementTurnId,
   type SettlementSchedulerConfig,
   runSettlementSchedulerOnce,
   startSettlementLoop,
@@ -265,6 +267,11 @@ async function getActiveTurnStatus() {
     });
   }
 
+  const openingGate = await getTurnOpeningGate(
+    globalConfig.snapshot,
+    config.apiBaseUrl,
+  );
+
   return {
     globalConfig: {
       activeTurnId: globalConfig.snapshot.activeTurnId,
@@ -280,6 +287,7 @@ async function getActiveTurnStatus() {
       voteFeeLamports: globalConfig.snapshot.voteFeeLamports.toString(),
     },
     globalConfigAddress: globalConfig.address.toString(),
+    openingGate,
     turnState: turnState
       ? {
           endTimestamp: turnState.snapshot.endTimestamp,
@@ -317,6 +325,10 @@ async function cycleTurnAndSettleManually(config: ManualControlConfig) {
         paused: globalConfig.snapshot.paused,
         settlementClosed,
       };
+    },
+    resolveSettlementTurnId: async () => {
+      const resolved = await resolveSettlementTurnId(enabledSettlementConfig);
+      return resolved.turnId;
     },
     runSettlementPass: () =>
       runSettlementSchedulerOnce(enabledSettlementConfig, settlementDeps),

@@ -178,6 +178,13 @@ function formatTurnLabel(turnId: number) {
   return `TURN-${turnId.toString().padStart(4, "0")}`;
 }
 
+function formatCycleDuration(hours: number) {
+  if (hours < 1) {
+    return `${Number((hours * 60).toFixed(2))}m`;
+  }
+  return `${Number(hours.toFixed(4))}h`;
+}
+
 function truncateAddress(value: string) {
   return `${value.slice(0, 5)}...${value.slice(-5)}`;
 }
@@ -439,15 +446,17 @@ export function RoundPage({ turnId: rawTurnId }: { turnId: string }) {
               </div>
               <div>
                 <dt>Turn duration</dt>
-                <dd>{round.cycle.durationHours}h</dd>
+                <dd>{formatCycleDuration(round.cycle.durationHours)}</dd>
               </div>
               <div>
                 <dt>Next duration</dt>
-                <dd>{round.cycle.nextDurationHours}h</dd>
+                <dd>{formatCycleDuration(round.cycle.nextDurationHours)}</dd>
               </div>
               <div>
                 <dt>Cycle pattern</dt>
-                <dd>{round.cycle.pattern.map((hours) => `${hours}h`).join(" -> ")}</dd>
+                <dd>
+                  {round.cycle.pattern.map(formatCycleDuration).join(" -> ")}
+                </dd>
               </div>
             </dl>
           </section>

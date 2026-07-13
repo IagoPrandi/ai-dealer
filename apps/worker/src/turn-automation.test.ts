@@ -9,6 +9,7 @@ import {
   createSetVrfConfigInstruction,
   createTurnAutomationConfig,
   decodeGlobalConfigAccount,
+  getTurnOpeningGate,
   isLegacyTurnDeserializationError,
   isTurnSettlementClosed,
   loadAuthorityKeypairBytesFromEnv,
@@ -69,6 +70,23 @@ test("turn automation settlement gate accepts only a CLOSED transition", async (
 
   assert.equal(closed, true);
   assert.equal(incomplete, false);
+});
+
+test("turn opening gate identifies the previous incomplete settlement", async () => {
+  const gate = await getTurnOpeningGate(
+    { hasActiveTurn: false, nextTurnId: 25 },
+    "http://api.test",
+    async () =>
+      new Response(JSON.stringify({ transitions: [{ toState: "CLAIMABLE" }] }), {
+        status: 200,
+      }),
+  );
+
+  assert.deepEqual(gate, {
+    blockingTurnId: 24,
+    canOpen: false,
+    code: "PREVIOUS_TURN_SETTLEMENT_PENDING",
+  });
 });
 
 test("turn automation settlement gate fails closed on an invalid API response", async () => {

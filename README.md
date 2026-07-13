@@ -52,46 +52,30 @@ pnpm test
 pnpm build
 ```
 
-## Docker Local Stack
+## Local Development
 
-Start required services:
+Docker runs only the local data stores. Start PostgreSQL and Redis:
 
 ```bash
-docker compose up --build
+docker compose up -d postgres redis
 ```
 
-Stop services:
+Run application services from the host in separate terminals:
+
+```bash
+pnpm --filter @idealer/api dev
+pnpm --filter @idealer/worker dev
+pnpm --filter @idealer/web dev
+pnpm --filter @idealer/admin dev
+```
+
+Stop the Dockerized data stores:
 
 ```bash
 docker compose down
 ```
 
-Reset local volumes:
-
-```bash
-docker compose down --volumes --remove-orphans
-```
-
-See [docs/local-development-runbook.md](docs/local-development-runbook.md) for profiles, health checks, and local URLs.
-
-Run the public DApp:
-
-```bash
-pnpm --filter @idealer/web dev
-```
-
-Run the admin console:
-
-```bash
-pnpm --filter @idealer/admin dev
-```
-
-Run backend stubs:
-
-```bash
-pnpm --filter @idealer/api dev
-pnpm --filter @idealer/worker dev
-```
+See [docs/local-development-runbook.md](docs/local-development-runbook.md) for environment setup, health checks, and local URLs.
 
 ## Boundary Rules
 

@@ -308,6 +308,36 @@ export async function isTurnSettlementClosed(
   );
 }
 
+export interface TurnOpeningGate {
+  blockingTurnId: number | null;
+  canOpen: boolean;
+  code: "PREVIOUS_TURN_SETTLEMENT_PENDING" | "READY_TO_OPEN";
+}
+
+export async function getTurnOpeningGate(
+  snapshot: Pick<GlobalConfigSnapshot, "hasActiveTurn" | "nextTurnId">,
+  apiBaseUrl: string = DEFAULT_API_BASE_URL,
+  fetchImpl: typeof fetch = fetch,
+): Promise<TurnOpeningGate> {
+  if (snapshot.hasActiveTurn || snapshot.nextTurnId <= 1) {
+    return { blockingTurnId: null, canOpen: true, code: "READY_TO_OPEN" };
+  }
+
+  const previousTurnId = snapshot.nextTurnId - 1;
+  const settlementClosed = await isTurnSettlementClosed(
+    previousTurnId,
+    apiBaseUrl,
+    fetchImpl,
+  );
+  return settlementClosed
+    ? { blockingTurnId: null, canOpen: true, code: "READY_TO_OPEN" }
+    : {
+        blockingTurnId: previousTurnId,
+        canOpen: false,
+        code: "PREVIOUS_TURN_SETTLEMENT_PENDING",
+      };
+}
+
 function getAccountDataBase64(
   account: AccountInfoResult["value"],
   expectedOwner: SolanaAddress,

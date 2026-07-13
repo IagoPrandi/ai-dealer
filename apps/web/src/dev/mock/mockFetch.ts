@@ -43,6 +43,11 @@ function resolveMock(url: string): unknown | undefined {
         voteFeeLamports: String(MOCK_GLOBAL_CONFIG.voteFeeLamports),
       },
       globalConfigAddress: "EtZ5ZyHKb8wZmMHFDLM6LtVmZV1WUMvFPER72eFE4qob",
+      openingGate: {
+        blockingTurnId: null,
+        canOpen: true,
+        code: "READY_TO_OPEN",
+      },
       turnState: {
         ...MOCK_TURN_STATE,
         endTimestamp: Math.floor(Date.now() / 1000) + 3600,

@@ -6,6 +6,7 @@ import { address } from "@solana/kit";
 import {
   confirmedProgramAccountExists,
   getActionCutoffTimestamp,
+  getTurnActionReadiness,
   IDEALER_PROGRAM_ID,
   waitForConfirmedProgramAccount,
 } from "./idealerProgram.js";
@@ -110,4 +111,31 @@ test("getActionCutoffTimestamp uses the base turn duration, not an extended draw
     }),
     200,
   );
+});
+
+test("no active turn surfaces the previous settlement blocker", () => {
+  const readiness = getTurnActionReadiness({
+    cutoffBps: 9_167,
+    globalConfig: {
+      activeTurnId: 0,
+      guessCutoffBps: 9_167,
+      guessSubmissionFeeLamports: 10_000_000n,
+      hasActiveTurn: false,
+      nextTurnId: 25,
+      paused: false,
+      ruleElectionCutoffBps: 9_167,
+      ruleRemovalFeeLamports: 50_000_000n,
+      voteFeeLamports: 5_000_000n,
+    },
+    openingGate: {
+      blockingTurnId: 24,
+      canOpen: false,
+      code: "PREVIOUS_TURN_SETTLEMENT_PENDING",
+    },
+    turn: null,
+  });
+
+  assert.equal(readiness.ok, false);
+  assert.equal(readiness.code, "PREVIOUS_TURN_SETTLEMENT_PENDING");
+  assert.match(readiness.message, /Round 24.*settlement is incomplete/);
 });

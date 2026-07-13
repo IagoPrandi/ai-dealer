@@ -25,6 +25,7 @@ export type Screen =
 export interface NavParams {
   chatId?: null | string;
   newConversation?: boolean;
+  resultTurnId?: number;
   seed?: string;
 }
 

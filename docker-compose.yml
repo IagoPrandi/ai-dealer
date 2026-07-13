@@ -43,6 +43,7 @@ services:
       context: .
       dockerfile: infra/docker/Dockerfile.node
     container_name: idealer-api
+    profiles: ["containerized"]
     command: ["pnpm", "--filter", "@idealer/api", "dev"]
     depends_on:
       postgres:
@@ -113,6 +114,7 @@ services:
       context: .
       dockerfile: infra/docker/Dockerfile.node
     container_name: idealer-worker
+    profiles: ["containerized"]
     command: ["pnpm", "--filter", "@idealer/worker", "dev"]
     depends_on:
       postgres:
@@ -195,6 +197,7 @@ services:
       context: .
       dockerfile: infra/docker/Dockerfile.node
     container_name: idealer-web
+    profiles: ["containerized"]
     command: ["pnpm", "--filter", "@idealer/web", "dev"]
     depends_on:
       api:
@@ -223,7 +226,7 @@ services:
       dockerfile: infra/docker/Dockerfile.node
     container_name: idealer-admin
     command: ["pnpm", "--filter", "@idealer/admin", "dev"]
-    profiles: ["admin"]
+    profiles: ["containerized"]
     depends_on:
       api:
         condition: service_healthy

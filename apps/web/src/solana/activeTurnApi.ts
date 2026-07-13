@@ -18,6 +18,11 @@ interface ActiveTurnApiResponse {
     voteFeeLamports: string;
   };
   globalConfigAddress: string;
+  openingGate: {
+    blockingTurnId: number | null;
+    canOpen: boolean;
+    code: "PREVIOUS_TURN_SETTLEMENT_PENDING" | "READY_TO_OPEN";
+  };
   turnState: null | {
     endTimestamp: number;
     startTimestamp: number;
@@ -32,6 +37,7 @@ export async function fetchActiveTurnSnapshotFromWorker(
   signal?: AbortSignal,
 ): Promise<ActiveTurnSnapshot> {
   const response = await fetch(`${getWorkerBaseUrl()}/turn/active`, {
+    cache: "no-store",
     ...(signal ? { signal } : {}),
   });
 
@@ -58,6 +64,7 @@ export async function fetchActiveTurnSnapshotFromWorker(
       voteFeeLamports: BigInt(body.globalConfig.voteFeeLamports),
     },
     globalConfigAddress: address(body.globalConfigAddress),
+    openingGate: body.openingGate,
     turnState: body.turnState,
     turnStateAddress: body.turnStateAddress
       ? address(body.turnStateAddress)

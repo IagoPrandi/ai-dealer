@@ -18,7 +18,6 @@ import {
   RULE_REMOVAL_CONFIG,
   sanitizeRuleText,
   TREASURY_FEE_BPS,
-  TURN_DURATION_CYCLE_HOURS,
   TURN_DURATION_CYCLE_SECONDS,
   VOTER_REWARD_CONFIG,
   VOTER_REWARD_RATE_BPS,
@@ -918,6 +917,157 @@ const conversationDrafts = new Map<string, ConversationDraftRecord>();
 const auditLogs = new Map<string, AuditLogRecord>();
 const auditLogOrder: string[] = [];
 let lastAuditLogHash: string | null = null;
+
+export interface ApiStateSnapshotV1 {
+  auditLogOrder: string[];
+  auditLogs: [string, AuditLogRecord][];
+  claimRecords: [string, ClaimRecord][];
+  conversationDrafts: [string, ConversationDraftRecord][];
+  creatorRewardRecords: [string, CreatorRewardRecord][];
+  draws: [number, DrawRecord][];
+  elections: [number, RuleElectionRecord][];
+  guessReceipts: [string, GuessReceiptRecord][];
+  lastAuditLogHash: string | null;
+  paidRuleRemovals: [string, PaidRuleRemovalRecord][];
+  ruleElectionProofAuditLogs: [number, string][];
+  ruleEliminationVotes: [string, RuleEliminationVoteRecord][];
+  ruleEliminations: [number, RuleEliminationRecord][];
+  ruleProposals: [string, RuleProposalRecord][];
+  ruleValidations: [string, RuleValidationRecord][];
+  ruleVotes: [string, RuleVoteRecord][];
+  settlementTransitionOrder: string[];
+  settlementTransitions: [string, SettlementTransitionRecord][];
+  turnRolloverSettlements: [number, TurnRolloverSettlement][];
+  turnRollovers: [number, TurnRolloverRecord][];
+  verificationJobs: [string, GuessVerificationJobRecord][];
+  verificationResults: [string, GuessVerificationResultRecord][];
+  version: 1;
+  voterRewardRecords: [string, VoterRewardRecord][];
+  winnerRecords: [string, WinnerRecord][];
+}
+
+export const API_STATE_POSTGRES_SCHEMA = `
+CREATE TABLE IF NOT EXISTS api_state_snapshots (
+  snapshot_key text PRIMARY KEY,
+  snapshot_json text NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE api_state_snapshots
+  ALTER COLUMN snapshot_json TYPE text USING snapshot_json::text;
+`;
+
+const API_STATE_SNAPSHOT_KEY = "operational-state-v1";
+let apiStatePool: InstanceType<typeof Pool> | null = null;
+let apiStatePersistenceQueue: Promise<void> = Promise.resolve();
+
+export function exportApiStateSnapshot(): ApiStateSnapshotV1 {
+  return {
+    auditLogOrder: [...auditLogOrder],
+    auditLogs: [...auditLogs.entries()],
+    claimRecords: [...claimRecords.entries()],
+    conversationDrafts: [...conversationDrafts.entries()],
+    creatorRewardRecords: [...creatorRewardRecords.entries()],
+    draws: [...draws.entries()],
+    elections: [...elections.entries()],
+    guessReceipts: [...guessReceipts.entries()],
+    lastAuditLogHash,
+    paidRuleRemovals: [...paidRuleRemovals.entries()],
+    ruleElectionProofAuditLogs: [...ruleElectionProofAuditLogs.entries()],
+    ruleEliminationVotes: [...ruleEliminationVotes.entries()],
+    ruleEliminations: [...ruleEliminations.entries()],
+    ruleProposals: [...ruleProposals.entries()],
+    ruleValidations: [...ruleValidations.entries()],
+    ruleVotes: [...ruleVotes.entries()],
+    settlementTransitionOrder: [...settlementTransitionOrder],
+    settlementTransitions: [...settlementTransitions.entries()],
+    turnRolloverSettlements: [...turnRolloverSettlements.entries()],
+    turnRollovers: [...turnRollovers.entries()],
+    verificationJobs: [...verificationJobs.entries()],
+    verificationResults: [...verificationResults.entries()],
+    version: 1,
+    voterRewardRecords: [...voterRewardRecords.entries()],
+    winnerRecords: [...winnerRecords.entries()],
+  };
+}
+
+function replaceMap<TKey, TValue>(
+  target: Map<TKey, TValue>,
+  entries: [TKey, TValue][],
+) {
+  target.clear();
+  for (const [key, value] of entries) {
+    target.set(key, value);
+  }
+}
+
+export function restoreApiStateSnapshot(snapshot: ApiStateSnapshotV1) {
+  if (!snapshot || snapshot.version !== 1) {
+    throw new Error("API_STATE_SNAPSHOT_VERSION_UNSUPPORTED");
+  }
+
+  replaceMap(auditLogs, snapshot.auditLogs);
+  replaceMap(claimRecords, snapshot.claimRecords);
+  replaceMap(conversationDrafts, snapshot.conversationDrafts);
+  replaceMap(creatorRewardRecords, snapshot.creatorRewardRecords);
+  replaceMap(draws, snapshot.draws);
+  replaceMap(elections, snapshot.elections);
+  replaceMap(guessReceipts, snapshot.guessReceipts);
+  replaceMap(paidRuleRemovals, snapshot.paidRuleRemovals);
+  replaceMap(ruleElectionProofAuditLogs, snapshot.ruleElectionProofAuditLogs);
+  replaceMap(ruleEliminationVotes, snapshot.ruleEliminationVotes);
+  replaceMap(ruleEliminations, snapshot.ruleEliminations);
+  replaceMap(ruleProposals, snapshot.ruleProposals);
+  replaceMap(ruleValidations, snapshot.ruleValidations);
+  replaceMap(ruleVotes, snapshot.ruleVotes);
+  replaceMap(settlementTransitions, snapshot.settlementTransitions);
+  replaceMap(turnRolloverSettlements, snapshot.turnRolloverSettlements);
+  replaceMap(turnRollovers, snapshot.turnRollovers);
+  replaceMap(verificationJobs, snapshot.verificationJobs);
+  replaceMap(verificationResults, snapshot.verificationResults);
+  replaceMap(voterRewardRecords, snapshot.voterRewardRecords);
+  replaceMap(winnerRecords, snapshot.winnerRecords);
+
+  auditLogOrder.splice(0, auditLogOrder.length, ...snapshot.auditLogOrder);
+  settlementTransitionOrder.splice(
+    0,
+    settlementTransitionOrder.length,
+    ...snapshot.settlementTransitionOrder,
+  );
+  lastAuditLogHash = snapshot.lastAuditLogHash;
+}
+
+async function initializeApiStatePersistence(databaseUrl: string) {
+  const pool = new Pool({ connectionString: databaseUrl });
+  await pool.query(API_STATE_POSTGRES_SCHEMA);
+  const result = await pool.query<{ snapshot_json: string }>(
+    "SELECT snapshot_json FROM api_state_snapshots WHERE snapshot_key = $1",
+    [API_STATE_SNAPSHOT_KEY],
+  );
+  const stored = result.rows[0]?.snapshot_json;
+  if (stored) {
+    restoreApiStateSnapshot(JSON.parse(stored) as ApiStateSnapshotV1);
+  }
+  apiStatePool = pool;
+}
+
+function queueApiStatePersistence() {
+  if (!apiStatePool) {
+    return Promise.reject(new Error("API_STATE_PERSISTENCE_NOT_READY"));
+  }
+  const snapshot = exportApiStateSnapshot();
+  apiStatePersistenceQueue = apiStatePersistenceQueue
+    .catch(() => undefined)
+    .then(async () => {
+      await apiStatePool?.query(
+        `INSERT INTO api_state_snapshots (snapshot_key, snapshot_json, updated_at)
+         VALUES ($1, $2, now())
+         ON CONFLICT (snapshot_key) DO UPDATE
+         SET snapshot_json = EXCLUDED.snapshot_json, updated_at = EXCLUDED.updated_at`,
+        [API_STATE_SNAPSHOT_KEY, JSON.stringify(snapshot)],
+      );
+    });
+  return apiStatePersistenceQueue;
+}
 const AUDIT_LOG_KINDS = new Set<AuditLogKind>([
   "compiler.validation",
   "guess.verification",
@@ -2659,11 +2809,33 @@ function sendJson(
   statusCode: number,
   body: unknown,
 ) {
-  response.writeHead(statusCode, {
-    "content-type": "application/json",
-    ...getCorsHeaders(request),
-  });
-  response.end(JSON.stringify(body));
+  const writeResponse = (resolvedStatus: number, resolvedBody: unknown) => {
+    response.writeHead(resolvedStatus, {
+      "content-type": "application/json",
+      ...getCorsHeaders(request),
+    });
+    response.end(JSON.stringify(resolvedBody));
+  };
+
+  if (
+    request.method === "POST" &&
+    statusCode >= 200 &&
+    statusCode < 300 &&
+    apiStatePool
+  ) {
+    void queueApiStatePersistence()
+      .then(() => writeResponse(statusCode, body))
+      .catch((error: unknown) => {
+        console.error("API state persistence failed", error);
+        writeResponse(503, {
+          error: "api_state_persistence_failed",
+          message: "The operation was not acknowledged because durable state persistence failed.",
+        });
+      });
+    return;
+  }
+
+  writeResponse(statusCode, body);
 }
 
 function sendNoContent(
@@ -3838,14 +4010,41 @@ function createClaimRecord(args: {
   const sourceRecordKey = getClaimSourceKey(args);
   const claimId = getClaimId(args);
   const existing = claimRecords.get(claimId);
-  if (existing) {
-    return existing;
-  }
-
   const minimumClaimThresholdLamports = getMinimumClaimThresholdLamports();
   const isClaimable = args.amountLamports >= minimumClaimThresholdLamports;
   const status: ClaimRecordStatus = isClaimable ? "available" : "unavailable";
   const statusReason = isClaimable ? "CLAIM_AVAILABLE" : "PAYOUT_BELOW_MINIMUM";
+
+  if (existing) {
+    if (existing.amountLamports === args.amountLamports) {
+      return existing;
+    }
+    const canReconcile =
+      existing.status === "available" ||
+      existing.status === "failed" ||
+      (existing.status === "unavailable" &&
+        existing.statusReason === "PAYOUT_BELOW_MINIMUM");
+    if (!canReconcile) {
+      throw new Error("CLAIM_RECONCILIATION_LOCKED");
+    }
+
+    return {
+      ...existing,
+      amountLamports: args.amountLamports,
+      failedAt: null,
+      status,
+      statusReason,
+      updatedAt: args.availableAt,
+      walletApproval: {
+        ...existing.walletApproval,
+        approvalStartedAt: null,
+        completedAt: null,
+        failureReason: null,
+        signature: null,
+        state: "not_requested",
+      },
+    };
+  }
 
   return {
     activeRuleId: args.activeRuleId,
@@ -5449,8 +5648,58 @@ type AiOperationRole =
 type ConfidenceBucket = "0_50" | "50_70" | "70_90" | "90_100";
 type ConfidenceBucketCounts = Record<ConfidenceBucket, number>;
 
-function cycleDurationHours(stepIndex: number): number {
-  const value = TURN_DURATION_CYCLE_HOURS[stepIndex];
+const DEFAULT_MANUAL_OPEN_DURATION_SECONDS = 3_600;
+
+function envFlag(value: string | undefined) {
+  return value === "1" || value?.toLowerCase() === "true";
+}
+
+export function resolveEffectiveTurnDurationCycleSeconds(
+  env: NodeJS.ProcessEnv = process.env,
+): readonly number[] {
+  if (envFlag(env.IDEALER_TURN_MANUAL_CONTROL_ENABLED)) {
+    const rawDuration =
+      env.IDEALER_TURN_MANUAL_OPEN_DURATION_SECONDS ??
+      String(DEFAULT_MANUAL_OPEN_DURATION_SECONDS);
+    const durationSeconds = Number(rawDuration);
+    if (!Number.isInteger(durationSeconds) || durationSeconds <= 0) {
+      throw new Error(
+        "IDEALER_TURN_MANUAL_OPEN_DURATION_SECONDS must be a positive integer number of seconds.",
+      );
+    }
+    return [durationSeconds, durationSeconds, durationSeconds, durationSeconds];
+  }
+
+  const rawScale = env.IDEALER_DEVNET_TURN_DURATION_SCALE_BPS;
+  if (!rawScale) {
+    return TURN_DURATION_CYCLE_SECONDS;
+  }
+
+  const scaleBps = Number(rawScale);
+  if (!Number.isInteger(scaleBps) || scaleBps <= 0 || scaleBps > 10_000) {
+    throw new Error(
+      "IDEALER_DEVNET_TURN_DURATION_SCALE_BPS must be an integer between 1 and 10000.",
+    );
+  }
+
+  return TURN_DURATION_CYCLE_SECONDS.map((duration) =>
+    Math.max(1, Math.floor((duration * scaleBps) / 10_000)),
+  );
+}
+
+function effectiveTurnDurationCycleHours(
+  env: NodeJS.ProcessEnv = process.env,
+) {
+  return resolveEffectiveTurnDurationCycleSeconds(env).map(
+    (duration) => duration / 3_600,
+  );
+}
+
+function cycleDurationHours(
+  stepIndex: number,
+  durationCycleHours: readonly number[],
+): number {
+  const value = durationCycleHours[stepIndex];
   if (value === undefined) {
     throw new Error(`Invalid turn-cycle step index ${stepIndex}.`);
   }
@@ -5782,29 +6031,61 @@ export function settleTurnRollover(
     throw new Error("INVALID_TURN_ID");
   }
 
-  // Idempotent: a turn's rollover settles exactly once. A retried settlement
-  // step must not recompute and overwrite the next turn's rollover record —
-  // expired unclaimed claims may have been added to it since the first pass.
-  const existingSettlement = turnRolloverSettlements.get(turnId);
-  if (existingSettlement) {
-    return existingSettlement;
-  }
-
   const winners = getWinnerSummary(turnId);
   const original = buildRolloverBucketSettlement(winners.original);
   const alternative = buildRolloverBucketSettlement(winners.alternative);
   const nextTurnId = turnId + 1;
+  const existingSettlement = turnRolloverSettlements.get(turnId);
 
-  // Merge additively with anything already recorded for the next turn (the
-  // expired-unclaimed-claims path writes there too); overwriting would drop it.
+  if (
+    existingSettlement &&
+    existingSettlement.original.rolloverLamports ===
+      original.rolloverLamports &&
+    existingSettlement.alternative.rolloverLamports ===
+      alternative.rolloverLamports
+  ) {
+    return existingSettlement;
+  }
+
+  if (
+    existingSettlement &&
+    listClaimRecords({ turnId }).some(
+      (claim) =>
+        claim.status === "claimed" ||
+        claim.status === "pending_wallet_approval",
+    )
+  ) {
+    throw new Error("ROLLOVER_RECONCILIATION_LOCKED");
+  }
+
+  // Merge additively with anything already recorded for the next turn. When a
+  // late on-chain receipt changes winner accounting, remove only this turn's
+  // prior contribution before adding the corrected value. This preserves
+  // unrelated additions such as expired unclaimed claims.
   const recordedForNext = getTurnRollover(nextTurnId);
+  const priorOriginalLamports =
+    existingSettlement?.original.rolloverLamports ?? 0;
+  const priorAlternativeLamports =
+    existingSettlement?.alternative.rolloverLamports ?? 0;
+  const reconciledOriginalLamports =
+    (recordedForNext?.originalRolloverLamports ?? 0) -
+    priorOriginalLamports +
+    original.rolloverLamports;
+  const reconciledAlternativeLamports =
+    (recordedForNext?.alternativeRolloverLamports ?? 0) -
+    priorAlternativeLamports +
+    alternative.rolloverLamports;
+  assertNonNegativeSafeInteger(
+    reconciledOriginalLamports,
+    "reconciled_original_rollover_lamports",
+  );
+  assertNonNegativeSafeInteger(
+    reconciledAlternativeLamports,
+    "reconciled_alternative_rollover_lamports",
+  );
   saveTurnRollover({
-    alternativeRolloverLamports:
-      (recordedForNext?.alternativeRolloverLamports ?? 0) +
-      alternative.rolloverLamports,
-    originalRolloverLamports:
-      (recordedForNext?.originalRolloverLamports ?? 0) +
-      original.rolloverLamports,
+    alternativeRolloverLamports: reconciledAlternativeLamports,
+    originalRolloverLamports: reconciledOriginalLamports,
     recordedAt: settledAt,
     sourceTurnId: turnId,
     turnId: nextTurnId,
@@ -6025,7 +6306,8 @@ export function getRoundSummary(
     (transition) => transition.toState === "CLOSED",
   );
 
-  const cycleLength = TURN_DURATION_CYCLE_HOURS.length;
+  const durationCycleHours = effectiveTurnDurationCycleHours();
+  const cycleLength = durationCycleHours.length;
   const stepIndex = (turnId - 1) % cycleLength;
   const nextStepIndex = turnId % cycleLength;
   const guessSol = lamportsToSol(
@@ -6056,9 +6338,9 @@ export function getRoundSummary(
   return {
     activity: getActivityEvents(turnId),
     cycle: {
-      durationHours: cycleDurationHours(stepIndex),
-      nextDurationHours: cycleDurationHours(nextStepIndex),
-      pattern: TURN_DURATION_CYCLE_HOURS,
+      durationHours: cycleDurationHours(stepIndex, durationCycleHours),
+      nextDurationHours: cycleDurationHours(nextStepIndex, durationCycleHours),
+      pattern: durationCycleHours,
       stepIndex,
     },
     claims: getClaimSummary({ turnId }),
@@ -7815,32 +8097,19 @@ async function checkRedis(redisUrl: string): Promise<"ok" | "error"> {
 }
 
 function getEffectiveTurnDurationHealth() {
-  const rawScale = process.env.IDEALER_DEVNET_TURN_DURATION_SCALE_BPS;
-  if (!rawScale) {
-    return {
-      turnDurationCycleHours: TURN_DURATION_CYCLE_HOURS,
-      turnDurationCycleSeconds: TURN_DURATION_CYCLE_SECONDS,
-      turnDurationScaleBps: null,
-    };
-  }
-
-  const scaleBps = Number(rawScale);
-  if (!Number.isInteger(scaleBps) || scaleBps <= 0 || scaleBps > 10_000) {
-    throw new Error(
-      "IDEALER_DEVNET_TURN_DURATION_SCALE_BPS must be an integer between 1 and 10000.",
-    );
-  }
-
-  const turnDurationCycleSeconds = TURN_DURATION_CYCLE_SECONDS.map((duration) =>
-    Math.max(1, Math.floor((duration * scaleBps) / 10_000)),
+  const manualControlEnabled = envFlag(
+    process.env.IDEALER_TURN_MANUAL_CONTROL_ENABLED,
   );
+  const turnDurationCycleSeconds = resolveEffectiveTurnDurationCycleSeconds();
 
   return {
     turnDurationCycleHours: turnDurationCycleSeconds.map(
       (duration) => duration / 3_600,
     ),
     turnDurationCycleSeconds,
-    turnDurationScaleBps: scaleBps,
+    turnDurationScaleBps: manualControlEnabled
+      ? null
+      : Number(process.env.IDEALER_DEVNET_TURN_DURATION_SCALE_BPS) || null,
   };
 }
 
@@ -7884,6 +8153,13 @@ function isMainModule() {
 if (isMainModule()) {
   const port = Number(process.env.PORT ?? 3002);
   const host = process.env.HOST ?? "0.0.0.0";
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error(
+      "DATABASE_URL is required because operational API state must be durable.",
+    );
+  }
+  const persistenceReady = initializeApiStatePersistence(databaseUrl);
 
   const server = createServer((request, response) => {
     const url = new URL(
@@ -9318,10 +9594,17 @@ if (isMainModule()) {
     sendJson(request, response, 404, { error: "not_found" });
   });
 
-  server.listen(port, host, () => {
-    console.log(`@idealer/api listening on ${host}:${port}`);
-    void warmDealerModels();
-  });
+  void persistenceReady
+    .then(() => {
+      server.listen(port, host, () => {
+        console.log(`@idealer/api listening on ${host}:${port}`);
+        void warmDealerModels();
+      });
+    })
+    .catch((error: unknown) => {
+      console.error("API state persistence initialization failed", error);
+      process.exitCode = 1;
+    });
 }
 
 // On boot, load the dealer (and guardian) models into Ollama so the first

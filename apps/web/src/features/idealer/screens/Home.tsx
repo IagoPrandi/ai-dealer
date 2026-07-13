@@ -265,7 +265,7 @@ export function HomeScreen() {
 
         {/* PREVIOUS ROUND RESULT — hairline row, not a balloon */}
         {showResultLink ? (
-          <button onClick={() => go("result")} className="ide-listrow" style={{ marginBottom: 26, padding: "15px 2px", borderTop: "1px solid var(--line)", borderBottom: "1px solid var(--line)" }} type="button">
+          <button onClick={() => go("result", { resultTurnId })} className="ide-listrow" style={{ marginBottom: 26, padding: "15px 2px", borderTop: "1px solid var(--line)", borderBottom: "1px solid var(--line)" }} type="button">
             <span style={{ width: 36, height: 36, borderRadius: 11, background: "var(--gold)", color: "#0B0910", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.trophy style={{ color: "#0B0910" }} /></span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 14.5, fontWeight: 700 }}>Result of round {fmtTurnId(resultTurnId)}</div>

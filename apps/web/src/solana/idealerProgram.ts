@@ -95,9 +95,16 @@ export interface TurnStateSnapshot {
   turnId: number;
 }
 
+export interface TurnOpeningGate {
+  blockingTurnId: number | null;
+  canOpen: boolean;
+  code: "PREVIOUS_TURN_SETTLEMENT_PENDING" | "READY_TO_OPEN";
+}
+
 export interface ActiveTurnSnapshot {
   globalConfig: GlobalConfigSnapshot;
   globalConfigAddress: ReturnType<typeof address>;
+  openingGate?: TurnOpeningGate;
   turnState: null | TurnStateSnapshot;
   turnStateAddress: null | ReturnType<typeof address>;
 }
@@ -492,11 +499,13 @@ export function getTurnActionReadiness({
   cutoffBps,
   globalConfig,
   nowSeconds = Math.floor(Date.now() / 1000),
+  openingGate,
   turn,
 }: {
   cutoffBps: number;
   globalConfig: GlobalConfigSnapshot;
   nowSeconds?: number;
+  openingGate?: TurnOpeningGate;
   turn: null | TurnStateSnapshot;
 }) {
   if (globalConfig.paused) {
@@ -508,6 +517,16 @@ export function getTurnActionReadiness({
   }
 
   if (!globalConfig.hasActiveTurn || globalConfig.activeTurnId <= 0) {
+    if (
+      openingGate?.code === "PREVIOUS_TURN_SETTLEMENT_PENDING" &&
+      openingGate.blockingTurnId
+    ) {
+      return {
+        code: "PREVIOUS_TURN_SETTLEMENT_PENDING",
+        message: `Round ${openingGate.blockingTurnId} is closed on-chain, but its settlement is incomplete. The next round will open after recovery finishes.`,
+        ok: false,
+      } as const;
+    }
     return {
       code: "NO_ACTIVE_TURN",
       message: "There is no active devnet turn. Open a turn before submitting.",

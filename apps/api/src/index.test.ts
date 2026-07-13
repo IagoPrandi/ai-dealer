@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { generateKeyPairSync, sign } from "node:crypto";
 import { test } from "node:test";
 import {
+  API_STATE_POSTGRES_SCHEMA,
   M3_7_POSTGRES_AUDIT_SCHEMA,
   authorizeOperatorAiRequest,
   buildOperatorAiAccessMessage,
@@ -14,6 +15,7 @@ import {
   createOperatorAiAccessChallenge,
   createClaimRecordsForTurn,
   createGuessVerificationJobsForTurn,
+  exportApiStateSnapshot,
   getAuditLog,
   getClaimSummary,
   getAllowedMethodsForPath,
@@ -27,6 +29,7 @@ import {
   getRewardSummary,
   getActivityEvents,
   getDefaultActiveTurnId,
+  getGuessReceipt,
   getRolloverActivityEvents,
   getRoundSummary,
   getRuleRemovalActivityEvents,
@@ -50,8 +53,10 @@ import {
   recordSettlementTransition,
   listSettlementTransitions,
   removeRule,
+  resolveEffectiveTurnDurationCycleSeconds,
   RuleRemovalRejectedError,
   resetApiStateForTests,
+  restoreApiStateSnapshot,
   runRuleValidationForProposal,
   saveDraw,
   saveGuessReceipt,
@@ -83,6 +88,37 @@ const wallet = "4bYqf3rJ7m2nQh9sV1xCH8kLpWtD6eZaUg5oNbMcXyTH";
 const walletTwo = "5bYqf3rJ7m2nQh9sV1xCH8kLpWtD6eZaUg5oNbMcXyTJ";
 const walletThree = "6bYqf3rJ7m2nQh9sV1xCH8kLpWtD6eZaUg5oNbMcXyTK";
 const base58 = "ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd";
+
+test("effective turn duration follows the isolated dev-cycle configuration", () => {
+  assert.deepEqual(resolveEffectiveTurnDurationCycleSeconds({}), [
+    86_400,
+    86_400,
+    86_400,
+    86_400,
+  ]);
+  assert.deepEqual(
+    resolveEffectiveTurnDurationCycleSeconds({
+      IDEALER_DEVNET_TURN_DURATION_SCALE_BPS: "139",
+    }),
+    [1_200, 1_200, 1_200, 1_200],
+  );
+  assert.deepEqual(
+    resolveEffectiveTurnDurationCycleSeconds({
+      IDEALER_DEVNET_TURN_DURATION_SCALE_BPS: "10000",
+      IDEALER_TURN_MANUAL_CONTROL_ENABLED: "true",
+      IDEALER_TURN_MANUAL_OPEN_DURATION_SECONDS: "1200",
+    }),
+    [1_200, 1_200, 1_200, 1_200],
+  );
+  assert.throws(
+    () =>
+      resolveEffectiveTurnDurationCycleSeconds({
+        IDEALER_TURN_MANUAL_CONTROL_ENABLED: "true",
+        IDEALER_TURN_MANUAL_OPEN_DURATION_SECONDS: "invalid",
+      }),
+    /must be a positive integer/,
+  );
+});
 
 function hashArray(byte: number) {
   return Array.from({ length: 32 }, () => byte);
@@ -1326,6 +1362,28 @@ test("default active turn follows the newest projected round", () => {
   assert.equal(getRoundSummary(getDefaultActiveTurnId()).status, "completed");
 });
 
+test("operational API state survives snapshot export and restore", () => {
+  resetApiStateForTests();
+  const turnId = 4_201;
+  saveReceiptForWallet(turnId, wallet, [1, 2, 3, 4, 5, 6]);
+  saveFulfilledDraw(turnId);
+
+  const snapshot = exportApiStateSnapshot();
+  resetApiStateForTests();
+  assert.equal(getGuessReceipt(turnId, wallet), null);
+
+  restoreApiStateSnapshot(snapshot);
+  assert.deepEqual(getGuessReceipt(turnId, wallet)?.numbers, [1, 2, 3, 4, 5, 6]);
+  assert.deepEqual(getRoundSummary(turnId, turnId).draw?.drawResult, [
+    1, 2, 3, 4, 5, 6,
+  ]);
+  assert.match(
+    API_STATE_POSTGRES_SCHEMA,
+    /CREATE TABLE IF NOT EXISTS api_state_snapshots/,
+  );
+  assert.match(API_STATE_POSTGRES_SCHEMA, /snapshot_json text NOT NULL/);
+});
+
 test("round summary uses the caller-provided active turn id for current status", () => {
   resetApiStateForTests();
 
@@ -1750,6 +1808,44 @@ test("rollover settlement adds to a pre-existing next-turn record instead of ove
   const accounting341 = getPrizePoolAccounting(341);
   assert.equal(accounting341.buckets.original.rolloverLamports, 6_750_000);
   assert.equal(accounting341.buckets.alternative.rolloverLamports, 4_750_000);
+});
+
+test("rollover settlement reconciles late verification without dropping unrelated additions", () => {
+  resetApiStateForTests();
+  recordNoWinnerTurn(332, wallet);
+  const first = settleTurnRollover(332, "2026-06-12T12:18:00.000Z");
+
+  saveTurnRollover({
+    alternativeRolloverLamports:
+      first.alternative.rolloverLamports + 1_000_000,
+    originalRolloverLamports: first.original.rolloverLamports + 2_000_000,
+    recordedAt: "2026-06-12T12:19:00.000Z",
+    sourceTurnId: 305,
+    turnId: 333,
+  });
+  saveReceiptForWallet(332, walletTwo, [10, 20, 30, 40, 50, 60]);
+  const lateJob = createGuessVerificationJobsForTurn(332).jobs.find(
+    (job) => job.payload.wallet === walletTwo,
+  );
+  assert.ok(lateJob);
+  saveGuessVerificationResult(
+    resultForJob({
+      alternative: "WIN",
+      jobId: lateJob.id,
+      original: "WIN",
+      player: walletTwo,
+      resultByte: "d",
+      turnId: 332,
+    }),
+  );
+  calculateAndStoreWinnerRecords(332, "2026-06-12T12:20:00.000Z");
+
+  const reconciled = settleTurnRollover(332, "2026-06-12T12:21:00.000Z");
+  const accounting = getPrizePoolAccounting(333);
+  assert.equal(reconciled.original.rolloverLamports, 0);
+  assert.equal(reconciled.alternative.rolloverLamports, 0);
+  assert.equal(accounting.buckets.original.rolloverLamports, 2_000_000);
+  assert.equal(accounting.buckets.alternative.rolloverLamports, 1_000_000);
 });
 
 test("M9.3 rounding dust rolls over partially while no-winner bucket rolls over totally", () => {
@@ -2178,6 +2274,58 @@ test("M9.3 minimum payout and expired unclaimed winner claims roll over safely",
       }),
     /CLAIM_WINDOW_EXPIRED/,
   );
+});
+
+test("unclaimed payout reconciles when a late receipt changes the winner pool", () => {
+  resetApiStateForTests();
+  saveReceiptForWallet(622, wallet, [1, 2, 3, 4, 5, 6]);
+  saveFulfilledDraw(622);
+  const firstJob = createGuessVerificationJobsForTurn(622).jobs[0];
+  assert.ok(firstJob);
+  saveGuessVerificationResult(
+    resultForJob({
+      alternative: "NONE",
+      jobId: firstJob.id,
+      original: "WIN",
+      player: wallet,
+      resultByte: "e",
+      turnId: 622,
+    }),
+  );
+  calculateAndStoreWinnerRecords(622, "2026-06-12T12:18:00.000Z");
+  const initialClaim = createClaimRecordsForTurn(
+    622,
+    "2026-06-12T12:20:00.000Z",
+  ).claims.find((claim) => claim.kind === "winner_payout");
+  assert.ok(initialClaim);
+
+  saveReceiptForWallet(622, walletTwo, [10, 20, 30, 40, 50, 60]);
+  const lateJob = createGuessVerificationJobsForTurn(622).jobs.find(
+    (job) => job.payload.wallet === walletTwo,
+  );
+  assert.ok(lateJob);
+  saveGuessVerificationResult(
+    resultForJob({
+      alternative: "NONE",
+      jobId: lateJob.id,
+      original: "LOSE",
+      player: walletTwo,
+      resultByte: "f",
+      turnId: 622,
+    }),
+  );
+  calculateAndStoreWinnerRecords(622, "2026-06-12T12:21:00.000Z");
+  const reconciledClaim = createClaimRecordsForTurn(
+    622,
+    "2026-06-12T12:22:00.000Z",
+  ).claims.find((claim) => claim.claimId === initialClaim.claimId);
+
+  assert.ok(reconciledClaim);
+  assert.equal(
+    reconciledClaim.amountLamports > initialClaim.amountLamports,
+    true,
+  );
+  assert.equal(reconciledClaim.createdAt, initialClaim.createdAt);
 });
 
 test("player claims summary aggregates a wallet's claims across turns", () => {

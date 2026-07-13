@@ -54,6 +54,25 @@ export interface ActiveTurnView {
   state: TurnState;
 }
 
+export function resolveResultSelection({
+  currentResultTurnId,
+  navigatingToResult,
+  requestedResultTurnId,
+}: {
+  currentResultTurnId: number | null;
+  navigatingToResult: boolean;
+  requestedResultTurnId?: number;
+}) {
+  if (!navigatingToResult) {
+    return null;
+  }
+  return requestedResultTurnId !== undefined &&
+    Number.isInteger(requestedResultTurnId) &&
+    requestedResultTurnId > 0
+    ? requestedResultTurnId
+    : currentResultTurnId;
+}
+
 export function resolveVisibleTurnId(snapshot: ActiveTurnSnapshot) {
   if (
     snapshot.globalConfig.hasActiveTurn &&
@@ -82,6 +101,7 @@ export function useActiveTurn(): ActiveTurnView {
       const readiness = getTurnActionReadiness({
         cutoffBps: snapshot.globalConfig.guessCutoffBps,
         globalConfig: snapshot.globalConfig,
+        ...(snapshot.openingGate ? { openingGate: snapshot.openingGate } : {}),
         turn: snapshot.turnState,
       });
       setView({
