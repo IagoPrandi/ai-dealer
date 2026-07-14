@@ -28,6 +28,7 @@ import {
   externalDependencyGateText,
   hasExternalDependency,
   hasInvalidConstraint,
+  looksLikeOrderedTensRangeRule,
   ruleAstSchema,
   resolveRankingWinners,
   validateAndPrecompileRule,
@@ -53,6 +54,7 @@ import {
   resolveTranslateToEnglish,
   RuleAgentError,
   translateRuleToEnglish,
+  type RuleAgentInterpretation,
 } from "./llm.js";
 import {
   checkGroundedness,
@@ -152,6 +154,7 @@ export interface RulePreflightResult {
   sanitizedText: string;
   sanitizedTextHash: readonly number[];
   suggestedRewrite?: string;
+  suggestedRewrites?: readonly string[];
   title: string;
   tokenCount: number;
 }
@@ -1524,7 +1527,38 @@ function createRuleId() {
   return Date.now() * 1_000 + randomInt(0, 1_000);
 }
 
+function createKnownRuleInterpretation(
+  sourceText: string,
+): RuleAgentInterpretation | null {
+  if (!looksLikeOrderedTensRangeRule(sourceText)) {
+    return null;
+  }
+  return {
+    addedOperationalClauses: [],
+    clarificationQuestions: [],
+    clarityNote: "",
+    dealerMessage:
+      "Got it - all six corresponding positions must stay in the same tens range.",
+    needsClarification: false,
+    normalizedText:
+      "A guess wins if all six guessed numbers are in the same tens range as the drawn number in the corresponding position.",
+    officialInterpretation:
+      "For each of the six positions, divide the guessed number and the drawn number by 10 using integer division; the guess wins only if all six resulting values are equal position by position.",
+    suggestedRewrites: [],
+    title: "Ordered Tens Ranges",
+  };
+}
+
+export function enforceKnownRuleInterpretation(
+  sourceText: string,
+  interpretation: RuleAgentInterpretation,
+): RuleAgentInterpretation {
+  return createKnownRuleInterpretation(sourceText) ?? interpretation;
+}
+
 interface RuleRefinementFeedbackInput {
+  agentClarificationQuestions?: readonly string[];
+  agentSuggestedRewrites?: readonly string[];
   clarityNote: string;
   compileText: string;
   officialInterpretation: string;
@@ -1541,6 +1575,12 @@ interface RuleRefinementFeedback {
   refinementFocus: readonly string[];
   refinementQuestions: readonly string[];
   suggestedRewrite?: string;
+  suggestedRewrites: readonly string[];
+}
+
+interface IntentSpecificRefinement {
+  questions: readonly string[];
+  rewrites: readonly string[];
 }
 
 function looksLikeUnorderedSameSetRule(text: string) {
@@ -1564,14 +1604,115 @@ function looksLikeAmbiguousDigitExample(text: string) {
   return mentionsUnqualifiedDigits || splitsAPlayedNumberIntoDigits;
 }
 
-function inferSuggestedRewrite(text: string): string | undefined {
+function inferIntentSpecificRefinement(text: string): IntentSpecificRefinement {
+  if (looksLikeOrderedTensRangeRule(text)) {
+    return {
+      questions: [],
+      rewrites: [
+        "Win if all six guessed numbers are in the same tens range as the drawn number in the corresponding position.",
+      ],
+    };
+  }
   if (looksLikeUnorderedSameSetRule(text)) {
-    return "Win if all 6 guessed numbers appear in the draw, regardless of order.";
+    return {
+      questions: [
+        "Should this require all six guessed numbers to appear in the draw?",
+        "Should order be ignored completely?",
+      ],
+      rewrites: [
+        "Win if all six guessed numbers appear in the draw, regardless of order.",
+      ],
+    };
   }
   if (looksLikeAmbiguousDigitExample(text)) {
-    return "Win if at least one guessed number shares either its tens digit or its units digit with any drawn number, regardless of order.";
+    return {
+      questions: [
+        "Should matching compare tens digits, units digits, or either digit?",
+      ],
+      rewrites: [
+        "Win if at least one guessed number shares either its tens digit or its units digit with any drawn number, regardless of order.",
+        "Win if at least one guessed number has the same tens digit as any drawn number, regardless of order.",
+        "Win if at least one guessed number has the same units digit as any drawn number, regardless of order.",
+      ],
+    };
   }
-  return undefined;
+  return { questions: [], rewrites: [] };
+}
+
+function dedupeBoundedStrings(values: readonly string[], limit = 3): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const rawValue of values) {
+    const value = rawValue.trim();
+    const key = value.toLowerCase();
+    if (!value || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push(value);
+    if (result.length === limit) {
+      break;
+    }
+  }
+  return result;
+}
+
+function isIntentPreservingRewrite(source: string, rewrite: string): boolean {
+  const normalizedSource = source.toLowerCase();
+  const normalizedRewrite = rewrite.toLowerCase();
+  if (
+    !/\b(guess|guessed|pick|picked|ticket|my numbers?|your numbers?)\b/.test(normalizedRewrite) ||
+    !/\b(draw|drawn)\b/.test(normalizedRewrite)
+  ) {
+    return false;
+  }
+  if (looksLikeOrderedTensRangeRule(source)) {
+    return (
+      /\b(all six|all|every|each)\b/.test(normalizedRewrite) &&
+      /\btens range\b/.test(normalizedRewrite) &&
+      /\b(corresponding|same) position\b/.test(normalizedRewrite)
+    );
+  }
+
+  const requiredCues: Array<[RegExp, RegExp]> = [
+    [/\b(regardless of order|any order|unordered|order does not matter)\b/, /\b(regardless of order|any order|unordered|order is ignored)\b/],
+    [/\b(same|corresponding) (order|position|positions|slot|slots)\b/, /\b(same|corresponding) (order|position|positions|slot|slots)\b/],
+    [/\b(sum|total)\b/, /\b(sum|total)\b/],
+    [/\b(units?|last) digit\b/, /\b(units?|last) digit\b/],
+    [/\btens? digit\b/, /\btens? digit\b/],
+    [/\b(even|odd)\b/, /\b(even|odd)\b/],
+    [/\b(miss|misses|missed|wrong|incorrect)\b/, /\b(miss|misses|missed|not appear|outside the draw)\b/],
+  ];
+  if (
+    requiredCues.some(
+      ([sourcePattern, rewritePattern]) =>
+        sourcePattern.test(normalizedSource) && !rewritePattern.test(normalizedRewrite),
+    )
+  ) {
+    return false;
+  }
+
+  for (const comparator of ["at least", "at most", "exactly"] as const) {
+    const match = normalizedSource.match(
+      new RegExp(`\\b${comparator}\\s+(zero|one|two|three|four|five|six|[0-6])\\b`),
+    );
+    if (match?.[1] && !normalizedRewrite.includes(`${comparator} ${match[1]}`)) {
+      return false;
+    }
+  }
+
+  const sourceAnchors = [
+    /\b(match|matches|appear|appears|intersection)\b/,
+    /\b(digit|digits|tens|units|last digit)\b/,
+    /\b(sum|total)\b/,
+    /\b(distance|within|close|near)\b/,
+    /\b(even|odd|parity)\b/,
+    /\b(position|positions|order|ordered)\b/,
+    /\b(miss|misses|wrong|incorrect)\b/,
+  ];
+  return sourceAnchors.some(
+    (anchor) => anchor.test(normalizedSource) && anchor.test(normalizedRewrite),
+  );
 }
 
 export function buildRuleRefinementFeedback(
@@ -1579,10 +1720,20 @@ export function buildRuleRefinementFeedback(
 ): RuleRefinementFeedback {
   const reasonCodes = new Set(input.reasonCodes);
   const focus = new Set<string>();
-  const questions: string[] = [];
-  const suggestedRewrite =
-    inferSuggestedRewrite(input.compileText) ??
-    inferSuggestedRewrite(input.sanitizedText);
+  const sourceText = `${input.compileText} ${input.sanitizedText}`;
+  const deterministicRefinement = inferIntentSpecificRefinement(sourceText);
+  const questions = dedupeBoundedStrings([
+    ...deterministicRefinement.questions,
+    ...(input.agentClarificationQuestions ?? []),
+  ]);
+  const agentRewrites = (input.agentSuggestedRewrites ?? []).filter((rewrite) =>
+    isIntentPreservingRewrite(sourceText, rewrite),
+  );
+  const suggestedRewrites = dedupeBoundedStrings([
+    ...deterministicRefinement.rewrites,
+    ...agentRewrites,
+  ]);
+  const suggestedRewrite = suggestedRewrites[0];
   const deterministicCheck = validateAndPrecompileRule({
     officialInterpretation: input.officialInterpretation,
     originalText: input.sanitizedText,
@@ -1622,21 +1773,8 @@ export function buildRuleRefinementFeedback(
     );
   }
 
-  if (looksLikeAmbiguousDigitExample(input.compileText) || looksLikeAmbiguousDigitExample(input.sanitizedText)) {
-    questions.push("Should matching compare tens digits, units digits, or either digit?");
-    questions.push("How many guessed numbers must have a matching digit to win?");
-    questions.push("Should draw order and number positions be ignored?");
-  } else if (
-    looksLikeUnorderedSameSetRule(input.compileText) ||
-    looksLikeUnorderedSameSetRule(input.sanitizedText)
-  ) {
-    questions.push("Should this require all 6 guessed numbers to appear in the draw?");
-    questions.push("Should order be ignored completely?");
-  }
-
   if (questions.length === 0) {
-    questions.push("What exact count or comparison should make a guess win?");
-    questions.push("Should order or positions matter, or should matching ignore order?");
+    questions.push("Which exact comparison in this rule still needs to be defined?");
   }
 
   if (deterministicCheck.decision === "VALID" && deterministicCheck.artifact) {
@@ -1653,15 +1791,15 @@ export function buildRuleRefinementFeedback(
 
   const reasonSummary =
     "Rule needs refinement before payment: the compiler could not turn it into a safe executable rule from this wording.";
-  const rewriteLine = suggestedRewrite
-    ? ` Suggested rewrite: "${suggestedRewrite}"`
+  const rewriteLine = suggestedRewrites.length > 0
+    ? ` Choose one of the ${suggestedRewrites.length} intent-preserving rewrites or write your own.`
     : "";
   const dealerMessage = `${reasonSummary}${rewriteLine} Answer the clarification questions by sending a revised rule.`;
   const clarityNote = [
     input.clarityNote || input.reasonSummary,
     `Refine: ${[...focus].join(" ")}`,
     `Questions: ${questions.join(" ")}`,
-    suggestedRewrite ? `Try: ${suggestedRewrite}` : "",
+    suggestedRewrites.length > 0 ? `Rewrites: ${suggestedRewrites.join(" | ")}` : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -1673,6 +1811,7 @@ export function buildRuleRefinementFeedback(
     refinementFocus: [...focus],
     refinementQuestions: questions,
     ...(suggestedRewrite ? { suggestedRewrite } : {}),
+    suggestedRewrites,
   };
 }
 
@@ -1762,19 +1901,24 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
   // multilingual model reads the original directly — and the rule-authoring skill
   // carries a Portuguese trigger glossary — so this step can be turned off
   // (LLM_TRANSLATE_TO_ENGLISH=false) to save a call without losing consistency.
-  const compileText = resolveTranslateToEnglish()
-    ? await translateRuleToEnglish(sanitizedText, agentConfig)
-    : sanitizedText;
+  const knownInterpretation = createKnownRuleInterpretation(sanitizedText);
+  const compileText =
+    knownInterpretation?.normalizedText ??
+    (resolveTranslateToEnglish()
+      ? await translateRuleToEnglish(sanitizedText, agentConfig)
+      : sanitizedText);
   const ruleId = createRuleId();
 
   // A full dealer pass for a given model: interpret (human message), compile the
   // AST from the rule text (skill-guided), and check groundedness.
   const dealerPass = async (model: string) => {
     const passConfig = { ...agentConfig, model };
-    const interpretation = await interpretRuleWithAgent(
-      compileText,
-      passConfig,
-    );
+    const interpretation =
+      knownInterpretation ??
+      enforceKnownRuleInterpretation(
+        `${compileText} ${sanitizedText}`,
+        await interpretRuleWithAgent(compileText, passConfig),
+      );
     const astProvider: RuleAstProvider = async ({ prompt }) =>
       compileRuleToAst(prompt, passConfig);
     const validation = await compileRuleArtifact(
@@ -1873,6 +2017,8 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
   const refinementFeedback =
     needsClarification && !reproposalBlocked && !guardianBlocked
       ? buildRuleRefinementFeedback({
+          agentClarificationQuestions: interpretation.clarificationQuestions,
+          agentSuggestedRewrites: interpretation.suggestedRewrites,
           clarityNote: interpretation.clarityNote,
           compileText,
           officialInterpretation,
@@ -1894,9 +2040,10 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
     ruleId,
     sanitizedText,
     suggestedRewrite: refinementFeedback?.suggestedRewrite ?? null,
+    suggestedRewrites: refinementFeedback?.suggestedRewrites ?? [],
     title: interpretation.title,
     tokenCount,
-    version: 6,
+    version: 7,
   });
 
   return {
@@ -1939,6 +2086,9 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
     sanitizedTextHash: hashBytes(sanitizedText),
     ...(refinementFeedback?.suggestedRewrite
       ? { suggestedRewrite: refinementFeedback.suggestedRewrite }
+      : {}),
+    ...(refinementFeedback
+      ? { suggestedRewrites: refinementFeedback.suggestedRewrites }
       : {}),
     title: interpretation.title,
     tokenCount,

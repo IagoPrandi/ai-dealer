@@ -1044,6 +1044,88 @@ function normalizeRuleText(value: string) {
     .toLowerCase();
 }
 
+function extractNumberRuns(value: string): number[][] {
+  return [...value.matchAll(/\b(?:100|[1-9]?\d)(?:[\s,;/|-]+(?:100|[1-9]?\d)){1,5}\b/g)]
+    .map((match) =>
+      (match[0].match(/\b(?:100|[1-9]?\d)\b/g) ?? []).map(Number),
+    )
+    .filter(
+      (run) =>
+        run.length >= 2 &&
+        run.length <= 6 &&
+        run.every((number) => number >= 1 && number <= 100),
+    );
+}
+
+function hasTensProjectionExample(value: string): boolean {
+  const runs = extractNumberRuns(value);
+  return runs.some((left, leftIndex) =>
+    runs.slice(leftIndex + 1).some(
+      (right) =>
+        left.length === right.length &&
+        left.some((number, index) => number !== right[index]) &&
+        left.every(
+          (number, index) =>
+            Math.floor(number / 10) === Math.floor((right[index] ?? -1) / 10),
+        ),
+    ),
+  );
+}
+
+/**
+ * Detects an ordered tens-range rule without confusing Brazilian lottery
+ * "dezena" (normally a whole drawn number) with a numeric range. The ambiguous
+ * Portuguese term is accepted only when the player's example proves the
+ * projection, such as 12/11, 31/30, 24/29 -> 10,30,20.
+ */
+export function looksLikeOrderedTensRangeRule(value: string): boolean {
+  const text = normalizeRuleText(value);
+  const hasAllPositions =
+    /\b(all(?: six)?|every|each|todas?|todos?|seis)\b/.test(text);
+  const hasPositionRelation =
+    /\b(same|matching|corresponding)\s+(order|position|positions|slot|slots)\b/.test(text) ||
+    /\b(mesma\s+ordem|na\s+mesma\s+ordem|posicoes?\s+correspondentes?)\b/.test(text);
+  const hasExplicitRange =
+    /\b(tens|ten-number|decade)\s+(range|ranges|group|groups|bucket|buckets)\b/.test(text) ||
+    /\b(faixas?|grupos?)\s+(?:de|das?)\s+dezenas?\b/.test(text);
+  const hasPortugueseExample =
+    /\bdezenas?\b/.test(text) && hasTensProjectionExample(text);
+  return hasAllPositions && hasPositionRelation && (hasExplicitRange || hasPortugueseExample);
+}
+
+function parseOrderedTensRangeRule(text: string): RuleAst | null {
+  if (!looksLikeOrderedTensRangeRule(text)) {
+    return null;
+  }
+  return {
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "pairs_forall",
+        left: { kind: "source", source: "guess" },
+        right: { kind: "source", source: "draw" },
+        where: {
+          kind: "compare",
+          op: "eq",
+          left: {
+            kind: "arith",
+            op: "div",
+            left: { kind: "pair", side: "left" },
+            right: { kind: "lit", value: 10 },
+          },
+          right: {
+            kind: "arith",
+            op: "div",
+            left: { kind: "pair", side: "right" },
+            right: { kind: "lit", value: 10 },
+          },
+        },
+      },
+    },
+  };
+}
+
 function hasPattern(value: string, patterns: readonly RegExp[]) {
   return patterns.some((pattern) => pattern.test(value));
 }
@@ -1055,6 +1137,11 @@ function compileSupportedRule(text: string): RuleAst | null {
   const mostMatchesRanking = parseMostMatchesRankingRule(text);
   if (mostMatchesRanking) {
     return mostMatchesRanking;
+  }
+
+  const orderedTensRange = parseOrderedTensRangeRule(text);
+  if (orderedTensRange) {
+    return orderedTensRange;
   }
 
   // Newly-supported deterministic shapes (prompt-set 24/25/26/27/82/84). Placed

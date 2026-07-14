@@ -93,6 +93,10 @@ X = `reduce count`; "N smallest/largest" = `sort` + `slice`.
 - "same set of numbers, regardless of order" -> `count(intersection(guess,draw)) == 6`; never ordered equality or a ranking.
 - "sums are equal" -> `compare(sum(guess), eq, sum(draw))`.
 - "all six match in the same positions" -> `pairs_forall(guess, draw, pair.left == pair.right)`.
+- "all six are in the same tens range in corresponding positions" ->
+  `pairs_forall(guess, draw, pair.left div 10 == pair.right div 10)`. This is a
+  tens-RANGE comparison (12 and 11 both map to 1), not full-number equality,
+  unordered digit matching, or the isolated tens digit (`100 div 10 == 10`).
 - "every pick is below the drawn number in the same position" -> `pairs_forall(guess, draw, left lt right)`.
 - "each pick within 5 of the same-position drawn number" -> `pairs_forall(guess, draw, abs(left - right) <= 5)`.
 - "at least/exactly N same-position matches" -> count with a pairwise 0/1 map:
@@ -149,6 +153,13 @@ draw in reverse" without exact positions or a threshold is ambiguous; ask.
 For "win if" wording, default to a predicate. Do not convert it into a ranking
 unless the player clearly asks for comparison against other guesses ("the most",
 "fewest", "closest among all players").
+
+When clarification is necessary, preserve four intent dimensions independently:
+quantity/comparator, compared property, positional/order relation, and
+polarity/direction. Vary only a dimension the player left ambiguous. Never
+replace the rule with a stock match-count example or invent a threshold. If no
+complete intent-preserving rewrite is possible, ask a focused question and emit
+no suggested rewrite.
 
 ## Tricky intents
 

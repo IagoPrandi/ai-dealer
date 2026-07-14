@@ -115,6 +115,7 @@ test("interpret harness teaches predicate min/max and casual threshold cases", a
             message: {
               content: JSON.stringify({
                 addedOperationalClauses: [],
+                clarificationQuestions: [],
                 clarityNote: "",
                 dealerMessage: "Compiled as a predicate.",
                 needsClarification: false,
@@ -122,6 +123,7 @@ test("interpret harness teaches predicate min/max and casual threshold cases", a
                   "A guess wins if the smallest guessed number equals the smallest drawn number.",
                 officialInterpretation:
                   "A guess wins if min(guess) equals min(draw).",
+                suggestedRewrites: [],
                 title: "Matching Minimums",
               }),
             },
@@ -150,6 +152,9 @@ test("interpret harness teaches predicate min/max and casual threshold cases", a
   assert.match(systemPrompt, /match the\s+draw in reverse/i);
   assert.match(systemPrompt, /concise 2-6 word English UI title/i);
   assert.match(systemPrompt, /normalizedText: the rule rewritten in clear English/i);
+  assert.match(systemPrompt, /quantity\/comparator, property being compared/i);
+  assert.match(systemPrompt, /never offer stock examples, generic match-count rules/i);
+  assert.match(systemPrompt, /draw 12 31 24 versus guess 11 30 29/i);
 });
 
 test("rule agent responses without a title fail closed", async () => {
@@ -161,11 +166,13 @@ test("rule agent responses without a title fail closed", async () => {
             message: {
               content: JSON.stringify({
                 addedOperationalClauses: [],
+                clarificationQuestions: [],
                 clarityNote: "",
                 dealerMessage: "Compiled as a predicate.",
                 needsClarification: false,
                 normalizedText: "A guess wins if one number matches.",
                 officialInterpretation: "Compare the six guess numbers with the draw.",
+                suggestedRewrites: [],
               }),
             },
           },
@@ -177,6 +184,36 @@ test("rule agent responses without a title fail closed", async () => {
   await assert.rejects(
     interpretRuleWithAgent("Win if one number matches.", CONFIG),
     /omitted the title/i,
+  );
+});
+
+test("rule agent responses without structured clarification arrays fail closed", async () => {
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                addedOperationalClauses: [],
+                clarityNote: "A threshold is missing.",
+                dealerMessage: "Please clarify the threshold.",
+                needsClarification: true,
+                normalizedText: "A guess wins if it is close to the draw.",
+                officialInterpretation:
+                  "The exact distance threshold has not been defined.",
+                title: "Distance Needs Detail",
+              }),
+            },
+          },
+        ],
+      }),
+      { status: 200 },
+    )) as typeof fetch;
+
+  await assert.rejects(
+    interpretRuleWithAgent("Win if my guess is close to the draw.", CONFIG),
+    /must return clarificationQuestions/i,
   );
 });
 

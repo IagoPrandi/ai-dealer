@@ -27,6 +27,9 @@ compositional core).
 "win if every guessed number is lower than the drawn number in the same position" =>
 {"schemaVersion":3,"result":{"type":"predicate","predicate":{"kind":"pairs_forall","left":{"kind":"source","source":"guess"},"right":{"kind":"source","source":"draw"},"where":{"kind":"compare","op":"lt","left":{"kind":"pair","side":"left"},"right":{"kind":"pair","side":"right"}}}}}
 
+"all six guessed numbers must be in the same tens range as the drawn number in the corresponding position" / "12 31 24 and 11 30 29 match as 10 30 20 in the same order" =>
+{"schemaVersion":3,"result":{"type":"predicate","predicate":{"kind":"pairs_forall","left":{"kind":"source","source":"guess"},"right":{"kind":"source","source":"draw"},"where":{"kind":"compare","op":"eq","left":{"kind":"arith","op":"div","left":{"kind":"pair","side":"left"},"right":{"kind":"lit","value":10}},"right":{"kind":"arith","op":"div","left":{"kind":"pair","side":"right"},"right":{"kind":"lit","value":10}}}}}}
+
 "win if the second guessed number equals the second drawn number" =>
 {"schemaVersion":3,"result":{"type":"predicate","predicate":{"kind":"compare","op":"eq","left":{"kind":"at","index":1,"of":{"kind":"source","source":"guess"}},"right":{"kind":"at","index":1,"of":{"kind":"source","source":"draw"}}}}}
 

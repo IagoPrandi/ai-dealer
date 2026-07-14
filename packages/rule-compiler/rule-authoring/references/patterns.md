@@ -93,6 +93,14 @@ When the surrounding text does not make the intent clear, DEFAULT to the
 drawn-number meaning (the dominant lottery usage) and proceed. Only treat it as the
 tens digit when the player explicitly says "digit / dígito / casa das dezenas".
 
+An explicit projection example overrides that default. If the player compares
+draw `12 31 24` with guess `11 30 29`, says every value must stay in the same
+order, and explains the match as `10 30 20`, they mean corresponding TENS RANGES:
+compare `guess[i] div 10 == draw[i] div 10` for all six positions. Do not compile
+this as exact full-number equality, an unordered digit intersection, or an
+"at least one" rule. This range rule puts `1-9` in quotient 0 and `100` in
+quotient 10; it is distinct from the isolated tens digit (`floor(n/10) mod 10`).
+
 ## Portuguese trigger glossary
 
 | Portuguese | Meaning | Maps to |

@@ -9,11 +9,13 @@ import { buildRuleCompilerSkillPrompt } from "@idealer/rule-compiler";
 
 export interface RuleAgentInterpretation {
   addedOperationalClauses: string[];
+  clarificationQuestions: string[];
   clarityNote: string;
   dealerMessage: string;
   needsClarification: boolean;
   normalizedText: string;
   officialInterpretation: string;
+  suggestedRewrites: string[];
   title: string;
 }
 
@@ -63,6 +65,17 @@ const SYSTEM_PROMPT = [
   "  objective and never make a vague rule objective without flagging it.",
   "- If the rule is too vague to interpret objectively, set needsClarification to",
   "  true and explain what is missing in clarityNote.",
+  "- Treat the player's explicit semantics as invariants along four dimensions:",
+  "  quantity/comparator, property being compared, positional/order relation,",
+  "  and polarity/direction. A clarification may vary only a dimension that is",
+  "  genuinely missing or ambiguous. Never drop, weaken, or invent one.",
+  "- When clarification is needed, return 1-3 short clarificationQuestions that",
+  "  name the missing dimensions and 0-3 suggestedRewrites. Every suggestion must",
+  "  be a complete executable rule derived from this player's rule, preserve every",
+  "  explicit invariant, and differ only on an ambiguity named by a question.",
+  "  Never offer stock examples, generic match-count rules, arbitrary thresholds,",
+  "  or unrelated replacement rules. If no faithful complete rewrite can be",
+  "  inferred, return an empty suggestedRewrites array.",
   "- Preserve polarity and direction EXACTLY. 'more/most' = maximize; 'fewer/",
   "  least' = minimize. 'miss/wrong/errar' means numbers in the guess that do NOT",
   "  appear in the draw — count those; never silently flip it to 'correct'.",
@@ -143,6 +156,11 @@ const SYSTEM_PROMPT = [
   "- 'dezena' is ambiguous: it can mean a drawn number (Brazilian lottery sense)",
   "  or the tens digit of a number. If the player's intent is unclear, set",
   "  needsClarification and ask which meaning they want.",
+  "- A same-order example such as draw 12 31 24 versus guess 11 30 29, explained",
+  "  as matching 10 30 20, is NOT full-number equality and is not unordered digit",
+  "  matching. It explicitly means that every corresponding pair belongs to the",
+  "  same tens range after integer division by 10. Preserve 'all' and the",
+  "  position-by-position order in both the normalized rule and its AST.",
   "- An example where a pick such as 12 is said to win after 10 and 20 are",
   "  drawn because of 'number 1' or 'number 2' is ambiguous. Ask whether the",
   "  player means the tens digit, units digit, or either digit; never infer it.",
@@ -150,7 +168,8 @@ const SYSTEM_PROMPT = [
   "Respond with a single JSON object and nothing else, using exactly these keys:",
   '{"title": string, "normalizedText": string, "officialInterpretation": string,',
   ' "addedOperationalClauses": string[], "needsClarification": boolean,',
-  ' "clarityNote": string, "dealerMessage": string}',
+  ' "clarityNote": string, "clarificationQuestions": string[],',
+  ' "suggestedRewrites": string[], "dealerMessage": string}',
   "- title: a concise 2-6 word English UI title that summarizes the executable",
   "  condition. It must describe the normalized rule, never copy the player's",
   "  prompt verbatim, and must not promise a winner when clarification is needed.",
@@ -171,7 +190,8 @@ const SYSTEM_PROMPT = [
   ' appear in the six-number official draw; the highest count wins.",',
   ' "addedOperationalClauses":["If two or more guesses tie on the count, the',
   ' earliest valid submission wins."],"needsClarification":false,',
-  ' "clarityNote":"","dealerMessage":"Got it - the guess matching the most',
+  ' "clarityNote":"","clarificationQuestions":[],"suggestedRewrites":[],',
+  ' "dealerMessage":"Got it - the guess matching the most',
   ' drawn numbers takes the round."}',
 ].join("\n");
 
@@ -425,8 +445,42 @@ function coerceInterpretation(value: unknown): RuleAgentInterpretation {
         .filter((clause) => clause.length > 0)
     : [];
 
+  const readRequiredStringArray = (
+    key: "clarificationQuestions" | "suggestedRewrites",
+    maxItemBytes: number,
+  ) => {
+    const candidate = record[key];
+    if (!Array.isArray(candidate) || candidate.length > 3) {
+      throw new RuleAgentError(
+        "RULE_AGENT_BAD_RESPONSE",
+        `The rule agent must return ${key} as an array with at most 3 items.`,
+      );
+    }
+    if (
+      candidate.some(
+        (item) =>
+          typeof item !== "string" ||
+          !item.trim() ||
+          Buffer.byteLength(item.trim(), "utf8") > maxItemBytes,
+      )
+    ) {
+      throw new RuleAgentError(
+        "RULE_AGENT_BAD_RESPONSE",
+        `The rule agent returned an invalid ${key} item.`,
+      );
+    }
+    return candidate.map((item) => (item as string).trim());
+  };
+
+  const clarificationQuestions = readRequiredStringArray(
+    "clarificationQuestions",
+    300,
+  );
+  const suggestedRewrites = readRequiredStringArray("suggestedRewrites", 800);
+
   return {
     addedOperationalClauses,
+    clarificationQuestions,
     clarityNote:
       typeof record.clarityNote === "string" ? record.clarityNote.trim() : "",
     dealerMessage:
@@ -436,6 +490,7 @@ function coerceInterpretation(value: unknown): RuleAgentInterpretation {
     needsClarification: record.needsClarification === true,
     normalizedText,
     officialInterpretation,
+    suggestedRewrites,
     title,
   };
 }
@@ -557,6 +612,9 @@ const TRANSLATE_SYSTEM_PROMPT = [
   "  number. Keep miss vs match intact.",
   "- logical connectors: 'e'=and, 'ou'=or — keep every clause.",
   "- thresholds: 'pelo menos N', 'N ou mais' stay as written.",
+  "- numeric examples and order/position words must remain intact. If 'dezena'",
+  "  is demonstrated by 12/11 -> 10, translate it as a tens range, not as an",
+  "  exact drawn number or an unordered digit match.",
   "Do not interpret, normalize, or add anything. If the text is already English,",
   "return it unchanged. Output ONLY the translated rule sentence, no quotes, no",
   "labels, no extra text.",

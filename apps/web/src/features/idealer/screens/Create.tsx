@@ -425,6 +425,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
       reproposalBlocked: snapshot.rule.reproposalBlocked ?? false,
       sanitizedText: snapshot.rule.sanitizedText,
       suggestedRewrite: snapshot.rule.suggestedRewrite ?? null,
+      suggestedRewrites: snapshot.rule.suggestedRewrites ?? null,
     });
   }, [openGuidance]);
 
@@ -479,6 +480,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
       currentRuleText: pendingRule?.sanitizedText ?? null,
       refinementQuestions: pendingRule?.refinementQuestions ?? null,
       suggestedRewrite: pendingRule?.suggestedRewrite ?? null,
+      suggestedRewrites: pendingRule?.suggestedRewrites ?? null,
     };
     const refinedDraft =
       !clarificationBudgetExhausted &&

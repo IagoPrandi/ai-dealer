@@ -101,6 +101,9 @@ test("the compile_rule_to_ast skill prompt is versioned and covers both rule mod
   assert.ok(prompt.includes('"up":1'));
   assert.ok(prompt.includes("first pick only needs to be higher"));
   assert.ok(prompt.includes("sum(guess) mod 10"));
+  assert.ok(prompt.includes("same tens range"));
+  assert.ok(prompt.includes("pair.left div 10 == pair.right div 10"));
+  assert.ok(prompt.includes("Never\nreplace the rule with a stock match-count example"));
   // And forbid external/unverifiable inputs.
   assert.ok(/wallets|votes|oracle|external/i.test(prompt));
 });
@@ -1114,6 +1117,38 @@ test("requires clarification when an example implies unspecified digit matching"
   assert.equal(result.decision, "INVALID");
   assert.equal(result.artifact, null);
   assert.ok(result.log.reasonCodes.includes("AMBIGUOUS_RULE"));
+});
+
+test("compiles an all-position tens-range example without turning it into exact equality", () => {
+  const result = validateAndPrecompileRule({
+    prompt:
+      "Vence quem acertar todas as dezenas na mesma ordem. Por exemplo, se sair 12 31 24 e eu jogar 11 30 29, eu venço pois acertei as dezenas na ordem (10 30 20).",
+    tokenCount: 42,
+  });
+
+  assert.equal(result.decision, "VALID");
+  assert.equal(result.artifact?.ast.schemaVersion, 3);
+  assert.equal(
+    evaluatePredicate(result.artifact!.ast, {
+      draw: [12, 31, 24, 45, 56, 67],
+      guess: [11, 30, 29, 49, 50, 69],
+    }).result,
+    "WIN",
+  );
+  assert.equal(
+    evaluatePredicate(result.artifact!.ast, {
+      draw: [12, 31, 24, 45, 56, 67],
+      guess: [11, 30, 29, 49, 50, 79],
+    }).result,
+    "LOSE",
+  );
+  assert.equal(
+    evaluatePredicate(result.artifact!.ast, {
+      draw: [100, 31, 24, 45, 56, 67],
+      guess: [99, 30, 29, 49, 50, 69],
+    }).result,
+    "LOSE",
+  );
 });
 
 test("fails unsupported rules without producing an artifact", () => {

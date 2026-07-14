@@ -6,6 +6,7 @@ export interface RuleRefinementContext {
   currentRuleText?: string | null;
   refinementQuestions?: readonly string[] | null;
   suggestedRewrite?: string | null;
+  suggestedRewrites?: readonly string[] | null;
 }
 
 export interface RuleGuidanceContext extends RuleRefinementContext {
@@ -75,25 +76,13 @@ function dedupeOptions(options: RuleGuidanceOption[]) {
   return result;
 }
 
-function guidanceText(context: RuleGuidanceContext) {
-  return normalizeIntentText([
-    context.sanitizedText ?? "",
-    context.currentRuleText ?? "",
-    context.reasonSummary ?? "",
-    context.clarityNote ?? "",
-    ...(context.refinementQuestions ?? []),
-  ].join(" "));
-}
-
-function looksLikeDigitClarification(value: string) {
-  return /\b(digit|digits|units?|tens?|algarismo|algarismos|dezena|dezenas|unidade|unidades|numero 1|numero 2)\b/i.test(value);
-}
-
 export function getRuleRefinementBase(context: RuleRefinementContext) {
   // Prefer the dealer's concrete suggested rewrite. Only fall back to the raw
   // current rule text when it was previously VALID — otherwise a clarification
   // answer would be appended to an unfixable draft and loop forever.
-  const rewrite = context.suggestedRewrite?.trim();
+  const rewrite =
+    context.suggestedRewrites?.find((candidate) => candidate.trim())?.trim() ??
+    context.suggestedRewrite?.trim();
   if (rewrite) {
     return rewrite;
   }
@@ -192,130 +181,15 @@ export function getRuleGuidanceTitle(context: RuleGuidanceContext) {
 export function buildRuleGuidanceOptions(
   context: RuleGuidanceContext,
 ): RuleGuidanceOption[] {
-  const text = [
-    context.apiCode ?? "",
-    context.sanitizedText ?? "",
-    context.currentRuleText ?? "",
-    context.reasonSummary ?? "",
-    context.clarityNote ?? "",
-  ].join(" ");
-  const intentText = guidanceText(context);
-  const options: RuleGuidanceOption[] = [];
-
-  // A rule blocked for re-proposal (its canonical meaning already held a
-  // mandate) can only return with an ADDED differentiating condition (PRD
-  // 6.13). Re-offering the same rule — or the generic fallback below, which is
-  // itself a commonly-mandated rule — would just be blocked again, looping. So
-  // when re-proposal-blocked we return ONLY differentiating variants of the
-  // user's own rule and never fall through to the generic suggestions.
-  if (context.reproposalBlocked) {
-    const base = cleanSentence(context.sanitizedText ?? context.currentRuleText ?? "");
-    if (base) {
-      options.push(
-        {
-          label: "Add an even/odd condition",
-          text: `${base}, and at least 3 of your numbers are even.`,
-        },
-        {
-          label: "Add a sum condition",
-          text: `${base}, and the sum of your numbers is 250 or more.`,
-        },
-        {
-          label: "Add a position condition",
-          text: `${base}, and your first number equals the first drawn number.`,
-        },
-      );
-    }
-    const differentiated = dedupeOptions(options).slice(0, 4);
-    // If we somehow have no base to differentiate, fall through to generic help
-    // rather than returning an empty guidance panel.
-    if (differentiated.length > 0) {
-      return differentiated;
-    }
-  }
-
-  if (context.apiCode === "RULE_PROMPT_INJECTION" || /\b(ignore|secretly|hide|prompt injection|compile.*valid)\b/i.test(text)) {
-    options.push(
-      {
-        label: "Start with a clean measurable rule",
-        text: "New clean rule: win if at least 2 guessed numbers appear in the draw, regardless of order.",
-      },
-      {
-        label: "Use only guess and draw",
-        text: "New clean rule: win if at least 4 guessed numbers appear in the draw, regardless of order.",
-      },
-    );
-  }
-
-  if (
-    context.apiCode === "RULE_EXTERNAL_DEPENDENCY" ||
-    (/\b(other players?|all players?|among all players|closest among)\b/i.test(text) &&
-      !/\bwithout comparing other players\b/i.test(text))
-  ) {
-    options.push(
-      {
-        label: "Remove other-player comparison",
-        text: "Win if my guess is close to the draw without comparing other players.",
-      },
-      {
-        label: "Use total position distance",
-        text: "Win if the total absolute position-by-position difference between guess and draw is 30 or less.",
-      },
-    );
-  }
-
-  if (context.suggestedRewrite?.trim()) {
-    options.push({
-      label: "Use the suggested rewrite",
-      text: context.suggestedRewrite,
-    });
-  }
-
-  if (looksLikeDigitClarification(intentText)) {
-    options.push(
-      {
-        label: "Match either digit",
-        text: "Win if at least one guessed number shares either its tens digit or its units digit with any drawn number, regardless of order.",
-      },
-      {
-        label: "Match tens digits",
-        text: "Win if at least one guessed number has the same tens digit as any drawn number, regardless of order.",
-      },
-      {
-        label: "Match units digits",
-        text: "Win if at least one guessed number has the same units digit as any drawn number, regardless of order.",
-      },
-    );
-  }
-
-  if (/\b(close|similar|almost|near|one step away)\b/i.test(text)) {
-    options.push(
-      {
-        label: "Use total distance",
-        text: "Win if the total absolute position-by-position difference between guess and draw is 30 or less.",
-      },
-      {
-        label: "Use same-position tolerance",
-        text: "Win if each guessed number is within 5 of the drawn number in the same position.",
-      },
-    );
-  }
-
-  const orderBase = cleanSentence(context.suggestedRewrite ?? context.sanitizedText ?? context.currentRuleText ?? "");
-  const onlyOrderQuestions =
-    (context.refinementQuestions?.length ?? 0) > 0 &&
-    context.refinementQuestions?.every((question) => /\border|position/i.test(question));
-  if (
-    orderBase &&
-    !looksLikeDigitClarification(intentText) &&
-    (Boolean(context.suggestedRewrite?.trim()) || onlyOrderQuestions) &&
-    context.refinementQuestions?.some((question) => /\border|position/i.test(question))
-  ) {
-    options.push(
-      { label: "Ignore order", text: `${orderBase}. Order is ignored.` },
-      { label: "Keep exact positions", text: `${orderBase}. Order matters exactly as submitted.` },
-    );
-  }
-
-  return dedupeOptions(options).slice(0, 4);
+  // Only the structured, API-vetted list is selectable. The singular field is
+  // retained solely as a refinement-base compatibility field; rendering it
+  // directly would let an older generic server suggestion bypass the new
+  // intent-preservation contract.
+  const rewrites = context.suggestedRewrites ?? [];
+  return dedupeOptions(
+    rewrites.map((text) => ({
+      label: "Use intent-preserving rewrite",
+      text,
+    })),
+  ).slice(0, 4);
 }

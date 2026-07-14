@@ -13,10 +13,9 @@ import { fileURLToPath } from "node:url";
 
 export const RULE_COMPILER_SKILL = {
   name: "compile_rule_to_ast",
-  // v6: schemaVersion 3 compositional core + macro cookbook (docs/
-  // rule-algebra-core-design.md). The model composes core nodes instead of
-  // pattern-matching against specialized predicate kinds.
-  version: "idealer_rule_compiler_skill_v6",
+  // v7: intent-preserving clarification invariants plus explicit ordered
+  // tens-range semantics for examples that project 12/11 -> 10, etc.
+  version: "idealer_rule_compiler_skill_v7",
   allowedInputs: ["guess", "draw"] as const,
 } as const;
 

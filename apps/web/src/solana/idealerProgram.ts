@@ -134,6 +134,7 @@ export interface RulePreflightResult {
   sanitizedText: string;
   sanitizedTextHash: readonly number[];
   suggestedRewrite?: string;
+  suggestedRewrites?: readonly string[];
   title: string;
   tokenCount: number;
 }

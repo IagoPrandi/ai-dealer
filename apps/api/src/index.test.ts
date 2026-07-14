@@ -79,6 +79,7 @@ import {
   exportTransparencySnapshotCsv,
   getOperatorAiOperationsSnapshot,
   buildRuleRefinementFeedback,
+  enforceKnownRuleInterpretation,
   type AuditLogRecord,
   type GuessVerificationResultRecord,
   type RuleProposalRecord,
@@ -204,7 +205,7 @@ test("rule preflight refinement feedback explains malformed unordered same-set r
   assert.match(feedback.reasonSummary, /needs refinement/i);
   assert.equal(
     feedback.suggestedRewrite,
-    "Win if all 6 guessed numbers appear in the draw, regardless of order.",
+    "Win if all six guessed numbers appear in the draw, regardless of order.",
   );
   assert.ok(
     feedback.refinementFocus.some((item) =>
@@ -212,7 +213,7 @@ test("rule preflight refinement feedback explains malformed unordered same-set r
     ),
   );
   assert.deepEqual(feedback.refinementQuestions, [
-    "Should this require all 6 guessed numbers to appear in the draw?",
+    "Should this require all six guessed numbers to appear in the draw?",
     "Should order be ignored completely?",
   ]);
   assert.match(feedback.dealerMessage, /send(?:ing)? a revised rule/i);
@@ -238,9 +239,65 @@ test("rule preflight refinement feedback identifies the missing digit semantics"
   );
   assert.deepEqual(feedback.refinementQuestions, [
     "Should matching compare tens digits, units digits, or either digit?",
-    "How many guessed numbers must have a matching digit to win?",
-    "Should draw order and number positions be ignored?",
   ]);
+  assert.equal(feedback.suggestedRewrites.length, 3);
+});
+
+test("rule refinement preserves all ordered tens ranges and rejects a generic agent rewrite", () => {
+  const original =
+    "Vence quem acertar todas as dezenas na mesma ordem. Por exemplo, se sair 12 31 24 e eu jogar 11 30 29, eu venço pois acertei as dezenas na ordem (10 30 20).";
+  const expected =
+    "Win if all six guessed numbers are in the same tens range as the drawn number in the corresponding position.";
+  const feedback = buildRuleRefinementFeedback({
+    agentClarificationQuestions: [
+      "Should the tens ranges be compared in corresponding positions?",
+    ],
+    agentSuggestedRewrites: [
+      "Win if at least two guessed numbers appear anywhere in the draw.",
+      expected,
+    ],
+    clarityNote: "Confirm the intended tens-range projection.",
+    compileText: original,
+    officialInterpretation: "",
+    reasonCodes: ["PROVIDER_MALFORMED_RESPONSE"],
+    reasonSummary: "Rule rejected: PROVIDER_MALFORMED_RESPONSE.",
+    sanitizedText: original,
+    tokenCount: 42,
+  });
+
+  assert.deepEqual(feedback.suggestedRewrites, [expected]);
+  assert.equal(feedback.suggestedRewrite, expected);
+  assert.ok(
+    feedback.suggestedRewrites.every(
+      (rewrite) =>
+        /all six/i.test(rewrite) &&
+        /tens range/i.test(rewrite) &&
+        /corresponding position/i.test(rewrite),
+    ),
+  );
+});
+
+test("known ordered tens-range evidence aligns the public interpretation with the AST", () => {
+  const interpretation = enforceKnownRuleInterpretation(
+    "Vence quem acertar todas as dezenas na mesma ordem: 12 31 24 e 11 30 29 correspondem a 10 30 20.",
+    {
+      addedOperationalClauses: [],
+      clarificationQuestions: ["Should order matter?"],
+      clarityNote: "Possibly ambiguous.",
+      dealerMessage: "I interpreted this as exact equality.",
+      needsClarification: true,
+      normalizedText: "All six complete numbers must match exactly.",
+      officialInterpretation: "Compare complete numbers in order.",
+      suggestedRewrites: ["Win if two numbers match anywhere."],
+      title: "Exact Order Match",
+    },
+  );
+
+  assert.equal(interpretation.title, "Ordered Tens Ranges");
+  assert.equal(interpretation.needsClarification, false);
+  assert.match(interpretation.normalizedText, /all six.*same tens range/i);
+  assert.match(interpretation.officialInterpretation, /divide.*by 10.*integer division/i);
+  assert.deepEqual(interpretation.suggestedRewrites, []);
 });
 
 test("rule proposal preserves the dealer-generated title", () => {
