@@ -65,6 +65,18 @@ function roundPayload(drawSettled: boolean) {
   };
 }
 
+function roundFor(turnId: number, drawSettled: boolean) {
+  const round = roundPayload(drawSettled).round;
+  return {
+    ...round,
+    draw: { ...round.draw, turnId },
+    turnId,
+    ...(round.winners
+      ? { winners: { ...round.winners, turnId } }
+      : {}),
+  };
+}
+
 async function mockBackend(page: Page, drawSettled: boolean) {
   const nowSec = Math.floor(Date.now() / 1000);
   // Origins vary with the dev setup (NEXT_PUBLIC_* overrides vs the /__api and
@@ -97,7 +109,7 @@ async function mockBackend(page: Page, drawSettled: boolean) {
     /\/(rounds\/\d+|rule-proposals\?|rule-votes\?|rule-elimination-votes\?|guess-receipts\?|winner-records\?|players\/)/,
     (route) => route.fulfill({ json: { error: "not_mocked" }, status: 404 }),
   );
-  await page.route(new RegExp(`/rounds/${TURN_ID}$`), (route) =>
+  await page.route(new RegExp(`/rounds/${TURN_ID}(?:\\?activeTurnId=${TURN_ID})?$`), (route) =>
     route.fulfill({ json: roundPayload(drawSettled) }),
   );
   await page.route(new RegExp(`/rule-proposals\\?turnId=${TURN_ID}$`), (route) =>
@@ -107,6 +119,57 @@ async function mockBackend(page: Page, drawSettled: boolean) {
     route.fulfill({ json: { counts: { "3": 21, "4": 8 }, votes: [] } }),
   );
   await page.route(new RegExp(`/rule-elimination-votes\\?turnId=${TURN_ID}$`), (route) =>
+    route.fulfill({ json: { counts: {}, votes: [] } }),
+  );
+}
+
+async function mockCanonicalRoundNavigation(page: Page) {
+  const activeTurnId = 31;
+  const nowSec = Math.floor(Date.now() / 1000);
+
+  await page.route("**/turn/active", (route) =>
+    route.fulfill({
+      json: {
+        globalConfig: {
+          activeTurnId,
+          guessCutoffBps: 9167,
+          guessSubmissionFeeLamports: "10000000",
+          hasActiveTurn: true,
+          nextTurnId: activeTurnId + 1,
+          paused: false,
+          ruleElectionCutoffBps: 9167,
+          ruleRemovalFeeLamports: "50000000",
+          voteFeeLamports: "5000000",
+        },
+        globalConfigAddress: "11111111111111111111111111111111",
+        turnState: {
+          endTimestamp: nowSec + 3_600,
+          startTimestamp: nowSec - 1_800,
+          status: "open",
+          turnDurationSeconds: 5_400,
+          turnId: activeTurnId,
+        },
+        turnStateAddress: "11111111111111111111111111111111",
+      },
+    }),
+  );
+  await page.route(
+    /\/(rounds\/\d+|rule-proposals\?|rule-votes\?|rule-elimination-votes\?|guess-receipts\?|winner-records\?|players\/)/,
+    (route) => route.fulfill({ json: { error: "not_mocked" }, status: 404 }),
+  );
+  await page.route(/\/rounds\/(24|30|31)(?:\?activeTurnId=31)?$/, (route) => {
+    const turnId = Number(new URL(route.request().url()).pathname.split("/").at(-1));
+    return route.fulfill({
+      json: { round: roundFor(turnId, turnId !== activeTurnId) },
+    });
+  });
+  await page.route(new RegExp(`/rule-proposals\\?turnId=${activeTurnId}$`), (route) =>
+    route.fulfill({ json: { proposals: [] } }),
+  );
+  await page.route(new RegExp(`/rule-votes\\?turnId=${activeTurnId}$`), (route) =>
+    route.fulfill({ json: { counts: {}, votes: [] } }),
+  );
+  await page.route(new RegExp(`/rule-elimination-votes\\?turnId=${activeTurnId}$`), (route) =>
     route.fulfill({ json: { counts: {}, votes: [] } }),
   );
 }
@@ -150,4 +213,38 @@ test("when the draw settles a pop-up covers the home screen with the result", as
   await page.reload();
   await expect(page.getByText("Accumulated prize")).toBeVisible();
   await expect(page.getByRole("heading", { name: "The numbers are out" })).toHaveCount(0);
+});
+
+test("historical round and live round keep canonical URLs across navigation and reload", async ({ page }) => {
+  await mockCanonicalRoundNavigation(page);
+  await page.goto("/round/24");
+
+  await expect(page).toHaveURL(/\/round\/24$/);
+  await expect(page.getByText("#0024", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Back to the current round" }).click();
+  await expect(page).toHaveURL(/\/play$/);
+  await page.getByRole("button", { name: "Close result" }).click();
+  await expect(page.getByText("Result of round #0030", { exact: true })).toBeVisible();
+
+  await page.reload();
+  await expect(page).toHaveURL(/\/play$/);
+  await expect(page.getByText("Result of round #0030", { exact: true })).toBeVisible();
+  await expect(page.getByText("#0024", { exact: true })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Result of round #0030" }).click();
+  await expect(page).toHaveURL(/\/round\/30$/);
+  await expect(page.getByText("#0030", { exact: true })).toBeVisible();
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/play$/);
+  await expect(page.getByText("Result of round #0030", { exact: true })).toBeVisible();
+
+  await page.goForward();
+  await expect(page).toHaveURL(/\/round\/30$/);
+  await expect(page.getByText("#0030", { exact: true })).toBeVisible();
+
+  await page.reload();
+  await expect(page).toHaveURL(/\/round\/30$/);
+  await expect(page.getByText("#0030", { exact: true })).toBeVisible();
 });

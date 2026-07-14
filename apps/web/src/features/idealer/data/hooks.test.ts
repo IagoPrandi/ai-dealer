@@ -5,7 +5,6 @@ import { address } from "@solana/kit";
 import {
   buildUiRule,
   resolvePlayerGuessState,
-  resolveResultSelection,
   resolveVisibleTurnId,
 } from "./hooks.js";
 import type { RuleProposalApi } from "./types.js";
@@ -46,21 +45,6 @@ test("visible turn uses the latest completed turn when no turn is active", () =>
 
 test("visible turn falls back to the bootstrap turn before any turn exists", () => {
   assert.equal(resolveVisibleTurnId(snapshot({ nextTurnId: 0 })), 1);
-});
-
-test("leaving a historical result releases it before opening the live dev-cycle result", () => {
-  const afterHomeNavigation = resolveResultSelection({
-    currentResultTurnId: 24,
-    navigatingToResult: false,
-  });
-  const liveResult = resolveResultSelection({
-    currentResultTurnId: afterHomeNavigation,
-    navigatingToResult: true,
-    requestedResultTurnId: 27,
-  });
-
-  assert.equal(afterHomeNavigation, null);
-  assert.equal(liveResult, 27);
 });
 
 test("on-chain guess confirmation keeps the player in the round while receipt indexing catches up", () => {

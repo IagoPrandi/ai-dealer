@@ -8,6 +8,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { useSolanaClient, useWalletConnection } from "@solana/react-hooks";
 import { address } from "@solana/kit";
+import { usePathname, useRouter } from "next/navigation";
 
 import "./idealer.css";
 
@@ -35,7 +36,6 @@ import {
 } from "./context";
 import { lamportsToSol } from "./data/format";
 import {
-  resolveResultSelection,
   usePlayerGuess,
   useActiveTurn,
   useRound,
@@ -101,6 +101,8 @@ export function IdealerApp({
   const client = useSolanaClient();
   const { connect, connecting, connected, connectors, wallet } = useWalletConnection();
   const walletAddress = wallet?.account.address.toString();
+  const pathname = usePathname();
+  const router = useRouter();
 
   const activeTurn = useActiveTurn();
   const turnId = activeTurn.activeTurnId;
@@ -108,14 +110,23 @@ export function IdealerApp({
   const rules = useRules(turnId, round);
   const { entrySyncing, playCount, played, receipt, reload: reloadPlayer } = usePlayerGuess(turnId, walletAddress);
 
-  const [screen, setScreen] = useState<Screen>(initialScreen);
-  const [selectedResultTurnId, setSelectedResultTurnId] = useState<null | number>(
+  const latestResultTurnId = useMemo(() => {
+    const currentTurnHasResult =
+      round?.turnId === turnId &&
+      (round.status === "completed" ||
+        round.draw?.status === "fulfilled" ||
+        Boolean(round.winners?.records.length));
+    return currentTurnHasResult ? turnId : Math.max(1, turnId - 1);
+  }, [round, turnId]);
+  const historicalResultTurnId =
     initialResultTurnId &&
-      Number.isInteger(initialResultTurnId) &&
-      initialResultTurnId > 0
+    Number.isInteger(initialResultTurnId) &&
+    initialResultTurnId > 0
       ? initialResultTurnId
-      : null,
-  );
+      : null;
+  const resultTurnId = historicalResultTurnId ?? latestResultTurnId;
+
+  const [screen, setScreen] = useState<Screen>(initialScreen);
   const [seed, setSeed] = useState("");
   const [chatId, setChatId] = useState<null | string>(null);
   const [newConversationKey, setNewConversationKey] = useState(0);
@@ -127,15 +138,20 @@ export function IdealerApp({
   const [connectError, setConnectError] = useState<null | string>(null);
 
   const go = useCallback((next: Screen, params?: NavParams) => {
-    setSelectedResultTurnId((currentResultTurnId) =>
-      resolveResultSelection({
-        currentResultTurnId,
-        navigatingToResult: next === "result",
-        ...(params?.resultTurnId === undefined
-          ? {}
-          : { requestedResultTurnId: params.resultTurnId }),
-      }),
-    );
+    if (next === "home" && pathname !== "/play" && !pathname.startsWith("/dev/gallery")) {
+      router.push("/play");
+      return;
+    }
+    if (next === "result" && !pathname.startsWith("/dev/gallery")) {
+      const requestedResultTurnId = params?.resultTurnId ?? resultTurnId;
+      if (Number.isInteger(requestedResultTurnId) && requestedResultTurnId > 0) {
+        const resultPath = `/round/${requestedResultTurnId}`;
+        if (pathname !== resultPath) {
+          router.push(resultPath);
+          return;
+        }
+      }
+    }
     if (params?.newConversation) {
       setSeed("");
       setChatId(null);
@@ -148,7 +164,7 @@ export function IdealerApp({
     }
     setDetail(null);
     setScreen(next);
-  }, []);
+  }, [pathname, resultTurnId, router]);
 
   const openDetail = useCallback(
     (ruleId: number, opts?: { canAgainst?: boolean; rank?: number | null }) => {
@@ -309,16 +325,6 @@ export function IdealerApp({
       vote: gc ? lamportsToSol(gc.voteFeeLamports) : MVP_FEES_SOL.vote,
     };
   }, [activeTurn.snapshot, playCount, rules.rules, turnId]);
-
-  const latestResultTurnId = useMemo(() => {
-    const currentTurnHasResult =
-      round?.turnId === turnId &&
-      (round.status === "completed" ||
-        round.draw?.status === "fulfilled" ||
-        Boolean(round.winners?.records.length));
-    return currentTurnHasResult ? turnId : Math.max(1, turnId - 1);
-  }, [round, turnId]);
-  const resultTurnId = selectedResultTurnId ?? latestResultTurnId;
 
   // When does guess submission close? (guessCutoffBps into the turn window.)
   const guessCutoffEndsAt = useMemo(() => {
