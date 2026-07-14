@@ -25,6 +25,41 @@ function EligItem({ label, ok }: { label: string; ok: boolean }) {
   );
 }
 
+type GuessRuleMatch = "both" | "none" | "original" | "turn";
+
+export function getGuessRuleMatch(
+  wins: Array<{ category: "alternative" | "original" }>,
+): GuessRuleMatch {
+  const original = wins.some((win) => win.category === "original");
+  const turn = wins.some((win) => win.category === "alternative");
+
+  if (original && turn) return "both";
+  if (original) return "original";
+  if (turn) return "turn";
+  return "none";
+}
+
+function GuessNumber({ number, match }: { number: number; match: GuessRuleMatch }) {
+  const stateLabel =
+    match === "both"
+      ? "matched both rules"
+      : match === "original"
+        ? "matched the original rule"
+        : match === "turn"
+          ? "matched the rule of the turn"
+          : "did not match a winning rule";
+
+  return (
+    <span
+      aria-label={`${number}: ${stateLabel}`}
+      className={`ide-num ide-result-number${match === "none" ? "" : ` is-${match}`}`}
+      role="listitem"
+    >
+      {number}
+    </span>
+  );
+}
+
 export function ResultScreen() {
   const { go, resultTurnId, walletAddress } = useIdealer();
   const { round, loading } = useRound(resultTurnId);
@@ -59,9 +94,8 @@ export function ResultScreen() {
   );
   const youWonLamports = myWins.reduce((total, r) => total + r.payoutLamports, 0);
   const youWon = youWonLamports > 0;
-  const youMatched = receipt
-    ? receipt.numbers.filter((n) => draw.includes(n)).length
-    : 0;
+  const guessRuleMatch = getGuessRuleMatch(myWins);
+  const verificationAvailable = Boolean(round?.winners);
 
   const original = round?.winners?.original;
   const alternative = round?.winners?.alternative;
@@ -134,33 +168,20 @@ export function ResultScreen() {
         {/* drawn numbers — chips over the background */}
         <div style={{ borderTop: "1px solid var(--line)", paddingTop: 16, marginBottom: 26 }}>
           <SectionLabel>Drawn numbers</SectionLabel>
-          <div style={{ display: "flex", gap: 9, marginTop: 14, flexWrap: "wrap" }}>
+          <div aria-label="Drawn numbers" className="ide-result-numbers" role="list" style={{ marginTop: 14 }}>
             {draw.length === 0 ? (
               <span style={{ fontSize: 13.5, color: "var(--muted)" }}>The draw has not settled yet.</span>
             ) : draw.map((n) => (
-              <span key={n} className="ide-num" style={{ width: 44, height: 44, borderRadius: 13, background: "var(--surface-2)", border: "1px solid var(--line-2)", display: "grid", placeItems: "center", fontWeight: 700, fontSize: 17 }}>{n}</span>
+              <span key={n} className="ide-num ide-result-number is-drawn" role="listitem">{n}</span>
             ))}
           </div>
         </div>
 
-        {/* two win conditions — divided sections, no boxes */}
-        <SectionLabel>Two conditions · each takes 50% of the prize</SectionLabel>
+        {/* The elected rule leads the result story: draw, rule, then entry. */}
+        <SectionLabel>Rule of the turn</SectionLabel>
         <div style={{ margin: "12px 0 26px" }}>
-          <div style={{ padding: "2px 2px 18px", borderBottom: "1px solid var(--line)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
-              <span style={{ width: 26, height: 26, borderRadius: 8, background: "var(--surface-2)", color: "var(--muted)", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.dice style={{ color: "var(--muted)", width: 15, height: 15 }} /></span>
-              <div style={{ fontWeight: 700, fontSize: 15.5 }}>Original rule</div>
-              <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--dim)" }}>exact sequence</span>
-            </div>
-            <p style={{ margin: 0, fontSize: 13.5, color: "var(--muted)", lineHeight: 1.5 }}>
-              {!original || original.winnerCount === 0
-                ? <>No one matched the exact sequence. The <span className="ide-num" style={{ color: "var(--text)" }}>{fmtSol(originalPoolSol)}</span> SOL rolls over to the next round.</>
-                : <><span className="ide-num" style={{ color: "var(--green)" }}>{original.winnerCount}</span> winner(s) shared <span className="ide-num" style={{ color: "var(--text)" }}>{fmtSol(originalPoolSol)}</span> SOL.</>}
-            </p>
-          </div>
-
           {/* elected alternative rule — emphasis by color, not by box */}
-          <div style={{ padding: "16px 2px 2px" }}>
+          <div style={{ padding: "2px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
               <span style={{ width: 26, height: 26, borderRadius: 8, background: "var(--gold)", color: "#0B0910", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.trophy style={{ color: "#0B0910", width: 15, height: 15 }} /></span>
               <div style={{ fontWeight: 800, fontSize: 16, color: "var(--gold)" }}>{electedRule?.title ?? "No alternative rule elected"}</div>
@@ -176,12 +197,47 @@ export function ResultScreen() {
         {receipt ? (
           <div style={{ borderTop: "1px solid var(--line)", borderBottom: "1px solid var(--line)", padding: "16px 2px", marginBottom: 26 }}>
             <SectionLabel>Your guess</SectionLabel>
-            <div style={{ display: "flex", alignItems: "center", gap: 16, marginTop: 12 }}>
-              <EligItem ok={youMatched >= 4} label={`${youMatched} numbers matched`} />
-              <EligItem ok={votedElected} label={votedElected ? "Voted for the elected rule" : "Didn't vote for the elected"} />
+            <div aria-label="Your submitted numbers" className="ide-result-numbers" role="list" style={{ marginTop: 14 }}>
+              {receipt.numbers.map((number, index) => (
+                <GuessNumber key={`${number}-${index}`} match={verificationAvailable ? guessRuleMatch : "none"} number={number} />
+              ))}
+            </div>
+            {verificationAvailable ? (
+              <p style={{ margin: "12px 0 0", fontSize: 13.5, color: "var(--muted)", lineHeight: 1.45 }}>
+                {guessRuleMatch === "both"
+                  ? "Your entry won under both rules."
+                  : guessRuleMatch === "original"
+                    ? "Your entry won under the original rule."
+                    : guessRuleMatch === "turn"
+                      ? "Your entry won under the rule of the turn."
+                      : "Your entry did not win under either rule."}
+              </p>
+            ) : (
+              <p style={{ margin: "12px 0 0", fontSize: 13.5, color: "var(--muted)", lineHeight: 1.45 }}>Verified rule results are not available yet.</p>
+            )}
+            <div aria-label="Number color legend" className="ide-result-legend">
+              <span><i className="original" />Original rule</span>
+              {electedRule ? <span><i className="turn" />Rule of the turn</span> : null}
+              {electedRule ? <span><i className="both" />Both rules</span> : null}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 16, marginTop: 13 }}>
+              <EligItem ok={votedElected} label={votedElected ? "Voted for the elected rule" : "Didn't vote for the elected rule"} />
             </div>
           </div>
         ) : null}
+
+        <div style={{ padding: "2px 2px 18px", borderBottom: "1px solid var(--line)", marginBottom: 26 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
+            <span style={{ width: 26, height: 26, borderRadius: 8, background: "var(--surface-2)", color: "var(--muted)", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.dice style={{ color: "var(--muted)", width: 15, height: 15 }} /></span>
+            <div style={{ fontWeight: 700, fontSize: 15.5 }}>Original rule</div>
+            <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--dim)" }}>exact sequence</span>
+          </div>
+          <p style={{ margin: 0, fontSize: 13.5, color: "var(--muted)", lineHeight: 1.5 }}>
+            {!original || original.winnerCount === 0
+              ? <>No one matched the exact sequence. The <span className="ide-num" style={{ color: "var(--text)" }}>{fmtSol(originalPoolSol)}</span> SOL rolls over to the next round.</>
+              : <><span className="ide-num" style={{ color: "var(--green)" }}>{original.winnerCount}</span> winner(s) shared <span className="ide-num" style={{ color: "var(--text)" }}>{fmtSol(originalPoolSol)}</span> SOL.</>}
+          </p>
+        </div>
 
         {finalistRules.length > 0 ? (
           <>

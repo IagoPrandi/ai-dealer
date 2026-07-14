@@ -173,6 +173,53 @@
   animation: ide-pop .3s cubic-bezier(.2,.8,.3,1) both;
 }
 
+/* Settled-round numbers use the brand gradient. Entry chips show which
+   verified winning condition applies; a two-rule win is split diagonally. */
+.ide-result-numbers {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+.ide-result-number {
+  aspect-ratio: 1;
+  min-width: 0;
+  border: 1px solid var(--line-2);
+  border-radius: 13px;
+  background: var(--surface-2);
+  color: var(--text);
+  display: grid;
+  place-items: center;
+  font-size: clamp(15px, 4.5vw, 18px);
+  font-weight: 700;
+}
+.ide-result-number.is-drawn {
+  background: var(--grad);
+  border-color: transparent;
+  color: #08110C;
+  box-shadow: 0 6px 16px -8px rgba(20,241,149,0.55);
+}
+.ide-result-number.is-original { background: var(--purple); border-color: transparent; color: #08110C; }
+.ide-result-number.is-turn { background: var(--green); border-color: transparent; color: #08110C; }
+.ide-result-number.is-both {
+  background: linear-gradient(135deg, var(--purple) 0 49%, var(--green) 51% 100%);
+  border-color: transparent;
+  color: #08110C;
+}
+.ide-result-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 12px;
+  color: var(--dim);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.ide-result-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.ide-result-legend i { width: 10px; height: 10px; border-radius: 3px; }
+.ide-result-legend .original { background: var(--purple); }
+.ide-result-legend .turn { background: var(--green); }
+.ide-result-legend .both { background: linear-gradient(135deg, var(--purple) 0 49%, var(--green) 51% 100%); }
+
 /* chat bubbles */
 .ide-bubble-ai {
   max-width: 86%; align-self: flex-start; overflow-wrap: anywhere; word-break: break-word;
