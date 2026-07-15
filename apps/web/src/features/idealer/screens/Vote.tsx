@@ -292,8 +292,7 @@ export function VoteScreen() {
           <>
             {/* decision window — section block bounded by hairlines, no balloon */}
             <div style={{ borderTop: "1px solid rgba(255,210,63,0.28)", borderBottom: "1px solid var(--line)", padding: "14px 0 16px", marginBottom: 6 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span className={"ide-phase" + (finalistPhase.kind === "decision" ? " decision" : "")} style={{ background: "none", border: "none", padding: 0 }}><span className="dot" /> {finalistPhase.label}</span>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
                 {finalistPhase.kind === "decision" ? (
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 13, color: "var(--muted)" }}>
                     <Ico.clock style={{ color: "var(--yellow)" }} /> <span className="ide-num" style={{ fontWeight: 700, color: "var(--text)" }}>{h}:{m}:{s}</span>

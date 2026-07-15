@@ -305,14 +305,6 @@
 .ide-votebtn.against.on { background: rgba(255,107,107,0.14); border-color: rgba(255,107,107,0.45); color: var(--red); }
 
 /* indicador de fase da rodada */
-.ide-phase {
-  display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; border-radius: 999px;
-  font-size: 12px; font-weight: 700; letter-spacing: 0.01em;
-  background: var(--surface-2); border: 1px solid var(--line-2); color: var(--purple-soft);
-}
-.ide-phase .dot { width: 7px; height: 7px; border-radius: 4px; background: var(--purple-soft); box-shadow: 0 0 8px var(--purple-soft); }
-.ide-phase.decision { color: var(--yellow); border-color: rgba(255,210,63,0.3); }
-.ide-phase.decision .dot { background: var(--yellow); box-shadow: 0 0 8px var(--yellow); animation: ide-blink 1.4s ease-in-out infinite; }
 @keyframes ide-blink { 0%,100% { opacity: 1 } 50% { opacity: 0.35 } }
 
 /* barra de saldo a favor/contra de um finalista */
