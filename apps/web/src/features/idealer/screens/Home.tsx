@@ -162,9 +162,18 @@ export function HomeScreen() {
               <span style={{ fontSize: 21, fontWeight: 700, color: "var(--purple-soft)", marginTop: 11, marginLeft: 4 }}>SOL</span>
             </div>
             {apiUnavailable ? null : (
-              <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 18, flexWrap: "wrap" }}>
-                <span className="ide-pill"><Ico.users style={{ color: "var(--purple-soft)" }} /> <span className="ide-num">{fmtInt(players)}</span> playing</span>
-                <span className="ide-pill"><Ico.spark style={{ color: "var(--yellow)" }} /> {rules.rules.length} rules</span>
+              <div className="ide-hero-stats" aria-label={`${fmtInt(players)} playing, ${rules.rules.length} rules`}>
+                <span className="ide-hero-stat">
+                  <Ico.users style={{ color: "var(--purple-soft)" }} />
+                  <span className="ide-num">{fmtInt(players)}</span>
+                  playing
+                </span>
+                <span className="ide-hero-stat-divider" aria-hidden="true" />
+                <span className="ide-hero-stat">
+                  <Ico.spark style={{ color: "var(--yellow)" }} />
+                  <span className="ide-num">{rules.rules.length}</span>
+                  rules
+                </span>
               </div>
             )}
           </div>

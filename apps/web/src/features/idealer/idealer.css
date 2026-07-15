@@ -102,6 +102,46 @@
   color: var(--muted);
 }
 
+/* Home hero counters retain the elevated pill surface while using the compact,
+   divided composition from the original live-round layout. */
+.ide-hero-stats {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  margin-top: 16px;
+  padding: 5px 2px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  background:
+    linear-gradient(var(--surface-2), var(--surface-2)) padding-box,
+    linear-gradient(90deg, var(--line), var(--line-2), var(--line)) border-box;
+}
+
+.ide-hero-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
+.ide-hero-stat .ide-num {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.ide-hero-stat-divider {
+  align-self: stretch;
+  width: 1px;
+  min-height: 18px;
+  background: linear-gradient(180deg, transparent, var(--line-2), transparent);
+}
+
 /* buttons */
 .ide-btn {
   font-family: 'Outfit', sans-serif; font-weight: 700; font-size: 16px;
