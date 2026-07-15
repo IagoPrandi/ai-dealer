@@ -300,7 +300,7 @@ export function VoteScreen() {
                   </span>
                 ) : null}
               </div>
-              <p style={{ margin: "10px 0 0", fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5 }}>
+              <p style={{ margin: "10px 0 0", fontSize: 13.5, color: "var(--muted)", lineHeight: 1.5 }}>
                 {finalistPhase.body}
               </p>
               <div style={{ marginTop: 12, display: "flex", gap: 18, fontSize: 12.5, flexWrap: "wrap" }}>

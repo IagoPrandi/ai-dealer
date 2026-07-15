@@ -68,6 +68,12 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-07-14 (Vote screen typography alignment)
+
+- Opened the required documents before editing UI: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/idealer-ui-coherence/SKILL.md`, and `.claude/skills/idealer-design-system/SKILL.md`.
+- Aligned the closed-phase paragraph on the Rules/Vote screen with the instruction paragraph by increasing the top status copy from 12.5px to 13.5px in `apps/web/src/features/idealer/screens/Vote.tsx`.
+- Reviewed the result for inconsistencies: no layout structure changed, the text remains English, and no milestone checkbox/status was changed because milestone marking requires explicit user confirmation.
+
 ### 2026-07-14 (PRD tokenomics v2.6 coherence review)
 
 - Opened the required documents and context before reviewing: `PRD.md`, `PRD-TOKENOMICS-v2.6.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, the `.claude/skills` directory, and `.claude/skills/best-practices/SKILL.md` with its agent-principles, architecture, Web3-contract, governance/compliance, and final-checklist references.
