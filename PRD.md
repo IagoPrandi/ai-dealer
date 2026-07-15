@@ -2538,11 +2538,29 @@ The repository must include `AGENTS.md` defining:
 
 ### 8.1 Token
 
+> **SUPERSEDED — see PRD-TOKENOMICS-v2.8 §1.1, §3.** Idealer now introduces a
+> fixed-supply 1,000,000,000 SPL token as the only entitlement mechanism for
+> treasury-fee distributions. The "native SOL / no SPL token" statements below
+> are legacy and no longer binding. Native SOL remains the prize and game-fee
+> currency; the SPL token governs locking, treasury-fee claims, and promotions.
+
 Idealer uses native SOL.
 
 No SPL token is required for MVP.
 
 ### 8.2 Fees
+
+> **CONFIGURABLE PER ENVIRONMENT (free-action window) — see PRD-TOKENOMICS-v2.8
+> §5.2, §10.1.** The turn index at which the first-action free window ends is an
+> environment-configured value, `freeActionWindowEndsBeforeTurnIndex`:
+> - **development / staging / devnet:** `100` (kept while the project is being
+>   built and tested);
+> - **production / mainnet:** `30` (activated when the project is ready).
+>
+> All "before turn 100 / from turn 100" free-action references in this document
+> (including §6.14, §6.14a, and the milestone/test rows) describe the
+> **development** value; production reads `30 / 31`. "Turn" and "round" are
+> synonymous (PRD-TOKENOMICS-v2.8 §1.1).
 
 Default fee model:
 
@@ -2575,6 +2593,10 @@ const MVP_FEE_CONFIG = {
   repeatedActionFeeMultiplier: 2, // exponent base for repeated paid actions
   ruleReportFeeLamports: 0,
   treasuryFeeBps: 500, // 5%
+  // Turn index before which the first same-wallet action in each fee scope is
+  // free. Configurable per environment: 100 in development/staging/devnet
+  // while the project is being built; 30 in production/mainnet when ready.
+  freeActionWindowEndsBeforeTurnIndex: 100,
 };
 ```
 
@@ -2622,6 +2644,14 @@ If no alternative rule is active, if the alternative rule is invalidated, or if 
 
 ### 8.4 Active Rule Creator Reward and Elected-Rule Voter Reward
 
+> **SUPERSEDED (currency & funding) — see PRD-TOKENOMICS-v2.8 §5.3, §5.3.1, §4.1.**
+> The 15%-of-one-individual-payout formula is preserved, but the creator and
+> voter rewards are now paid in **Idealer tokens from a campaign reserve vault**,
+> not in SOL from platform monetization. No direct SOL is paid for these rewards,
+> and they are never deducted from the treasury-fee (locker) distribution. The
+> SOL amount is converted to token atoms via the reward-only relation
+> `1 calculated reward lamport = 1 token atom` (not a market peg).
+
 When an alternative rule is active in a turn and that rule produces winners, the creator of the active rule receives a reward equal to **15% of a single individual alternative-rule winner payout**.
 
 This reward is calculated from the individual payout but funded from the creator reward reserve sourced from platform monetization. It must not reduce the winner's individual payout.
@@ -2660,6 +2690,13 @@ Voter reward per voter: 1.5 / 4 = 0.375
 ```
 
 ### 8.5 Creator Reward Reserve and Cap
+
+> **SUPERSEDED (reserve source & cap unit) — see PRD-TOKENOMICS-v2.8 §5.3.1.**
+> The reserve is now a **campaign token vault**, not a SOL "platform_monetization"
+> reserve. The `capPerTurnLamports: 250_000_000` values below are now **0.25
+> token** (`250,000,000` token atoms), not 0.25 SOL. The numerals coincide only
+> because of the reward-only `1 lamport = 1 atom` relation. Creator-first-then-
+> voter draw order and "unpaid shortfall creates no debt" are preserved.
 
 Creator and voter rewards must never break platform monetization or create accounting deficits. Both are funded from the same creator reward reserve.
 
@@ -2718,6 +2755,14 @@ If the reserve is insufficient:
 - transparency/accounting insights should track capped creator reward and capped voter reward events from public accounting records.
 
 ### 8.6 Treasury / Platform Monetization
+
+> **SUPERSEDED (fee destination) — see PRD-TOKENOMICS-v2.8 §4.1, §3.3-§3.5.**
+> 100% of the treasury-fee share now flows to the token-lock distribution vault
+> for lockers; it is not a general operating pool. Active-rule creator and
+> elected-rule voter rewards are **removed** from the treasury-fee use list below
+> (they are paid from the campaign token reserve). Project operations are
+> financed from the SOL the locked 800M Creator Treasury Reserve claims into the
+> `Treasury SOL Vault`, subject to multisig + 7-day timelock for outbound use.
 
 Default treasury fee:
 
@@ -2939,6 +2984,15 @@ Rate-limit requirements:
 ## 9. Smart Contract Architecture
 
 ### 9.1 Core Accounts
+
+> **EXTENDED — see PRD-TOKENOMICS-v2.8 §3.3.4, §6.1.** The single `TreasuryVault`
+> below is superseded by a separated custody architecture: `TreasuryPolicyExecutor`
+> PDA, `Creator Treasury Reserve Vault`, `Treasury Lock Escrow`, `Treasury SOL
+> Vault`, the token-lock distribution vault, `Correction Reserve Vault`, and the
+> campaign vaults. The tokenomics programme also adds `TokenConfig`,
+> `LockPosition`, `DistributionEpoch`, `EpochRootChallenge`, campaign/referral
+> records, etc. The game accounts below remain valid for turns, guesses, votes,
+> and prizes.
 
 Suggested Solana accounts:
 
