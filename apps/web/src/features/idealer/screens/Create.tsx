@@ -145,6 +145,11 @@ function createClientDraftId(turnId: number) {
 
 function RulePreview({ rule }: { rule: RulePreflightResult }) {
   const valid = rule.decision === "VALID" && !rule.needsClarification;
+  const statusLabel = valid
+    ? "valid rule"
+    : rule.confirmationRequired
+      ? "review required"
+      : "needs adjustment";
   const pct = Math.round((rule.tokenCount / RULE_MAX_TOKENS) * 100);
   const confidencePct =
     typeof rule.finalConfidence === "number"
@@ -154,11 +159,11 @@ function RulePreview({ rule }: { rule: RulePreflightResult }) {
     <div style={{ padding: 16, border: "1px solid var(--line)", borderRadius: 16, background: "var(--surface)", animation: "ide-rise .3s ease both" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
         <span className="ide-pill" style={{ color: valid ? "var(--green)" : "var(--yellow)", padding: "4px 10px" }}>
-          {valid ? <><Ico.check style={{ width: 13, height: 13, color: "var(--green)" }} /> valid rule</> : "needs adjustment"}
+          {valid ? <Ico.check style={{ width: 13, height: 13, color: "var(--green)" }} /> : <Ico.info style={{ width: 13, height: 13, color: "var(--yellow)" }} />} {statusLabel}
         </span>
         {confidencePct !== null ? (
           <span className="ide-pill" style={{ padding: "4px 10px", color: "var(--purple-soft)" }}>
-            <Ico.shield style={{ width: 12, height: 12, color: "var(--purple-soft)" }} /> <span className="ide-num">{confidencePct}%</span> confidence
+            <Ico.shield style={{ width: 12, height: 12, color: "var(--purple-soft)" }} /> <span className="ide-num">{confidencePct}%</span> interpretation confidence
           </span>
         ) : null}
         <span style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--dim)" }} className="ide-num">{rule.tokenCount}/{RULE_MAX_TOKENS} tokens</span>
@@ -418,6 +423,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
     clarificationAttemptsRef.current += 1;
     openGuidance({
       clarityNote: snapshot.rule.clarityNote,
+      confirmationRequired: snapshot.rule.confirmationRequired,
       currentRuleText: snapshot.rule.sanitizedText,
       needsClarification: snapshot.rule.needsClarification,
       reasonSummary: snapshot.rule.reasonSummary ?? null,
@@ -572,7 +578,15 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
   }, []);
 
   async function submit() {
-    if (!rule || !played || !wallet || !walletAddress) {
+    if (
+      !rule ||
+      rule.decision !== "VALID" ||
+      rule.needsClarification ||
+      rule.confirmationRequired ||
+      !played ||
+      !wallet ||
+      !walletAddress
+    ) {
       return;
     }
     setBusy(true);

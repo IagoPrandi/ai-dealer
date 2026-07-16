@@ -83,7 +83,7 @@ test("rule agent config ignores inline comments copied from .env examples", () =
     LLM_ESCALATION_MODEL: "gemma4:e2b # stronger model",
     LLM_MODEL: "gemma4:latest # primary model",
     LLM_SEED: "7 # deterministic",
-    LLM_TIMEOUT_MS: "180000 # slow local model",
+    LLM_TIMEOUT_MS: "300000 # slow local model",
     LLM_TRANSLATE_TO_ENGLISH: "false # multilingual model",
   };
 
@@ -93,9 +93,19 @@ test("rule agent config ignores inline comments copied from .env examples", () =
   assert.equal(config.baseUrl, "http://localhost:11434/v1");
   assert.equal(config.model, "gemma4:latest");
   assert.equal(config.seed, 7);
-  assert.equal(config.timeoutMs, 180_000);
+  assert.equal(config.timeoutMs, 300_000);
   assert.equal(resolveEscalationModel(env), "gemma4:e2b");
   assert.equal(resolveTranslateToEnglish(env), false);
+});
+
+test("rule agent config enforces a five-minute minimum timeout", () => {
+  const config = resolveRuleAgentConfig({
+    LLM_BASE_URL: "http://localhost:11434/v1",
+    LLM_MODEL: "gemma4:latest",
+    LLM_TIMEOUT_MS: "45000",
+  });
+
+  assert.equal(config.timeoutMs, 300_000);
 });
 
 test("interpret harness teaches predicate min/max and casual threshold cases", async () => {

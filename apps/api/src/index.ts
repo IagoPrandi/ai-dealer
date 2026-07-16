@@ -61,6 +61,10 @@ import {
   detectJailbreak,
   resolveGuardianConfig,
 } from "./guardian.js";
+import {
+  analyzeRuleSemanticImpact,
+  type RuleSemanticImpact,
+} from "./semanticImpact.js";
 
 const ROOT_ENV_PATH = resolve(fileURLToPath(new URL("../../..", import.meta.url)), ".env");
 if (existsSync(ROOT_ENV_PATH)) {
@@ -124,6 +128,7 @@ export interface GuessReceiptRecord {
 export interface RulePreflightResult {
   addedOperationalClauses: string[];
   clarityNote: string;
+  confirmationRequired: boolean;
   // Compile gate (PRD §7.5): the rule is only payable/proposable when the dealer
   // can compile it into a verifiable AST. These fields carry that verdict so the
   // frontend can gate submission on `decision === "VALID"`.
@@ -153,6 +158,7 @@ export interface RulePreflightResult {
   ruleMode?: "predicate" | "ranking" | undefined;
   sanitizedText: string;
   sanitizedTextHash: readonly number[];
+  semanticImpact: RuleSemanticImpact;
   suggestedRewrite?: string;
   suggestedRewrites?: readonly string[];
   title: string;
@@ -1989,7 +1995,7 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
   const { interpretation, validation } = pass;
   const normalizedText =
     validation.artifact?.normalizedText ?? interpretation.normalizedText;
-  const officialInterpretation =
+  const baseOfficialInterpretation =
     validation.artifact?.officialInterpretation ??
     interpretation.officialInterpretation;
   const guardianGrounded = pass.grounded;
@@ -2004,18 +2010,52 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
     ruleAst !== null &&
     getMandatedRuleSignatures().has(ruleSignature(ruleAst));
 
+  // Technical validity is not the same as confirmed intent. Inspect the frozen
+  // AST instead of trusting model prose so draw-only/guess-only outcomes and
+  // unstated numeric range boundaries cannot pass silently.
+  const semanticReview = analyzeRuleSemanticImpact({
+    ast: ruleAst,
+    normalizedText,
+    officialInterpretation: baseOfficialInterpretation,
+    // Only the player's submitted text can confirm a material consequence.
+    // A translation or model normalization must never manufacture consent.
+    sourceText: sanitizedText,
+  });
+  const officialInterpretation = semanticReview.officialInterpretation;
+
   const needsClarification =
     interpretation.needsClarification ||
     validation.decision !== "VALID" ||
     guardianBlocked ||
-    reproposalBlocked;
+    reproposalBlocked ||
+    semanticReview.confirmationRequired;
   const reasonSummary = reproposalBlocked
     ? "This rule was already the Rule of the Hour in a previous turn. To reuse it, add a condition that differentiates it (e.g. combine it with another criterion over the numbers)."
     : guardianBlocked
       ? "The dealer's interpretation may not match your rule. Please rephrase it."
-      : validation.log.reasonSummary;
+      : semanticReview.reasonSummary ?? validation.log.reasonSummary;
+  const semanticConfirmationFeedback =
+    semanticReview.confirmationRequired &&
+    validation.decision === "VALID" &&
+    !reproposalBlocked &&
+    !guardianBlocked
+      ? {
+          clarityNote: semanticReview.clarityNote,
+          dealerMessage:
+            semanticReview.dealerMessage ??
+            "Review the rule's material effects before submission.",
+          reasonSummary:
+            semanticReview.reasonSummary ??
+            "Review required before payment.",
+          refinementFocus: [semanticReview.officialInterpretation],
+          refinementQuestions: semanticReview.refinementQuestions,
+          suggestedRewrite: semanticReview.suggestedRewrites[0],
+          suggestedRewrites: semanticReview.suggestedRewrites,
+        }
+      : null;
   const refinementFeedback =
-    needsClarification && !reproposalBlocked && !guardianBlocked
+    semanticConfirmationFeedback ??
+    (needsClarification && !reproposalBlocked && !guardianBlocked
       ? buildRuleRefinementFeedback({
           agentClarificationQuestions: interpretation.clarificationQuestions,
           agentSuggestedRewrites: interpretation.suggestedRewrites,
@@ -2027,10 +2067,11 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
           sanitizedText,
           tokenCount,
         })
-      : null;
+      : null);
 
   const preflightResult = JSON.stringify({
     compiledArtifactHash: validation.artifactHash,
+    confirmationRequired: semanticReview.confirmationRequired,
     decision: validation.decision,
     guardianGrounded: guardianGrounded ?? null,
     maxTokens: RULE_MAX_TOKENS,
@@ -2041,9 +2082,10 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
     sanitizedText,
     suggestedRewrite: refinementFeedback?.suggestedRewrite ?? null,
     suggestedRewrites: refinementFeedback?.suggestedRewrites ?? [],
+    semanticImpact: semanticReview.impact,
     title: interpretation.title,
     tokenCount,
-    version: 7,
+    version: 8,
   });
 
   return {
@@ -2054,6 +2096,7 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
         ? reasonSummary
         : interpretation.clarityNote),
     compiledArtifactHash: validation.artifactHash,
+    confirmationRequired: semanticReview.confirmationRequired,
     decision: validation.decision,
     dealerMessage:
       refinementFeedback?.dealerMessage ?? interpretation.dealerMessage,
@@ -2084,6 +2127,7 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
     ruleMode: validation.artifact?.ruleMode,
     sanitizedText,
     sanitizedTextHash: hashBytes(sanitizedText),
+    semanticImpact: semanticReview.impact,
     ...(refinementFeedback?.suggestedRewrite
       ? { suggestedRewrite: refinementFeedback.suggestedRewrite }
       : {}),
@@ -2203,6 +2247,9 @@ function isValidRuleProposal(value: unknown): value is RuleProposalRecord {
   }
 
   const proposal = value as Partial<RuleProposalRecord>;
+  const semanticImpact = proposal.semanticImpact as
+    | Partial<RuleSemanticImpact>
+    | undefined;
 
   return (
     Number.isInteger(proposal.turnId) &&
@@ -2219,6 +2266,17 @@ function isValidRuleProposal(value: unknown): value is RuleProposalRecord {
     Number(proposal.tokenCount) > 0 &&
     Number(proposal.tokenCount) <= RULE_MAX_TOKENS &&
     countRuleTokens(proposal.sanitizedText) === proposal.tokenCount &&
+    proposal.decision === "VALID" &&
+    proposal.needsClarification === false &&
+    proposal.confirmationRequired === false &&
+    Boolean(semanticImpact) &&
+    [
+      semanticImpact?.drawIndependent,
+      semanticImpact?.rangeBoundsAmbiguous,
+      semanticImpact?.sharedOutcome,
+      semanticImpact?.usesDraw,
+      semanticImpact?.usesGuess,
+    ].every((flag) => typeof flag === "boolean") &&
     isHashArray(proposal.sanitizedTextHash) &&
     isHashArray(proposal.normalizedTextHash) &&
     isHashArray(proposal.officialInterpretationHash) &&

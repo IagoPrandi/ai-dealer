@@ -215,6 +215,7 @@ export interface RulePreflightApiResult {
   // The full RulePreflightResult shape lives in solana/idealerProgram.ts; the
   // create screen passes this straight into createProposeRuleInstruction.
   [key: string]: unknown;
+  confirmationRequired: boolean;
   decision?: "INVALID" | "VALID";
   dealerMessage: string;
   needsClarification: boolean;

@@ -43,7 +43,10 @@ export class RuleAgentError extends Error {
   }
 }
 
-const DEFAULT_TIMEOUT_MS = 30_000;
+// Local rule/guardian chains can take several minutes for a single proposal.
+// Never let a stale environment value reduce the user-visible response window.
+const MIN_TIMEOUT_MS = 300_000;
+const DEFAULT_TIMEOUT_MS = MIN_TIMEOUT_MS;
 // Fixed seed + temperature 0 make the dealer deterministic: the same rule text
 // always compiles to the same normalized rule, which the on-chain hashes depend
 // on. Override with LLM_SEED only if you intentionally want a different anchor.
@@ -63,6 +66,17 @@ const SYSTEM_PROMPT = [
   "  clauses (range guards, defined division, bounded removal, tie handling) only",
   "  when needed to make the rule safe and executable. Never invent a different",
   "  objective and never make a vague rule objective without flagging it.",
+  "- Rewrite first-person wording such as 'I win' as a universal condition:",
+  "  'A guess wins if ...'. A proposed rule applies to every eligible guess,",
+  "  never only to its creator.",
+  "- State whether the executable condition uses the guess, the draw, or both.",
+  "  If it ignores the guess, explicitly say every eligible guess receives the",
+  "  same result. If it ignores the draw, explicitly say the result is fixed",
+  "  before the draw. Treat either consequence as requiring confirmation unless",
+  "  the player explicitly requested it.",
+  "- Never silently choose inclusive or exclusive numeric range endpoints. If",
+  "  the player did not explicitly define the boundary behavior, set",
+  "  needsClarification to true and ask whether both endpoints are included.",
   "- If the rule is too vague to interpret objectively, set needsClarification to",
   "  true and explain what is missing in clarityNote.",
   "- Treat the player's explicit semantics as invariants along four dimensions:",
@@ -174,10 +188,12 @@ const SYSTEM_PROMPT = [
   "  condition. It must describe the normalized rule, never copy the player's",
   "  prompt verbatim, and must not promise a winner when clarification is needed.",
   "- normalizedText: the rule rewritten in clear English as one measurable sentence.",
-  "- officialInterpretation: clear English explaining how the engine compares every eligible guess.",
+  "- officialInterpretation: clear English explaining how the engine evaluates",
+  "  every eligible guess, including any shared-outcome or draw-independent consequence.",
   "- addedOperationalClauses: each guard clause you added (empty array if none).",
   "- dealerMessage: a short, friendly note in English to the player about what",
-  "  you understood (1-2 sentences).",
+  "  you understood (1-2 sentences). It must name every material consequence",
+  "  that requires confirmation.",
   "",
   "Do not think out loud or add any text before or after the JSON. Output the",
   "JSON object only. Be deterministic: identical input must produce identical",
@@ -251,9 +267,9 @@ export function resolveRuleAgentConfig(
 
   const timeoutRaw = Number(cleanEnvValue(env.LLM_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS);
   const timeoutMs =
-    Number.isFinite(timeoutRaw) && timeoutRaw > 0
+    Number.isFinite(timeoutRaw) && timeoutRaw >= MIN_TIMEOUT_MS
       ? timeoutRaw
-      : DEFAULT_TIMEOUT_MS;
+      : MIN_TIMEOUT_MS;
 
   const seedRaw = Number(cleanEnvValue(env.LLM_SEED) || DEFAULT_SEED);
   const seed = Number.isInteger(seedRaw) ? seedRaw : DEFAULT_SEED;

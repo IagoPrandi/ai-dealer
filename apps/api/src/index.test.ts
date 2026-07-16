@@ -161,6 +161,8 @@ function proposal(turnId: number, ruleId: number): RuleProposalRecord {
   return {
     addedOperationalClauses: [],
     clarityNote: "",
+    confirmationRequired: false,
+    decision: "VALID",
     dealerMessage: "Win if at least four of your numbers are drawn.",
     maxTokens: 1000,
     needsClarification: false,
@@ -176,6 +178,13 @@ function proposal(turnId: number, ruleId: number): RuleProposalRecord {
     ruleProposal: base58,
     sanitizedText: "Win if at least 4 of your numbers appear in the draw.",
     sanitizedTextHash: hashArray(4),
+    semanticImpact: {
+      drawIndependent: false,
+      rangeBoundsAmbiguous: false,
+      sharedOutcome: false,
+      usesDraw: true,
+      usesGuess: true,
+    },
     signature: base58,
     submittedAt: "2026-06-12T12:00:00.000Z",
     title: "Win if at least 4 of your numbers appear in",

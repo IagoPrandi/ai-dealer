@@ -112,6 +112,7 @@ export interface ActiveTurnSnapshot {
 export interface RulePreflightResult {
   addedOperationalClauses: string[];
   clarityNote: string;
+  confirmationRequired: boolean;
   // Compile-gate verdict: the rule is only proposable when decision === "VALID".
   compiledArtifactHash?: string | null;
   decision?: "VALID" | "INVALID";
@@ -133,6 +134,13 @@ export interface RulePreflightResult {
   ruleMode?: "predicate" | "ranking";
   sanitizedText: string;
   sanitizedTextHash: readonly number[];
+  semanticImpact: {
+    drawIndependent: boolean;
+    rangeBoundsAmbiguous: boolean;
+    sharedOutcome: boolean;
+    usesDraw: boolean;
+    usesGuess: boolean;
+  };
   suggestedRewrite?: string;
   suggestedRewrites?: readonly string[];
   title: string;

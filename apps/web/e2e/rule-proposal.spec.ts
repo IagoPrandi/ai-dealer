@@ -9,6 +9,7 @@ function validPreflight(text: string, ruleId: number) {
     preflight: {
       addedOperationalClauses: [],
       clarityNote: "",
+      confirmationRequired: false,
       decision: "VALID",
       dealerMessage: "Done. I compiled your rule into a deterministic condition.",
       difficultyClass: "MEDIUM",
@@ -24,6 +25,13 @@ function validPreflight(text: string, ruleId: number) {
       ruleMode: "predicate",
       sanitizedText: text,
       sanitizedTextHash: hashBytes(4),
+      semanticImpact: {
+        drawIndependent: false,
+        rangeBoundsAmbiguous: false,
+        sharedOutcome: false,
+        usesDraw: true,
+        usesGuess: true,
+      },
       tokenCount: 12,
     },
   };
@@ -34,6 +42,7 @@ function clarifyPreflight(text: string) {
     preflight: {
       addedOperationalClauses: [],
       clarityNote: "Close needs a precise measurable threshold.",
+      confirmationRequired: false,
       decision: "INVALID",
       dealerMessage: "I need one objective threshold before this can be compiled.",
       finalConfidence: 0.36,
@@ -53,7 +62,62 @@ function clarifyPreflight(text: string) {
       ruleId: 960,
       sanitizedText: text,
       sanitizedTextHash: hashBytes(8),
+      semanticImpact: {
+        drawIndependent: false,
+        rangeBoundsAmbiguous: false,
+        sharedOutcome: false,
+        usesDraw: true,
+        usesGuess: true,
+      },
       tokenCount: 12,
+    },
+  };
+}
+
+function materialImpactPreflight(text: string) {
+  const inclusiveRewrite =
+    "A guess wins if all six official draw numbers are between 9 and 40, inclusive. The player's guess does not affect the result.";
+  const exclusiveRewrite =
+    "A guess wins if all six official draw numbers are strictly greater than 9 and strictly less than 40. The player's guess does not affect the result.";
+  return {
+    preflight: {
+      addedOperationalClauses: [],
+      clarityNote:
+        "Confirm that the guess is ignored and whether the numeric range includes both endpoints.",
+      confirmationRequired: true,
+      decision: "VALID",
+      dealerMessage:
+        "I compiled the rule, but it needs your confirmation before submission. Because this condition does not inspect the player's guess, every eligible guess wins or loses together. The wording also does not say whether the range includes its endpoints.",
+      finalConfidence: 0.94,
+      maxTokens: 1000,
+      needsClarification: true,
+      normalizedText:
+        "A guess wins if all six official draw numbers are between 9 and 40.",
+      normalizedTextHash: hashBytes(9),
+      officialInterpretation:
+        "Check whether all six official draw numbers fall within the range from 9 to 40. Because this condition does not inspect the player's guess, every eligible guess wins or loses together.",
+      officialInterpretationHash: hashBytes(10),
+      preflightResultHash: hashBytes(11),
+      reasonSummary:
+        "Review required: confirm the rule's outcome scope and any numeric range boundaries before payment.",
+      refinementQuestions: [
+        "Should this rule ignore the player's guess so every eligible guess wins or loses together?",
+        "Should the numeric range include both endpoints?",
+      ],
+      ruleId: 100,
+      sanitizedText: text,
+      sanitizedTextHash: hashBytes(12),
+      semanticImpact: {
+        drawIndependent: false,
+        rangeBoundsAmbiguous: true,
+        sharedOutcome: true,
+        usesDraw: true,
+        usesGuess: false,
+      },
+      suggestedRewrite: inclusiveRewrite,
+      suggestedRewrites: [inclusiveRewrite, exclusiveRewrite],
+      title: "Draw Numbers in Range",
+      tokenCount: 13,
     },
   };
 }
@@ -193,6 +257,48 @@ test("blocked prompt injection offers no generic replacement and accepts a playe
         "New clean rule: win if at least 2 guessed numbers appear in the draw, regardless of order.",
     }),
   ).toBeVisible();
+});
+
+test("material-impact review blocks submission until draw-only range semantics are confirmed", async ({
+  page,
+}) => {
+  await mockShellData(page);
+  const original =
+    "eu ganho se todos os número do sorteio forem entre 9 e 40";
+  const inclusiveRewrite =
+    "A guess wins if all six official draw numbers are between 9 and 40, inclusive. The player's guess does not affect the result.";
+
+  await page.route("**/rule-preflight", async (route) => {
+    const body = (await route.request().postDataJSON()) as { text: string };
+    await route.fulfill({
+      contentType: "application/json",
+      json:
+        body.text === original
+          ? materialImpactPreflight(body.text)
+          : validPreflight(inclusiveRewrite, 101),
+      status: 200,
+    });
+  });
+
+  await page.goto("/play/propose");
+  await page.getByLabel("Message", { exact: true }).fill(original);
+  await page.getByRole("button", { name: "Send message" }).click();
+
+  await expect(page.getByText("review required", { exact: true })).toBeVisible();
+  await expect(page.getByText("94% interpretation confidence", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Confirm rule impact" })).toBeVisible();
+  await expect(
+    page.getByText(/every eligible guess wins or loses together/i).first(),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: /1 A guess wins.*inclusive/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /2 A guess wins.*strictly greater/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Submit to the round/i })).toHaveCount(0);
+
+  await page.getByRole("button", { name: /1 A guess wins.*inclusive/i }).click();
+  await page.getByRole("button", { name: /^Submit/ }).click();
+
+  await expect(page.getByText("valid rule", { exact: true })).toBeVisible();
+  await expect(page.locator("p").filter({ hasText: inclusiveRewrite })).toBeVisible();
 });
 
 test("external dependency offers no arbitrary threshold and accepts a player rewrite", async ({

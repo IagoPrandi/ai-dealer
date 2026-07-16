@@ -12,6 +12,7 @@ export interface RuleRefinementContext {
 export interface RuleGuidanceContext extends RuleRefinementContext {
   apiCode?: string | null;
   clarityNote?: string | null;
+  confirmationRequired?: boolean;
   needsClarification?: boolean;
   reasonSummary?: string | null;
   /** The rule's canonical meaning already held a mandate (was Rule of the Hour)
@@ -142,6 +143,23 @@ export function composeRefinedRuleDraft(
     if (orderQuestion) {
       return `${cleanSentence(base)}. Order is ignored.`;
     }
+    const confirmsSharedOutcome = context.refinementQuestions?.some((question) =>
+      /ignore the player's guess|every eligible guess wins or loses together/i.test(question),
+    );
+    const confirmsDrawIndependent = context.refinementQuestions?.some((question) =>
+      /ignore the official draw|fixed before the draw/i.test(question),
+    );
+    const confirmsInclusiveRange = context.refinementQuestions?.some((question) =>
+      /range include both endpoints/i.test(question),
+    );
+    const confirmations = [
+      confirmsSharedOutcome ? "The player's guess does not affect the result." : "",
+      confirmsDrawIndependent ? "The official draw does not affect the result." : "",
+      confirmsInclusiveRange ? "The numeric range includes both endpoints." : "",
+    ].filter(Boolean);
+    if (confirmations.length > 0) {
+      return `${cleanSentence(base)}. ${confirmations.join(" ")}`;
+    }
   }
 
   if (/^(no|nao)$/iu.test(correction)) {
@@ -169,6 +187,9 @@ export function composeRefinedRuleDraft(
 }
 
 export function getRuleGuidanceTitle(context: RuleGuidanceContext) {
+  if (context.confirmationRequired) {
+    return "Confirm rule impact";
+  }
   if (context.reproposalBlocked) {
     return "Differentiate this rule?";
   }
