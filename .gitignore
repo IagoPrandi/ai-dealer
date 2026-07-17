@@ -21,3 +21,6 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 Plataforma-handoff.zip
+Plataforma-handoff-nongroup.zip
+.gitignore
+Tokenomics staking e rewards-handoff.zip

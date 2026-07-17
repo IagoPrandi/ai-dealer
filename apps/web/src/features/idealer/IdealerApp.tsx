@@ -408,7 +408,7 @@ export function IdealerApp({
     walletAddress,
   };
 
-  const showNav = screen === "home" || screen === "vote" || screen === "profile";
+  const showNav = screen === "home" || screen === "vote" || screen === "rewards" || screen === "profile";
   const detailRule = detail ? rules.rules.find((r) => r.ruleId === detail.ruleId) ?? null : null;
   const detailVote: RuleDetailVote | null =
     detailRule
@@ -453,6 +453,9 @@ export function IdealerApp({
                   <Ico.vote style={{ color: "currentColor" }} /> Rules
                 </button>
                 <button className="ide-nav-fab" onClick={() => go("create", { newConversation: true })} title="Create rule" type="button"><Ico.plus style={{ color: "#08110C" }} /></button>
+                <button className={"ide-nav-btn" + (screen === "rewards" ? " on" : "")} onClick={() => go("rewards")} type="button">
+                  <Ico.coin style={{ color: "currentColor" }} /> Rewards
+                </button>
                 <button className={"ide-nav-btn" + (screen === "profile" ? " on" : "")} onClick={() => go("profile")} type="button">
                   <Ico.user style={{ color: "currentColor" }} /> Account
                 </button>

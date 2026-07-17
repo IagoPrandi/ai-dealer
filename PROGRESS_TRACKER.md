@@ -68,6 +68,27 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-07-16 (Stake & earn rewards page handoff)
+
+- Opened the required project and handoff context before implementation: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, the `.claude/skills` directory, the frontend/design-system/UI-coherence/test-and-verify/Playwright skill guidance and required references, `PRD-TOKENOMICS-v2.8.md`, and the attached `Tokenomics staking e rewards-handoff.zip` README. The README identified `project/Staking.dc.html` as the primary design and `project/support.js` as its imported interaction support; both were read in full. The archive contains no `Idealer.html` file.
+- Rebuilt `/play/rewards` as the reference-driven `Stake & earn` experience: staking balance hero, lock/unlock affordances, Overview/Activity tabs, reward-token and revenue-epoch cards, live game-claim summary/activity, claim notifications, wallet-connect state, disclosure copy, and the five-item bottom navigation. Added the screen to the development gallery and covered claim summary/filter/sort behavior with a unit regression.
+- Preserved fail-visible behavior: because Tokenomics Core staking accounts, indexer endpoints, and transaction builders are not implemented in the repository, token balances and epoch values render as explicitly unavailable and lock/unlock remain disabled. The existing game claim ledger remains live; no fabricated token balance, yield, or transaction fallback was introduced.
+- Verification passed: `pnpm --filter @idealer/web typecheck`, `test` (81/81), `lint`, `build`, and `git diff --check`. Playwright verified Overview, Activity, notification initial focus, Escape-to-close, and zero horizontal overflow at 320, 390, 768, and 1440 px; visual evidence is in `output/playwright/rewards-*.png`.
+- Rechecked the user-reported missing fourth destination against the actual development server at `http://localhost:3000/play`, not only the source component. A fresh client bundle renders the intended five controls in order—Round, Rules, Create, Rewards, Account—clicking Rewards activates the destination and opens the wallet-gated rewards screen, and the 390px route has zero horizontal overflow. The reported capture was using the previous client bundle; refreshed live evidence is `output/playwright/rewards-nav-live-390.png` and `output/playwright/rewards-route-live-390.png`.
+- Reviewed the result for inconsistencies: UI/UX copy is UTF-8 English, the page uses existing Idealer tokens/components, unavailable tokenomics capabilities are distinguished from current SOL game claims, and unrelated pre-existing worktree/archive changes were preserved. No tokenomics milestone checkbox or status was changed because Tokenomics Core remains unimplemented and milestone marking requires explicit user confirmation.
+
+### 2026-07-16 (Rule-space longevity clarification)
+
+- Clarified the rule-space estimate against the existing re-proposal policy in `PRD.md` §6.13. At 100,000 proposals per day, 100 years produces about 3.65 billion proposals and 1,000 years about 36.5 billion; both are negligible compared with the DSL's conservative semantic-capacity lower bound.
+- Recorded the material policy distinction: the canonical-AST re-proposal gate blocks only a rule signature that previously held a mandate. It does not guarantee that two ordinary proposals in the same or different turns will be unique, so human users can still submit common/repeated rules unless a broader proposal-level deduplication policy is explicitly adopted.
+- Reviewed the conclusion for consistency: no rule policy, implementation, or milestone status was changed.
+
+### 2026-07-16 (Rule-space estimate)
+
+- Opened the required context before analysing: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, the `.claude/skills` directory, `.claude/skills/solana-dev/SKILL.md`, and the current rule DSL/runtime sources (`packages/rule-schema/src/index.ts` and `packages/rule-runtime/src/index.ts`).
+- Estimated the capacity of the active v3 rule algebra without changing source code or configuration. The runtime bounds AST depth to 16 and boolean `and`/`or` groups to eight clauses; therefore the executable syntax space is finite but extremely large. The estimate distinguishes unique rule meanings from textual rewrites and from the practical per-turn proposal/shortlist limits.
+- Reviewed the assessment for consistency: the analysis preserves the existing canonical-AST identity policy, its 80-token authoring limit, and the rejection of impossible/always-true rules. No milestone checkbox/status was changed because milestone marking requires explicit user confirmation.
+
 ### 2026-07-14 (Vote screen typography alignment)
 
 - Opened the required documents before editing UI: `PRD.md`, `AGENTS.md`, `.claude/skills`, `.claude/skills/idealer-ui-coherence/SKILL.md`, and `.claude/skills/idealer-design-system/SKILL.md`.
