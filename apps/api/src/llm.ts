@@ -229,6 +229,19 @@ function firstConfigured(...values: Array<string | undefined>): string {
   return "";
 }
 
+function ollamaThinkingControl(config: RuleAgentConfig) {
+  const usesOllama =
+    config.apiKey.toLowerCase() === "ollama" ||
+    (() => {
+      try {
+        return new URL(config.baseUrl).port === "11434";
+      } catch {
+        return false;
+      }
+    })();
+  return usesOllama ? { reasoning_effort: "none" as const } : {};
+}
+
 // The stronger model used to re-try a rule when the fast primary model produces
 // an invalid/drifted result (escalation). Empty disables escalation.
 export function resolveEscalationModel(
@@ -324,9 +337,10 @@ function modelMatches(loaded: string, wanted: string): boolean {
   if (loaded === wanted) {
     return true;
   }
-  // Ollama normalizes "gemma4" -> "gemma4:latest"; match the family head too.
-  const head = (value: string) => value.split(":")[0];
-  return head(loaded) === head(wanted);
+  // Ollama normalizes an untagged name such as "gemma4" to
+  // "gemma4:latest". Explicit tags are different models and must never match:
+  // treating gemma4:e2b as gemma4:latest skips the required primary warmup.
+  return !wanted.includes(":") && loaded === `${wanted}:latest`;
 }
 
 // Make sure `model` is resident in Ollama before a time-boxed chat call hits it.
@@ -539,6 +553,11 @@ async function requestAgentJson(
           { content: userText, role: "user" },
         ],
         model: config.model,
+        max_tokens: 2_048,
+        // Rule preflight needs the constrained JSON result, not a hidden
+        // reasoning trace. Ollama otherwise enables thinking by default for
+        // thinking-capable models.
+        ...ollamaThinkingControl(config),
         response_format: { type: "json_object" },
         seed: config.seed,
         stream: false,
@@ -658,6 +677,8 @@ export async function translateRuleToEnglish(
           { content: text, role: "user" },
         ],
         model: config.model,
+        max_tokens: 256,
+        ...ollamaThinkingControl(config),
         seed: config.seed,
         stream: false,
         temperature: 0,

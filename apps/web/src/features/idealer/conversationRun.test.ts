@@ -18,7 +18,11 @@ test("conversation run continues while no screen is subscribed", async () => {
   const deps: ConversationRunDeps = {
     describeError: (cause) => cause instanceof Error ? cause.message : String(cause),
     postDraft: async (_wallet, body) => ({ draft: { draftId: body.draftId ?? draftId } }),
-    postPreflight: async () => {
+    postPreflight: async (_text, onProgress) => {
+      onProgress?.({
+        message: "Interpreting your winning condition...",
+        stage: "interpreting",
+      });
       await preflightStarted;
       return {
         preflight: {
@@ -49,12 +53,16 @@ test("conversation run continues while no screen is subscribed", async () => {
   assert.equal(isConversationRunActive(draftId), true);
   assert.equal(getLatestConversationRun(null, 87)?.status, "pending");
 
+  await Promise.resolve();
+  assert.equal(getConversationRun(draftId)?.progress?.stage, "interpreting");
+
   resolvePreflight();
   await task;
 
   const run = getConversationRun(draftId);
   assert.equal(isConversationRunActive(draftId), false);
   assert.equal(run?.status, "done");
+  assert.equal(run?.progress, null);
   assert.equal(run?.messages.at(-1)?.text, "Done! I compiled your rule.");
   assert.equal(run?.rule?.ruleId, 8701);
 });

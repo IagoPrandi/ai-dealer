@@ -17,6 +17,7 @@ test("conversation run subscribers reattach to pending progress and completion",
     draftId,
     error: null,
     messages: [{ text: "Win if exactly 2 numbers match.", who: "user" }],
+    progress: null,
     rule: null,
     status: "pending",
   });
@@ -46,6 +47,7 @@ test("conversation run can be reattached by wallet and turn", () => {
     draftId,
     error: null,
     messages: [{ text: "Win if the first number matches.", who: "user" }],
+    progress: null,
     rule: null,
     status: "pending",
   });

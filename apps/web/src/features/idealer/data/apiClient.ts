@@ -224,10 +224,116 @@ export interface RulePreflightApiResult {
   tokenCount: number;
 }
 
-export function postRulePreflight(text: string) {
-  return postStrictJson<{ preflight: RulePreflightApiResult }>("/rule-preflight", {
-    text,
+export type RulePreflightProgressStage =
+  | "checking_input"
+  | "loading_models"
+  | "checking_safety"
+  | "translating"
+  | "interpreting"
+  | "compiling"
+  | "checking_fidelity"
+  | "escalating"
+  | "reviewing_impact";
+
+export interface RulePreflightProgress {
+  message: string;
+  model?: string;
+  stage: RulePreflightProgressStage;
+}
+
+type RulePreflightStreamEvent =
+  | { progress: RulePreflightProgress; type: "progress" }
+  | { preflight: RulePreflightApiResult; type: "result" }
+  | { error?: string; message?: string; status?: number; type: "error" };
+
+function throwRulePreflightStreamError(event: Extract<RulePreflightStreamEvent, { type: "error" }>) {
+  throw new ApiRequestError({
+    code: event.error ?? null,
+    detail: event,
+    message: event.message ?? "The rule preflight stream ended with an error.",
+    status: event.status ?? 502,
   });
+}
+
+export async function consumeRulePreflightResponse(
+  response: Response,
+  onProgress?: (progress: RulePreflightProgress) => void,
+) {
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+  if (!contentType.includes("application/x-ndjson")) {
+    return (await response.json()) as { preflight: RulePreflightApiResult };
+  }
+  if (!response.body) {
+    throw new Error("The rule preflight stream did not include a response body.");
+  }
+
+  const decoder = new TextDecoder();
+  const reader = response.body.getReader();
+  let buffer = "";
+  let result: RulePreflightApiResult | null = null;
+
+  const consumeLine = (line: string) => {
+    if (!line.trim()) {
+      return;
+    }
+    const event = JSON.parse(line) as RulePreflightStreamEvent;
+    if (event.type === "progress") {
+      onProgress?.(event.progress);
+    } else if (event.type === "result") {
+      result = event.preflight;
+    } else if (event.type === "error") {
+      throwRulePreflightStreamError(event);
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value, { stream: !done });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    lines.forEach(consumeLine);
+    if (done) {
+      break;
+    }
+  }
+  consumeLine(buffer);
+
+  if (!result) {
+    throw new Error("The rule preflight stream ended before returning a result.");
+  }
+  return { preflight: result };
+}
+
+export async function postRulePreflight(
+  text: string,
+  onProgress?: (progress: RulePreflightProgress) => void,
+) {
+  const path = "/rule-preflight";
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
+    body: JSON.stringify({ text }),
+    headers: {
+      accept: "application/x-ndjson",
+      "content-type": "application/json",
+    },
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    let detail: unknown;
+    try {
+      detail = await response.json();
+    } catch {
+      detail = undefined;
+    }
+    throw new ApiRequestError({
+      code: apiErrorCode(detail),
+      detail,
+      message: apiErrorMessage(path, response.status, detail),
+      status: response.status,
+    });
+  }
+
+  return consumeRulePreflightResponse(response, onProgress);
 }
 
 export function postRuleProposal(body: unknown) {

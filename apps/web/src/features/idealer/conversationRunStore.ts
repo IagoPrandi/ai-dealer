@@ -2,6 +2,7 @@
 
 import type { RulePreflightResult } from "../../solana/idealerProgram";
 import type { ConversationMessage } from "./data/types";
+import type { RulePreflightProgress } from "./data/apiClient";
 import type { RuleGuidanceContext } from "./ruleRefinement";
 
 export interface ConversationRunSnapshot {
@@ -9,6 +10,7 @@ export interface ConversationRunSnapshot {
   error: null | string;
   guidanceContext?: RuleGuidanceContext | null;
   messages: ConversationMessage[];
+  progress: RulePreflightProgress | null;
   rule: RulePreflightResult | null;
   status: "done" | "error" | "pending";
 }

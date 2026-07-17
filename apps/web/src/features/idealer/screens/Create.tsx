@@ -20,7 +20,11 @@ import {
 } from "../../../solana/idealerProgram";
 import { fetchActiveTurnSnapshotFromWorker } from "../../../solana/activeTurnApi";
 import { useIdealer } from "../context";
-import { getConversationDrafts, postRuleProposal } from "../data/apiClient";
+import {
+  getConversationDrafts,
+  postRuleProposal,
+  type RulePreflightProgress,
+} from "../data/apiClient";
 import { fmtSol, fmtTurnId } from "../data/format";
 import { describeTxError, sendInstruction } from "../data/tx";
 import {
@@ -320,6 +324,45 @@ function ClarificationPrompt({
   );
 }
 
+function AgentProgress({ progress }: { progress: RulePreflightProgress | null }) {
+  return (
+    <div
+      aria-atomic="true"
+      aria-live="polite"
+      className="ide-bubble-ai"
+      role="status"
+      style={{
+        alignItems: "center",
+        display: "grid",
+        gap: 11,
+        gridTemplateColumns: "28px minmax(0, 1fr)",
+        maxWidth: "92%",
+        padding: "12px 14px",
+      }}
+    >
+      <span
+        aria-hidden="true"
+        className="ide-spin"
+        style={{
+          border: "2px solid var(--surface-3)",
+          borderRadius: "50%",
+          borderTopColor: "var(--green)",
+          height: 24,
+          width: 24,
+        }}
+      />
+      <span style={{ display: "grid", gap: 2, minWidth: 0 }}>
+        <span style={{ color: "var(--purple-soft)", fontSize: 11.5, fontWeight: 750, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+          AI Dealer
+        </span>
+        <span style={{ color: "var(--text)", fontSize: 14, lineHeight: 1.4 }}>
+          {progress?.message ?? "Preparing your rule..."}
+        </span>
+      </span>
+    </div>
+  );
+}
+
 export function CreateScreen() {
   const { chatId, client, connected, fees, go, newConversationKey, phase1EndsAt, played, reloadAll, seed, turnId, wallet, walletAddress } = useIdealer();
 
@@ -334,6 +377,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
   ]);
   const [val, setVal] = useState(seed ?? "");
   const [typing, setTyping] = useState(false);
+  const [progress, setProgress] = useState<RulePreflightProgress | null>(null);
   const [rule, setRule] = useState<RulePreflightResult | null>(null);
   const [guidance, setGuidance] = useState<RuleGuidanceState | null>(null);
   const [selectedGuidanceIndex, setSelectedGuidanceIndex] = useState<number | null>(0);
@@ -356,7 +400,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
     if (el) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [msgs, typing, rule, guidance]);
+  }, [msgs, typing, progress, rule, guidance]);
 
   useEffect(() => {
     if (!guidance) {
@@ -400,6 +444,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
   const applyRunSnapshot = useCallback((snapshot: ConversationRunSnapshot) => {
     setMsgs(snapshot.messages);
     setTyping(snapshot.status === "pending");
+    setProgress(snapshot.progress);
     setRule(snapshot.rule);
     setError(snapshot.error);
     if (snapshot.status === "pending") {
@@ -716,6 +761,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
     setRule(null);
     setSubmitted(false);
     setTyping(false);
+    setProgress(null);
     setError(null);
     setActiveDraftId(null);
     setGuidance(null);
@@ -751,7 +797,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
         {msgs.map((mm, i) => (
           <div key={i} className={mm.who === "ai" ? "ide-bubble-ai" : "ide-bubble-user"} style={{ animation: "ide-rise .3s ease both" }}>{mm.text}</div>
         ))}
-        {typing ? <div className="ide-bubble-ai ide-typing" style={{ width: 56 }}><span /><span /><span /></div> : null}
+        {typing ? <AgentProgress progress={progress} /> : null}
 
         {rule && !typing ? <RulePreview rule={rule} /> : null}
 

@@ -165,6 +165,25 @@ export interface RulePreflightResult {
   tokenCount: number;
 }
 
+export type RulePreflightProgressStage =
+  | "checking_input"
+  | "loading_models"
+  | "checking_safety"
+  | "translating"
+  | "interpreting"
+  | "compiling"
+  | "checking_fidelity"
+  | "escalating"
+  | "reviewing_impact";
+
+export interface RulePreflightProgress {
+  message: string;
+  model?: string;
+  stage: RulePreflightProgressStage;
+}
+
+type RulePreflightProgressReporter = (progress: RulePreflightProgress) => void;
+
 export interface RuleProposalRecord extends RulePreflightResult {
   compiledArtifactHash?: string | null;
   feeLamports?: number;
@@ -1821,7 +1840,14 @@ export function buildRuleRefinementFeedback(
   };
 }
 
-async function createRulePreflight(text: string): Promise<RulePreflightResult> {
+async function createRulePreflight(
+  text: string,
+  reportProgress: RulePreflightProgressReporter = () => undefined,
+): Promise<RulePreflightResult> {
+  reportProgress({
+    message: "Checking rule limits and allowed inputs...",
+    stage: "checking_input",
+  });
   const sanitizedText = sanitizeRuleText(text);
   const tokenCount = countRuleTokens(sanitizedText);
   const textByteLength = Buffer.byteLength(sanitizedText, "utf8");
@@ -1879,6 +1905,11 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
   // cold Ollama load otherwise blows past LLM_TIMEOUT_MS on the first request
   // after boot and surfaces as a failure even though the rule is fine. This is
   // a best-effort no-op for non-Ollama endpoints.
+  reportProgress({
+    message: "Preparing the local rule agents...",
+    model: agentConfig.model,
+    stage: "loading_models",
+  });
   if (guardianConfig.enabled) {
     await ensureModelLoaded(guardianConfig.model, agentConfig);
   }
@@ -1888,6 +1919,11 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
   // addition to the regex guard. If the guardian is down we keep the regex guard
   // and surface the outage rather than silently dropping the check.
   if (guardianConfig.enabled) {
+    reportProgress({
+      message: "Checking the rule for unsafe instructions...",
+      model: guardianConfig.model,
+      stage: "checking_safety",
+    });
     try {
       if (await detectJailbreak(sanitizedText, guardianConfig)) {
         throw new Error("RULE_PROMPT_INJECTION");
@@ -1908,9 +1944,17 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
   // carries a Portuguese trigger glossary — so this step can be turned off
   // (LLM_TRANSLATE_TO_ENGLISH=false) to save a call without losing consistency.
   const knownInterpretation = createKnownRuleInterpretation(sanitizedText);
+  const shouldTranslate = !knownInterpretation && resolveTranslateToEnglish();
+  if (shouldTranslate) {
+    reportProgress({
+      message: "Translating the rule without changing its meaning...",
+      model: agentConfig.model,
+      stage: "translating",
+    });
+  }
   const compileText =
     knownInterpretation?.normalizedText ??
-    (resolveTranslateToEnglish()
+    (shouldTranslate
       ? await translateRuleToEnglish(sanitizedText, agentConfig)
       : sanitizedText);
   const ruleId = createRuleId();
@@ -1919,12 +1963,25 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
   // AST from the rule text (skill-guided), and check groundedness.
   const dealerPass = async (model: string) => {
     const passConfig = { ...agentConfig, model };
+    reportProgress({
+      message:
+        model === agentConfig.model
+          ? "Interpreting your winning condition..."
+          : "Retrying with the stronger rule model...",
+      model,
+      stage: model === agentConfig.model ? "interpreting" : "escalating",
+    });
     const interpretation =
       knownInterpretation ??
       enforceKnownRuleInterpretation(
         `${compileText} ${sanitizedText}`,
         await interpretRuleWithAgent(compileText, passConfig),
       );
+    reportProgress({
+      message: "Building and testing the executable rule...",
+      model,
+      stage: "compiling",
+    });
     const astProvider: RuleAstProvider = async ({ prompt }) =>
       compileRuleToAst(prompt, passConfig);
     const validation = await compileRuleArtifact(
@@ -1932,7 +1989,11 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
         model,
         officialInterpretation: interpretation.officialInterpretation,
         originalText: sanitizedText,
-        prompt: compileText,
+        // Compile the normalized interpretation. This avoids a second model
+        // call whenever the deterministic compiler already supports the
+        // normalized rule, while groundedness below still compares it with the
+        // player's source meaning.
+        prompt: interpretation.normalizedText,
         ruleId,
         tokenCount,
       },
@@ -1940,6 +2001,11 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
     );
     let grounded: boolean | undefined;
     if (guardianConfig.enabled && validation.decision === "VALID") {
+      reportProgress({
+        message: "Checking that the compiled rule matches your words...",
+        model: guardianConfig.model,
+        stage: "checking_fidelity",
+      });
       try {
         grounded = await checkGroundedness(
           compileText,
@@ -2020,6 +2086,10 @@ async function createRulePreflight(text: string): Promise<RulePreflightResult> {
     // Only the player's submitted text can confirm a material consequence.
     // A translation or model normalization must never manufacture consent.
     sourceText: sanitizedText,
+  });
+  reportProgress({
+    message: "Reviewing the rule's effects before payment...",
+    stage: "reviewing_impact",
   });
   const officialInterpretation = semanticReview.officialInterpretation;
 
@@ -3044,6 +3114,67 @@ function sendJson(
   }
 
   writeResponse(statusCode, body);
+}
+
+function describeRulePreflightError(error: unknown) {
+  if (error instanceof RuleAgentError) {
+    return {
+      body: {
+        error: error.code,
+        message:
+          error.code === "RULE_AGENT_NOT_CONFIGURED"
+            ? "The rule agent is not configured. Set LLM_BASE_URL and LLM_MODEL."
+            : error.code === "RULE_AGENT_TIMEOUT"
+              ? "The dealer agent took too long to respond. Try again."
+              : error.code === "RULE_AGENT_BAD_RESPONSE"
+                ? "The dealer agent returned an unusable response. Try rephrasing the rule."
+                : "The dealer agent is unavailable. Make sure the model is running and try again.",
+      },
+      status: 502,
+    };
+  }
+
+  const code = error instanceof Error ? error.message : "RULE_REJECTED";
+  return {
+    body: {
+      error: code,
+      message:
+        code === "RULE_PROMPT_INJECTION"
+          ? "Rule text contains prompt-injection language. Rewrite it as a measurable game condition."
+          : code === "RULE_EXTERNAL_DEPENDENCY"
+            ? "Rule text depends on unavailable external game state. Rewrite it using only your guess and the official draw."
+            : code === "RULE_INVALID_CONSTRAINT"
+              ? "Rule uses an impossible constraint (numbers are 1-100, and a number cannot be both even and odd). Rewrite it as a condition that can actually happen."
+              : code === "RULE_TOKEN_LIMIT_EXCEEDED"
+                ? `Rule text exceeds the ${RULE_MAX_TOKENS}-token limit.`
+                : code === "RULE_TEXT_TOO_LONG"
+                  ? `Rule text exceeds the ${MAX_RULE_TEXT_BYTES}-byte on-chain limit.`
+                  : "Rule text is invalid.",
+    },
+    status: 400,
+  };
+}
+
+function startRulePreflightStream(
+  request: import("node:http").IncomingMessage,
+  response: import("node:http").ServerResponse,
+) {
+  response.writeHead(200, {
+    "cache-control": "no-cache, no-transform",
+    "content-type": "application/x-ndjson; charset=utf-8",
+    "x-accel-buffering": "no",
+    ...getCorsHeaders(request),
+  });
+  response.flushHeaders();
+}
+
+function writeRulePreflightStreamEvent(
+  response: import("node:http").ServerResponse,
+  event: unknown,
+) {
+  if (!response.destroyed && !response.writableEnded) {
+    response.write(`${JSON.stringify(event)}\n`);
+  }
 }
 
 function sendNoContent(
@@ -8417,43 +8548,56 @@ if (isMainModule()) {
             return;
           }
 
+          const streamProgress = request.headers.accept
+            ?.toLowerCase()
+            .includes("application/x-ndjson") === true;
+          if (streamProgress) {
+            startRulePreflightStream(request, response);
+            try {
+              const preflight = await createRulePreflight(text, (progress) => {
+                writeRulePreflightStreamEvent(response, {
+                  progress,
+                  type: "progress",
+                });
+              });
+              if (apiStatePool) {
+                try {
+                  await queueApiStatePersistence();
+                } catch (error) {
+                  console.error("API state persistence failed", error);
+                  writeRulePreflightStreamEvent(response, {
+                    error: "api_state_persistence_failed",
+                    message: "The operation was not acknowledged because durable state persistence failed.",
+                    status: 503,
+                    type: "error",
+                  });
+                  return;
+                }
+              }
+              writeRulePreflightStreamEvent(response, {
+                preflight,
+                type: "result",
+              });
+            } catch (error) {
+              const failure = describeRulePreflightError(error);
+              writeRulePreflightStreamEvent(response, {
+                ...failure.body,
+                status: failure.status,
+                type: "error",
+              });
+            } finally {
+              response.end();
+            }
+            return;
+          }
+
           try {
             sendJson(request, response, 200, {
               preflight: await createRulePreflight(text),
             });
           } catch (error) {
-            if (error instanceof RuleAgentError) {
-              sendJson(request, response, 502, {
-                error: error.code,
-                message:
-                  error.code === "RULE_AGENT_NOT_CONFIGURED"
-                    ? "The rule agent is not configured. Set LLM_BASE_URL and LLM_MODEL."
-                    : error.code === "RULE_AGENT_TIMEOUT"
-                      ? "The dealer agent took too long to respond. Try again."
-                      : error.code === "RULE_AGENT_BAD_RESPONSE"
-                        ? "The dealer agent returned an unusable response. Try rephrasing the rule."
-                        : "The dealer agent is unavailable. Make sure the model is running and try again.",
-              });
-              return;
-            }
-
-            const code =
-              error instanceof Error ? error.message : "RULE_REJECTED";
-            sendJson(request, response, 400, {
-              error: code,
-              message:
-                code === "RULE_PROMPT_INJECTION"
-                  ? "Rule text contains prompt-injection language. Rewrite it as a measurable game condition."
-                  : code === "RULE_EXTERNAL_DEPENDENCY"
-                    ? "Rule text depends on unavailable external game state. Rewrite it using only your guess and the official draw."
-                  : code === "RULE_INVALID_CONSTRAINT"
-                    ? "Rule uses an impossible constraint (numbers are 1-100, and a number cannot be both even and odd). Rewrite it as a condition that can actually happen."
-                  : code === "RULE_TOKEN_LIMIT_EXCEEDED"
-                    ? `Rule text exceeds the ${RULE_MAX_TOKENS}-token limit.`
-                    : code === "RULE_TEXT_TOO_LONG"
-                      ? `Rule text exceeds the ${MAX_RULE_TEXT_BYTES}-byte on-chain limit.`
-                      : "Rule text is invalid.",
-            });
+            const failure = describeRulePreflightError(error);
+            sendJson(request, response, failure.status, failure.body);
           }
         })
         .catch((error: unknown) => {

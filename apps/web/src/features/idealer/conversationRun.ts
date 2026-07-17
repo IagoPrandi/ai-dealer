@@ -2,7 +2,12 @@
 
 import type { RulePreflightResult } from "../../solana/idealerProgram";
 import { buildConversationDraftBody, type ConversationDraftBody } from "./conversationDraft";
-import { ApiRequestError, postConversationDraft, postRulePreflight } from "./data/apiClient";
+import {
+  ApiRequestError,
+  postConversationDraft,
+  postRulePreflight,
+  type RulePreflightProgress,
+} from "./data/apiClient";
 import type { ConversationMessage } from "./data/types";
 import { describeTxError } from "./data/tx";
 import {
@@ -24,7 +29,10 @@ type PreflightResponse = {
 export interface ConversationRunDeps {
   describeError: (cause: unknown) => string;
   postDraft: (wallet: string, body: ConversationDraftBody) => Promise<DraftResponse>;
-  postPreflight: (text: string) => Promise<PreflightResponse>;
+  postPreflight: (
+    text: string,
+    onProgress?: (progress: RulePreflightProgress) => void,
+  ) => Promise<PreflightResponse>;
 }
 
 export interface StartConversationRunArgs {
@@ -127,6 +135,10 @@ export function startConversationRun(
     error: null,
     guidanceContext: null,
     messages: args.initialMessages,
+    progress: {
+      message: "Sending your rule to the compiler...",
+      stage: "checking_input",
+    },
     rule: null,
     status: "pending",
   });
@@ -160,6 +172,10 @@ async function runConversation(
         error: null,
         guidanceContext: null,
         messages: transcript,
+        progress: {
+          message: "Sending your rule to the compiler...",
+          stage: "checking_input",
+        },
         rule: null,
         status: "pending",
       });
@@ -176,6 +192,7 @@ async function runConversation(
         error: null,
         guidanceContext: null,
         messages: transcript,
+        progress: null,
         rule: null,
         status: "done",
       });
@@ -210,7 +227,9 @@ async function runConversation(
       });
     }
 
-    const body = await deps.postPreflight(args.ruleText);
+    const body = await deps.postPreflight(args.ruleText, (progress) => {
+      patchConversationRun(args.draftId, { progress });
+    });
     const preflight = body.preflight as RulePreflightResult;
     const valid = preflight.decision === "VALID" && !preflight.needsClarification;
     const dealerMessage =
@@ -223,6 +242,7 @@ async function runConversation(
       error: null,
       guidanceContext: null,
       messages: transcript,
+      progress: null,
       rule: preflight,
       status: "done",
     });
@@ -268,6 +288,7 @@ async function runConversation(
           sanitizedText: args.ruleText,
         },
         messages: [...transcript, { text: blockedMessage, who: "ai" }],
+        progress: null,
         rule: null,
         status: "done",
       });
@@ -282,6 +303,7 @@ async function runConversation(
         ...transcript,
         { text: "Dealer engine unavailable. The compiler must be online before I can lock a rule.", who: "ai" },
       ],
+      progress: null,
       rule: null,
       status: "error",
     });

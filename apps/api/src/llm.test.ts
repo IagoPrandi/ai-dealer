@@ -55,6 +55,33 @@ test("ensureModelLoaded does not reload an already-resident model", async () => 
   assert.deepEqual(calls, ["http://localhost:11434/api/ps"]);
 });
 
+test("ensureModelLoaded does not confuse explicit tags from the same model family", async () => {
+  const calls: string[] = [];
+  globalThis.fetch = (async (
+    input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    const url = String(input);
+    calls.push(url);
+    if (url.endsWith("/api/ps")) {
+      return new Response(JSON.stringify({ models: [{ name: "gemma4:e2b" }] }), {
+        status: 200,
+      });
+    }
+    const body = JSON.parse(String(init?.body)) as { model?: string };
+    assert.equal(body.model, "gemma4:latest");
+    return new Response(JSON.stringify({ done: true }), { status: 200 });
+  }) as typeof fetch;
+
+  const result = await ensureModelLoaded("gemma4:latest", CONFIG);
+
+  assert.equal(result.loaded, true);
+  assert.deepEqual(calls, [
+    "http://localhost:11434/api/ps",
+    "http://localhost:11434/api/generate",
+  ]);
+});
+
 test("ensureModelLoaded loads the model when it is not resident", async () => {
   const calls: string[] = [];
   globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
@@ -110,6 +137,7 @@ test("rule agent config enforces a five-minute minimum timeout", () => {
 
 test("interpret harness teaches predicate min/max and casual threshold cases", async () => {
   let systemPrompt = "";
+  let requestBody: Record<string, unknown> = {};
   globalThis.fetch = (async (
     _input: Parameters<typeof fetch>[0],
     init?: Parameters<typeof fetch>[1],
@@ -117,6 +145,7 @@ test("interpret harness teaches predicate min/max and casual threshold cases", a
     const body = JSON.parse(String(init?.body)) as {
       messages: Array<{ content: string; role: string }>;
     };
+    requestBody = body;
     systemPrompt = body.messages[0]?.content ?? "";
     return new Response(
       JSON.stringify({
@@ -165,6 +194,18 @@ test("interpret harness teaches predicate min/max and casual threshold cases", a
   assert.match(systemPrompt, /quantity\/comparator, property being compared/i);
   assert.match(systemPrompt, /never offer stock examples, generic match-count rules/i);
   assert.match(systemPrompt, /draw 12 31 24 versus guess 11 30 29/i);
+  assert.equal(requestBody.reasoning_effort, "none");
+  assert.equal(requestBody.max_tokens, 2_048);
+
+  await interpretRuleWithAgent(
+    "Win if the smallest number matches.",
+    {
+      ...CONFIG,
+      apiKey: "cloud-key",
+      baseUrl: "https://api.openai.example/v1",
+    },
+  );
+  assert.equal("reasoning_effort" in requestBody, false);
 });
 
 test("rule agent responses without a title fail closed", async () => {
