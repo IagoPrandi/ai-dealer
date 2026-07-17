@@ -2067,18 +2067,10 @@ async function createRulePreflight(
   const guardianGrounded = pass.grounded;
   const guardianBlocked = guardianGrounded === false;
 
-  // Re-proposal gate: block a rule whose canonical meaning already held a mandate
-  // (was elected active in a past turn). It may only return with an added,
-  // differentiating condition (which changes the canonical signature).
   const ruleAst = validation.artifact?.ast ?? null;
-  const reproposalBlocked =
-    validation.decision === "VALID" &&
-    ruleAst !== null &&
-    getMandatedRuleSignatures().has(ruleSignature(ruleAst));
-
   // Technical validity is not the same as confirmed intent. Inspect the frozen
-  // AST instead of trusting model prose so draw-only/guess-only outcomes and
-  // unstated numeric range boundaries cannot pass silently.
+  // AST instead of trusting model prose so tautologies, draw-only/guess-only
+  // outcomes, and unstated numeric range boundaries cannot pass silently.
   const semanticReview = analyzeRuleSemanticImpact({
     ast: ruleAst,
     normalizedText,
@@ -2087,6 +2079,17 @@ async function createRulePreflight(
     // A translation or model normalization must never manufacture consent.
     sourceText: sanitizedText,
   });
+  const decision: RuleValidationDecision = semanticReview.impact.triviallyAlwaysTrue
+    ? "INVALID"
+    : validation.decision;
+
+  // Re-proposal gate: block a valid rule whose canonical meaning already held a
+  // mandate (was elected active in a past turn). A semantically invalid rule is
+  // rejected first and is never presented as a re-proposal candidate.
+  const reproposalBlocked =
+    decision === "VALID" &&
+    ruleAst !== null &&
+    getMandatedRuleSignatures().has(ruleSignature(ruleAst));
   reportProgress({
     message: "Reviewing the rule's effects before payment...",
     stage: "reviewing_impact",
@@ -2095,15 +2098,34 @@ async function createRulePreflight(
 
   const needsClarification =
     interpretation.needsClarification ||
-    validation.decision !== "VALID" ||
+    decision !== "VALID" ||
     guardianBlocked ||
     reproposalBlocked ||
     semanticReview.confirmationRequired;
-  const reasonSummary = reproposalBlocked
-    ? "This rule was already the Rule of the Hour in a previous turn. To reuse it, add a condition that differentiates it (e.g. combine it with another criterion over the numbers)."
-    : guardianBlocked
-      ? "The dealer's interpretation may not match your rule. Please rephrase it."
-      : semanticReview.reasonSummary ?? validation.log.reasonSummary;
+  const reasonSummary = semanticReview.impact.triviallyAlwaysTrue
+    ? (semanticReview.reasonSummary ?? "This rule is always true and cannot distinguish winners from losers.")
+    : reproposalBlocked
+      ? "This rule was already the Rule of the Hour in a previous turn. To reuse it, add a condition that differentiates it (e.g. combine it with another criterion over the numbers)."
+      : guardianBlocked
+        ? "The dealer's interpretation may not match your rule. Please rephrase it."
+        : semanticReview.reasonSummary ?? validation.log.reasonSummary;
+  const semanticRejectionFeedback =
+    semanticReview.impact.triviallyAlwaysTrue &&
+    validation.decision === "VALID"
+      ? {
+          clarityNote: semanticReview.clarityNote,
+          dealerMessage:
+            semanticReview.dealerMessage ??
+            "This rule is always true and cannot pass preflight.",
+          reasonSummary,
+          refinementFocus: [
+            "Use both the player's guess and the official draw in a condition that can be either true or false.",
+          ],
+          refinementQuestions: [],
+          suggestedRewrite: semanticReview.suggestedRewrites[0],
+          suggestedRewrites: semanticReview.suggestedRewrites,
+        }
+      : null;
   const semanticConfirmationFeedback =
     semanticReview.confirmationRequired &&
     validation.decision === "VALID" &&
@@ -2124,6 +2146,7 @@ async function createRulePreflight(
         }
       : null;
   const refinementFeedback =
+    semanticRejectionFeedback ??
     semanticConfirmationFeedback ??
     (needsClarification && !reproposalBlocked && !guardianBlocked
       ? buildRuleRefinementFeedback({
@@ -2140,9 +2163,9 @@ async function createRulePreflight(
       : null);
 
   const preflightResult = JSON.stringify({
-    compiledArtifactHash: validation.artifactHash,
+    compiledArtifactHash: decision === "VALID" ? validation.artifactHash : null,
     confirmationRequired: semanticReview.confirmationRequired,
-    decision: validation.decision,
+    decision,
     guardianGrounded: guardianGrounded ?? null,
     maxTokens: RULE_MAX_TOKENS,
     modelUsed: pass.model,
@@ -2155,7 +2178,7 @@ async function createRulePreflight(
     semanticImpact: semanticReview.impact,
     title: interpretation.title,
     tokenCount,
-    version: 8,
+    version: 9,
   });
 
   return {
@@ -2165,9 +2188,9 @@ async function createRulePreflight(
       (needsClarification && !interpretation.clarityNote
         ? reasonSummary
         : interpretation.clarityNote),
-    compiledArtifactHash: validation.artifactHash,
+    compiledArtifactHash: decision === "VALID" ? validation.artifactHash : null,
     confirmationRequired: semanticReview.confirmationRequired,
-    decision: validation.decision,
+    decision,
     dealerMessage:
       refinementFeedback?.dealerMessage ?? interpretation.dealerMessage,
     difficultyClass: validation.log.difficultyClass,

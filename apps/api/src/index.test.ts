@@ -182,6 +182,7 @@ function proposal(turnId: number, ruleId: number): RuleProposalRecord {
       drawIndependent: false,
       rangeBoundsAmbiguous: false,
       sharedOutcome: false,
+      triviallyAlwaysTrue: false,
       usesDraw: true,
       usesGuess: true,
     },

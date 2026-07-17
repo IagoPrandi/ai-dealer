@@ -4,6 +4,7 @@ export interface RuleSemanticImpact {
   drawIndependent: boolean;
   rangeBoundsAmbiguous: boolean;
   sharedOutcome: boolean;
+  triviallyAlwaysTrue: boolean;
   usesDraw: boolean;
   usesGuess: boolean;
 }
@@ -94,6 +95,85 @@ function hasBoundedRangeComparisons(ast: RuleAst | null) {
   };
   visit(ast);
   return hasLowerBound && hasUpperBound;
+}
+
+function comparisonIsTrueAcrossNumberDomain(value: Record<string, unknown>) {
+  if (value.kind !== "compare" || typeof value.op !== "string") {
+    return false;
+  }
+  const left = value.left as Record<string, unknown> | undefined;
+  const right = value.right as Record<string, unknown> | undefined;
+  const elemOnLeft = left?.kind === "elem" && right?.kind === "lit";
+  const elemOnRight = left?.kind === "lit" && right?.kind === "elem";
+  if (!elemOnLeft && !elemOnRight) {
+    return false;
+  }
+
+  const literal = Number(elemOnLeft ? right?.value : left?.value);
+  if (!Number.isFinite(literal)) {
+    return false;
+  }
+
+  const compare = (number: number) => {
+    const leftValue = elemOnLeft ? number : literal;
+    const rightValue = elemOnLeft ? literal : number;
+    switch (value.op) {
+      case "eq":
+        return leftValue === rightValue;
+      case "neq":
+        return leftValue !== rightValue;
+      case "lt":
+        return leftValue < rightValue;
+      case "lte":
+        return leftValue <= rightValue;
+      case "gt":
+        return leftValue > rightValue;
+      case "gte":
+        return leftValue >= rightValue;
+      default:
+        return false;
+    }
+  };
+
+  // Guesses and draws use only integers in the closed domain [1, 100]. A
+  // comparison that holds for every value in that bounded domain contributes
+  // no ability to distinguish winners from losers.
+  return Array.from({ length: 100 }, (_, index) => index + 1).every(compare);
+}
+
+function predicateIsTriviallyAlwaysTrue(value: unknown): boolean {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  if (record.kind === "compare") {
+    return comparisonIsTrueAcrossNumberDomain(record);
+  }
+  if (record.kind === "and") {
+    const clauses = Array.isArray(record.clauses) ? record.clauses : [];
+    return clauses.length > 0 && clauses.every(predicateIsTriviallyAlwaysTrue);
+  }
+  if (record.kind === "or") {
+    const clauses = Array.isArray(record.clauses) ? record.clauses : [];
+    return clauses.some(predicateIsTriviallyAlwaysTrue);
+  }
+  if (record.kind === "forall") {
+    const source = record.of as Record<string, unknown> | undefined;
+    return (
+      source?.kind === "source" &&
+      (source.source === "guess" || source.source === "draw") &&
+      predicateIsTriviallyAlwaysTrue(record.where)
+    );
+  }
+  return false;
+}
+
+function isTriviallyAlwaysTrue(ast: RuleAst | null) {
+  return Boolean(
+    ast?.schemaVersion === 3 &&
+      ast.result.type === "predicate" &&
+      predicateIsTriviallyAlwaysTrue(ast.result.predicate),
+  );
 }
 
 function extractNumericRange(value: string): NumericRange | null {
@@ -231,14 +311,17 @@ export function analyzeRuleSemanticImpact({
   const rangeBoundsAmbiguous = Boolean(
     numericRange && hasBoundedRangeComparisons(ast) && !boundaryMode,
   );
+  const triviallyAlwaysTrue = isTriviallyAlwaysTrue(ast);
   const scopeConfirmationMissing =
     (sharedOutcome && !explicitlyConfirmsDrawOnly(sourceText)) ||
     (drawIndependent && !explicitlyConfirmsGuessOnly(sourceText));
-  const confirmationRequired = scopeConfirmationMissing || rangeBoundsAmbiguous;
+  const confirmationRequired =
+    !triviallyAlwaysTrue && (scopeConfirmationMissing || rangeBoundsAmbiguous);
   const impact: RuleSemanticImpact = {
     drawIndependent,
     rangeBoundsAmbiguous,
     sharedOutcome,
+    triviallyAlwaysTrue,
     usesDraw,
     usesGuess,
   };
@@ -251,6 +334,28 @@ export function analyzeRuleSemanticImpact({
   const interpretedWithImpact = impactNote
     ? appendSentence(officialInterpretation, impactNote)
     : officialInterpretation;
+
+  if (triviallyAlwaysTrue) {
+    const guaranteedDomain = sharedOutcome
+      ? "Every official draw already contains six unique numbers from 1 to 100."
+      : drawIndependent
+        ? "Every eligible guess already contains six unique numbers from 1 to 100."
+        : "Eligible guesses and official draws already use numbers from 1 to 100.";
+    const reasonSummary = `${guaranteedDomain} This condition is therefore always true and cannot distinguish winners from losers.`;
+    return {
+      clarityNote: reasonSummary,
+      confirmationRequired: false,
+      dealerMessage: `This rule cannot pass preflight. ${reasonSummary} Choose one of the valid variations below or write a different rule.`,
+      impact,
+      officialInterpretation: interpretedWithImpact,
+      reasonSummary,
+      refinementQuestions: [],
+      suggestedRewrites: [
+        "A guess wins if every guessed number is lower than the official drawn number in the corresponding position.",
+        "A guess wins if every guessed number is higher than the official drawn number in the corresponding position.",
+      ],
+    };
+  }
 
   if (!confirmationRequired) {
     return {

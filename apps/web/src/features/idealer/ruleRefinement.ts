@@ -7,6 +7,10 @@ export interface RuleRefinementContext {
   refinementQuestions?: readonly string[] | null;
   suggestedRewrite?: string | null;
   suggestedRewrites?: readonly string[] | null;
+  /** A terminal semantic rejection cannot be repaired by appending a short
+   * clarification to the rejected draft. The user must choose or write a full
+   * replacement rule. */
+  triviallyAlwaysTrue?: boolean;
 }
 
 export interface RuleGuidanceContext extends RuleRefinementContext {
@@ -78,6 +82,9 @@ function dedupeOptions(options: RuleGuidanceOption[]) {
 }
 
 export function getRuleRefinementBase(context: RuleRefinementContext) {
+  if (context.triviallyAlwaysTrue) {
+    return null;
+  }
   // Prefer the dealer's concrete suggested rewrite. Only fall back to the raw
   // current rule text when it was previously VALID — otherwise a clarification
   // answer would be appended to an unfixable draft and loop forever.
@@ -187,6 +194,9 @@ export function composeRefinedRuleDraft(
 }
 
 export function getRuleGuidanceTitle(context: RuleGuidanceContext) {
+  if (context.triviallyAlwaysTrue) {
+    return "Choose a valid variation";
+  }
   if (context.confirmationRequired) {
     return "Confirm rule impact";
   }

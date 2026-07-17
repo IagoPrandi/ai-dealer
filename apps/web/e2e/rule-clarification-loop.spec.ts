@@ -61,6 +61,51 @@ function clarifyPreflight(text: string) {
   };
 }
 
+function alwaysTruePreflight(text: string) {
+  const suggestedRewrites = [
+    "A guess wins if every guessed number is lower than the official drawn number in the corresponding position.",
+    "A guess wins if every guessed number is higher than the official drawn number in the corresponding position.",
+  ];
+  const reasonSummary =
+    "Every official draw already contains six unique numbers from 1 to 100. This condition is therefore always true and cannot distinguish winners from losers.";
+  return {
+    preflight: {
+      addedOperationalClauses: [],
+      clarityNote: reasonSummary,
+      compiledArtifactHash: null,
+      confirmationRequired: false,
+      decision: "INVALID",
+      dealerMessage: `This rule cannot pass preflight. ${reasonSummary} Choose one of the valid variations below or write a different rule.`,
+      finalConfidence: 0.94,
+      maxTokens: 1000,
+      needsClarification: true,
+      normalizedText: text,
+      normalizedTextHash: hashBytes(9),
+      officialInterpretation:
+        "The condition checks only whether every official draw number is between 1 and 100.",
+      officialInterpretationHash: hashBytes(10),
+      preflightResultHash: hashBytes(11),
+      reasonSummary,
+      refinementQuestions: [],
+      ruleId: 962,
+      sanitizedText: text,
+      sanitizedTextHash: hashBytes(12),
+      semanticImpact: {
+        drawIndependent: false,
+        rangeBoundsAmbiguous: false,
+        sharedOutcome: true,
+        triviallyAlwaysTrue: true,
+        usesDraw: true,
+        usesGuess: false,
+      },
+      suggestedRewrite: suggestedRewrites[0],
+      suggestedRewrites,
+      title: "Draw Range Check",
+      tokenCount: 21,
+    },
+  };
+}
+
 async function mockShellData(page: Page) {
   await page.route("**/turn/active", async (route) => {
     await route.fulfill({
@@ -165,9 +210,11 @@ test("answering a clarification on an unfixable base finalizes instead of re-ask
 
   // The flow must reach the finalized "valid rule" card (the pre-submit /
   // connect-wallet state) — NOT loop back to the same clarification.
+  await expect(page.getByText("valid rule", { exact: true })).toBeVisible();
   await expect(
-    page.locator(".ide-card").filter({ hasText: "valid rule" }).filter({
-      hasText: "Win if at least 4 guessed numbers appear in the draw, regardless of order.",
+    page.locator("p").filter({
+      hasText:
+        "Win if at least 4 guessed numbers appear in the draw, regardless of order.",
     }),
   ).toBeVisible();
   await expect(page.getByRole("heading", { name: "Clarify this rule?" })).toHaveCount(0);
@@ -178,4 +225,49 @@ test("answering a clarification on an unfixable base finalizes instead of re-ask
   expect(preflightTexts[1]).toBe(
     "Win if at least 4 guessed numbers appear in the draw, regardless of order.",
   );
+});
+
+test("an always-true rule is rejected with valid replacements instead of entering confirmation loop", async ({
+  page,
+}) => {
+  await mockShellData(page);
+  const original =
+    "A guess wins if all six official draw numbers are between 1 and 100, inclusive.";
+  const replacement =
+    "A guess wins if every guessed number is lower than the official drawn number in the corresponding position.";
+  const preflightTexts: string[] = [];
+
+  await page.route("**/rule-preflight", async (route) => {
+    const body = (await route.request().postDataJSON()) as { text: string };
+    preflightTexts.push(body.text);
+    await route.fulfill({
+      contentType: "application/json",
+      json:
+        body.text === original
+          ? alwaysTruePreflight(body.text)
+          : validPreflight(body.text, 963),
+      status: 200,
+    });
+  });
+
+  await page.goto("/play/propose");
+  await page.getByLabel("Message", { exact: true }).fill(original);
+  await page.getByRole("button", { name: "Send message" }).click();
+
+  await expect(page.getByText("invalid rule", { exact: true })).toBeVisible();
+  await expect(page.getByText(/this rule cannot pass preflight/i)).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Choose a valid variation" }),
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Confirm rule impact" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /1 A guess wins.*lower/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /2 A guess wins.*higher/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Write a different valid rule/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Submit to the round/i })).toHaveCount(0);
+
+  await page.getByRole("button", { name: /1 A guess wins.*lower/i }).click();
+  await page.getByRole("button", { name: /^Use rule/ }).click();
+
+  await expect(page.getByText("valid rule", { exact: true })).toBeVisible();
+  expect(preflightTexts).toEqual([original, replacement]);
 });

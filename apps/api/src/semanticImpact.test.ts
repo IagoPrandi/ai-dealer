@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { RuleAst } from "@idealer/rule-compiler";
+import {
+  validateAndPrecompileRule,
+  type RuleAst,
+} from "@idealer/rule-compiler";
 import { analyzeRuleSemanticImpact } from "./semanticImpact.js";
 
 const drawOnlyRangeAst = {
@@ -113,8 +116,65 @@ test("stress prompt 2: explicit draw-only and inclusive intent passes while reta
   assert.equal(review.confirmationRequired, false);
   assert.equal(review.impact.sharedOutcome, true);
   assert.equal(review.impact.rangeBoundsAmbiguous, false);
+  assert.equal(review.impact.triviallyAlwaysTrue, false);
   assert.deepEqual(review.refinementQuestions, []);
   assert.match(review.officialInterpretation, /every eligible guess wins or loses together/i);
+});
+
+test("rejects a full-domain draw range as always true and offers executable replacements", () => {
+  const fullDomainAst = {
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "forall",
+        of: { kind: "source", source: "draw" },
+        where: {
+          kind: "and",
+          clauses: [
+            {
+              kind: "compare",
+              left: { kind: "elem" },
+              op: "gte",
+              right: { kind: "lit", value: 1 },
+            },
+            {
+              kind: "compare",
+              left: { kind: "elem" },
+              op: "lte",
+              right: { kind: "lit", value: 100 },
+            },
+          ],
+        },
+      },
+    },
+  } satisfies RuleAst;
+  const review = analyzeRuleSemanticImpact({
+    ast: fullDomainAst,
+    normalizedText:
+      "A guess wins if all six official draw numbers are between 1 and 100, inclusive.",
+    officialInterpretation:
+      "Check whether all official draw numbers are in the inclusive range from 1 to 100.",
+    sourceText:
+      "A guess wins if all six official draw numbers are between 1 and 100, inclusive.",
+  });
+
+  assert.equal(review.impact.triviallyAlwaysTrue, true);
+  assert.equal(review.confirmationRequired, false);
+  assert.deepEqual(review.refinementQuestions, []);
+  assert.match(review.dealerMessage ?? "", /cannot pass preflight/i);
+  assert.match(review.reasonSummary ?? "", /always true/i);
+  assert.equal(review.suggestedRewrites.length, 2);
+  for (const rewrite of review.suggestedRewrites) {
+    assert.equal(
+      validateAndPrecompileRule({
+        prompt: rewrite,
+        tokenCount: rewrite.split(/\s+/u).length,
+      }).decision,
+      "VALID",
+      rewrite,
+    );
+  }
 });
 
 test("stress prompt 3: explicit inclusive compound rule using guess and draw needs no semantic confirmation", () => {

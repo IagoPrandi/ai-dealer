@@ -58,6 +58,7 @@ interface ChatMessage {
 
 interface RuleGuidanceState {
   options: RuleGuidanceOption[];
+  terminalRejection: boolean;
   title: string;
 }
 
@@ -149,11 +150,19 @@ function createClientDraftId(turnId: number) {
 
 function RulePreview({ rule }: { rule: RulePreflightResult }) {
   const valid = rule.decision === "VALID" && !rule.needsClarification;
+  const terminalRejection = rule.semanticImpact?.triviallyAlwaysTrue ?? false;
   const statusLabel = valid
     ? "valid rule"
+    : terminalRejection
+      ? "invalid rule"
     : rule.confirmationRequired
       ? "review required"
       : "needs adjustment";
+  const statusColor = valid
+    ? "var(--green)"
+    : terminalRejection
+      ? "var(--red)"
+      : "var(--yellow)";
   const pct = Math.round((rule.tokenCount / RULE_MAX_TOKENS) * 100);
   const confidencePct =
     typeof rule.finalConfidence === "number"
@@ -162,8 +171,8 @@ function RulePreview({ rule }: { rule: RulePreflightResult }) {
   return (
     <div style={{ padding: 16, border: "1px solid var(--line)", borderRadius: 16, background: "var(--surface)", animation: "ide-rise .3s ease both" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-        <span className="ide-pill" style={{ color: valid ? "var(--green)" : "var(--yellow)", padding: "4px 10px" }}>
-          {valid ? <Ico.check style={{ width: 13, height: 13, color: "var(--green)" }} /> : <Ico.info style={{ width: 13, height: 13, color: "var(--yellow)" }} />} {statusLabel}
+        <span className="ide-pill" style={{ color: statusColor, padding: "4px 10px" }}>
+          {valid ? <Ico.check style={{ width: 13, height: 13, color: statusColor }} /> : <Ico.info style={{ width: 13, height: 13, color: statusColor }} />} {statusLabel}
         </span>
         {confidencePct !== null ? (
           <span className="ide-pill" style={{ padding: "4px 10px", color: "var(--purple-soft)" }}>
@@ -181,8 +190,8 @@ function RulePreview({ rule }: { rule: RulePreflightResult }) {
         </>
       ) : null}
       {!valid && rule.reasonSummary ? (
-        <p style={{ margin: "12px 0 0", fontSize: 13, lineHeight: 1.5, color: "var(--yellow)", display: "flex", gap: 7 }}>
-          <Ico.info style={{ color: "var(--yellow)", flexShrink: 0, marginTop: 1 }} /> {rule.reasonSummary}
+        <p style={{ margin: "12px 0 0", fontSize: 13, lineHeight: 1.5, color: statusColor, display: "flex", gap: 7 }}>
+          <Ico.info style={{ color: statusColor, flexShrink: 0, marginTop: 1 }} /> {rule.reasonSummary}
         </p>
       ) : null}
       {rule.reproposalBlocked ? (
@@ -191,7 +200,7 @@ function RulePreview({ rule }: { rule: RulePreflightResult }) {
         </p>
       ) : null}
       <div style={{ marginTop: 14, height: 6, borderRadius: 4, background: "var(--surface-3)", overflow: "hidden" }}>
-        <div style={{ width: `${Math.min(100, pct)}%`, height: "100%", background: valid ? "var(--grad-btn)" : "var(--yellow)", borderRadius: 4, transition: "width .4s" }} />
+        <div style={{ width: `${Math.min(100, pct)}%`, height: "100%", background: valid ? "var(--grad-btn)" : statusColor, borderRadius: 4, transition: "width .4s" }} />
       </div>
     </div>
   );
@@ -206,6 +215,7 @@ function ClarificationPrompt({
   onSubmit,
   options,
   selectedIndex,
+  terminalRejection,
   title,
 }: {
   disabled: boolean;
@@ -216,6 +226,7 @@ function ClarificationPrompt({
   onSubmit: () => void;
   options: readonly RuleGuidanceOption[];
   selectedIndex: number | null;
+  terminalRejection: boolean;
   title: string;
 }) {
   const selectedOption = selectedIndex === null ? null : options[selectedIndex];
@@ -298,7 +309,7 @@ function ClarificationPrompt({
             <Ico.edit style={{ color: "var(--muted)", height: 17, width: 17 }} />
           </span>
           <span style={{ fontSize: 15, fontWeight: 400, lineHeight: 1.45, minWidth: 0, overflowWrap: "anywhere" }}>
-            {manualText.trim() ? manualText : "Write your own clarification..."}
+            {manualText.trim() ? manualText : terminalRejection ? "Write a different valid rule..." : "Write your own clarification..."}
           </span>
         </button>
       </div>
@@ -317,7 +328,7 @@ function ClarificationPrompt({
           style={{ background: "#78b7df", borderRadius: 20, boxShadow: "none", color: "#09131A", minWidth: 112, opacity: disabled || !canSubmit ? 0.5 : 1, padding: "13px 18px" }}
           type="button"
         >
-          Submit <Ico.back style={{ color: "#09131A", height: 18, transform: "rotate(180deg)", width: 18 }} />
+          {terminalRejection ? "Use rule" : "Submit"} <Ico.back style={{ color: "#09131A", height: 18, transform: "rotate(180deg)", width: 18 }} />
         </button>
       </div>
     </div>
@@ -436,6 +447,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
     const options = buildRuleGuidanceOptions(context);
     setGuidance({
       options,
+      terminalRejection: Boolean(context.triviallyAlwaysTrue),
       title: getRuleGuidanceTitle(context),
     });
     setSelectedGuidanceIndex(options.length > 0 ? 0 : null);
@@ -477,6 +489,8 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
       sanitizedText: snapshot.rule.sanitizedText,
       suggestedRewrite: snapshot.rule.suggestedRewrite ?? null,
       suggestedRewrites: snapshot.rule.suggestedRewrites ?? null,
+      triviallyAlwaysTrue:
+        snapshot.rule.semanticImpact?.triviallyAlwaysTrue ?? false,
     });
   }, [openGuidance]);
 
@@ -532,6 +546,8 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
       refinementQuestions: pendingRule?.refinementQuestions ?? null,
       suggestedRewrite: pendingRule?.suggestedRewrite ?? null,
       suggestedRewrites: pendingRule?.suggestedRewrites ?? null,
+      triviallyAlwaysTrue:
+        pendingRule?.semanticImpact?.triviallyAlwaysTrue ?? false,
     };
     const refinedDraft =
       !clarificationBudgetExhausted &&
@@ -814,6 +830,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
             onSubmit={submitGuidance}
             options={guidance.options}
             selectedIndex={selectedGuidanceIndex}
+            terminalRejection={guidance.terminalRejection}
             title={guidance.title}
           />
         ) : null}
@@ -898,7 +915,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
                   }
                 }
               }}
-              placeholder={guidance ? "Choose an option or write your own clarification..." : rule ? "Ask for a tweak or describe another rule..." : "Describe your rule..."}
+              placeholder={guidance ? guidance.terminalRejection ? "Choose a valid variation or write a different rule..." : "Choose an option or write your own clarification..." : rule ? "Ask for a tweak or describe another rule..." : "Describe your rule..."}
               style={{ flex: 1, minWidth: 0, resize: "none", background: "var(--surface)", border: "1px solid var(--line-2)", borderRadius: 16, padding: "13px 15px", color: "var(--text)", fontSize: 15, fontFamily: "Outfit", outline: "none", maxHeight: 90 }}
             />
             <button aria-label="Send message" onClick={() => void send()} className="ide-btn" style={{ width: 48, height: 48, padding: 0, borderRadius: 15, flexShrink: 0 }} type="button"><Ico.send style={{ color: "#08110C" }} /></button>

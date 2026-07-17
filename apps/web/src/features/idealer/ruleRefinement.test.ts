@@ -269,3 +269,24 @@ test("ordered tens-range clarification offers only the intent-preserving rule", 
 
   assert.deepEqual(options.map((option) => option.text), [intendedRule]);
 });
+
+test("always-true rejection offers full replacement rules without patching the rejected draft", () => {
+  const context = {
+    currentRuleText:
+      "A guess wins if all six official draw numbers are between 1 and 100, inclusive.",
+    suggestedRewrites: [
+      "A guess wins if every guessed number is lower than the official drawn number in the corresponding position.",
+      "A guess wins if every guessed number is higher than the official drawn number in the corresponding position.",
+    ],
+    triviallyAlwaysTrue: true,
+  };
+
+  assert.equal(getRuleGuidanceTitle(context), "Choose a valid variation");
+  assert.equal(getRuleRefinementBase(context), null);
+  assert.equal(isRuleRefinementPatch("yes", context), false);
+  assert.equal(composeRefinedRuleDraft("yes", context), null);
+  assert.deepEqual(
+    buildRuleGuidanceOptions(context).map((option) => option.text),
+    context.suggestedRewrites,
+  );
+});

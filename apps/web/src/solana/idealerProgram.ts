@@ -138,6 +138,7 @@ export interface RulePreflightResult {
     drawIndependent: boolean;
     rangeBoundsAmbiguous: boolean;
     sharedOutcome: boolean;
+    triviallyAlwaysTrue: boolean;
     usesDraw: boolean;
     usesGuess: boolean;
   };
