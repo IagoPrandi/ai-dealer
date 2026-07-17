@@ -793,7 +793,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
     phase1EndsAt !== null && Math.floor(Date.now() / 1000) >= phase1EndsAt;
 
   return (
-    <div className="ide-app ide-screen" style={{ height: "100%", position: "relative", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+    <div className="ide-app ide-screen ide-chat-screen" style={{ height: "100%", position: "relative", overflow: "hidden", display: "flex", flexDirection: "column" }}>
       <div className="ide-ambient" />
       <div style={{ position: "relative", zIndex: 2, padding: "52px 18px 12px", borderBottom: "1px solid var(--line)", background: "rgba(11,9,16,0.6)", backdropFilter: "blur(10px)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

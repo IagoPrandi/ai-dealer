@@ -68,6 +68,14 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-07-16 (Borderless group treatment)
+
+- Opened the required context before editing: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, the `.claude/skills` directory, the frontend/design-system/UI-coherence/test-and-verify guidance, the relevant design-system references, and the browser-verification skill. Inspected the current Next.js Idealer shell, shared primitives, CSS, and neighboring screens before applying the visual rule.
+- Added one app-level border policy that removes borders from non-interactive groups, cards, panels, lists, metrics, sheets, pills, and separators while explicitly preserving buttons/CTA links, inputs, and the complete AI chat surface. Marked the Create screen with the semantic `ide-chat-screen` scope so its header/footer separators, bubbles, guidance panels, and message field retain their borders.
+- Corrected the rule-list exception after visual review: `.ide-rulerow` is a navigable content group implemented as a button, not a standalone CTA, so its outline is now explicitly removed while its click behavior and ranking glow remain intact. Live computed styles confirmed zero border on all four sides; the updated capture is `output/playwright/borderless-rule-row-390.png`.
+- Browser verification on the live `/play` route confirmed borderless group surfaces, preserved secondary-button and chat borders, no console errors, and zero horizontal overflow at 320, 390, 768, and 1440 px. Visual evidence is available at `output/playwright/borderless-home-390.png` and `output/playwright/borderless-chat-390.png`.
+- Verification passed: `pnpm --filter @idealer/web typecheck`, `test` (81/81), `lint`, `build`, and `git diff --check`. Reviewed for inconsistencies: border removal is centralized rather than duplicated, interactive affordances and focus outlines remain visible, UI copy is unchanged, and no milestone checkbox/status was changed because milestone marking requires explicit user confirmation.
+
 ### 2026-07-16 (Stake & earn rewards page handoff)
 
 - Opened the required project and handoff context before implementation: `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, the `.claude/skills` directory, the frontend/design-system/UI-coherence/test-and-verify/Playwright skill guidance and required references, `PRD-TOKENOMICS-v2.8.md`, and the attached `Tokenomics staking e rewards-handoff.zip` README. The README identified `project/Staking.dc.html` as the primary design and `project/support.js` as its imported interaction support; both were read in full. The archive contains no `Idealer.html` file.
