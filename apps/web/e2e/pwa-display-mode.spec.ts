@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("keeps preview chrome in the browser and removes it in standalone PWA mode", async ({
+test("keeps preview chrome in the browser and keeps standalone PWA mode interactive", async ({
   context,
   page,
 }) => {
@@ -42,4 +42,9 @@ test("keeps preview chrome in the browser and removes it in standalone PWA mode"
   await expect(pwaPage.locator(".ide-statusbar")).toBeHidden();
   await expect(pwaPage.locator(".ide-homebar")).toBeHidden();
   await expect(pwaPage.locator(".ide-scroll").first()).toHaveCSS("padding-top", "16px");
+
+  await pwaPage.getByRole("button", { exact: true, name: "Connect" }).click();
+  await expect(
+    pwaPage.getByRole("heading", { name: "Connect your wallet" }),
+  ).toBeVisible();
 });
