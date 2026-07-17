@@ -101,7 +101,7 @@ export function HomeScreen() {
   return (
     <div className="ide-app ide-screen" style={{ height: "100%", position: "relative", overflow: "hidden" }}>
       <div className="ide-ambient" />
-      <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", padding: "52px 18px 96px" }}>
+      <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", padding: "var(--ide-shell-content-top) 18px 96px" }}>
 
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 22 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 9 }}>

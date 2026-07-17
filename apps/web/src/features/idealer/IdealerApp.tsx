@@ -5,7 +5,7 @@
  * Holds screen navigation, the rule-detail overlay, and wires the global app
  * state to live wallet + on-chain + API data. Replaces the old per-route pages.
  */
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSolanaClient, useWalletConnection } from "@solana/react-hooks";
 import { address } from "@solana/kit";
 import { usePathname, useRouter } from "next/navigation";
@@ -82,6 +82,26 @@ function PhoneChrome() {
   );
 }
 
+function useStandaloneDisplayMode() {
+  const [standalone, setStandalone] = useState(false);
+
+  useEffect(() => {
+    const displayMode = window.matchMedia("(display-mode: standalone)");
+    const update = () => {
+      const navigatorStandalone =
+        "standalone" in navigator &&
+        (navigator as Navigator & { standalone?: boolean }).standalone === true;
+      setStandalone(displayMode.matches || navigatorStandalone);
+    };
+
+    update();
+    displayMode.addEventListener("change", update);
+    return () => displayMode.removeEventListener("change", update);
+  }, []);
+
+  return standalone;
+}
+
 function repeatedActionFeeSol(turnId: number, sequence: number, baseFeeSol: number) {
   if (turnId < VOTE_FEE_START_TURN && sequence === 1) {
     return 0;
@@ -99,6 +119,7 @@ export function IdealerApp({
   initialScreen = "home",
 }: { initialConnect?: boolean; initialResultTurnId?: number; initialScreen?: Screen } = {}) {
   const client = useSolanaClient();
+  const standalone = useStandaloneDisplayMode();
   const { connect, connecting, connected, connectors, wallet } = useWalletConnection();
   const walletAddress = wallet?.account.address.toString();
   const pathname = usePathname();
@@ -430,8 +451,8 @@ export function IdealerApp({
 
   return (
     <IdealerContext.Provider value={value}>
-      <main className="ide-stage">
-        <div className="ide-phone-shell ide-app">
+      <main className={`ide-stage${standalone ? " ide-standalone" : ""}`}>
+        <div className={`ide-phone-shell ide-app${standalone ? " ide-standalone" : ""}`}>
           <PhoneChrome />
           <div className="ide-root">
             {screen === "home" ? <HomeScreen /> : null}

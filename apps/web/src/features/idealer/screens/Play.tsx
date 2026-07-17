@@ -465,7 +465,7 @@ function PlayFlow() {
     return (
       <div className="ide-app ide-screen" style={{ height: "100%", position: "relative", overflow: "hidden" }}>
         <div className="ide-ambient" />
-        <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", padding: "52px 20px 150px" }}>
+        <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", padding: "var(--ide-shell-content-top) 20px 150px" }}>
           <ScreenHead onBack={() => setStep("pick")} title="Review guess" />
           <p style={{ margin: "2px 2px 22px", fontSize: 14, color: "var(--muted)", lineHeight: 1.5 }}>
             Check your numbers before confirming. Once submitted, the guess <b style={{ color: "var(--text)" }}>cannot be edited</b>.
@@ -515,7 +515,7 @@ function PlayFlow() {
   return (
     <div className="ide-app ide-screen" style={{ height: "100%", position: "relative", overflow: "hidden" }}>
       <div className="ide-ambient" />
-      <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", padding: "52px 20px 150px" }}>
+      <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", padding: "var(--ide-shell-content-top) 20px 150px" }}>
         <ScreenHead onBack={() => go("home")} title="Make a guess"
           right={sel.length > 0 ? <button onClick={() => setSel([])} style={{ background: "none", border: "none", color: "var(--dim)", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "Outfit" }} type="button">clear</button> : undefined} />
 

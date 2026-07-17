@@ -113,7 +113,7 @@ export function ResultScreen() {
     return (
       <div className="ide-app ide-screen" style={{ height: "100%", position: "relative", overflow: "hidden" }}>
         <div className="ide-ambient" />
-        <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", padding: "52px 20px 96px" }}>
+        <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", padding: "var(--ide-shell-content-top) 20px 96px" }}>
           <ScreenHead onBack={() => go("home")} title="Result" />
           <div className="ide-card" style={{ height: 120, marginBottom: 12 }} />
           <div className="ide-card" style={{ height: 90 }} />
@@ -126,7 +126,7 @@ export function ResultScreen() {
     <div className="ide-app ide-screen" style={{ height: "100%", position: "relative", overflow: "hidden" }}>
       <div className="ide-ambient" />
       {youWon ? <Confetti /> : null}
-      <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", padding: "52px 20px 96px" }}>
+      <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", padding: "var(--ide-shell-content-top) 20px 96px" }}>
         <ScreenHead
           onBack={() => go("home")}
           title="Result"

@@ -795,7 +795,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
   return (
     <div className="ide-app ide-screen ide-chat-screen" style={{ height: "100%", position: "relative", overflow: "hidden", display: "flex", flexDirection: "column" }}>
       <div className="ide-ambient" />
-      <div style={{ position: "relative", zIndex: 2, padding: "52px 18px 12px", borderBottom: "1px solid var(--line)", background: "rgba(11,9,16,0.6)", backdropFilter: "blur(10px)" }}>
+      <div style={{ position: "relative", zIndex: 2, padding: "var(--ide-shell-content-top) 18px 12px", borderBottom: "1px solid var(--line)", background: "rgba(11,9,16,0.6)", backdropFilter: "blur(10px)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <button onClick={() => go(chatId ? "profile" : "home")} style={{ width: 40, height: 40, borderRadius: 13, background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--text)", display: "grid", placeItems: "center", cursor: "pointer" }} type="button"><Ico.back /></button>
           <div style={{ display: "flex", alignItems: "center", gap: 9 }}>

@@ -40,6 +40,7 @@
   --red:    #FF6B6B;
 
   --num-font: 'Space Grotesk';
+  --ide-shell-content-top: 52px;
 
   font-family: 'Outfit', system-ui, sans-serif;
   color: var(--text);
@@ -405,7 +406,7 @@
   height: 100%;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 52px 18px 104px;
+  padding: var(--ide-shell-content-top) 18px 104px;
 }
 .ide-rewards-connect {
   position: relative;
@@ -763,6 +764,59 @@
 @media (max-width: 460px) {
   .ide-stage { padding: 0; }
   .ide-phone-shell { width: 100%; height: 100dvh; max-width: 100vw; max-height: none; border-radius: 0; aspect-ratio: auto; box-shadow: none; }
+}
+
+/* Installed PWAs use the operating system's real status and gesture areas.
+   Keep the simulated device chrome only in ordinary browser previews. */
+.ide-app.ide-standalone,
+.ide-stage.ide-standalone .ide-app {
+  --ide-shell-content-top: calc(16px + env(safe-area-inset-top, 0px));
+}
+
+.ide-stage.ide-standalone {
+  padding: 0;
+}
+
+.ide-phone-shell.ide-standalone {
+  width: 100%;
+  height: 100dvh;
+  max-width: 100vw;
+  max-height: none;
+  border-radius: 0;
+  aspect-ratio: auto;
+  box-shadow: none;
+}
+
+.ide-standalone > .ide-di,
+.ide-standalone > .ide-statusbar,
+.ide-standalone > .ide-homebar {
+  display: none;
+}
+
+@media (display-mode: standalone) {
+  .ide-app {
+    --ide-shell-content-top: calc(16px + env(safe-area-inset-top, 0px));
+  }
+
+  .ide-stage {
+    padding: 0;
+  }
+
+  .ide-phone-shell {
+    width: 100%;
+    height: 100dvh;
+    max-width: 100vw;
+    max-height: none;
+    border-radius: 0;
+    aspect-ratio: auto;
+    box-shadow: none;
+  }
+
+  .ide-di,
+  .ide-statusbar,
+  .ide-homebar {
+    display: none;
+  }
 }
 
 /* Border policy: content is grouped by surface, spacing, and hierarchy.

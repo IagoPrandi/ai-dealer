@@ -45,7 +45,7 @@ export function ShareScreen() {
   return (
     <div className="ide-app ide-screen" style={{ height: "100%", position: "relative", overflow: "hidden" }}>
       <div className="ide-ambient" />
-      <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", overflowX: "hidden", padding: "52px 18px 96px" }}>
+      <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", overflowX: "hidden", padding: "var(--ide-shell-content-top) 18px 96px" }}>
         <ScreenHead onBack={() => go("home")} title="Share" />
 
         <div className="ide-card" style={{ padding: 18, marginBottom: 14 }}>
