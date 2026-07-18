@@ -140,6 +140,9 @@ importers:
       '@idealer/rule-schema':
         specifier: workspace:*
         version: link:../../packages/rule-schema
+      '@idealer/tokenomics':
+        specifier: workspace:*
+        version: link:../../packages/tokenomics
       '@solana/kit':
         specifier: 5.5.1
         version: 5.5.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)
@@ -261,6 +264,12 @@ importers:
       '@idealer/types':
         specifier: workspace:*
         version: link:../types
+    devDependencies:
+      '@idealer/config':
+        specifier: workspace:*
+        version: link:../config
+
+  packages/tokenomics:
     devDependencies:
       '@idealer/config':
         specifier: workspace:*

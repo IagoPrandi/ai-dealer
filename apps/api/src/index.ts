@@ -65,6 +65,14 @@ import {
   analyzeRuleSemanticImpact,
   type RuleSemanticImpact,
 } from "./semanticImpact.js";
+import {
+  authorizeTokenomicsProjection,
+  getPublicTokenomicsSnapshot,
+  getWalletTokenomicsProjection,
+  isTokenomicsProjection,
+  resetTokenomicsProjectionForTests,
+  saveTokenomicsProjection,
+} from "./tokenomics.js";
 
 const ROOT_ENV_PATH = resolve(fileURLToPath(new URL("../../..", import.meta.url)), ".env");
 if (existsSync(ROOT_ENV_PATH)) {
@@ -1137,6 +1145,8 @@ const CORS_PATHS = new Set([
   "/claim-records/expire-unclaimed",
   "/claim-records/request",
   "/settlement-transitions",
+  "/tokenomics/projection",
+  "/tokenomics/public",
   "/transparency",
   "/transparency/export",
   "/operator/ai-operations",
@@ -1522,6 +1532,7 @@ export function resetApiStateForTests() {
   auditLogOrder.length = 0;
   lastAuditLogHash = null;
   operatorAiAccessChallenges.clear();
+  resetTokenomicsProjectionForTests();
 }
 
 function hasPreventedRulePattern(value: string) {
@@ -9786,6 +9797,65 @@ if (isMainModule()) {
           ? { integrity: verifyAuditLogIntegrity(log), log }
           : { error: "not_found" },
       );
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/tokenomics/public") {
+      sendJson(request, response, 200, {
+        tokenomics: getPublicTokenomicsSnapshot(),
+      });
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      url.pathname.startsWith("/tokenomics/wallets/")
+    ) {
+      const wallet = url.pathname.slice("/tokenomics/wallets/".length);
+      if (!isBase58Like(wallet)) {
+        sendJson(request, response, 400, { error: "invalid_wallet" });
+        return;
+      }
+      const walletProjection = getWalletTokenomicsProjection(wallet);
+      sendJson(
+        request,
+        response,
+        walletProjection ? 200 : 404,
+        walletProjection
+          ? { wallet: walletProjection }
+          : { error: "tokenomics_wallet_not_indexed" },
+      );
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/tokenomics/projection") {
+      const authorization = authorizeTokenomicsProjection(
+        request.headers.authorization,
+      );
+      if (!authorization.ok) {
+        sendJson(request, response, authorization.statusCode, {
+          error: authorization.error,
+        });
+        return;
+      }
+      void readJsonBody(request)
+        .then((body) => {
+          if (!isTokenomicsProjection(body)) {
+            sendJson(request, response, 400, {
+              error: "invalid_tokenomics_projection",
+            });
+            return;
+          }
+          sendJson(request, response, 201, {
+            projection: saveTokenomicsProjection(body),
+          });
+        })
+        .catch((error: unknown) => {
+          sendJson(request, response, 400, {
+            error: "invalid_json",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
       return;
     }
 

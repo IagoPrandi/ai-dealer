@@ -14,6 +14,8 @@ import type {
   RoundSummaryApi,
   RuleProposalApi,
   RuleVotesApi,
+  TokenomicsPublicApi,
+  TokenomicsWalletApi,
 } from "./types";
 import { getApiBaseUrl } from "../../../lib/apiBase";
 
@@ -169,6 +171,20 @@ export function getPlayerClaims(wallet: string, signal?: AbortSignal) {
   return getJson<{ claims: PlayerClaimsApi }>(
     `/players/${wallet}/claims`,
     signal ? { signal } : {},
+  );
+}
+
+export function getPublicTokenomics(signal?: AbortSignal) {
+  return getJson<{ tokenomics: TokenomicsPublicApi }>(
+    "/tokenomics/public",
+    signal ? { signal } : {},
+  );
+}
+
+export function getWalletTokenomics(wallet: string, signal?: AbortSignal) {
+  return getJson<{ wallet: TokenomicsWalletApi }>(
+    `/tokenomics/wallets/${wallet}`,
+    { allow404: true, ...(signal ? { signal } : {}) },
   );
 }
 

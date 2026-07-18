@@ -27,15 +27,21 @@ manual-test = []
 # mainnet builds so the mainnet Switchboard program id is enforced instead.
 sb-devnet = []
 custom-panic = []
-idl-build = ["anchor-lang/idl-build"]
+idl-build = [
+  "anchor-lang/idl-build",
+  "anchor-spl/idl-build",
+  "tokenomics-core/idl-build",
+]
 no-entrypoint = []
 no-idl = []
 no-log-ix-name = []
 
 [dependencies]
 anchor-lang = { workspace = true }
+anchor-spl = { workspace = true }
 solana-sha256-hasher = { workspace = true }
 switchboard-on-demand = { version = "0.13.0", features = ["anchor"] }
+tokenomics-core = { path = "../tokenomics_core", features = ["cpi"] }
 
 [dev-dependencies]
 solana-account-info = "2.3.0"

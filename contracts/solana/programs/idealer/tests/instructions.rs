@@ -4,9 +4,9 @@ use anchor_lang::{
 };
 use idealer::{
     accounts, instruction, DrawStatus, GlobalConfig, IdealerError, InitializeGlobalConfigArgs,
-    PlayerGuess, PrecompilationStatus, PrecompileRuleArgs, ProposeRuleArgs, ResetStaleVrfRequestArgs,
-    RuleProposal, RuleState, RuleVote, SetVrfConfigArgs, SubmitGuessArgs, TurnState, TurnStatus,
-    VoteRuleArgs, VrfStage,
+    PlayerGuess, PrecompilationStatus, PrecompileRuleArgs, ProposeRuleArgs,
+    ResetStaleVrfRequestArgs, RuleProposal, RuleState, RuleVote, SetVrfConfigArgs, SubmitGuessArgs,
+    TurnState, TurnStatus, VoteRuleArgs, VrfStage,
 };
 use solana_account_info::AccountInfo;
 use solana_program_error::ProgramResult;
@@ -818,7 +818,12 @@ async fn rule_election_locks_requests_and_settles_active_rule() {
     add_randomness_account(
         &mut program_test,
         active_randomness_account,
-        randomness_account_data(election_queue(), active_seed_slot, active_reveal_slot, [11; 32]),
+        randomness_account_data(
+            election_queue(),
+            active_seed_slot,
+            active_reveal_slot,
+            [11; 32],
+        ),
     );
     let mut context = program_test.start_with_context().await;
     initialize_and_open_turn(&mut context, turn_id).await;
@@ -1278,7 +1283,10 @@ async fn reset_stale_vrf_request_refuses_a_live_or_mismatched_account() {
         &[],
     )
     .await;
-    assert_custom_error(mismatched, u32::from(IdealerError::RandomnessSourceMismatch));
+    assert_custom_error(
+        mismatched,
+        u32::from(IdealerError::RandomnessSourceMismatch),
+    );
 
     // Passing the recorded account, which STILL EXISTS on-chain, is rejected:
     // the reset must never discard a live randomness request.
@@ -1601,29 +1609,6 @@ fn claim_prize_instruction(turn_id: u64, claimant: Pubkey) -> Instruction {
     }
 }
 
-fn claim_reward_instruction(
-    turn_id: u64,
-    claimant: Pubkey,
-    kind: idealer::ClaimKind,
-) -> Instruction {
-    Instruction {
-        program_id: idealer::ID,
-        accounts: accounts::ClaimReward {
-            claimant,
-            global_config: pda(&[b"global_config"]),
-            claim: pda(&[
-                b"claim",
-                &turn_id.to_le_bytes(),
-                claimant.as_ref(),
-                &[kind as u8],
-            ]),
-            treasury_vault: pda(&[b"treasury_vault"]),
-        }
-        .to_account_metas(None),
-        data: instruction::ClaimReward { turn_id, kind }.data(),
-    }
-}
-
 async fn lamports_of(context: &mut ProgramTestContext, address: Pubkey) -> u64 {
     context
         .banks_client
@@ -1636,7 +1621,7 @@ async fn lamports_of(context: &mut ProgramTestContext, address: Pubkey) -> u64 {
 
 #[tokio::test]
 #[ignore = "requires an SBF build and SBF_OUT_DIR; run the explicit SBF integration suite"]
-async fn claim_flow_records_and_pays_winner_and_reward() {
+async fn claim_flow_pays_winner_and_rejects_legacy_sol_rewards() {
     let turn_id = 1_u64;
     // Pre-register the draw randomness account at genesis, revealed at the settle
     // slot, so the warp does not trip the accounts-hash verification.
@@ -1773,12 +1758,11 @@ async fn claim_flow_records_and_pays_winner_and_reward() {
     .await
     .is_err());
 
-    // Creator/voter rewards are paid from the treasury vault. Fund it, record a
-    // creator reward, and verify the wallet pulls it.
-    let treasury_vault = pda(&[b"treasury_vault"]);
-    fund(&mut context, &treasury_vault).await;
+    // Creator/voter rewards now belong exclusively to Tokenomics Core. The
+    // legacy SOL claim recorder must reject them so the game treasury cannot
+    // accrue a competing liability.
     let reward = 5_000_000_u64;
-    process(
+    let creator_reward = process(
         &mut context,
         record_claim_instruction(
             turn_id,
@@ -1789,26 +1773,6 @@ async fn claim_flow_records_and_pays_winner_and_reward() {
         ),
         &[],
     )
-    .await
-    .unwrap();
-
-    // The reward instruction rejects a winner-payout kind (kind mismatch).
-    assert!(process(
-        &mut context,
-        claim_reward_instruction(turn_id, player.pubkey(), idealer::ClaimKind::WinnerPayout),
-        &[&player],
-    )
-    .await
-    .is_err());
-
-    let before = lamports_of(&mut context, player.pubkey()).await;
-    process(
-        &mut context,
-        claim_reward_instruction(turn_id, player.pubkey(), idealer::ClaimKind::CreatorReward),
-        &[&player],
-    )
-    .await
-    .unwrap();
-    let after = lamports_of(&mut context, player.pubkey()).await;
-    assert_eq!(after - before, reward);
+    .await;
+    assert_custom_error(creator_reward, u32::from(IdealerError::ClaimKindMismatch));
 }

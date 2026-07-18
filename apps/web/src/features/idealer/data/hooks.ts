@@ -26,10 +26,12 @@ import {
   getGuessReceipt,
   getPlayerClaims,
   getPlayerHistory,
+  getPublicTokenomics,
   getRound,
   getRuleEliminationVotes,
   getRuleProposals,
   getRuleVotes,
+  getWalletTokenomics,
 } from "./apiClient";
 import { truncateAddress } from "./format";
 import type {
@@ -39,6 +41,8 @@ import type {
   PlayerHistoryApi,
   RoundSummaryApi,
   RuleProposalApi,
+  TokenomicsPublicApi,
+  TokenomicsWalletApi,
   UiRule,
 } from "./types";
 
@@ -519,6 +523,60 @@ export function usePlayerClaims(walletAddress: string | undefined) {
   }, [reload]);
 
   return { claims, error, loading, reload: () => reload() };
+}
+
+export function useTokenomics(walletAddress: string | undefined) {
+  const [publicState, setPublicState] = useState<TokenomicsPublicApi | null>(null);
+  const [walletState, setWalletState] = useState<TokenomicsWalletApi | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<null | string>(null);
+
+  const reload = useCallback(
+    (signal?: AbortSignal) => {
+      setLoading(true);
+      Promise.all([
+        getPublicTokenomics(signal),
+        walletAddress
+          ? getWalletTokenomics(walletAddress, signal)
+          : Promise.resolve(null),
+      ])
+        .then(([publicBody, walletBody]) => {
+          setPublicState(publicBody?.tokenomics ?? null);
+          setWalletState(walletBody?.wallet ?? null);
+          setError(null);
+        })
+        .catch((cause: unknown) => {
+          if (cause instanceof DOMException && cause.name === "AbortError") {
+            return;
+          }
+          console.warn("Failed to load Tokenomics Core data.", cause);
+          setError("tokenomics_unavailable");
+        })
+        .finally(() => setLoading(false));
+    },
+    [walletAddress],
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const run = () => reload(controller.signal);
+    run();
+    const id = window.setInterval(run, 15_000);
+    window.addEventListener("focus", run);
+    return () => {
+      controller.abort();
+      window.clearInterval(id);
+      window.removeEventListener("focus", run);
+    };
+  }, [reload]);
+
+  return {
+    error,
+    loading,
+    publicState,
+    reload: () => reload(),
+    walletState,
+  };
 }
 
 export function usePlayerHistory(walletAddress: string | undefined) {

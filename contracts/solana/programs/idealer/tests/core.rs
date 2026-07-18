@@ -2,7 +2,7 @@ use anchor_lang::prelude::Pubkey;
 use idealer::domain::{
     calculate_prize_pool_accounting, derive_draw_numbers, next_cycle_index, run_rule_election,
     split_fee, validate_action_window, validate_config, validate_guess, validate_rule,
-    ConfigValidation, ElectionCandidate, PrizePoolAccountingInput,
+    ConfigValidation, ElectionCandidate, PrizePoolAccountingInput, VOTE_FEE_START_TURN,
 };
 use solana_sha256_hasher::hash;
 
@@ -27,7 +27,12 @@ fn account_constraints_use_isolated_canonical_pdas() {
     let rule_id = 11_u64;
 
     let (guess, _) = Pubkey::find_program_address(
-        &[b"guess", &turn_id.to_le_bytes(), player.as_ref(), &1_u64.to_le_bytes()],
+        &[
+            b"guess",
+            &turn_id.to_le_bytes(),
+            player.as_ref(),
+            &1_u64.to_le_bytes(),
+        ],
         &program_id,
     );
     let (game_token, _) = Pubkey::find_program_address(
@@ -134,7 +139,7 @@ fn prize_pool_accounting_tracks_sources_buckets_and_rollover() {
 #[test]
 fn prize_pool_accounting_sums_repeated_vote_fee_sequences() {
     let before_gate = calculate_prize_pool_accounting(&PrizePoolAccountingInput {
-        turn_id: 99,
+        turn_id: VOTE_FEE_START_TURN - 1,
         guess_submission_count: 0,
         rule_proposal_count: 0,
         paid_rule_removal_count: 0,
@@ -149,7 +154,7 @@ fn prize_pool_accounting_sums_repeated_vote_fee_sequences() {
     })
     .unwrap();
     let after_gate = calculate_prize_pool_accounting(&PrizePoolAccountingInput {
-        turn_id: 100,
+        turn_id: VOTE_FEE_START_TURN,
         guess_submission_count: 0,
         rule_proposal_count: 0,
         paid_rule_removal_count: 0,

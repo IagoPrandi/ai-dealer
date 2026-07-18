@@ -15,7 +15,7 @@ AGAVE_VERSION="${AGAVE_VERSION:-2.1.21}"
 DEPLOY_DIR="/root/.config/idealer/devnet"
 PROGRAM_KEYPAIR_PATH="${PROGRAM_KEYPAIR_PATH:-${DEPLOY_DIR}/idealer-program-keypair.json}"
 PROGRAM_ID="${PROGRAM_ID:-}"
-SBF_OUT_DIR="/sbf-target/deploy"
+SBF_OUT_DIR="${SBF_OUT_DIR:-/sbf-target/deploy}"
 SO_PATH="${SBF_OUT_DIR}/idealer.so"
 export PATH="/root/.local/share/solana/install/active_release/bin:${PATH}"
 
@@ -40,25 +40,72 @@ ensure_toolchain() {
 cmd_build() {
   ensure_toolchain
   cd /workspace/contracts/solana
-  local feature_args=()
+  local idealer_feature_args=()
   if [ -n "${SBF_FEATURES:-}" ]; then
     # Optional cargo features (e.g. SBF_FEATURES=devnet-test). Defaults to none
     # so production builds never include test-only instructions.
     echo "[build] features: ${SBF_FEATURES}"
-    feature_args=(--features "${SBF_FEATURES}")
+    idealer_feature_args=(--features "${SBF_FEATURES}")
   fi
-  echo "[build] cargo build-sbf..."
-  cargo-build-sbf --sbf-out-dir "${SBF_OUT_DIR}" "${feature_args[@]}"
-  ls -la "${SO_PATH}"
+  echo "[build] cargo build-sbf (tokenomics-core, isolated entrypoint)..."
+  local build_log
+  local build_status
+  build_log="$(mktemp)"
+  set +e
+  # Build each deployable independently. A workspace-wide build unifies
+  # idealer's tokenomics-core/cpi dependency into tokenomics-core itself and
+  # silently produces a tokenomics artifact with no entrypoint.
+  cargo-build-sbf \
+    --manifest-path programs/tokenomics_core/Cargo.toml \
+    --sbf-out-dir "${SBF_OUT_DIR}" 2>&1 \
+    | tee "${build_log}"
+  build_status="${PIPESTATUS[0]}"
+  set -e
+  if [ "${build_status}" -ne 0 ] || grep -q '^Error:' "${build_log}"; then
+    echo "[build] tokenomics-core cargo build-sbf reported compiler errors" >&2
+    rm -f "${build_log}"
+    return 1
+  fi
+  rm -f "${build_log}"
+
+  echo "[build] cargo build-sbf (idealer)..."
+  build_log="$(mktemp)"
+  set +e
+  cargo-build-sbf \
+    --manifest-path programs/idealer/Cargo.toml \
+    --sbf-out-dir "${SBF_OUT_DIR}" \
+    "${idealer_feature_args[@]}" 2>&1 \
+    | tee "${build_log}"
+  build_status="${PIPESTATUS[0]}"
+  set -e
+  if [ "${build_status}" -ne 0 ] || grep -q '^Error:' "${build_log}"; then
+    echo "[build] idealer cargo build-sbf reported compiler errors" >&2
+    rm -f "${build_log}"
+    return 1
+  fi
+  rm -f "${build_log}"
+
+  # cargo-build-sbf may create deploy keypairs as a side effect. The programs
+  # use declared ids and verification never needs these disposable secrets.
+  rm -f \
+    "${SBF_OUT_DIR}/idealer-keypair.json" \
+    "${SBF_OUT_DIR}/tokenomics_core-keypair.json"
+  ls -la \
+    "${SBF_OUT_DIR}/tokenomics_core.so" \
+    "${SBF_OUT_DIR}/idealer.so"
 }
 
 cmd_test_sbf() {
   ensure_toolchain
+  local test_out_dir="${SBF_TEST_OUT_DIR:-/sbf-target/test-deploy}"
+  local test_features="${SBF_TEST_FEATURES:-sb-devnet}"
+  echo "[test:sbf] building an isolated Switchboard-devnet SBF artifact..."
+  SBF_OUT_DIR="${test_out_dir}" SBF_FEATURES="${test_features}" cmd_build
   cd /workspace/contracts/solana
   echo "[test:sbf] running ignored instruction suite against the SBF build..."
   # Single-threaded: the program-test bank/clock state is timing-sensitive, so
   # parallel execution of these stateful integration tests is flaky.
-  SBF_OUT_DIR="${SBF_OUT_DIR}" BPF_OUT_DIR="${SBF_OUT_DIR}" \
+  SBF_OUT_DIR="${test_out_dir}" BPF_OUT_DIR="${test_out_dir}" \
     cargo test --test instructions --all-features --locked -- --ignored --test-threads=1
 }
 

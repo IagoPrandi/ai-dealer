@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { ClaimRecordApi } from "../data/types";
-import { summarizeRewardClaims } from "./Rewards";
+import {
+  formatLamportString,
+  formatTokenAtoms,
+  parseTokenAmountToAtoms,
+  summarizeRewardClaims,
+} from "./Rewards";
 
 const records: ClaimRecordApi[] = [
   {
@@ -41,4 +46,14 @@ test("rewards summary uses only real claim statuses and sorts newest turns first
   assert.equal(summary.claimedSol, 0.25);
   assert.equal(summary.notificationCount, 2);
   assert.deepEqual(summary.records.map((record) => record.claimId), ["available", "pending", "claimed"]);
+});
+
+test("token and SOL formatting stays exact above Number safe integer range", () => {
+  assert.equal(parseTokenAmountToAtoms("1.000000001"), 1_000_000_001n);
+  assert.equal(formatTokenAtoms("1000000001"), "1.000000001");
+  assert.equal(
+    formatLamportString("9007199254740993000"),
+    "9007199254.740993",
+  );
+  assert.throws(() => parseTokenAmountToAtoms("1.0000000001"), /up to 9/);
 });

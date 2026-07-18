@@ -1,0 +1,35 @@
+[package]
+name = "tokenomics-core"
+version = "0.1.0"
+description = "Immutable Idealer fixed-supply tokenomics core"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "tokenomics_core"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+custom-heap = []
+custom-panic = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+
+[dependencies]
+anchor-lang = { workspace = true }
+anchor-spl = { workspace = true }
+solana-sha256-hasher = { workspace = true }
+
+[dev-dependencies]
+solana-account-info = "2.3.0"
+solana-program-error = "2.2.2"
+solana-program-test = "2.3.13"
+solana-sdk = "2.3.1"
+solana-system-interface = { version = "1.0.0", features = ["bincode"] }
+tokio = { version = "1.48.0", features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

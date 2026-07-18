@@ -1,0 +1,19 @@
+{
+  "programId": "0909090909090909090909090909090909090909090909090909090909090909",
+  "network": "devnet",
+  "epochId": "7",
+  "finalisedFeesLamports": "10",
+  "rolloverInLamports": "1",
+  "positions": [
+    {
+      "position": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+      "beneficiary": "0101010101010101010101010101010101010101010101010101010101010101",
+      "weight": "2"
+    },
+    {
+      "position": "0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c",
+      "beneficiary": "0202020202020202020202020202020202020202020202020202020202020202",
+      "weight": "1"
+    }
+  ]
+}

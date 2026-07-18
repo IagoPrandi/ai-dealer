@@ -79,6 +79,18 @@ function resolveMock(url: string): unknown | undefined {
   if (url.includes("/guess-receipts")) {
     return MOCK_GUESS_RECEIPT;
   }
+  if (url.includes("/tokenomics/public")) {
+    return {
+      tokenomics: {
+        available: false,
+        projection: null,
+        reason: "not_indexed",
+      },
+    };
+  }
+  if (url.includes("/tokenomics/wallets/")) {
+    return { wallet: null };
+  }
   if (url.includes("/claims")) {
     return MOCK_PLAYER_CLAIMS;
   }

@@ -80,7 +80,18 @@ pub struct PrizePoolAccounting {
     pub next_alternative_rollover_if_no_winners_lamports: u64,
 }
 
+#[cfg(any(
+    feature = "devnet-test",
+    feature = "manual-test",
+    feature = "sb-devnet"
+))]
 pub const VOTE_FEE_START_TURN: u64 = 100;
+#[cfg(not(any(
+    feature = "devnet-test",
+    feature = "manual-test",
+    feature = "sb-devnet"
+)))]
+pub const VOTE_FEE_START_TURN: u64 = 30;
 const REPEATED_ACTION_FEE_MULTIPLIER: u64 = 2;
 
 pub struct ConfigValidation<'a> {

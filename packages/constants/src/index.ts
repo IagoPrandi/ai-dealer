@@ -10,11 +10,31 @@ export const LAMPORTS_PER_SOL = 1_000_000_000;
 // 79202s ≈ 22h (basis points cannot express 22/24 exactly; the ~2s drift is
 // accepted). The 4-slot cycle machinery is retained with equal slots.
 export const TURN_DURATION_CYCLE_HOURS = [24, 24, 24, 24] as const;
-export const TURN_DURATION_CYCLE_SECONDS = [86_400, 86_400, 86_400, 86_400] as const;
+export const TURN_DURATION_CYCLE_SECONDS = [
+  86_400, 86_400, 86_400, 86_400,
+] as const;
 export const RULE_ELECTION_CUTOFF_BPS = 9_167;
 export const GUESS_CUTOFF_BPS = 9_167;
 export const TEST_TURN_DURATION_SCALE_BPS = 1_500;
-export const VOTE_FEE_START_TURN = 100;
+export const PRODUCTION_FREE_ACTION_WINDOW_ENDS_BEFORE_TURN_INDEX = 30;
+export const DEVELOPMENT_FREE_ACTION_WINDOW_ENDS_BEFORE_TURN_INDEX = 100;
+
+export function resolveFreeActionWindowEndsBeforeTurnIndex(
+  network: string | undefined,
+) {
+  return network === "mainnet" || network === "mainnet-beta"
+    ? PRODUCTION_FREE_ACTION_WINDOW_ENDS_BEFORE_TURN_INDEX
+    : DEVELOPMENT_FREE_ACTION_WINDOW_ENDS_BEFORE_TURN_INDEX;
+}
+
+export const FREE_ACTION_WINDOW_ENDS_BEFORE_TURN_INDEX =
+  resolveFreeActionWindowEndsBeforeTurnIndex(
+    process.env.NEXT_PUBLIC_SOLANA_NETWORK ??
+      process.env.SOLANA_NETWORK ??
+      process.env.IDEALER_NETWORK,
+  );
+/** @deprecated Use FREE_ACTION_WINDOW_ENDS_BEFORE_TURN_INDEX. */
+export const VOTE_FEE_START_TURN = FREE_ACTION_WINDOW_ENDS_BEFORE_TURN_INDEX;
 export const REPEATED_ACTION_FEE_MULTIPLIER = 2;
 
 export const MVP_FEES_SOL = {
@@ -22,7 +42,7 @@ export const MVP_FEES_SOL = {
   ruleProposal: 0.02,
   paidRuleRemoval: 0.05,
   vote: 0.005,
-  report: 0
+  report: 0,
 } as const;
 
 // Paid rule removal protections. Only the rule creator may remove their rule,
@@ -43,7 +63,7 @@ export const CREATOR_REWARD_RESERVE_SHARE_BPS = 2_000;
 export const CREATOR_REWARD_CAP_SOL = 0.25;
 export const VOTER_REWARD_RATE_BPS = 1_500;
 export const VOTER_REWARD_CONFIG = {
-  capPerTurnLamports: 250_000_000
+  capPerTurnLamports: 250_000_000,
 } as const;
 export const MINIMUM_CLAIM_THRESHOLD_SOL = 0.005;
 export const CLAIM_WINDOW_TURNS = 12;

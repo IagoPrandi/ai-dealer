@@ -8,6 +8,9 @@
 
 use anchor_lang::prelude::*;
 use anchor_lang::system_program::{self, Transfer};
+#[cfg(feature = "idl-build")]
+use anchor_lang::{Discriminator, IdlBuild};
+use anchor_spl::token::{Mint, Token, TokenAccount};
 
 pub mod domain;
 
@@ -60,10 +63,7 @@ pub fn expected_switchboard_program() -> [u8; 32] {
 ///
 /// Used by the `request_*` (commit) instructions so the queue/owner are checked
 /// once at commit time and the seed slot is recorded for the later settle.
-fn read_committed_randomness(
-    randomness_ai: &AccountInfo,
-    expected_queue: &Pubkey,
-) -> Result<u64> {
+fn read_committed_randomness(randomness_ai: &AccountInfo, expected_queue: &Pubkey) -> Result<u64> {
     require!(
         randomness_ai.owner.to_bytes() == expected_switchboard_program(),
         IdealerError::InvalidRandomnessOwner
@@ -235,6 +235,8 @@ pub mod idealer {
         turn.end_timestamp = end_timestamp;
         turn.status = TurnStatus::Open;
         turn.prize_pool_amount_lamports = 0;
+        turn.treasury_fee_amount_lamports = 0;
+        turn.treasury_fee_bridged = false;
         turn.turn_duration_seconds = turn_duration_seconds;
         turn.cycle_index = cycle_index;
         turn.draw_result = [0; 6];
@@ -409,6 +411,12 @@ pub mod idealer {
         ctx.accounts.game_token.issuing_guess = guess.key();
         ctx.accounts.game_token.guess_count = args.sequence;
 
+        ctx.accounts.turn_state.treasury_fee_amount_lamports = ctx
+            .accounts
+            .turn_state
+            .treasury_fee_amount_lamports
+            .checked_add(treasury_amount)
+            .ok_or(IdealerError::ArithmeticOverflow)?;
         ctx.accounts.treasury_vault.total_collected_lamports = ctx
             .accounts
             .treasury_vault
@@ -505,6 +513,12 @@ pub mod idealer {
             .game_token
             .used_for_rule_proposal_count
             .checked_add(1)
+            .ok_or(IdealerError::ArithmeticOverflow)?;
+        ctx.accounts.turn_state.treasury_fee_amount_lamports = ctx
+            .accounts
+            .turn_state
+            .treasury_fee_amount_lamports
+            .checked_add(treasury_amount)
             .ok_or(IdealerError::ArithmeticOverflow)?;
         ctx.accounts.treasury_vault.total_collected_lamports = ctx
             .accounts
@@ -687,6 +701,12 @@ pub mod idealer {
         // Status change only — historical data is preserved (PRD §6.11).
         ctx.accounts.rule_proposal.state = RuleState::RemovedPaid;
 
+        ctx.accounts.turn_state.treasury_fee_amount_lamports = ctx
+            .accounts
+            .turn_state
+            .treasury_fee_amount_lamports
+            .checked_add(treasury_amount)
+            .ok_or(IdealerError::ArithmeticOverflow)?;
         ctx.accounts.treasury_vault.total_collected_lamports = ctx
             .accounts
             .treasury_vault
@@ -1194,8 +1214,7 @@ pub mod idealer {
         // program; an absent account is owned by the System program with zero
         // lamports and no data. Refuse to reset anything that still exists.
         require!(
-            ctx.accounts.randomness.lamports() == 0
-                && ctx.accounts.randomness.data_is_empty(),
+            ctx.accounts.randomness.lamports() == 0 && ctx.accounts.randomness.data_is_empty(),
             IdealerError::RandomnessAccountStillExists
         );
 
@@ -1258,6 +1277,281 @@ pub mod idealer {
             prize_pool_amount_lamports: ctx.accounts.turn_state.prize_pool_amount_lamports,
         });
         Ok(())
+    }
+
+    /// Moves the closed turn's exact treasury share into Tokenomics Core and
+    /// atomically records it in the collecting seven-turn epoch. A per-turn
+    /// flag prevents replay; zero-fee turns are still marked reconciled.
+    pub fn bridge_turn_treasury_fee(ctx: Context<BridgeTurnTreasuryFee>) -> Result<()> {
+        let turn = &mut ctx.accounts.turn_state;
+        require!(
+            turn.status == TurnStatus::Closed,
+            IdealerError::TurnNotClosed
+        );
+        require!(
+            !turn.treasury_fee_bridged,
+            IdealerError::TreasuryFeeAlreadyBridged
+        );
+        require_keys_eq!(
+            ctx.accounts.token_config.game_authority,
+            ctx.accounts.global_config.key(),
+            IdealerError::InvalidTokenomicsConfiguration
+        );
+        require!(
+            ctx.accounts.epoch.status == tokenomics_core::EpochStatus::Collecting,
+            IdealerError::InvalidTokenomicsEpoch
+        );
+        require!(
+            (ctx.accounts.epoch.first_turn_id..=ctx.accounts.epoch.last_turn_id)
+                .contains(&turn.turn_id),
+            IdealerError::InvalidTokenomicsEpoch
+        );
+
+        let amount_lamports = turn.treasury_fee_amount_lamports;
+        if amount_lamports > 0 {
+            require!(
+                ctx.accounts.treasury_vault.total_collected_lamports >= amount_lamports,
+                IdealerError::InsufficientVaultBalance
+            );
+            pay_from_vault(
+                &ctx.accounts.treasury_vault.to_account_info(),
+                &ctx.accounts.distribution_vault.to_account_info(),
+                amount_lamports,
+            )?;
+
+            let bump = ctx.accounts.global_config.bump;
+            let signer_seeds: &[&[&[u8]]] = &[&[b"global_config", &[bump]]];
+            tokenomics_core::cpi::record_external_treasury_fee(
+                CpiContext::new_with_signer(
+                    ctx.accounts.tokenomics_program.to_account_info(),
+                    tokenomics_core::cpi::accounts::RecordExternalTreasuryFee {
+                        game_authority: ctx.accounts.global_config.to_account_info(),
+                        token_config: ctx.accounts.token_config.to_account_info(),
+                        epoch: ctx.accounts.epoch.to_account_info(),
+                        distribution_vault: ctx.accounts.distribution_vault.to_account_info(),
+                    },
+                    signer_seeds,
+                ),
+                turn.turn_id,
+                amount_lamports,
+            )?;
+            ctx.accounts.treasury_vault.total_collected_lamports = ctx
+                .accounts
+                .treasury_vault
+                .total_collected_lamports
+                .checked_sub(amount_lamports)
+                .ok_or(IdealerError::ArithmeticOverflow)?;
+        }
+
+        turn.treasury_fee_bridged = true;
+        emit!(TurnTreasuryFeeBridged {
+            turn_id: turn.turn_id,
+            epoch_id: ctx.accounts.epoch.epoch_id,
+            amount_lamports,
+        });
+        Ok(())
+    }
+
+    /// Permissionlessly settles the fixed proposal reward while binding the
+    /// recipient to the proposal's recorded creator.
+    pub fn settle_proposal_token_reward(ctx: Context<SettleProposalTokenReward>) -> Result<()> {
+        let bump = ctx.accounts.global_config.bump;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"global_config", &[bump]]];
+        tokenomics_core::cpi::settle_action_reward(
+            CpiContext::new_with_signer(
+                ctx.accounts.tokenomics_program.to_account_info(),
+                tokenomics_core::cpi::accounts::SettleActionReward {
+                    payer: ctx.accounts.payer.to_account_info(),
+                    game_authority: ctx.accounts.global_config.to_account_info(),
+                    token_config: ctx.accounts.token_config.to_account_info(),
+                    mint: ctx.accounts.mint.to_account_info(),
+                    campaign: ctx.accounts.campaign.to_account_info(),
+                    campaign_vault: ctx.accounts.campaign_vault.to_account_info(),
+                    beneficiary_token_account: ctx
+                        .accounts
+                        .beneficiary_token_account
+                        .to_account_info(),
+                    reward_receipt: ctx.accounts.reward_receipt.to_account_info(),
+                    token_program: ctx.accounts.token_program.to_account_info(),
+                    system_program: ctx.accounts.system_program.to_account_info(),
+                },
+                signer_seeds,
+            ),
+            tokenomics_core::SettleActionRewardArgs {
+                action_id: ctx.accounts.rule_proposal.key().to_bytes(),
+                kind: tokenomics_core::ActionRewardKind::Proposal,
+            },
+        )
+    }
+
+    /// Permissionlessly settles the fixed supporter reward while binding the
+    /// recipient to the immutable vote record.
+    pub fn settle_supporter_token_reward(ctx: Context<SettleSupporterTokenReward>) -> Result<()> {
+        let bump = ctx.accounts.global_config.bump;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"global_config", &[bump]]];
+        tokenomics_core::cpi::settle_action_reward(
+            CpiContext::new_with_signer(
+                ctx.accounts.tokenomics_program.to_account_info(),
+                tokenomics_core::cpi::accounts::SettleActionReward {
+                    payer: ctx.accounts.payer.to_account_info(),
+                    game_authority: ctx.accounts.global_config.to_account_info(),
+                    token_config: ctx.accounts.token_config.to_account_info(),
+                    mint: ctx.accounts.mint.to_account_info(),
+                    campaign: ctx.accounts.campaign.to_account_info(),
+                    campaign_vault: ctx.accounts.campaign_vault.to_account_info(),
+                    beneficiary_token_account: ctx
+                        .accounts
+                        .beneficiary_token_account
+                        .to_account_info(),
+                    reward_receipt: ctx.accounts.reward_receipt.to_account_info(),
+                    token_program: ctx.accounts.token_program.to_account_info(),
+                    system_program: ctx.accounts.system_program.to_account_info(),
+                },
+                signer_seeds,
+            ),
+            tokenomics_core::SettleActionRewardArgs {
+                action_id: ctx.accounts.rule_vote.key().to_bytes(),
+                kind: tokenomics_core::ActionRewardKind::Supporter,
+            },
+        )
+    }
+
+    pub fn settle_active_rule_token_rewards<'info>(
+        ctx: Context<'_, '_, '_, 'info, SettleActiveRuleTokenRewards<'info>>,
+        args: SettleActiveRuleTokenRewardsArgs,
+    ) -> Result<()> {
+        require_eq!(
+            ctx.accounts.turn_state.turn_id,
+            args.turn_id,
+            IdealerError::InvalidTurnId
+        );
+        require_eq!(
+            ctx.accounts.turn_state.active_rule_id,
+            ctx.accounts.rule_proposal.rule_id,
+            IdealerError::InvalidTokenomicsRewardFact
+        );
+        require!(
+            ctx.accounts.turn_state.draw_status == DrawStatus::Fulfilled,
+            IdealerError::DrawNotSettleable
+        );
+
+        let bump = ctx.accounts.global_config.bump;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"global_config", &[bump]]];
+        tokenomics_core::cpi::settle_active_rule_rewards(
+            CpiContext::new_with_signer(
+                ctx.accounts.tokenomics_program.to_account_info(),
+                tokenomics_core::cpi::accounts::SettleActiveRuleRewards {
+                    payer: ctx.accounts.authority.to_account_info(),
+                    game_authority: ctx.accounts.global_config.to_account_info(),
+                    token_config: ctx.accounts.token_config.to_account_info(),
+                    mint: ctx.accounts.mint.to_account_info(),
+                    campaign: ctx.accounts.campaign.to_account_info(),
+                    campaign_vault: ctx.accounts.campaign_vault.to_account_info(),
+                    creator_token_account: ctx.accounts.creator_token_account.to_account_info(),
+                    active_rule_reward: ctx.accounts.active_rule_reward.to_account_info(),
+                    token_program: ctx.accounts.token_program.to_account_info(),
+                    system_program: ctx.accounts.system_program.to_account_info(),
+                },
+                signer_seeds,
+            )
+            .with_remaining_accounts(ctx.remaining_accounts.to_vec()),
+            tokenomics_core::SettleActiveRuleRewardsArgs {
+                turn_id: args.turn_id,
+                alternative_prize_pool_lamports: args.alternative_prize_pool_lamports,
+                winner_count: args.winner_count,
+            },
+        )
+    }
+
+    pub fn settle_referral_base_token_rewards(
+        ctx: Context<SettleReferralBaseTokenRewards>,
+        turn_id: u64,
+    ) -> Result<()> {
+        require_eq!(
+            ctx.accounts.game_token.turn_id,
+            turn_id,
+            IdealerError::InvalidTurnId
+        );
+        require!(
+            ctx.accounts.game_token.guess_count > 0
+                && ctx.accounts.attribution.attributed_at <= ctx.accounts.game_token.issued_at,
+            IdealerError::InvalidTokenomicsRewardFact
+        );
+        require_keys_eq!(
+            ctx.accounts.game_token.player,
+            ctx.accounts.attribution.invitee,
+            IdealerError::InvalidRewardBeneficiary
+        );
+        let bump = ctx.accounts.global_config.bump;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"global_config", &[bump]]];
+        tokenomics_core::cpi::settle_referral_base_rewards(
+            CpiContext::new_with_signer(
+                ctx.accounts.tokenomics_program.to_account_info(),
+                tokenomics_core::cpi::accounts::SettleReferralBaseRewards {
+                    game_authority: ctx.accounts.global_config.to_account_info(),
+                    token_config: ctx.accounts.token_config.to_account_info(),
+                    mint: ctx.accounts.mint.to_account_info(),
+                    attribution: ctx.accounts.attribution.to_account_info(),
+                    campaign: ctx.accounts.campaign.to_account_info(),
+                    campaign_vault: ctx.accounts.campaign_vault.to_account_info(),
+                    inviter_token_account: ctx.accounts.inviter_token_account.to_account_info(),
+                    invitee_token_account: ctx.accounts.invitee_token_account.to_account_info(),
+                    token_program: ctx.accounts.token_program.to_account_info(),
+                },
+                signer_seeds,
+            ),
+            turn_id,
+        )
+    }
+
+    pub fn record_referral_reward_contribution(
+        ctx: Context<RecordReferralRewardContribution>,
+        args: RecordReferralRewardContributionArgs,
+    ) -> Result<()> {
+        let bump = ctx.accounts.global_config.bump;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"global_config", &[bump]]];
+        tokenomics_core::cpi::record_invitee_first_round_reward(
+            CpiContext::new_with_signer(
+                ctx.accounts.tokenomics_program.to_account_info(),
+                tokenomics_core::cpi::accounts::RecordInviteeFirstRoundReward {
+                    payer: ctx.accounts.authority.to_account_info(),
+                    game_authority: ctx.accounts.global_config.to_account_info(),
+                    token_config: ctx.accounts.token_config.to_account_info(),
+                    attribution: ctx.accounts.attribution.to_account_info(),
+                    contribution: ctx.accounts.contribution.to_account_info(),
+                    system_program: ctx.accounts.system_program.to_account_info(),
+                },
+                signer_seeds,
+            ),
+            args.turn_id,
+            args.contribution_id,
+            args.paid_atoms,
+        )
+    }
+
+    pub fn settle_referral_bonus_token_reward(
+        ctx: Context<SettleReferralBonusTokenReward>,
+        turn_id: u64,
+    ) -> Result<()> {
+        let bump = ctx.accounts.global_config.bump;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"global_config", &[bump]]];
+        tokenomics_core::cpi::settle_referral_bonus(
+            CpiContext::new_with_signer(
+                ctx.accounts.tokenomics_program.to_account_info(),
+                tokenomics_core::cpi::accounts::SettleReferralBonus {
+                    game_authority: ctx.accounts.global_config.to_account_info(),
+                    token_config: ctx.accounts.token_config.to_account_info(),
+                    mint: ctx.accounts.mint.to_account_info(),
+                    attribution: ctx.accounts.attribution.to_account_info(),
+                    campaign: ctx.accounts.campaign.to_account_info(),
+                    campaign_vault: ctx.accounts.campaign_vault.to_account_info(),
+                    inviter_token_account: ctx.accounts.inviter_token_account.to_account_info(),
+                    token_program: ctx.accounts.token_program.to_account_info(),
+                },
+                signer_seeds,
+            ),
+            turn_id,
+        )
     }
 
     pub fn force_skip_legacy_active_turn(ctx: Context<ForceSkipLegacyActiveTurn>) -> Result<()> {
@@ -1410,16 +1704,17 @@ pub mod idealer {
         Ok(())
     }
 
-    /// Authority posts the off-chain-computed claimable amount for a single
-    /// `(turn, wallet, kind)` so the wallet can later pull its funds on-chain.
-    /// The winner/creator/voter amounts are computed deterministically by the
-    /// API after the draw; this instruction mirrors a single claim record on
-    /// chain. Creating the `Claim` PDA via `init` makes it idempotent: a second
-    /// post for the same tuple fails, so the worker can treat "already exists"
-    /// as success.
+    /// Authority posts an off-chain-computed winner payout. Creator and voter
+    /// rewards are token rewards owned by Tokenomics Core and are deliberately
+    /// rejected here so the game treasury cannot accrue competing SOL
+    /// liabilities.
     pub fn record_claim(ctx: Context<RecordClaim>, args: RecordClaimArgs) -> Result<()> {
         let config = &ctx.accounts.global_config;
         require!(!config.paused, IdealerError::ProtocolPaused);
+        require!(
+            args.kind == ClaimKind::WinnerPayout,
+            IdealerError::ClaimKindMismatch
+        );
         require!(
             args.claimant != Pubkey::default(),
             IdealerError::InvalidClaimant
@@ -1499,10 +1794,9 @@ pub mod idealer {
         Ok(())
     }
 
-    /// Pull a recorded creator or voter reward from the global treasury vault,
-    /// which holds platform monetization and acts as the creator-reward
-    /// reserve. Signed by the claimant wallet (pull-payment). Winner payouts
-    /// must use `claim_prize` instead.
+    /// Legacy migration-only path for creator/voter SOL claims recorded by an
+    /// older deployment. New records reject these kinds; current rewards live
+    /// in Tokenomics Core.
     pub fn claim_reward(ctx: Context<ClaimReward>, turn_id: u64, kind: ClaimKind) -> Result<()> {
         require!(
             !ctx.accounts.global_config.paused,
@@ -1741,7 +2035,10 @@ fn validate_approval_vote_window(
     Ok(Some(index))
 }
 
-fn submit_guess_with_game_token_init(ctx: Context<SubmitGuess>, args: SubmitGuessArgs) -> Result<()> {
+fn submit_guess_with_game_token_init(
+    ctx: Context<SubmitGuess>,
+    args: SubmitGuessArgs,
+) -> Result<()> {
     let clock = Clock::get()?;
     let config = &ctx.accounts.global_config;
     validate_live_turn(config, &ctx.accounts.turn_state)?;
@@ -1793,6 +2090,12 @@ fn submit_guess_with_game_token_init(ctx: Context<SubmitGuess>, args: SubmitGues
     game_token.close_authority = ctx.accounts.player.key();
     game_token.bump = ctx.bumps.game_token;
 
+    ctx.accounts.turn_state.treasury_fee_amount_lamports = ctx
+        .accounts
+        .turn_state
+        .treasury_fee_amount_lamports
+        .checked_add(treasury_amount)
+        .ok_or(IdealerError::ArithmeticOverflow)?;
     ctx.accounts.treasury_vault.total_collected_lamports = ctx
         .accounts
         .treasury_vault
@@ -1833,7 +2136,11 @@ fn validate_game_token(game_token: &GameToken, turn_id: u64, player: Pubkey) -> 
     Ok(())
 }
 
-fn repeated_action_fee_lamports(base_fee_lamports: u64, turn_id: u64, sequence: u64) -> Result<u64> {
+fn repeated_action_fee_lamports(
+    base_fee_lamports: u64,
+    turn_id: u64,
+    sequence: u64,
+) -> Result<u64> {
     require!(sequence > 0, IdealerError::InvalidActionSequence);
 
     if turn_id < VOTE_FEE_START_TURN && sequence == 1 {
@@ -2105,6 +2412,20 @@ pub struct RecordClaimArgs {
     pub kind: ClaimKind,
     /// The off-chain-computed claimable amount, in lamports.
     pub amount_lamports: u64,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct SettleActiveRuleTokenRewardsArgs {
+    pub turn_id: u64,
+    pub alternative_prize_pool_lamports: u64,
+    pub winner_count: u64,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct RecordReferralRewardContributionArgs {
+    pub turn_id: u64,
+    pub contribution_id: [u8; 32],
+    pub paid_atoms: u64,
 }
 
 #[derive(Accounts)]
@@ -2743,6 +3064,359 @@ pub struct CloseTurn<'info> {
 }
 
 #[derive(Accounts)]
+pub struct BridgeTurnTreasuryFee<'info> {
+    pub authority: Signer<'info>,
+    #[account(
+        seeds = [b"global_config"],
+        bump = global_config.bump,
+        has_one = authority @ IdealerError::Unauthorized
+    )]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        mut,
+        seeds = [b"turn".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
+        bump = turn_state.bump
+    )]
+    pub turn_state: Box<Account<'info, TurnState>>,
+    #[account(
+        mut,
+        seeds = [b"treasury_vault"],
+        bump = treasury_vault.bump
+    )]
+    pub treasury_vault: Account<'info, TreasuryVault>,
+    pub tokenomics_program: Program<'info, tokenomics_core::program::TokenomicsCore>,
+    #[account(
+        seeds = [b"token_config"],
+        bump = token_config.bump,
+        seeds::program = tokenomics_program.key()
+    )]
+    pub token_config: Account<'info, tokenomics_core::TokenConfig>,
+    #[account(
+        mut,
+        seeds = [b"epoch", epoch.epoch_id.to_le_bytes().as_ref()],
+        bump = epoch.bump,
+        seeds::program = tokenomics_program.key()
+    )]
+    pub epoch: Account<'info, tokenomics_core::DistributionEpoch>,
+    #[account(
+        mut,
+        address = token_config.distribution_vault,
+        seeds = [b"distribution_vault"],
+        bump = distribution_vault.bump,
+        seeds::program = tokenomics_program.key()
+    )]
+    pub distribution_vault: Account<'info, tokenomics_core::DistributionVaultRecord>,
+}
+
+#[derive(Accounts)]
+pub struct SettleProposalTokenReward<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(seeds = [b"global_config"], bump = global_config.bump)]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        seeds = [
+            b"rule",
+            rule_proposal.turn_id.to_le_bytes().as_ref(),
+            rule_proposal.rule_id.to_le_bytes().as_ref()
+        ],
+        bump = rule_proposal.bump
+    )]
+    pub rule_proposal: Box<Account<'info, RuleProposal>>,
+    pub tokenomics_program: Program<'info, tokenomics_core::program::TokenomicsCore>,
+    #[account(
+        seeds = [b"token_config"],
+        bump = token_config.bump,
+        seeds::program = tokenomics_program.key(),
+        constraint = token_config.game_authority == global_config.key()
+            @ IdealerError::InvalidTokenomicsConfiguration
+    )]
+    pub token_config: Box<Account<'info, tokenomics_core::TokenConfig>>,
+    #[account(address = token_config.mint)]
+    pub mint: Box<Account<'info, Mint>>,
+    #[account(
+        mut,
+        seeds = [b"campaign", campaign.campaign_id.to_le_bytes().as_ref()],
+        bump = campaign.bump,
+        seeds::program = tokenomics_program.key()
+    )]
+    pub campaign: Box<Account<'info, tokenomics_core::CampaignReserve>>,
+    #[account(mut, address = campaign.vault)]
+    pub campaign_vault: Box<Account<'info, TokenAccount>>,
+    #[account(
+        mut,
+        constraint = beneficiary_token_account.owner == rule_proposal.proposer
+            @ IdealerError::InvalidRewardBeneficiary,
+        constraint = beneficiary_token_account.mint == token_config.mint
+            @ IdealerError::InvalidTokenomicsConfiguration
+    )]
+    pub beneficiary_token_account: Account<'info, TokenAccount>,
+    /// CHECK: Tokenomics Core verifies the canonical reward-receipt PDA and
+    /// initializes it atomically; this program binds the action and recipient.
+    #[account(mut)]
+    pub reward_receipt: UncheckedAccount<'info>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct SettleSupporterTokenReward<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(seeds = [b"global_config"], bump = global_config.bump)]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        seeds = [
+            b"vote",
+            rule_vote.turn_id.to_le_bytes().as_ref(),
+            rule_vote.rule_id.to_le_bytes().as_ref(),
+            rule_vote.voter.as_ref(),
+            rule_vote.sequence.to_le_bytes().as_ref()
+        ],
+        bump = rule_vote.bump
+    )]
+    pub rule_vote: Account<'info, RuleVote>,
+    pub tokenomics_program: Program<'info, tokenomics_core::program::TokenomicsCore>,
+    #[account(
+        seeds = [b"token_config"],
+        bump = token_config.bump,
+        seeds::program = tokenomics_program.key(),
+        constraint = token_config.game_authority == global_config.key()
+            @ IdealerError::InvalidTokenomicsConfiguration
+    )]
+    pub token_config: Account<'info, tokenomics_core::TokenConfig>,
+    #[account(address = token_config.mint)]
+    pub mint: Account<'info, Mint>,
+    #[account(
+        mut,
+        seeds = [b"campaign", campaign.campaign_id.to_le_bytes().as_ref()],
+        bump = campaign.bump,
+        seeds::program = tokenomics_program.key()
+    )]
+    pub campaign: Account<'info, tokenomics_core::CampaignReserve>,
+    #[account(mut, address = campaign.vault)]
+    pub campaign_vault: Account<'info, TokenAccount>,
+    #[account(
+        mut,
+        constraint = beneficiary_token_account.owner == rule_vote.voter
+            @ IdealerError::InvalidRewardBeneficiary,
+        constraint = beneficiary_token_account.mint == token_config.mint
+            @ IdealerError::InvalidTokenomicsConfiguration
+    )]
+    pub beneficiary_token_account: Account<'info, TokenAccount>,
+    /// CHECK: Tokenomics Core verifies the canonical reward-receipt PDA and
+    /// initializes it atomically; this program binds the action and recipient.
+    #[account(mut)]
+    pub reward_receipt: UncheckedAccount<'info>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(args: SettleActiveRuleTokenRewardsArgs)]
+pub struct SettleActiveRuleTokenRewards<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(
+        seeds = [b"global_config"],
+        bump = global_config.bump,
+        has_one = authority @ IdealerError::Unauthorized
+    )]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        seeds = [b"turn", args.turn_id.to_le_bytes().as_ref()],
+        bump = turn_state.bump
+    )]
+    pub turn_state: Box<Account<'info, TurnState>>,
+    #[account(
+        seeds = [
+            b"rule",
+            args.turn_id.to_le_bytes().as_ref(),
+            rule_proposal.rule_id.to_le_bytes().as_ref()
+        ],
+        bump = rule_proposal.bump,
+        constraint = rule_proposal.turn_id == args.turn_id @ IdealerError::InvalidTurnId
+    )]
+    pub rule_proposal: Box<Account<'info, RuleProposal>>,
+    pub tokenomics_program: Program<'info, tokenomics_core::program::TokenomicsCore>,
+    #[account(
+        seeds = [b"token_config"],
+        bump = token_config.bump,
+        seeds::program = tokenomics_program.key(),
+        constraint = token_config.game_authority == global_config.key()
+            @ IdealerError::InvalidTokenomicsConfiguration
+    )]
+    pub token_config: Box<Account<'info, tokenomics_core::TokenConfig>>,
+    #[account(address = token_config.mint)]
+    pub mint: Box<Account<'info, Mint>>,
+    #[account(
+        mut,
+        seeds = [b"campaign", campaign.campaign_id.to_le_bytes().as_ref()],
+        bump = campaign.bump,
+        seeds::program = tokenomics_program.key()
+    )]
+    pub campaign: Box<Account<'info, tokenomics_core::CampaignReserve>>,
+    #[account(mut, address = campaign.vault)]
+    pub campaign_vault: Box<Account<'info, TokenAccount>>,
+    #[account(
+        mut,
+        constraint = creator_token_account.owner == rule_proposal.proposer
+            @ IdealerError::InvalidRewardBeneficiary,
+        constraint = creator_token_account.mint == token_config.mint
+            @ IdealerError::InvalidTokenomicsConfiguration
+    )]
+    pub creator_token_account: Box<Account<'info, TokenAccount>>,
+    /// CHECK: Tokenomics Core verifies and initializes the turn/campaign PDA.
+    #[account(mut)]
+    pub active_rule_reward: UncheckedAccount<'info>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(turn_id: u64)]
+pub struct SettleReferralBaseTokenRewards<'info> {
+    pub authority: Signer<'info>,
+    #[account(
+        seeds = [b"global_config"],
+        bump = global_config.bump,
+        has_one = authority @ IdealerError::Unauthorized
+    )]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        seeds = [
+            b"game_token",
+            turn_id.to_le_bytes().as_ref(),
+            attribution.invitee.as_ref()
+        ],
+        bump = game_token.bump
+    )]
+    pub game_token: Box<Account<'info, GameToken>>,
+    pub tokenomics_program: Program<'info, tokenomics_core::program::TokenomicsCore>,
+    #[account(
+        seeds = [b"token_config"],
+        bump = token_config.bump,
+        seeds::program = tokenomics_program.key(),
+        constraint = token_config.game_authority == global_config.key()
+            @ IdealerError::InvalidTokenomicsConfiguration
+    )]
+    pub token_config: Box<Account<'info, tokenomics_core::TokenConfig>>,
+    #[account(address = token_config.mint)]
+    pub mint: Box<Account<'info, Mint>>,
+    #[account(
+        mut,
+        seeds = [b"referral_attribution", attribution.invitee.as_ref()],
+        bump = attribution.bump,
+        seeds::program = tokenomics_program.key()
+    )]
+    pub attribution: Box<Account<'info, tokenomics_core::ReferralAttribution>>,
+    #[account(
+        mut,
+        seeds = [b"campaign", campaign.campaign_id.to_le_bytes().as_ref()],
+        bump = campaign.bump,
+        seeds::program = tokenomics_program.key()
+    )]
+    pub campaign: Box<Account<'info, tokenomics_core::CampaignReserve>>,
+    #[account(mut, address = campaign.vault)]
+    pub campaign_vault: Box<Account<'info, TokenAccount>>,
+    #[account(mut)]
+    pub inviter_token_account: Box<Account<'info, TokenAccount>>,
+    #[account(
+        mut,
+        constraint = invitee_token_account.owner == attribution.invitee
+            @ IdealerError::InvalidRewardBeneficiary
+    )]
+    pub invitee_token_account: Box<Account<'info, TokenAccount>>,
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+#[instruction(args: RecordReferralRewardContributionArgs)]
+pub struct RecordReferralRewardContribution<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(
+        seeds = [b"global_config"],
+        bump = global_config.bump,
+        has_one = authority @ IdealerError::Unauthorized
+    )]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    pub tokenomics_program: Program<'info, tokenomics_core::program::TokenomicsCore>,
+    #[account(
+        seeds = [b"token_config"],
+        bump = token_config.bump,
+        seeds::program = tokenomics_program.key(),
+        constraint = token_config.game_authority == global_config.key()
+            @ IdealerError::InvalidTokenomicsConfiguration
+    )]
+    pub token_config: Account<'info, tokenomics_core::TokenConfig>,
+    #[account(
+        mut,
+        seeds = [b"referral_attribution", attribution.invitee.as_ref()],
+        bump = attribution.bump,
+        seeds::program = tokenomics_program.key()
+    )]
+    pub attribution: Account<'info, tokenomics_core::ReferralAttribution>,
+    /// CHECK: Tokenomics Core validates and initializes the idempotency PDA.
+    #[account(
+        mut,
+        seeds = [
+            b"referral_contribution",
+            attribution.key().as_ref(),
+            args.contribution_id.as_ref()
+        ],
+        bump,
+        seeds::program = tokenomics_program.key()
+    )]
+    pub contribution: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(turn_id: u64)]
+pub struct SettleReferralBonusTokenReward<'info> {
+    pub authority: Signer<'info>,
+    #[account(
+        seeds = [b"global_config"],
+        bump = global_config.bump,
+        has_one = authority @ IdealerError::Unauthorized
+    )]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    pub tokenomics_program: Program<'info, tokenomics_core::program::TokenomicsCore>,
+    #[account(
+        seeds = [b"token_config"],
+        bump = token_config.bump,
+        seeds::program = tokenomics_program.key(),
+        constraint = token_config.game_authority == global_config.key()
+            @ IdealerError::InvalidTokenomicsConfiguration
+    )]
+    pub token_config: Account<'info, tokenomics_core::TokenConfig>,
+    #[account(address = token_config.mint)]
+    pub mint: Account<'info, Mint>,
+    #[account(
+        mut,
+        seeds = [b"referral_attribution", attribution.invitee.as_ref()],
+        bump = attribution.bump,
+        seeds::program = tokenomics_program.key(),
+        constraint = attribution.qualifying_turn_id == turn_id
+            @ IdealerError::InvalidTokenomicsRewardFact
+    )]
+    pub attribution: Account<'info, tokenomics_core::ReferralAttribution>,
+    #[account(
+        mut,
+        seeds = [b"campaign", campaign.campaign_id.to_le_bytes().as_ref()],
+        bump = campaign.bump,
+        seeds::program = tokenomics_program.key()
+    )]
+    pub campaign: Account<'info, tokenomics_core::CampaignReserve>,
+    #[account(mut, address = campaign.vault)]
+    pub campaign_vault: Account<'info, TokenAccount>,
+    #[account(mut)]
+    pub inviter_token_account: Account<'info, TokenAccount>,
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
 pub struct ForceSkipLegacyActiveTurn<'info> {
     pub authority: Signer<'info>,
     #[account(
@@ -2977,6 +3651,8 @@ pub struct TurnState {
     pub end_timestamp: i64,
     pub status: TurnStatus,
     pub prize_pool_amount_lamports: u64,
+    pub treasury_fee_amount_lamports: u64,
+    pub treasury_fee_bridged: bool,
     pub turn_duration_seconds: u32,
     pub cycle_index: u8,
     pub draw_result: [u8; 6],
@@ -3361,6 +4037,13 @@ pub struct TurnClosed {
 }
 
 #[event]
+pub struct TurnTreasuryFeeBridged {
+    pub turn_id: u64,
+    pub epoch_id: u64,
+    pub amount_lamports: u64,
+}
+
+#[event]
 pub struct LegacyActiveTurnSkipped {
     pub turn_id: u64,
     pub legacy_data_len: u32,
@@ -3419,6 +4102,8 @@ pub enum IdealerError {
     InvalidTurnId,
     #[msg("The turn is not open.")]
     TurnNotOpen,
+    #[msg("The turn is not closed.")]
+    TurnNotClosed,
     #[msg("The turn has not ended.")]
     TurnNotEnded,
     #[msg("The action window is closed.")]
@@ -3535,6 +4220,16 @@ pub enum IdealerError {
     ClaimKindMismatch,
     #[msg("The vault has insufficient lamports above its rent-exempt minimum.")]
     InsufficientVaultBalance,
+    #[msg("The turn treasury fee was already bridged to Tokenomics Core.")]
+    TreasuryFeeAlreadyBridged,
+    #[msg("The Tokenomics Core configuration does not authorize this game.")]
+    InvalidTokenomicsConfiguration,
+    #[msg("The Tokenomics Core epoch does not accept this turn.")]
+    InvalidTokenomicsEpoch,
+    #[msg("The token reward account is not owned by the recorded beneficiary.")]
+    InvalidRewardBeneficiary,
+    #[msg("The supplied Tokenomics Core reward fact does not match the game state.")]
+    InvalidTokenomicsRewardFact,
     #[msg("Only the rule creator can remove this rule.")]
     RuleRemovalNotCreator,
 }

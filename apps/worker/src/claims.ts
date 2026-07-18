@@ -121,10 +121,13 @@ export async function createRecordClaimInstruction({
   };
 }
 
-/// Only claims the API marked `available` are recordable; `unavailable`
-/// (below-minimum) and already-terminal records are skipped.
+/// Only winner payouts remain SOL claims in the game program. Creator and voter
+/// rewards are settled as tokens through Tokenomics Core.
 export function selectRecordableClaims(records: readonly ClaimRecordLike[]) {
-  return records.filter((record) => record.status === "available");
+  return records.filter(
+    (record) =>
+      record.status === "available" && record.kind === "winner_payout",
+  );
 }
 
 /// The on-chain `Claim` PDA uses `init`, so re-posting the same tuple fails with

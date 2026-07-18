@@ -38,6 +38,89 @@ export interface RuleVotesApi {
   votes: RuleVoteApi[];
 }
 
+export interface TokenomicsPublicApi {
+  available: boolean;
+  projection: {
+    allocation: {
+      campaignReserveAtoms: string;
+      creatorTreasuryAtoms: string;
+      fixedSupplyAtoms: string;
+      freezeAuthorityRevoked: boolean;
+      mintAuthorityRevoked: boolean;
+    };
+    campaigns: Array<{
+      campaignId: string;
+      cumulativeDistributedAtoms: string;
+      originalAllocationAtoms: string;
+      remainingAtoms: string;
+      state: "draft" | "ended" | "exhausted" | "funded";
+      vault: string;
+    }>;
+    cluster: string;
+    currentEpoch: {
+      epochId: string;
+      grossDistributableLamports: string;
+      manifestHash: string | null;
+      merkleRoot: string | null;
+      remainingClaimLiabilityLamports: string;
+      rolloverOutLamports: string;
+      rootVersion: number;
+      status:
+        | "calculating"
+        | "challenged"
+        | "collecting"
+        | "expired_unresolved"
+        | "provisional"
+        | "rolled_over_no_weight"
+        | "sealed";
+      sumOfMerkleClaimsLamports: string;
+      totalWeight: string;
+      verificationWindowEndsAt: string | null;
+    } | null;
+    indexedAt: string;
+    indexedFinalizedSlot: string;
+    lockConcentrationBps: number;
+    lockedSupplyAtoms: string;
+    mint: string;
+    programId: string;
+    uniqueLockers: number;
+    vaults: {
+      correctionReserve: string;
+      correctionReserveLamports: string;
+      distribution: string;
+      distributionAvailableLamports: string;
+      initialCampaign: string;
+      treasuryLockEscrow: string;
+      treasuryReserve: string;
+      treasurySol: string;
+      treasurySolLamports: string;
+    };
+  } | null;
+  reason: "not_indexed" | null;
+}
+
+export interface TokenomicsWalletApi {
+  claimableLamports: string;
+  claimedLamports: string;
+  claimRecords: Array<{
+    amountLamports: string;
+    beneficiary: string;
+    epochId: string;
+    epochKind: "correction" | "standard";
+    position: string;
+    proof: string[];
+    rootVersion: number;
+    signature: string;
+    status: "claimable" | "claimed";
+  }>;
+  currentEpochWeight: string;
+  lockedAtoms: string;
+  promotionalRewardAtoms: string;
+  unlockedAtoms: string;
+  unlockedTokenAccount: string;
+  wallet: string;
+}
+
 export interface EliminationFinalistApi {
   approvalVotes: number;
   eliminated: boolean;

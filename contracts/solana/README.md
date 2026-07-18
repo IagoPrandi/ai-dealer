@@ -1,6 +1,48 @@
 # Solana Programs
 
-This Anchor workspace contains the Idealer core devnet program introduced in M2.2 and extended with the verifiable draw flow in M3.1.
+This Anchor workspace contains the updateable Idealer game program and the
+separate Tokenomics Core program specified by `PRD-TOKENOMICS-v2.8.md`.
+
+## Tokenomics Core
+
+`programs/tokenomics_core` is a separate custody boundary with compile-time
+placeholder program ID `CWA3N4ew4guFuY3P4jJTyt5HgidCRW6c7mGAL5pUSmb6`.
+No matching keypair is stored in the repository. Replace it with the public
+address of an externally managed deployment key before devnet or mainnet. It
+implements:
+
+- one-transaction 1B-token genesis allocation, classic SPL mint/freeze
+  authority revocation, a 200M campaign vault, and immediate locking of the
+  800M Creator Treasury Reserve;
+- ordinary and treasury lock positions with confirmed-time event checkpoints,
+  top-ups, and immediate canonical-destination unlocks;
+- seven-turn distribution epochs, exact liabilities/dust/zero-weight rollover,
+  optimistic roots, bonded challenges, replacement versions, permissionless
+  sealing, perpetual fixed-destination Merkle claims, and positive correction
+  epochs funded only by the correction reserve;
+- deterministic campaign action, active-rule, voter-remainder, and referral
+  reward arithmetic with exact terminal partial settlement;
+- isolated future campaign vaults whose economic configuration freezes at
+  funding;
+- seven-day on-chain treasury operations, bounded spending limits, a
+  guardian-only pause, and multisig plus 24-hour-notice unpause.
+
+`tools/tokenomics-calculator` is the independent Rust epoch calculator.
+`packages/tokenomics` is the TypeScript implementation. Production root
+publication must stop unless both outputs agree exactly. The shared vector is
+`test-vectors/tokenomics-epoch-basic.json`.
+
+The program remains upgradeable only for local development, audit, and devnet
+rehearsal. Its upgrade authority must be revoked before any real-value mainnet
+lock, fee deposit, campaign reward, or treasury funding.
+
+The updateable Idealer game program is configured as the Core's
+`game_authority` through its `global_config` PDA. It tracks each turn's exact
+treasury share and can bridge a closed turn once into a collecting epoch. Its
+CPI entry points bind proposal/supporter recipients to immutable game records,
+bind active-rule settlement to the elected rule and fulfilled draw, require a
+first-guess `GameToken` for referral qualification, and use idempotent
+contribution PDAs for the first-round referral bonus.
 
 ## Implemented Core
 
@@ -22,7 +64,7 @@ auditor can reproduce them.
 
 ### SBF build, SBF tests, and devnet deploy
 
-`scripts/sbf.sh` runs inside the pinned toolchain container (Agave + `cargo-build-sbf`) with the workspace, the `idealer-solana-home` volume (toolchain + deploy keypairs), the cargo registry cache, and `idealer-sbf-target` as `CARGO_TARGET_DIR`:
+`scripts/sbf.sh` runs inside the pinned Rust container with Agave + `cargo-build-sbf` persisted in `idealer-solana-home`, the workspace, cargo registry cache, and `idealer-sbf-target` as `CARGO_TARGET_DIR`. Every invocation logs the active Agave/SBF versions. Tokenomics Core and Idealer are built as isolated deployables so Idealer's `tokenomics-core/cpi` dependency cannot disable the Tokenomics Core entrypoint through Cargo feature unification:
 
 ```bash
 # from the repo root (PowerShell avoids MSYS path mangling)
@@ -54,13 +96,18 @@ pnpm --filter @idealer/solana-programs lint
 pnpm --filter @idealer/solana-programs test
 ```
 
-The complete instruction suite requires an authorized SBF build environment. Build the SBF artifact into a temporary directory, remove any automatically generated deploy keypair immediately, then run:
+The complete instruction suite requires Docker and the SBF toolchain. The helper builds an isolated `sb-devnet` artifact under `/sbf-target/test-deploy`, leaving the production-feature deploy artifact untouched, and then runs the ignored tests serially:
 
 ```bash
-SBF_OUT_DIR=/absolute/path/to/temporary/deploy pnpm --filter @idealer/solana-programs test:sbf
+docker run --rm -e CARGO_TARGET_DIR=/sbf-target \
+  -v idealer-cargo-registry:/usr/local/cargo/registry \
+  -v idealer-sbf-target:/sbf-target \
+  -v idealer-solana-home:/root \
+  -v "<repo>:/workspace" -w /workspace/contracts/solana \
+  rust:1.91-bookworm bash /workspace/contracts/solana/scripts/sbf.sh test-sbf
 ```
 
-The SBF suite executes initialization, turn opening, guess/Game Token creation, rule proposal, sequenced vote idempotency, invalid-input rejection, and turn closing.
+The SBF suite executes 8 Idealer scenarios covering initialization, turn opening, guess/Game Token creation, rule proposal, sequenced vote idempotency, VRF request/settlement, invalid-input rejection, turn closing, winner claims, and rejection of legacy creator/voter SOL claims. It also executes 2 Tokenomics Core scenarios covering one-time fixed-supply genesis and authority revocation, pause-safe canonical treasury unlock, epoch review and sealing, fixed-destination treasury claims, replay rejection, exact liability/dust accounting, and correction-epoch binding to an original sealed epoch. The build helper treats any compiler `Error:` diagnostic as fatal even if `cargo-build-sbf` exits successfully and removes disposable keypair files that `cargo-build-sbf` may generate beside the artifacts.
 
 ## Devnet Deployment Gate
 
