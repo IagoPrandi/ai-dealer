@@ -135,10 +135,12 @@ is the escrow authority. No account may be owned directly by an individual
 wallet, application server, or programme upgrade authority. Custody evolves
 through the following confirmed stages.
 
-#### 3.3.1 Initial custody: founder-controlled `2-of-3`
+#### 3.3.1 Devnet rehearsal custody: founder-controlled `2-of-3`
 
-At genesis and during the initial operating stage, the treasury uses a
-`2-of-3` multisig:
+During the devnet rehearsal, the treasury uses a founder-controlled `2-of-3`
+multisig. These addresses and the resulting Squads accounts are **devnet-only**.
+They must not be reused, copied, or inferred as the mainnet custody set. Mainnet
+members require a separate custody approval before genesis:
 
 - all three signer wallets are initially owned and controlled by the founder;
 - each signer uses a different device or hardware wallet;
@@ -154,14 +156,43 @@ governance. The founder controls enough keys to meet the threshold and therefore
 retains unilateral economic control. Public disclosures must describe it that
 way.
 
-The owner supplied these initial member public addresses. They are members, not
-the future multisig-vault address and not private keys:
+The owner supplied these devnet-only member public addresses. They are members,
+not a multisig or vault PDA and not private keys:
 
 | Member | Public address | Device, backup, and recovery record |
 | --- | --- | --- |
-| A | `EHHVmFK3FM9qb2eyc8wnEwpHtVH3yW1FGZzrEGn4iSea` | Pending owner record. |
-| B | `EAoZrh8TtZCYtUdKpkuMaNSrConsQoUQvzjZ7cuQGqdW` | Pending owner record. |
-| C | `7E3DMct5umGMA4mSeAr1UcJUFSd5kd444rK39G8GTC9p` | Pending owner record. |
+| A | `EHHVmFK3FM9qb2eyc8wnEwpHtVH3yW1FGZzrEGn4iSea` | Devnet only; operated through Phantom; pending device/recovery record. |
+| B | `EAoZrh8TtZCYtUdKpkuMaNSrConsQoUQvzjZ7cuQGqdW` | Devnet only; pending device/recovery record. |
+| C | `7E3DMct5umGMA4mSeAr1UcJUFSd5kd444rK39G8GTC9p` | Devnet only; pending device/recovery record. |
+
+Phantom is the approved wallet application for member A during this devnet
+ceremony. This identifies the transaction-signing client only; it does not
+complete the required device, seed-backup, or recovery record and does not
+authorize Phantom or any application server to access the private key.
+
+The selected devnet provider is **Squads Protocol v4**, program
+`SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf`. The multisig must be created
+with all three members holding initiate, vote, and execute permissions,
+threshold `2`, `time_lock = 0`, no unilateral configuration authority, and no
+spending limit at creation. The multisig account is a Squads-owned PDA. Vault
+index `0` is derived from that multisig account and is the PDA that executes
+approved Tokenomics Core governance instructions. Neither PDA is known before
+the creation transaction is finalized. The previously supplied
+`iV6DGgtL79buLCvhUEFYiTyAaE4teT6utweVTaqoXFa` value is explicitly rejected and
+must not be used as either address.
+
+The web application exposes a devnet-only creation ceremony at
+`/dev/tokenomics/multisig`. It accepts only Phantom connected to member A,
+checks the RPC genesis hash against Solana devnet, generates the required
+one-time Squads create signer only in browser memory, derives multisig and vault
+index `0`, and displays the exact provider treasury, creation fee, estimated
+rent, fee payer, members, permissions, threshold, and time lock before enabling
+the signing action. After Phantom signs, the application verifies signatures
+while simulating the exact signed bytes; it broadcasts only after a successful
+simulation, waits for finalization, then reads the multisig back and rejects any
+owner, member, permission, threshold, time-lock, config-authority, or
+rent-collector mismatch. Preparing or opening the page cannot submit a
+transaction.
 
 #### 3.3.2 Planned transition to `3-of-5`
 
@@ -1411,7 +1442,7 @@ user confirmation.
 | Creator Treasury Reserve | The full 800M is eligible to lock and claim treasury fees under the same formula as every holder; its fee share finances operations. |
 | Treasury vault and escrow | Unlocked treasury tokens are held in the TreasuryPolicyExecutor-controlled Creator Treasury Reserve Vault governed by the multisig. Locked treasury tokens are held in the programme-PDA-controlled Treasury Lock Escrow. The multisig is the beneficial owner and sole unlock authority, and every unlock returns only to the canonical reserve vault. |
 | Treasury operating cash flow | SOL claimed by the locked 800M reserve settles immediately from the distribution vault to the fixed Treasury SOL Vault without multisig approval. A later discretionary transfer from the Treasury SOL Vault to an Operating Wallet, remuneration wallet, vendor, or other external destination requires the active multisig threshold and is immediately executable after approval. |
-| Initial treasury custody | The Creator Treasury Reserve starts under a founder-controlled `2-of-3` multisig: `EHHVmFK3FM9qb2eyc8wnEwpHtVH3yW1FGZzrEGn4iSea`, `EAoZrh8TtZCYtUdKpkuMaNSrConsQoUQvzjZ7cuQGqdW`, and `7E3DMct5umGMA4mSeAr1UcJUFSd5kd444rK39G8GTC9p`. Device, seed, and backup records remain required. |
+| Devnet treasury custody | The devnet rehearsal uses Squads Protocol v4 program `SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf` with founder-controlled `2-of-3` members `EHHVmFK3FM9qb2eyc8wnEwpHtVH3yW1FGZzrEGn4iSea`, `EAoZrh8TtZCYtUdKpkuMaNSrConsQoUQvzjZ7cuQGqdW`, and `7E3DMct5umGMA4mSeAr1UcJUFSd5kd444rK39G8GTC9p`. Phantom is the approved devnet signing application for member A. These addresses are devnet-only. The multisig and vault PDAs remain pending creation; mainnet members require a separate decision. |
 | Planned multisig expansion | Two new members may later be added to the same multisig and the threshold changed to `3-of-5` after both new wallets are tested. If the founder retains the original three keys, the founder still retains unilateral threshold control; this must be publicly disclosed. |
 | Treasury execution | The execution delay is zero seconds. Discretionary outbound use of assets held in treasury-controlled vaults and critical authority, member, threshold, destination, or spending-policy changes still require the active `2-of-3` multisig and the on-chain executor without a direct-transfer bypass. Fee-pool claims, ordinary-holder claims, treasury-position claims to the fixed Treasury SOL Vault, and canonical lock/unlock movements remain immediate. |
 | Claim destinations | Every sealed claim pays only the beneficiary encoded in its Merkle leaf. Ordinary holder claims pay the holder beneficiary; only the 800M treasury-position claim pays the fixed Treasury SOL Vault. Claims may be initiated permissionlessly but cannot redirect funds or unlock tokens. |
