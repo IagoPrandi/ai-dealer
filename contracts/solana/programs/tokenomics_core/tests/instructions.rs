@@ -179,7 +179,7 @@ async fn initialize_genesis(
                     game_authority: authority,
                     epoch_root_publisher: authority,
                     network: "devnet".to_owned(),
-                    metadata_uri: "https://example.com/jdr-devnet.json".to_owned(),
+                    metadata_uri: String::new(),
                     initial_campaign_config_hash: [1; 32],
                     initial_unused_balance_policy_hash: [2; 32],
                 },
@@ -208,7 +208,7 @@ async fn genesis_revokes_authorities_and_pause_keeps_treasury_unlock_open() {
     let config: TokenConfig = read_anchor_account(&mut context, fixture.token_config).await;
     assert_eq!(config.metadata, fixture.metadata);
     assert_eq!(config.metadata_update_authority, authority);
-    assert_eq!(config.metadata_uri, "https://example.com/jdr-devnet.json");
+    assert!(config.metadata_uri.is_empty());
     assert!(config.metadata_mutable);
 
     let campaign_vault = read_token_account(&mut context, fixture.campaign_vault).await;
@@ -547,7 +547,27 @@ async fn epoch_seals_and_treasury_claim_pays_only_the_fixed_vault_once() {
     process(&mut context, claim_instruction.clone(), &[])
         .await
         .unwrap();
-    assert!(process(&mut context, claim_instruction, &[]).await.is_err());
+    // Use a distinct permissionless caller for the replay. Reusing the exact
+    // payer, message, and ProgramTest blockhash would recreate the same
+    // transaction signature, which BanksClient treats as an already-processed
+    // transaction instead of executing the claim instruction again.
+    let replay_caller = Keypair::new();
+    process(
+        &mut context,
+        solana_system_interface::instruction::transfer(
+            &authority,
+            &replay_caller.pubkey(),
+            1_000_000,
+        ),
+        &[],
+    )
+    .await
+    .unwrap();
+    let mut replay_instruction = claim_instruction;
+    replay_instruction.accounts[0].pubkey = replay_caller.pubkey();
+    assert!(process(&mut context, replay_instruction, &[&replay_caller])
+        .await
+        .is_err());
 
     let epoch: DistributionEpoch = read_anchor_account(&mut context, epoch_address).await;
     let config: TokenConfig = read_anchor_account(&mut context, fixture.token_config).await;

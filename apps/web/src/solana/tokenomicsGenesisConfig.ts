@@ -80,6 +80,42 @@ export interface TokenomicsGenesisSnapshot {
   treasuryPositionUnlockAuthority: string;
 }
 
+export function validateTokenomicsMetadataUri({
+  metadataUri,
+  network,
+  programId,
+}: {
+  metadataUri: string;
+  network: string;
+  programId: string;
+}): string[] {
+  const errors: string[] = [];
+  const devnetEmptyUriAllowed =
+    network === "devnet" && programId === TOKENOMICS_DEVNET_PROGRAM_ID;
+
+  if (!metadataUri) {
+    if (!devnetEmptyUriAllowed) {
+      errors.push(
+        "A durable HTTPS JDR metadata URI is required before any mainnet build or genesis.",
+      );
+    }
+    return errors;
+  }
+
+  try {
+    const uri = new URL(metadataUri);
+    if (uri.protocol !== "https:") {
+      errors.push("The JDR metadata URI must use HTTPS.");
+    }
+  } catch {
+    errors.push("The JDR metadata URI is invalid.");
+  }
+  if (new TextEncoder().encode(metadataUri).length > 200) {
+    errors.push("The JDR metadata URI exceeds the 200-byte on-chain limit.");
+  }
+  return errors;
+}
+
 export function validateTokenomicsGenesisConfig(): string[] {
   const errors: string[] = [];
   const config = TOKENOMICS_GENESIS_CONFIG;
@@ -96,21 +132,13 @@ export function validateTokenomicsGenesisConfig(): string[] {
       "The configured Tokenomics Core program ID does not match the approved devnet identity.",
     );
   }
-  if (!config.metadataUri) {
-    errors.push("The approved JDR metadata URI is not configured.");
-  } else {
-    try {
-      const uri = new URL(config.metadataUri);
-      if (uri.protocol !== "https:") {
-        errors.push("The JDR metadata URI must use HTTPS.");
-      }
-    } catch {
-      errors.push("The JDR metadata URI is invalid.");
-    }
-    if (new TextEncoder().encode(config.metadataUri).length > 200) {
-      errors.push("The JDR metadata URI exceeds the 200-byte on-chain limit.");
-    }
-  }
+  errors.push(
+    ...validateTokenomicsMetadataUri({
+      metadataUri: config.metadataUri,
+      network: config.network,
+      programId: config.programId,
+    }),
+  );
   if (config.name !== "JUSDEALER" || config.symbol !== "JDR") {
     errors.push("The configured token identity does not match JUSDEALER/JDR.");
   }

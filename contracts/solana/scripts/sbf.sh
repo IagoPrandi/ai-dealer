@@ -74,6 +74,11 @@ cmd_build() {
   ensure_toolchain
   cd /workspace/contracts/solana
   local idealer_feature_args=()
+  local tokenomics_feature_args=()
+  if [ -n "${TOKENOMICS_SBF_FEATURES:-}" ]; then
+    echo "[build] tokenomics-core features: ${TOKENOMICS_SBF_FEATURES}"
+    tokenomics_feature_args=(--features "${TOKENOMICS_SBF_FEATURES}")
+  fi
   if [ -n "${SBF_FEATURES:-}" ]; then
     # Optional cargo features (e.g. SBF_FEATURES=devnet-test). Defaults to none
     # so production builds never include test-only instructions.
@@ -90,7 +95,8 @@ cmd_build() {
   # silently produces a tokenomics artifact with no entrypoint.
   cargo-build-sbf \
     --manifest-path programs/tokenomics_core/Cargo.toml \
-    --sbf-out-dir "${SBF_OUT_DIR}" 2>&1 \
+    --sbf-out-dir "${SBF_OUT_DIR}" \
+    "${tokenomics_feature_args[@]}" 2>&1 \
     | tee "${build_log}"
   build_status="${PIPESTATUS[0]}"
   set -e
@@ -132,8 +138,12 @@ cmd_test_sbf() {
   ensure_toolchain
   local test_out_dir="${SBF_TEST_OUT_DIR:-/sbf-target/test-deploy}"
   local test_features="${SBF_TEST_FEATURES:-sb-devnet}"
+  local tokenomics_test_features="${TOKENOMICS_SBF_TEST_FEATURES:-devnet-empty-metadata-uri}"
   echo "[test:sbf] building an isolated Switchboard-devnet SBF artifact..."
-  SBF_OUT_DIR="${test_out_dir}" SBF_FEATURES="${test_features}" cmd_build
+  SBF_OUT_DIR="${test_out_dir}" \
+    SBF_FEATURES="${test_features}" \
+    TOKENOMICS_SBF_FEATURES="${tokenomics_test_features}" \
+    cmd_build
   cd /workspace/contracts/solana
   echo "[test:sbf] running ignored instruction suite against the SBF build..."
   # These stateful integration suites must run serially. `--test-threads=1`

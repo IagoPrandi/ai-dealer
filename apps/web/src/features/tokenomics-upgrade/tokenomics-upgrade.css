@@ -1,0 +1,29 @@
+.tu-details dd {
+  overflow-wrap: anywhere;
+}
+
+.tu-hash {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 1.25rem;
+}
+
+.tu-hash span {
+  color: var(--tm-muted);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tu-hash code {
+  background: rgb(3 8 13 / 58%);
+  border: 1px solid rgb(122 255 160 / 18%);
+  border-radius: 0.75rem;
+  color: var(--tm-accent);
+  display: block;
+  font-size: 0.78rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  padding: 0.85rem;
+}

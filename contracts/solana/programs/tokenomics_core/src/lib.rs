@@ -28,6 +28,19 @@ const MAX_REASON_URI_BYTES: usize = 200;
 const MAX_METADATA_URI_BYTES: usize = 200;
 const TOKEN_NAME: &str = "JUSDEALER";
 const TOKEN_SYMBOL: &str = "JDR";
+const DEVNET_TOKENOMICS_PROGRAM_ID: Pubkey =
+    pubkey!("BRK6G8Sep66LFREp2nGMLiganfw2nbWe1f8zeAdoP1Fm");
+
+fn metadata_uri_is_valid(metadata_uri: &str, program_id: &Pubkey) -> bool {
+    if metadata_uri.len() > MAX_METADATA_URI_BYTES {
+        return false;
+    }
+    if metadata_uri.is_empty() {
+        return cfg!(feature = "devnet-empty-metadata-uri")
+            && program_id == &DEVNET_TOKENOMICS_PROGRAM_ID;
+    }
+    metadata_uri.starts_with("https://")
+}
 
 #[program]
 pub mod tokenomics_core {
@@ -49,7 +62,7 @@ pub mod tokenomics_core {
             TokenomicsError::InvalidNetwork
         );
         require!(
-            !args.metadata_uri.is_empty() && args.metadata_uri.len() <= MAX_METADATA_URI_BYTES,
+            metadata_uri_is_valid(&args.metadata_uri, &crate::ID),
             TokenomicsError::InvalidMetadata
         );
 
@@ -3809,4 +3822,50 @@ pub enum TokenomicsError {
     SpendingLimitExceeded,
     #[msg("The public incident record hash is invalid.")]
     InvalidIncidentRecord,
+}
+
+#[cfg(test)]
+mod metadata_uri_policy_tests {
+    use super::*;
+
+    #[test]
+    fn https_metadata_is_valid_and_non_https_metadata_is_rejected() {
+        assert!(metadata_uri_is_valid(
+            "https://metadata.example/jdr.json",
+            &DEVNET_TOKENOMICS_PROGRAM_ID
+        ));
+        assert!(!metadata_uri_is_valid(
+            "http://metadata.example/jdr.json",
+            &DEVNET_TOKENOMICS_PROGRAM_ID
+        ));
+        assert!(!metadata_uri_is_valid(
+            "ipfs://jdr",
+            &DEVNET_TOKENOMICS_PROGRAM_ID
+        ));
+    }
+
+    #[test]
+    fn empty_metadata_never_crosses_the_devnet_program_identity_boundary() {
+        let separate_mainnet_identity = Pubkey::new_from_array([7; 32]);
+        assert_ne!(separate_mainnet_identity, DEVNET_TOKENOMICS_PROGRAM_ID);
+        assert!(!metadata_uri_is_valid("", &separate_mainnet_identity));
+    }
+
+    #[test]
+    fn empty_metadata_follows_the_explicit_devnet_build_feature() {
+        assert_eq!(
+            metadata_uri_is_valid("", &DEVNET_TOKENOMICS_PROGRAM_ID),
+            cfg!(feature = "devnet-empty-metadata-uri")
+        );
+    }
+
+    #[test]
+    fn oversized_metadata_is_rejected_in_every_build() {
+        let oversized = format!("https://example.com/{}", "a".repeat(MAX_METADATA_URI_BYTES));
+        assert!(oversized.len() > MAX_METADATA_URI_BYTES);
+        assert!(!metadata_uri_is_valid(
+            &oversized,
+            &DEVNET_TOKENOMICS_PROGRAM_ID
+        ));
+    }
 }

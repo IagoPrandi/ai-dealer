@@ -9,7 +9,17 @@ separate Tokenomics Core program specified by `PRD-TOKENOMICS-v2.8.md`.
 managed devnet program identity is
 `BRK6G8Sep66LFREp2nGMLiganfw2nbWe1f8zeAdoP1Fm`; the keypair is stored only in
 the external `idealer-solana-home` volume and is never committed. This address
-is devnet-only and does not select a mainnet program identity. The
+is devnet-only and does not select a mainnet program identity. The programme
+was deployed at finalized devnet slot `477455064` by transaction
+`2CFWENLszmB7YJH8D6q2BjGeUEPL5o7XuM2dkEbg2SQmeD2EHFtfWs8BsUytqykrTAr27iyhMHXgJYtKVPF6kT5k`.
+The downloaded on-chain bytes match the reviewed deployment artifact at
+SHA-256 `b1cfc5f0a1bd69d28eb191e24bf2f0f3c24811d5f29b7f2e175bddd80bb0cc8c`.
+Finalized devnet transaction
+`5h3eiWKtkuNWxXQXQE1z4FsMeVwVvQfHdTwo3hFsrmQtgKWo9jTRhSPrZmcTqBjqPk35MqyB5LgC373Ya221DSKh`
+transferred its upgrade authority from the initial deployer to Squads vault
+`0`, `DB5nz633YioWzEUnLb97ypUra5RUE11SJDFW9ar23KTp`, at slot `477456584`.
+Future upgrades therefore require the configured Squads `2-of-3` execution
+path. Genesis remains disabled until all other preflight gates pass. The
 initialization CPI creates canonical Metaplex metadata for `JUSDEALER` (`JDR`)
 before mint/freeze authority revocation and binds metadata updates to the same
 governance account as Tokenomics Core. It
@@ -89,6 +99,25 @@ Keypair contents are never printed or committed. Set
 Core. The helper fails unless that keypair public address matches the source
 `declare_id!`.
 
+The owner-approved devnet rehearsal creates canonical on-chain Metaplex
+metadata with `JUSDEALER`, `JDR`, and an intentionally empty off-chain URI.
+Build that upgrade artifact in an isolated output directory with both the
+explicit devnet feature and the approved devnet programme identity:
+
+```bash
+SBF_OUT_DIR=/sbf-target/devnet-tokenomics-upgrade \
+TOKENOMICS_SBF_FEATURES=devnet-empty-metadata-uri \
+bash scripts/sbf.sh build
+```
+
+The feature alone is insufficient: Tokenomics Core also compares its compiled
+programme identity with `BRK6G8Sep66LFREp2nGMLiganfw2nbWe1f8zeAdoP1Fm`.
+Builds without the feature, or builds using a separate mainnet identity, reject
+an empty URI. Before mainnet, publish and review durable HTTPS JSON metadata,
+select the separate mainnet metadata governance/mutability policy, build
+without `devnet-empty-metadata-uri`, and verify that an empty or non-HTTPS URI
+fails before any genesis transaction is proposed.
+
 After a verified Devnet Tokenomics Core deployment, transfer its upgrade
 authority to the finalized Devnet Squads vault before genesis:
 
@@ -101,8 +130,10 @@ bash scripts/sbf.sh set-upgrade-authority
 This command is a network write and must be run only after explicit transaction
 review and approval. The genesis page at `/dev/tokenomics/genesis` remains
 disabled until the program is executable, its upgrade authority is that vault,
-the Idealer `GlobalConfig` PDA exists, all genesis PDAs are unused, and an
-approved HTTPS metadata URI is configured.
+the Idealer `GlobalConfig` PDA exists, all genesis PDAs are unused, and the
+metadata input matches the devnet-only policy. An empty devnet URI is not
+permission to omit the canonical Metadata account and does not satisfy the
+future mainnet metadata gate.
 
 ## Local Validation
 
@@ -122,7 +153,7 @@ pnpm --filter @idealer/solana-programs lint
 pnpm --filter @idealer/solana-programs test
 ```
 
-The complete instruction suite requires Docker and the SBF toolchain. The helper builds an isolated `sb-devnet` artifact under `/sbf-target/test-deploy`, leaving the production-feature deploy artifact untouched, and then runs the ignored tests serially:
+The complete instruction suite requires Docker and the SBF toolchain. The helper builds isolated `sb-devnet` Idealer and `devnet-empty-metadata-uri` Tokenomics Core artifacts under `/sbf-target/test-deploy`, leaving the production-feature deploy artifact untouched, and then runs the ignored tests serially:
 
 ```bash
 docker run --rm -e CARGO_TARGET_DIR=/sbf-target \

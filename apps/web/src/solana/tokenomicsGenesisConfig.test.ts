@@ -3,9 +3,70 @@ import test from "node:test";
 
 import {
   CLASSIC_SPL_TOKEN_PROGRAM_ID,
+  TOKENOMICS_DEVNET_PROGRAM_ID,
   TOKENOMICS_GENESIS_CONFIG,
+  validateTokenomicsMetadataUri,
   validateTokenomicsGenesisSnapshot,
 } from "./tokenomicsGenesisConfig";
+
+test("the pinned devnet genesis accepts an empty off-chain metadata URI", () => {
+  assert.deepEqual(
+    validateTokenomicsMetadataUri({
+      metadataUri: "",
+      network: "devnet",
+      programId: TOKENOMICS_DEVNET_PROGRAM_ID,
+    }),
+    [],
+  );
+});
+
+test("empty metadata remains blocked outside the exact devnet identity", () => {
+  const expected =
+    "A durable HTTPS JDR metadata URI is required before any mainnet build or genesis.";
+  assert.deepEqual(
+    validateTokenomicsMetadataUri({
+      metadataUri: "",
+      network: "mainnet-beta",
+      programId: "MainnetTokenomics111111111111111111111111111",
+    }),
+    [expected],
+  );
+  assert.deepEqual(
+    validateTokenomicsMetadataUri({
+      metadataUri: "",
+      network: "devnet",
+      programId: "WrongDevnetTokenomics111111111111111111111111",
+    }),
+    [expected],
+  );
+});
+
+test("published metadata must be valid HTTPS and fit on-chain", () => {
+  assert.deepEqual(
+    validateTokenomicsMetadataUri({
+      metadataUri: "https://metadata.example/jdr.json",
+      network: "mainnet-beta",
+      programId: "MainnetTokenomics111111111111111111111111111",
+    }),
+    [],
+  );
+  assert.deepEqual(
+    validateTokenomicsMetadataUri({
+      metadataUri: "http://metadata.example/jdr.json",
+      network: "devnet",
+      programId: TOKENOMICS_DEVNET_PROGRAM_ID,
+    }),
+    ["The JDR metadata URI must use HTTPS."],
+  );
+  assert.deepEqual(
+    validateTokenomicsMetadataUri({
+      metadataUri: `https://metadata.example/${"a".repeat(201)}`,
+      network: "mainnet-beta",
+      programId: "MainnetTokenomics111111111111111111111111111",
+    }),
+    ["The JDR metadata URI exceeds the 200-byte on-chain limit."],
+  );
+});
 
 test("the fixed JDR allocation is exactly 1B tokens with nine decimals", () => {
   assert.equal(

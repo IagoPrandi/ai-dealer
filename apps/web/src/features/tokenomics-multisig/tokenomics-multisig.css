@@ -38,6 +38,7 @@
   position: relative;
   display: grid;
   gap: 18px;
+  min-width: 0;
   width: min(100%, 880px);
   margin: 0 auto;
 }
@@ -45,6 +46,7 @@
 .tm-hero {
   display: grid;
   gap: 16px;
+  min-width: 0;
   padding: 12px 2px 22px;
 }
 
@@ -120,6 +122,7 @@
 }
 
 .tm-card {
+  min-width: 0;
   padding: clamp(20px, 4vw, 30px);
   border: 1px solid rgb(255 255 255 / 8%);
   border-radius: 22px;
@@ -133,6 +136,11 @@
   gap: 16px;
   align-items: flex-start;
   justify-content: space-between;
+}
+
+.tm-section-heading > *,
+.tm-wallet-row > * {
+  min-width: 0;
 }
 
 .tm-section-heading h2,
@@ -231,12 +239,14 @@
 }
 
 .tm-facts span {
+  max-width: 100%;
   padding: 6px 10px;
   border-radius: 999px;
   background: rgb(255 255 255 / 5%);
   color: #a39cb6;
   font-size: 11px;
   font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .tm-muted {
@@ -426,6 +436,10 @@
 
   .tm-hero {
     padding-top: 58px;
+  }
+
+  .tm-section-heading {
+    flex-wrap: wrap;
   }
 
   .tm-network {

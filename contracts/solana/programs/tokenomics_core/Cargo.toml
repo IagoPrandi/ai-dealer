@@ -13,6 +13,11 @@ default = []
 cpi = ["no-entrypoint"]
 custom-heap = []
 custom-panic = []
+# DEVNET ONLY: permits the canonical Metaplex Metadata account to use an empty
+# URI while the off-chain JDR metadata remains unpublished. The program also
+# binds this exception to the approved devnet program id, so a separate mainnet
+# identity continues to require a non-empty HTTPS URI.
+devnet-empty-metadata-uri = []
 idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 no-entrypoint = []
 no-idl = []

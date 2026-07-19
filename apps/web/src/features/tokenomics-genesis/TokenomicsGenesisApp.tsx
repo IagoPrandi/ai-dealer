@@ -131,13 +131,17 @@ function GenesisReview({ summary }: { summary: TokenomicsGenesisSummary }) {
 
       <div className="tg-uri">
         <span>Immutable transaction input · metadata URI</span>
-        <code>{summary.metadataUri}</code>
+        <code>
+          {summary.metadataUri ||
+            "Empty · devnet-only; mainnet HTTPS URL pending"}
+        </code>
       </div>
       <p className="tm-note">
         The one-time mint signer exists only in this browser tab. The
         transaction creates Metaplex metadata, mints the complete supply,
         allocates 200M/800M, locks the 800M reserve, and revokes mint and freeze
-        authority atomically.
+        authority atomically. An empty URI omits only off-chain metadata on
+        devnet; a durable HTTPS URI remains mandatory before mainnet.
       </p>
     </section>
   );
@@ -246,6 +250,8 @@ export function TokenomicsGenesisApp() {
             One reviewed transaction creates the classic SPL mint and metadata,
             issues exactly one billion JDR, funds the campaign reserve, locks
             the creator reserve, and permanently closes future minting.
+            Off-chain metadata may remain empty only for this pinned devnet
+            rehearsal; mainnet metadata is still pending.
           </p>
         </header>
 
@@ -299,6 +305,11 @@ export function TokenomicsGenesisApp() {
             <li className="tg-check-ok">
               Tokenomics Core identity {TOKENOMICS_GENESIS_CONFIG.programId} is
               fixed for devnet.
+            </li>
+            <li className="tg-check-pending">
+              The devnet Metadata account may use an empty URI. A durable HTTPS
+              URI, content review, and separate metadata-governance decision
+              remain mandatory before mainnet.
             </li>
             {configErrors.map((configError) => (
               <li className="tg-check-blocked" key={configError}>
@@ -430,9 +441,13 @@ export function TokenomicsGenesisApp() {
               />
               <span>
                 I reviewed Devnet, wallet A, program and upgrade authority,
-                metadata URI, one-billion fixed supply, 200M/800M allocation,
-                800M lock, Squads governance, costs, and irreversible
-                mint/freeze authority revocation.
+                {TOKENOMICS_GENESIS_CONFIG.metadataUri
+                  ? " metadata URI,"
+                  : " the devnet-only empty metadata URI,"}{" "}
+                one-billion fixed supply, 200M/800M allocation, 800M lock,
+                Squads governance, costs, and irreversible mint/freeze authority
+                revocation. I understand mainnet remains blocked on durable
+                HTTPS metadata.
               </span>
             </label>
             <button

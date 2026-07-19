@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("JDR genesis route exposes the fixed allocation and fails closed", async ({
+test("JDR genesis route exposes the devnet-only empty metadata policy", async ({
   page,
 }) => {
   const errors: string[] = [];
@@ -29,7 +29,9 @@ test("JDR genesis route exposes the fixed allocation and fails closed", async ({
     ),
   ).toBeVisible();
   await expect(
-    page.getByText("The approved JDR metadata URI is not configured."),
+    page.getByText(
+      "The devnet Metadata account may use an empty URI. A durable HTTPS URI, content review, and separate metadata-governance decision remain mandatory before mainnet.",
+    ),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Prepare JDR genesis" }),
@@ -45,6 +47,21 @@ test("JDR genesis route has no horizontal overflow at 320px", async ({
   const dimensions = await page.evaluate(() => ({
     clientWidth: document.documentElement.clientWidth,
     scrollWidth: document.documentElement.scrollWidth,
+    shellClientWidth:
+      document.querySelector<HTMLElement>(".tm-shell")?.clientWidth ?? 0,
+    shellScrollWidth:
+      document.querySelector<HTMLElement>(".tm-shell")?.scrollWidth ?? 0,
+    widestRightEdge: Math.max(
+      ...Array.from(
+        document.querySelectorAll<HTMLElement>(".tm-hero, .tm-card"),
+      ).map((element) => element.getBoundingClientRect().right),
+    ),
   }));
   expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
+  expect(dimensions.shellScrollWidth).toBeLessThanOrEqual(
+    dimensions.shellClientWidth,
+  );
+  expect(dimensions.widestRightEdge).toBeLessThanOrEqual(
+    dimensions.clientWidth,
+  );
 });

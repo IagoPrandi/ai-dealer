@@ -9,7 +9,7 @@ test("initialize_genesis encoding is deterministic and starts with the Anchor di
     gameAuthority: "EtZ5ZyHKb8wZmMHFDLM6LtVmZV1WUMvFPER72eFE4qob",
     governance: "DB5nz633YioWzEUnLb97ypUra5RUE11SJDFW9ar23KTp",
     guardian: "EHHVmFK3FM9qb2eyc8wnEwpHtVH3yW1FGZzrEGn4iSea",
-    metadataUri: "https://example.com/jdr-devnet.json",
+    metadataUri: "",
   };
   const first = encodeInitializeGenesisInstructionData(args);
   const second = encodeInitializeGenesisInstructionData(args);
