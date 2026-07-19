@@ -20,7 +20,7 @@ use domain::{
     TREASURY_OPERATION_DELAY_SECONDS, TURNS_PER_EPOCH, UNPAUSE_NOTICE_SECONDS,
 };
 
-declare_id!("CWA3N4ew4guFuY3P4jJTyt5HgidCRW6c7mGAL5pUSmb6");
+declare_id!("BRK6G8Sep66LFREp2nGMLiganfw2nbWe1f8zeAdoP1Fm");
 
 const MAX_NETWORK_BYTES: usize = 32;
 const MAX_ARTIFACT_URI_BYTES: usize = 200;

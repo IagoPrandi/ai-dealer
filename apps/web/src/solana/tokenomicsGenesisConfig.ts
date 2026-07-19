@@ -5,6 +5,8 @@ import { SQUADS_DEVNET_CONFIG } from "./squadsDevnetConfig";
 
 export const TOKENOMICS_PLACEHOLDER_PROGRAM_ID =
   "CWA3N4ew4guFuY3P4jJTyt5HgidCRW6c7mGAL5pUSmb6";
+export const TOKENOMICS_DEVNET_PROGRAM_ID =
+  "BRK6G8Sep66LFREp2nGMLiganfw2nbWe1f8zeAdoP1Fm";
 export const TOKEN_METADATA_PROGRAM_ID =
   "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s";
 export const BPF_UPGRADEABLE_LOADER_ID =
@@ -40,7 +42,7 @@ export const TOKENOMICS_GENESIS_CONFIG = Object.freeze({
   network: "devnet",
   programId:
     process.env.NEXT_PUBLIC_TOKENOMICS_CORE_PROGRAM_ID ??
-    TOKENOMICS_PLACEHOLDER_PROGRAM_ID,
+    TOKENOMICS_DEVNET_PROGRAM_ID,
   symbol: "JDR",
   treasuryAllocationAtoms: 800_000_000n * TOKEN_ATOMS_PER_TOKEN,
 } as const);
@@ -88,6 +90,10 @@ export function validateTokenomicsGenesisConfig(): string[] {
   if (config.programId === TOKENOMICS_PLACEHOLDER_PROGRAM_ID) {
     errors.push(
       "Tokenomics Core still uses the non-deployable placeholder program ID.",
+    );
+  } else if (config.programId !== TOKENOMICS_DEVNET_PROGRAM_ID) {
+    errors.push(
+      "The configured Tokenomics Core program ID does not match the approved devnet identity.",
     );
   }
   if (!config.metadataUri) {

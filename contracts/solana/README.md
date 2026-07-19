@@ -5,10 +5,11 @@ separate Tokenomics Core program specified by `PRD-TOKENOMICS-v2.8.md`.
 
 ## Tokenomics Core
 
-`programs/tokenomics_core` is a separate custody boundary with compile-time
-placeholder program ID `CWA3N4ew4guFuY3P4jJTyt5HgidCRW6c7mGAL5pUSmb6`.
-No matching keypair is stored in the repository. Replace it with the public
-address of an externally managed deployment key before devnet or mainnet. The
+`programs/tokenomics_core` is a separate custody boundary. Its externally
+managed devnet program identity is
+`BRK6G8Sep66LFREp2nGMLiganfw2nbWe1f8zeAdoP1Fm`; the keypair is stored only in
+the external `idealer-solana-home` volume and is never committed. This address
+is devnet-only and does not select a mainnet program identity. The
 initialization CPI creates canonical Metaplex metadata for `JUSDEALER` (`JDR`)
 before mint/freeze authority revocation and binds metadata updates to the same
 governance account as Tokenomics Core. It

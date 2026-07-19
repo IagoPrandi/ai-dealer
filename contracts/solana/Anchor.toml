@@ -8,11 +8,11 @@ skip-lint = false
 
 [programs.localnet]
 idealer = "ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd"
-tokenomics_core = "CWA3N4ew4guFuY3P4jJTyt5HgidCRW6c7mGAL5pUSmb6"
+tokenomics_core = "BRK6G8Sep66LFREp2nGMLiganfw2nbWe1f8zeAdoP1Fm"
 
 [programs.devnet]
 idealer = "ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd"
-tokenomics_core = "CWA3N4ew4guFuY3P4jJTyt5HgidCRW6c7mGAL5pUSmb6"
+tokenomics_core = "BRK6G8Sep66LFREp2nGMLiganfw2nbWe1f8zeAdoP1Fm"
 
 [provider]
 cluster = "devnet"

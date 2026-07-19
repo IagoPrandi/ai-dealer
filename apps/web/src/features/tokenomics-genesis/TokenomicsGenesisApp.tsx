@@ -296,6 +296,10 @@ export function TokenomicsGenesisApp() {
             <li className="tg-check-ok">
               Supply, allocations, authorities, and campaign hashes are fixed.
             </li>
+            <li className="tg-check-ok">
+              Tokenomics Core identity {TOKENOMICS_GENESIS_CONFIG.programId} is
+              fixed for devnet.
+            </li>
             {configErrors.map((configError) => (
               <li className="tg-check-blocked" key={configError}>
                 {configError}

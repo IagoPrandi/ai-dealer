@@ -11,7 +11,7 @@ import { SYSTEM_PROGRAM_ID } from "./idealerProgram";
 
 export const TOKENOMICS_CORE_PROGRAM_ID = address(
   process.env.NEXT_PUBLIC_TOKENOMICS_CORE_PROGRAM_ID ??
-    "CWA3N4ew4guFuY3P4jJTyt5HgidCRW6c7mGAL5pUSmb6",
+    "BRK6G8Sep66LFREp2nGMLiganfw2nbWe1f8zeAdoP1Fm",
 );
 export const SPL_TOKEN_PROGRAM_ID = address(
   "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",

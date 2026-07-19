@@ -22,6 +22,11 @@ test("JDR genesis route exposes the fixed allocation and fails closed", async ({
     page.getByText(
       "Tokenomics Core still uses the non-deployable placeholder program ID.",
     ),
+  ).toHaveCount(0);
+  await expect(
+    page.getByText(
+      "Tokenomics Core identity BRK6G8Sep66LFREp2nGMLiganfw2nbWe1f8zeAdoP1Fm is fixed for devnet.",
+    ),
   ).toBeVisible();
   await expect(
     page.getByText("The approved JDR metadata URI is not configured."),
