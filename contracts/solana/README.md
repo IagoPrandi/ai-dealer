@@ -8,7 +8,10 @@ separate Tokenomics Core program specified by `PRD-TOKENOMICS-v2.8.md`.
 `programs/tokenomics_core` is a separate custody boundary with compile-time
 placeholder program ID `CWA3N4ew4guFuY3P4jJTyt5HgidCRW6c7mGAL5pUSmb6`.
 No matching keypair is stored in the repository. Replace it with the public
-address of an externally managed deployment key before devnet or mainnet. It
+address of an externally managed deployment key before devnet or mainnet. The
+initialization CPI creates canonical Metaplex metadata for `JUSDEALER` (`JDR`)
+before mint/freeze authority revocation and binds metadata updates to the same
+governance account as Tokenomics Core. It
 implements:
 
 - one-transaction 1B-token genesis allocation, classic SPL mint/freeze
@@ -77,7 +80,28 @@ docker run --rm -e CARGO_TARGET_DIR=/sbf-target \
   rust:1.91-bookworm bash /workspace/contracts/solana/scripts/sbf.sh <build|test-sbf|fund|deploy>
 ```
 
-`deploy` performs an upgrade of program `6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4` using the deployer (and upgrade authority) keypair stored only in the `idealer-solana-home` volume. Keypair contents are never printed or committed.
+`deploy` defaults to the Idealer program and uses the deployer (and initial
+upgrade-authority) keypair stored only in the `idealer-solana-home` volume.
+Keypair contents are never printed or committed. Set
+`DEPLOY_PROGRAM=tokenomics_core` and provide the externally managed
+`tokenomics-core-program-keypair.json` in the same volume to deploy Tokenomics
+Core. The helper fails unless that keypair public address matches the source
+`declare_id!`.
+
+After a verified Devnet Tokenomics Core deployment, transfer its upgrade
+authority to the finalized Devnet Squads vault before genesis:
+
+```bash
+DEPLOY_PROGRAM=tokenomics_core \
+NEW_UPGRADE_AUTHORITY=<DEVNET_SQUADS_VAULT_0> \
+bash scripts/sbf.sh set-upgrade-authority
+```
+
+This command is a network write and must be run only after explicit transaction
+review and approval. The genesis page at `/dev/tokenomics/genesis` remains
+disabled until the program is executable, its upgrade authority is that vault,
+the Idealer `GlobalConfig` PDA exists, all genesis PDAs are unused, and an
+approved HTTPS metadata URI is configured.
 
 ## Local Validation
 

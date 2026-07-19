@@ -18,8 +18,10 @@ export const SQUADS_DEVNET_CONFIG = Object.freeze({
   permissionMask: 7,
   programId: "SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf",
   provider: "Squads Protocol v4",
+  multisigAddress: "DQmcXBdLsQUVsk8UmgnTdnjruRHnAquuFP9wPa87T5RD",
   threshold: 2,
   timeLockSeconds: 0,
+  vaultAddress: "DB5nz633YioWzEUnLb97ypUra5RUE11SJDFW9ar23KTp",
   vaultIndex: 0,
 } as const);
 
@@ -60,6 +62,12 @@ export function validateSquadsDevnetConfig(): string[] {
     errors.push(
       "Every devnet member must have initiate, vote, and execute permissions.",
     );
+  }
+  if (
+    !SQUADS_DEVNET_CONFIG.multisigAddress ||
+    !SQUADS_DEVNET_CONFIG.vaultAddress
+  ) {
+    errors.push("The finalized devnet multisig and vault must be configured.");
   }
 
   return errors;

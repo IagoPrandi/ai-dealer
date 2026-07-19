@@ -13,18 +13,51 @@ set -euo pipefail
 
 AGAVE_VERSION="${AGAVE_VERSION:-2.1.21}"
 DEPLOY_DIR="/root/.config/idealer/devnet"
-PROGRAM_KEYPAIR_PATH="${PROGRAM_KEYPAIR_PATH:-${DEPLOY_DIR}/idealer-program-keypair.json}"
+DEPLOY_PROGRAM="${DEPLOY_PROGRAM:-idealer}"
+case "${DEPLOY_PROGRAM}" in
+  idealer)
+    default_program_keypair="${DEPLOY_DIR}/idealer-program-keypair.json"
+    ;;
+  tokenomics_core)
+    default_program_keypair="${DEPLOY_DIR}/tokenomics-core-program-keypair.json"
+    ;;
+  *)
+    echo "[config] DEPLOY_PROGRAM must be idealer or tokenomics_core" >&2
+    exit 2
+    ;;
+esac
+PROGRAM_KEYPAIR_PATH="${PROGRAM_KEYPAIR_PATH:-${default_program_keypair}}"
 PROGRAM_ID="${PROGRAM_ID:-}"
 SBF_OUT_DIR="${SBF_OUT_DIR:-/sbf-target/deploy}"
-SO_PATH="${SBF_OUT_DIR}/idealer.so"
+SO_PATH="${SBF_OUT_DIR}/${DEPLOY_PROGRAM}.so"
 export PATH="/root/.local/share/solana/install/active_release/bin:${PATH}"
 
 resolve_program_id() {
-  if [ -n "${PROGRAM_ID}" ]; then
-    echo "${PROGRAM_ID}"
-    return 0
+  if [ ! -f "${PROGRAM_KEYPAIR_PATH}" ]; then
+    echo "[config] externally managed program keypair not found: ${PROGRAM_KEYPAIR_PATH}" >&2
+    return 1
   fi
-  solana-keygen pubkey "${PROGRAM_KEYPAIR_PATH}"
+  local keypair_program_id
+  keypair_program_id="$(solana-keygen pubkey "${PROGRAM_KEYPAIR_PATH}")"
+  if [ -n "${PROGRAM_ID}" ] && [ "${PROGRAM_ID}" != "${keypair_program_id}" ]; then
+    echo "[config] PROGRAM_ID does not match PROGRAM_KEYPAIR_PATH" >&2
+    return 1
+  fi
+  echo "${keypair_program_id}"
+}
+
+assert_declared_program_id() {
+  local program_id="$1"
+  local declared_program_id
+  declared_program_id="$(
+    sed -n 's/.*declare_id!("\([^"]*\)").*/\1/p' \
+      "/workspace/contracts/solana/programs/${DEPLOY_PROGRAM}/src/lib.rs" \
+      | head -1
+  )"
+  if [ -z "${declared_program_id}" ] || [ "${declared_program_id}" != "${program_id}" ]; then
+    echo "[config] ${DEPLOY_PROGRAM} declare_id does not match the deployment keypair" >&2
+    return 1
+  fi
 }
 
 ensure_toolchain() {
@@ -120,6 +153,7 @@ cmd_deploy() {
   local program_kp="${PROGRAM_KEYPAIR_PATH}"
   local program_id
   program_id="$(resolve_program_id)"
+  assert_declared_program_id "${program_id}"
   local deployer_pub
   deployer_pub="$(solana-keygen pubkey "${deployer}")"
   echo "[deploy] deployer ${deployer_pub}"
@@ -138,6 +172,28 @@ cmd_deploy() {
     --keypair "${deployer}" \
     --url devnet
   echo "[verify]"
+  solana program show "${program_id}" --url devnet -k "${deployer}"
+}
+
+cmd_set_upgrade_authority() {
+  ensure_toolchain
+  if [ -z "${NEW_UPGRADE_AUTHORITY:-}" ]; then
+    echo "[config] NEW_UPGRADE_AUTHORITY is required" >&2
+    return 1
+  fi
+  local deployer="${DEPLOY_DIR}/idealer-deployer-keypair.json"
+  local program_id
+  program_id="$(resolve_program_id)"
+  assert_declared_program_id "${program_id}"
+  echo "[authority] program ${program_id}"
+  echo "[authority] new upgrade authority ${NEW_UPGRADE_AUTHORITY}"
+  solana program show "${program_id}" --url devnet -k "${deployer}"
+  solana program set-upgrade-authority "${program_id}" \
+    --new-upgrade-authority "${NEW_UPGRADE_AUTHORITY}" \
+    --skip-new-upgrade-authority-signer-check \
+    --upgrade-authority "${deployer}" \
+    --keypair "${deployer}" \
+    --url devnet
   solana program show "${program_id}" --url devnet -k "${deployer}"
 }
 
@@ -166,5 +222,6 @@ case "${1:-build}" in
   test-sbf) cmd_test_sbf ;;
   fund) cmd_fund "$@" ;;
   deploy) cmd_deploy ;;
-  *) echo "usage: sbf.sh [build|test-sbf|fund|deploy]" >&2; exit 2 ;;
+  set-upgrade-authority) cmd_set_upgrade_authority ;;
+  *) echo "usage: sbf.sh [build|test-sbf|fund|deploy|set-upgrade-authority]" >&2; exit 2 ;;
 esac

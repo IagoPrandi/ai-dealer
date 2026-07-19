@@ -2,6 +2,7 @@ use anchor_lang::{
     prelude::{Clock, Pubkey},
     AccountDeserialize, InstructionData, ToAccountMetas,
 };
+use anchor_spl::metadata::mpl_token_metadata;
 use anchor_spl::token::{spl_token, Mint, TokenAccount};
 use solana_account_info::AccountInfo;
 use solana_program_error::ProgramResult;
@@ -46,8 +47,25 @@ fn tokenomics_program_test() -> ProgramTest {
         spl_token::ID,
         processor!(spl_token::processor::Processor::process),
     );
+    // The production instruction CPIs to the audited Metaplex program. The SBF
+    // harness uses a test-only success processor because ProgramTest does not
+    // ship the external Metaplex executable; address/account constraints and
+    // the finalized devnet rehearsal verify the real CPI.
+    test.add_program(
+        "mpl_token_metadata",
+        mpl_token_metadata::ID,
+        processor!(process_metadata_stub),
+    );
     test.prefer_bpf(true);
     test
+}
+
+fn process_metadata_stub(
+    _program_id: &Pubkey,
+    _accounts: &[AccountInfo<'_>],
+    _instruction_data: &[u8],
+) -> ProgramResult {
+    Ok(())
 }
 
 async fn process(
@@ -95,6 +113,7 @@ struct GenesisFixture {
     distribution_vault: Pubkey,
     executor: Pubkey,
     mint: Keypair,
+    metadata: Pubkey,
     token_config: Pubkey,
     treasury_escrow: Pubkey,
     treasury_position: Pubkey,
@@ -104,13 +123,15 @@ struct GenesisFixture {
 
 impl GenesisFixture {
     fn new(governance: Pubkey) -> Self {
+        let mint = Keypair::new();
         Self {
             campaign: pda(&[b"campaign", &0u64.to_le_bytes()]),
             campaign_vault: pda(&[b"campaign_vault", &0u64.to_le_bytes()]),
             correction_reserve: pda(&[b"correction_reserve_vault"]),
             distribution_vault: pda(&[b"distribution_vault"]),
             executor: pda(&[b"treasury_policy_executor"]),
-            mint: Keypair::new(),
+            metadata: mpl_token_metadata::accounts::Metadata::find_pda(&mint.pubkey()).0,
+            mint,
             token_config: pda(&[b"token_config"]),
             treasury_escrow: pda(&[b"treasury_lock_escrow"]),
             treasury_position: pda(&[b"lock_position", governance.as_ref()]),
@@ -135,6 +156,8 @@ async fn initialize_genesis(
                 token_config: fixture.token_config,
                 treasury_policy_executor: fixture.executor,
                 mint: fixture.mint.pubkey(),
+                metadata: fixture.metadata,
+                governance: authority,
                 creator_treasury_reserve_vault: fixture.treasury_reserve,
                 treasury_lock_escrow: fixture.treasury_escrow,
                 initial_campaign_vault: fixture.campaign_vault,
@@ -143,6 +166,7 @@ async fn initialize_genesis(
                 distribution_vault: fixture.distribution_vault,
                 treasury_sol_vault: fixture.treasury_sol_vault,
                 correction_reserve_vault: fixture.correction_reserve,
+                metadata_program: mpl_token_metadata::ID,
                 token_program: spl_token::ID,
                 system_program: system_program::ID,
                 rent: sysvar::rent::ID,
@@ -155,6 +179,7 @@ async fn initialize_genesis(
                     game_authority: authority,
                     epoch_root_publisher: authority,
                     network: "devnet".to_owned(),
+                    metadata_uri: "https://example.com/jdr-devnet.json".to_owned(),
                     initial_campaign_config_hash: [1; 32],
                     initial_unused_balance_policy_hash: [2; 32],
                 },
@@ -180,6 +205,11 @@ async fn genesis_revokes_authorities_and_pause_keeps_treasury_unlock_open() {
     assert_eq!(mint.supply, domain::FIXED_SUPPLY_ATOMS);
     assert!(mint.mint_authority.is_none());
     assert!(mint.freeze_authority.is_none());
+    let config: TokenConfig = read_anchor_account(&mut context, fixture.token_config).await;
+    assert_eq!(config.metadata, fixture.metadata);
+    assert_eq!(config.metadata_update_authority, authority);
+    assert_eq!(config.metadata_uri, "https://example.com/jdr-devnet.json");
+    assert!(config.metadata_mutable);
 
     let campaign_vault = read_token_account(&mut context, fixture.campaign_vault).await;
     let treasury_escrow = read_token_account(&mut context, fixture.treasury_escrow).await;

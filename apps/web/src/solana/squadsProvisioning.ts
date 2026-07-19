@@ -150,6 +150,15 @@ export async function prepareSquadsCreation({
   const multisig = await import("@sqds/multisig");
   const connection = new Connection(rpcEndpoint, "confirmed");
   await assertDevnetConnection(connection);
+  const existingMultisig = await connection.getAccountInfo(
+    new PublicKey(SQUADS_DEVNET_CONFIG.multisigAddress),
+    "confirmed",
+  );
+  if (existingMultisig) {
+    throw new Error(
+      `The configured devnet multisig already exists at ${SQUADS_DEVNET_CONFIG.multisigAddress}. Duplicate creation was blocked.`,
+    );
+  }
 
   const programId = new PublicKey(SQUADS_DEVNET_CONFIG.programId);
   if (!multisig.PROGRAM_ID.equals(programId)) {
@@ -229,18 +238,31 @@ export async function prepareSquadsCreation({
 async function verifyCreatedMultisig(
   prepared: PreparedSquadsCreation,
 ): Promise<void> {
+  await verifyExpectedDevnetMultisig({
+    multisigAddress: prepared.summary.multisigAddress,
+    rpcEndpoint: prepared.rpcEndpoint,
+  });
+}
+
+export async function verifyExpectedDevnetMultisig({
+  multisigAddress = SQUADS_DEVNET_CONFIG.multisigAddress,
+  rpcEndpoint,
+}: {
+  multisigAddress?: string;
+  rpcEndpoint: string;
+}): Promise<void> {
   const multisig = await import("@sqds/multisig");
-  const connection = new Connection(prepared.rpcEndpoint, "finalized");
+  const connection = new Connection(rpcEndpoint, "finalized");
   await assertDevnetConnection(connection);
 
-  const multisigAddress = new PublicKey(prepared.summary.multisigAddress);
+  const multisigPublicKey = new PublicKey(multisigAddress);
   const [account, accountInfo] = await Promise.all([
     multisig.accounts.Multisig.fromAccountAddress(
       connection,
-      multisigAddress,
+      multisigPublicKey,
       "finalized",
     ),
-    connection.getAccountInfo(multisigAddress, "finalized"),
+    connection.getAccountInfo(multisigPublicKey, "finalized"),
   ]);
   if (!accountInfo) {
     throw new Error("The finalized multisig account could not be read back.");

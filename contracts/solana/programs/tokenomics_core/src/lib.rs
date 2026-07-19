@@ -2,6 +2,9 @@ use anchor_lang::prelude::*;
 use anchor_lang::system_program::{self, Transfer as SystemTransfer};
 #[cfg(feature = "idl-build")]
 use anchor_lang::{Discriminator, IdlBuild};
+use anchor_spl::metadata::{
+    create_metadata_accounts_v3, mpl_token_metadata, CreateMetadataAccountsV3, Metadata,
+};
 use anchor_spl::token::spl_token::instruction::AuthorityType;
 use anchor_spl::token::{self, Mint, MintTo, SetAuthority, Token, TokenAccount, TransferChecked};
 use solana_sha256_hasher::hashv;
@@ -22,6 +25,9 @@ declare_id!("CWA3N4ew4guFuY3P4jJTyt5HgidCRW6c7mGAL5pUSmb6");
 const MAX_NETWORK_BYTES: usize = 32;
 const MAX_ARTIFACT_URI_BYTES: usize = 200;
 const MAX_REASON_URI_BYTES: usize = 200;
+const MAX_METADATA_URI_BYTES: usize = 200;
+const TOKEN_NAME: &str = "JUSDEALER";
+const TOKEN_SYMBOL: &str = "JDR";
 
 #[program]
 pub mod tokenomics_core {
@@ -42,6 +48,10 @@ pub mod tokenomics_core {
             !args.network.is_empty() && args.network.len() <= MAX_NETWORK_BYTES,
             TokenomicsError::InvalidNetwork
         );
+        require!(
+            !args.metadata_uri.is_empty() && args.metadata_uri.len() <= MAX_METADATA_URI_BYTES,
+            TokenomicsError::InvalidMetadata
+        );
 
         let clock = Clock::get()?;
         let config = &mut ctx.accounts.token_config;
@@ -50,6 +60,10 @@ pub mod tokenomics_core {
         config.game_authority = args.game_authority;
         config.epoch_root_publisher = args.epoch_root_publisher;
         config.mint = ctx.accounts.mint.key();
+        config.metadata = ctx.accounts.metadata.key();
+        config.metadata_update_authority = args.governance;
+        config.metadata_uri = args.metadata_uri.clone();
+        config.metadata_mutable = true;
         config.creator_treasury_reserve_vault = ctx.accounts.creator_treasury_reserve_vault.key();
         config.treasury_lock_escrow = ctx.accounts.treasury_lock_escrow.key();
         config.initial_campaign_vault = ctx.accounts.initial_campaign_vault.key();
@@ -144,6 +158,34 @@ pub mod tokenomics_core {
             ctx.accounts.mint.supply == FIXED_SUPPLY_ATOMS,
             TokenomicsError::SupplyInvariantViolation
         );
+
+        create_metadata_accounts_v3(
+            CpiContext::new_with_signer(
+                ctx.accounts.metadata_program.to_account_info(),
+                CreateMetadataAccountsV3 {
+                    metadata: ctx.accounts.metadata.to_account_info(),
+                    mint: ctx.accounts.mint.to_account_info(),
+                    mint_authority: config.to_account_info(),
+                    payer: ctx.accounts.payer.to_account_info(),
+                    update_authority: ctx.accounts.governance.to_account_info(),
+                    system_program: ctx.accounts.system_program.to_account_info(),
+                    rent: ctx.accounts.rent.to_account_info(),
+                },
+                &[config_signer],
+            ),
+            mpl_token_metadata::types::DataV2 {
+                name: TOKEN_NAME.to_owned(),
+                symbol: TOKEN_SYMBOL.to_owned(),
+                uri: args.metadata_uri,
+                seller_fee_basis_points: 0,
+                creators: None,
+                collection: None,
+                uses: None,
+            },
+            true,
+            false,
+            None,
+        )?;
 
         let executor_bump = [executor.bump];
         let executor_signer: &[&[u8]] = &[b"treasury_policy_executor", &executor_bump];
@@ -2062,6 +2104,7 @@ pub struct InitializeGenesisArgs {
     pub game_authority: Pubkey,
     pub epoch_root_publisher: Pubkey,
     pub network: String,
+    pub metadata_uri: String,
     pub initial_campaign_config_hash: [u8; 32],
     pub initial_unused_balance_policy_hash: [u8; 32],
 }
@@ -2163,6 +2206,17 @@ pub struct InitializeGenesis<'info> {
         mint::freeze_authority = token_config
     )]
     pub mint: Box<Account<'info, Mint>>,
+    /// CHECK: The address is constrained to the canonical Metaplex metadata PDA,
+    /// and the Metaplex program creates and owns it in this instruction.
+    #[account(
+        mut,
+        address = mpl_token_metadata::accounts::Metadata::find_pda(&mint.key()).0
+    )]
+    pub metadata: UncheckedAccount<'info>,
+    /// CHECK: This devnet rehearsal binds metadata updates to the same Squads
+    /// vault that governs Tokenomics Core. It is not required to sign creation.
+    #[account(address = args.governance)]
+    pub governance: UncheckedAccount<'info>,
     #[account(
         init,
         payer = payer,
@@ -2230,6 +2284,7 @@ pub struct InitializeGenesis<'info> {
         bump
     )]
     pub correction_reserve_vault: Box<Account<'info, CorrectionReserveVaultRecord>>,
+    pub metadata_program: Program<'info, Metadata>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
@@ -2693,7 +2748,7 @@ pub struct AttributeReferral<'info> {
 pub struct SettleReferralBaseRewards<'info> {
     pub game_authority: Signer<'info>,
     #[account(seeds = [b"token_config"], bump = token_config.bump)]
-    pub token_config: Account<'info, TokenConfig>,
+    pub token_config: Box<Account<'info, TokenConfig>>,
     #[account(address = token_config.mint)]
     pub mint: Account<'info, Mint>,
     #[account(
@@ -3039,6 +3094,11 @@ pub struct TokenConfig {
     pub game_authority: Pubkey,
     pub epoch_root_publisher: Pubkey,
     pub mint: Pubkey,
+    pub metadata: Pubkey,
+    pub metadata_update_authority: Pubkey,
+    #[max_len(MAX_METADATA_URI_BYTES)]
+    pub metadata_uri: String,
+    pub metadata_mutable: bool,
     pub creator_treasury_reserve_vault: Pubkey,
     pub treasury_lock_escrow: Pubkey,
     pub initial_campaign_vault: Pubkey,
@@ -3625,6 +3685,8 @@ pub enum TokenomicsError {
     SupplyInvariantViolation,
     #[msg("The token mint is invalid.")]
     InvalidMint,
+    #[msg("The token metadata configuration is invalid.")]
+    InvalidMetadata,
     #[msg("The token owner is invalid.")]
     InvalidTokenOwner,
     #[msg("The SPL token program is invalid.")]

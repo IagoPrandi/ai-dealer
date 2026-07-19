@@ -14,6 +14,14 @@ test("the Squads rehearsal configuration is a valid devnet-only 2-of-3", () => {
     SQUADS_DEVNET_CONFIG.members[0]?.address,
     "EHHVmFK3FM9qb2eyc8wnEwpHtVH3yW1FGZzrEGn4iSea",
   );
+  assert.equal(
+    SQUADS_DEVNET_CONFIG.multisigAddress,
+    "DQmcXBdLsQUVsk8UmgnTdnjruRHnAquuFP9wPa87T5RD",
+  );
+  assert.equal(
+    SQUADS_DEVNET_CONFIG.vaultAddress,
+    "DB5nz633YioWzEUnLb97ypUra5RUE11SJDFW9ar23KTp",
+  );
 });
 
 test("a matching on-chain snapshot passes strict verification", () => {
