@@ -11,7 +11,9 @@ export const TURNS_PER_EPOCH = 7;
 export const EPOCH_REVIEW_SECONDS = 24n * 60n * 60n;
 export const CHALLENGE_RESOLUTION_SECONDS = 48n * 60n * 60n;
 export const DEFAULT_CHALLENGE_BOND_LAMPORTS = 20_000_000n;
-export const TREASURY_TIMELOCK_SECONDS = 7n * 24n * 60n * 60n;
+// A 2-of-3 multisig approval remains mandatory; the approved execution delay
+// for treasury operations is intentionally zero.
+export const TREASURY_OPERATION_DELAY_SECONDS = 0n;
 export const UNPAUSE_NOTICE_SECONDS = 24n * 60n * 60n;
 export const PROPOSAL_REWARD_ATOMS = 400_000_000n;
 export const SUPPORTER_REWARD_ATOMS = 60_000_000n;

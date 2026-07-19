@@ -18,6 +18,7 @@ import {
   settleCampaignRewardLegs,
   splitVoterPool,
   SUPPORTER_REWARD_ATOMS,
+  TREASURY_OPERATION_DELAY_SECONDS,
   aggregatePositionWeights,
   assertFixedSupplyAllocation,
   buildMerkleTree,
@@ -46,6 +47,10 @@ test("fixed supply allocation is exact", () => {
       ),
     /invalid_initial_campaign_allocation/,
   );
+});
+
+test("treasury operations have no post-approval execution delay", () => {
+  assert.equal(TREASURY_OPERATION_DELAY_SECONDS, 0n);
 });
 
 test("lock intervals use amount multiplied by confirmed time", () => {

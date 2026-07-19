@@ -13,8 +13,8 @@ use domain::{
     verify_merkle_proof, voter_payment, CHALLENGE_RESOLUTION_SECONDS, CREATOR_TREASURY_ATOMS,
     DEFAULT_CHALLENGE_BOND_LAMPORTS, FIXED_SUPPLY_ATOMS, INITIAL_CAMPAIGN_ATOMS,
     PROPOSAL_REWARD_ATOMS, REFERRAL_INVITEE_REWARD_ATOMS, REFERRAL_INVITER_REWARD_ATOMS,
-    REVIEW_WINDOW_SECONDS, SUPPORTER_REWARD_ATOMS, TOKEN_DECIMALS, TREASURY_TIMELOCK_SECONDS,
-    TURNS_PER_EPOCH, UNPAUSE_NOTICE_SECONDS,
+    REVIEW_WINDOW_SECONDS, SUPPORTER_REWARD_ATOMS, TOKEN_DECIMALS,
+    TREASURY_OPERATION_DELAY_SECONDS, TURNS_PER_EPOCH, UNPAUSE_NOTICE_SECONDS,
 };
 
 declare_id!("CWA3N4ew4guFuY3P4jJTyt5HgidCRW6c7mGAL5pUSmb6");
@@ -69,7 +69,7 @@ pub mod tokenomics_core {
 
         let executor = &mut ctx.accounts.treasury_policy_executor;
         executor.governance = args.governance;
-        executor.delay_seconds = TREASURY_TIMELOCK_SECONDS;
+        executor.delay_seconds = TREASURY_OPERATION_DELAY_SECONDS;
         executor.next_operation_id = 0;
         executor.bump = ctx.bumps.treasury_policy_executor;
 
@@ -2026,7 +2026,7 @@ fn validate_operation(
     );
     require!(
         Clock::get()?.unix_timestamp >= operation.execute_after,
-        TokenomicsError::TreasuryTimelockActive
+        TokenomicsError::TreasuryOperationNotExecutable
     );
     Ok(())
 }
@@ -3719,8 +3719,8 @@ pub enum TokenomicsError {
     InvalidOperationState,
     #[msg("The treasury operation does not match its scheduled asset or destination.")]
     OperationMismatch,
-    #[msg("The treasury timelock has not elapsed.")]
-    TreasuryTimelockActive,
+    #[msg("The treasury operation is not yet executable.")]
+    TreasuryOperationNotExecutable,
     #[msg("The destination is invalid.")]
     InvalidDestination,
     #[msg("The vault is not owned by Tokenomics Core.")]

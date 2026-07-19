@@ -24,7 +24,8 @@ implements:
   reward arithmetic with exact terminal partial settlement;
 - isolated future campaign vaults whose economic configuration freezes at
   funding;
-- seven-day on-chain treasury operations, bounded spending limits, a
+- immediate on-chain treasury operations after the configured 2-of-3 multisig
+  approval, bounded spending limits, a
   guardian-only pause, and multisig plus 24-hour-notice unpause.
 
 `tools/tokenomics-calculator` is the independent Rust epoch calculator.

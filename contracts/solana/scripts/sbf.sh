@@ -103,10 +103,14 @@ cmd_test_sbf() {
   SBF_OUT_DIR="${test_out_dir}" SBF_FEATURES="${test_features}" cmd_build
   cd /workspace/contracts/solana
   echo "[test:sbf] running ignored instruction suite against the SBF build..."
-  # Single-threaded: the program-test bank/clock state is timing-sensitive, so
-  # parallel execution of these stateful integration tests is flaky.
+  # These stateful integration suites must run serially. `--test-threads=1`
+  # only serializes cases inside one test binary; Cargo can still launch the
+  # Idealer and Tokenomics Core binaries concurrently when addressed through
+  # the workspace, which makes the SBF run flaky.
   SBF_OUT_DIR="${test_out_dir}" BPF_OUT_DIR="${test_out_dir}" \
-    cargo test --test instructions --all-features --locked -- --ignored --test-threads=1
+    cargo test -p tokenomics-core --test instructions --all-features --locked -- --ignored --test-threads=1
+  SBF_OUT_DIR="${test_out_dir}" BPF_OUT_DIR="${test_out_dir}" \
+    cargo test -p idealer --test instructions --all-features --locked -- --ignored --test-threads=1
 }
 
 cmd_deploy() {

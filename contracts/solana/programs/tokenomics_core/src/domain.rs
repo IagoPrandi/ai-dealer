@@ -12,7 +12,9 @@ pub const TURNS_PER_EPOCH: u64 = 7;
 pub const REVIEW_WINDOW_SECONDS: i64 = 24 * 60 * 60;
 pub const CHALLENGE_RESOLUTION_SECONDS: i64 = 48 * 60 * 60;
 pub const DEFAULT_CHALLENGE_BOND_LAMPORTS: u64 = 20_000_000;
-pub const TREASURY_TIMELOCK_SECONDS: i64 = 7 * 24 * 60 * 60;
+// Treasury outbound operations still require the configured 2-of-3 multisig,
+// but the owner-approved execution delay is zero.
+pub const TREASURY_OPERATION_DELAY_SECONDS: i64 = 0;
 pub const UNPAUSE_NOTICE_SECONDS: i64 = 24 * 60 * 60;
 pub const PROPOSAL_REWARD_ATOMS: u64 = 400_000_000;
 pub const SUPPORTER_REWARD_ATOMS: u64 = 60_000_000;

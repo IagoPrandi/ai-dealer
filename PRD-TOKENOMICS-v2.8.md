@@ -1,7 +1,7 @@
 # Idealer — Fixed-Supply Tokenomics and Promotion PRD
 
 > **Version:** 2.8-draft
-> **Status:** Draft — core economic, custody, technical timelock, immutable tokenomics-core, optimistic epoch settlement, challenge-liveness, correction-reserve, campaign-vault, referral, claim-destination, and terminal-reserve rules confirmed; metadata, legal, and launch records remain pending
+> **Status:** Draft — core economic, custody, immediate multisig treasury execution, immutable tokenomics-core, optimistic epoch settlement, challenge-liveness, correction-reserve, campaign-vault, referral, claim-destination, and terminal-reserve rules confirmed; metadata, legal, and launch records remain pending
 > **Last updated:** 2026-07-14
 > **Scope order:** Tokenomics first; promotional use second.
 
@@ -89,7 +89,7 @@ window open through turn 100 until the production cutover.
 | Mint authority | Revoked (`None`) immediately after the genesis mint. |
 | Freeze authority | `None`; no party can freeze a holder's account. |
 | Transferability | Transferable while unlocked; tokens in the locking escrow cannot be transferred until unlocked. |
-| Metadata | Name, symbol, image URI, and update authority are pending confirmation. |
+| Metadata | Name: `JUSDEALER`; symbol: `JDR`. Image URI and metadata update authority remain pending confirmation. |
 
 ### 3.1 Supply invariant
 
@@ -154,6 +154,15 @@ governance. The founder controls enough keys to meet the threshold and therefore
 retains unilateral economic control. Public disclosures must describe it that
 way.
 
+The owner supplied these initial member public addresses. They are members, not
+the future multisig-vault address and not private keys:
+
+| Member | Public address | Device, backup, and recovery record |
+| --- | --- | --- |
+| A | `EHHVmFK3FM9qb2eyc8wnEwpHtVH3yW1FGZzrEGn4iSea` | Pending owner record. |
+| B | `EAoZrh8TtZCYtUdKpkuMaNSrConsQoUQvzjZ7cuQGqdW` | Pending owner record. |
+| C | `7E3DMct5umGMA4mSeAr1UcJUFSd5kd444rK39G8GTC9p` | Pending owner record. |
+
 #### 3.3.2 Planned transition to `3-of-5`
 
 The same multisig may later be expanded by adding two new members and changing
@@ -192,15 +201,18 @@ decentralisation decision may replace one or more founder-controlled signers
 with independently controlled member wallets; this is optional and requires a
 separately approved custody amendment.
 
-#### 3.3.3 Treasury timelock scope and movement policy
+#### 3.3.3 Treasury operation approval and immediate execution policy
 
-The treasury timelock protects **discretionary outbound use of assets already
-inside treasury custody**. It does not delay protocol settlement between the
-fee-distribution pool and a beneficiary, and it does not create an unbonding
-period for token locking.
+All treasury movements remain subject to the active `2-of-3` multisig
+threshold. The owner has explicitly set the Tokenomics Core execution delay to
+**zero seconds**: once the multisig approves and submits a valid operation, it
+is executable immediately. This applies to discretionary outbound treasury
+movements and treasury policy changes. It does not alter the independent
+24-hour root-review window, 48-hour challenge-resolution deadline, or 24-hour
+unpause notice.
 
-The following protocol-settlement and internal-custody operations have **no
-seven-day timelock**:
+The following protocol-settlement and internal-custody operations are also
+immediate:
 
 - a sealed holder claim from the token-lock distribution vault to the
   beneficiary encoded in the Merkle leaf;
@@ -215,11 +227,9 @@ seven-day timelock**:
 These operations remain subject to their own authentication, state, Merkle,
 beneficiary, and canonical-destination checks. For treasury lock and unlock, the
 active multisig threshold must authorise the instruction, but execution is
-immediate once that valid instruction is confirmed. There is no additional
-seven-day delay because the tokens remain inside the treasury custody perimeter
-and cannot be redirected to an arbitrary recipient.
+immediate once that valid instruction is confirmed.
 
-The `7-day` execution timelock applies to **discretionary outbound movements or
+The active multisig threshold applies to **discretionary outbound movements or
 changes that can redirect treasury property**, including:
 
 - transferring SOL from the `Treasury SOL Vault` to an `Operating Wallet`,
@@ -235,27 +245,26 @@ changes that can redirect treasury property**, including:
   vault, canonical lock escrow, or fixed claim destination defined by this PRD.
 
 A spending limit is itself established or changed only after the multisig
-threshold and seven-day timelock. Once active, transfers that satisfy its
-amount, period, asset, and destination constraints do not require a new
-seven-day delay for every routine payment.
+threshold. Once active, transfers that satisfy its amount, period, asset, and
+destination constraints do not require a new approval for every routine payment.
 
-The timelock must be an on-chain execution invariant, not merely an operational
-promise. The same treasury multisig governs the `TreasuryPolicyExecutor`, which is
+The same treasury multisig governs the `TreasuryPolicyExecutor`, which is
 the technical authority of the `Creator Treasury Reserve Vault` and the
 `Treasury SOL Vault`. Discretionary outbound execution must pass through this
 on-chain executor, which:
 
 - records the approved transaction and `execute_after` timestamp;
-- rejects execution before the timestamp;
+- records an `execute_after` timestamp equal to approval time because the
+  configured delay is zero;
 - prevents threshold signatures from using a parallel direct-transfer path;
-- permits only the explicitly defined immediate protocol-settlement and
-  internal-custody operations above without delay.
+- preserves the approved asset, destination, amount, and purpose hash at
+  execution.
 
 Public records must show the multisig, vaults, members by role, proposal,
-approvals, timelock end, permitted destination, and execution transaction. An
+approvals, immediate execution eligibility, permitted destination, and execution transaction. An
 emergency process may pause future campaign distributions or unexecuted
 operations where technically possible, but may not bypass the active threshold
-or the timelock for discretionary outbound movements. Initial signer addresses,
+for discretionary outbound movements. Initial signer addresses,
 device separation, backup locations by role, and the recovery procedure are
 operational launch records and must be documented before genesis.
 
@@ -278,7 +287,7 @@ Creator Treasury Reserve Vault --multisig-authorised immediate lock--> Treasury 
 Treasury Lock Escrow --multisig-authorised immediate unlock--> Creator Treasury Reserve Vault
 ```
 
-Neither leg has a seven-day timelock or an additional unbonding period. They are
+Neither leg has an execution delay or an additional unbonding period. They are
 canonical internal movements: the lock escrow cannot choose another source or
 return destination, and the tokens remain treasury property throughout.
 
@@ -288,13 +297,13 @@ bound in `TokenConfig` and in the treasury `LockPosition`. A future campaign,
 sale, liquidity operation, pledge, remuneration transfer, operating allocation,
 or other external use occurs only after the asset is in the relevant treasury
 vault and the separately scheduled discretionary outbound transaction has
-completed its seven-day timelock or satisfies a previously timelocked on-chain
-spending limit.
+received the active multisig threshold approval or satisfies a previously
+approved on-chain spending limit.
 
 The token-lock distribution vault is outside this discretionary treasury
 movement path. It is a protocol settlement pool holding amounts owed to all
 sealed beneficiaries. Claims from that pool are executed under Section 4.4 and
-are never delayed by the treasury timelock.
+are never delayed by treasury-operation approval.
 
 ### 3.4 Creator Treasury Reserve lock participation
 
@@ -332,22 +341,22 @@ must be shown plainly in public tokenomics, epoch accounting, and the creator
 treasury dashboard before users lock tokens.
 
 Treasury lock and unlock instructions require the active multisig threshold but
-have no seven-day timelock: they move tokens only between the canonical
+have no execution delay: they move tokens only between the canonical
 `Creator Treasury Reserve Vault` and `Treasury Lock Escrow`, with no arbitrary
 recipient and no additional unbonding period. A routine treasury-fee claim also
-has no timelock and does not unlock or transfer the 800M tokens. It may be
+requires no multisig approval and does not unlock or transfer the 800M tokens. It may be
 initiated by the founder, an authorised keeper, or any caller when implemented
 as a permissionless claim. The claim instruction reads the beneficiary from the
 sealed Merkle leaf and therefore pays the treasury position only to the
-`Treasury SOL Vault`. The seven-day timelock begins only for a later
-discretionary outbound use of assets held by a treasury-controlled vault, as
-defined in Section 3.3.3.
+`Treasury SOL Vault`. A later discretionary outbound use of assets held by a
+treasury-controlled vault requires the active multisig threshold as defined in
+Section 3.3.3.
 
 Claimed SOL becomes treasury property only after it reaches the `Treasury SOL
 Vault`. Moving it from that vault to an operating wallet or another
-discretionary destination requires the active multisig threshold plus the
-seven-day timelock, unless the transfer is within a previously timelocked,
-on-chain spending limit. The fee-pool claim and the later treasury withdrawal
+discretionary destination requires the active multisig threshold, unless the
+transfer is within a previously approved on-chain spending limit. The fee-pool
+claim and the later treasury withdrawal
 must be separate instructions, separate state transitions, and separate audit
 events.
 
@@ -384,8 +393,7 @@ Operational requirements:
 - the founder may administer the operating wallet and execute expenses within
   an approved budget or spending limit;
 - establishing or increasing the operating limit, changing its destination,
-  or transferring above it requires the active multisig threshold and the
-  seven-day treasury timelock;
+  or transferring above it requires the active multisig threshold;
 - every claim, operating allocation, and expense reconciliation must be
   publicly auditable at the treasury level, without publishing private vendor
   or personal data.
@@ -436,7 +444,7 @@ general-purpose operating account. The movement path is:
 Creator Treasury Lock Escrow
 -> approved tranche unlock
 -> Creator Treasury Reserve Vault
--> active multisig threshold + 7-day timelock
+-> active multisig threshold + immediate execution
 -> Future Campaign Vault N
 -> programme-controlled reward settlement
 ```
@@ -448,7 +456,7 @@ start condition, stop condition, expiry if any, settlement programme, terminal
 partial-payment rule, and unused-balance policy. Once funded, those economic
 fields are immutable. Only a predeclared pause/resume control may remain
 operational. Any material economic change requires a new campaign ID, new
-configuration, new vault, new multisig approval, and new seven-day timelock.
+configuration, new vault, and new multisig approval.
 Unless a funded campaign explicitly defines another approved rule, unused tokens
 remain in the same campaign vault and cannot be spent by another campaign.
 
@@ -487,9 +495,9 @@ paid to the leaf-bound beneficiary or classified as rollover under Section 4.4.
 Therefore:
 
 - no treasury multisig proposal is required for a valid holder claim;
-- no treasury timelock applies between the distribution vault and an ordinary
+- no treasury-operation approval applies between the distribution vault and an ordinary
   holder beneficiary;
-- no treasury timelock applies between the distribution vault and the fixed
+- no treasury-operation approval applies between the distribution vault and the fixed
   `Treasury SOL Vault` beneficiary of the 800M treasury position;
 - the treasury cannot spend, redirect, borrow, or withdraw SOL directly from the
   distribution vault;
@@ -663,7 +671,7 @@ The Merkle-root lifecycle is:
    epoch under Section 4.4.5; it may add an entitlement but cannot reduce one.
 
 The `0.02 SOL` bond is a launch default. Changing it requires the treasury
-multisig, seven-day timelock, and public notice, and applies only to roots whose
+multisig and public notice, and applies only to roots whose
 verification window starts after the change.
 
 For an epoch with zero total weight, the programme publishes the manifest and
@@ -684,8 +692,8 @@ the destination cannot be supplied or changed by the caller:
 
 All valid claims use the same settlement path and are executable immediately
 after the epoch is sealed. They are not treasury withdrawal proposals, require
-no treasury multisig approval, and are not subject to the seven-day treasury
-timelock. A permissionless keeper may execute the treasury claim because the
+no treasury multisig approval, and are not subject to treasury-operation
+approval. A permissionless keeper may execute the treasury claim because the
 leaf fixes the destination and the caller cannot redirect the SOL.
 
 A token transfer or unlock after the epoch snapshot cannot alter the closed
@@ -716,8 +724,8 @@ Every correction epoch must:
   another holder's entitlement.
 
 The `Correction Reserve Vault` contains treasury-owned SOL only. It is funded
-from the `Treasury SOL Vault` through a timelocked treasury allocation or a
-previously timelocked spending limit whose fixed destination and purpose are the
+from the `Treasury SOL Vault` through a multisig-approved treasury allocation or a
+previously approved spending limit whose fixed destination and purpose are the
 correction reserve. Accepted challenge bonds are returned; rejected challenge
 bonds are added to this reserve. If the reserve is insufficient, the correction
 remains publicly recorded as unfunded and cannot create a claim until the
@@ -733,11 +741,11 @@ canonical return destination.
 For an ordinary holder, the destination is the wallet or token account bound to
 that holder's `LockPosition`. For the 800M treasury position, the destination is
 only the canonical `Creator Treasury Reserve Vault`. The treasury instruction
-requires the active multisig threshold, but it has no seven-day timelock because
+requires the active multisig threshold, but it has no post-approval execution delay because
 the tokens move only from the programme-controlled `Treasury Lock Escrow` back
 inside the treasury custody perimeter.
 
-The treasury timelock applies only if a later instruction attempts to move those
+The treasury approval threshold applies only if a later instruction attempts to move those
 tokens out of the `Creator Treasury Reserve Vault` for a campaign, sale,
 liquidity, pledge, remuneration, grant, or another discretionary purpose. Claim
 settlement from the fee-distribution pool and token unlock from the lock escrow
@@ -773,7 +781,7 @@ The 200M ceiling applies collectively to all reward types in the initial
 promotion described in this section. Tokens remaining in the initial vault are
 reserved exclusively for that promotion and do not participate in treasury-fee
 distributions. Future promotions may receive existing tokens from the 800M
-Creator Treasury Reserve through the multisig and timelock process, but each
+Creator Treasury Reserve through the multisig approval process, but each
 future campaign requires a separately approved configuration and a separate
 programme-controlled vault with its own formula, maximum allocation, stop
 condition, unused-balance policy, and public accounting. No campaign may
@@ -1016,7 +1024,7 @@ After it is exhausted, a future campaign may be funded by transferring an
 approved amount of existing tokens from the 800M Creator Treasury Reserve into
 a newly created, campaign-specific programme-controlled vault. Each such
 campaign must be independently authorised through the confirmed multisig and
-seven-day timelock and must publish, before execution:
+active 2-of-3 multisig threshold and must publish, before execution:
 
 - the amount transferred from the Creator Treasury Reserve;
 - eligible actions or outcomes and exact reward formulas;
@@ -1030,7 +1038,7 @@ seven-day timelock and must publish, before execution:
   another campaign vault, the prize vault, or any SOL vault.
 
 The approved tranche must be transferred directly from treasury custody to the
-new campaign vault after the timelock; it must not pass through a founder or
+new campaign vault immediately after multisig approval; it must not pass through a founder or
 operator wallet. The campaign programme then settles ordinary rewards without
 per-reward multisig approvals.
 
@@ -1062,20 +1070,20 @@ policy.
 Required instructions include:
 
 - initialise the mint, `TreasuryPolicyExecutor`-controlled Creator Treasury Reserve Vault and Treasury SOL Vault, programme-controlled Treasury Lock Escrow, Correction Reserve Vault, and the 200M Initial Campaign Reserve Vault; revoke mint authority; validate allocations; then lock the complete 800M reserve;
-- create a future campaign vault and fund it with a timelocked treasury tranche;
+- create a future campaign vault and fund it with a multisig-approved treasury tranche;
 - lock treasury tokens into the canonical escrow and unlock them immediately
   back to the canonical reserve vault after a valid multisig-authorised
-  instruction, without a seven-day delay or additional unbonding period;
+  instruction, without an execution delay or additional unbonding period;
 - schedule and execute discretionary outbound treasury movements through the
-  on-chain treasury timelock/executor;
-- create or amend bounded spending limits only through the same timelocked
+  on-chain multisig-governed treasury executor;
+- create or amend bounded spending limits only through the same multisig
   governance path;
 - deposit the configured treasury-fee share;
 - publish a provisional epoch root and calculation-manifest hash;
 - challenge a provisional root with the configured bond, reject duplicate evidence, resolve within the deadline, expire unresolved roots, cancel, and replace roots during the review lifecycle;
 - seal an unchallenged or resolved epoch root after the verification window;
 - claim a sealed distribution immediately after sealing only to the beneficiary
-  encoded in its leaf, without applying the treasury timelock;
+  encoded in its leaf, without applying treasury-operation approval;
 - settle proposal-action, supporter-action, active-rule creator, and
   elected-rule voter rewards only from the campaign-specific vault bound to the
   active campaign configuration;
@@ -1100,10 +1108,10 @@ vectors and must produce identical roots and accounting totals.
   every campaign vault address and authority, campaign reserve balances, fee
   splits, locks, epoch roots, and claims are publicly auditable.
 - Critical configuration changes and discretionary outbound treasury movements
-  must be timelocked and controlled by the named multisig. The timelock must be
-  enforced by an on-chain executor or equivalent multisig-native mechanism with
-  no direct-transfer bypass. Protocol claims and canonical lock/escrow returns
-  are expressly excluded from this delay.
+  must be controlled by the named multisig through an on-chain executor or
+  equivalent multisig-native mechanism with no direct-transfer bypass. The
+  execution delay is zero; protocol claims and canonical lock/escrow returns
+  remain independent of multisig approval.
 - The immutable supply cannot be changed after mint-authority revocation. Sealed epochs and prior claims are protected by the immutable Tokenomics Core programme after its upgrade authority is revoked before real-value mainnet activation.
 - Provisional epoch roots, challenges, root replacements, resolution reasons,
   root versions, manifests, and final sealing transactions must be public. A
@@ -1133,7 +1141,7 @@ instruction may retain equivalent power over its PDAs.
 
 **Game and Application Layer — updateable:** turns, game rules, AI compiler,
 indexer, APIs, frontend, analytics, and other product components may remain
-upgradeable under the active multisig and seven-day timelock. They cannot become
+upgradeable under the active multisig. They cannot become
 an authority over Tokenomics Core vaults or mutate sealed tokenomic state.
 
 ### 6.5 Emergency pause and safe-exit invariants
@@ -1230,8 +1238,8 @@ user confirmation.
     multisig-owned `LockPosition`; the three signer wallets use independent
     devices and seeds; recovery procedures are documented; tests prove that
     canonical lock/unlock and fee-pool claims execute without a treasury delay,
-    while discretionary outbound vault movements cannot bypass the seven-day
-    timelock.
+    while discretionary outbound vault movements require the active multisig
+    threshold and cannot bypass its executor.
 - [ ] **M10.1.2 — Irreversible authority revocation.**
   - Approval: mint authority and freeze authority are `None`; an attempted
     second mint fails in automated and devnet tests.
@@ -1256,7 +1264,7 @@ user confirmation.
   - Approval: lock, top-up, and immediate partial/full unlock flows preserve
     custody and correctly stop future accrual; the TreasuryPolicyExecutor-controlled Creator Treasury Reserve Vault, governed by the multisig, and the programme-controlled Treasury Lock Escrow are distinct; the treasury multisig is the beneficial owner and sole treasury
     unlock authority; treasury unlocks return only to the canonical reserve
-    vault and execute without the seven-day discretionary-movement timelock.
+    vault and execute without an additional discretionary-movement delay.
 - [ ] **M10.2.2 — Treasury fee routing.**
   - Approval: each paid action routes 100% of the defined treasury-fee share
     to the token-lock distribution vault; prize pools are unchanged; active-rule
@@ -1274,8 +1282,8 @@ user confirmation.
     `Treasury SOL Vault`; invalid proof, double claim, cross-epoch replay,
     redirected beneficiary, and claim above the remaining sealed liability fail;
     both ordinary and treasury-position claims execute without the treasury
-    timelock; later operating withdrawals remain separate and obey the seven-day
-    timelock or a previously timelocked on-chain spending limit.
+    delay; later operating withdrawals remain separate and obey the active
+    multisig threshold or a previously approved on-chain spending limit.
 - [ ] **M10.2.5 — Merkle-root publication and contestation.**
   - Approval: independent Rust and TypeScript calculations agree before publication; a restricted publisher can submit only a provisional root and content-addressed reproducible artifacts; claims remain disabled for the 24-hour review window; any wallet can challenge with a 0.02-SOL bond and unique evidence hash; accepted replacements increment the root version and restart the window; challenges are resolved within 48 hours after the window or the root expires; rejected bonds fund the Correction Reserve Vault; the programme explicitly does not claim to reconstruct semantic completeness on-chain; a sealed root is immutable after Tokenomics Core upgrade-authority revocation.
 - [ ] **M10.2.6 — Correction reserve and positive correction epochs.**
@@ -1314,7 +1322,7 @@ user confirmation.
     `0.2` inviter, nominal `0.03` invitee, 15%-of-first-round-invitee-rewards
     bonus using the closed list of actually paid invitee referral/proposal/supporter/creator/voter rewards, exclusion of prizes, fee claims, transfers, unpaid amounts, and downstream referrals, canonical leg ordering, terminal partial payment, one-reward-per-invitee uniqueness, no per-inviter cap, aggregate campaign-vault cap, and idempotent settlement are tested.
 - [ ] **M10.3.5 — Future campaign vault isolation.**
-  - Approval: a devnet campaign is funded by a disclosed, timelocked tranche
+  - Approval: a devnet campaign is funded by a disclosed, multisig-approved tranche
     transferred directly from Creator Treasury custody to a new dedicated
     campaign vault; ordinary rewards require no per-payment multisig approval;
     funding freezes every economic configuration field; an attempted in-place economic amendment fails and requires a new campaign/vault; cross-campaign debits, operator-wallet routing, reserve bypass, and undefined unused-balance handling fail safely.
@@ -1370,7 +1378,7 @@ user confirmation.
     liabilities and dust rollover, final partial campaign reward, exact reserve
     exhaustion, and idempotent replay reconcile.
 - [ ] **M10.5.4 — Mainnet go/no-go.**
-  - Approval: M9 gates, M10.0 legal gate, multisig/timelock operations,
+  - Approval: M9 gates, M10.0 legal gate, multisig treasury operations,
     Tokenomics Core final programme hashes and upgrade-authority revocation, TreasuryPolicyExecutor no-bypass proof, safe-exit pause matrix, incident runbook, monitoring, and user disclosures are approved.
 - [ ] **M10.5 approval.**
   - Approval: all launch gates are approved explicitly by the owner.
@@ -1385,8 +1393,8 @@ user confirmation.
 | Proofs and roots | Wrong wallet, beneficiary, amount, epoch, network, or root fails; replay fails; provisional-root challenge/replacement and 24-hour review work; sealed roots are immutable after Tokenomics Core upgrade-authority revocation; optimistic settlement limitations are explicit. |
 | Campaigns | Genesis funds exactly 200M into the dedicated PDA-controlled Initial Campaign Reserve Vault; campaign tokens earn no locking weight; exact action/referral formulas, creator/voter `15%` formulas, atom-level `1 calculated reward lamport = 1 token atom` conversion, independent 0.25-token caps, canonical reward-leg ordering, final partial payment to exact zero upon the next eligible leg, referral uniqueness and closed bonus base, vault isolation, future-campaign tranche funding, and atomic no-overspend behavior hold. |
 | Accounting | Finalised events only; retries/reorgs are idempotent; on-chain/API/indexer totals reconcile. |
-| Custody | Initial `2-of-3` rejects one-signer movement; independent-device recovery works; canonical treasury lock/unlock moves only between the reserve vault and escrow without delay; discretionary outbound vault movements cannot execute before the seven-day timelock or bypass its executor; a rehearsed expansion to `3-of-5` preserves authority and records founder-controlled signer concentration. |
-| Treasury cash-flow | The distribution vault is not a treasury spending vault; ordinary claims pay their leaf-bound holder beneficiaries and the treasury-position claim pays the fixed Treasury SOL Vault, all without a treasury timelock; claims do not unlock tokens; later operating withdrawals are separately scheduled, authorised, delayed or spending-limit constrained, and reconciled. |
+| Custody | Initial `2-of-3` rejects one-signer movement; independent-device recovery works; canonical treasury lock/unlock moves only between the reserve vault and escrow without delay; discretionary outbound vault movements require the active multisig threshold and cannot bypass its executor; a rehearsed expansion to `3-of-5` preserves authority and records founder-controlled signer concentration. |
+| Treasury cash-flow | The distribution vault is not a treasury spending vault; ordinary claims pay their leaf-bound holder beneficiaries and the treasury-position claim pays the fixed Treasury SOL Vault, all without treasury-operation approval; claims do not unlock tokens; later operating withdrawals are separately scheduled, multisig-authorised or spending-limit constrained, and reconciled. |
 | UX | Mobile wallet happy/rejection/retry flows; clear English disclosure; no guaranteed-return language. |
 
 ## 10. Decision Register
@@ -1399,21 +1407,21 @@ user confirmation.
 | Treasury-fee distribution | 100% of the treasury-fee share goes to token lockers. |
 | Distribution cadence | One closed distribution epoch every seven completed turns. |
 | Claim expiry | None; sealed claims remain available indefinitely. |
-| Unlock | Every valid holder unlock, including the 800M treasury position, has no unbonding delay. Treasury tokens return only from the canonical Treasury Lock Escrow to the canonical Creator Treasury Reserve Vault; this internal custody movement is not subject to the seven-day treasury timelock. |
+| Unlock | Every valid holder unlock, including the 800M treasury position, has no unbonding delay. Treasury tokens return only from the canonical Treasury Lock Escrow to the canonical Creator Treasury Reserve Vault; this internal custody movement is not subject to an execution delay. |
 | Creator Treasury Reserve | The full 800M is eligible to lock and claim treasury fees under the same formula as every holder; its fee share finances operations. |
 | Treasury vault and escrow | Unlocked treasury tokens are held in the TreasuryPolicyExecutor-controlled Creator Treasury Reserve Vault governed by the multisig. Locked treasury tokens are held in the programme-PDA-controlled Treasury Lock Escrow. The multisig is the beneficial owner and sole unlock authority, and every unlock returns only to the canonical reserve vault. |
-| Treasury operating cash flow | SOL claimed by the locked 800M reserve settles immediately from the distribution vault to the fixed Treasury SOL Vault without a timelock. Only the later discretionary transfer from the Treasury SOL Vault to an Operating Wallet, remuneration wallet, vendor, or other external destination is subject to the seven-day timelock or a previously timelocked on-chain spending limit. |
-| Initial treasury custody | The Creator Treasury Reserve starts under a founder-controlled `2-of-3` multisig. The three signer wallets use separate devices, independently generated seeds, and physically separated backups. This protects against one-key loss or compromise but remains single-owner custody. |
+| Treasury operating cash flow | SOL claimed by the locked 800M reserve settles immediately from the distribution vault to the fixed Treasury SOL Vault without multisig approval. A later discretionary transfer from the Treasury SOL Vault to an Operating Wallet, remuneration wallet, vendor, or other external destination requires the active multisig threshold and is immediately executable after approval. |
+| Initial treasury custody | The Creator Treasury Reserve starts under a founder-controlled `2-of-3` multisig: `EHHVmFK3FM9qb2eyc8wnEwpHtVH3yW1FGZzrEGn4iSea`, `EAoZrh8TtZCYtUdKpkuMaNSrConsQoUQvzjZ7cuQGqdW`, and `7E3DMct5umGMA4mSeAr1UcJUFSd5kd444rK39G8GTC9p`. Device, seed, and backup records remain required. |
 | Planned multisig expansion | Two new members may later be added to the same multisig and the threshold changed to `3-of-5` after both new wallets are tested. If the founder retains the original three keys, the founder still retains unilateral threshold control; this must be publicly disclosed. |
-| Treasury timelock | The seven-day delay applies only to discretionary outbound use of assets held in treasury-controlled vaults and to critical authority, member, threshold, destination, or spending-policy changes. It does not apply to fee-pool claims, ordinary-holder claims, treasury-position claims to the fixed Treasury SOL Vault, or canonical lock/unlock movements between the Creator Treasury Reserve Vault and Treasury Lock Escrow. The delay must be enforced on-chain without a threshold-signature bypass. |
+| Treasury execution | The execution delay is zero seconds. Discretionary outbound use of assets held in treasury-controlled vaults and critical authority, member, threshold, destination, or spending-policy changes still require the active `2-of-3` multisig and the on-chain executor without a direct-transfer bypass. Fee-pool claims, ordinary-holder claims, treasury-position claims to the fixed Treasury SOL Vault, and canonical lock/unlock movements remain immediate. |
 | Claim destinations | Every sealed claim pays only the beneficiary encoded in its Merkle leaf. Ordinary holder claims pay the holder beneficiary; only the 800M treasury-position claim pays the fixed Treasury SOL Vault. Claims may be initiated permissionlessly but cannot redirect funds or unlock tokens. |
 | Zero-weight epoch | If an epoch has no locked-token weight, it creates no claims and rolls 100% of its gross distributable SOL into the next epoch. |
 | Epoch rounding and perpetual liabilities | `sum_of_merkle_claims` is the only perpetual liability retained for a sealed epoch. The difference between `gross_distributable` and that sum is rounding dust and rolls into the next epoch. |
 | Merkle-root governance | Optimistic public settlement: independent Rust/TypeScript reproduction, content-addressed manifest and leaves, 24-hour challenge window, 0.02-SOL bond, 48-hour post-window resolution deadline, automatic expiry of unresolved roots, replacement-version restart, and permissionless sealing. The programme does not claim to semantically reconstruct the full manifest on-chain. |
-| Programme immutability | Tokenomics Core remains upgradeable only through development/audit, then its upgrade authority is revoked before real-value mainnet activation. Game/application components remain updateable under multisig and timelock. |
+| Programme immutability | Tokenomics Core remains upgradeable only through development/audit, then its upgrade authority is revoked before real-value mainnet activation. Game/application components remain updateable under active multisig governance. |
 | Correction epochs | Post-seal underpayment is corrected only by a positive, separately funded correction epoch paid from the treasury-funded Correction Reserve Vault; no sealed entitlement is reduced and no locker/prize/campaign liability is debited. |
-| Operating wallet | The founder may operate a separate bounded Operating Wallet. Funding above an approved budget or spending limit requires the active multisig controls and applicable timelock. |
-| Initial 800M lock | After allocation verification and mint-authority revocation, all 800M treasury tokens are locked. The initial unlocked treasury-token balance is zero; future uses require partial unlock followed by the separately timelocked outbound movement. |
+| Operating wallet | The founder may operate a separate bounded Operating Wallet. Funding above an approved budget or spending limit requires the active multisig controls. |
+| Initial 800M lock | After allocation verification and mint-authority revocation, all 800M treasury tokens are locked. The initial unlocked treasury-token balance is zero; future uses require partial unlock followed by a separately multisig-approved outbound movement. |
 | Emergency pause | Guardian may pause only new exposure; sealed claims, finalised prize claims, ordinary unlocks, and canonical treasury unlocks remain executable. Unpause requires multisig, incident disclosure, and 24-hour notice. |
 | Holder autonomy | The project defines only official protocol utility; transfer, external integration, holding, or voluntary burning of unlocked tokens is outside project scope. |
 | Free-action transition | The first-action free period end is environment-configured (`freeActionWindowEndsBeforeTurnIndex`, main PRD §8.2): it ends after round 30 in production/mainnet, and after turn 99 in development/staging/devnet while the project is being built. From the configured cutover onward, normal game fees apply while token promotions may continue. |
@@ -1421,13 +1429,13 @@ user confirmation.
 | Proposal and supporter action rewards | While the initial reserve remains: every confirmed `propose_rule` creates a nominal 0.4-token reward and every confirmed in-favour `vote` creates a nominal 0.06-token reward; the final eligible leg may receive a partial amount that consumes the exact remaining vault balance. |
 | Initial promotion custody | The complete 200M allocation is deposited at genesis into a dedicated Initial Campaign Reserve Vault controlled by the campaign-program PDA. The founder, app server, and general treasury cannot manually settle or redirect ordinary rewards. |
 | Campaign reserve fee eligibility | Tokens held by an initial or future campaign vault remain liquid for rewards but are not locked and receive no treasury-fee distribution entitlement. Recipients may choose to lock tokens after settlement. |
-| Future campaign vaults | Every future campaign receives an approved existing-token tranche directly from Creator Treasury custody into a separate programme-controlled campaign vault after multisig approval and the seven-day timelock. Funding freezes all economic configuration; amendments require a new campaign and vault. Campaign vaults cannot debit one another. |
+| Future campaign vaults | Every future campaign receives an approved existing-token tranche directly from Creator Treasury custody into a separate programme-controlled campaign vault after multisig approval. Funding freezes all economic configuration; amendments require a new campaign and vault. Campaign vaults cannot debit one another. |
 | Unused campaign balance | Each future campaign must define its unused-balance policy before funding. Unless another rule is explicitly approved, unused tokens remain isolated in that campaign's vault. |
 | Active-rule creator reward | When an active alternative rule produces winners, its creator receives tokens equal to 15% of one individual alternative-rule winner payout in SOL, using the atom-level relation `1 calculated reward lamport = 1 token atom`, capped at 0.25 token per turn and subject to campaign-reserve availability. |
 | Elected-rule voter reward | A token pool equal to 15% of one individual alternative-rule winner payout in SOL is calculated using the atom-level relation `1 calculated reward lamport = 1 token atom`, capped at 0.25 token per turn, then divided among unique eligible wallets; token-atom remainder is assigned by canonical public-key order, so shares differ by at most one atom; repeated votes do not multiply a wallet's share. |
 | Reward-only accounting relation | With nine decimals, `1 calculated reward lamport = 1 Idealer token atom` exclusively for creator/voter calculations; integer math uses `u128`, multiplication before division, and floor rounding. This is not a market peg, redemption right, price promise, or general conversion rule. |
 | Direct fund rewards | Active-rule creator and elected-rule voter rewards are not paid directly in SOL from platform monetisation or the treasury-fee distribution vault. |
-| Future campaigns | Future promotions may use disclosed allocations transferred from the existing 800M Creator Treasury Reserve under multisig and timelock controls. |
+| Future campaigns | Future promotions may use disclosed allocations transferred from the existing 800M Creator Treasury Reserve under multisig controls. |
 | Referral qualification | The referred player's first confirmed guess, whether free or paid. |
 | Referral rewards | Inviter: 0.2 tokens. Invitee: 0.03 tokens. Inviter first-round bonus: 15% of the invitee's actually paid first-round invitee referral, proposal, supporter, creator, and voter rewards; prizes, fee claims, transfers, unpaid amounts, and downstream referral rewards are excluded. No per-inviter cap; the active campaign-vault balance is the aggregate cap. |
 | Initial promotion end | Only when the Initial Campaign Reserve Vault reaches exactly zero; there is no round-based expiry. The next eligible reward leg consumes any residual balance through partial payment. If no further eligible event occurs, the residual remains isolated and the campaign stays open. |
@@ -1438,10 +1446,10 @@ These decisions remain blocking; no implementation should infer them.
 
 | Priority | Decision needed | Why it matters |
 | --- | --- | --- |
-| P1 | Document the three initial signer addresses, device assignments, independent backup locations by role, and the `2-of-3` recovery procedure before genesis. | The threshold and the on-chain seven-day delay for discretionary outbound treasury movements are confirmed, but the operational records are required to prove real key separation and recovery. |
+| P1 | Document device assignments, independent backup locations by role, and the `2-of-3` recovery procedure for the three supplied signer addresses before genesis. | The threshold and zero-second execution-delay policy for discretionary outbound treasury movements are confirmed, but the operational records are required to prove real key separation and recovery. |
 | P1 | Confirm the initial Operating Wallet budget/spending limit and the process for replenishing it from the Treasury SOL Vault. | Required to let the solo operator cover routine costs without giving the daily wallet unrestricted treasury access. |
 | P2 | Before expanding to `3-of-5`, document the two new member addresses, roles, independent key custody, test signatures, and the exact configuration-transition transaction. | Required to avoid an unusable threshold or false claims of independent governance during the expansion. |
-| P1 | Confirm token name, symbol, metadata URI, and metadata update authority. | Nine decimals and the complete initial 800M lock are confirmed; display metadata remains required for genesis and public disclosure. |
+| P1 | Confirm the metadata URI and metadata update authority for `JUSDEALER` (`JDR`). | Nine decimals, token name, symbol, and the complete initial 800M lock are confirmed; remaining display metadata is required for genesis and public disclosure. |
 | P1 | Confirm target jurisdictions and user eligibility rules for real-value/mainnet activation. | Required before real-value fee distributions. |
 
 ## 11. Inconsistency Review
@@ -1451,14 +1459,14 @@ single 1B genesis supply, a 200M initial promotion allocation held in a
 separate programme-controlled Campaign Reserve Vault, and a fully lock-eligible
 800M Creator Treasury Reserve. The 200M campaign allocation remains liquid for
 reward settlement but earns no treasury-fee weight, and every future campaign
-must use its own isolated vault funded by a disclosed timelocked tranche of the
+must use its own isolated vault funded by a disclosed multisig-approved tranche of the
 existing 800M reserve. It confirms an initial
 founder-controlled `2-of-3` multisig with physically and digitally separated
-keys, a seven-day on-chain timelock for discretionary outbound movements from
-treasury-controlled vaults, and a planned path to add two members and change the
+keys, zero-second execution after multisig approval for discretionary outbound
+movements from treasury-controlled vaults, and a planned path to add two members and change the
 same multisig to `3-of-5`. Protocol claims and canonical lock/unlock movements
-inside the treasury custody perimeter are explicitly immediate and outside that
-timelock. It explicitly
+inside the treasury custody perimeter are explicitly immediate and outside the
+discretionary multisig-operation scope. It explicitly
 discloses that the founder retains unilateral threshold control while holding
 three qualifying keys. It also separates ordinary holder claims from the treasury position's
 fixed-destination claim, distinguishes the TreasuryPolicyExecutor-controlled reserve vault governed by the multisig
