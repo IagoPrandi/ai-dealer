@@ -176,14 +176,14 @@ async function assertDevnetConnection(connection: Connection) {
 
 function decodeProgramDataAuthority(data: Buffer) {
   if (data.length < 13 || data.readUInt32LE(0) !== 3) {
-    throw new Error("Tokenomics Core has an invalid ProgramData account.");
+    throw new Error("Idealer has an invalid ProgramData account.");
   }
   const authorityOption = data.readUInt8(12);
   if (authorityOption === 0) {
     return null;
   }
   if (authorityOption !== 1 || data.length < 45) {
-    throw new Error("Tokenomics Core has an invalid upgrade authority option.");
+    throw new Error("Idealer has an invalid upgrade authority option.");
   }
   return new PublicKey(data.subarray(13, 45)).toBase58();
 }
@@ -253,7 +253,7 @@ async function assertReviewedProgramAndBuffer(connection: Connection) {
   const [programInfo, programDataInfo, bufferInfo] =
     await connection.getMultipleAccountsInfo(
       [program, programData, buffer],
-      "confirmed",
+      "finalized",
     );
 
   if (
@@ -263,18 +263,38 @@ async function assertReviewedProgramAndBuffer(connection: Connection) {
     programInfo.data.length < 36 ||
     programInfo.data.readUInt32LE(0) !== 2
   ) {
-    throw new Error("Tokenomics Core is not the reviewed upgradeable program.");
+    throw new Error("Idealer is not the reviewed upgradeable program.");
   }
   const linkedProgramData = new PublicKey(programInfo.data.subarray(4, 36));
   if (!linkedProgramData.equals(programData)) {
-    throw new Error("Tokenomics Core links to a different ProgramData account.");
+    throw new Error("Idealer links to a different ProgramData account.");
   }
   if (!programDataInfo || !programDataInfo.owner.equals(loader)) {
-    throw new Error("Tokenomics Core ProgramData could not be verified.");
+    throw new Error("Idealer ProgramData could not be verified.");
   }
   if (decodeProgramDataAuthority(programDataInfo.data) !== config.vaultAddress) {
     throw new Error(
-      "Tokenomics Core upgrade authority is not Squads vault 0.",
+      "Idealer upgrade authority is not Squads vault 0.",
+    );
+  }
+  const deployedBytes = programDataInfo.data.subarray(45);
+  if (deployedBytes.length !== config.programDataCapacity) {
+    throw new Error("Idealer ProgramData capacity does not match the review.");
+  }
+  const deployedPrefix = deployedBytes.subarray(
+    0,
+    config.currentProgramPrefixLength,
+  );
+  const zeroPadding = deployedBytes.subarray(
+    config.currentProgramPrefixLength,
+  );
+  if (
+    (await sha256Hex(deployedPrefix)) !==
+      config.currentProgramPrefixSha256 ||
+    zeroPadding.some((byte) => byte !== 0)
+  ) {
+    throw new Error(
+      "Idealer deployed bytes or pre-upgrade zero padding differ from the review.",
     );
   }
   if (!bufferInfo || !bufferInfo.owner.equals(loader)) {

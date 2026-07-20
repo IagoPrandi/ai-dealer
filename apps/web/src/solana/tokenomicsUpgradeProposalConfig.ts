@@ -1,20 +1,22 @@
 import { SQUADS_DEVNET_CONFIG } from "./squadsDevnetConfig";
-import {
-  BPF_UPGRADEABLE_LOADER_ID,
-  TOKENOMICS_GENESIS_CONFIG,
-} from "./tokenomicsGenesisConfig";
+import { IDEALER_PROGRAM_ID } from "./idealerProgram";
+import { BPF_UPGRADEABLE_LOADER_ID } from "./tokenomicsGenesisConfig";
 
 export const TOKENOMICS_UPGRADE_PROPOSAL_CONFIG = Object.freeze({
-  bufferAddress: "4HHMDBPqr3hTX5wr2cs4mMRsATGeKiHUjQrs5aqVguoE",
-  bufferProgramLength: 1_082_976,
+  bufferAddress: "9G8tkVowKwf6s5TZNbqk4wBc1noKvj4PzoUocRsbGMU7",
+  bufferProgramLength: 1_023_336,
   bufferSha256:
-    "cb7d9e93aa943b1e7edd2ff6b9eacbd5d770d886a1ac66d186b71b3f21d6bef8",
+    "2ca0484a3fef56bfa9f5831022474f3cef839bc27db36758d83cb8f57bf012d1",
+  currentProgramPrefixLength: 790_960,
+  currentProgramPrefixSha256:
+    "2b64705d56a3e410f7a701c496060d4754711a15e6441857745ca36bedf2d274",
   loaderProgramId: BPF_UPGRADEABLE_LOADER_ID,
-  memo: "JUSDEALER devnet empty-metadata URI upgrade",
+  memo: "JUSDEALER devnet Idealer M10 reward CPI upgrade",
   multisigAddress: SQUADS_DEVNET_CONFIG.multisigAddress,
   network: "devnet",
-  programDataAddress: "DBM5tfyUMcThsXyvMuYMEU1Xgfar4KZpXtSAh9LXusaS",
-  programId: TOKENOMICS_GENESIS_CONFIG.programId,
+  programDataAddress: "AWGUseV1DEsoSvdW7CDMxxBDUPQXAKqTXyxHVzeTnL8g",
+  programDataCapacity: 1_023_336,
+  programId: "ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd",
   spillAddress: SQUADS_DEVNET_CONFIG.vaultAddress,
   vaultAddress: SQUADS_DEVNET_CONFIG.vaultAddress,
   vaultIndex: SQUADS_DEVNET_CONFIG.vaultIndex,
@@ -27,8 +29,8 @@ export function validateTokenomicsUpgradeProposalConfig(): string[] {
   if (config.network !== "devnet") {
     errors.push("The upgrade proposal must be pinned to devnet.");
   }
-  if (config.programId !== TOKENOMICS_GENESIS_CONFIG.programId) {
-    errors.push("The upgrade target does not match Tokenomics Core.");
+  if (config.programId !== IDEALER_PROGRAM_ID.toString()) {
+    errors.push("The upgrade target does not match the Idealer program.");
   }
   if (config.multisigAddress !== SQUADS_DEVNET_CONFIG.multisigAddress) {
     errors.push("The upgrade proposal does not target the configured multisig.");
@@ -47,6 +49,14 @@ export function validateTokenomicsUpgradeProposalConfig(): string[] {
   }
   if (config.bufferProgramLength <= 0) {
     errors.push("The reviewed buffer length is invalid.");
+  }
+  if (
+    config.programDataCapacity !== config.bufferProgramLength ||
+    config.currentProgramPrefixLength <= 0 ||
+    config.currentProgramPrefixLength >= config.programDataCapacity ||
+    !/^[0-9a-f]{64}$/.test(config.currentProgramPrefixSha256)
+  ) {
+    errors.push("The reviewed Idealer ProgramData layout is invalid.");
   }
 
   return errors;
