@@ -40,6 +40,10 @@ export const TOKENOMICS_GENESIS_CONFIG = Object.freeze({
   multisigAddress: SQUADS_DEVNET_CONFIG.multisigAddress,
   name: "JUSDEALER",
   network: "devnet",
+  programArtifactLength: 1_082_976,
+  programArtifactSha256:
+    "cb7d9e93aa943b1e7edd2ff6b9eacbd5d770d886a1ac66d186b71b3f21d6bef8",
+  programCapacity: 1_093_160,
   programId:
     process.env.NEXT_PUBLIC_TOKENOMICS_CORE_PROGRAM_ID ??
     TOKENOMICS_DEVNET_PROGRAM_ID,
@@ -144,6 +148,13 @@ export function validateTokenomicsGenesisConfig(): string[] {
   }
   if (config.decimals !== 9) {
     errors.push("JDR must use exactly nine decimals.");
+  }
+  if (
+    !/^[0-9a-f]{64}$/.test(config.programArtifactSha256) ||
+    config.programArtifactLength <= 0 ||
+    config.programCapacity < config.programArtifactLength
+  ) {
+    errors.push("The reviewed devnet Tokenomics Core artifact is invalid.");
   }
   if (
     config.campaignAllocationAtoms + config.treasuryAllocationAtoms !==

@@ -2,6 +2,10 @@ use anchor_lang::{
     prelude::{Clock, Pubkey},
     AccountDeserialize, InstructionData, ToAccountMetas,
 };
+use anchor_spl::{
+    metadata::mpl_token_metadata,
+    token::{spl_token, TokenAccount},
+};
 use idealer::{
     accounts, instruction, DrawStatus, GlobalConfig, IdealerError, InitializeGlobalConfigArgs,
     PlayerGuess, PrecompilationStatus, PrecompileRuleArgs, ProposeRuleArgs,
@@ -18,6 +22,11 @@ use solana_sdk::{
 };
 use solana_sha256_hasher::hash;
 use solana_system_interface::{instruction as system_instruction, program as system_program};
+use tokenomics_core::{
+    accounts as tokenomics_accounts, domain as tokenomics_domain,
+    instruction as tokenomics_instruction, CampaignReserve, CampaignRewardReceipt,
+    InitializeGenesisArgs,
+};
 
 const PLAYER_BALANCE: u64 = 2_000_000_000;
 
@@ -31,6 +40,10 @@ const RANDOMNESS_DISCRIMINATOR: [u8; 8] = [10, 66, 229, 135, 220, 239, 217, 114]
 
 fn pda(seeds: &[&[u8]]) -> Pubkey {
     Pubkey::find_program_address(seeds, &idealer::ID).0
+}
+
+fn tokenomics_pda(seeds: &[&[u8]]) -> Pubkey {
+    Pubkey::find_program_address(seeds, &tokenomics_core::ID).0
 }
 
 /// Assert a processed instruction failed with the given Anchor custom error
@@ -125,6 +138,14 @@ fn process_idealer_instruction<'a, 'b, 'c, 'info>(
     // AccountInfo lifetime, so this test-only adapter narrows the API mismatch.
     let anchor_accounts: &'info [AccountInfo<'info>] = unsafe { std::mem::transmute(accounts) };
     idealer::entry(program_id, anchor_accounts, instruction_data)
+}
+
+fn process_metadata_stub(
+    _program_id: &Pubkey,
+    _accounts: &[AccountInfo<'_>],
+    _instruction_data: &[u8],
+) -> ProgramResult {
+    Ok(())
 }
 
 fn test_config_args() -> InitializeGlobalConfigArgs {
@@ -1775,4 +1796,212 @@ async fn claim_flow_pays_winner_and_rejects_legacy_sol_rewards() {
     )
     .await;
     assert_custom_error(creator_reward, u32::from(IdealerError::ClaimKindMismatch));
+}
+
+#[tokio::test]
+#[ignore = "requires an SBF build and SBF_OUT_DIR; run the explicit SBF integration suite"]
+async fn proposal_reward_cpi_debits_campaign_and_creates_one_receipt() {
+    let mut test = ProgramTest::new(
+        "idealer",
+        idealer::ID,
+        processor!(process_idealer_instruction),
+    );
+    test.add_program(
+        "tokenomics_core",
+        tokenomics_core::ID,
+        None,
+    );
+    test.prefer_bpf(false);
+    test.add_program(
+        "spl_token",
+        spl_token::ID,
+        processor!(spl_token::processor::Processor::process),
+    );
+    test.add_program(
+        "mpl_token_metadata",
+        mpl_token_metadata::ID,
+        processor!(process_metadata_stub),
+    );
+    let mut context = test.start_with_context().await;
+
+    let turn_id = 1_u64;
+    initialize_and_open_turn(&mut context, turn_id).await;
+    let global_config = pda(&[b"global_config"]);
+
+    let mint = Keypair::new();
+    let governance = context.payer.pubkey();
+    let token_config = tokenomics_pda(&[b"token_config"]);
+    let executor = tokenomics_pda(&[b"treasury_policy_executor"]);
+    let treasury_reserve = tokenomics_pda(&[b"creator_treasury_reserve_vault"]);
+    let treasury_escrow = tokenomics_pda(&[b"treasury_lock_escrow"]);
+    let campaign_vault = tokenomics_pda(&[b"campaign_vault", &0u64.to_le_bytes()]);
+    let campaign = tokenomics_pda(&[b"campaign", &0u64.to_le_bytes()]);
+    let treasury_position =
+        tokenomics_pda(&[b"lock_position", governance.as_ref()]);
+    let distribution_vault = tokenomics_pda(&[b"distribution_vault"]);
+    let treasury_sol_vault = tokenomics_pda(&[b"treasury_sol_vault"]);
+    let correction_reserve = tokenomics_pda(&[b"correction_reserve_vault"]);
+    let metadata = mpl_token_metadata::accounts::Metadata::find_pda(&mint.pubkey()).0;
+
+    process(
+        &mut context,
+        Instruction {
+            program_id: tokenomics_core::ID,
+            accounts: tokenomics_accounts::InitializeGenesis {
+                payer: governance,
+                token_config,
+                treasury_policy_executor: executor,
+                mint: mint.pubkey(),
+                metadata,
+                governance,
+                creator_treasury_reserve_vault: treasury_reserve,
+                treasury_lock_escrow: treasury_escrow,
+                initial_campaign_vault: campaign_vault,
+                initial_campaign: campaign,
+                treasury_lock_position: treasury_position,
+                distribution_vault,
+                treasury_sol_vault,
+                correction_reserve_vault: correction_reserve,
+                metadata_program: mpl_token_metadata::ID,
+                token_program: spl_token::ID,
+                system_program: system_program::ID,
+                rent: solana_sdk::sysvar::rent::ID,
+            }
+            .to_account_metas(None),
+            data: tokenomics_instruction::InitializeGenesis {
+                args: InitializeGenesisArgs {
+                    governance,
+                    guardian: governance,
+                    game_authority: global_config,
+                    epoch_root_publisher: governance,
+                    network: "devnet".to_owned(),
+                    metadata_uri: String::new(),
+                    initial_campaign_config_hash: [1; 32],
+                    initial_unused_balance_policy_hash: [2; 32],
+                },
+            }
+            .data(),
+        },
+        &[&mint],
+    )
+    .await
+    .unwrap();
+
+    let proposer = Keypair::new();
+    fund(&mut context, &proposer.pubkey()).await;
+    submit_guess(&mut context, &proposer, turn_id, [1, 2, 3, 4, 5, 6])
+        .await
+        .unwrap();
+    let rule_id = 7_u64;
+    propose_rule(
+        &mut context,
+        &proposer,
+        turn_id,
+        rule_id,
+        "Win if the draw includes one.",
+    )
+    .await
+    .unwrap();
+    let rule_proposal = pda(&[
+        b"rule",
+        &turn_id.to_le_bytes(),
+        &rule_id.to_le_bytes(),
+    ]);
+
+    let beneficiary_token_account = Keypair::new();
+    let token_account_rent = context
+        .banks_client
+        .get_rent()
+        .await
+        .unwrap()
+        .minimum_balance(TokenAccount::LEN);
+    process(
+        &mut context,
+        system_instruction::create_account(
+            &governance,
+            &beneficiary_token_account.pubkey(),
+            token_account_rent,
+            TokenAccount::LEN as u64,
+            &spl_token::ID,
+        ),
+        &[&beneficiary_token_account],
+    )
+    .await
+    .unwrap();
+    process(
+        &mut context,
+        spl_token::instruction::initialize_account3(
+            &spl_token::ID,
+            &beneficiary_token_account.pubkey(),
+            &mint.pubkey(),
+            &proposer.pubkey(),
+        )
+        .unwrap(),
+        &[],
+    )
+    .await
+    .unwrap();
+
+    let reward_receipt = tokenomics_pda(&[
+        b"campaign_reward",
+        campaign.as_ref(),
+        rule_proposal.as_ref(),
+    ]);
+    let settle_reward = Instruction {
+        program_id: idealer::ID,
+        accounts: accounts::SettleProposalTokenReward {
+            payer: governance,
+            global_config,
+            rule_proposal,
+            tokenomics_program: tokenomics_core::ID,
+            token_config,
+            mint: mint.pubkey(),
+            campaign,
+            campaign_vault,
+            beneficiary_token_account: beneficiary_token_account.pubkey(),
+            reward_receipt,
+            token_program: spl_token::ID,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+        data: instruction::SettleProposalTokenReward {}.data(),
+    };
+    process(&mut context, settle_reward.clone(), &[])
+        .await
+        .unwrap();
+
+    let beneficiary: TokenAccount =
+        read_anchor_account(&mut context, beneficiary_token_account.pubkey()).await;
+    assert_eq!(
+        beneficiary.amount,
+        tokenomics_domain::PROPOSAL_REWARD_ATOMS
+    );
+    assert_eq!(beneficiary.owner, proposer.pubkey());
+
+    let receipt: CampaignRewardReceipt =
+        read_anchor_account(&mut context, reward_receipt).await;
+    assert_eq!(receipt.action_id, rule_proposal.to_bytes());
+    assert_eq!(receipt.beneficiary, proposer.pubkey());
+    assert_eq!(receipt.paid_atoms, tokenomics_domain::PROPOSAL_REWARD_ATOMS);
+    assert!(!receipt.final_partial);
+
+    let campaign_state: CampaignReserve = read_anchor_account(&mut context, campaign).await;
+    assert_eq!(
+        campaign_state.remaining_atoms,
+        tokenomics_domain::INITIAL_CAMPAIGN_ATOMS
+            - tokenomics_domain::PROPOSAL_REWARD_ATOMS
+    );
+    assert_eq!(
+        campaign_state.cumulative_distributed_atoms,
+        tokenomics_domain::PROPOSAL_REWARD_ATOMS
+    );
+
+    // The receipt PDA uses `init`, so replay is rejected before another debit.
+    assert!(process(&mut context, settle_reward, &[]).await.is_err());
+    let campaign_after_replay: CampaignReserve =
+        read_anchor_account(&mut context, campaign).await;
+    assert_eq!(
+        campaign_after_replay.cumulative_distributed_atoms,
+        tokenomics_domain::PROPOSAL_REWARD_ATOMS
+    );
 }

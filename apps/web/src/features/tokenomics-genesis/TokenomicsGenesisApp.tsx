@@ -127,6 +127,12 @@ function GenesisReview({ summary }: { summary: TokenomicsGenesisSummary }) {
             {shortAddress(summary.programUpgradeAuthority)}
           </dd>
         </div>
+        <div>
+          <dt>Deployed artifact SHA-256</dt>
+          <dd title={summary.programArtifactSha256}>
+            {shortAddress(summary.programArtifactSha256)}
+          </dd>
+        </div>
       </dl>
 
       <div className="tg-uri">

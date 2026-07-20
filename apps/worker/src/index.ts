@@ -38,6 +38,10 @@ import {
   createPrecompileLoopConfig,
   startPrecompileLoop,
 } from "./precompile-loop.js";
+import {
+  createTokenRewardSettlementConfig,
+  startTokenRewardSettlementLoop,
+} from "./token-reward-settlement.js";
 
 export * from "./api-bridge.js";
 export * from "./claims.js";
@@ -50,6 +54,7 @@ export * from "./settlement.js";
 export * from "./settlement-loop.js";
 export * from "./settlement-scheduler.js";
 export * from "./switchboard.js";
+export * from "./token-reward-settlement.js";
 export * from "./turn-automation.js";
 
 // Load the repo-root .env for native (non-Docker) dev so DATABASE_URL/REDIS_URL,
@@ -556,6 +561,21 @@ if (
 
   void createPrecompileLoopConfig().then((precompileConfig) => {
     const timer = startPrecompileLoop(precompileConfig);
+
+    if (!timer) {
+      return;
+    }
+
+    const stop = () => {
+      clearInterval(timer);
+    };
+
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+  });
+
+  void createTokenRewardSettlementConfig().then((rewardConfig) => {
+    const timer = startTokenRewardSettlementLoop(rewardConfig);
 
     if (!timer) {
       return;

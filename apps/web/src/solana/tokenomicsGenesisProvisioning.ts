@@ -50,6 +50,9 @@ const METADATA_PROGRAM_ID = address(TOKEN_METADATA_PROGRAM_ID);
 const UPGRADEABLE_LOADER_ID = new PublicKey(BPF_UPGRADEABLE_LOADER_ID);
 const ADDRESS_ENCODER = getAddressEncoder();
 const TEXT_ENCODER = new TextEncoder();
+const PROGRAM_DATA_METADATA_LENGTH = 45;
+const FINALIZATION_TIMEOUT_MS = 120_000;
+const FINALIZATION_POLL_INTERVAL_MS = 1_000;
 
 // Anchor account sizes plus the canonical Metaplex metadata allocation.
 const GENESIS_ACCOUNT_SIZES = Object.freeze([
@@ -88,6 +91,7 @@ export interface TokenomicsGenesisSummary {
   estimatedRentLamports: bigint;
   metadataUri: string;
   payerBalanceLamports: bigint;
+  programArtifactSha256: string;
   programDataAddress: string;
   programId: string;
   programUpgradeAuthority: string;
@@ -337,6 +341,38 @@ function decodeProgramDataAuthority(data: Buffer) {
   return new PublicKey(data.subarray(13, 45)).toBase58();
 }
 
+async function sha256Hex(data: Uint8Array) {
+  const digest = await globalThis.crypto.subtle.digest(
+    "SHA-256",
+    new Uint8Array(data),
+  );
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
+export function validateReviewedTokenomicsProgramArtifact({
+  capacity,
+  deployedHash,
+  paddingZero,
+}: {
+  capacity: number;
+  deployedHash: string;
+  paddingZero: boolean;
+}) {
+  const errors: string[] = [];
+  if (capacity !== TOKENOMICS_GENESIS_CONFIG.programCapacity) {
+    errors.push("Tokenomics Core ProgramData capacity changed.");
+  }
+  if (deployedHash !== TOKENOMICS_GENESIS_CONFIG.programArtifactSha256) {
+    errors.push("Tokenomics Core deployed bytes do not match the reviewed artifact.");
+  }
+  if (!paddingZero) {
+    errors.push("Tokenomics Core ProgramData padding is not zero-filled.");
+  }
+  return errors;
+}
+
 async function assertProgramAndAuthority(connection: Connection) {
   const program = new PublicKey(TOKENOMICS_GENESIS_CONFIG.programId);
   const programInfo = await connection.getAccountInfo(program, "confirmed");
@@ -369,7 +405,27 @@ async function assertProgramAndAuthority(connection: Connection) {
       "Tokenomics Core upgrade authority is not controlled by the configured Squads vault.",
     );
   }
+  const programBytes = programDataInfo.data.subarray(
+    PROGRAM_DATA_METADATA_LENGTH,
+  );
+  const deployedBytes = programBytes.subarray(
+    0,
+    TOKENOMICS_GENESIS_CONFIG.programArtifactLength,
+  );
+  const padding = programBytes.subarray(
+    TOKENOMICS_GENESIS_CONFIG.programArtifactLength,
+  );
+  const programArtifactSha256 = await sha256Hex(deployedBytes);
+  const artifactErrors = validateReviewedTokenomicsProgramArtifact({
+    capacity: programBytes.length,
+    deployedHash: programArtifactSha256,
+    paddingZero: padding.every((byte) => byte === 0),
+  });
+  if (artifactErrors.length > 0) {
+    throw new Error(artifactErrors.join(" "));
+  }
   return {
+    programArtifactSha256,
     programDataAddress: programDataAddress.toBase58(),
     upgradeAuthority,
   };
@@ -487,6 +543,7 @@ export async function prepareTokenomicsGenesis({
       estimatedRentLamports,
       metadataUri: TOKENOMICS_GENESIS_CONFIG.metadataUri,
       payerBalanceLamports: BigInt(payerBalance),
+      programArtifactSha256: program.programArtifactSha256,
       programDataAddress: program.programDataAddress,
       programId: TOKENOMICS_GENESIS_CONFIG.programId,
       programUpgradeAuthority: program.upgradeAuthority,
@@ -565,29 +622,106 @@ function decodeTokenConfig(data: Buffer) {
   const treasuryReserve = readAddress(data, offset);
   offset += 32;
   const treasuryEscrow = readAddress(data, offset);
+  offset += 32;
+  const initialCampaignVault = readAddress(data, offset);
+  offset += 32;
+  const distributionVault = readAddress(data, offset);
+  offset += 32;
+  const treasurySolVault = readAddress(data, offset);
+  offset += 32;
+  const correctionReserveVault = readAddress(data, offset);
+  offset += 32;
+  const network = readString(data, offset);
+  offset = network.nextOffset;
+  const nextEpochId = readU64(data, offset);
+  offset += 8;
+  const nextCorrectionEpochId = readU64(data, offset);
+  offset += 8;
+  const pendingRolloverLamports = readU64(data, offset);
+  offset += 8;
+  const totalSealedLiabilityRemaining = readU64(data, offset);
+  offset += 8;
+  const totalCorrectionLiabilityRemaining = readU64(data, offset);
+  offset += 8;
+  const paused = data.readUInt8(offset) !== 0;
 
   return {
+    correctionReserveVault,
+    distributionVault,
     gameAuthority,
     governance,
     guardian,
+    initialCampaignVault,
     metadata,
     metadataMutable,
     metadataUpdateAuthority,
     metadataUri: metadataUri.value,
     mint,
+    network: network.value,
+    nextCorrectionEpochId,
+    nextEpochId,
+    paused,
+    pendingRolloverLamports,
     publisher,
+    totalCorrectionLiabilityRemaining,
+    totalSealedLiabilityRemaining,
     treasuryEscrow,
     treasuryReserve,
+    treasurySolVault,
   };
 }
 
 function decodeTreasuryPosition(data: Buffer) {
   return {
     beneficialOwner: readAddress(data, 8),
+    isTreasury: data.readUInt8(192) !== 0,
     lockedAtoms: readU64(data, 168),
     mint: readAddress(data, 136),
     returnAccount: readAddress(data, 72),
+    solClaimBeneficiary: readAddress(data, 104),
     unlockAuthority: readAddress(data, 40),
+  };
+}
+
+function decodeTreasuryPolicyExecutor(data: Buffer) {
+  return {
+    delaySeconds: data.readBigInt64LE(40),
+    governance: readAddress(data, 8),
+    nextOperationId: readU64(data, 48),
+  };
+}
+
+function decodeCampaignReserve(data: Buffer) {
+  return {
+    campaignId: readU64(data, 8),
+    cumulativeDistributedAtoms: readU64(data, 88),
+    economicConfigHash: data.subarray(105, 137).toString("hex"),
+    mint: readAddress(data, 16),
+    originalAllocationAtoms: readU64(data, 80),
+    paused: data.readUInt8(169) !== 0,
+    remainingAtoms: readU64(data, 96),
+    state: data.readUInt8(104),
+    unusedBalancePolicyHash: data.subarray(137, 169).toString("hex"),
+    vault: readAddress(data, 48),
+  };
+}
+
+function decodeDistributionVaultRecord(data: Buffer) {
+  return {
+    totalClaimedLamports: readU64(data, 16),
+    totalDepositedLamports: readU64(data, 8),
+  };
+}
+
+function decodeTreasurySolVaultRecord(data: Buffer) {
+  return { totalReceivedLamports: readU64(data, 8) };
+}
+
+function decodeCorrectionReserveVaultRecord(data: Buffer) {
+  return {
+    rejectedBondsLamports: readU64(data, 24),
+    totalClaimedLamports: readU64(data, 16),
+    totalFundedLamports: readU64(data, 8),
   };
 }
 
@@ -604,9 +738,24 @@ function decodeMetadata(data: Buffer) {
   const uri = readString(data, offset);
   offset = uri.nextOffset;
   const sellerFeeBasisPoints = data.readUInt16LE(offset);
+  offset += 2;
+  const creatorsOption = data.readUInt8(offset);
+  offset += 1;
+  if (creatorsOption === 1) {
+    const creatorCount = data.readUInt32LE(offset);
+    offset += 4 + creatorCount * 34;
+  } else if (creatorsOption !== 0) {
+    throw new Error("The finalized metadata creators option is invalid.");
+  }
+  const primarySaleHappened = data.readUInt8(offset) !== 0;
+  offset += 1;
+  const isMutable = data.readUInt8(offset) !== 0;
   return {
+    creatorsOption,
+    isMutable,
     mint,
     name: name.value.replace(/\0+$/, ""),
+    primarySaleHappened,
     sellerFeeBasisPoints,
     symbol: symbol.value.replace(/\0+$/, ""),
     updateAuthority,
@@ -614,9 +763,15 @@ function decodeMetadata(data: Buffer) {
   };
 }
 
-async function verifyFinalizedGenesis(prepared: PreparedTokenomicsGenesis) {
-  const connection = new Connection(prepared.rpcEndpoint, "finalized");
-  const a = prepared.summary.addresses;
+export async function verifyFinalizedTokenomicsGenesis({
+  addresses,
+  rpcEndpoint,
+}: {
+  addresses: TokenomicsGenesisAddresses;
+  rpcEndpoint: string;
+}) {
+  const connection = new Connection(rpcEndpoint, "finalized");
+  const a = addresses;
   const accountAddresses = [
     a.mint,
     a.campaignVault,
@@ -625,6 +780,11 @@ async function verifyFinalizedGenesis(prepared: PreparedTokenomicsGenesis) {
     a.tokenConfig,
     a.treasuryPosition,
     a.metadata,
+    a.executor,
+    a.campaign,
+    a.distributionVault,
+    a.treasurySolVault,
+    a.correctionReserveVault,
   ].map((value) => new PublicKey(value));
   const accounts = await connection.getMultipleAccountsInfo(
     accountAddresses,
@@ -638,6 +798,11 @@ async function verifyFinalizedGenesis(prepared: PreparedTokenomicsGenesis) {
     configInfo,
     positionInfo,
     metadataInfo,
+    executorInfo,
+    campaignRecordInfo,
+    distributionInfo,
+    treasurySolInfo,
+    correctionReserveInfo,
   ] = accounts;
   if (
     !mintInfo ||
@@ -646,14 +811,27 @@ async function verifyFinalizedGenesis(prepared: PreparedTokenomicsGenesis) {
     !reserveInfo ||
     !configInfo ||
     !positionInfo ||
-    !metadataInfo
+    !metadataInfo ||
+    !executorInfo ||
+    !campaignRecordInfo ||
+    !distributionInfo ||
+    !treasurySolInfo ||
+    !correctionReserveInfo
   ) {
     throw new Error(
       "Genesis finalized, but one or more required accounts could not be read back.",
     );
   }
   const coreProgram = new PublicKey(TOKENOMICS_GENESIS_CONFIG.programId);
-  for (const accountInfo of [configInfo, positionInfo]) {
+  for (const accountInfo of [
+    configInfo,
+    positionInfo,
+    executorInfo,
+    campaignRecordInfo,
+    distributionInfo,
+    treasurySolInfo,
+    correctionReserveInfo,
+  ]) {
     if (!accountInfo.owner.equals(coreProgram)) {
       throw new Error(
         "A finalized Tokenomics Core account has the wrong owner.",
@@ -678,6 +856,12 @@ async function verifyFinalizedGenesis(prepared: PreparedTokenomicsGenesis) {
   const config = decodeTokenConfig(configInfo.data);
   const position = decodeTreasuryPosition(positionInfo.data);
   const metadata = decodeMetadata(metadataInfo.data);
+  const executor = decodeTreasuryPolicyExecutor(executorInfo.data);
+  const campaignRecord = decodeCampaignReserve(campaignRecordInfo.data);
+  const distribution = decodeDistributionVaultRecord(distributionInfo.data);
+  const treasurySol = decodeTreasurySolVaultRecord(treasurySolInfo.data);
+  const correctionReserve =
+    decodeCorrectionReserveVaultRecord(correctionReserveInfo.data);
   const verificationErrors = validateTokenomicsGenesisSnapshot(
     {
       campaignAmountAtoms: campaign.amount,
@@ -728,10 +912,78 @@ async function verifyFinalizedGenesis(prepared: PreparedTokenomicsGenesis) {
     metadata.symbol !== TOKENOMICS_GENESIS_CONFIG.symbol ||
     metadata.uri !== TOKENOMICS_GENESIS_CONFIG.metadataUri ||
     metadata.updateAuthority !== TOKENOMICS_GENESIS_CONFIG.governance ||
-    metadata.sellerFeeBasisPoints !== 0
+    metadata.sellerFeeBasisPoints !== 0 ||
+    metadata.creatorsOption !== 0 ||
+    metadata.primarySaleHappened ||
+    metadata.isMutable !== TOKENOMICS_GENESIS_CONFIG.metadataMutable
   ) {
     verificationErrors.push(
       "The finalized Metaplex metadata does not match the reviewed JDR identity.",
+    );
+  }
+  if (
+    config.initialCampaignVault !== a.campaignVault ||
+    config.distributionVault !== a.distributionVault ||
+    config.treasurySolVault !== a.treasurySolVault ||
+    config.correctionReserveVault !== a.correctionReserveVault ||
+    config.network !== TOKENOMICS_GENESIS_CONFIG.network ||
+    config.nextEpochId !== 0n ||
+    config.nextCorrectionEpochId !== 0n ||
+    config.pendingRolloverLamports !== 0n ||
+    config.totalSealedLiabilityRemaining !== 0n ||
+    config.totalCorrectionLiabilityRemaining !== 0n ||
+    config.paused
+  ) {
+    verificationErrors.push(
+      "The finalized TokenConfig operational state does not match genesis.",
+    );
+  }
+  if (
+    executor.governance !== TOKENOMICS_GENESIS_CONFIG.governance ||
+    executor.delaySeconds !== 0n ||
+    executor.nextOperationId !== 0n
+  ) {
+    verificationErrors.push(
+      "The finalized treasury executor does not match immediate Squads governance.",
+    );
+  }
+  if (
+    campaignRecord.campaignId !== 0n ||
+    campaignRecord.mint !== a.mint ||
+    campaignRecord.vault !== a.campaignVault ||
+    campaignRecord.originalAllocationAtoms !==
+      TOKENOMICS_GENESIS_CONFIG.campaignAllocationAtoms ||
+    campaignRecord.cumulativeDistributedAtoms !== 0n ||
+    campaignRecord.remainingAtoms !==
+      TOKENOMICS_GENESIS_CONFIG.campaignAllocationAtoms ||
+    campaignRecord.state !== 1 ||
+    campaignRecord.economicConfigHash !== INITIAL_CAMPAIGN_CONFIG_HASH ||
+    campaignRecord.unusedBalancePolicyHash !==
+      INITIAL_UNUSED_BALANCE_POLICY_HASH ||
+    campaignRecord.paused
+  ) {
+    verificationErrors.push(
+      "The finalized initial campaign reserve does not match the reviewed reward policy.",
+    );
+  }
+  if (
+    !position.isTreasury ||
+    position.solClaimBeneficiary !== a.treasurySolVault
+  ) {
+    verificationErrors.push(
+      "The finalized treasury lock position has invalid treasury semantics.",
+    );
+  }
+  if (
+    distribution.totalDepositedLamports !== 0n ||
+    distribution.totalClaimedLamports !== 0n ||
+    treasurySol.totalReceivedLamports !== 0n ||
+    correctionReserve.totalFundedLamports !== 0n ||
+    correctionReserve.totalClaimedLamports !== 0n ||
+    correctionReserve.rejectedBondsLamports !== 0n
+  ) {
+    verificationErrors.push(
+      "A finalized genesis accounting vault did not start at zero.",
     );
   }
   if (verificationErrors.length > 0) {
@@ -758,8 +1010,57 @@ function assertHasBlockhashLifetime(transaction: {
   }
 }
 
+export async function submitGenesisConfirmedAndAwaitFinalized({
+  send,
+  waitForFinalized,
+}: {
+  send: (commitment: "confirmed") => Promise<string>;
+  waitForFinalized: (signature: string) => Promise<void>;
+}) {
+  const signature = await send("confirmed");
+  await waitForFinalized(signature);
+  return signature;
+}
+
+async function waitForFinalizedSignature({
+  rpcEndpoint,
+  signature,
+}: {
+  rpcEndpoint: string;
+  signature: string;
+}) {
+  const connection = new Connection(rpcEndpoint, "finalized");
+  const deadline = Date.now() + FINALIZATION_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const status = (
+      await connection.getSignatureStatuses([signature], {
+        searchTransactionHistory: true,
+      })
+    ).value[0];
+    if (status?.err) {
+      throw new Error(
+        `The genesis transaction failed on-chain: ${JSON.stringify(status.err)}.`,
+      );
+    }
+    if (status?.confirmationStatus === "finalized") {
+      return;
+    }
+    await new Promise((resolve) =>
+      globalThis.setTimeout(resolve, FINALIZATION_POLL_INTERVAL_MS),
+    );
+  }
+  throw new Error(
+    "The genesis transaction did not reach finalized commitment within 120 seconds.",
+  );
+}
+
 function errorText(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
+  if (error instanceof Error) {
+    const cause =
+      error.cause instanceof Error ? ` ${error.cause.message}` : "";
+    return `${error.message}${cause}`.trim();
+  }
+  return String(error);
 }
 
 export async function signSimulateSendAndVerifyGenesis({
@@ -818,15 +1119,26 @@ export async function signSimulateSendAndVerifyGenesis({
 
   let signature: string;
   try {
-    signature = (
-      await client.actions.sendTransaction(signedTransaction, "finalized")
-    ).toString();
+    signature = await submitGenesisConfirmedAndAwaitFinalized({
+      send: async (commitment) =>
+        (
+          await client.actions.sendTransaction(signedTransaction, commitment)
+        ).toString(),
+      waitForFinalized: async (submittedSignature) =>
+        waitForFinalizedSignature({
+          rpcEndpoint: prepared.rpcEndpoint,
+          signature: submittedSignature,
+        }),
+    });
   } catch (error) {
     throw new Error(
       `The simulated genesis transaction was not finalized: ${errorText(error)}`,
       { cause: error },
     );
   }
-  await verifyFinalizedGenesis(prepared);
+  await verifyFinalizedTokenomicsGenesis({
+    addresses: prepared.summary.addresses,
+    rpcEndpoint: prepared.rpcEndpoint,
+  });
   return { ...prepared.summary, signature };
 }

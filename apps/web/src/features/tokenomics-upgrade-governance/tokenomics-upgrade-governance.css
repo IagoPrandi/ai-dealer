@@ -1,0 +1,74 @@
+.tug-details dd {
+  overflow-wrap: anywhere;
+}
+
+.tug-votes {
+  display: grid;
+  gap: 9px;
+  margin-top: 16px;
+}
+
+.tug-vote {
+  display: grid;
+  grid-template-columns: 6rem minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid rgb(255 255 255 / 7%);
+  border-radius: 13px;
+  background: rgb(255 255 255 / 2.5%);
+}
+
+.tug-vote span,
+.tug-vote strong {
+  font-size: 12px;
+}
+
+.tug-vote code {
+  overflow: hidden;
+  color: #827b92;
+  font-size: 11px;
+  text-overflow: ellipsis;
+}
+
+.tug-vote strong {
+  color: #a39cb6;
+}
+
+.tug-vote .tug-approved {
+  color: #14f195;
+}
+
+.tug-links {
+  margin-top: 16px;
+}
+
+.tug-connectors,
+.tug-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.tug-execute {
+  background: linear-gradient(120deg, #ffd23f, #14f195);
+}
+
+@media (max-width: 640px) {
+  .tug-vote {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .tug-vote code {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .tug-actions,
+  .tug-actions .tm-button,
+  .tug-connectors,
+  .tug-connectors .tm-button {
+    width: 100%;
+  }
+}
