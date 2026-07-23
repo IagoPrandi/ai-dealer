@@ -10,14 +10,14 @@ import {
 const [walletA, walletB] = SQUADS_DEVNET_CONFIG.members;
 
 test("pins governance to the finalized Squads proposal", () => {
-  assert.equal(TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex, 1n);
+  assert.equal(TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex, 2n);
   assert.equal(
     TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.proposalAddress,
-    "FcAvvrTxyYLSpmEYWBhrNvHy7Cr7FNART8a4SK9Wbgj",
+    "Hnhnm1x1vUb7AKk1mnSC4MFdy9vpMTDNreY38CKhhkHS",
   );
   assert.equal(
     TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionAddress,
-    "2QA55QJb97P9TJVQ6LqXusqcEY8cazfHGf2t8ysZpzAk",
+    "6vziiip4rKcVc7TppkBhbYRYrNxYn4c6adDFi1cxvQoY",
   );
 });
 

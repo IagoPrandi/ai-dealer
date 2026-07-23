@@ -34,17 +34,13 @@ type KitInstruction = Parameters<
 
 const PROGRAM_DATA_METADATA_LENGTH = 45;
 const BUFFER_METADATA_LENGTH = 37;
-const EXTENDED_PROGRAM_CAPACITY = 1_093_160;
-const PRE_UPGRADE_PROGRAM_LENGTH = 1_082_920;
-const PRE_UPGRADE_PROGRAM_SHA256 =
-  "b1cfc5f0a1bd69d28eb191e24bf2f0f3c24811d5f29b7f2e175bddd80bb0cc8c";
 const FINALIZATION_TIMEOUT_MS = 120_000;
 const FINALIZATION_POLL_INTERVAL_MS = 1_000;
 
 export const TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG = Object.freeze({
-  proposalAddress: "FcAvvrTxyYLSpmEYWBhrNvHy7Cr7FNART8a4SK9Wbgj",
-  transactionAddress: "2QA55QJb97P9TJVQ6LqXusqcEY8cazfHGf2t8ysZpzAk",
-  transactionIndex: 1n,
+  proposalAddress: "Hnhnm1x1vUb7AKk1mnSC4MFdy9vpMTDNreY38CKhhkHS",
+  transactionAddress: "6vziiip4rKcVc7TppkBhbYRYrNxYn4c6adDFi1cxvQoY",
+  transactionIndex: 2n,
 });
 
 export type TokenomicsUpgradeGovernanceAction = "approve" | "execute";
@@ -160,7 +156,7 @@ function decodeProgramDataAuthority(data: Buffer) {
     data.readUInt32LE(0) !== 3 ||
     data.readUInt8(12) !== 1
   ) {
-    throw new Error("Tokenomics Core has invalid ProgramData metadata.");
+    throw new Error("Idealer has invalid ProgramData metadata.");
   }
   return new PublicKey(data.subarray(13, 45)).toBase58();
 }
@@ -320,26 +316,29 @@ export async function readTokenomicsUpgradeGovernanceState(
     programInfo.data.readUInt32LE(0) !== 2 ||
     !new PublicKey(programInfo.data.subarray(4, 36)).equals(programDataAddress)
   ) {
-    throw new Error("Tokenomics Core does not link to the reviewed ProgramData.");
+    throw new Error("Idealer does not link to the reviewed ProgramData.");
   }
   if (
     !programDataInfo ||
     !programDataInfo.owner.equals(loaderProgramId)
   ) {
-    throw new Error("Tokenomics Core ProgramData could not be verified.");
+    throw new Error("Idealer ProgramData could not be verified.");
   }
   if (
     decodeProgramDataAuthority(programDataInfo.data) !==
     TOKENOMICS_UPGRADE_PROPOSAL_CONFIG.vaultAddress
   ) {
-    throw new Error("Tokenomics Core authority is not Squads vault 0.");
+    throw new Error("Idealer authority is not Squads vault 0.");
   }
 
   const programBytes = programDataInfo.data.subarray(
     PROGRAM_DATA_METADATA_LENGTH,
   );
-  if (programBytes.length !== EXTENDED_PROGRAM_CAPACITY) {
-    throw new Error("Tokenomics Core ProgramData capacity changed.");
+  if (
+    programBytes.length !==
+    TOKENOMICS_UPGRADE_PROPOSAL_CONFIG.programDataCapacity
+  ) {
+    throw new Error("Idealer ProgramData capacity changed.");
   }
 
   let programSha256: string;
@@ -359,7 +358,7 @@ export async function readTokenomicsUpgradeGovernanceState(
       programSha256 !== TOKENOMICS_UPGRADE_PROPOSAL_CONFIG.bufferSha256 ||
       !allZero(padding)
     ) {
-      throw new Error("The executed Tokenomics Core bytes failed read-back.");
+      throw new Error("The executed Idealer bytes failed read-back.");
     }
   } else {
     if (
@@ -372,14 +371,20 @@ export async function readTokenomicsUpgradeGovernanceState(
         "The reviewed upgrade buffer owner or Squads authority changed.",
       );
     }
-    const currentBytes = programBytes.subarray(0, PRE_UPGRADE_PROGRAM_LENGTH);
-    const padding = programBytes.subarray(PRE_UPGRADE_PROGRAM_LENGTH);
+    const currentBytes = programBytes.subarray(
+      0,
+      TOKENOMICS_UPGRADE_PROPOSAL_CONFIG.currentProgramPrefixLength,
+    );
+    const padding = programBytes.subarray(
+      TOKENOMICS_UPGRADE_PROPOSAL_CONFIG.currentProgramPrefixLength,
+    );
     programSha256 = await sha256Hex(currentBytes);
     if (
-      programSha256 !== PRE_UPGRADE_PROGRAM_SHA256 ||
+      programSha256 !==
+        TOKENOMICS_UPGRADE_PROPOSAL_CONFIG.currentProgramPrefixSha256 ||
       !allZero(padding)
     ) {
-      throw new Error("The pre-upgrade Tokenomics Core bytes changed.");
+      throw new Error("The pre-upgrade Idealer bytes changed.");
     }
 
     const bufferProgramBytes = bufferInfo.data.subarray(
@@ -445,7 +450,7 @@ export async function prepareTokenomicsUpgradeGovernanceAction({
   if (action === "approve") {
     instruction = multisigSdk.instructions.proposalApprove({
       member,
-      memo: "Approve JUSDEALER devnet Tokenomics Core upgrade",
+      memo: "Approve JUSDEALER devnet Idealer M10 reward CPI upgrade",
       multisigPda,
       programId,
       transactionIndex:

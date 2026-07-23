@@ -193,9 +193,9 @@ export function TokenomicsUpgradeGovernanceApp() {
           <p className="tm-eyebrow">Squads governance - M10</p>
           <h1>Approve and execute the reviewed upgrade</h1>
           <p className="tm-lead">
-            Two different multisig members approve proposal 1. Execution is a
-            separate wallet transaction and remains blocked until the 2-of-3
-            threshold is on-chain.
+            {state?.status === "Executed"
+              ? "Idealer proposal 2 was approved by two different multisig members and executed as a separate finalized transaction."
+              : "Two different multisig members approve Idealer proposal 2. Execution is a separate wallet transaction and remains blocked until the 2-of-3 threshold is on-chain."}
           </p>
         </header>
 
@@ -260,7 +260,9 @@ export function TokenomicsUpgradeGovernanceApp() {
                     >
                       {state.approved.includes(candidate.address)
                         ? "Approved"
-                        : "Pending"}
+                        : state.status === "Executed"
+                          ? "Not required"
+                          : "Pending"}
                     </strong>
                   </div>
                 ))}
@@ -277,7 +279,8 @@ export function TokenomicsUpgradeGovernanceApp() {
           ) : null}
         </section>
 
-        <section className="tm-card" aria-labelledby="wallet-title">
+        {state?.status !== "Executed" ? (
+          <section className="tm-card" aria-labelledby="wallet-title">
           <div className="tm-section-heading">
             <div>
               <p className="tm-eyebrow">Step 2</p>
@@ -337,7 +340,8 @@ export function TokenomicsUpgradeGovernanceApp() {
               member.
             </p>
           ) : null}
-        </section>
+          </section>
+        ) : null}
 
         {state?.status !== "Executed" ? (
           <section className="tm-card" aria-labelledby="action-title">
@@ -402,7 +406,7 @@ export function TokenomicsUpgradeGovernanceApp() {
                 type="checkbox"
               />
               <span>
-                I reviewed devnet, proposal 1, the exact upgrade payload,
+                I reviewed devnet, Idealer proposal 2, the exact upgrade payload,
                 ProgramData capacity, buffer hash, current votes, and connected
                 member account {member ? memberLabel(member.address) : ""}.
               </span>
@@ -425,7 +429,7 @@ export function TokenomicsUpgradeGovernanceApp() {
             <p className="tm-eyebrow">Strict verification passed</p>
             <h2 id="result-title">
               {result.action === "execute"
-                ? "Tokenomics Core upgraded"
+                ? "Idealer upgraded"
                 : "Approval finalized"}
             </h2>
             <p>
