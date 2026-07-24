@@ -9,6 +9,7 @@ import {
   createSetVrfConfigInstruction,
   createTurnAutomationConfig,
   decodeGlobalConfigAccount,
+  decodeTurnStateAccount,
   getTurnOpeningGate,
   isLegacyTurnDeserializationError,
   isTurnSettlementClosed,
@@ -19,6 +20,7 @@ import {
 
 const addressEncoder = getAddressEncoder();
 const SET_VRF_CONFIG_DISCRIMINATOR = [53, 52, 195, 216, 205, 110, 46, 74];
+const TURN_STATE_DISCRIMINATOR = [184, 240, 193, 137, 151, 216, 79, 187];
 
 function writeU32Le(data: Uint8Array, offset: number, value: number) {
   new DataView(data.buffer).setUint32(offset, value, true);
@@ -31,6 +33,36 @@ function writeU64Le(data: Uint8Array, offset: number, value: number) {
 function writeAddress(data: Uint8Array, offset: number, value: string) {
   data.set(addressEncoder.encode(address(value)), offset);
 }
+
+function turnStateData(length: 780 | 789) {
+  const data = new Uint8Array(length);
+  data.set(TURN_STATE_DISCRIMINATOR, 0);
+  writeU64Le(data, 8, 42);
+  writeU64Le(data, 16, 100);
+  writeU64Le(data, 24, 900);
+  data[32] = 0;
+  const durationOffset = length === 789 ? 50 : 41;
+  writeU32Le(data, durationOffset, 800);
+  data[durationOffset + 4] = 3;
+  return data;
+}
+
+test("turn automation decodes legacy and current TurnState offsets explicitly", () => {
+  for (const length of [780, 789] as const) {
+    assert.deepEqual(decodeTurnStateAccount(turnStateData(length)), {
+      cycleIndex: 3,
+      endTimestamp: 900,
+      startTimestamp: 100,
+      status: "open",
+      turnDurationSeconds: 800,
+      turnId: 42,
+    });
+  }
+  assert.throws(
+    () => decodeTurnStateAccount(new Uint8Array(789)),
+    /recognized 780-byte legacy or 789-byte current layout/,
+  );
+});
 
 test("turn automation is disabled unless explicitly enabled", async () => {
   const config = await createTurnAutomationConfig({});

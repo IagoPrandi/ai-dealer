@@ -33,3 +33,26 @@ test("17 deterministic M5 guesses cover every possible draw number", () => {
     assert.ok(covered.has(number), `missing ${number}`);
   }
 });
+
+test("M5 input seeding accepts only a canonical explicit guess", () => {
+  assert.deepEqual(
+    readSeedConfig({
+      IDEALER_M5_INPUTS_GUESS_NUMBERS: "95,96,97,98,99,100",
+    }).guessNumbers,
+    [95, 96, 97, 98, 99, 100],
+  );
+  for (const invalid of [
+    "1,2,3,4,5",
+    "1,2,3,4,5,101",
+    "1,2,3,3,4,5",
+    "2,1,3,4,5,6",
+  ]) {
+    assert.throws(
+      () =>
+        readSeedConfig({
+          IDEALER_M5_INPUTS_GUESS_NUMBERS: invalid,
+        }),
+      /six unique ascending integers/,
+    );
+  }
+});

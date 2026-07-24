@@ -15,6 +15,8 @@
     "devnet:stage-turn": "tsx src/devnet-stage-turn.ts",
     "devnet:seed-real-inputs": "tsx src/devnet-seed-real-inputs.ts",
     "devnet:simulate-10-players": "tsx src/devnet-10-player-simulation.ts",
+    "devnet:settle-jdr-manifest": "tsx src/devnet-jdr-reward-manifest.ts",
+    "devnet:active-rule-reward": "tsx src/active-rule-reward-run.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test --import tsx \"src/**/*.test.ts\""
   },

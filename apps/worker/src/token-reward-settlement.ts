@@ -45,6 +45,7 @@ export interface TokenRewardAction {
 }
 
 export interface TokenRewardSettlementConfig {
+  actionAllowlist: readonly PublicKey[] | null;
   automation: TurnAutomationConfig;
   enabled: boolean;
   intervalMs: number;
@@ -64,10 +65,11 @@ export type TokenRewardSettlementResult =
       }>;
     };
 
-interface CampaignAccounts {
+export interface CampaignAccounts {
   campaign: PublicKey;
   campaignVault: PublicKey;
   mint: PublicKey;
+  remainingAtoms: bigint;
   tokenConfig: PublicKey;
 }
 
@@ -87,6 +89,52 @@ function envNumber(value: string | undefined, fallback: number) {
   }
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export function parseTokenRewardActionAllowlist(value: string | undefined) {
+  const addresses = value
+    ?.split(",")
+    .map((address) => address.trim())
+    .filter(Boolean);
+  if (!addresses || addresses.length === 0) {
+    return null;
+  }
+  if (new Set(addresses).size !== addresses.length) {
+    throw new Error("Token reward action allowlist contains a duplicate.");
+  }
+  return addresses.map((address) => {
+    try {
+      return new PublicKey(address);
+    } catch {
+      throw new Error(
+        `Invalid token reward action allowlist address: ${address}.`,
+      );
+    }
+  });
+}
+
+export function selectTokenRewardActions({
+  actions,
+  allowlist,
+}: {
+  actions: readonly TokenRewardAction[];
+  allowlist: readonly PublicKey[] | null;
+}) {
+  if (!allowlist) {
+    return [...actions];
+  }
+  const actionsByAddress = new Map(
+    actions.map((action) => [action.action.toBase58(), action]),
+  );
+  return allowlist.map((allowedAddress) => {
+    const action = actionsByAddress.get(allowedAddress.toBase58());
+    if (!action) {
+      throw new Error(
+        `Allowlisted token reward action is missing or invalid: ${allowedAddress.toBase58()}.`,
+      );
+    }
+    return action;
+  });
 }
 
 function accountDiscriminator(name: string) {
@@ -174,7 +222,7 @@ export function decodeCampaignAccounts({
 }): CampaignAccounts {
   const bytes = Buffer.from(data);
   if (
-    bytes.length < 80 ||
+    bytes.length < 104 ||
     !bytes.subarray(0, 8).equals(CAMPAIGN_RESERVE_DISCRIMINATOR) ||
     bytes.readBigUInt64LE(8) !== 0n
   ) {
@@ -184,11 +232,12 @@ export function decodeCampaignAccounts({
     campaign,
     campaignVault: new PublicKey(bytes.subarray(48, 80)),
     mint: new PublicKey(bytes.subarray(16, 48)),
+    remainingAtoms: bytes.readBigUInt64LE(96),
     tokenConfig: derivePda(tokenomicsProgramId, [Buffer.from("token_config")]),
   };
 }
 
-function createAssociatedTokenInstruction({
+export function createAssociatedTokenInstruction({
   associatedToken,
   mint,
   owner,
@@ -363,7 +412,7 @@ async function listRewardActions(
   );
 }
 
-async function sendRewardTransaction({
+export async function sendRewardTransaction({
   authority,
   connection,
   instructions,
@@ -429,6 +478,9 @@ export async function createTokenRewardSettlementConfig(
     );
   }
   return {
+    actionAllowlist: parseTokenRewardActionAllowlist(
+      env.IDEALER_TOKEN_REWARD_ACTION_ALLOWLIST,
+    ),
     automation: await createTurnAutomationConfig(env),
     enabled,
     intervalMs: envNumber(
@@ -486,7 +538,10 @@ export async function runTokenRewardSettlementOnce(
     tokenomicsProgramId,
   });
 
-  const actions = await listRewardActions(connection, idealerProgramId);
+  const actions = selectTokenRewardActions({
+    actions: await listRewardActions(connection, idealerProgramId),
+    allowlist: config.actionAllowlist,
+  });
   const unsettled: Array<{
     accounts: ActionRewardAccounts;
     action: TokenRewardAction;

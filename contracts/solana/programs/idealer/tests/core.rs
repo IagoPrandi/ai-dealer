@@ -1,10 +1,15 @@
-use anchor_lang::prelude::Pubkey;
+use anchor_lang::{prelude::Pubkey, Space};
 use idealer::domain::{
     calculate_prize_pool_accounting, derive_draw_numbers, next_cycle_index, run_rule_election,
     split_fee, validate_action_window, validate_config, validate_guess, validate_rule,
     ConfigValidation, ElectionCandidate, PrizePoolAccountingInput, VOTE_FEE_START_TURN,
 };
 use solana_sha256_hasher::hash;
+
+#[test]
+fn turn_state_account_size_is_explicit() {
+    assert_eq!(8 + idealer::TurnState::INIT_SPACE, 789);
+}
 
 fn valid_config(cycle: &[u32; 4]) -> ConfigValidation<'_> {
     ConfigValidation {

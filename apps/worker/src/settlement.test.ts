@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { PublicKey } from "@solana/web3.js";
 import {
@@ -195,30 +196,37 @@ test("settlement close_turn writes global config and turn state", () => {
 });
 
 function buildTurnStateBuffer(): Uint8Array {
-  const data = Buffer.alloc(780);
+  const data = Buffer.alloc(789);
+  createHash("sha256")
+    .update("account:TurnState")
+    .digest()
+    .subarray(0, 8)
+    .copy(data, 0);
   data.writeBigUInt64LE(42n, 8); // turn_id
   data.writeBigInt64LE(200n, 16); // start_timestamp
   data.writeBigInt64LE(1_000n, 24); // end_timestamp
   data.writeUInt8(1, 32); // status = closed
-  data.writeUInt32LE(800, 41); // turn_duration_seconds
-  Buffer.from([1, 2, 3, 4, 5, 6]).copy(data, 46); // draw_result
-  data.writeBigUInt64LE(7n, 52); // active_rule_id
-  Buffer.alloc(32, 0xaa).copy(data, 60); // active_rule_hash
-  Buffer.alloc(32, 0xbb).copy(data, 92); // frozen_rule_artifact_hash
-  Buffer.alloc(32, 0xcc).copy(data, 124); // eligible_rule_pool_hash
-  Buffer.alloc(32, 0xdd).copy(data, 156); // top_voted_finalist_hash
-  Buffer.alloc(32, 0xee).copy(data, 188); // random_finalist_hash
-  Buffer.alloc(32, 0x11).copy(data, 220); // finalist_set_hash
-  data.writeUInt8(2, 252); // finalist_count
-  data.writeBigUInt64LE(7n, 253); // finalist_rule_ids[0]
-  data.writeBigUInt64LE(8n, 261); // finalist_rule_ids[1]
-  data.writeUInt8(0, 413); // finalist_eliminated[0]
-  data.writeUInt8(1, 414); // finalist_eliminated[1]
-  Buffer.alloc(32, 0x22).copy(data, 423); // eliminated_finalist_hash
-  Buffer.alloc(32, 0x33).copy(data, 455); // survivor_finalist_hash
-  data.writeBigInt64LE(4_500n, 487); // elimination_window_end (spans all of phase 2)
-  data.writeUInt8(2, 641); // draw_status = fulfilled
-  data.writeBigInt64LE(1_234n, 754); // drawn_at
+  data.writeBigUInt64LE(300n, 41); // treasury_fee_amount_lamports
+  data.writeUInt8(1, 49); // treasury_fee_bridged
+  data.writeUInt32LE(800, 50); // turn_duration_seconds
+  Buffer.from([1, 2, 3, 4, 5, 6]).copy(data, 55); // draw_result
+  data.writeBigUInt64LE(7n, 61); // active_rule_id
+  Buffer.alloc(32, 0xaa).copy(data, 69); // active_rule_hash
+  Buffer.alloc(32, 0xbb).copy(data, 101); // frozen_rule_artifact_hash
+  Buffer.alloc(32, 0xcc).copy(data, 133); // eligible_rule_pool_hash
+  Buffer.alloc(32, 0xdd).copy(data, 165); // top_voted_finalist_hash
+  Buffer.alloc(32, 0xee).copy(data, 197); // random_finalist_hash
+  Buffer.alloc(32, 0x11).copy(data, 229); // finalist_set_hash
+  data.writeUInt8(2, 261); // finalist_count
+  data.writeBigUInt64LE(7n, 262); // finalist_rule_ids[0]
+  data.writeBigUInt64LE(8n, 270); // finalist_rule_ids[1]
+  data.writeUInt8(0, 422); // finalist_eliminated[0]
+  data.writeUInt8(1, 423); // finalist_eliminated[1]
+  Buffer.alloc(32, 0x22).copy(data, 432); // eliminated_finalist_hash
+  Buffer.alloc(32, 0x33).copy(data, 464); // survivor_finalist_hash
+  data.writeBigInt64LE(4_500n, 496); // elimination_window_end
+  data.writeUInt8(2, 650); // draw_status = fulfilled
+  data.writeBigInt64LE(1_234n, 763); // drawn_at
   return data;
 }
 
@@ -249,7 +257,12 @@ test("decodeSettlementTurnState reads the trustless TurnState layout", () => {
 });
 
 test("decodeSettlementTurnState reports all-zero hashes as null", () => {
-  const data = Buffer.alloc(780);
+  const data = Buffer.alloc(789);
+  createHash("sha256")
+    .update("account:TurnState")
+    .digest()
+    .subarray(0, 8)
+    .copy(data, 0);
   data.writeBigUInt64LE(1n, 8);
   const state = decodeSettlementTurnState(data, 9_167);
 
@@ -261,6 +274,17 @@ test("decodeSettlementTurnState reports all-zero hashes as null", () => {
   assert.equal(state.finalistSetHash, null);
   assert.equal(state.survivorFinalistHash, null);
   assert.equal(state.finalistCount, 0);
+});
+
+test("decodeSettlementTurnState rejects legacy or wrong account layouts", () => {
+  assert.throws(
+    () => decodeSettlementTurnState(Buffer.alloc(780), 9_167),
+    /current 789-byte layout/,
+  );
+  assert.throws(
+    () => decodeSettlementTurnState(Buffer.alloc(789), 9_167),
+    /current 789-byte layout/,
+  );
 });
 
 test("decodeRuleProposalCandidate handles the variable-length text prefix", () => {

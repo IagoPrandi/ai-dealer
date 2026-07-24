@@ -8,6 +8,8 @@ import {
   decodeTokenRewardAction,
   deriveAssociatedTokenAddress,
   deriveCampaignRewardReceipt,
+  parseTokenRewardActionAllowlist,
+  selectTokenRewardActions,
 } from "./token-reward-settlement.js";
 
 const IDEALER_PROGRAM = key(1);
@@ -65,11 +67,12 @@ test("decodes the beneficiary only from canonical proposal and vote accounts", (
 });
 
 test("decodes campaign zero and derives its canonical token config", () => {
-  const data = Buffer.alloc(80);
+  const data = Buffer.alloc(104);
   discriminator("account", "CampaignReserve").copy(data, 0);
   data.writeBigUInt64LE(0n, 8);
   MINT.toBuffer().copy(data, 16);
   CAMPAIGN_VAULT.toBuffer().copy(data, 48);
+  data.writeBigUInt64LE(199_999_997_180_000_000n, 96);
 
   const decoded = decodeCampaignAccounts({
     campaign: CAMPAIGN,
@@ -83,6 +86,7 @@ test("decodes campaign zero and derives its canonical token config", () => {
   assert.equal(decoded.campaign.toBase58(), CAMPAIGN.toBase58());
   assert.equal(decoded.campaignVault.toBase58(), CAMPAIGN_VAULT.toBase58());
   assert.equal(decoded.mint.toBase58(), MINT.toBase58());
+  assert.equal(decoded.remainingAtoms, 199_999_997_180_000_000n);
   assert.equal(decoded.tokenConfig.toBase58(), expectedConfig.toBase58());
 
   data.writeBigUInt64LE(1n, 8);
@@ -146,6 +150,7 @@ test("creates ATA idempotently before the exact Idealer reward CPI", () => {
     campaignVault: CAMPAIGN_VAULT,
     globalConfig: GLOBAL_CONFIG,
     mint: MINT,
+    remainingAtoms: 1_000_000_000n,
     rewardReceipt,
     tokenConfig: key(10),
   };
@@ -232,5 +237,55 @@ test("creates ATA idempotently before the exact Idealer reward CPI", () => {
       tokenomicsProgramId: TOKENOMICS_PROGRAM,
     }).length,
     1,
+  );
+});
+
+test("parses an explicit action allowlist and rejects invalid ambiguity", () => {
+  assert.equal(parseTokenRewardActionAllowlist(undefined), null);
+  assert.equal(parseTokenRewardActionAllowlist(" , "), null);
+  assert.deepEqual(
+    parseTokenRewardActionAllowlist(
+      ` ${ACTION.toBase58()}, ${CAMPAIGN.toBase58()} `,
+    )?.map((address) => address.toBase58()),
+    [ACTION.toBase58(), CAMPAIGN.toBase58()],
+  );
+  assert.throws(
+    () =>
+      parseTokenRewardActionAllowlist(
+        `${ACTION.toBase58()},${ACTION.toBase58()}`,
+      ),
+    /duplicate/,
+  );
+  assert.throws(
+    () => parseTokenRewardActionAllowlist("not-a-public-key"),
+    /Invalid token reward action allowlist address/,
+  );
+});
+
+test("selects only allowlisted actions in the approved order", () => {
+  const proposal = decodeTokenRewardAction({
+    action: ACTION,
+    data: actionData("proposal"),
+    kind: "proposal",
+  });
+  const supporter = decodeTokenRewardAction({
+    action: CAMPAIGN,
+    data: actionData("supporter"),
+    kind: "supporter",
+  });
+  assert.deepEqual(
+    selectTokenRewardActions({
+      actions: [proposal, supporter],
+      allowlist: [CAMPAIGN],
+    }).map(({ action }) => action.toBase58()),
+    [CAMPAIGN.toBase58()],
+  );
+  assert.throws(
+    () =>
+      selectTokenRewardActions({
+        actions: [proposal],
+        allowlist: [CAMPAIGN],
+      }),
+    /missing or invalid/,
   );
 });

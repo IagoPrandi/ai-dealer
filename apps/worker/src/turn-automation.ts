@@ -36,6 +36,9 @@ const SET_VRF_CONFIG_DISCRIMINATOR = new Uint8Array([
 const SET_TURN_DURATION_CYCLE_DISCRIMINATOR = new Uint8Array([
   163, 41, 240, 31, 94, 126, 122, 36,
 ]);
+const TURN_STATE_DISCRIMINATOR = new Uint8Array([
+  184, 240, 193, 137, 151, 216, 79, 187,
+]);
 const BASIS_POINTS_DENOMINATOR = 10_000;
 // Production turn = 24h: ~22h phase 1 (create rules + pick numbers, up to the
 // rule-election/guess cutoff) + ~2h phase 2 (finalist shortlist, elimination
@@ -45,10 +48,10 @@ const PRODUCTION_TURN_DURATION_CYCLE_SECONDS = [
   86_400, 86_400, 86_400, 86_400,
 ] as const;
 // Byte length of a current-layout `TurnState` account (8-byte discriminator +
-// trustless settlement fields; matches the 788-byte live devnet turn from
-// M5.2). Turns smaller than this predate the trustless layout and cannot be
+// trustless settlement fields). Turns smaller than this predate the current
+// treasury-fee and rollover layout and cannot be
 // settled by the current program, so they are force-skipped instead.
-const CURRENT_TURN_STATE_DATA_LENGTH = 788;
+const CURRENT_TURN_STATE_DATA_LENGTH = 789;
 const addressDecoder = getAddressDecoder();
 const addressEncoder = getAddressEncoder();
 
@@ -530,6 +533,18 @@ export function decodeGlobalConfigAccount(
 }
 
 export function decodeTurnStateAccount(data: Uint8Array): TurnStateSnapshot {
+  const isLegacyLayout = data.length === 780;
+  const isCurrentLayout = data.length === CURRENT_TURN_STATE_DATA_LENGTH;
+  if (
+    (!isLegacyLayout && !isCurrentLayout) ||
+    !data
+      .subarray(0, TURN_STATE_DISCRIMINATOR.length)
+      .every((byte, index) => byte === TURN_STATE_DISCRIMINATOR[index])
+  ) {
+    throw new Error(
+      "TurnState account must use the recognized 780-byte legacy or 789-byte current layout.",
+    );
+  }
   const reader = createAccountReader(data);
   const turnId = reader.readU64Number();
   const startTimestamp = reader.readI64Number();
@@ -540,7 +555,9 @@ export function decodeTurnStateAccount(data: Uint8Array): TurnStateSnapshot {
     throw new Error("TurnState status is invalid.");
   }
 
-  reader.skip(8);
+  // Both layouts contain prize_pool_amount_lamports. The current layout then
+  // adds treasury_fee_amount_lamports and treasury_fee_bridged before duration.
+  reader.skip(isCurrentLayout ? 17 : 8);
   const turnDurationSeconds = reader.readU32();
   const cycleIndex = reader.readU8();
 

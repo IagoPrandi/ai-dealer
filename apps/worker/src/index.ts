@@ -42,7 +42,12 @@ import {
   createTokenRewardSettlementConfig,
   startTokenRewardSettlementLoop,
 } from "./token-reward-settlement.js";
+import {
+  createActiveRuleRewardSettlementConfig,
+  startActiveRuleRewardSettlementLoop,
+} from "./active-rule-reward-settlement.js";
 
+export * from "./active-rule-reward-settlement.js";
 export * from "./api-bridge.js";
 export * from "./claims.js";
 export * from "./draw.js";
@@ -576,6 +581,21 @@ if (
 
   void createTokenRewardSettlementConfig().then((rewardConfig) => {
     const timer = startTokenRewardSettlementLoop(rewardConfig);
+
+    if (!timer) {
+      return;
+    }
+
+    const stop = () => {
+      clearInterval(timer);
+    };
+
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+  });
+
+  void createActiveRuleRewardSettlementConfig().then((rewardConfig) => {
+    const timer = startActiveRuleRewardSettlementLoop(rewardConfig);
 
     if (!timer) {
       return;

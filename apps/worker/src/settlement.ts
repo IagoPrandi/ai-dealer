@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import bs58 from "bs58";
 import {
   AnchorUtils,
@@ -41,6 +42,11 @@ const ZERO_ADDRESS = "11111111111111111111111111111111";
 const GLOBAL_CONFIG_SEED = Buffer.from("global_config");
 const TURN_SEED = Buffer.from("turn");
 const RULE_SEED = Buffer.from("rule");
+export const CURRENT_TURN_STATE_DATA_LENGTH = 789;
+const TURN_STATE_DISCRIMINATOR = createHash("sha256")
+  .update("account:TurnState")
+  .digest()
+  .subarray(0, 8);
 
 const REQUEST_DRAW_DISCRIMINATOR = Buffer.from([
   22, 180, 8, 81, 47, 21, 86, 159,
@@ -641,8 +647,9 @@ const ZERO_HASH_HEX = "00".repeat(32);
 
 /**
  * Full on-chain settlement view of a `TurnState`, decoded from the current
- * program layout (788-byte account; offsets verified against the live devnet
- * turn from M5.2). Drives the M5.3 settlement state machine: every PRD §5.5
+ * program layout (789-byte account including the Anchor discriminator;
+ * validated against the generated Rust `InitSpace`). Drives the M5.3
+ * settlement state machine: every PRD §5.5
  * phase boundary is derivable from these fields (status, election pipeline
  * hashes/slots, elimination window timestamps, active-election freeze, draw
  * status). A hash/pubkey that is all-zero means "not set yet".
@@ -691,6 +698,14 @@ export function decodeSettlementTurnState(
   ruleElectionCutoffBps: number,
 ): SettlementTurnState {
   if (
+    data.length !== CURRENT_TURN_STATE_DATA_LENGTH ||
+    !Buffer.from(data.subarray(0, 8)).equals(TURN_STATE_DISCRIMINATOR)
+  ) {
+    throw new Error(
+      `TurnState account must use the current ${CURRENT_TURN_STATE_DATA_LENGTH}-byte layout.`,
+    );
+  }
+  if (
     !Number.isInteger(ruleElectionCutoffBps) ||
     ruleElectionCutoffBps <= 0 ||
     ruleElectionCutoffBps > 10_000
@@ -702,35 +717,34 @@ export function decodeSettlementTurnState(
   const startTimestampSeconds = i64Number(view, 16);
   const endTimestampSeconds = i64Number(view, 24);
   const status = view.getUint8(32) === 0 ? "open" : "closed";
-  const turnDurationSeconds = view.getUint32(41, true);
-  const drawResult = Array.from(data.slice(46, 52));
-  const activeRuleId = u64Number(view, 52);
-  const activeRuleHash = hex32At(data, 60);
-  const activeRuleArtifactHash = hex32At(data, 92);
-  const eligibleRulePoolHash = hex32At(data, 124);
-  const topVotedFinalistHash = hex32At(data, 156);
-  const randomFinalistHash = hex32At(data, 188);
-  const finalistSetHash = hex32At(data, 220);
-  const finalistCount = view.getUint8(252);
+  const turnDurationSeconds = view.getUint32(50, true);
+  const drawResult = Array.from(data.slice(55, 61));
+  const activeRuleId = u64Number(view, 61);
+  const activeRuleHash = hex32At(data, 69);
+  const activeRuleArtifactHash = hex32At(data, 101);
+  const eligibleRulePoolHash = hex32At(data, 133);
+  const topVotedFinalistHash = hex32At(data, 165);
+  const randomFinalistHash = hex32At(data, 197);
+  const finalistSetHash = hex32At(data, 229);
+  const finalistCount = view.getUint8(261);
   const finalistRuleIds: number[] = [];
   const finalistEliminated: boolean[] = [];
   for (let index = 0; index < finalistCount; index += 1) {
-    finalistRuleIds.push(u64Number(view, 253 + index * 8));
-    finalistEliminated.push(view.getUint8(413 + index) !== 0);
+    finalistRuleIds.push(u64Number(view, 262 + index * 8));
+    finalistEliminated.push(view.getUint8(422 + index) !== 0);
   }
-  const eliminatedFinalistHash = hex32At(data, 423);
-  const survivorFinalistHash = hex32At(data, 455);
-  // `elimination_window_start_timestamp` was removed from `TurnState` (the
-  // window now spans the whole of phase 2, so only the close time is stored).
-  // All offsets from here on shift down by 8 bytes versus the old layout.
-  const eliminationWindowEndSeconds = i64Number(view, 487);
-  const electionVrfRequest = readPubkey(data, 495);
-  const electionVrfFulfillment = readPubkey(data, 527);
-  const activeElectionVrfRequest = readPubkey(data, 568);
-  const activeElectionVrfFulfillment = readPubkey(data, 600);
-  const drawStatus = decodeDrawStatus(view.getUint8(641));
-  const drawVrfRequest = readPubkey(data, 642);
-  const drawnAtSeconds = i64Number(view, 754);
+  const eliminatedFinalistHash = hex32At(data, 432);
+  const survivorFinalistHash = hex32At(data, 464);
+  // The decision window spans the whole of phase 2, so only its close time is
+  // stored. These offsets include the current treasury-fee accounting fields.
+  const eliminationWindowEndSeconds = i64Number(view, 496);
+  const electionVrfRequest = readPubkey(data, 504);
+  const electionVrfFulfillment = readPubkey(data, 536);
+  const activeElectionVrfRequest = readPubkey(data, 577);
+  const activeElectionVrfFulfillment = readPubkey(data, 609);
+  const drawStatus = decodeDrawStatus(view.getUint8(650));
+  const drawVrfRequest = readPubkey(data, 651);
+  const drawnAtSeconds = i64Number(view, 763);
 
   const hashOrNull = (value: string) =>
     value === ZERO_HASH_HEX ? null : value;

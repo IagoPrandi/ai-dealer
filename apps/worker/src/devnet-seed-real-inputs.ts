@@ -93,6 +93,7 @@ export interface RulePreflightResult {
 interface SeedConfig {
   apiBaseUrl: string;
   fundLamportsPerPlayer: number;
+  guessNumbers?: readonly number[] | null;
   playerCount: number;
   ruleText: string;
 }
@@ -134,10 +135,30 @@ export function readSeedConfig(env = process.env): SeedConfig {
   if (!Number.isSafeInteger(fundLamportsPerPlayer) || fundLamportsPerPlayer < 0) {
     throw new Error("IDEALER_M5_INPUTS_FUND_LAMPORTS must be a non-negative safe integer.");
   }
+  const configuredGuess = env.IDEALER_M5_INPUTS_GUESS_NUMBERS?.trim();
+  const guessNumbers = configuredGuess
+    ? configuredGuess.split(",").map((value) => Number(value.trim()))
+    : null;
+  if (
+    guessNumbers &&
+    (guessNumbers.length !== 6 ||
+      guessNumbers.some(
+        (value, index) =>
+          !Number.isInteger(value) ||
+          value < 1 ||
+          value > 100 ||
+          (index > 0 && value <= (guessNumbers[index - 1] as number)),
+      ))
+  ) {
+    throw new Error(
+      "IDEALER_M5_INPUTS_GUESS_NUMBERS must contain six unique ascending integers from 1 to 100.",
+    );
+  }
 
   return {
     apiBaseUrl: env.IDEALER_API_BASE_URL ?? DEFAULT_API_BASE_URL,
     fundLamportsPerPlayer,
+    guessNumbers,
     playerCount,
     ruleText:
       env.IDEALER_M5_RULE_TEXT ??
@@ -654,7 +675,9 @@ export async function seedRealInputs(): Promise<SeededInputSummary> {
   };
 
   for (const [index, player] of players.entries()) {
-    const guess = deterministicGuess(index);
+    const guess = [
+      ...(seedConfig.guessNumbers ?? deterministicGuess(index)),
+    ];
     const guessBuilder = createSubmitGuessInstruction({
       numbers: guess,
       player: player.publicKey,
