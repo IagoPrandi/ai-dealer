@@ -21,6 +21,7 @@ import {
   fetchTurnState,
   stringifySimulationError,
 } from "./turn-automation.js";
+import { persistFinalizedTransaction } from "./durable-indexer.js";
 
 /**
  * M5.4 devnet operator: seed one open turn with real player inputs.
@@ -35,7 +36,7 @@ const DEFAULT_API_BASE_URL = "http://127.0.0.1:3002";
 const DEFAULT_PLAYER_COUNT = 3;
 const MAX_PLAYER_COUNT = 17;
 const DEFAULT_FUND_LAMPORTS = 120_000_000;
-const COMMITMENT: Commitment = "confirmed";
+const COMMITMENT: Commitment = "finalized";
 const SYSTEM_PROGRAM_ID = new PublicKey("11111111111111111111111111111111");
 const GLOBAL_CONFIG_SEED = Buffer.from("global_config");
 const TURN_SEED = Buffer.from("turn");
@@ -49,6 +50,9 @@ const VOTE_SEED = Buffer.from("vote");
 const SUBMIT_GUESS_DISCRIMINATOR = Buffer.from([
   61, 124, 32, 227, 64, 198, 252, 3,
 ]);
+const SUBMIT_ADDITIONAL_GUESS_DISCRIMINATOR = Buffer.from([
+  141, 186, 105, 183, 228, 255, 164, 47,
+]);
 const PROPOSE_RULE_DISCRIMINATOR = Buffer.from([
   14, 35, 67, 184, 137, 188, 125, 233,
 ]);
@@ -61,6 +65,10 @@ const PRECOMPILE_RULE_DISCRIMINATOR = Buffer.from([
 
 function isInputBroadcastEnabled() {
   return process.env.IDEALER_M5_INPUTS_BROADCAST === "1";
+}
+
+function wasSubmittedInThisRun(signature: string) {
+  return signature !== "already-exists";
 }
 
 export interface RulePreflightResult {
@@ -94,6 +102,7 @@ interface SeedConfig {
   apiBaseUrl: string;
   fundLamportsPerPlayer: number;
   guessNumbers?: readonly number[] | null;
+  paidGuessPlayerCount: number;
   playerCount: number;
   ruleText: string;
 }
@@ -106,6 +115,7 @@ interface SeededInputSummary {
     gameToken: string;
     guess: number[];
     guessSignature: string;
+    paidGuessSignature: string | null;
     playerGuess: string;
     voteSignature: string | null;
   }[];
@@ -135,6 +145,18 @@ export function readSeedConfig(env = process.env): SeedConfig {
   if (!Number.isSafeInteger(fundLamportsPerPlayer) || fundLamportsPerPlayer < 0) {
     throw new Error("IDEALER_M5_INPUTS_FUND_LAMPORTS must be a non-negative safe integer.");
   }
+  const paidGuessPlayerCount = Number(
+    env.IDEALER_M5_INPUTS_PAID_GUESS_PLAYER_COUNT ?? "0",
+  );
+  if (
+    !Number.isInteger(paidGuessPlayerCount) ||
+    paidGuessPlayerCount < 0 ||
+    paidGuessPlayerCount > playerCount
+  ) {
+    throw new Error(
+      "IDEALER_M5_INPUTS_PAID_GUESS_PLAYER_COUNT must be an integer from 0 to the player count.",
+    );
+  }
   const configuredGuess = env.IDEALER_M5_INPUTS_GUESS_NUMBERS?.trim();
   const guessNumbers = configuredGuess
     ? configuredGuess.split(",").map((value) => Number(value.trim()))
@@ -159,6 +181,7 @@ export function readSeedConfig(env = process.env): SeedConfig {
     apiBaseUrl: env.IDEALER_API_BASE_URL ?? DEFAULT_API_BASE_URL,
     fundLamportsPerPlayer,
     guessNumbers,
+    paidGuessPlayerCount,
     playerCount,
     ruleText:
       env.IDEALER_M5_RULE_TEXT ??
@@ -288,10 +311,21 @@ export function createSubmitGuessInstruction({
   sequence: number;
   turnId: number;
 }) {
+  if (!Number.isInteger(sequence) || sequence < 1) {
+    throw new Error("Guess sequence must be a positive integer.");
+  }
   const playerGuess = playerGuessPda(programId, turnId, player, sequence);
   return {
     instruction: {
-      data: Buffer.concat([SUBMIT_GUESS_DISCRIMINATOR, Buffer.from(numbers), u64Le(sequence)]),
+      // The first guess creates the player's GameToken; later guesses must use
+      // the separate on-chain instruction which reuses that existing account.
+      data: Buffer.concat([
+        sequence === 1
+          ? SUBMIT_GUESS_DISCRIMINATOR
+          : SUBMIT_ADDITIONAL_GUESS_DISCRIMINATOR,
+        Buffer.from(numbers),
+        u64Le(sequence),
+      ]),
       keys: [
         { isSigner: true, isWritable: true, pubkey: player },
         { isSigner: false, isWritable: false, pubkey: globalConfigPda(programId) },
@@ -483,6 +517,17 @@ export async function sendTransaction({
       )}`,
     );
   }
+  await persistFinalizedTransaction({
+    cluster: "devnet",
+    connection,
+    eventKind: `acceptance_round.${label}`,
+    payload: {
+      feePayer: feePayer.toBase58(),
+      instructionCount: instructions.length,
+      label,
+    },
+    signature,
+  });
   return signature;
 }
 
@@ -710,30 +755,90 @@ export async function seedRealInputs(): Promise<SeededInputSummary> {
           signers: [authority, player],
         });
 
-    await postJson({
-      body: {
-        gameToken: guessBuilder.accounts.gameToken.toBase58(),
-        numbers: guess,
-        player: player.publicKey.toBase58(),
-        playerGuess: guessBuilder.accounts.playerGuess.toBase58(),
-        programId: programId.toBase58(),
-        sequence: 1,
-        signature: guessSignature,
-        submittedAt: new Date().toISOString(),
-        turnId,
-      },
-      path: "/guess-receipts",
-      seedConfig,
-    });
+    if (wasSubmittedInThisRun(guessSignature)) {
+      await postJson({
+        body: {
+          gameToken: guessBuilder.accounts.gameToken.toBase58(),
+          numbers: guess,
+          player: player.publicKey.toBase58(),
+          playerGuess: guessBuilder.accounts.playerGuess.toBase58(),
+          programId: programId.toBase58(),
+          sequence: 1,
+          signature: guessSignature,
+          submittedAt: new Date().toISOString(),
+          turnId,
+        },
+        path: "/guess-receipts",
+        seedConfig,
+      });
+    }
 
     summary.players.push({
       address: player.publicKey.toBase58(),
       gameToken: guessBuilder.accounts.gameToken.toBase58(),
       guess,
       guessSignature,
+      paidGuessSignature: null,
       playerGuess: guessBuilder.accounts.playerGuess.toBase58(),
       voteSignature: null,
     });
+  }
+
+  // Before turn 100 the first same-wallet guess is free. The explicitly
+  // configured second guesses create a real alternative-prize bucket for the
+  // active-rule reward acceptance path; no implicit paid action is ever sent.
+  for (const [index, player] of players
+    .slice(0, seedConfig.paidGuessPlayerCount)
+    .entries()) {
+    const paidGuess = [
+      ...(seedConfig.guessNumbers ?? deterministicGuess(index)),
+    ];
+    const paidGuessBuilder = createSubmitGuessInstruction({
+      numbers: paidGuess,
+      player: player.publicKey,
+      programId,
+      sequence: 2,
+      turnId,
+    });
+    const paidGuessExists = await accountExists(
+      connection,
+      paidGuessBuilder.accounts.playerGuess,
+    );
+    const paidGuessSignature = paidGuessExists
+      ? "already-exists"
+      : await sendTransaction({
+          connection,
+          feePayer: player.publicKey,
+          instructions: [paidGuessBuilder.instruction],
+          label: `submit_paid_guess:${index}`,
+          signers: [player],
+        });
+
+    if (wasSubmittedInThisRun(paidGuessSignature)) {
+      await postJson({
+        body: {
+          gameToken: paidGuessBuilder.accounts.gameToken.toBase58(),
+          numbers: paidGuess,
+          player: player.publicKey.toBase58(),
+          playerGuess: paidGuessBuilder.accounts.playerGuess.toBase58(),
+          programId: programId.toBase58(),
+          sequence: 2,
+          signature: paidGuessSignature,
+          submittedAt: new Date().toISOString(),
+          turnId,
+        },
+        path: "/guess-receipts",
+        seedConfig,
+      });
+    }
+    const playerSummary = summary.players[index];
+    if (!playerSummary) {
+      throw new Error(`Missing player summary for paid guess ${index}.`);
+    }
+    summary.players[index] = {
+      ...playerSummary,
+      paidGuessSignature,
+    };
   }
 
   const proposalAlreadyExists = await accountExists(

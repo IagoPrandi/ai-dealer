@@ -15,6 +15,7 @@ import {
   stringifySimulationError,
   type TurnAutomationConfig,
 } from "./turn-automation.js";
+import { persistFinalizedTransaction } from "./durable-indexer.js";
 
 const DEFAULT_COMMITMENT: Commitment = "finalized";
 const DEFAULT_INTERVAL_MS = 30_000;
@@ -462,6 +463,16 @@ export async function sendRewardTransaction({
       )}`,
     );
   }
+  await persistFinalizedTransaction({
+    cluster: "devnet",
+    connection,
+    eventKind: `token_reward.${label}`,
+    payload: {
+      instructionCount: instructions.length,
+      label,
+    },
+    signature,
+  });
   return signature;
 }
 

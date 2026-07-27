@@ -42,8 +42,9 @@ import {
   decodeGlobalConfigAccount,
   stringifySimulationError,
 } from "./turn-automation.js";
+import { persistFinalizedTransaction } from "./durable-indexer.js";
 
-const DEFAULT_COMMITMENT: Commitment = "confirmed";
+const DEFAULT_COMMITMENT: Commitment = "finalized";
 const ZERO_ADDRESS = "11111111111111111111111111111111";
 const GLOBAL_CONFIG_SEED = Buffer.from("global_config");
 const TURN_SEED = Buffer.from("turn");
@@ -599,6 +600,16 @@ async function simulateAndSendWeb3({
       )}`,
     );
   }
+  await persistFinalizedTransaction({
+    cluster: "devnet",
+    connection,
+    eventKind: `settlement.${label}`,
+    payload: {
+      instructionCount: transaction.message.compiledInstructions.length,
+      label,
+    },
+    signature,
+  });
   return signature;
 }
 

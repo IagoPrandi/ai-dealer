@@ -46,11 +46,16 @@ import {
   createActiveRuleRewardSettlementConfig,
   startActiveRuleRewardSettlementLoop,
 } from "./active-rule-reward-settlement.js";
+import {
+  createDurableIndexerConfig,
+  startDurableSolanaReconciliationLoop,
+} from "./durable-indexer.js";
 
 export * from "./active-rule-reward-settlement.js";
 export * from "./api-bridge.js";
 export * from "./claims.js";
 export * from "./draw.js";
+export * from "./durable-indexer.js";
 export * from "./guess-verification.js";
 export * from "./manual-control.js";
 export * from "./precompile-loop.js";
@@ -608,4 +613,13 @@ if (
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
   });
+
+  const durableIndexerTimer = startDurableSolanaReconciliationLoop(
+    createDurableIndexerConfig(),
+  );
+  if (durableIndexerTimer) {
+    const stop = () => clearInterval(durableIndexerTimer);
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+  }
 }

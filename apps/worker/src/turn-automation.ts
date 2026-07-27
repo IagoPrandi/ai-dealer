@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import bs58 from "bs58";
+import { Connection } from "@solana/web3.js";
 import {
   AccountRole,
   address,
@@ -15,6 +16,7 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
 } from "@solana/kit";
+import { persistFinalizedTransaction } from "./durable-indexer.js";
 
 const DEFAULT_DEVNET_RPC_URL = "https://api.devnet.solana.com";
 const DEFAULT_API_BASE_URL = "http://localhost:3002";
@@ -981,6 +983,20 @@ export async function simulateAndSend({
     })
     .send();
   await waitForSignatureConfirmation(rpc, signature.toString());
+  await persistFinalizedTransaction({
+    cluster: "devnet",
+    connection: new Connection(
+      process.env.IDEALER_SOLANA_RPC_URL ?? DEFAULT_DEVNET_RPC_URL,
+      "finalized",
+    ),
+    eventKind: "turn_automation.authority_instruction",
+    payload: {
+      accountCount: instruction.accounts.length,
+      instructionDataHex: Buffer.from(instruction.data).toString("hex"),
+      programId: instruction.programAddress.toString(),
+    },
+    signature: signature.toString(),
+  });
   return signature;
 }
 
@@ -1007,7 +1023,6 @@ async function waitForSignatureConfirmation(
     }
 
     if (
-      status?.confirmationStatus === "confirmed" ||
       status?.confirmationStatus === "finalized"
     ) {
       return;

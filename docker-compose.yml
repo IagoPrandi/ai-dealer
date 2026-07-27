@@ -201,6 +201,9 @@ services:
       - "${WORKER_PORT:-3003}:3003"
     volumes:
       - ./apps/worker/src:/app/apps/worker/src
+      # Acceptance-round rule prompts are reviewed source material; mount them
+      # read-only so worker tests and operators run against the same inputs.
+      - ./docs:/app/docs:ro
       - ./deployments:/app/deployments:ro
       - idealer-solana-home:/solana-home:ro
 

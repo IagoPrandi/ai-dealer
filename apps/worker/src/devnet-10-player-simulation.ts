@@ -748,6 +748,7 @@ export async function runTenPlayerSimulation() {
       seedConfig: {
         apiBaseUrl: config.apiBaseUrl,
         fundLamportsPerPlayer: 0,
+        paidGuessPlayerCount: 0,
         playerCount: PLAYER_COUNT,
         ruleText: requiredPrompt(prompts, index),
       },
@@ -760,6 +761,7 @@ export async function runTenPlayerSimulation() {
     const seedConfig = {
       apiBaseUrl: config.apiBaseUrl,
       fundLamportsPerPlayer: 0,
+      paidGuessPlayerCount: 0,
       playerCount: PLAYER_COUNT,
       ruleText: prompt,
     };
@@ -870,6 +872,7 @@ export async function runTenPlayerSimulation() {
       seedConfig: {
         apiBaseUrl: config.apiBaseUrl,
         fundLamportsPerPlayer: 0,
+        paidGuessPlayerCount: 0,
         playerCount: PLAYER_COUNT,
         ruleText: rule.prompt,
       },
@@ -932,6 +935,7 @@ export async function runTenPlayerSimulation() {
       seedConfig: {
         apiBaseUrl: config.apiBaseUrl,
         fundLamportsPerPlayer: 0,
+        paidGuessPlayerCount: 0,
         playerCount: PLAYER_COUNT,
         ruleText: requiredPrompt(prompts, index),
       },
