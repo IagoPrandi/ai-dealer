@@ -51,6 +51,24 @@ fn tokenomics_pda(seeds: &[&[u8]]) -> Pubkey {
     Pubkey::find_program_address(seeds, &tokenomics_core::ID).0
 }
 
+fn idealer_program_data() -> Pubkey {
+    Pubkey::find_program_address(&[idealer::ID.as_ref()], &idealer::UPGRADEABLE_LOADER_ID).0
+}
+
+fn program_data_account(upgrade_authority: Pubkey) -> Account {
+    let mut data = vec![0; 45];
+    data[0..4].copy_from_slice(&3u32.to_le_bytes());
+    data[12] = 1;
+    data[13..45].copy_from_slice(upgrade_authority.as_ref());
+    Account {
+        lamports: 10_000_000,
+        data,
+        owner: idealer::UPGRADEABLE_LOADER_ID,
+        executable: false,
+        rent_epoch: 0,
+    }
+}
+
 /// Assert a processed instruction failed with the given Anchor custom error
 /// (error codes start at 6000). Anchor maps `#[error_code]` variants in order.
 fn assert_custom_error(result: Result<(), BanksClientError>, expected_code: u32) {
@@ -243,7 +261,7 @@ async fn read_anchor_account<T: AccountDeserialize>(
     T::try_deserialize(&mut account.data.as_slice()).unwrap()
 }
 
-async fn initialize_and_open_turn(context: &mut ProgramTestContext, turn_id: u64) {
+async fn initialize_global_config(context: &mut ProgramTestContext) {
     let global_config = pda(&[b"global_config"]);
     let treasury_vault = pda(&[b"treasury_vault"]);
     process(
@@ -266,7 +284,10 @@ async fn initialize_and_open_turn(context: &mut ProgramTestContext, turn_id: u64
     )
     .await
     .unwrap();
+}
 
+async fn open_turn(context: &mut ProgramTestContext, turn_id: u64) {
+    let global_config = pda(&[b"global_config"]);
     let turn_state = pda(&[b"turn", &turn_id.to_le_bytes()]);
     let prize_vault = pda(&[b"prize_vault", &turn_id.to_le_bytes()]);
     process(
@@ -289,31 +310,48 @@ async fn initialize_and_open_turn(context: &mut ProgramTestContext, turn_id: u64
     .unwrap();
 }
 
+async fn initialize_and_open_turn(context: &mut ProgramTestContext, turn_id: u64) {
+    initialize_global_config(context).await;
+    open_turn(context, turn_id).await;
+}
+
 #[tokio::test]
 #[ignore = "requires an SBF build and SBF_OUT_DIR; run the explicit SBF integration suite"]
 async fn set_vrf_config_is_authority_gated_and_updates_global_config() {
-    let mut context = ProgramTest::new(
+    let governance_authority = Keypair::new();
+    let unauthorized = Keypair::new();
+    let wrong_program_data = Pubkey::new_unique();
+    let mut test = ProgramTest::new(
         "idealer",
         idealer::ID,
         processor!(process_idealer_instruction),
-    )
-    .start_with_context()
-    .await;
-    initialize_and_open_turn(&mut context, 1).await;
+    );
+    test.add_account(
+        idealer_program_data(),
+        program_data_account(governance_authority.pubkey()),
+    );
+    test.add_account(
+        wrong_program_data,
+        program_data_account(governance_authority.pubkey()),
+    );
+    let mut context = test.start_with_context().await;
+    initialize_global_config(&mut context).await;
+    fund(&mut context, &governance_authority.pubkey()).await;
+    fund(&mut context, &unauthorized.pubkey()).await;
 
     let global_config = pda(&[b"global_config"]);
     let old_config: GlobalConfig = read_anchor_account(&mut context, global_config).await;
     let new_draw_vrf_config = Pubkey::new_unique();
     let new_election_vrf_config = Pubkey::new_unique();
-    let authority = context.payer.pubkey();
 
     process(
         &mut context,
         Instruction {
             program_id: idealer::ID,
             accounts: accounts::SetVrfConfig {
-                authority,
+                governance_authority: governance_authority.pubkey(),
                 global_config,
+                program_data: idealer_program_data(),
             }
             .to_account_metas(None),
             data: instruction::SetVrfConfig {
@@ -324,7 +362,7 @@ async fn set_vrf_config_is_authority_gated_and_updates_global_config() {
             }
             .data(),
         },
-        &[],
+        &[&governance_authority],
     )
     .await
     .unwrap();
@@ -340,8 +378,9 @@ async fn set_vrf_config_is_authority_gated_and_updates_global_config() {
         Instruction {
             program_id: idealer::ID,
             accounts: accounts::SetVrfConfig {
-                authority,
+                governance_authority: governance_authority.pubkey(),
                 global_config,
+                program_data: idealer_program_data(),
             }
             .to_account_metas(None),
             data: instruction::SetVrfConfig {
@@ -352,20 +391,19 @@ async fn set_vrf_config_is_authority_gated_and_updates_global_config() {
             }
             .data(),
         },
-        &[],
+        &[&governance_authority],
     )
     .await
     .is_err());
 
-    let unauthorized = Keypair::new();
-    fund(&mut context, &unauthorized.pubkey()).await;
     assert!(process(
         &mut context,
         Instruction {
             program_id: idealer::ID,
             accounts: accounts::SetVrfConfig {
-                authority: unauthorized.pubkey(),
+                governance_authority: unauthorized.pubkey(),
                 global_config,
+                program_data: idealer_program_data(),
             }
             .to_account_metas(None),
             data: instruction::SetVrfConfig {
@@ -377,6 +415,53 @@ async fn set_vrf_config_is_authority_gated_and_updates_global_config() {
             .data(),
         },
         &[&unauthorized],
+    )
+    .await
+    .is_err());
+
+    assert!(process(
+        &mut context,
+        Instruction {
+            program_id: idealer::ID,
+            accounts: accounts::SetVrfConfig {
+                governance_authority: governance_authority.pubkey(),
+                global_config,
+                program_data: wrong_program_data,
+            }
+            .to_account_metas(None),
+            data: instruction::SetVrfConfig {
+                args: SetVrfConfigArgs {
+                    draw_vrf_config: Pubkey::new_unique(),
+                    election_vrf_config: Pubkey::new_unique(),
+                },
+            }
+            .data(),
+        },
+        &[&governance_authority],
+    )
+    .await
+    .is_err());
+
+    open_turn(&mut context, 1).await;
+    assert!(process(
+        &mut context,
+        Instruction {
+            program_id: idealer::ID,
+            accounts: accounts::SetVrfConfig {
+                governance_authority: governance_authority.pubkey(),
+                global_config,
+                program_data: idealer_program_data(),
+            }
+            .to_account_metas(None),
+            data: instruction::SetVrfConfig {
+                args: SetVrfConfigArgs {
+                    draw_vrf_config: Pubkey::new_unique(),
+                    election_vrf_config: Pubkey::new_unique(),
+                },
+            }
+            .data(),
+        },
+        &[&governance_authority],
     )
     .await
     .is_err());
@@ -1548,8 +1633,15 @@ async fn draw_request_settle_and_failure_flow_persist_state() {
 #[ignore = "requires an SBF build and SBF_OUT_DIR; run the explicit SBF integration suite"]
 async fn orao_draw_request_is_persistent_and_settles_fulfilled_v2_randomness() {
     let turn_id = 1_u64;
-    let mut context = idealer_program_test().start_with_context().await;
-    initialize_and_open_turn(&mut context, turn_id).await;
+    let governance_authority = Keypair::new();
+    let mut test = idealer_program_test();
+    test.add_account(
+        idealer_program_data(),
+        program_data_account(governance_authority.pubkey()),
+    );
+    let mut context = test.start_with_context().await;
+    initialize_global_config(&mut context).await;
+    fund(&mut context, &governance_authority.pubkey()).await;
     let authority = context.payer.pubkey();
     let global_config = pda(&[b"global_config"]);
     let turn_address = pda(&[b"turn", &turn_id.to_le_bytes()]);
@@ -1560,8 +1652,9 @@ async fn orao_draw_request_is_persistent_and_settles_fulfilled_v2_randomness() {
         Instruction {
             program_id: idealer::ID,
             accounts: accounts::SetVrfConfig {
-                authority,
+                governance_authority: governance_authority.pubkey(),
                 global_config,
+                program_data: idealer_program_data(),
             }
             .to_account_metas(None),
             data: instruction::SetVrfConfig {
@@ -1572,10 +1665,11 @@ async fn orao_draw_request_is_persistent_and_settles_fulfilled_v2_randomness() {
             }
             .data(),
         },
-        &[],
+        &[&governance_authority],
     )
     .await
     .unwrap();
+    open_turn(&mut context, turn_id).await;
 
     let seed = [17; 32];
     let raw_randomness = [23; 64];

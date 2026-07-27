@@ -39,6 +39,10 @@ pub const REPEATED_ACTION_FEE_MULTIPLIER: u64 = 2;
 pub const MAX_RULE_TEXT_BYTES: usize = 6000;
 pub const BASIS_POINTS_DENOMINATOR: u16 = 10_000;
 pub const ORAO_COMMIT_MARKER: u64 = u64::MAX;
+pub const UPGRADEABLE_LOADER_ID: Pubkey = Pubkey::new_from_array([
+    2, 168, 246, 145, 78, 136, 161, 176, 226, 16, 21, 62, 247, 99, 174, 43, 0, 194, 185, 61, 22,
+    193, 36, 210, 192, 83, 122, 16, 4, 128, 0, 0,
+]);
 
 /// Raw 32-byte program id of the Switchboard On-Demand program that must own any
 /// randomness account consumed by the trustless `settle_*` instructions.
@@ -63,6 +67,42 @@ pub fn expected_switchboard_program() -> [u8; 32] {
 
 pub fn expected_orao_network_state() -> Pubkey {
     orao_solana_vrf::network_state_account_address(&orao_solana_vrf::ID)
+}
+
+fn require_program_upgrade_authority(
+    program_data: &AccountInfo,
+    governance_authority: Pubkey,
+) -> Result<()> {
+    let expected_program_data =
+        Pubkey::find_program_address(&[crate::ID.as_ref()], &UPGRADEABLE_LOADER_ID).0;
+    require_keys_eq!(
+        program_data.key(),
+        expected_program_data,
+        IdealerError::InvalidProgramData
+    );
+
+    let data = program_data.try_borrow_data()?;
+    require!(data.len() >= 45, IdealerError::InvalidProgramData);
+    require!(
+        u32::from_le_bytes(
+            data[0..4]
+                .try_into()
+                .map_err(|_| error!(IdealerError::InvalidProgramData))?
+        ) == 3,
+        IdealerError::InvalidProgramData
+    );
+    require!(data[12] == 1, IdealerError::InvalidGovernanceAuthority);
+    let stored_authority = Pubkey::new_from_array(
+        data[13..45]
+            .try_into()
+            .map_err(|_| error!(IdealerError::InvalidProgramData))?,
+    );
+    require_keys_eq!(
+        governance_authority,
+        stored_authority,
+        IdealerError::InvalidGovernanceAuthority
+    );
+    Ok(())
 }
 
 fn read_orao_randomness(randomness_ai: &AccountInfo) -> Result<OraoRandomnessAccountData> {
@@ -354,15 +394,20 @@ pub mod idealer {
                 && args.election_vrf_config != Pubkey::default(),
             IdealerError::InvalidConfigAddress
         );
+        require_program_upgrade_authority(
+            &ctx.accounts.program_data,
+            ctx.accounts.governance_authority.key(),
+        )?;
 
         let config = &mut ctx.accounts.global_config;
+        require!(!config.has_active_turn, IdealerError::ActiveTurnExists);
         let old_draw_vrf_config = config.draw_vrf_config;
         let old_election_vrf_config = config.election_vrf_config;
         config.draw_vrf_config = args.draw_vrf_config;
         config.election_vrf_config = args.election_vrf_config;
 
         emit!(VrfConfigUpdated {
-            authority: ctx.accounts.authority.key(),
+            authority: ctx.accounts.governance_authority.key(),
             old_draw_vrf_config,
             new_draw_vrf_config: config.draw_vrf_config,
             old_election_vrf_config,
@@ -2638,14 +2683,18 @@ pub struct InitializeGlobalConfig<'info> {
 
 #[derive(Accounts)]
 pub struct SetVrfConfig<'info> {
-    pub authority: Signer<'info>,
+    pub governance_authority: Signer<'info>,
     #[account(
         mut,
         seeds = [b"global_config"],
-        bump = global_config.bump,
-        has_one = authority @ IdealerError::Unauthorized
+        bump = global_config.bump
     )]
     pub global_config: Box<Account<'info, GlobalConfig>>,
+    /// CHECK: The handler requires the canonical ProgramData PDA for this
+    /// program, validates the loader-v3 state tag, and matches its stored
+    /// upgrade authority to `governance_authority`.
+    #[account(owner = UPGRADEABLE_LOADER_ID)]
+    pub program_data: UncheckedAccount<'info>,
 }
 
 #[derive(Accounts)]
@@ -4424,4 +4473,8 @@ pub enum IdealerError {
     InvalidTokenomicsRewardFact,
     #[msg("Only the rule creator can remove this rule.")]
     RuleRemovalNotCreator,
+    #[msg("The supplied ProgramData account is not the canonical account for Idealer.")]
+    InvalidProgramData,
+    #[msg("The signer is not the current Idealer program upgrade authority.")]
+    InvalidGovernanceAuthority,
 }

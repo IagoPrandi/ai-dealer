@@ -235,35 +235,46 @@ test("turn automation disabled check has no RPC side effects", async () => {
 });
 
 test("global config decoder exposes configured VRF addresses", () => {
+  const authority = "4bY5krt2VnnSNB1R4c1bhiWdQYkTc1FvFTN1LaV5JxCH";
+  const pendingAuthority = "DB5nz633YioWzEUnLb97ypUra5RUE11SJDFW9ar23KTp";
   const drawVrfConfig = "EYiAmGSdsQTuCw413V5BzaruWuCCSDgTPtBGvLkXHbe7";
   const electionVrfConfig = "EYiAmGSdsQTuCw413V5BzaruWuCCSDgTPtBGvLkXHbe7";
-  const data = new Uint8Array(256);
-  writeAddress(data, 73, drawVrfConfig);
-  writeAddress(data, 105, electionVrfConfig);
-  writeU32Le(data, 171, 7_200);
-  writeU32Le(data, 175, 7_200);
-  writeU32Le(data, 179, 28_800);
-  writeU32Le(data, 183, 28_800);
-  writeU64Le(data, 228, 1);
-  writeU64Le(data, 236, 0);
+  const data = new Uint8Array(288);
+  writeAddress(data, 8, authority);
+  data[40] = 1;
+  writeAddress(data, 41, pendingAuthority);
+  writeAddress(data, 105, drawVrfConfig);
+  writeAddress(data, 137, electionVrfConfig);
+  writeU32Le(data, 203, 7_200);
+  writeU32Le(data, 207, 7_200);
+  writeU32Le(data, 211, 28_800);
+  writeU32Le(data, 215, 28_800);
+  writeU64Le(data, 260, 1);
+  writeU64Le(data, 268, 0);
 
   const snapshot = decodeGlobalConfigAccount(data);
 
+  assert.equal(snapshot.authority, authority);
+  assert.equal(snapshot.pendingAuthority, pendingAuthority);
   assert.equal(snapshot.drawVrfConfig, drawVrfConfig);
   assert.equal(snapshot.electionVrfConfig, electionVrfConfig);
   assert.deepEqual(snapshot.turnDurationCycle, [7_200, 7_200, 28_800, 28_800]);
 });
 
-test("set VRF config instruction uses Anchor discriminator and queue accounts", async () => {
-  const authority = address("4bY5krt2VnnSNB1R4c1bhiWdQYkTc1FvFTN1LaV5JxCH");
+test("set VRF config instruction is governed by canonical ProgramData authority", async () => {
+  const governanceAuthority = address(
+    "DB5nz633YioWzEUnLb97ypUra5RUE11SJDFW9ar23KTp",
+  );
   const programId = address("ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd");
+  const globalConfig = address("8eAwKD514LK6rJYLLFZh92g3V5a5MwbyLZMU83EpWWZ");
+  const programData = address("AWGUseV1DEsoSvdW7CDMxxBDUPQXAKqTXyxHVzeTnL8g");
   const drawVrfConfig = address("EYiAmGSdsQTuCw413V5BzaruWuCCSDgTPtBGvLkXHbe7");
   const electionVrfConfig = address(
     "EYiAmGSdsQTuCw413V5BzaruWuCCSDgTPtBGvLkXHbe7",
   );
 
   const instruction = await createSetVrfConfigInstruction({
-    authority,
+    governanceAuthority,
     drawVrfConfig,
     electionVrfConfig,
     programId,
@@ -282,11 +293,9 @@ test("set VRF config instruction uses Anchor discriminator and queue accounts", 
     ...addressEncoder.encode(electionVrfConfig),
   ]);
   assert.deepEqual(instruction.accounts, [
-    { address: authority, role: AccountRole.READONLY_SIGNER },
-    {
-      address: address("8eAwKD514LK6rJYLLFZh92g3V5a5MwbyLZMU83EpWWZ"),
-      role: AccountRole.WRITABLE,
-    },
+    { address: governanceAuthority, role: AccountRole.READONLY_SIGNER },
+    { address: globalConfig, role: AccountRole.WRITABLE },
+    { address: programData, role: AccountRole.READONLY },
   ]);
 });
 

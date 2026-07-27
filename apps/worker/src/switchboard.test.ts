@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   createSwitchboardProofConfig,
   extractSwitchboardRandomnessValue,
+  setConfiguredVrfToSwitchboardDevnet,
   SWITCHBOARD_DEVNET_ON_DEMAND,
 } from "./switchboard.js";
 
@@ -20,6 +21,13 @@ test("switchboard proof config requires an authority keypair", async () => {
       IDEALER_SOLANA_RPC_URL: "https://api.devnet.solana.com",
     }),
     /IDEALER_TURN_AUTHORITY_KEYPAIR/,
+  );
+});
+
+test("direct VRF configuration is disabled in favor of Squads governance", async () => {
+  await assert.rejects(
+    setConfiguredVrfToSwitchboardDevnet({}),
+    /Create and execute a Squads proposal/,
   );
 });
 

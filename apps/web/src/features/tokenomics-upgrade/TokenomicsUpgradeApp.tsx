@@ -9,13 +9,13 @@ import {
 
 import { SQUADS_DEVNET_CONFIG } from "../../solana/squadsDevnetConfig";
 import {
-  type PreparedTokenomicsUpgradeProposal,
-  type TokenomicsUpgradeProposalResult,
-  type TokenomicsUpgradeProposalSummary,
-  prepareTokenomicsUpgradeProposal,
-  signSimulateSendAndVerifyUpgradeProposal,
-} from "../../solana/tokenomicsUpgradeProposal";
-import { validateTokenomicsUpgradeProposalConfig } from "../../solana/tokenomicsUpgradeProposalConfig";
+  type IdealerProgramExtensionProposalResult,
+  type IdealerProgramExtensionProposalSummary,
+  type PreparedIdealerProgramExtensionProposal,
+  prepareIdealerProgramExtensionProposal,
+  signSimulateSendAndVerifyExtensionProposal,
+} from "../../solana/idealerProgramExtensionProposal";
+import { validateIdealerProgramExtensionProposalConfig } from "../../solana/idealerProgramExtensionProposalConfig";
 import "../tokenomics-multisig/tokenomics-multisig.css";
 import "./tokenomics-upgrade.css";
 
@@ -56,14 +56,14 @@ function ExplorerLink({
 function UpgradeReview({
   summary,
 }: {
-  summary: TokenomicsUpgradeProposalSummary;
+  summary: IdealerProgramExtensionProposalSummary;
 }) {
   return (
     <section className="tm-card tm-review" aria-labelledby="upgrade-review">
       <div className="tm-section-heading">
         <div>
           <p className="tm-eyebrow">Required review</p>
-          <h2 id="upgrade-review">Squads upgrade proposal</h2>
+          <h2 id="upgrade-review">Squads ProgramData extension proposal</h2>
         </div>
         <span className="tm-status tm-status-ready">Prepared</span>
       </div>
@@ -88,14 +88,22 @@ function UpgradeReview({
           </dd>
         </div>
         <div>
-          <dt>Verified buffer</dt>
-          <dd title={summary.bufferAddress}>
-            {shortAddress(summary.bufferAddress)}
-          </dd>
+          <dt>Current capacity</dt>
+          <dd>{summary.currentCapacity.toLocaleString("en-US")} bytes</dd>
         </div>
         <div>
-          <dt>Buffer bytes</dt>
-          <dd>{summary.bufferProgramLength.toLocaleString("en-US")}</dd>
+          <dt>Extension</dt>
+          <dd>+{summary.extensionBytes.toLocaleString("en-US")} bytes</dd>
+        </div>
+        <div>
+          <dt>Target capacity</dt>
+          <dd>{summary.targetCapacity.toLocaleString("en-US")} bytes</dd>
+        </div>
+        <div>
+          <dt>ProgramData rent</dt>
+          <dd>
+            {(Number(summary.programDataLamports) / 1_000_000_000).toFixed(8)} SOL
+          </dd>
         </div>
         <div>
           <dt>Squads transaction index</dt>
@@ -108,25 +116,25 @@ function UpgradeReview({
           </dd>
         </div>
         <div>
-          <dt>Authority and spill recipient</dt>
+          <dt>Extension authority</dt>
           <dd title={summary.vaultAddress}>
             Vault 0 - {shortAddress(summary.vaultAddress)}
           </dd>
         </div>
         <div>
           <dt>Votes and execution</dt>
-          <dd>Zero approvals - upgrade is not executed</dd>
+          <dd>Zero approvals - extension is not executed</dd>
         </div>
       </dl>
 
       <div className="tu-hash">
-        <span>Verified on-chain buffer SHA-256</span>
-        <code>{summary.bufferSha256}</code>
+        <span>Verified deployed ProgramData SHA-256</span>
+        <code>{summary.currentSha256}</code>
       </div>
       <p className="tm-note">
         The submitted transaction creates one Squads vault transaction and one
-        active proposal. It contains no approval, execution, token mint, or
-        token transfer.
+        active proposal. It contains no approval, execution, code upgrade,
+        provider change, token mint, or token transfer.
       </p>
     </section>
   );
@@ -144,18 +152,19 @@ export function TokenomicsUpgradeApp() {
     isReady,
     wallet,
   } = useWalletConnection();
-  const preparedRef = useRef<PreparedTokenomicsUpgradeProposal | null>(null);
+  const preparedRef =
+    useRef<PreparedIdealerProgramExtensionProposal | null>(null);
   const walletAddress = wallet?.account.address.toString() ?? null;
   const walletName = wallet?.connector.name ?? null;
   const [accepted, setAccepted] = useState(false);
   const [busy, setBusy] = useState<"preparing" | "submitting" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] =
-    useState<TokenomicsUpgradeProposalResult | null>(null);
+    useState<IdealerProgramExtensionProposalResult | null>(null);
   const [summary, setSummary] =
-    useState<TokenomicsUpgradeProposalSummary | null>(null);
+    useState<IdealerProgramExtensionProposalSummary | null>(null);
   const configErrors = useMemo(
-    () => validateTokenomicsUpgradeProposalConfig(),
+    () => validateIdealerProgramExtensionProposalConfig(),
     [],
   );
   const phantomConnector = useMemo(
@@ -184,7 +193,7 @@ export function TokenomicsUpgradeApp() {
     setBusy("preparing");
     setError(null);
     try {
-      const prepared = await prepareTokenomicsUpgradeProposal({
+      const prepared = await prepareIdealerProgramExtensionProposal({
         creatorAddress: walletAddress,
         rpcEndpoint: cluster.endpoint.toString(),
       });
@@ -207,7 +216,7 @@ export function TokenomicsUpgradeApp() {
     setBusy("submitting");
     setError(null);
     try {
-      const created = await signSimulateSendAndVerifyUpgradeProposal({
+      const created = await signSimulateSendAndVerifyExtensionProposal({
         client,
         prepared,
         wallet,
@@ -234,12 +243,12 @@ export function TokenomicsUpgradeApp() {
           </div>
           <span className="tm-network">Devnet only</span>
           <p className="tm-eyebrow">Program governance - M10</p>
-          <h1>Propose the Idealer ORAO upgrade</h1>
+          <h1>Propose the Idealer ProgramData extension</h1>
           <p className="tm-lead">
-            Wallet A creates an active Squads proposal for the reviewed Idealer
-            build containing the governed ORAO v2 randomness provider. The
-            proposal starts with zero approvals and cannot execute until two
-            members approve it.
+            Wallet A creates an active Squads proposal to add exactly 3,952
+            zero-filled bytes to the rent-funded Idealer ProgramData. No code
+            or VRF configuration changes in this proposal. It starts with zero
+            approvals and cannot execute until two members approve it.
           </p>
         </header>
 
@@ -305,9 +314,9 @@ export function TokenomicsUpgradeApp() {
             <span className="tm-status">Read only</span>
           </div>
           <p className="tm-muted">
-            This reads and hashes the complete on-chain buffer, verifies both
-            loader authorities and the 2-of-3 multisig, then derives the next
-            unused Squads proposal address.
+            This reads and hashes the deployed program, verifies the exact
+            ProgramData capacity, rent funding, loader authority, and 2-of-3
+            multisig, then derives the next unused Squads proposal address.
           </p>
           <button
             className="tm-button"
@@ -316,8 +325,8 @@ export function TokenomicsUpgradeApp() {
             type="button"
           >
             {busy === "preparing"
-              ? "Hashing the on-chain buffer..."
-              : "Prepare upgrade proposal"}
+              ? "Hashing the deployed program..."
+              : "Prepare extension proposal"}
           </button>
         </section>
 
@@ -344,8 +353,9 @@ export function TokenomicsUpgradeApp() {
                 type="checkbox"
               />
               <span>
-                I reviewed the devnet cluster, program, ProgramData, buffer
-                hash, Squads vault, spill recipient, and zero-vote state.
+                I reviewed the devnet cluster, program, current and target
+                ProgramData capacities, deployed hash, rent funding, Squads
+                vault, and zero-vote state.
               </span>
             </label>
             <button
@@ -367,10 +377,10 @@ export function TokenomicsUpgradeApp() {
             aria-labelledby="success-title"
           >
             <p className="tm-eyebrow">Strict verification passed</p>
-            <h2 id="success-title">Upgrade proposal created</h2>
+            <h2 id="success-title">Extension proposal created</h2>
             <p>
               The finalized Squads proposal is active with zero approvals. The
-              Idealer program has not been upgraded.
+              Idealer ProgramData has not been extended.
             </p>
             <div className="tm-success-links">
               <ExplorerLink path={`address/${result.proposalAddress}`}>
@@ -395,9 +405,9 @@ export function TokenomicsUpgradeApp() {
         ) : null}
 
         <footer className="tm-footer">
-          This buffer, program, multisig, vault, and all three member addresses
-          are devnet-only. Mainnet requires a separate audited artifact,
-          program identity, metadata decision, and governance ceremony.
+          This program, multisig, vault, and all three member addresses are
+          devnet-only. Mainnet requires a separate audited artifact, program
+          identity, metadata decision, and governance ceremony.
         </footer>
       </div>
     </main>

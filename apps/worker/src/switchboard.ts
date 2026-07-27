@@ -14,13 +14,9 @@ import {
   VersionedTransaction,
   type Commitment,
 } from "@solana/web3.js";
-import { address, createSolanaRpc } from "@solana/kit";
 import {
-  createSetVrfConfigInstruction,
   createTurnAutomationConfig,
-  deriveAuthorityAddress,
   loadAuthorityKeypairBytesFromEnv,
-  simulateAndSend,
 } from "./turn-automation.js";
 
 const DEFAULT_COMMITMENT: Commitment = "confirmed";
@@ -114,35 +110,10 @@ export async function createSwitchboardProofConfig(
 export async function setConfiguredVrfToSwitchboardDevnet(
   env = process.env,
 ) {
-  const [authorityKeypairBytes, automation] = await Promise.all([
-    loadAuthorityKeypairBytesFromEnv(env),
-    createTurnAutomationConfig(env),
-  ]);
-  if (!authorityKeypairBytes) {
-    throw new Error(
-      "set_vrf_config requires IDEALER_TURN_AUTHORITY_KEYPAIR or IDEALER_TURN_AUTHORITY_KEYPAIR_PATH.",
-    );
-  }
-
-  const authority = deriveAuthorityAddress(authorityKeypairBytes);
-  const queueAddress = address(SWITCHBOARD_DEVNET_ON_DEMAND.queue);
-  const instruction = await createSetVrfConfigInstruction({
-    authority,
-    drawVrfConfig: queueAddress,
-    electionVrfConfig: queueAddress,
-    programId: automation.programId,
-  });
-  const signature = await simulateAndSend({
-    authorityKeypairBytes,
-    instruction,
-    rpc: createSolanaRpc(automation.rpcUrl),
-  });
-
-  return {
-    drawVrfConfig: queueAddress.toString(),
-    electionVrfConfig: queueAddress.toString(),
-    signature: signature.toString(),
-  };
+  void env;
+  throw new Error(
+    "Direct VRF configuration is disabled. Create and execute a Squads proposal signed by the Idealer ProgramData upgrade authority.",
+  );
 }
 
 export function extractSwitchboardRandomnessValue(data: unknown): Uint8Array {

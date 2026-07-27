@@ -21,6 +21,9 @@ const DEFAULT_API_BASE_URL = "http://localhost:3002";
 const DEFAULT_IDEALER_PROGRAM_ID =
   "ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd";
 export const SYSTEM_PROGRAM_ID = address("11111111111111111111111111111111");
+export const UPGRADEABLE_LOADER_PROGRAM_ID = address(
+  "BPFLoaderUpgradeab1e11111111111111111111111",
+);
 const OPEN_TURN_DISCRIMINATOR = new Uint8Array([
   78, 206, 19, 149, 237, 34, 191, 82,
 ]);
@@ -59,6 +62,7 @@ export type SolanaAddress = ReturnType<typeof address>;
 
 export interface GlobalConfigSnapshot {
   activeTurnId: number;
+  authority: SolanaAddress;
   drawVrfConfig: SolanaAddress;
   electionVrfConfig: SolanaAddress;
   guessCutoffBps: number;
@@ -66,6 +70,7 @@ export interface GlobalConfigSnapshot {
   hasActiveTurn: boolean;
   nextTurnId: number;
   paused: boolean;
+  pendingAuthority: SolanaAddress | null;
   ruleElectionCutoffBps: number;
   ruleProposalFeeLamports: bigint;
   ruleRemovalFeeLamports: bigint | null;
@@ -461,11 +466,12 @@ function decodeGlobalConfigAccountWithLayout(
   hasRuleRemovalFee: boolean,
 ): GlobalConfigSnapshot {
   const reader = createAccountReader(data);
-  reader.skip(32);
+  const authority = reader.readAddress();
   const pendingAuthorityTag = reader.readU8();
+  let pendingAuthority: SolanaAddress | null = null;
 
   if (pendingAuthorityTag === 1) {
-    reader.skip(32);
+    pendingAuthority = reader.readAddress();
   } else if (pendingAuthorityTag !== 0) {
     throw new Error("GlobalConfig pending authority option is invalid.");
   }
@@ -497,6 +503,7 @@ function decodeGlobalConfigAccountWithLayout(
 
   return {
     activeTurnId,
+    authority,
     drawVrfConfig,
     electionVrfConfig,
     guessCutoffBps,
@@ -504,6 +511,7 @@ function decodeGlobalConfigAccountWithLayout(
     hasActiveTurn,
     nextTurnId,
     paused,
+    pendingAuthority,
     ruleElectionCutoffBps,
     ruleProposalFeeLamports,
     ruleRemovalFeeLamports,
@@ -741,22 +749,29 @@ export async function createSetTurnDurationCycleInstruction({
 }
 
 export async function createSetVrfConfigInstruction({
-  authority,
+  governanceAuthority,
   drawVrfConfig,
   electionVrfConfig,
   programId,
 }: {
-  authority: SolanaAddress;
+  governanceAuthority: SolanaAddress;
   drawVrfConfig: SolanaAddress;
   electionVrfConfig: SolanaAddress;
   programId: SolanaAddress;
 }) {
-  const globalConfig = await getGlobalConfigPda(programId);
+  const [globalConfig, [programData]] = await Promise.all([
+    getGlobalConfigPda(programId),
+    getProgramDerivedAddress({
+      programAddress: UPGRADEABLE_LOADER_PROGRAM_ID,
+      seeds: [addressEncoder.encode(programId)],
+    }),
+  ]);
 
   return {
     accounts: [
-      { address: authority, role: AccountRole.READONLY_SIGNER },
+      { address: governanceAuthority, role: AccountRole.READONLY_SIGNER },
       { address: globalConfig, role: AccountRole.WRITABLE },
+      { address: programData, role: AccountRole.READONLY },
     ],
     data: createSetVrfConfigData({ drawVrfConfig, electionVrfConfig }),
     programAddress: programId,

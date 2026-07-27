@@ -192,11 +192,11 @@ export function TokenomicsUpgradeGovernanceApp() {
           </div>
           <span className="tm-network">Devnet only</span>
           <p className="tm-eyebrow">Squads governance - M10</p>
-          <h1>Approve and execute the reviewed upgrade</h1>
+          <h1>Approve and execute the reviewed extension</h1>
           <p className="tm-lead">
             {state?.status === "Executed"
-              ? `Idealer ORAO proposal ${TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex.toString()} was approved by two different multisig members and executed as a separate finalized transaction.`
-              : `Two different multisig members approve Idealer ORAO proposal ${TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex.toString()}. Execution is a separate wallet transaction and remains blocked until the 2-of-3 threshold is on-chain.`}
+              ? `Idealer ProgramData extension proposal ${TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex.toString()} was approved by two different multisig members and executed as a separate finalized transaction.`
+              : `Two different multisig members approve Idealer ProgramData extension proposal ${TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex.toString()}. Execution is a separate wallet transaction and remains blocked until the 2-of-3 threshold is on-chain.`}
           </p>
         </header>
 
@@ -213,8 +213,9 @@ export function TokenomicsUpgradeGovernanceApp() {
             </span>
           </div>
           <p className="tm-muted">
-            This re-hashes the full deployed program and reviewed buffer, then
-            verifies the exact Squads transaction before enabling any action.
+            This re-hashes the full deployed program, verifies the exact
+            ProgramData capacity, rent, and Squads transaction, then enables
+            only the action allowed by the finalized proposal state.
           </p>
           <button
             className="tm-button"
@@ -241,8 +242,12 @@ export function TokenomicsUpgradeGovernanceApp() {
                   <dd>{state.programCapacity.toLocaleString("en-US")} bytes</dd>
                 </div>
                 <div>
-                  <dt>Upgrade buffer</dt>
-                  <dd>{state.bufferAvailable ? "Verified" : "Closed after execution"}</dd>
+                  <dt>Extension state</dt>
+                  <dd>
+                    {state.extensionComplete
+                      ? "3,952 zero-filled bytes added"
+                      : "Not executed"}
+                  </dd>
                 </div>
               </dl>
               <div className="tug-votes">
@@ -356,8 +361,9 @@ export function TokenomicsUpgradeGovernanceApp() {
               </span>
             </div>
             <p className="tm-muted">
-              Approval records one vote only. Execution deploys the reviewed
-              buffer only after two distinct approvals are finalized.
+              Approval records one vote only. Execution adds exactly 3,952
+              zero-filled ProgramData bytes only after two distinct approvals
+              are finalized.
             </p>
             <div className="tug-actions">
               <button
@@ -376,7 +382,7 @@ export function TokenomicsUpgradeGovernanceApp() {
                 onClick={() => void prepare("execute")}
                 type="button"
               >
-                Prepare upgrade execution
+                Prepare extension execution
               </button>
             </div>
             {state?.status === "Active" && state.approved.length === 1 ? (
@@ -407,10 +413,11 @@ export function TokenomicsUpgradeGovernanceApp() {
                 type="checkbox"
               />
               <span>
-                I reviewed devnet, Idealer ORAO proposal{" "}
+                I reviewed devnet, Idealer ProgramData extension proposal{" "}
                 {TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex.toString()},
-                the exact upgrade payload, ProgramData capacity, buffer hash,
-                current votes, and connected member account{" "}
+                the exact checked-loader payload, current and target
+                capacities, deployed hash, rent funding, current votes, and
+                connected member account{" "}
                 {member ? memberLabel(member.address) : ""}.
               </span>
             </label>
@@ -432,12 +439,12 @@ export function TokenomicsUpgradeGovernanceApp() {
             <p className="tm-eyebrow">Strict verification passed</p>
             <h2 id="result-title">
               {result.action === "execute"
-                ? "Idealer upgraded"
+                ? "ProgramData extended"
                 : "Approval finalized"}
             </h2>
             <p>
               {result.action === "execute"
-                ? "The finalized proposal is Executed, the deployed program matches the reviewed artifact SHA-256, and the buffer is closed."
+                ? "The finalized proposal is Executed, the original deployed bytes retain the reviewed SHA-256, and the 3,952-byte extension is zero-filled."
                 : `${memberLabel(walletAddress)} is recorded on-chain. The proposal now has ${result.state.approved.length} approval(s).`}
             </p>
             <div className="tm-success-links">

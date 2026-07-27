@@ -28,12 +28,12 @@ const SQUADS_VAULT = new PublicKey(
 );
 const PROGRAM_DATA_METADATA_BYTES = 45;
 const BUFFER_METADATA_BYTES = 37;
-const CURRENT_CAPACITY = 1_023_336;
+const CURRENT_CAPACITY = 1_045_352;
 const CURRENT_SHA256 =
-  "2ca0484a3fef56bfa9f5831022474f3cef839bc27db36758d83cb8f57bf012d1";
-const REVIEWED_ARTIFACT_BYTES = 1_045_352;
-const REVIEWED_ARTIFACT_SHA256 =
   "29825f38ff3d92214a4842e3ed00f983202b61ed7e82140df12f6af066948a35";
+const REVIEWED_ARTIFACT_BYTES = 1_049_304;
+const REVIEWED_ARTIFACT_SHA256 =
+  "3a8da33f590768b399e93aa6497cf92b2218701b9a9dd1e6342cc0c663bce200";
 const EXTENSION_BYTES = REVIEWED_ARTIFACT_BYTES - CURRENT_CAPACITY;
 
 function requiredEnvironment(name) {
@@ -184,7 +184,7 @@ async function simulateSendAndFinalize(connection, payer, instructions) {
   return signature;
 }
 
-async function extendProgramData() {
+async function fundProgramDataExtensionRent() {
   verifyArtifact();
   const { connection, payer } = await connectionAndPayer();
   const before = await readProgramData(connection, "finalized");
@@ -206,22 +206,26 @@ async function extendProgramData() {
   );
   const additionalRentLamports = requiredLamports - before.lamports;
   const payerBalance = await connection.getBalance(payer.publicKey, "finalized");
-  if (additionalRentLamports <= 0 || payerBalance <= additionalRentLamports + 5_000) {
+  if (additionalRentLamports <= 0) {
+    console.log(
+      JSON.stringify({
+        alreadyFunded: true,
+        capacity: before.bytes.length,
+        programData: PROGRAM_DATA_ID.toBase58(),
+        programDataLamports: before.lamports,
+        requiredLamports,
+      }),
+    );
+    return;
+  }
+  if (payerBalance <= additionalRentLamports + 5_000) {
     throw new Error("The reviewed payer cannot fund the ProgramData extension and fee.");
   }
 
-  const data = Buffer.alloc(8);
-  data.writeUInt32LE(6, 0);
-  data.writeUInt32LE(EXTENSION_BYTES, 4);
-  const instruction = new TransactionInstruction({
-    data,
-    keys: [
-      { pubkey: PROGRAM_DATA_ID, isSigner: false, isWritable: true },
-      { pubkey: PROGRAM_ID, isSigner: false, isWritable: true },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-      { pubkey: payer.publicKey, isSigner: true, isWritable: true },
-    ],
-    programId: LOADER_ID,
+  const instruction = SystemProgram.transfer({
+    fromPubkey: payer.publicKey,
+    lamports: additionalRentLamports,
+    toPubkey: PROGRAM_DATA_ID,
   });
   console.log(
     JSON.stringify({
@@ -229,23 +233,24 @@ async function extendProgramData() {
       cluster: "devnet",
       extensionBytes: EXTENSION_BYTES,
       feePayer: payer.publicKey.toBase58(),
+      nextRequiredAction: "Squads ExtendProgramChecked proposal",
       stage: "reviewed-plan",
     }),
   );
   const signature = await simulateSendAndFinalize(connection, payer, [instruction]);
   const after = await readProgramData(connection, "finalized");
-  verifyProgramData(after, REVIEWED_ARTIFACT_BYTES);
-  if (after.lamports < requiredLamports) {
-    throw new Error("The extension finalized without the required rent balance.");
+  verifyProgramData(after, CURRENT_CAPACITY);
+  if (after.lamports < requiredLamports || after.bytes.length !== before.bytes.length) {
+    throw new Error("The rent funding finalized, but strict read-back failed.");
   }
   console.log(
     JSON.stringify({
       additionalRentLamports,
       authority: after.authority.toBase58(),
-      capacityAfter: after.bytes.length,
-      capacityBefore: before.bytes.length,
+      capacity: after.bytes.length,
       extensionBytes: EXTENSION_BYTES,
-      programDataLamportsAfter: after.lamports,
+      programDataLamports: after.lamports,
+      requiredLamports,
       signature,
       stage: "finalized",
     }),
@@ -352,8 +357,8 @@ async function transferBufferAuthority() {
 
 const command = process.argv[2];
 const action =
-  command === "extend"
-    ? extendProgramData
+  command === "fund-extension-rent"
+    ? fundProgramDataExtensionRent
     : command === "verify-buffer"
       ? verifyBuffer
       : command === "transfer-buffer-authority"
@@ -362,7 +367,7 @@ const action =
 
 if (!action) {
   console.error(
-    "Usage: prepare-idealer-orao-upgrade.cjs <extend|verify-buffer|transfer-buffer-authority>",
+    "Usage: prepare-idealer-orao-upgrade.cjs <fund-extension-rent|verify-buffer|transfer-buffer-authority>",
   );
   process.exitCode = 1;
 } else {
