@@ -13,6 +13,7 @@ import {
   type TokenomicsUpgradeGovernanceAction,
   type TokenomicsUpgradeGovernanceResult,
   type TokenomicsUpgradeGovernanceState,
+  TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG,
   governanceActionAvailability,
   prepareTokenomicsUpgradeGovernanceAction,
   readTokenomicsUpgradeGovernanceState,
@@ -194,8 +195,8 @@ export function TokenomicsUpgradeGovernanceApp() {
           <h1>Approve and execute the reviewed upgrade</h1>
           <p className="tm-lead">
             {state?.status === "Executed"
-              ? "Idealer proposal 2 was approved by two different multisig members and executed as a separate finalized transaction."
-              : "Two different multisig members approve Idealer proposal 2. Execution is a separate wallet transaction and remains blocked until the 2-of-3 threshold is on-chain."}
+              ? `Idealer ORAO proposal ${TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex.toString()} was approved by two different multisig members and executed as a separate finalized transaction.`
+              : `Two different multisig members approve Idealer ORAO proposal ${TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex.toString()}. Execution is a separate wallet transaction and remains blocked until the 2-of-3 threshold is on-chain.`}
           </p>
         </header>
 
@@ -406,9 +407,11 @@ export function TokenomicsUpgradeGovernanceApp() {
                 type="checkbox"
               />
               <span>
-                I reviewed devnet, Idealer proposal 2, the exact upgrade payload,
-                ProgramData capacity, buffer hash, current votes, and connected
-                member account {member ? memberLabel(member.address) : ""}.
+                I reviewed devnet, Idealer ORAO proposal{" "}
+                {TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex.toString()},
+                the exact upgrade payload, ProgramData capacity, buffer hash,
+                current votes, and connected member account{" "}
+                {member ? memberLabel(member.address) : ""}.
               </span>
             </label>
             <button

@@ -1,0 +1,373 @@
+const { createHash } = require("node:crypto");
+const fs = require("node:fs");
+const {
+  Connection,
+  Keypair,
+  PublicKey,
+  SystemProgram,
+  TransactionInstruction,
+  TransactionMessage,
+  VersionedTransaction,
+} = require("@solana/web3.js");
+
+const DEVNET_GENESIS_HASH = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
+const LOADER_ID = new PublicKey(
+  "BPFLoaderUpgradeab1e11111111111111111111111",
+);
+const PROGRAM_ID = new PublicKey(
+  "ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd",
+);
+const PROGRAM_DATA_ID = new PublicKey(
+  "AWGUseV1DEsoSvdW7CDMxxBDUPQXAKqTXyxHVzeTnL8g",
+);
+const TECHNICAL_PAYER = new PublicKey(
+  "4bY5krt2VnnSNB1R4c1bhiWdQYkTc1FvFTN1LaV5JxCH",
+);
+const SQUADS_VAULT = new PublicKey(
+  "DB5nz633YioWzEUnLb97ypUra5RUE11SJDFW9ar23KTp",
+);
+const PROGRAM_DATA_METADATA_BYTES = 45;
+const BUFFER_METADATA_BYTES = 37;
+const CURRENT_CAPACITY = 1_023_336;
+const CURRENT_SHA256 =
+  "2ca0484a3fef56bfa9f5831022474f3cef839bc27db36758d83cb8f57bf012d1";
+const REVIEWED_ARTIFACT_BYTES = 1_045_352;
+const REVIEWED_ARTIFACT_SHA256 =
+  "29825f38ff3d92214a4842e3ed00f983202b61ed7e82140df12f6af066948a35";
+const EXTENSION_BYTES = REVIEWED_ARTIFACT_BYTES - CURRENT_CAPACITY;
+
+function requiredEnvironment(name) {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`${name} is required.`);
+  }
+  return value;
+}
+
+function readKeypair(path) {
+  const secret = Uint8Array.from(JSON.parse(fs.readFileSync(path, "utf8")));
+  return Keypair.fromSecretKey(secret);
+}
+
+function sha256(data) {
+  return createHash("sha256").update(data).digest("hex");
+}
+
+function decodeAuthority(account, expectedTag, metadataBytes, label) {
+  if (
+    !account ||
+    !account.owner.equals(LOADER_ID) ||
+    account.data.length < metadataBytes ||
+    account.data.readUInt32LE(0) !== expectedTag
+  ) {
+    throw new Error(`${label} loader metadata is missing or malformed.`);
+  }
+  const optionOffset = expectedTag === 1 ? 4 : 12;
+  const authorityOffset = optionOffset + 1;
+  if (account.data[optionOffset] !== 1) {
+    throw new Error(`${label} has no authority.`);
+  }
+  return {
+    authority: new PublicKey(
+      account.data.subarray(authorityOffset, authorityOffset + 32),
+    ),
+    bytes: account.data.subarray(metadataBytes),
+    lamports: account.lamports,
+    totalBytes: account.data.length,
+  };
+}
+
+async function readProgramData(connection, commitment) {
+  const [program, programDataAccount] = await Promise.all([
+    connection.getAccountInfo(PROGRAM_ID, commitment),
+    connection.getAccountInfo(PROGRAM_DATA_ID, commitment),
+  ]);
+  if (
+    !program ||
+    !program.executable ||
+    !program.owner.equals(LOADER_ID) ||
+    program.data.length !== 36 ||
+    program.data.readUInt32LE(0) !== 2 ||
+    !new PublicKey(program.data.subarray(4, 36)).equals(PROGRAM_DATA_ID)
+  ) {
+    throw new Error("Idealer does not link to the reviewed ProgramData.");
+  }
+  return decodeAuthority(
+    programDataAccount,
+    3,
+    PROGRAM_DATA_METADATA_BYTES,
+    "Idealer ProgramData",
+  );
+}
+
+function verifyProgramData(programData, expectedCapacity) {
+  if (
+    !programData.authority.equals(SQUADS_VAULT) ||
+    programData.bytes.length !== expectedCapacity ||
+    sha256(programData.bytes.subarray(0, CURRENT_CAPACITY)) !== CURRENT_SHA256 ||
+    programData.bytes
+      .subarray(CURRENT_CAPACITY)
+      .some((byte) => byte !== 0)
+  ) {
+    throw new Error("The finalized Idealer ProgramData is not in the reviewed state.");
+  }
+}
+
+function verifyArtifact() {
+  const artifact = fs.readFileSync(requiredEnvironment("IDEALER_ARTIFACT_PATH"));
+  if (
+    artifact.length !== REVIEWED_ARTIFACT_BYTES ||
+    sha256(artifact) !== REVIEWED_ARTIFACT_SHA256
+  ) {
+    throw new Error("The supplied Idealer artifact is not the reviewed binary.");
+  }
+}
+
+async function connectionAndPayer() {
+  const payer = readKeypair(requiredEnvironment("SOLANA_KEYPAIR_PATH"));
+  if (!payer.publicKey.equals(TECHNICAL_PAYER)) {
+    throw new Error("The supplied keypair is not the reviewed devnet payer.");
+  }
+  const connection = new Connection(requiredEnvironment("SOLANA_RPC_URL"), "confirmed");
+  if ((await connection.getGenesisHash()) !== DEVNET_GENESIS_HASH) {
+    throw new Error("The RPC endpoint is not Solana devnet.");
+  }
+  const [derivedProgramData] = PublicKey.findProgramAddressSync(
+    [PROGRAM_ID.toBuffer()],
+    LOADER_ID,
+  );
+  if (!derivedProgramData.equals(PROGRAM_DATA_ID)) {
+    throw new Error("The configured ProgramData is not derived from Idealer.");
+  }
+  return { connection, payer };
+}
+
+async function simulateSendAndFinalize(connection, payer, instructions) {
+  const latest = await connection.getLatestBlockhash("confirmed");
+  const transaction = new VersionedTransaction(
+    new TransactionMessage({
+      instructions,
+      payerKey: payer.publicKey,
+      recentBlockhash: latest.blockhash,
+    }).compileToV0Message(),
+  );
+  transaction.sign([payer]);
+  const simulation = await connection.simulateTransaction(transaction, {
+    commitment: "confirmed",
+    replaceRecentBlockhash: false,
+    sigVerify: true,
+  });
+  console.log(
+    JSON.stringify({
+      error: simulation.value.err,
+      stage: "signed-simulation",
+      unitsConsumed: simulation.value.unitsConsumed,
+    }),
+  );
+  if (simulation.value.err) {
+    throw new Error("The signed transaction failed simulation; nothing was sent.");
+  }
+  const signature = await connection.sendRawTransaction(transaction.serialize(), {
+    maxRetries: 5,
+    preflightCommitment: "confirmed",
+    skipPreflight: false,
+  });
+  const confirmation = await connection.confirmTransaction(
+    { ...latest, signature },
+    "finalized",
+  );
+  if (confirmation.value.err) {
+    throw new Error(
+      `The transaction failed on-chain: ${JSON.stringify(confirmation.value.err)}.`,
+    );
+  }
+  return signature;
+}
+
+async function extendProgramData() {
+  verifyArtifact();
+  const { connection, payer } = await connectionAndPayer();
+  const before = await readProgramData(connection, "finalized");
+  if (before.bytes.length === REVIEWED_ARTIFACT_BYTES) {
+    verifyProgramData(before, REVIEWED_ARTIFACT_BYTES);
+    console.log(
+      JSON.stringify({
+        alreadyExtended: true,
+        capacity: before.bytes.length,
+        programData: PROGRAM_DATA_ID.toBase58(),
+      }),
+    );
+    return;
+  }
+  verifyProgramData(before, CURRENT_CAPACITY);
+
+  const requiredLamports = await connection.getMinimumBalanceForRentExemption(
+    before.totalBytes + EXTENSION_BYTES,
+  );
+  const additionalRentLamports = requiredLamports - before.lamports;
+  const payerBalance = await connection.getBalance(payer.publicKey, "finalized");
+  if (additionalRentLamports <= 0 || payerBalance <= additionalRentLamports + 5_000) {
+    throw new Error("The reviewed payer cannot fund the ProgramData extension and fee.");
+  }
+
+  const data = Buffer.alloc(8);
+  data.writeUInt32LE(6, 0);
+  data.writeUInt32LE(EXTENSION_BYTES, 4);
+  const instruction = new TransactionInstruction({
+    data,
+    keys: [
+      { pubkey: PROGRAM_DATA_ID, isSigner: false, isWritable: true },
+      { pubkey: PROGRAM_ID, isSigner: false, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: payer.publicKey, isSigner: true, isWritable: true },
+    ],
+    programId: LOADER_ID,
+  });
+  console.log(
+    JSON.stringify({
+      additionalRentLamports,
+      cluster: "devnet",
+      extensionBytes: EXTENSION_BYTES,
+      feePayer: payer.publicKey.toBase58(),
+      stage: "reviewed-plan",
+    }),
+  );
+  const signature = await simulateSendAndFinalize(connection, payer, [instruction]);
+  const after = await readProgramData(connection, "finalized");
+  verifyProgramData(after, REVIEWED_ARTIFACT_BYTES);
+  if (after.lamports < requiredLamports) {
+    throw new Error("The extension finalized without the required rent balance.");
+  }
+  console.log(
+    JSON.stringify({
+      additionalRentLamports,
+      authority: after.authority.toBase58(),
+      capacityAfter: after.bytes.length,
+      capacityBefore: before.bytes.length,
+      extensionBytes: EXTENSION_BYTES,
+      programDataLamportsAfter: after.lamports,
+      signature,
+      stage: "finalized",
+    }),
+  );
+}
+
+async function readReviewedBuffer(connection, bufferId, commitment) {
+  const account = await connection.getAccountInfo(bufferId, commitment);
+  const buffer = decodeAuthority(
+    account,
+    1,
+    BUFFER_METADATA_BYTES,
+    "Idealer ORAO upgrade buffer",
+  );
+  if (
+    buffer.bytes.length !== REVIEWED_ARTIFACT_BYTES ||
+    sha256(buffer.bytes) !== REVIEWED_ARTIFACT_SHA256
+  ) {
+    throw new Error("The on-chain buffer does not match the reviewed artifact.");
+  }
+  return buffer;
+}
+
+async function verifyBuffer() {
+  verifyArtifact();
+  const { connection } = await connectionAndPayer();
+  const programData = await readProgramData(connection, "finalized");
+  verifyProgramData(programData, REVIEWED_ARTIFACT_BYTES);
+  const bufferId = new PublicKey(requiredEnvironment("IDEALER_BUFFER_ADDRESS"));
+  const buffer = await readReviewedBuffer(connection, bufferId, "finalized");
+  if (
+    !buffer.authority.equals(TECHNICAL_PAYER) &&
+    !buffer.authority.equals(SQUADS_VAULT)
+  ) {
+    throw new Error("The reviewed buffer has an unexpected authority.");
+  }
+  console.log(
+    JSON.stringify({
+      authority: buffer.authority.toBase58(),
+      buffer: bufferId.toBase58(),
+      bytes: buffer.bytes.length,
+      sha256: sha256(buffer.bytes),
+      stage: "finalized-readback",
+    }),
+  );
+}
+
+async function transferBufferAuthority() {
+  verifyArtifact();
+  const { connection, payer } = await connectionAndPayer();
+  const programData = await readProgramData(connection, "finalized");
+  verifyProgramData(programData, REVIEWED_ARTIFACT_BYTES);
+  const bufferId = new PublicKey(requiredEnvironment("IDEALER_BUFFER_ADDRESS"));
+  const before = await readReviewedBuffer(connection, bufferId, "finalized");
+  if (before.authority.equals(SQUADS_VAULT)) {
+    console.log(
+      JSON.stringify({
+        alreadyTransferred: true,
+        buffer: bufferId.toBase58(),
+        bufferAuthority: before.authority.toBase58(),
+      }),
+    );
+    return;
+  }
+  if (!before.authority.equals(payer.publicKey)) {
+    throw new Error("The technical payer is not the current buffer authority.");
+  }
+
+  const data = Buffer.alloc(4);
+  data.writeUInt32LE(4, 0);
+  const instruction = new TransactionInstruction({
+    data,
+    keys: [
+      { pubkey: bufferId, isSigner: false, isWritable: true },
+      { pubkey: payer.publicKey, isSigner: true, isWritable: false },
+      { pubkey: SQUADS_VAULT, isSigner: false, isWritable: false },
+    ],
+    programId: LOADER_ID,
+  });
+  console.log(
+    JSON.stringify({
+      buffer: bufferId.toBase58(),
+      cluster: "devnet",
+      currentAuthority: payer.publicKey.toBase58(),
+      newAuthority: SQUADS_VAULT.toBase58(),
+      stage: "reviewed-plan",
+    }),
+  );
+  const signature = await simulateSendAndFinalize(connection, payer, [instruction]);
+  const after = await readReviewedBuffer(connection, bufferId, "finalized");
+  if (!after.authority.equals(SQUADS_VAULT)) {
+    throw new Error("The authority transfer finalized, but strict read-back failed.");
+  }
+  console.log(
+    JSON.stringify({
+      buffer: bufferId.toBase58(),
+      bufferAuthority: after.authority.toBase58(),
+      sha256: sha256(after.bytes),
+      signature,
+      stage: "finalized",
+    }),
+  );
+}
+
+const command = process.argv[2];
+const action =
+  command === "extend"
+    ? extendProgramData
+    : command === "verify-buffer"
+      ? verifyBuffer
+      : command === "transfer-buffer-authority"
+        ? transferBufferAuthority
+        : null;
+
+if (!action) {
+  console.error(
+    "Usage: prepare-idealer-orao-upgrade.cjs <extend|verify-buffer|transfer-buffer-authority>",
+  );
+  process.exitCode = 1;
+} else {
+  action().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  });
+}

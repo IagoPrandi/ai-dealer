@@ -38,9 +38,9 @@ const FINALIZATION_TIMEOUT_MS = 120_000;
 const FINALIZATION_POLL_INTERVAL_MS = 1_000;
 
 export const TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG = Object.freeze({
-  proposalAddress: "Hnhnm1x1vUb7AKk1mnSC4MFdy9vpMTDNreY38CKhhkHS",
-  transactionAddress: "6vziiip4rKcVc7TppkBhbYRYrNxYn4c6adDFi1cxvQoY",
-  transactionIndex: 2n,
+  proposalAddress: "HfqLF6ikWVaiQv8AGEKQoCdnq9fAJ84ibwtnNMnhqQxr",
+  transactionAddress: "De2Z5vodMELCgoPMiT9ev8JH21Hp72AugX9SdWNb7y9R",
+  transactionIndex: 4n,
 });
 
 export type TokenomicsUpgradeGovernanceAction = "approve" | "execute";

@@ -19,6 +19,9 @@ use domain::{
     validate_config, validate_guess, validate_rule, ConfigValidation, ElectionCandidate,
     VOTE_FEE_START_TURN,
 };
+use orao_solana_vrf::state::{
+    RandomnessAccountData as OraoRandomnessAccountData, RandomnessAccountVersion,
+};
 use solana_sha256_hasher::hash;
 use switchboard_on_demand::RandomnessAccountData;
 
@@ -35,6 +38,7 @@ pub const REPEATED_ACTION_FEE_MULTIPLIER: u64 = 2;
 // as an untimed settlement stage once the window closes.
 pub const MAX_RULE_TEXT_BYTES: usize = 6000;
 pub const BASIS_POINTS_DENOMINATOR: u16 = 10_000;
+pub const ORAO_COMMIT_MARKER: u64 = u64::MAX;
 
 /// Raw 32-byte program id of the Switchboard On-Demand program that must own any
 /// randomness account consumed by the trustless `settle_*` instructions.
@@ -57,13 +61,76 @@ pub fn expected_switchboard_program() -> [u8; 32] {
     switchboard_on_demand::ON_DEMAND_MAINNET_PID.to_bytes()
 }
 
+pub fn expected_orao_network_state() -> Pubkey {
+    orao_solana_vrf::network_state_account_address(&orao_solana_vrf::ID)
+}
+
+fn read_orao_randomness(randomness_ai: &AccountInfo) -> Result<OraoRandomnessAccountData> {
+    require_keys_eq!(
+        *randomness_ai.owner,
+        orao_solana_vrf::ID,
+        IdealerError::InvalidRandomnessOwner
+    );
+    let data = randomness_ai.try_borrow_data()?;
+    let mut data_ref: &[u8] = &data;
+    OraoRandomnessAccountData::try_deserialize(&mut data_ref)
+        .map_err(|_| error!(IdealerError::InvalidRandomnessAccount))
+}
+
+fn validate_orao_request(
+    randomness_ai: &AccountInfo,
+    expected_authority: &Pubkey,
+    require_fulfilled: bool,
+) -> Result<Option<[u8; 32]>> {
+    let randomness = read_orao_randomness(randomness_ai)?;
+    require!(
+        randomness.version() == RandomnessAccountVersion::V2,
+        IdealerError::UnsupportedRandomnessAccountVersion
+    );
+    require_keys_eq!(
+        *randomness
+            .client()
+            .ok_or(IdealerError::UnsupportedRandomnessAccountVersion)?,
+        *expected_authority,
+        IdealerError::InvalidRandomnessClient
+    );
+    require!(
+        *randomness.seed() != [0; 32],
+        IdealerError::InvalidRandomnessValue
+    );
+    require_keys_eq!(
+        randomness_ai.key(),
+        orao_solana_vrf::randomness_account_address(&orao_solana_vrf::ID, randomness.seed()),
+        IdealerError::RandomnessSourceMismatch
+    );
+
+    let fulfilled = randomness.fulfilled_randomness();
+    if require_fulfilled {
+        let digest = hash(fulfilled.ok_or(IdealerError::RandomnessNotResolved)?).to_bytes();
+        require!(digest != [0; 32], IdealerError::InvalidRandomnessValue);
+        Ok(Some(digest))
+    } else {
+        require!(fulfilled.is_none(), IdealerError::RandomnessAlreadyResolved);
+        Ok(None)
+    }
+}
+
 /// Parse a committed Switchboard On-Demand randomness account and return its
 /// configured queue + committed seed slot, after verifying the account is owned
 /// by the Switchboard program and originates from the trusted VRF queue.
 ///
 /// Used by the `request_*` (commit) instructions so the queue/owner are checked
 /// once at commit time and the seed slot is recorded for the later settle.
-fn read_committed_randomness(randomness_ai: &AccountInfo, expected_queue: &Pubkey) -> Result<u64> {
+fn read_committed_randomness(
+    randomness_ai: &AccountInfo,
+    expected_config: &Pubkey,
+    expected_authority: &Pubkey,
+) -> Result<u64> {
+    if *expected_config == expected_orao_network_state() {
+        validate_orao_request(randomness_ai, expected_authority, false)?;
+        return Ok(ORAO_COMMIT_MARKER);
+    }
+
     require!(
         randomness_ai.owner.to_bytes() == expected_switchboard_program(),
         IdealerError::InvalidRandomnessOwner
@@ -72,7 +139,7 @@ fn read_committed_randomness(randomness_ai: &AccountInfo, expected_queue: &Pubke
     let randomness = RandomnessAccountData::parse(data)
         .map_err(|_| error!(IdealerError::InvalidRandomnessAccount))?;
     require!(
-        randomness.queue.to_bytes() == expected_queue.to_bytes(),
+        randomness.queue.to_bytes() == expected_config.to_bytes(),
         IdealerError::RandomnessQueueMismatch
     );
     Ok(randomness.seed_slot)
@@ -90,8 +157,9 @@ fn read_committed_randomness(randomness_ai: &AccountInfo, expected_queue: &Pubke
 fn verify_revealed_randomness(
     randomness_ai: &AccountInfo,
     expected_account: &Pubkey,
-    expected_queue: &Pubkey,
+    expected_config: &Pubkey,
     expected_commit_slot: u64,
+    expected_authority: &Pubkey,
     clock: &Clock,
 ) -> Result<[u8; 32]> {
     require_keys_eq!(
@@ -99,6 +167,11 @@ fn verify_revealed_randomness(
         *expected_account,
         IdealerError::RandomnessSourceMismatch
     );
+    if expected_commit_slot == ORAO_COMMIT_MARKER {
+        return validate_orao_request(randomness_ai, expected_authority, true)?
+            .ok_or_else(|| error!(IdealerError::RandomnessNotResolved));
+    }
+
     require!(
         randomness_ai.owner.to_bytes() == expected_switchboard_program(),
         IdealerError::InvalidRandomnessOwner
@@ -107,7 +180,7 @@ fn verify_revealed_randomness(
     let randomness = RandomnessAccountData::parse(data)
         .map_err(|_| error!(IdealerError::InvalidRandomnessAccount))?;
     require!(
-        randomness.queue.to_bytes() == expected_queue.to_bytes(),
+        randomness.queue.to_bytes() == expected_config.to_bytes(),
         IdealerError::RandomnessQueueMismatch
     );
     require!(
@@ -119,6 +192,92 @@ fn verify_revealed_randomness(
         .map_err(|_| error!(IdealerError::RandomnessNotResolved))?;
     require!(value != [0; 32], IdealerError::InvalidRandomnessValue);
     Ok(value)
+}
+
+#[cfg(test)]
+mod randomness_provider_tests {
+    use super::*;
+    use orao_solana_vrf::state::{FulfilledRequest, PendingRequest, RandomnessV2, RequestAccount};
+
+    fn serialize_orao(data: &RandomnessV2, size: usize) -> Vec<u8> {
+        let mut bytes = vec![0; 8 + size];
+        let mut output: &mut [u8] = &mut bytes;
+        data.try_serialize(&mut output).unwrap();
+        bytes
+    }
+
+    #[test]
+    fn orao_pending_request_is_bound_to_client_seed_and_pda() {
+        let authority = Pubkey::new_unique();
+        let seed = [7; 32];
+        let key = orao_solana_vrf::randomness_account_address(&orao_solana_vrf::ID, &seed);
+        let owner = orao_solana_vrf::ID;
+        let mut lamports = 1;
+        let mut bytes = serialize_orao(
+            &RandomnessV2 {
+                request: RequestAccount::Pending(PendingRequest {
+                    client: authority,
+                    seed,
+                    responses: vec![],
+                }),
+            },
+            RandomnessV2::PENDING_SIZE,
+        );
+        let account = AccountInfo::new(
+            &key,
+            false,
+            false,
+            &mut lamports,
+            &mut bytes,
+            &owner,
+            false,
+            0,
+        );
+
+        assert_eq!(
+            validate_orao_request(&account, &authority, false).unwrap(),
+            None
+        );
+        assert!(validate_orao_request(&account, &Pubkey::new_unique(), false).is_err());
+    }
+
+    #[test]
+    fn orao_fulfillment_is_hashed_and_cannot_be_pre_sampled() {
+        let authority = Pubkey::new_unique();
+        let seed = [8; 32];
+        let raw_randomness = [9; 64];
+        let key = orao_solana_vrf::randomness_account_address(&orao_solana_vrf::ID, &seed);
+        let owner = orao_solana_vrf::ID;
+        let mut lamports = 1;
+        let mut bytes = serialize_orao(
+            &RandomnessV2 {
+                request: RequestAccount::Fulfilled(FulfilledRequest {
+                    client: authority,
+                    seed,
+                    randomness: raw_randomness,
+                }),
+            },
+            RandomnessV2::FULFILLED_SIZE,
+        );
+        let account = AccountInfo::new(
+            &key,
+            false,
+            false,
+            &mut lamports,
+            &mut bytes,
+            &owner,
+            false,
+            0,
+        );
+
+        assert!(validate_orao_request(&account, &authority, false).is_err());
+        assert_eq!(
+            validate_orao_request(&account, &authority, true)
+                .unwrap()
+                .unwrap(),
+            hash(&raw_randomness).to_bytes()
+        );
+    }
 }
 
 #[program]
@@ -814,8 +973,11 @@ pub mod idealer {
         );
 
         let randomness_account = ctx.accounts.randomness.key();
-        let commit_slot =
-            read_committed_randomness(&ctx.accounts.randomness, &config.election_vrf_config)?;
+        let commit_slot = read_committed_randomness(
+            &ctx.accounts.randomness,
+            &config.election_vrf_config,
+            &ctx.accounts.authority.key(),
+        )?;
         ctx.accounts.turn_state.election_vrf_request = randomness_account;
         ctx.accounts.turn_state.election_commit_slot = commit_slot;
 
@@ -845,6 +1007,7 @@ pub mod idealer {
             &ctx.accounts.turn_state.election_vrf_request,
             &config.election_vrf_config,
             ctx.accounts.turn_state.election_commit_slot,
+            &ctx.accounts.authority.key(),
             &clock,
         )?;
 
@@ -1075,8 +1238,11 @@ pub mod idealer {
         );
 
         let randomness_account = ctx.accounts.randomness.key();
-        let commit_slot =
-            read_committed_randomness(&ctx.accounts.randomness, &config.election_vrf_config)?;
+        let commit_slot = read_committed_randomness(
+            &ctx.accounts.randomness,
+            &config.election_vrf_config,
+            &ctx.accounts.authority.key(),
+        )?;
         ctx.accounts.turn_state.active_election_vrf_request = randomness_account;
         ctx.accounts.turn_state.active_election_commit_slot = commit_slot;
         emit!(ActiveElectionVrfRequested {
@@ -1104,6 +1270,7 @@ pub mod idealer {
             &ctx.accounts.turn_state.active_election_vrf_request,
             &config.election_vrf_config,
             ctx.accounts.turn_state.active_election_commit_slot,
+            &ctx.accounts.authority.key(),
             &clock,
         )?;
 
@@ -1199,10 +1366,19 @@ pub mod idealer {
                 ctx.accounts.turn_state.draw_vrf_request
             }
         };
+        let recorded_commit = match args.stage {
+            VrfStage::FinalistElection => ctx.accounts.turn_state.election_commit_slot,
+            VrfStage::ActiveElection => ctx.accounts.turn_state.active_election_commit_slot,
+            VrfStage::Draw => ctx.accounts.turn_state.draw_commit_slot,
+        };
 
         require!(
             recorded != Pubkey::default(),
             IdealerError::ElectionVrfNotRequested
+        );
+        require!(
+            recorded_commit != ORAO_COMMIT_MARKER,
+            IdealerError::PersistentRandomnessCannotBeReset
         );
         require_keys_eq!(
             ctx.accounts.randomness.key(),
@@ -1606,8 +1782,11 @@ pub mod idealer {
         require!(!config.paused, IdealerError::ProtocolPaused);
 
         let randomness_account = ctx.accounts.randomness.key();
-        let commit_slot =
-            read_committed_randomness(&ctx.accounts.randomness, &config.draw_vrf_config)?;
+        let commit_slot = read_committed_randomness(
+            &ctx.accounts.randomness,
+            &config.draw_vrf_config,
+            &ctx.accounts.authority.key(),
+        )?;
 
         let clock = Clock::get()?;
         let turn = &mut ctx.accounts.turn_state;
@@ -1657,6 +1836,7 @@ pub mod idealer {
             &ctx.accounts.turn_state.draw_vrf_request,
             &config.draw_vrf_config,
             ctx.accounts.turn_state.draw_commit_slot,
+            &ctx.accounts.authority.key(),
             &clock,
         )?;
 
@@ -1691,6 +1871,10 @@ pub mod idealer {
         require!(
             turn.draw_status == DrawStatus::Requested,
             IdealerError::DrawNotSettleable
+        );
+        require!(
+            turn.draw_commit_slot != ORAO_COMMIT_MARKER,
+            IdealerError::PersistentRandomnessCannotBeReset
         );
 
         turn.draw_status = DrawStatus::Failed;
@@ -4166,14 +4350,22 @@ pub enum IdealerError {
     InvalidRandomnessValue,
     #[msg("The randomness source does not match the requested account.")]
     RandomnessSourceMismatch,
-    #[msg("The randomness account is not owned by the Switchboard On-Demand program.")]
+    #[msg("The randomness account is not owned by the configured verifiable-randomness program.")]
     InvalidRandomnessOwner,
-    #[msg("The randomness account does not belong to the configured VRF queue.")]
+    #[msg("The randomness account does not belong to the configured randomness provider.")]
     RandomnessQueueMismatch,
-    #[msg("The randomness account seed slot does not match the recorded commit slot.")]
+    #[msg("The randomness commitment does not match the recorded request.")]
     RandomnessCommitSlotMismatch,
-    #[msg("The Switchboard randomness has not been revealed in the current slot.")]
+    #[msg("The verifiable randomness has not been fulfilled for settlement.")]
     RandomnessNotResolved,
+    #[msg("This randomness account version is not supported.")]
+    UnsupportedRandomnessAccountVersion,
+    #[msg("The randomness request client does not match the Idealer authority.")]
+    InvalidRandomnessClient,
+    #[msg("The randomness was already fulfilled before the Idealer request was recorded.")]
+    RandomnessAlreadyResolved,
+    #[msg("A persistent randomness request cannot be failed, reset, or replaced.")]
+    PersistentRandomnessCannotBeReset,
     #[msg("The draw failure code must be non-zero.")]
     InvalidDrawFailureCode,
     #[msg("The compiled rule artifact hash is invalid.")]

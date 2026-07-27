@@ -14,12 +14,17 @@ import {
   createSettlementCloseTurnInstruction,
   decodeRuleProposalCandidate,
   decodeSettlementTurnState,
+  hashOraoFulfillment,
+  isOraoProviderConfig,
 } from "./settlement.js";
 import type { ElectionCandidate } from "./election.js";
 
 const PROGRAM_ID = new PublicKey("ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd");
 const AUTHORITY = new PublicKey("4bY5krt2VnnSNB1R4c1bhiWdQYkTc1FvFTN1LaV5JxCH");
 const RANDOMNESS = new PublicKey("FWBa3Ubjyv7niKs3cxQkccmBvym3yoH9bYCXmUB5W1oq");
+const ORAO_NETWORK_STATE = new PublicKey(
+  "5ER1oENnV4srxYdAynUfRzWeQCPQaqMiAp4VqyMbSqnK",
+);
 
 const REQUEST_DRAW_DISCRIMINATOR = [22, 180, 8, 81, 47, 21, 86, 159];
 const SETTLE_DRAW_DISCRIMINATOR = [175, 154, 75, 30, 118, 117, 107, 194];
@@ -63,6 +68,20 @@ function candidate(ruleId: number): ElectionCandidate {
     voteCount: 1,
   };
 }
+
+test("ORAO provider identity and 64-byte fulfillment hashing are deterministic", () => {
+  assert.equal(isOraoProviderConfig(ORAO_NETWORK_STATE), true);
+  assert.equal(isOraoProviderConfig(RANDOMNESS), false);
+  const raw = Uint8Array.from({ length: 64 }, (_, index) => index);
+  assert.deepEqual(
+    hashOraoFulfillment(raw),
+    createHash("sha256").update(raw).digest(),
+  );
+  assert.throws(
+    () => hashOraoFulfillment(raw.subarray(0, 32)),
+    /exactly 64 bytes/,
+  );
+});
 
 test("draw settlement builders use trustless randomness account", () => {
   const request = createRequestDrawInstruction({

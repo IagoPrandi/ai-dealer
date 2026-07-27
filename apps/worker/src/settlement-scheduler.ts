@@ -428,7 +428,8 @@ async function executeAction(args: ExecuteArgs): Promise<string | null> {
       return signature;
     }
     case "request_finalist_vrf": {
-      const { randomnessAccount } = await senders.createCommittedRandomness();
+      const { randomnessAccount } =
+        await senders.createCommittedRandomness("election");
       return senders.requestElectionVrf(turnId, randomnessAccount);
     }
     case "settle_finalist_vrf": {
@@ -484,7 +485,8 @@ async function executeAction(args: ExecuteArgs): Promise<string | null> {
       return signature;
     }
     case "request_active_vrf": {
-      const { randomnessAccount } = await senders.createCommittedRandomness();
+      const { randomnessAccount } =
+        await senders.createCommittedRandomness("election");
       return senders.requestActiveElectionVrf(turnId, randomnessAccount);
     }
     case "settle_active_vrf": {
@@ -535,7 +537,8 @@ async function executeAction(args: ExecuteArgs): Promise<string | null> {
       return projectionSignature();
     }
     case "request_draw": {
-      const { randomnessAccount } = await senders.createCommittedRandomness();
+      const { randomnessAccount } =
+        await senders.createCommittedRandomness("draw");
       const signature = await senders.requestDraw(turnId, randomnessAccount);
       await deps.bridge.publishDraw(
         buildRequestedDraw(turnId, randomnessAccount, deps.nowIso()),

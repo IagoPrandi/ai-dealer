@@ -2369,6 +2369,7 @@ version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "anchor-spl",
+ "orao-solana-vrf",
  "solana-account-info",
  "solana-client",
  "solana-program-error",
@@ -3243,6 +3244,17 @@ dependencies = [
  "pin-project",
  "rand 0.8.6",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "orao-solana-vrf"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a2da2b4cadd3d921e9a339cf1786ea17ef62fa6d837fe8e14183bd8e47b109e"
+dependencies = [
+ "anchor-lang",
+ "anchor-spl",
+ "bs58",
 ]
 
 [[package]]

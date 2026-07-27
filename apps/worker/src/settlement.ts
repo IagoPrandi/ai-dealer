@@ -1,5 +1,11 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import bs58 from "bs58";
+import {
+  networkStateAccountAddress as oraoNetworkStateAccountAddress,
+  Orao,
+  PROGRAM_ID as ORAO_PROGRAM_ID,
+  randomnessAccountAddress as oraoRandomnessAccountAddress,
+} from "@orao-network/solana-vrf";
 import {
   AnchorUtils,
   asV0Tx,
@@ -103,6 +109,8 @@ interface SettlementContext {
   switchboardProgram: Awaited<
     ReturnType<typeof AnchorUtils.loadProgramFromConnection>
   >;
+  oraoProgram: Orao;
+  preparedOraoRequests: Map<string, TransactionInstruction>;
 }
 
 export interface SettlementSenderOptions {
@@ -125,6 +133,19 @@ interface SwitchboardRandomnessData {
   revealSlot: { toNumber(): number };
   seedSlot: { toNumber(): number };
   value: unknown;
+}
+
+export type RandomnessProviderStage = "draw" | "election";
+
+export function isOraoProviderConfig(config: PublicKey) {
+  return config.equals(oraoNetworkStateAccountAddress());
+}
+
+export function hashOraoFulfillment(randomness: Uint8Array) {
+  if (randomness.length !== 64) {
+    throw new Error("ORAO fulfilled randomness must contain exactly 64 bytes.");
+  }
+  return createHash("sha256").update(randomness).digest();
 }
 
 function createAnchorWallet(keypair: Keypair) {
@@ -523,6 +544,11 @@ async function createSettlementContext(
     createAnchorWallet(authority) as never,
     switchboardProgramId,
   );
+  const oraoProgram = new Orao({
+    connection,
+    publicKey: authority.publicKey,
+    wallet: createAnchorWallet(authority),
+  } as never);
 
   return {
     authority,
@@ -530,6 +556,8 @@ async function createSettlementContext(
     connection,
     programId: new PublicKey(config.programId.toString()),
     queue,
+    oraoProgram,
+    preparedOraoRequests: new Map(),
     switchboardProgram,
     switchboardProgramId,
   };
@@ -599,7 +627,57 @@ async function sendInstructions({
   });
 }
 
-async function createAndCommitRandomness(context: SettlementContext) {
+async function fetchConfiguredRandomnessProvider(
+  context: SettlementContext,
+  stage: RandomnessProviderStage,
+) {
+  const account = await context.connection.getAccountInfo(
+    globalConfigPda(context.programId),
+    context.commitment,
+  );
+  if (!account || !account.owner.equals(context.programId)) {
+    throw new Error("GlobalConfig is missing or owned by an unexpected program.");
+  }
+  const snapshot = decodeGlobalConfigAccount(account.data);
+  return new PublicKey(
+    stage === "draw"
+      ? snapshot.drawVrfConfig.toString()
+      : snapshot.electionVrfConfig.toString(),
+  );
+}
+
+async function createAndCommitRandomness(
+  context: SettlementContext,
+  stage: RandomnessProviderStage,
+) {
+  const configuredProvider = await fetchConfiguredRandomnessProvider(
+    context,
+    stage,
+  );
+  if (isOraoProviderConfig(configuredProvider)) {
+    const seed = randomBytes(32);
+    const requestBuilder = await context.oraoProgram.request(seed);
+    const requestMethod = await requestBuilder
+      .withComputeUnitPrice(0n)
+      .build();
+    const requestInstruction = await requestMethod.instruction();
+    const randomnessAccount = oraoRandomnessAccountAddress(seed);
+    context.preparedOraoRequests.set(
+      randomnessAccount.toBase58(),
+      requestInstruction,
+    );
+    return {
+      randomnessAccount: randomnessAccount.toBase58(),
+      signature: null,
+    };
+  }
+
+  if (!configuredProvider.equals(context.queue)) {
+    throw new Error(
+      `Unsupported Switchboard queue ${configuredProvider.toBase58()}; configured worker queue is ${context.queue.toBase58()}.`,
+    );
+  }
+
   const [randomness, randomnessKeypair, createAndCommitIxs] =
     await Randomness.createAndCommitIxs(
       context.switchboardProgram,
@@ -617,6 +695,53 @@ async function createAndCommitRandomness(context: SettlementContext) {
     randomnessAccount: randomness.pubkey.toBase58(),
     signature,
   };
+}
+
+async function sendRandomnessRequest({
+  context,
+  instruction,
+  label,
+  randomnessAccount,
+  stage,
+}: {
+  context: SettlementContext;
+  instruction: TransactionInstruction;
+  label: string;
+  randomnessAccount: PublicKey;
+  stage: RandomnessProviderStage;
+}) {
+  const configuredProvider = await fetchConfiguredRandomnessProvider(
+    context,
+    stage,
+  );
+  const address = randomnessAccount.toBase58();
+  const prepared = context.preparedOraoRequests.get(address);
+  if (isOraoProviderConfig(configuredProvider)) {
+    if (!prepared) {
+      throw new Error(
+        `ORAO request ${address} was not prepared in this worker process; refusing a non-atomic Idealer request.`,
+      );
+    }
+    const signature = await sendInstructions({
+      context,
+      instructions: [prepared, instruction],
+      label,
+    });
+    context.preparedOraoRequests.delete(address);
+    return signature;
+  }
+
+  if (prepared) {
+    context.preparedOraoRequests.delete(address);
+    throw new Error(
+      `Prepared ORAO request ${address} does not match the configured provider.`,
+    );
+  }
+  return sendInstructions({
+    context,
+    instructions: [instruction],
+    label,
+  });
 }
 
 function readPubkey(data: Uint8Array, offset: number) {
@@ -852,6 +977,53 @@ function asSwitchboardData(data: unknown): SwitchboardRandomnessData {
   return data as SwitchboardRandomnessData;
 }
 
+interface OraoRequestFields {
+  client: PublicKey;
+  randomness?: number[];
+  seed: number[];
+}
+
+interface OraoRandomnessV2Data {
+  request:
+    | { fulfilled: [OraoRequestFields] }
+    | { pending: [OraoRequestFields] };
+}
+
+async function fetchOraoRandomness(
+  context: SettlementContext,
+  randomnessAccount: PublicKey,
+) {
+  const decoded = (await context.oraoProgram.account.randomnessV2.fetch(
+    randomnessAccount,
+    context.commitment,
+  )) as unknown as OraoRandomnessV2Data;
+  const request =
+    "pending" in decoded.request
+      ? decoded.request.pending[0]
+      : decoded.request.fulfilled[0];
+  if (!request.client.equals(context.authority.publicKey)) {
+    throw new Error(
+      `ORAO request ${randomnessAccount.toBase58()} belongs to an unexpected client.`,
+    );
+  }
+  const expectedAddress = oraoRandomnessAccountAddress(
+    Uint8Array.from(request.seed),
+  );
+  if (!expectedAddress.equals(randomnessAccount)) {
+    throw new Error(
+      `ORAO request ${randomnessAccount.toBase58()} does not match its seed PDA.`,
+    );
+  }
+  if (!("fulfilled" in decoded.request)) {
+    return null;
+  }
+  const raw = decoded.request.fulfilled[0].randomness;
+  if (!raw) {
+    throw new Error("ORAO fulfilled request is missing randomness.");
+  }
+  return hashOraoFulfillment(Uint8Array.from(raw));
+}
+
 async function fetchCommittedRandomness({
   context,
   randomnessAccount,
@@ -863,6 +1035,29 @@ async function fetchCommittedRandomness({
 }): Promise<ElectionRandomnessState | RandomnessState | null> {
   if (isZeroPubkey(randomnessAccount)) {
     return null;
+  }
+  const account = await context.connection.getAccountInfo(
+    randomnessAccount,
+    context.commitment,
+  );
+  if (!account) {
+    return null;
+  }
+  if (account.owner.equals(ORAO_PROGRAM_ID)) {
+    const randomness = await fetchOraoRandomness(context, randomnessAccount);
+    if (!randomness) {
+      return { status: "pending" };
+    }
+    return {
+      randomness,
+      source: randomnessAccount.toBase58(),
+      status: "ready",
+    };
+  }
+  if (!account.owner.equals(context.switchboardProgramId)) {
+    throw new Error(
+      `Randomness account ${randomnessAccount.toBase58()} has unsupported owner ${account.owner.toBase58()}.`,
+    );
   }
 
   const randomness = new Randomness(
@@ -913,6 +1108,33 @@ async function revealAndSendCallback({
   label: string;
   randomnessAccount: PublicKey;
 }) {
+  const account = await context.connection.getAccountInfo(
+    randomnessAccount,
+    context.commitment,
+  );
+  if (!account) {
+    throw new Error(`Randomness account ${randomnessAccount.toBase58()} is missing.`);
+  }
+  if (account.owner.equals(ORAO_PROGRAM_ID)) {
+    const randomness = await fetchOraoRandomness(context, randomnessAccount);
+    if (!randomness) {
+      throw new Error(
+        `ORAO randomness ${randomnessAccount.toBase58()} is still pending.`,
+      );
+    }
+    const signature = await sendInstructions({
+      context,
+      instructions: callbackInstructions,
+      label,
+    });
+    return { randomness, signature };
+  }
+  if (!account.owner.equals(context.switchboardProgramId)) {
+    throw new Error(
+      `Randomness account ${randomnessAccount.toBase58()} has unsupported owner ${account.owner.toBase58()}.`,
+    );
+  }
+
   const randomness = new Randomness(
     context.switchboardProgram,
     randomnessAccount,
@@ -982,22 +1204,23 @@ export function createProductionDrawSettlementSenders(
     },
     async randomnessAccountFor() {
       const context = await getContext();
-      const result = await createAndCommitRandomness(context);
+      const result = await createAndCommitRandomness(context, "draw");
       return result.randomnessAccount;
     },
     async requestDraw(turnId: number, randomnessAccount: string) {
       const context = await getContext();
-      await sendInstructions({
+      const account = new PublicKey(randomnessAccount);
+      await sendRandomnessRequest({
         context,
-        instructions: [
-          createRequestDrawInstruction({
-            authority: context.authority.publicKey,
-            programId: context.programId,
-            randomnessAccount: new PublicKey(randomnessAccount),
-            turnId,
-          }),
-        ],
+        instruction: createRequestDrawInstruction({
+          authority: context.authority.publicKey,
+          programId: context.programId,
+          randomnessAccount: account,
+          turnId,
+        }),
         label: "request_draw",
+        randomnessAccount: account,
+        stage: "draw",
       });
     },
     async settleDraw(
@@ -1096,7 +1319,7 @@ export function createProductionRuleElectionSettlementSenders(
     },
     async randomnessAccountFor() {
       const context = await getContext();
-      const result = await createAndCommitRandomness(context);
+      const result = await createAndCommitRandomness(context, "election");
       return result.randomnessAccount;
     },
     async requestActiveElectionVrf(
@@ -1104,32 +1327,34 @@ export function createProductionRuleElectionSettlementSenders(
       randomnessAccount: string,
     ) {
       const context = await getContext();
-      await sendInstructions({
+      const account = new PublicKey(randomnessAccount);
+      await sendRandomnessRequest({
         context,
-        instructions: [
-          createRequestActiveElectionVrfInstruction({
-            authority: context.authority.publicKey,
-            programId: context.programId,
-            randomnessAccount: new PublicKey(randomnessAccount),
-            turnId,
-          }),
-        ],
+        instruction: createRequestActiveElectionVrfInstruction({
+          authority: context.authority.publicKey,
+          programId: context.programId,
+          randomnessAccount: account,
+          turnId,
+        }),
         label: "request_active_election_vrf",
+        randomnessAccount: account,
+        stage: "election",
       });
     },
     async requestElectionVrf(turnId: number, randomnessAccount: string) {
       const context = await getContext();
-      await sendInstructions({
+      const account = new PublicKey(randomnessAccount);
+      await sendRandomnessRequest({
         context,
-        instructions: [
-          createRequestRuleElectionVrfInstruction({
-            authority: context.authority.publicKey,
-            programId: context.programId,
-            randomnessAccount: new PublicKey(randomnessAccount),
-            turnId,
-          }),
-        ],
+        instruction: createRequestRuleElectionVrfInstruction({
+          authority: context.authority.publicKey,
+          programId: context.programId,
+          randomnessAccount: account,
+          turnId,
+        }),
         label: "request_rule_election_vrf",
+        randomnessAccount: account,
+        stage: "election",
       });
     },
     async settleActiveElection(
@@ -1288,9 +1513,9 @@ export interface SettlementSenders {
     finalists: readonly ElectionCandidate[],
   ) => Promise<string>;
   closeTurn: (turnId: number) => Promise<string>;
-  createCommittedRandomness: () => Promise<{
+  createCommittedRandomness: (stage: RandomnessProviderStage) => Promise<{
     randomnessAccount: string;
-    signature: string;
+    signature: string | null;
   }>;
   failDraw: (turnId: number, failureCode: number) => Promise<string>;
   fetchRandomnessFor: (
@@ -1381,8 +1606,8 @@ export function createSettlementSenders(
         label: "close_turn",
       });
     },
-    async createCommittedRandomness() {
-      return createAndCommitRandomness(await getContext());
+    async createCommittedRandomness(stage) {
+      return createAndCommitRandomness(await getContext(), stage);
     },
     async failDraw(turnId, failureCode) {
       const context = await getContext();
@@ -1438,47 +1663,50 @@ export function createSettlementSenders(
     },
     async requestActiveElectionVrf(turnId, randomnessAccount) {
       const context = await getContext();
-      return sendInstructions({
+      const account = new PublicKey(randomnessAccount);
+      return sendRandomnessRequest({
         context,
-        instructions: [
-          createRequestActiveElectionVrfInstruction({
-            authority: context.authority.publicKey,
-            programId: context.programId,
-            randomnessAccount: new PublicKey(randomnessAccount),
-            turnId,
-          }),
-        ],
+        instruction: createRequestActiveElectionVrfInstruction({
+          authority: context.authority.publicKey,
+          programId: context.programId,
+          randomnessAccount: account,
+          turnId,
+        }),
         label: "request_active_election_vrf",
+        randomnessAccount: account,
+        stage: "election",
       });
     },
     async requestDraw(turnId, randomnessAccount) {
       const context = await getContext();
-      return sendInstructions({
+      const account = new PublicKey(randomnessAccount);
+      return sendRandomnessRequest({
         context,
-        instructions: [
-          createRequestDrawInstruction({
-            authority: context.authority.publicKey,
-            programId: context.programId,
-            randomnessAccount: new PublicKey(randomnessAccount),
-            turnId,
-          }),
-        ],
+        instruction: createRequestDrawInstruction({
+          authority: context.authority.publicKey,
+          programId: context.programId,
+          randomnessAccount: account,
+          turnId,
+        }),
         label: "request_draw",
+        randomnessAccount: account,
+        stage: "draw",
       });
     },
     async requestElectionVrf(turnId, randomnessAccount) {
       const context = await getContext();
-      return sendInstructions({
+      const account = new PublicKey(randomnessAccount);
+      return sendRandomnessRequest({
         context,
-        instructions: [
-          createRequestRuleElectionVrfInstruction({
-            authority: context.authority.publicKey,
-            programId: context.programId,
-            randomnessAccount: new PublicKey(randomnessAccount),
-            turnId,
-          }),
-        ],
+        instruction: createRequestRuleElectionVrfInstruction({
+          authority: context.authority.publicKey,
+          programId: context.programId,
+          randomnessAccount: account,
+          turnId,
+        }),
         label: "request_rule_election_vrf",
+        randomnessAccount: account,
+        stage: "election",
       });
     },
     async settleActiveElection(turnId, randomnessAccount, candidates) {

@@ -234,12 +234,12 @@ export function TokenomicsUpgradeApp() {
           </div>
           <span className="tm-network">Devnet only</span>
           <p className="tm-eyebrow">Program governance - M10</p>
-          <h1>Propose the Idealer reward upgrade</h1>
+          <h1>Propose the Idealer ORAO upgrade</h1>
           <p className="tm-lead">
             Wallet A creates an active Squads proposal for the reviewed Idealer
-            build containing the Tokenomics Core reward CPIs. The proposal
-            starts with zero approvals and cannot execute until two members
-            approve it.
+            build containing the governed ORAO v2 randomness provider. The
+            proposal starts with zero approvals and cannot execute until two
+            members approve it.
           </p>
         </header>
 

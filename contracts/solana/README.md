@@ -68,14 +68,24 @@ contribution PDAs for the first-round referral bonus.
 ## M3.1 — Verifiable Draw Flow
 
 The draw uses a verifiable-randomness consumer pattern. Randomness is sourced
-off-chain from a verifiable provider (Switchboard On-Demand) and consumed
-on-chain; the program derives the published numbers deterministically so any
-auditor can reproduce them.
+off-chain from a configured verifiable provider and consumed on-chain; the
+program derives the published numbers deterministically so any auditor can
+reproduce them. ORAO v2 is the primary devnet continuation provider and
+Switchboard On-Demand remains compatible.
 
-- `request_draw(randomness_account)` — authority records the randomness account once a turn has ended (`DrawStatus::Requested`). Retryable from `NotRequested`/`Failed`.
+- `request_draw(randomness_account)` — authority records the randomness account once a turn has ended (`DrawStatus::Requested`). An ORAO v2 request must be created in the same transaction and cannot be failed/reset after recording; the Switchboard path retains its prior retry behavior.
 - `settle_draw({ randomness, randomness_source })` — consumes the revealed 32-byte value (source must match the requested account), derives 6 unique numbers in `1..=100` via `domain::derive_draw_numbers`, and stores `draw_result`, `draw_randomness`, and `draw_vrf_fulfillment` (`DrawStatus::Fulfilled`).
-- `fail_draw(failure_code)` — records a recoverable failure (`DrawStatus::Failed`) without corrupting turn/guess/rule/prize state.
+- `fail_draw(failure_code)` — records a recoverable Switchboard failure (`DrawStatus::Failed`) without corrupting turn/guess/rule/prize state; persistent ORAO requests reject this instruction to prevent abort-and-reroll bias.
 - Derivation uses SHA-256 over `randomness | turn_id(u64 LE) | counter(u64 LE)` with rejection sampling (bytes `>= 200` skipped) for an unbiased `1..=100` mapping. The off-chain worker mirror in `apps/worker/src/draw.ts` is locked to the same known vectors by tests on both sides.
+
+The existing `draw_vrf_config` and `election_vrf_config` fields select ORAO
+only when set to its canonical Network State PDA
+`5ER1oENnV4srxYdAynUfRzWeQCPQaqMiAp4VqyMbSqnK`; every other value continues
+to be interpreted as a Switchboard queue. The ORAO programme is hardcoded as
+`VRFzZoJdhFWL8rkvu87LpKM3RbcVezpMEc6X5GVDr7y`. Idealer accepts only v2
+request PDAs owned by that programme, bound to the Idealer authority as client,
+and rejects pre-fulfilled requests. Fulfilled 64-byte ORAO values are SHA-256
+compressed to the existing 32-byte protocol input.
 
 ### SBF build, SBF tests, and devnet deploy
 

@@ -1,8 +1,8 @@
 ﻿# Idealer — Product Requirements Document
 
-> **Version:** 1.5.1
-> **Status:** Implementation Baseline — MVP defaults integrated; local/self-hosted LLM support added; rule elimination decision phase added; repeated paid action fee escalation specified
-> **Last Updated:** 2026-06-29
+> **Version:** 1.5.2
+> **Status:** Implementation Baseline — MVP defaults integrated; governed verifiable-randomness provider abstraction added; local/self-hosted LLM support added; rule elimination decision phase added; repeated paid action fee escalation specified
+> **Last Updated:** 2026-07-24
 > **Primary Product Surface:** Mobile-first DApp  
 > **Language:** Portuguese / English technical terms where useful
 
@@ -30,6 +30,41 @@
 18. [Appendix B — Product Principle](#appendix-b--product-principle)
 19. [Appendix C — Retention Impact of Creator Rewards and Variable Turn Duration](#appendix-c--retention-impact-of-creator-rewards-and-variable-turn-duration)
 20. [Appendix D — Review Resolution Matrix](#appendix-d--review-resolution-matrix)
+
+---
+
+## 2026-07-24 Verifiable-Randomness Provider Amendment
+
+This amendment supersedes every provider-specific clause below that names
+Switchboard as the only permitted MVP provider. Idealer uses a
+Squads-governed, allowlisted verifiable-randomness provider for finalist
+selection, active-rule selection, and the number draw:
+
+- **ORAO v2 is the primary provider for the devnet continuation.** The official
+  ORAO programme identity is compiled into the Idealer programme. The existing
+  draw/election VRF configuration fields select ORAO only when they equal its
+  canonical Network State PDA.
+- **Switchboard On-Demand remains a compatible provider.** Existing configured
+  Switchboard queues and already committed Switchboard requests keep their
+  same owner, queue, seed-slot, and same-transaction reveal verification.
+- **The provider is bound when a request is recorded.** There is no automatic
+  or operator-selected fallback after commitment. ORAO request creation and the
+  corresponding Idealer request instruction must execute atomically.
+- **ORAO v2 requests are bound to the official programme, their canonical seed
+  PDA, and the Idealer authority as client.** Pre-fulfilled requests are
+  rejected. A fulfilled 64-byte ORAO result is SHA-256 compressed to the
+  protocol's existing 32-byte randomness input.
+- **Persistent requests cannot be discarded.** Once an ORAO request is
+  recorded, `fail_draw` and stale-request reset paths must reject it, preventing
+  abort-and-reroll bias.
+- Eligible-pool commitments, deterministic tie-breaking, rejection-sampling
+  selection, public proof references, and the prohibitions on backend entropy,
+  transaction/request hashes, clocks, blockhashes, mocks, and deterministic
+  fallback remain unchanged.
+- Provider activation still requires programme tests, reviewed SBF bytes, a
+  Squads-approved upgrade, an explicit governed configuration transaction, and
+  live devnet proof. This amendment does not authorize a mainnet provider or
+  mainnet deployment.
 
 ---
 
@@ -97,7 +132,7 @@ The main product experience is designed for users opening the app from a mobile 
 - **Docker Compose Project Name:** `idealer`
 - **Container Group Prefix:** `idealer-*`
 - **Wallet Support:** Phantom, Backpack, Solflare, and mobile wallet adapters
-- **Randomness:** Switchboard VRF for both number draw and rule-election randomness
+- **Randomness:** Squads-governed on-chain verifiable randomness; ORAO v2 is primary for the current devnet continuation and Switchboard On-Demand remains compatible
 - **AI Rule Compilation:** Multi-agent AI Rule Compiler harness
 - **Local AI Inference (optional):** Local/self-hosted open models (Phi, Llama, Gemma, Qwen) served through an OpenAI-compatible endpoint (Ollama / vLLM / llama.cpp); cloud providers remain available for fallback and escalation
 - **Rule Execution:** Deterministic DSL/AST runtime with sandbox limits
@@ -4448,7 +4483,9 @@ Requirements:
 
 Rule election randomness must satisfy the following requirements:
 
-- use Switchboard VRF on Solana for election randomness;
+- use an allowlisted, programme-verified Solana randomness provider selected by
+  the governed configuration; ORAO v2 is primary for the current devnet
+  continuation and Switchboard On-Demand remains compatible;
 - derive random finalists only from fulfilled VRF randomness;
 - commit eligible pool and top-voted finalist hashes before VRF fulfillment;
 - use ranged VRF output or rejection sampling for selecting indexes;
@@ -4480,7 +4517,7 @@ The project must not launch with real payouts or any real SOL flows until the M9
 | Gate                          | Required proof                                                                                                             |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | Rule Compiler Gate            | Natural-language rules compile into valid DSL/AST or are rejected with clear reasons.                                      |
-| Election Randomness Gate      | Switchboard election VRF, fulfilled-randomness finalist derivation, ranged output, and no deterministic fallback verified. |
+| Election Randomness Gate      | Governed allowlisted election VRF, fulfilled-randomness finalist derivation, ranged output, and no post-commit or deterministic fallback verified. |
 | Runtime Security Gate         | Sandbox limits verified; network/filesystem/imports/randomness blocked.                                                    |
 | Accounting Gate               | Payout, rollover, rounding, minimum payout, unclaimed claims, creator reward, voter reward, and repeated vote fee cases tested. |
 | Mobile Reliability Gate       | Wallet deep-link, pending, rejected, duplicate, delayed, and turn-changed flows tested.                                    |
@@ -4646,7 +4683,9 @@ Establish the product baseline, architecture baseline, monorepo structure, Docke
 - [x] Confirm current-turn Game Token requirement for proposing, voting, removing, and reporting rules.
 - [x] Confirm rule election policy: exactly 10 finalists, composed of 3 top-voted eligible + 7 VRF-random eligible, formed by a finalist-election VRF at the end of the play window.
 - [x] Confirm rule elimination decision phase: a decision window that spans the whole of phase 2 and closes at the turn end after the finalist set is locked, in which Game-Token holders cast paid elimination votes (2× the effective vote fee → prize pool); a finalist is eliminated when its elimination votes exceed its frozen approval votes; up to 5 of the 10 may be eliminated (when more than 5 qualify, the 5 with the most elimination votes are eliminated, ties broken by fewest approval votes then lowest rule_id); the active rule is then VRF-selected from the survivors. Historical baseline; superseded only for repeated elimination-vote fee handling by PRD v1.5.1 sections 6.14a and 8.2.
-- [x] Confirm Switchboard VRF is used for the draw, the finalist election, and the active election.
+- [x] Confirm a governed, allowlisted on-chain verifiable-randomness provider is
+  used for the draw, finalist election, and active election. ORAO v2 is primary
+  for the current devnet continuation; Switchboard remains compatible.
 - [x] Confirm no deterministic fallback finalist activation.
 - [x] Confirm paid rule removal is included in MVP with fixed prize-pool fee destination.
 - [x] Confirm active rule creator reward: 15% of a single individual alternative-rule winner payout.
@@ -6755,8 +6794,8 @@ This PRD revision integrates the technical review findings into the product and 
 
 |   # | Review issue                                             | PRD v1.3.4 resolution                                                                                                                         |
 | --: | -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-|   1 | Chainlink VRF is not native to Solana                    | Switchboard VRF is the only MVP randomness provider for both number draw and rule election.                                                   |
-|   2 | Random finalists used request entropy before fulfillment | Random finalists are derived only from fulfilled Switchboard VRF randomness.                                                                  |
+|   1 | Chainlink VRF is not native to Solana                    | A Squads-governed, programme-allowlisted Solana provider is used for number draw and rule election; ORAO v2 is primary on devnet and Switchboard remains compatible. |
+|   2 | Random finalists used request entropy before fulfillment | Random finalists are derived only from fulfilled, programme-verified VRF randomness.                                                           |
 |   3 | Fallback finalist invalidates VRF guarantee              | Finalists must be precompiled before election; deterministic fallback to the next finalist is disallowed.                                     |
 |   4 | Removal protection conflict                              | Paid removal is included in MVP as creator-only self-removal, with a creator self-removal vote threshold and third-party removal rejected. |
 |   5 | Dedup after payment creates UX/compliance issue          | Dedup is moved to `/api/v1/rules/preflight` before payment, with short-lived `preflight_token`.                                               |

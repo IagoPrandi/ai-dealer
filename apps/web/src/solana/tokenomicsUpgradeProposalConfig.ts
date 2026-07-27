@@ -3,19 +3,19 @@ import { IDEALER_PROGRAM_ID } from "./idealerProgram";
 import { BPF_UPGRADEABLE_LOADER_ID } from "./tokenomicsGenesisConfig";
 
 export const TOKENOMICS_UPGRADE_PROPOSAL_CONFIG = Object.freeze({
-  bufferAddress: "9G8tkVowKwf6s5TZNbqk4wBc1noKvj4PzoUocRsbGMU7",
-  bufferProgramLength: 1_023_336,
+  bufferAddress: "DBQnfiBR9XtWvU2M9m7jZVhtEECv5dTQmR1cr9WrS473",
+  bufferProgramLength: 1_045_352,
   bufferSha256:
-    "2ca0484a3fef56bfa9f5831022474f3cef839bc27db36758d83cb8f57bf012d1",
-  currentProgramPrefixLength: 790_960,
+    "29825f38ff3d92214a4842e3ed00f983202b61ed7e82140df12f6af066948a35",
+  currentProgramPrefixLength: 1_023_336,
   currentProgramPrefixSha256:
-    "2b64705d56a3e410f7a701c496060d4754711a15e6441857745ca36bedf2d274",
+    "2ca0484a3fef56bfa9f5831022474f3cef839bc27db36758d83cb8f57bf012d1",
   loaderProgramId: BPF_UPGRADEABLE_LOADER_ID,
-  memo: "JUSDEALER devnet Idealer M10 reward CPI upgrade",
+  memo: "JUSDEALER devnet Idealer governed ORAO VRF provider upgrade",
   multisigAddress: SQUADS_DEVNET_CONFIG.multisigAddress,
   network: "devnet",
   programDataAddress: "AWGUseV1DEsoSvdW7CDMxxBDUPQXAKqTXyxHVzeTnL8g",
-  programDataCapacity: 1_023_336,
+  programDataCapacity: 1_045_352,
   programId: "ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd",
   spillAddress: SQUADS_DEVNET_CONFIG.vaultAddress,
   vaultAddress: SQUADS_DEVNET_CONFIG.vaultAddress,

@@ -1,6 +1,6 @@
 use anchor_lang::{
     prelude::{Clock, Pubkey},
-    AccountDeserialize, InstructionData, ToAccountMetas,
+    AccountDeserialize, AccountSerialize, InstructionData, ToAccountMetas,
 };
 use anchor_spl::{
     metadata::mpl_token_metadata,
@@ -12,10 +12,15 @@ use idealer::{
     ResetStaleVrfRequestArgs, RuleProposal, RuleState, RuleVote, SetVrfConfigArgs, SubmitGuessArgs,
     TurnState, TurnStatus, VoteRuleArgs, VrfStage,
 };
+use orao_solana_vrf::state::{
+    FulfilledRequest as OraoFulfilledRequest, PendingRequest as OraoPendingRequest,
+    RandomnessV2 as OraoRandomnessV2, RequestAccount as OraoRequestAccount,
+};
 use solana_account_info::AccountInfo;
 use solana_program_error::ProgramResult;
 use solana_program_test::{processor, BanksClientError, ProgramTest, ProgramTestContext};
 use solana_sdk::{
+    account::{Account, AccountSharedData},
     instruction::{AccountMeta, Instruction},
     signature::{Keypair, Signer},
     transaction::Transaction,
@@ -96,6 +101,29 @@ fn add_randomness_account(program_test: &mut ProgramTest, pubkey: Pubkey, data: 
             rent_epoch: 0,
         },
     );
+}
+
+fn orao_randomness_account_data(request: OraoRequestAccount) -> Vec<u8> {
+    let size = match &request {
+        OraoRequestAccount::Pending(_) => OraoRandomnessV2::PENDING_SIZE,
+        OraoRequestAccount::Fulfilled(_) => OraoRandomnessV2::FULFILLED_SIZE,
+    };
+    let mut data = vec![0; 8 + size];
+    let mut output: &mut [u8] = &mut data;
+    OraoRandomnessV2 { request }
+        .try_serialize(&mut output)
+        .unwrap();
+    data
+}
+
+fn orao_account(data: Vec<u8>) -> Account {
+    Account {
+        lamports: 10_000_000,
+        data,
+        owner: orao_solana_vrf::ID,
+        executable: false,
+        rent_epoch: 0,
+    }
 }
 
 /// Build raw account bytes for a Switchboard On-Demand `RandomnessAccountData`
@@ -1518,6 +1546,118 @@ async fn draw_request_settle_and_failure_flow_persist_state() {
 
 #[tokio::test]
 #[ignore = "requires an SBF build and SBF_OUT_DIR; run the explicit SBF integration suite"]
+async fn orao_draw_request_is_persistent_and_settles_fulfilled_v2_randomness() {
+    let turn_id = 1_u64;
+    let mut context = idealer_program_test().start_with_context().await;
+    initialize_and_open_turn(&mut context, turn_id).await;
+    let authority = context.payer.pubkey();
+    let global_config = pda(&[b"global_config"]);
+    let turn_address = pda(&[b"turn", &turn_id.to_le_bytes()]);
+    let network_state = idealer::expected_orao_network_state();
+
+    process(
+        &mut context,
+        Instruction {
+            program_id: idealer::ID,
+            accounts: accounts::SetVrfConfig {
+                authority,
+                global_config,
+            }
+            .to_account_metas(None),
+            data: instruction::SetVrfConfig {
+                args: SetVrfConfigArgs {
+                    draw_vrf_config: network_state,
+                    election_vrf_config: network_state,
+                },
+            }
+            .data(),
+        },
+        &[],
+    )
+    .await
+    .unwrap();
+
+    let seed = [17; 32];
+    let raw_randomness = [23; 64];
+    let randomness_account =
+        orao_solana_vrf::randomness_account_address(&orao_solana_vrf::ID, &seed);
+    let pending = AccountSharedData::from(orao_account(orao_randomness_account_data(
+        OraoRequestAccount::Pending(OraoPendingRequest {
+            client: authority,
+            seed,
+            responses: vec![],
+        }),
+    )));
+    context.set_account(&randomness_account, &pending);
+    advance_clock_to_turn_end(&mut context, turn_id).await;
+
+    process(
+        &mut context,
+        request_draw_instruction(turn_id, authority, randomness_account),
+        &[],
+    )
+    .await
+    .unwrap();
+    let turn: TurnState = read_anchor_account(&mut context, turn_address).await;
+    assert_eq!(turn.draw_status, DrawStatus::Requested);
+    assert_eq!(turn.draw_vrf_request, randomness_account);
+    assert_eq!(turn.draw_commit_slot, idealer::ORAO_COMMIT_MARKER);
+
+    let failed = process(
+        &mut context,
+        Instruction {
+            program_id: idealer::ID,
+            accounts: accounts::FailDraw {
+                authority,
+                global_config,
+                turn_state: turn_address,
+            }
+            .to_account_metas(None),
+            data: instruction::FailDraw { failure_code: 1 }.data(),
+        },
+        &[],
+    )
+    .await;
+    assert_custom_error(
+        failed,
+        u32::from(IdealerError::PersistentRandomnessCannotBeReset),
+    );
+
+    let reset = process(
+        &mut context,
+        reset_stale_vrf_instruction(turn_id, authority, randomness_account, VrfStage::Draw),
+        &[],
+    )
+    .await;
+    assert_custom_error(
+        reset,
+        u32::from(IdealerError::PersistentRandomnessCannotBeReset),
+    );
+
+    let fulfilled = AccountSharedData::from(orao_account(orao_randomness_account_data(
+        OraoRequestAccount::Fulfilled(OraoFulfilledRequest {
+            client: authority,
+            seed,
+            randomness: raw_randomness,
+        }),
+    )));
+    context.set_account(&randomness_account, &fulfilled);
+    process(
+        &mut context,
+        settle_draw_instruction(turn_id, authority, randomness_account),
+        &[],
+    )
+    .await
+    .unwrap();
+
+    let turn: TurnState = read_anchor_account(&mut context, turn_address).await;
+    assert_eq!(turn.draw_status, DrawStatus::Fulfilled);
+    assert_eq!(turn.draw_randomness, hash(&raw_randomness).to_bytes());
+    assert_eq!(turn.draw_vrf_fulfillment, randomness_account);
+}
+
+#[tokio::test]
+#[ignore = "requires an SBF build and SBF_OUT_DIR; run the explicit SBF integration suite"]
 async fn invalid_guess_and_rule_proposal_are_rejected() {
     let mut context = ProgramTest::new(
         "idealer",
@@ -1806,11 +1946,7 @@ async fn proposal_reward_cpi_debits_campaign_and_creates_one_receipt() {
         idealer::ID,
         processor!(process_idealer_instruction),
     );
-    test.add_program(
-        "tokenomics_core",
-        tokenomics_core::ID,
-        None,
-    );
+    test.add_program("tokenomics_core", tokenomics_core::ID, None);
     test.prefer_bpf(false);
     test.add_program(
         "spl_token",
@@ -1836,8 +1972,7 @@ async fn proposal_reward_cpi_debits_campaign_and_creates_one_receipt() {
     let treasury_escrow = tokenomics_pda(&[b"treasury_lock_escrow"]);
     let campaign_vault = tokenomics_pda(&[b"campaign_vault", &0u64.to_le_bytes()]);
     let campaign = tokenomics_pda(&[b"campaign", &0u64.to_le_bytes()]);
-    let treasury_position =
-        tokenomics_pda(&[b"lock_position", governance.as_ref()]);
+    let treasury_position = tokenomics_pda(&[b"lock_position", governance.as_ref()]);
     let distribution_vault = tokenomics_pda(&[b"distribution_vault"]);
     let treasury_sol_vault = tokenomics_pda(&[b"treasury_sol_vault"]);
     let correction_reserve = tokenomics_pda(&[b"correction_reserve_vault"]);
@@ -1902,11 +2037,7 @@ async fn proposal_reward_cpi_debits_campaign_and_creates_one_receipt() {
     )
     .await
     .unwrap();
-    let rule_proposal = pda(&[
-        b"rule",
-        &turn_id.to_le_bytes(),
-        &rule_id.to_le_bytes(),
-    ]);
+    let rule_proposal = pda(&[b"rule", &turn_id.to_le_bytes(), &rule_id.to_le_bytes()]);
 
     let beneficiary_token_account = Keypair::new();
     let token_account_rent = context
@@ -1972,14 +2103,10 @@ async fn proposal_reward_cpi_debits_campaign_and_creates_one_receipt() {
 
     let beneficiary: TokenAccount =
         read_anchor_account(&mut context, beneficiary_token_account.pubkey()).await;
-    assert_eq!(
-        beneficiary.amount,
-        tokenomics_domain::PROPOSAL_REWARD_ATOMS
-    );
+    assert_eq!(beneficiary.amount, tokenomics_domain::PROPOSAL_REWARD_ATOMS);
     assert_eq!(beneficiary.owner, proposer.pubkey());
 
-    let receipt: CampaignRewardReceipt =
-        read_anchor_account(&mut context, reward_receipt).await;
+    let receipt: CampaignRewardReceipt = read_anchor_account(&mut context, reward_receipt).await;
     assert_eq!(receipt.action_id, rule_proposal.to_bytes());
     assert_eq!(receipt.beneficiary, proposer.pubkey());
     assert_eq!(receipt.paid_atoms, tokenomics_domain::PROPOSAL_REWARD_ATOMS);
@@ -1988,8 +2115,7 @@ async fn proposal_reward_cpi_debits_campaign_and_creates_one_receipt() {
     let campaign_state: CampaignReserve = read_anchor_account(&mut context, campaign).await;
     assert_eq!(
         campaign_state.remaining_atoms,
-        tokenomics_domain::INITIAL_CAMPAIGN_ATOMS
-            - tokenomics_domain::PROPOSAL_REWARD_ATOMS
+        tokenomics_domain::INITIAL_CAMPAIGN_ATOMS - tokenomics_domain::PROPOSAL_REWARD_ATOMS
     );
     assert_eq!(
         campaign_state.cumulative_distributed_atoms,
@@ -1998,8 +2124,7 @@ async fn proposal_reward_cpi_debits_campaign_and_creates_one_receipt() {
 
     // The receipt PDA uses `init`, so replay is rejected before another debit.
     assert!(process(&mut context, settle_reward, &[]).await.is_err());
-    let campaign_after_replay: CampaignReserve =
-        read_anchor_account(&mut context, campaign).await;
+    let campaign_after_replay: CampaignReserve = read_anchor_account(&mut context, campaign).await;
     assert_eq!(
         campaign_after_replay.cumulative_distributed_atoms,
         tokenomics_domain::PROPOSAL_REWARD_ATOMS
