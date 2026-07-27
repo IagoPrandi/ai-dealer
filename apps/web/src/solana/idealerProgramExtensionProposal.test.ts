@@ -3,6 +3,8 @@ import test from "node:test";
 
 import {
   createIdealerProgramExtensionInstruction,
+  createIdealerProgramDataAuthorityBridgeInstruction,
+  createIdealerProgramDataAuthorityReturnInstruction,
 } from "./idealerProgramExtensionProposal";
 import {
   IDEALER_PROGRAM_EXTENSION_PROPOSAL_CONFIG,
@@ -22,16 +24,20 @@ test("pins the exact rent-funded devnet ProgramData extension", () => {
   );
   assert.equal(
     IDEALER_PROGRAM_EXTENSION_PROPOSAL_CONFIG.requiredProgramDataLamports,
-    7_304_359_920,
+    7_348_124_400,
+  );
+  assert.equal(
+    IDEALER_PROGRAM_EXTENSION_PROPOSAL_CONFIG.extensionBytes,
+    10_240,
   );
 });
 
-test("builds only ExtendProgramChecked with the Squads vault signer", () => {
+test("builds the devnet legacy extension with system funding from Wallet A", () => {
   const config = IDEALER_PROGRAM_EXTENSION_PROPOSAL_CONFIG;
   const instruction = createIdealerProgramExtensionInstruction();
 
   assert.equal(instruction.programId.toBase58(), config.loaderProgramId);
-  assert.deepEqual(Array.from(instruction.data), [9, 0, 0, 0, 112, 15, 0, 0]);
+  assert.deepEqual(Array.from(instruction.data), [6, 0, 0, 0, 0, 40, 0, 0]);
   assert.deepEqual(
     instruction.keys.map((key) => ({
       address: key.pubkey.toBase58(),
@@ -50,8 +56,85 @@ test("builds only ExtendProgramChecked with the Squads vault signer", () => {
         writable: true,
       },
       {
+        address: "11111111111111111111111111111111",
+        signer: false,
+        writable: false,
+      },
+      {
+        address: config.temporaryAuthorityAddress,
+        signer: true,
+        writable: true,
+      },
+    ],
+  );
+});
+
+test("builds the atomic extension authority bridge governed by Squads", () => {
+  const config = IDEALER_PROGRAM_EXTENSION_PROPOSAL_CONFIG;
+  const instruction = createIdealerProgramDataAuthorityBridgeInstruction();
+
+  assert.equal(instruction.programId.toBase58(), config.loaderProgramId);
+  assert.deepEqual(Array.from(instruction.data), [4, 0, 0, 0]);
+  assert.deepEqual(
+    instruction.keys.map((key) => ({
+      address: key.pubkey.toBase58(),
+      signer: key.isSigner,
+      writable: key.isWritable,
+    })),
+    [
+      {
+        address: config.programDataAddress,
+        signer: false,
+        writable: true,
+      },
+      {
         address: config.vaultAddress,
         signer: true,
+        writable: false,
+      },
+      {
+        address: config.temporaryAuthorityAddress,
+        signer: false,
+        writable: false,
+      },
+    ],
+  );
+});
+
+test("builds the Wallet A extension and immediate authority return", () => {
+  const config = IDEALER_PROGRAM_EXTENSION_PROPOSAL_CONFIG;
+  const extension = createIdealerProgramExtensionInstruction(
+    config.temporaryAuthorityAddress,
+  );
+  const authorityReturn =
+    createIdealerProgramDataAuthorityReturnInstruction();
+
+  assert.equal(
+    extension.keys[3]?.pubkey.toBase58(),
+    config.temporaryAuthorityAddress,
+  );
+  assert.equal(extension.keys[3]?.isSigner, true);
+  assert.equal(extension.keys[3]?.isWritable, true);
+  assert.deepEqual(
+    authorityReturn.keys.map((key) => ({
+      address: key.pubkey.toBase58(),
+      signer: key.isSigner,
+      writable: key.isWritable,
+    })),
+    [
+      {
+        address: config.programDataAddress,
+        signer: false,
+        writable: true,
+      },
+      {
+        address: config.temporaryAuthorityAddress,
+        signer: true,
+        writable: false,
+      },
+      {
+        address: config.vaultAddress,
+        signer: false,
         writable: false,
       },
     ],

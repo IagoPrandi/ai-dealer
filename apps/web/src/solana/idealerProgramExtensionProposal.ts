@@ -10,6 +10,7 @@ import {
 import {
   Connection,
   PublicKey,
+  SystemProgram,
   TransactionInstruction,
   TransactionMessage,
   type TransactionInstruction as LegacyTransactionInstruction,
@@ -17,6 +18,7 @@ import {
 
 import {
   errorText,
+  formatRpcDiagnostic,
   submitConfirmedAndAwaitFinalized,
 } from "./tokenomicsUpgradeProposal";
 import {
@@ -39,9 +41,11 @@ type KitInstruction = Parameters<
 const FINALIZATION_TIMEOUT_MS = 120_000;
 const FINALIZATION_POLL_INTERVAL_MS = 1_000;
 const PROGRAM_DATA_METADATA_LENGTH = 45;
-const EXTEND_PROGRAM_CHECKED_DISCRIMINATOR = 9;
+const SET_AUTHORITY_DISCRIMINATOR = 4;
+const EXTEND_PROGRAM_DISCRIMINATOR = 6;
 
 export interface IdealerProgramExtensionProposalSummary {
+  bridgeAuthorityAddress: string;
   currentCapacity: number;
   currentSha256: string;
   extensionBytes: number;
@@ -152,10 +156,13 @@ function decodeProgramDataAuthority(data: Buffer) {
   return new PublicKey(data.subarray(13, 45)).toBase58();
 }
 
-export function createIdealerProgramExtensionInstruction() {
+export function createIdealerProgramExtensionInstruction(
+  payerAddress: string =
+    IDEALER_PROGRAM_EXTENSION_PROPOSAL_CONFIG.temporaryAuthorityAddress,
+) {
   const config = IDEALER_PROGRAM_EXTENSION_PROPOSAL_CONFIG;
   const data = Buffer.alloc(8);
-  data.writeUInt32LE(EXTEND_PROGRAM_CHECKED_DISCRIMINATOR, 0);
+  data.writeUInt32LE(EXTEND_PROGRAM_DISCRIMINATOR, 0);
   data.writeUInt32LE(config.extensionBytes, 4);
 
   return new TransactionInstruction({
@@ -172,12 +179,67 @@ export function createIdealerProgramExtensionInstruction() {
         pubkey: new PublicKey(config.programId),
       },
       {
-        isSigner: true,
+        isSigner: false,
         isWritable: false,
-        pubkey: new PublicKey(config.vaultAddress),
+        pubkey: SystemProgram.programId,
+      },
+      {
+        isSigner: true,
+        isWritable: true,
+        pubkey: new PublicKey(payerAddress),
       },
     ],
     programId: new PublicKey(config.loaderProgramId),
+  });
+}
+
+function createIdealerProgramDataAuthorityInstruction({
+  currentAuthorityAddress,
+  newAuthorityAddress,
+}: {
+  currentAuthorityAddress: string;
+  newAuthorityAddress: string;
+}) {
+  const config = IDEALER_PROGRAM_EXTENSION_PROPOSAL_CONFIG;
+  const data = Buffer.alloc(4);
+  data.writeUInt32LE(SET_AUTHORITY_DISCRIMINATOR, 0);
+
+  return new TransactionInstruction({
+    data,
+    keys: [
+      {
+        isSigner: false,
+        isWritable: true,
+        pubkey: new PublicKey(config.programDataAddress),
+      },
+      {
+        isSigner: true,
+        isWritable: false,
+        pubkey: new PublicKey(currentAuthorityAddress),
+      },
+      {
+        isSigner: false,
+        isWritable: false,
+        pubkey: new PublicKey(newAuthorityAddress),
+      },
+    ],
+    programId: new PublicKey(config.loaderProgramId),
+  });
+}
+
+export function createIdealerProgramDataAuthorityBridgeInstruction() {
+  const config = IDEALER_PROGRAM_EXTENSION_PROPOSAL_CONFIG;
+  return createIdealerProgramDataAuthorityInstruction({
+    currentAuthorityAddress: config.vaultAddress,
+    newAuthorityAddress: config.temporaryAuthorityAddress,
+  });
+}
+
+export function createIdealerProgramDataAuthorityReturnInstruction() {
+  const config = IDEALER_PROGRAM_EXTENSION_PROPOSAL_CONFIG;
+  return createIdealerProgramDataAuthorityInstruction({
+    currentAuthorityAddress: config.temporaryAuthorityAddress,
+    newAuthorityAddress: config.vaultAddress,
   });
 }
 
@@ -186,9 +248,13 @@ async function assertReviewedProgramData(connection: Connection) {
   const loader = new PublicKey(config.loaderProgramId);
   const program = new PublicKey(config.programId);
   const programData = new PublicKey(config.programDataAddress);
-  const [programInfo, programDataInfo] =
+  const [programInfo, programDataInfo, checkedExtensionFeatureInfo] =
     await connection.getMultipleAccountsInfo(
-      [program, programData],
+      [
+        program,
+        programData,
+        new PublicKey(config.extendProgramCheckedFeatureAddress),
+      ],
       "finalized",
     );
 
@@ -201,6 +267,11 @@ async function assertReviewedProgramData(connection: Connection) {
     !new PublicKey(programInfo.data.subarray(4, 36)).equals(programData)
   ) {
     throw new Error("Idealer does not link to the reviewed ProgramData.");
+  }
+  if (checkedExtensionFeatureInfo) {
+    throw new Error(
+      "ExtendProgramChecked activated on devnet. The reviewed legacy extension path is no longer valid.",
+    );
   }
   if (
     !programDataInfo ||
@@ -221,9 +292,9 @@ async function assertReviewedProgramData(connection: Connection) {
   if ((await sha256Hex(programBytes)) !== config.currentSha256) {
     throw new Error("Idealer deployed bytes changed.");
   }
-  if (programDataInfo.lamports < config.requiredProgramDataLamports) {
+  if (programDataInfo.lamports !== config.currentProgramDataLamports) {
     throw new Error(
-      "Idealer ProgramData is not funded for the reviewed extension.",
+      "Idealer ProgramData funding changed from the reviewed pre-extension balance.",
     );
   }
 
@@ -290,7 +361,7 @@ export async function prepareIdealerProgramExtensionProposal({
   }
 
   const transactionMessage = new TransactionMessage({
-    instructions: [createIdealerProgramExtensionInstruction()],
+    instructions: [createIdealerProgramDataAuthorityBridgeInstruction()],
     payerKey: new PublicKey(config.vaultAddress),
     recentBlockhash: PublicKey.default.toBase58(),
   });
@@ -320,6 +391,7 @@ export async function prepareIdealerProgramExtensionProposal({
     ],
     rpcEndpoint,
     summary: {
+      bridgeAuthorityAddress: config.temporaryAuthorityAddress,
       currentCapacity: config.currentCapacity,
       currentSha256: config.currentSha256,
       extensionBytes: config.extensionBytes,
@@ -388,7 +460,8 @@ async function verifyCreatedProposal(
 
   const message = vaultTransaction.message;
   const inner = message.instructions[0];
-  const expectedInstruction = createIdealerProgramExtensionInstruction();
+  const expectedInstruction =
+    createIdealerProgramDataAuthorityBridgeInstruction();
   if (
     message.instructions.length !== 1 ||
     message.addressTableLookups.length !== 0 ||
@@ -396,7 +469,7 @@ async function verifyCreatedProposal(
     !Buffer.from(inner.data).equals(expectedInstruction.data)
   ) {
     throw new Error(
-      "The stored proposal does not contain only the reviewed extension.",
+      "The stored proposal does not contain only the reviewed authority bridge.",
     );
   }
   const actualAccounts = Array.from(
@@ -414,7 +487,9 @@ async function verifyCreatedProposal(
       (actualAccount, index) => actualAccount !== expectedAccounts[index],
     )
   ) {
-    throw new Error("The stored extension accounts differ from the review.");
+    throw new Error(
+      "The stored authority-bridge accounts differ from the review.",
+    );
   }
 }
 
@@ -435,7 +510,7 @@ async function waitForFinalizedSignature({
     ).value[0];
     if (status?.err) {
       throw new Error(
-        `The proposal transaction failed on-chain: ${JSON.stringify(status.err)}.`,
+        `The proposal transaction failed on-chain: ${formatRpcDiagnostic(status.err)}.`,
       );
     }
     if (status?.confirmationStatus === "finalized") {
@@ -493,7 +568,7 @@ export async function signSimulateSendAndVerifyExtensionProposal({
     const logs =
       simulation.value.logs?.slice(-8).join(" ") ?? "No logs returned.";
     throw new Error(
-      `The signed proposal failed simulation and was not submitted. ${JSON.stringify(simulation.value.err)} ${logs}`,
+      `The signed proposal failed simulation and was not submitted. ${formatRpcDiagnostic(simulation.value.err)} ${logs}`,
     );
   }
 

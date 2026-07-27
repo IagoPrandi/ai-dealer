@@ -17,9 +17,14 @@ import { SQUADS_DEVNET_CONFIG } from "./squadsDevnetConfig";
 import { verifyExpectedDevnetMultisig } from "./squadsProvisioning";
 import {
   errorText,
+  formatRpcDiagnostic,
   submitConfirmedAndAwaitFinalized,
 } from "./tokenomicsUpgradeProposal";
-import { createIdealerProgramExtensionInstruction } from "./idealerProgramExtensionProposal";
+import {
+  createIdealerProgramDataAuthorityBridgeInstruction,
+  createIdealerProgramDataAuthorityReturnInstruction,
+  createIdealerProgramExtensionInstruction,
+} from "./idealerProgramExtensionProposal";
 import { IDEALER_PROGRAM_EXTENSION_PROPOSAL_CONFIG } from "./idealerProgramExtensionProposalConfig";
 
 type SolanaClient = ReturnType<typeof useSolanaClient>;
@@ -37,9 +42,9 @@ const FINALIZATION_TIMEOUT_MS = 120_000;
 const FINALIZATION_POLL_INTERVAL_MS = 1_000;
 
 export const TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG = Object.freeze({
-  proposalAddress: "Fetzf66VNC1FRHEGWQChe88PoXvWjsDsYuRyhJ5oerD3",
-  transactionAddress: "CrmEHNdFBD4Xk6kY3kFuJvY5iZ2f4qWnU9yB89WFtpPN",
-  transactionIndex: 5n,
+  proposalAddress: "3xoEM9XMESn3CHgs4sBqGznQscoboo1i4PPbhp9wQuEy",
+  transactionAddress: "8ySkm4mRP62JozFfjfm2ehy6QZ6mq6ZY7bf6WyDdfu3L",
+  transactionIndex: 6n,
 });
 
 export type TokenomicsUpgradeGovernanceAction = "approve" | "execute";
@@ -194,15 +199,16 @@ function assertStoredUpgradeMessage(vaultTransaction: {
     message.addressTableLookups.length !== 0 ||
     !inner ||
     !Buffer.from(inner.data).equals(
-      createIdealerProgramExtensionInstruction().data,
+      createIdealerProgramDataAuthorityBridgeInstruction().data,
     )
   ) {
     throw new Error(
-      "The stored proposal does not contain only the reviewed extension.",
+      "The stored proposal does not contain only the reviewed authority bridge.",
     );
   }
 
-  const expectedInstruction = createIdealerProgramExtensionInstruction();
+  const expectedInstruction =
+    createIdealerProgramDataAuthorityBridgeInstruction();
   const loader = message.accountKeys[inner.programIdIndex];
   const actualAccounts = Array.from(
     inner.accountIndexes,
@@ -218,7 +224,9 @@ function assertStoredUpgradeMessage(vaultTransaction: {
       (actualAccount, index) => actualAccount !== expectedAccounts[index],
     )
   ) {
-    throw new Error("The stored extension accounts differ from the review.");
+    throw new Error(
+      "The stored authority-bridge accounts differ from the review.",
+    );
   }
 }
 
@@ -239,8 +247,22 @@ export function governanceActionAvailability({
     canExecute:
       status === "Approved" &&
       approved.length >= SQUADS_DEVNET_CONFIG.threshold &&
-      isKnownMember(memberAddress),
+      memberAddress ===
+        IDEALER_PROGRAM_EXTENSION_PROPOSAL_CONFIG.temporaryAuthorityAddress,
   };
+}
+
+export function createAtomicProgramDataExtensionInstructions(
+  squadsExecutionInstruction: LegacyTransactionInstruction,
+) {
+  const config = IDEALER_PROGRAM_EXTENSION_PROPOSAL_CONFIG;
+  return [
+    squadsExecutionInstruction,
+    createIdealerProgramExtensionInstruction(
+      config.temporaryAuthorityAddress,
+    ),
+    createIdealerProgramDataAuthorityReturnInstruction(),
+  ] as const;
 }
 
 export async function readTokenomicsUpgradeGovernanceState(
@@ -260,7 +282,14 @@ export async function readTokenomicsUpgradeGovernanceState(
   const transactionAddress = new PublicKey(governance.transactionAddress);
   const programAddress = new PublicKey(config.programId);
   const programDataAddress = new PublicKey(config.programDataAddress);
-  const [proposal, vaultTransaction, programInfo, programDataInfo] =
+  const [
+    proposal,
+    vaultTransaction,
+    programInfo,
+    programDataInfo,
+    checkedExtensionFeatureInfo,
+    payerBalanceLamports,
+  ] =
     await Promise.all([
       multisigSdk.accounts.Proposal.fromAccountAddress(
         connection,
@@ -274,6 +303,14 @@ export async function readTokenomicsUpgradeGovernanceState(
       ),
       connection.getAccountInfo(programAddress, "finalized"),
       connection.getAccountInfo(programDataAddress, "finalized"),
+      connection.getAccountInfo(
+        new PublicKey(config.extendProgramCheckedFeatureAddress),
+        "finalized",
+      ),
+      connection.getBalance(
+        new PublicKey(config.temporaryAuthorityAddress),
+        "finalized",
+      ),
     ]);
 
   if (
@@ -306,6 +343,11 @@ export async function readTokenomicsUpgradeGovernanceState(
   ) {
     throw new Error("Idealer ProgramData could not be verified.");
   }
+  if (checkedExtensionFeatureInfo) {
+    throw new Error(
+      "ExtendProgramChecked activated on devnet. The reviewed legacy extension path is no longer valid.",
+    );
+  }
   if (
     decodeProgramDataAuthority(programDataInfo.data) !==
     config.vaultAddress
@@ -323,8 +365,19 @@ export async function readTokenomicsUpgradeGovernanceState(
       "Idealer ProgramData capacity does not match the proposal state.",
     );
   }
-  if (programDataInfo.lamports < config.requiredProgramDataLamports) {
-    throw new Error("Idealer ProgramData extension rent is not fully funded.");
+  const expectedProgramDataLamports =
+    status === "Executed"
+      ? config.requiredProgramDataLamports
+      : config.currentProgramDataLamports;
+  if (programDataInfo.lamports !== expectedProgramDataLamports) {
+    throw new Error("Idealer ProgramData funding differs from the review.");
+  }
+  const extensionRentLamports =
+    config.requiredProgramDataLamports - config.currentProgramDataLamports;
+  if (status !== "Executed" && payerBalanceLamports <= extensionRentLamports) {
+    throw new Error(
+      "Devnet Wallet A cannot fund the reviewed extension rent and network fee.",
+    );
   }
   const deployedPrefix = programBytes.subarray(0, config.currentCapacity);
   const extension = programBytes.subarray(config.currentCapacity);
@@ -374,7 +427,9 @@ export async function prepareTokenomicsUpgradeGovernanceAction({
     throw new Error("This member cannot approve the proposal in its current state.");
   }
   if (action === "execute" && !availability.canExecute) {
-    throw new Error("The proposal cannot be executed by this member yet.");
+    throw new Error(
+      "Atomic execution requires an approved 2-of-3 proposal and devnet Wallet A as the connected signer.",
+    );
   }
 
   const multisigSdk = await import("@sqds/multisig");
@@ -382,17 +437,19 @@ export async function prepareTokenomicsUpgradeGovernanceAction({
   const multisigPda = new PublicKey(SQUADS_DEVNET_CONFIG.multisigAddress);
   const member = new PublicKey(memberAddress);
   const programId = new PublicKey(SQUADS_DEVNET_CONFIG.programId);
-  let instruction: LegacyTransactionInstruction;
+  let instructions: readonly LegacyTransactionInstruction[];
 
   if (action === "approve") {
-    instruction = multisigSdk.instructions.proposalApprove({
-      member,
-      memo: "Approve JUSDEALER devnet Idealer ProgramData extension",
-      multisigPda,
-      programId,
-      transactionIndex:
-        TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex,
-    });
+    instructions = [
+      multisigSdk.instructions.proposalApprove({
+        member,
+        memo: "Approve JUSDEALER devnet atomic ProgramData extension",
+        multisigPda,
+        programId,
+        transactionIndex:
+          TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex,
+      }),
+    ];
   } else {
     const execution = await multisigSdk.instructions.vaultTransactionExecute({
       connection,
@@ -405,12 +462,14 @@ export async function prepareTokenomicsUpgradeGovernanceAction({
     if (execution.lookupTableAccounts.length !== 0) {
       throw new Error("Unexpected lookup table accounts blocked execution.");
     }
-    instruction = execution.instruction;
+    instructions = createAtomicProgramDataExtensionInstructions(
+      execution.instruction,
+    );
   }
 
   return {
     action,
-    instructions: [convertLegacyInstruction(instruction)],
+    instructions: instructions.map(convertLegacyInstruction),
     memberAddress,
     rpcEndpoint,
     stateBefore,
@@ -434,7 +493,7 @@ async function waitForFinalizedSignature({
     ).value[0];
     if (status?.err) {
       throw new Error(
-        `The governance transaction failed on-chain: ${JSON.stringify(status.err)}.`,
+        `The governance transaction failed on-chain: ${formatRpcDiagnostic(status.err)}.`,
       );
     }
     if (status?.confirmationStatus === "finalized") {
@@ -492,7 +551,7 @@ export async function signSimulateSendAndVerifyGovernanceAction({
     const logs =
       simulation.value.logs?.slice(-10).join(" ") ?? "No logs returned.";
     throw new Error(
-      `The signed ${prepared.action} transaction failed simulation and was not submitted. ${JSON.stringify(simulation.value.err)} ${logs}`,
+      `The signed ${prepared.action} transaction failed simulation and was not submitted. ${formatRpcDiagnostic(simulation.value.err)} ${logs}`,
     );
   }
 

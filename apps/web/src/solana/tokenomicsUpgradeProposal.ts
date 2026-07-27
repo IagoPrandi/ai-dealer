@@ -140,6 +140,20 @@ export function errorText(error: unknown) {
   return unique.length > 0 ? unique.join(" ") : String(error);
 }
 
+export function formatRpcDiagnostic(value: unknown) {
+  try {
+    return (
+      JSON.stringify(value, (_key, nestedValue) =>
+        typeof nestedValue === "bigint"
+          ? nestedValue.toString()
+          : nestedValue,
+      ) ?? String(value)
+    );
+  } catch (serializationError) {
+    return `${errorText(value)} [diagnostic serialization failed: ${errorText(serializationError)}]`;
+  }
+}
+
 function assertHasBlockhashLifetime(transaction: {
   lifetimeConstraint: unknown;
 }): asserts transaction is ConfirmableTransaction & {

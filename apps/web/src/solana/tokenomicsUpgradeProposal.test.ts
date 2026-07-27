@@ -8,6 +8,7 @@ import {
 import {
   createTokenomicsUpgradeInstruction,
   errorText,
+  formatRpcDiagnostic,
   submitConfirmedAndAwaitFinalized,
 } from "./tokenomicsUpgradeProposal";
 
@@ -98,5 +99,14 @@ test("surfaces nested RPC simulation diagnostics", () => {
   assert.equal(
     errorText(error),
     "Transaction simulation failed BlockhashNotFound",
+  );
+});
+
+test("formats bigint RPC diagnostics without masking simulation failures", () => {
+  assert.equal(
+    formatRpcDiagnostic({
+      InstructionError: [0n, { Custom: 1_234n }],
+    }),
+    '{"InstructionError":["0",{"Custom":"1234"}]}',
   );
 });
