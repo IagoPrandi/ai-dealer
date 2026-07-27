@@ -47,11 +47,16 @@ import {
   startActiveRuleRewardSettlementLoop,
 } from "./active-rule-reward-settlement.js";
 import {
+  createReferralRewardSettlementConfig,
+  startReferralRewardSettlementLoop,
+} from "./referral-reward-settlement.js";
+import {
   createDurableIndexerConfig,
   startDurableSolanaReconciliationLoop,
 } from "./durable-indexer.js";
 
 export * from "./active-rule-reward-settlement.js";
+export * from "./referral-reward-settlement.js";
 export * from "./api-bridge.js";
 export * from "./claims.js";
 export * from "./draw.js";
@@ -601,6 +606,21 @@ if (
 
   void createActiveRuleRewardSettlementConfig().then((rewardConfig) => {
     const timer = startActiveRuleRewardSettlementLoop(rewardConfig);
+
+    if (!timer) {
+      return;
+    }
+
+    const stop = () => {
+      clearInterval(timer);
+    };
+
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+  });
+
+  void createReferralRewardSettlementConfig().then((rewardConfig) => {
+    const timer = startReferralRewardSettlementLoop(rewardConfig);
 
     if (!timer) {
       return;

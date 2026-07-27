@@ -14,6 +14,7 @@
     "tokenomics:calculate": "tsx src/tokenomics-epoch-cli.ts",
     "devnet:stage-turn": "tsx src/devnet-stage-turn.ts",
     "devnet:seed-real-inputs": "tsx src/devnet-seed-real-inputs.ts",
+    "devnet:validate-referral": "tsx src/devnet-referral-validation.ts",
     "devnet:simulate-10-players": "tsx src/devnet-10-player-simulation.ts",
     "devnet:settle-jdr-manifest": "tsx src/devnet-jdr-reward-manifest.ts",
     "devnet:active-rule-reward": "tsx src/active-rule-reward-run.ts",
