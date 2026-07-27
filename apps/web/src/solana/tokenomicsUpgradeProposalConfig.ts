@@ -3,19 +3,19 @@ import { IDEALER_PROGRAM_ID } from "./idealerProgram";
 import { BPF_UPGRADEABLE_LOADER_ID } from "./tokenomicsGenesisConfig";
 
 export const TOKENOMICS_UPGRADE_PROPOSAL_CONFIG = Object.freeze({
-  bufferAddress: "DBQnfiBR9XtWvU2M9m7jZVhtEECv5dTQmR1cr9WrS473",
-  bufferProgramLength: 1_045_352,
+  bufferAddress: "CpVGBECDgYNXozEvR84bbFajDsQucjGhMyW6kEKYWr1M",
+  bufferProgramLength: 1_049_304,
   bufferSha256:
-    "29825f38ff3d92214a4842e3ed00f983202b61ed7e82140df12f6af066948a35",
-  currentProgramPrefixLength: 1_023_336,
+    "3a8da33f590768b399e93aa6497cf92b2218701b9a9dd1e6342cc0c663bce200",
+  currentProgramPrefixLength: 1_045_352,
   currentProgramPrefixSha256:
-    "2ca0484a3fef56bfa9f5831022474f3cef839bc27db36758d83cb8f57bf012d1",
+    "29825f38ff3d92214a4842e3ed00f983202b61ed7e82140df12f6af066948a35",
   loaderProgramId: BPF_UPGRADEABLE_LOADER_ID,
-  memo: "JUSDEALER devnet Idealer governed ORAO VRF provider upgrade",
+  memo: "JUSDEALER devnet Idealer ProgramData-governed VRF configuration upgrade",
   multisigAddress: SQUADS_DEVNET_CONFIG.multisigAddress,
   network: "devnet",
   programDataAddress: "AWGUseV1DEsoSvdW7CDMxxBDUPQXAKqTXyxHVzeTnL8g",
-  programDataCapacity: 1_045_352,
+  programDataCapacity: 1_055_592,
   programId: "ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd",
   spillAddress: SQUADS_DEVNET_CONFIG.vaultAddress,
   vaultAddress: SQUADS_DEVNET_CONFIG.vaultAddress,
@@ -51,9 +51,9 @@ export function validateTokenomicsUpgradeProposalConfig(): string[] {
     errors.push("The reviewed buffer length is invalid.");
   }
   if (
-    config.programDataCapacity !== config.bufferProgramLength ||
+    config.bufferProgramLength > config.programDataCapacity ||
     config.currentProgramPrefixLength <= 0 ||
-    config.currentProgramPrefixLength >= config.programDataCapacity ||
+    config.currentProgramPrefixLength >= config.bufferProgramLength ||
     !/^[0-9a-f]{64}$/.test(config.currentProgramPrefixSha256)
   ) {
     errors.push("The reviewed Idealer ProgramData layout is invalid.");

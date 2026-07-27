@@ -192,11 +192,11 @@ export function TokenomicsUpgradeGovernanceApp() {
           </div>
           <span className="tm-network">Devnet only</span>
           <p className="tm-eyebrow">Squads governance - M10</p>
-          <h1>Approve and execute the atomic extension</h1>
+          <h1>Approve and execute the Idealer upgrade</h1>
           <p className="tm-lead">
             {state?.status === "Executed"
-              ? `Atomic Idealer ProgramData extension proposal ${TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex.toString()} was approved and executed. ProgramData authority returned to Squads vault 0 in the same finalized transaction.`
-              : `Two different members approve atomic Idealer ProgramData extension proposal ${TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex.toString()}. After the 2-of-3 threshold, only Wallet A can sign the exact atomic execution.`}
+              ? `Idealer upgrade proposal ${TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex.toString()} was approved and executed. The deployed program matches the reviewed buffer and remains controlled by Squads vault 0.`
+              : `Two different members approve Idealer upgrade proposal ${TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex.toString()}. After the 2-of-3 threshold, any authorized devnet member can execute the exact stored upgrade.`}
           </p>
         </header>
 
@@ -213,9 +213,9 @@ export function TokenomicsUpgradeGovernanceApp() {
             </span>
           </div>
           <p className="tm-muted">
-            This re-hashes the full deployed program and verifies the exact
-            authority-bridge instruction, ProgramData authority, capacity,
-            rent, and Squads state before enabling an action.
+            This re-hashes the full deployed program and reviewed buffer, then
+            verifies the exact stored upgrade, ProgramData authority, capacity,
+            and Squads state before enabling an action.
           </p>
           <button
             className="tm-button"
@@ -242,12 +242,12 @@ export function TokenomicsUpgradeGovernanceApp() {
                   <dd>{state.programCapacity.toLocaleString("en-US")} bytes</dd>
                 </div>
                 <div>
-                  <dt>Extension state</dt>
-                  <dd>
-                    {state.extensionComplete
-                      ? "10,240 zero-filled bytes added"
-                      : "Not executed"}
-                  </dd>
+                  <dt>Upgrade state</dt>
+                  <dd>{state.upgradeComplete ? "Deployed" : "Not executed"}</dd>
+                </div>
+                <div>
+                  <dt>Upgrade buffer</dt>
+                  <dd>{state.bufferState}</dd>
                 </div>
               </dl>
               <div className="tug-votes">
@@ -362,10 +362,9 @@ export function TokenomicsUpgradeGovernanceApp() {
             </div>
             <p className="tm-muted">
               Approval records one vote only. Once two different approvals are
-              finalized, Wallet A can sign one transaction containing exactly:
-              Squads handoff execution, devnet extension, and immediate
-              authority return to vault 0. The extension adds 10,240 bytes and
-              funds 0.04376448 SOL of ProgramData rent from Wallet A.
+              finalized, one member can execute the stored Squads transaction.
+              Execution deploys only the reviewed 1,049,304-byte artifact,
+              closes the consumed buffer, and returns its rent to vault 0.
             </p>
             <div className="tug-actions">
               <button
@@ -384,24 +383,9 @@ export function TokenomicsUpgradeGovernanceApp() {
                 onClick={() => void prepare("execute")}
                 type="button"
               >
-                Prepare atomic execution
+                Prepare reviewed execution
               </button>
             </div>
-            {state?.status === "Approved" &&
-            member?.address !==
-              SQUADS_DEVNET_CONFIG.members[0]?.address ? (
-              <p className="tm-error">
-                Disconnect and select Wallet A for atomic execution. Never
-                execute this proposal from the generic Squads interface.
-              </p>
-            ) : null}
-            {state?.status !== "Approved" ? (
-              <p className="tm-note">
-                Do not execute this proposal from the generic Squads
-                interface. The project page appends the extension and authority
-                return instructions required for atomic safety.
-              </p>
-            ) : null}
             {state?.status === "Active" && state.approved.length === 1 ? (
               <p className="tm-note">
                 One approval is finalized. Disconnect and select a different
@@ -430,14 +414,14 @@ export function TokenomicsUpgradeGovernanceApp() {
                 type="checkbox"
               />
               <span>
-                I reviewed devnet, Idealer ProgramData extension proposal{" "}
+                I reviewed devnet, Idealer upgrade proposal{" "}
                 {TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex.toString()},
-                the stored authority bridge, current and target capacities,
-                deployed hash, rent funding, current votes, and connected
-                member account{" "}
+                the exact stored loader upgrade, reviewed buffer address,
+                artifact length and SHA-256, current deployed hash, ProgramData
+                authority and capacity, current votes, and connected member{" "}
                 {member ? memberLabel(member.address) : ""}.
                 {preparedAction === "execute"
-                  ? " I also reviewed the exact atomic order: Squads execution, 10,240-byte devnet extension funded with 0.04376448 SOL, then immediate authority return to vault 0."
+                  ? " I also reviewed that execution deploys the reviewed artifact, closes the consumed buffer, and keeps upgrade authority with Squads vault 0."
                   : ""}
               </span>
             </label>
@@ -459,12 +443,12 @@ export function TokenomicsUpgradeGovernanceApp() {
             <p className="tm-eyebrow">Strict verification passed</p>
             <h2 id="result-title">
               {result.action === "execute"
-                ? "ProgramData extended"
+                ? "Idealer program upgraded"
                 : "Approval finalized"}
             </h2>
             <p>
               {result.action === "execute"
-                ? "The finalized proposal is Executed, the original deployed bytes retain the reviewed SHA-256, and the 10,240-byte extension is zero-filled."
+                ? "The finalized proposal is Executed, the deployed program matches the reviewed SHA-256, the remaining ProgramData capacity is zero-filled, and the consumed buffer is closed."
                 : `${memberLabel(walletAddress)} is recorded on-chain. The proposal now has ${result.state.approved.length} approval(s).`}
             </p>
             <div className="tm-success-links">

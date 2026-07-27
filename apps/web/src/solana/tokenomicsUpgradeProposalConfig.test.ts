@@ -19,10 +19,18 @@ test("pins the reviewed devnet buffer and returns its rent to Squads vault 0", (
   );
   assert.equal(
     TOKENOMICS_UPGRADE_PROPOSAL_CONFIG.bufferSha256,
-    "29825f38ff3d92214a4842e3ed00f983202b61ed7e82140df12f6af066948a35",
+    "3a8da33f590768b399e93aa6497cf92b2218701b9a9dd1e6342cc0c663bce200",
   );
   assert.equal(
     TOKENOMICS_UPGRADE_PROPOSAL_CONFIG.currentProgramPrefixSha256,
-    "2ca0484a3fef56bfa9f5831022474f3cef839bc27db36758d83cb8f57bf012d1",
+    "29825f38ff3d92214a4842e3ed00f983202b61ed7e82140df12f6af066948a35",
+  );
+  assert.equal(
+    TOKENOMICS_UPGRADE_PROPOSAL_CONFIG.programDataCapacity,
+    1_055_592,
+  );
+  assert.equal(
+    TOKENOMICS_UPGRADE_PROPOSAL_CONFIG.bufferProgramLength,
+    1_049_304,
   );
 });

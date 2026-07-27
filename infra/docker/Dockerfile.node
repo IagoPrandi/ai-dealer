@@ -22,4 +22,10 @@ COPY infra ./infra
 
 RUN pnpm install --frozen-lockfile
 
+# API and worker execute TypeScript through tsx, but their workspace
+# dependencies expose their runtime entrypoints from dist/. Build those shared
+# packages in the image so container startup cannot resolve stale or missing
+# source-only links.
+RUN pnpm -r --filter "./packages/**" run build
+
 EXPOSE 3000 3001 3002 3003

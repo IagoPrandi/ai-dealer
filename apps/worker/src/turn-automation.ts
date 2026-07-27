@@ -828,6 +828,108 @@ export interface AuthorityInstruction {
   programAddress: SolanaAddress;
 }
 
+/**
+ * Sign and simulate an authority instruction without sending it to Solana.
+ * Operator preflight uses the same signer, message, and `sigVerify` path as a
+ * real action, while leaving all on-chain state unchanged.
+ */
+export async function simulateAuthorityInstruction({
+  authorityKeypairBytes,
+  instruction,
+  rpc,
+}: {
+  authorityKeypairBytes: Uint8Array;
+  instruction: AuthorityInstruction;
+  rpc: RpcClient;
+}) {
+  const authority = await createKeyPairSignerFromBytes(authorityKeypairBytes);
+  const latestBlockhash = await rpc
+    .getLatestBlockhash({ commitment: "confirmed" })
+    .send();
+  const message = appendTransactionMessageInstructions(
+    [instruction],
+    setTransactionMessageLifetimeUsingBlockhash(
+      latestBlockhash.value,
+      setTransactionMessageFeePayerSigner(
+        authority,
+        createTransactionMessage({ version: 0 }),
+      ),
+    ),
+  );
+  const signedTransaction = await signTransactionMessageWithSigners(message);
+  const wireTransaction = getBase64EncodedWireTransaction(signedTransaction);
+  const simulation = await rpc
+    .simulateTransaction(wireTransaction, {
+      commitment: "confirmed",
+      encoding: "base64",
+      sigVerify: true,
+    })
+    .send();
+
+  if (simulation.value.err) {
+    throw new Error(
+      `Turn automation transaction simulation failed: ${stringifySimulationError(
+        simulation.value.err,
+      )}; logs=${stringifySimulationError(simulation.value.logs ?? [])}`,
+    );
+  }
+
+  return simulation.value;
+}
+
+/**
+ * Simulate an ordered operator sequence without broadcasting it. This is used
+ * to review dependent actions, such as opening a turn and then applying its
+ * manual test duration, against the same simulated account state.
+ */
+export async function simulateAuthorityInstructions({
+  authorityKeypairBytes,
+  instructions,
+  rpc,
+}: {
+  authorityKeypairBytes: Uint8Array;
+  instructions: readonly AuthorityInstruction[];
+  rpc: RpcClient;
+}) {
+  if (instructions.length === 0) {
+    throw new Error("Authority simulation requires at least one instruction.");
+  }
+
+  const authority = await createKeyPairSignerFromBytes(authorityKeypairBytes);
+  const latestBlockhash = await rpc
+    .getLatestBlockhash({ commitment: "confirmed" })
+    .send();
+  const message = appendTransactionMessageInstructions(
+    instructions,
+    setTransactionMessageLifetimeUsingBlockhash(
+      latestBlockhash.value,
+      setTransactionMessageFeePayerSigner(
+        authority,
+        createTransactionMessage({ version: 0 }),
+      ),
+    ),
+  );
+  const signedTransaction = await signTransactionMessageWithSigners(message);
+  const wireTransaction = getBase64EncodedWireTransaction(signedTransaction);
+  const simulation = await rpc
+    .simulateTransaction(wireTransaction, {
+      commitment: "confirmed",
+      encoding: "base64",
+      sigVerify: true,
+    })
+    .send();
+
+  if (simulation.value.err) {
+    throw new Error(
+      `Turn automation transaction simulation failed: ${stringifySimulationError(
+        simulation.value.err,
+      )}; logs=${stringifySimulationError(simulation.value.logs ?? [])}`,
+    );
+  }
+
+  return simulation.value;
+}
+
 export async function simulateAndSend({
   authorityKeypairBytes,
   instruction,

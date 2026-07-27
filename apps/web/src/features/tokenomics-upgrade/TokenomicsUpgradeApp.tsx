@@ -9,13 +9,13 @@ import {
 
 import { SQUADS_DEVNET_CONFIG } from "../../solana/squadsDevnetConfig";
 import {
-  type IdealerProgramExtensionProposalResult,
-  type IdealerProgramExtensionProposalSummary,
-  type PreparedIdealerProgramExtensionProposal,
-  prepareIdealerProgramExtensionProposal,
-  signSimulateSendAndVerifyExtensionProposal,
-} from "../../solana/idealerProgramExtensionProposal";
-import { validateIdealerProgramExtensionProposalConfig } from "../../solana/idealerProgramExtensionProposalConfig";
+  type PreparedTokenomicsUpgradeProposal,
+  type TokenomicsUpgradeProposalResult,
+  type TokenomicsUpgradeProposalSummary,
+  prepareTokenomicsUpgradeProposal,
+  signSimulateSendAndVerifyUpgradeProposal,
+} from "../../solana/tokenomicsUpgradeProposal";
+import { validateTokenomicsUpgradeProposalConfig } from "../../solana/tokenomicsUpgradeProposalConfig";
 import "../tokenomics-multisig/tokenomics-multisig.css";
 import "./tokenomics-upgrade.css";
 
@@ -56,14 +56,14 @@ function ExplorerLink({
 function UpgradeReview({
   summary,
 }: {
-  summary: IdealerProgramExtensionProposalSummary;
+  summary: TokenomicsUpgradeProposalSummary;
 }) {
   return (
     <section className="tm-card tm-review" aria-labelledby="upgrade-review">
       <div className="tm-section-heading">
         <div>
           <p className="tm-eyebrow">Required review</p>
-          <h2 id="upgrade-review">Atomic extension authority proposal</h2>
+          <h2 id="upgrade-review">Governed Idealer upgrade proposal</h2>
         </div>
         <span className="tm-status tm-status-ready">Prepared</span>
       </div>
@@ -88,33 +88,19 @@ function UpgradeReview({
           </dd>
         </div>
         <div>
-          <dt>Current capacity</dt>
-          <dd>{summary.currentCapacity.toLocaleString("en-US")} bytes</dd>
-        </div>
-        <div>
-          <dt>Extension</dt>
-          <dd>+{summary.extensionBytes.toLocaleString("en-US")} bytes</dd>
-        </div>
-        <div>
-          <dt>Target capacity</dt>
-          <dd>{summary.targetCapacity.toLocaleString("en-US")} bytes</dd>
-        </div>
-        <div>
-          <dt>Pre-funded ProgramData balance</dt>
-          <dd>
-            {(Number(summary.programDataLamports) / 1_000_000_000).toFixed(8)} SOL
+          <dt>Reviewed buffer</dt>
+          <dd title={summary.bufferAddress}>
+            {shortAddress(summary.bufferAddress)}
           </dd>
         </div>
         <div>
-          <dt>Execution rent from Wallet A</dt>
-          <dd>
-            {(
-              Number(
-                summary.requiredProgramDataLamports -
-                  summary.programDataLamports,
-              ) / 1_000_000_000
-            ).toFixed(8)}{" "}
-            SOL
+          <dt>Artifact length</dt>
+          <dd>{summary.bufferProgramLength.toLocaleString("en-US")} bytes</dd>
+        </div>
+        <div>
+          <dt>Buffer authority and spill</dt>
+          <dd title={summary.vaultAddress}>
+            Squads vault 0 - {shortAddress(summary.vaultAddress)}
           </dd>
         </div>
         <div>
@@ -128,39 +114,25 @@ function UpgradeReview({
           </dd>
         </div>
         <div>
-          <dt>Current authority</dt>
-          <dd title={summary.vaultAddress}>
-            Vault 0 - {shortAddress(summary.vaultAddress)}
-          </dd>
-        </div>
-        <div>
-          <dt>Temporary atomic authority</dt>
-          <dd title={summary.bridgeAuthorityAddress}>
-            Wallet A - {shortAddress(summary.bridgeAuthorityAddress)}
-          </dd>
-        </div>
-        <div>
           <dt>Votes and execution</dt>
-          <dd>Zero approvals - no authority change or extension</dd>
+          <dd>Zero approvals - program code is unchanged</dd>
         </div>
       </dl>
 
       <div className="tu-hash">
-        <span>Verified deployed ProgramData SHA-256</span>
-        <code>{summary.currentSha256}</code>
+        <span>Verified on-chain buffer SHA-256</span>
+        <code>{summary.bufferSha256}</code>
       </div>
       <p className="tm-note">
         The submitted transaction creates one Squads vault transaction and one
-        active proposal. Its stored instruction authorizes only the first step
-        of an atomic execution: vault 0 hands ProgramData authority to Wallet A.
-        It contains no approval, execution, extension, code upgrade, provider
-        change, token mint, or token transfer.
+        active proposal containing exactly one Upgradeable Loader upgrade
+        instruction. It records no approval and does not execute the upgrade,
+        configure VRF, mint tokens, or transfer JDR.
       </p>
       <p className="tm-error">
-        Devnet recovery restriction: never execute this proposal from the
-        generic Squads interface. Only the project governance page will append
-        the reviewed extension and immediate authority return to the same atomic
-        transaction.
+        Approve only after the buffer address, byte length, SHA-256, program,
+        ProgramData, vault authority, and vault spill recipient match this
+        review.
       </p>
     </section>
   );
@@ -179,18 +151,18 @@ export function TokenomicsUpgradeApp() {
     wallet,
   } = useWalletConnection();
   const preparedRef =
-    useRef<PreparedIdealerProgramExtensionProposal | null>(null);
+    useRef<PreparedTokenomicsUpgradeProposal | null>(null);
   const walletAddress = wallet?.account.address.toString() ?? null;
   const walletName = wallet?.connector.name ?? null;
   const [accepted, setAccepted] = useState(false);
   const [busy, setBusy] = useState<"preparing" | "submitting" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] =
-    useState<IdealerProgramExtensionProposalResult | null>(null);
+    useState<TokenomicsUpgradeProposalResult | null>(null);
   const [summary, setSummary] =
-    useState<IdealerProgramExtensionProposalSummary | null>(null);
+    useState<TokenomicsUpgradeProposalSummary | null>(null);
   const configErrors = useMemo(
-    () => validateIdealerProgramExtensionProposalConfig(),
+    () => validateTokenomicsUpgradeProposalConfig(),
     [],
   );
   const phantomConnector = useMemo(
@@ -219,7 +191,7 @@ export function TokenomicsUpgradeApp() {
     setBusy("preparing");
     setError(null);
     try {
-      const prepared = await prepareIdealerProgramExtensionProposal({
+      const prepared = await prepareTokenomicsUpgradeProposal({
         creatorAddress: walletAddress,
         rpcEndpoint: cluster.endpoint.toString(),
       });
@@ -242,7 +214,7 @@ export function TokenomicsUpgradeApp() {
     setBusy("submitting");
     setError(null);
     try {
-      const created = await signSimulateSendAndVerifyExtensionProposal({
+      const created = await signSimulateSendAndVerifyUpgradeProposal({
         client,
         prepared,
         wallet,
@@ -269,13 +241,12 @@ export function TokenomicsUpgradeApp() {
           </div>
           <span className="tm-network">Devnet only</span>
           <p className="tm-eyebrow">Program governance - M10</p>
-          <h1>Propose the atomic ProgramData extension</h1>
+          <h1>Propose the reviewed Idealer upgrade</h1>
           <p className="tm-lead">
-            Wallet A creates a replacement Squads proposal for an atomic
-            authority bridge. After two approvals, one transaction transfers
-            authority from vault 0 to Wallet A, adds exactly 10,240 zero-filled
-            bytes with 0.04376448 SOL of rent, and immediately returns authority
-            to vault 0. No code or VRF configuration changes in this proposal.
+            Wallet A creates a zero-approval Squads proposal to install the
+            reviewed ProgramData-governed VRF configuration artifact. Proposal
+            creation does not upgrade the program; two different devnet members
+            must approve before a separate execution.
           </p>
         </header>
 
@@ -341,11 +312,10 @@ export function TokenomicsUpgradeApp() {
             <span className="tm-status">Read only</span>
           </div>
           <p className="tm-muted">
-            This reads and hashes the deployed program, verifies the exact
-            ProgramData capacity, rent funding, loader authority, and 2-of-3
-            multisig, then derives the next unused Squads proposal address. The
-            superseded proposal 5 is not executed because checked extension
-            instructions cannot run through loader CPI.
+            This re-hashes the deployed program and complete on-chain buffer,
+            verifies the ProgramData capacity and zero padding, checks both
+            loader authorities and the 2-of-3 multisig, then derives the next
+            unused Squads proposal address.
           </p>
           <button
             className="tm-button"
@@ -354,8 +324,8 @@ export function TokenomicsUpgradeApp() {
             type="button"
           >
             {busy === "preparing"
-              ? "Hashing the deployed program..."
-              : "Prepare atomic extension proposal"}
+              ? "Hashing program and buffer..."
+              : "Prepare governed upgrade proposal"}
           </button>
         </section>
 
@@ -382,11 +352,10 @@ export function TokenomicsUpgradeApp() {
                 type="checkbox"
               />
               <span>
-                I reviewed the devnet cluster, program, current and target
-                ProgramData capacities, deployed hash, rent funding, Squads
-                vault, temporary Wallet A authority, atomic return to vault 0,
-                zero-vote state, and the prohibition on generic Squads
-                execution.
+                I reviewed the devnet cluster, program, ProgramData, complete
+                buffer address, artifact byte length and SHA-256, Squads vault
+                authority and spill recipient, next proposal identity, and
+                zero-vote state.
               </span>
             </label>
             <button
@@ -408,10 +377,10 @@ export function TokenomicsUpgradeApp() {
             aria-labelledby="success-title"
           >
             <p className="tm-eyebrow">Strict verification passed</p>
-            <h2 id="success-title">Atomic extension proposal created</h2>
+            <h2 id="success-title">Upgrade proposal created</h2>
             <p>
               The finalized Squads proposal is active with zero approvals. The
-              Idealer ProgramData authority and capacity remain unchanged.
+              Idealer program code has not been upgraded.
             </p>
             <div className="tm-success-links">
               <ExplorerLink path={`address/${result.proposalAddress}`}>

@@ -4,7 +4,6 @@ const {
   Connection,
   Keypair,
   PublicKey,
-  SystemProgram,
   TransactionInstruction,
   TransactionMessage,
   VersionedTransaction,
@@ -28,13 +27,14 @@ const SQUADS_VAULT = new PublicKey(
 );
 const PROGRAM_DATA_METADATA_BYTES = 45;
 const BUFFER_METADATA_BYTES = 37;
-const CURRENT_CAPACITY = 1_045_352;
+const CURRENT_PROGRAM_LENGTH = 1_045_352;
 const CURRENT_SHA256 =
   "29825f38ff3d92214a4842e3ed00f983202b61ed7e82140df12f6af066948a35";
+const PROGRAM_DATA_CAPACITY = 1_055_592;
 const REVIEWED_ARTIFACT_BYTES = 1_049_304;
 const REVIEWED_ARTIFACT_SHA256 =
   "3a8da33f590768b399e93aa6497cf92b2218701b9a9dd1e6342cc0c663bce200";
-const EXTENSION_BYTES = REVIEWED_ARTIFACT_BYTES - CURRENT_CAPACITY;
+const BUFFER_UPLOAD_FEE_RESERVE_LAMPORTS = 6_000_000;
 
 function requiredEnvironment(name) {
   const value = process.env[name]?.trim();
@@ -100,13 +100,14 @@ async function readProgramData(connection, commitment) {
   );
 }
 
-function verifyProgramData(programData, expectedCapacity) {
+function verifyProgramData(programData) {
   if (
     !programData.authority.equals(SQUADS_VAULT) ||
-    programData.bytes.length !== expectedCapacity ||
-    sha256(programData.bytes.subarray(0, CURRENT_CAPACITY)) !== CURRENT_SHA256 ||
+    programData.bytes.length !== PROGRAM_DATA_CAPACITY ||
+    sha256(programData.bytes.subarray(0, CURRENT_PROGRAM_LENGTH)) !==
+      CURRENT_SHA256 ||
     programData.bytes
-      .subarray(CURRENT_CAPACITY)
+      .subarray(CURRENT_PROGRAM_LENGTH)
       .some((byte) => byte !== 0)
   ) {
     throw new Error("The finalized Idealer ProgramData is not in the reviewed state.");
@@ -123,11 +124,7 @@ function verifyArtifact() {
   }
 }
 
-async function connectionAndPayer() {
-  const payer = readKeypair(requiredEnvironment("SOLANA_KEYPAIR_PATH"));
-  if (!payer.publicKey.equals(TECHNICAL_PAYER)) {
-    throw new Error("The supplied keypair is not the reviewed devnet payer.");
-  }
+async function devnetConnection() {
   const connection = new Connection(requiredEnvironment("SOLANA_RPC_URL"), "confirmed");
   if ((await connection.getGenesisHash()) !== DEVNET_GENESIS_HASH) {
     throw new Error("The RPC endpoint is not Solana devnet.");
@@ -139,6 +136,15 @@ async function connectionAndPayer() {
   if (!derivedProgramData.equals(PROGRAM_DATA_ID)) {
     throw new Error("The configured ProgramData is not derived from Idealer.");
   }
+  return connection;
+}
+
+async function connectionAndPayer() {
+  const payer = readKeypair(requiredEnvironment("SOLANA_KEYPAIR_PATH"));
+  if (!payer.publicKey.equals(TECHNICAL_PAYER)) {
+    throw new Error("The supplied keypair is not the reviewed devnet payer.");
+  }
+  const connection = await devnetConnection();
   return { connection, payer };
 }
 
@@ -184,75 +190,57 @@ async function simulateSendAndFinalize(connection, payer, instructions) {
   return signature;
 }
 
-async function fundProgramDataExtensionRent() {
+async function planBufferPublication() {
   verifyArtifact();
-  const { connection, payer } = await connectionAndPayer();
-  const before = await readProgramData(connection, "finalized");
-  if (before.bytes.length === REVIEWED_ARTIFACT_BYTES) {
-    verifyProgramData(before, REVIEWED_ARTIFACT_BYTES);
+  const connection = await devnetConnection();
+  const programData = await readProgramData(connection, "finalized");
+  verifyProgramData(programData);
+  const bufferId = new PublicKey(requiredEnvironment("IDEALER_BUFFER_ADDRESS"));
+  const bufferAccount = await connection.getAccountInfo(bufferId, "finalized");
+  if (bufferAccount) {
+    const buffer = await readReviewedBuffer(
+      connection,
+      bufferId,
+      "finalized",
+    );
     console.log(
       JSON.stringify({
-        alreadyExtended: true,
-        capacity: before.bytes.length,
-        programData: PROGRAM_DATA_ID.toBase58(),
+        alreadyPublished: true,
+        authority: buffer.authority.toBase58(),
+        buffer: bufferId.toBase58(),
+        bytes: buffer.bytes.length,
+        sha256: sha256(buffer.bytes),
+        stage: "finalized-readback",
       }),
     );
     return;
   }
-  verifyProgramData(before, CURRENT_CAPACITY);
 
-  const requiredLamports = await connection.getMinimumBalanceForRentExemption(
-    before.totalBytes + EXTENSION_BYTES,
+  const bufferRentLamports = await connection.getMinimumBalanceForRentExemption(
+    BUFFER_METADATA_BYTES + REVIEWED_ARTIFACT_BYTES,
   );
-  const additionalRentLamports = requiredLamports - before.lamports;
-  const payerBalance = await connection.getBalance(payer.publicKey, "finalized");
-  if (additionalRentLamports <= 0) {
-    console.log(
-      JSON.stringify({
-        alreadyFunded: true,
-        capacity: before.bytes.length,
-        programData: PROGRAM_DATA_ID.toBase58(),
-        programDataLamports: before.lamports,
-        requiredLamports,
-      }),
-    );
-    return;
-  }
-  if (payerBalance <= additionalRentLamports + 5_000) {
-    throw new Error("The reviewed payer cannot fund the ProgramData extension and fee.");
-  }
-
-  const instruction = SystemProgram.transfer({
-    fromPubkey: payer.publicKey,
-    lamports: additionalRentLamports,
-    toPubkey: PROGRAM_DATA_ID,
-  });
+  const payerBalance = await connection.getBalance(TECHNICAL_PAYER, "finalized");
+  const requiredPayerLamports =
+    bufferRentLamports + BUFFER_UPLOAD_FEE_RESERVE_LAMPORTS;
+  const fundingShortfallLamports = Math.max(
+    0,
+    requiredPayerLamports - payerBalance,
+  );
   console.log(
     JSON.stringify({
-      additionalRentLamports,
+      artifactBytes: REVIEWED_ARTIFACT_BYTES,
+      artifactSha256: REVIEWED_ARTIFACT_SHA256,
+      buffer: bufferId.toBase58(),
+      bufferRentLamports,
+      bufferUploadFeeReserveLamports: BUFFER_UPLOAD_FEE_RESERVE_LAMPORTS,
       cluster: "devnet",
-      extensionBytes: EXTENSION_BYTES,
-      feePayer: payer.publicKey.toBase58(),
-      nextRequiredAction: "Squads ExtendProgramChecked proposal",
+      feePayer: TECHNICAL_PAYER.toBase58(),
+      fundingShortfallLamports,
+      payerBalanceLamports: payerBalance,
+      programDataCapacity: programData.bytes.length,
+      programDataCurrentSha256: CURRENT_SHA256,
+      requiredPayerLamports,
       stage: "reviewed-plan",
-    }),
-  );
-  const signature = await simulateSendAndFinalize(connection, payer, [instruction]);
-  const after = await readProgramData(connection, "finalized");
-  verifyProgramData(after, CURRENT_CAPACITY);
-  if (after.lamports < requiredLamports || after.bytes.length !== before.bytes.length) {
-    throw new Error("The rent funding finalized, but strict read-back failed.");
-  }
-  console.log(
-    JSON.stringify({
-      additionalRentLamports,
-      authority: after.authority.toBase58(),
-      capacity: after.bytes.length,
-      extensionBytes: EXTENSION_BYTES,
-      programDataLamports: after.lamports,
-      requiredLamports,
-      signature,
-      stage: "finalized",
     }),
   );
 }
@@ -276,9 +264,9 @@ async function readReviewedBuffer(connection, bufferId, commitment) {
 
 async function verifyBuffer() {
   verifyArtifact();
-  const { connection } = await connectionAndPayer();
+  const connection = await devnetConnection();
   const programData = await readProgramData(connection, "finalized");
-  verifyProgramData(programData, REVIEWED_ARTIFACT_BYTES);
+  verifyProgramData(programData);
   const bufferId = new PublicKey(requiredEnvironment("IDEALER_BUFFER_ADDRESS"));
   const buffer = await readReviewedBuffer(connection, bufferId, "finalized");
   if (
@@ -302,7 +290,7 @@ async function transferBufferAuthority() {
   verifyArtifact();
   const { connection, payer } = await connectionAndPayer();
   const programData = await readProgramData(connection, "finalized");
-  verifyProgramData(programData, REVIEWED_ARTIFACT_BYTES);
+  verifyProgramData(programData);
   const bufferId = new PublicKey(requiredEnvironment("IDEALER_BUFFER_ADDRESS"));
   const before = await readReviewedBuffer(connection, bufferId, "finalized");
   if (before.authority.equals(SQUADS_VAULT)) {
@@ -357,8 +345,8 @@ async function transferBufferAuthority() {
 
 const command = process.argv[2];
 const action =
-  command === "fund-extension-rent"
-    ? fundProgramDataExtensionRent
+  command === "plan-buffer"
+    ? planBufferPublication
     : command === "verify-buffer"
       ? verifyBuffer
       : command === "transfer-buffer-authority"
@@ -367,7 +355,7 @@ const action =
 
 if (!action) {
   console.error(
-    "Usage: prepare-idealer-orao-upgrade.cjs <fund-extension-rent|verify-buffer|transfer-buffer-authority>",
+    "Usage: prepare-idealer-orao-upgrade.cjs <plan-buffer|verify-buffer|transfer-buffer-authority>",
   );
   process.exitCode = 1;
 } else {
