@@ -77,6 +77,10 @@ docker compose down
 
 See [docs/local-development-runbook.md](docs/local-development-runbook.md) for environment setup, health checks, and local URLs.
 
+For controlled real-Solana devnet operations, including starting the
+containerized services and opening a short test turn, see
+[docs/devnet-turn-operations-runbook.md](docs/devnet-turn-operations-runbook.md).
+
 ## Boundary Rules
 
 - The public DApp is mobile-first.

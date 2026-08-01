@@ -4657,3 +4657,34 @@ Passed:
 - The target-only automated referral worker then finalized base receipt transaction `5w4TwQeAjk3ciaQY6wx9oQGG3hj7tQxs3UMRpDCZSNcmEDWtqx43fzuoNEUiYRFpufXYbr2AYdygELVZArhMeL7y` at slot `479370797` and bonus receipt transaction `5TfkfDwUmkDkV67dSKD2B5tDQrVxH9HzNBo2bvaxpSm1Fs8Hv1BrRUyFKykb2jG6vHFr9PDjToXLjdZHoXtk6VYy` at slot `479370840`. Both have `err: null` and paid `5,000` lamports in network fee.
 - Canonical token-balance deltas prove `200,000,000` JDR atoms (`0.20 JDR`) to Wallet A and `30,000,000` atoms (`0.03 JDR`) to the invitee in the base transaction; the bonus transaction added `4,500,000` atoms (`0.0045 JDR`) to Wallet A. The attribution is owned by Tokenomics Core and now records both `base_reward_settled=true` and `bonus_settled=true`. Re-running the enabled worker returned `nothing_to_settle`, proving receipt/state idempotency with no duplicate JDR transfer.
 - Referral automation remains enabled only for the completed immutable target `35:DTR7BM7wgHJQ7dJUnQe7KCkWVPB6Jky4EkHAVSstQakY`, at a five-minute interval to avoid unnecessary devnet public-RPC load. Turn automation and settlement automation remain disabled. M10 remains `In progress`; no milestone checkbox was marked. Final inconsistency review distinguishes the completed devnet referral proof from broad future-referral automation, multi-epoch rehearsal, custody, audit, and mainnet gates.
+
+### 2026-07-27 (Devnet turn operations runbook)
+
+- Reopened `PRD.md` and `AGENTS.md`, inspected `.claude/skills`, and reviewed the existing local-development runbook before documenting operations. Added `docs/devnet-turn-operations-runbook.md`, linked from `README.md`.
+- The runbook documents prerequisite checks, safe `.env` values, read-only technical-key validation, starting/recreating the containerized API/worker/web stack, health and effective-environment checks, state inspection, manual opening of a 1,200-second devnet turn, controlled settlement, reward-worker allowlists, shutdown, Docker/RPC troubleshooting, and the strict devnet/mainnet boundary.
+- Restored `infra/docker/worker-devnet-controlled.env` to a safe reusable default: referral settlement is disabled and has no historical target. A temporary live target remains only in the untracked local runtime configuration while its completed receipt is monitored idempotently. Compose configuration validation and `git diff --check` passed. M10 remains `In progress`; no milestone checkbox was changed.
+
+### 2026-07-27 (Host-native devnet operations documented)
+
+- Reopened `PRD.md` and `AGENTS.md`, inspected the local skills directory, and reviewed both devnet and local-development runbooks before extending the operational documentation.
+- Updated `docs/devnet-turn-operations-runbook.md` to support the normal host-native path: PostgreSQL/Redis in Docker, API/worker/web started individually with `pnpm`, host API URL, access-controlled host keypair path, restart/log behavior, host-native input seeding, controlled settlement, shutdown, and diagnostics. It also explicitly prevents running host and container API/worker instances together.
+- Preserved the containerized path as an alternative and documented its different internal API URL and mounted keypair path. Compose configuration validation and `git diff --check` passed. M10 remains `In progress`; no milestone checkbox was changed.
+
+### 2026-07-27 (Devnet turn command clarification)
+
+- Reopened `PRD.md` and inspected the manual-control implementation before correcting the operational guidance. `/manual/cycle` is the normal command to advance to a new devnet turn: it ends an active turn's play phase, drives the real settlement pipeline through `CLOSED`, and only then opens the next turn. With no active turn, it checks and settles any pending predecessor before opening.
+- Updated the devnet runbook to make `/manual/cycle` the recommended command and restrict `/manual/open` to the already-confirmed no-active-turn/previously-closed case. `git diff --check` passed. M10 remains `In progress`; no milestone checkbox was changed.
+
+### 2026-08-01 (Host-native game services restarted for local devnet testing)
+
+- Reopened the required `PRD.md` and `AGENTS.md`, inspected `.claude/skills`, and followed the local-development, devnet-operation, and verification guidance before starting services.
+- Started only PostgreSQL and Redis in Docker. The API, worker, public DApp, and read-only admin console run natively on the host at `localhost:3002`, `localhost:3003`, `localhost:3000`, and `localhost:3001` respectively. The host worker configuration now points to the protected host authority-keypair path and the host API loopback URL; turn and settlement automation remain disabled while manual control remains enabled.
+- Health checks report API and worker `ok` with PostgreSQL/Redis healthy and the 1,200-second controlled round profile effective. Playwright browser verification found no error overlay or console errors at `http://localhost:3000` and `http://localhost:3001`; the admin console loaded its public transparency data. The DApp correctly shows that the existing devnet turn `35` is expired and waiting for the next turn.
+- No manual-control endpoint, ORAO request, settlement, reward action, mainnet action, or milestone checkbox change occurred. M10 remains `In progress`. Final consistency review confirms only data stores run in Docker, all application services run on the host, and no devnet transaction was submitted.
+
+### 2026-08-01 (Mobile notifications sheet scroll fix)
+
+- Opened `PRD.md`, `AGENTS.md`, inspected `.claude/skills`, and followed the local frontend, design-system, Playwright, and test-and-verify guidance before correcting the mobile notifications sheet.
+- Moved the notifications sheet to the nearest Idealer root through a React portal so its backdrop is above the bottom navigation rather than inside the animated screen stacking context. Added explicit touch scrolling, contained overscroll, and a zero minimum height to the sheet's scroll container.
+- Validation passed: web TypeScript typecheck, `120/120` web unit tests, ESLint with zero warnings, production build, and `git diff --check`. A focused host-browser E2E run was attempted; its second pre-existing assertion expects a `Connect wallet` link on `/play/rewards`, while the current disconnected Rewards screen renders a button, so it failed independently of the notification dialog. The containerized browser attempt exceeded its dependency-preparation timeout before tests began.
+- No wallet, API, worker, devnet, mainnet, or milestone state was changed. Final consistency review confirms the portal remains scoped to each Idealer app root, preserves close-on-backdrop and Escape behavior, and prevents the bottom navigation from capturing notification-sheet gestures.

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { address } from "@solana/kit";
 
 import { useIdealer } from "../context";
@@ -163,6 +164,8 @@ function NotificationSheet({
   records: ClaimRecordApi[];
 }) {
   const closeRef = useRef<HTMLButtonElement>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
     closeRef.current?.focus();
@@ -175,11 +178,16 @@ function NotificationSheet({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
 
+  useEffect(() => {
+    setPortalTarget(backdropRef.current?.closest<HTMLElement>(".ide-root") ?? null);
+  }, []);
+
   const notable = records.filter((record) => record.status !== "claimed");
-  return (
+  const sheet = (
     <div
       className="ide-rewards-sheet-backdrop"
       onClick={onClose}
+      ref={backdropRef}
       role="presentation"
     >
       <section
@@ -242,6 +250,8 @@ function NotificationSheet({
       </section>
     </div>
   );
+
+  return portalTarget ? createPortal(sheet, portalTarget) : sheet;
 }
 
 export function RewardsScreen() {

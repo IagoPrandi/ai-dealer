@@ -699,7 +699,11 @@
 .ide-rewards-sheet {
   width: 100%;
   max-height: 82%;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
   padding: 10px 18px 28px;
   border: 1px solid var(--line-2);
   border-bottom: none;
