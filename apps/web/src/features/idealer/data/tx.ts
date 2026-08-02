@@ -64,6 +64,19 @@ export async function sendInstruction(
   instruction: ProgramInstruction,
   options: SendInstructionOptions = {},
 ): Promise<string> {
+  return sendInstructions(client, wallet, [instruction], options);
+}
+
+/** Sign + send one atomic transaction containing one or more instructions. */
+export async function sendInstructions(
+  client: SolanaClient,
+  wallet: ConnectedWallet,
+  instructions: readonly ProgramInstruction[],
+  options: SendInstructionOptions = {},
+): Promise<string> {
+  if (instructions.length === 0) {
+    throw new Error("At least one transaction instruction is required.");
+  }
   const walletSigner = createWalletTransactionSigner(wallet, {
     commitment: "confirmed",
   }).signer;
@@ -81,7 +94,7 @@ export async function sendInstruction(
       authority: walletSigner,
       commitment: "confirmed",
       feePayer: walletSigner,
-      instructions: [instruction],
+      instructions: [...instructions],
       version: 0,
     },
     {

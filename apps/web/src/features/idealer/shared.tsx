@@ -300,11 +300,15 @@ export function RuleDetail({
         ) : null}
 
         <SectionLabel>Details</SectionLabel>
-        <div className="ide-metrics rows2" style={{ margin: "10px 0 22px" }}>
-          <Meta label="Created by" value={rule.handle} />
-          <Meta label="Wallet" value={rule.wallet} mono />
-          <Meta label="When" value={rule.created} />
-          <Meta label="Balance" value={`${balance >= 0 ? "+" : ""}${balance}`} mono />
+        <div style={{ display: "grid", gap: 10, margin: "10px 0 22px" }}>
+          <div style={{ alignItems: "baseline", display: "flex", gap: 8, minWidth: 0 }}>
+            <span style={{ color: "var(--dim)", flexShrink: 0, fontSize: 11.5, letterSpacing: "0.03em" }}>Created by</span>
+            <span className="ide-num" style={{ color: "var(--text)", fontSize: 13, fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rule.handle}</span>
+          </div>
+          <div style={{ alignItems: "baseline", display: "flex", gap: 8, minWidth: 0 }}>
+            <span style={{ color: "var(--dim)", flexShrink: 0, fontSize: 11.5, letterSpacing: "0.03em" }}>When</span>
+            <span style={{ color: "var(--text)", fontSize: 13, fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rule.created}</span>
+          </div>
         </div>
       </div>
     </div>

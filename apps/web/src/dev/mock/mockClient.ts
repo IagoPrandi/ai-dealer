@@ -10,7 +10,7 @@
  * em little-endian). Ações de escrita (transaction/solTransfer) são stubs que
  * falham de forma clara — elas só rodam em cliques, nunca ao montar a tela.
  */
-import { getProgramDerivedAddress } from "@solana/kit";
+import { address, getAddressEncoder, getProgramDerivedAddress } from "@solana/kit";
 
 import {
   IDEALER_PROGRAM_ID,
@@ -19,7 +19,14 @@ import {
 import {
   MOCK_GLOBAL_CONFIG,
   MOCK_TURN_STATE,
+  MOCK_WALLET_ADDRESS,
 } from "./mockData";
+import {
+  deriveAssociatedTokenAddress,
+  IDEALER_TOKEN_MINT,
+  SPL_TOKEN_PROGRAM_ID,
+  TOKENOMICS_CORE_PROGRAM_ID,
+} from "../../solana/tokenomicsProgram";
 
 const PRIZE_VAULT_LAMPORTS = 20_500_000_000n;
 
@@ -96,6 +103,33 @@ function encodeTurnState(): Uint8Array {
   return w.data;
 }
 
+function encodeTokenConfig(): Uint8Array {
+  const data = new Uint8Array(723);
+  const encoder = getAddressEncoder();
+  data.set([92, 73, 255, 43, 107, 51, 117, 101], 0);
+  data.set(encoder.encode(IDEALER_TOKEN_MINT), 136);
+  new DataView(data.buffer).setUint32(232, 0, true);
+  data.set(encoder.encode(IDEALER_TOKEN_MINT), 269);
+  data.set(encoder.encode(IDEALER_TOKEN_MINT), 301);
+  return data;
+}
+
+function encodeJdrBalance(): Uint8Array {
+  const data = new Uint8Array(165);
+  const encoder = getAddressEncoder();
+  data.set(encoder.encode(IDEALER_TOKEN_MINT), 0);
+  data.set(encoder.encode(address(MOCK_WALLET_ADDRESS)), 32);
+  new DataView(data.buffer).setBigUint64(64, 2_300_000_000n, true);
+  return data;
+}
+
+function encodeProposalRewardSource(): Uint8Array {
+  const data = new Uint8Array(56);
+  data.set([233, 212, 161, 38, 30, 217, 172, 177], 0);
+  data.set(getAddressEncoder().encode(address(MOCK_WALLET_ADDRESS)), 24);
+  return data;
+}
+
 function toBase64(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) {
@@ -124,6 +158,13 @@ async function getAccountMap(): Promise<Map<string, AccountData>> {
         programAddress: IDEALER_PROGRAM_ID,
         seeds: ["turn", u64LeBytes(MOCK_GLOBAL_CONFIG.activeTurnId)],
       });
+      const [tokenConfigAddress] = await getProgramDerivedAddress({
+        programAddress: TOKENOMICS_CORE_PROGRAM_ID,
+        seeds: ["token_config"],
+      });
+      const tokenAccountAddress = await deriveAssociatedTokenAddress(
+        address(MOCK_WALLET_ADDRESS),
+      );
 
       const map = new Map<string, AccountData>();
       map.set(globalConfigAddress.toString(), {
@@ -133,6 +174,14 @@ async function getAccountMap(): Promise<Map<string, AccountData>> {
       map.set(turnStateAddress.toString(), {
         owner,
         data: [toBase64(encodeTurnState()), "base64"],
+      });
+      map.set(tokenConfigAddress.toString(), {
+        owner: TOKENOMICS_CORE_PROGRAM_ID.toString(),
+        data: [toBase64(encodeTokenConfig()), "base64"],
+      });
+      map.set(tokenAccountAddress.toString(), {
+        owner: SPL_TOKEN_PROGRAM_ID.toString(),
+        data: [toBase64(encodeJdrBalance()), "base64"],
       });
       return map;
     })();
@@ -161,6 +210,19 @@ export const mockSolanaClient = {
       getBalance() {
         return {
           send: async () => ({ value: PRIZE_VAULT_LAMPORTS }),
+        };
+      },
+      getProgramAccounts() {
+        return {
+          send: async () => [
+            {
+              account: {
+                data: [toBase64(encodeProposalRewardSource()), "base64"] as const,
+                owner: IDEALER_PROGRAM_ID.toString(),
+              },
+              pubkey: "SysvarRent111111111111111111111111111111111",
+            },
+          ],
         };
       },
       simulateTransaction() {

@@ -2,7 +2,7 @@
 
 > **Version:** 2.8-draft
 > **Status:** Draft — core economic, custody, immediate multisig treasury execution, immutable tokenomics-core, optimistic epoch settlement, challenge-liveness, correction-reserve, campaign-vault, referral, claim-destination, and terminal-reserve rules confirmed; metadata, legal, and launch records remain pending
-> **Last updated:** 2026-07-18
+> **Last updated:** 2026-08-02
 > **Scope order:** Tokenomics first; promotional use second.
 
 ## 1. Purpose
@@ -470,6 +470,22 @@ The initial campaign vault requirements are:
   already settled or redirect previously committed balances;
 - the vault address, token mint, programme authority, original allocation,
   current balance, cumulative issuance, and all transfers are public.
+
+#### 3.6.1 Manual campaign-reward claims
+
+Campaign rewards must not be credited by a background settlement loop. A user
+must explicitly request each supported claim and approve the transaction in
+their wallet. Eligibility, the immutable beneficiary, the fixed reward amount,
+campaign balance, and the unique receipt remain enforced on-chain; manual claim
+does not let the caller redirect or duplicate a reward.
+
+The current beneficiary-initiated DApp path covers proposal and supporter
+action rewards. Automated action, active-rule, and referral reward settlement
+must remain disabled. Active-rule and referral claims may be exposed as manual
+user actions only after their authority-gated instructions receive a reviewed
+beneficiary-initiated contract path; disabling automation must never be hidden
+behind a frontend fallback or represented as a claimable reward before that
+path exists.
 
 Each future promotion must receive a disclosed tranche of existing tokens in a
 new, campaign-specific vault. Campaign balances must never be pooled in a single
