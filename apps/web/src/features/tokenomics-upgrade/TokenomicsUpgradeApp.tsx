@@ -63,7 +63,7 @@ function UpgradeReview({
       <div className="tm-section-heading">
         <div>
           <p className="tm-eyebrow">Required review</p>
-          <h2 id="upgrade-review">Governed Idealer upgrade proposal</h2>
+          <h2 id="upgrade-review">Governed Tokenomics Core upgrade proposal</h2>
         </div>
         <span className="tm-status tm-status-ready">Prepared</span>
       </div>
@@ -127,7 +127,7 @@ function UpgradeReview({
         The submitted transaction creates one Squads vault transaction and one
         active proposal containing exactly one Upgradeable Loader upgrade
         instruction. It records no approval and does not execute the upgrade,
-        configure VRF, mint tokens, or transfer JDR.
+        migrate campaign state, mint tokens, or transfer JDR.
       </p>
       <p className="tm-error">
         Approve only after the buffer address, byte length, SHA-256, program,
@@ -150,15 +150,15 @@ export function TokenomicsUpgradeApp() {
     isReady,
     wallet,
   } = useWalletConnection();
-  const preparedRef =
-    useRef<PreparedTokenomicsUpgradeProposal | null>(null);
+  const preparedRef = useRef<PreparedTokenomicsUpgradeProposal | null>(null);
   const walletAddress = wallet?.account.address.toString() ?? null;
   const walletName = wallet?.connector.name ?? null;
   const [accepted, setAccepted] = useState(false);
   const [busy, setBusy] = useState<"preparing" | "submitting" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] =
-    useState<TokenomicsUpgradeProposalResult | null>(null);
+  const [result, setResult] = useState<TokenomicsUpgradeProposalResult | null>(
+    null,
+  );
   const [summary, setSummary] =
     useState<TokenomicsUpgradeProposalSummary | null>(null);
   const configErrors = useMemo(
@@ -241,12 +241,12 @@ export function TokenomicsUpgradeApp() {
           </div>
           <span className="tm-network">Devnet only</span>
           <p className="tm-eyebrow">Program governance - M10</p>
-          <h1>Propose the reviewed Idealer upgrade</h1>
+          <h1>Propose the reviewed Tokenomics Core upgrade</h1>
           <p className="tm-lead">
             Wallet A creates a zero-approval Squads proposal to install the
-            reviewed ProgramData-governed VRF configuration artifact. Proposal
-            creation does not upgrade the program; two different devnet members
-            must approve before a separate execution.
+            reviewed JDR reward-v2 artifact. Proposal creation does not upgrade
+            the program; two different devnet members must approve before a
+            separate execution.
           </p>
         </header>
 
@@ -380,7 +380,7 @@ export function TokenomicsUpgradeApp() {
             <h2 id="success-title">Upgrade proposal created</h2>
             <p>
               The finalized Squads proposal is active with zero approvals. The
-              Idealer program code has not been upgraded.
+              Tokenomics Core program code has not been upgraded.
             </p>
             <div className="tm-success-links">
               <ExplorerLink path={`address/${result.proposalAddress}`}>

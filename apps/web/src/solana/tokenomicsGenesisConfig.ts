@@ -1,4 +1,8 @@
 import { address } from "@solana/kit";
+import {
+  CAMPAIGN_UNUSED_BALANCE_POLICY_HASH,
+  CAMPAIGN_V2_ECONOMIC_CONFIG_HASH,
+} from "@idealer/constants";
 
 import { IDEALER_PROGRAM_ID } from "./idealerProgram";
 import { SQUADS_DEVNET_CONFIG } from "./squadsDevnetConfig";
@@ -14,14 +18,19 @@ export const BPF_UPGRADEABLE_LOADER_ID =
 export const CLASSIC_SPL_TOKEN_PROGRAM_ID =
   "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 
+// v2 amends the initial campaign economics before any mainnet launch: action
+// rewards and the active-rule rate are 50% higher, the invitee base reward is
+// 150% of the inviter reward, and the inviter first-round bonus rate is 22.5%
+// (PRD-TOKENOMICS §5.2-5.4). Every field is part of the hashed preimage, so the
+// existing funded devnet campaign 0 (v1 hash `145e7abd…`) remains unavailable
+// until its one-time, governance-controlled v2 migration is finalized.
 export const INITIAL_CAMPAIGN_CONFIG_PREIMAGE =
-  "idealer:jdr:initial-campaign-config:v1|proposal=400000000|supporter=60000000|referral-inviter=200000000|referral-invitee=30000000|active-rule-rate-bps=1500|active-rule-cap=250000000|creator-before-voters=true|campaign=0";
-export const INITIAL_CAMPAIGN_CONFIG_HASH =
-  "145e7abde160c7d6828624eb12f320b570b674ad46708659cf5e640751854efd";
+  "idealer:jdr:initial-campaign-config:v2|proposal=600000000|supporter=90000000|referral-inviter=200000000|referral-invitee=300000000|referral-invitee-rate-bps=15000|referral-first-round-bonus-rate-bps=2250|active-rule-rate-bps=2250|active-rule-cap=250000000|creator-before-voters=true|campaign=0";
+export const INITIAL_CAMPAIGN_CONFIG_HASH = CAMPAIGN_V2_ECONOMIC_CONFIG_HASH;
 export const INITIAL_UNUSED_BALANCE_POLICY_PREIMAGE =
   "idealer:jdr:initial-campaign-unused-balance:v1|stop=exhaustion-only|final-partial=true|residual=isolated|admin-sweep=false";
 export const INITIAL_UNUSED_BALANCE_POLICY_HASH =
-  "92f6153e1c48440fa5f7bf5e8fa45523a3d3956e6fd762b41ca2097c4522dbfd";
+  CAMPAIGN_UNUSED_BALANCE_POLICY_HASH;
 
 const TOKEN_ATOMS_PER_TOKEN = 1_000_000_000n;
 

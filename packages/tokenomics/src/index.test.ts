@@ -14,6 +14,7 @@ import {
   hashTreasuryDistributionLeaf,
   INITIAL_CAMPAIGN_ALLOCATION_ATOMS,
   PROPOSAL_REWARD_ATOMS,
+  REFERRAL_INVITEE_REWARD_ATOMS,
   repeatedActionFeeAtoms,
   settleCampaignRewardLegs,
   splitVoterPool,
@@ -177,7 +178,7 @@ test("domain-separated Merkle proof binds beneficiary and amount", () => {
 });
 
 test("terminal partial reward consumes the exact remaining atoms", () => {
-  const settlement = settleCampaignRewardLegs(450_000_000n, [
+  const settlement = settleCampaignRewardLegs(650_000_000n, [
     {
       beneficiary: wallet(1),
       kind: "proposal",
@@ -189,7 +190,7 @@ test("terminal partial reward consumes the exact remaining atoms", () => {
       nominalAtoms: SUPPORTER_REWARD_ATOMS,
     },
   ]);
-  assert.equal(settlement.legs[0]?.paidAtoms, 400_000_000n);
+  assert.equal(settlement.legs[0]?.paidAtoms, 600_000_000n);
   assert.equal(settlement.legs[1]?.paidAtoms, 50_000_000n);
   assert.equal(settlement.legs[1]?.finalPartialReward, true);
   assert.equal(settlement.remainingAtoms, 0n);
@@ -219,7 +220,7 @@ test("active-rule rewards cap independently and debit creator first", () => {
     wallet(2),
     wallet(3),
   ]);
-  assert.equal(result.calculatedCreatorAtoms, 1_500_000_000n);
+  assert.equal(result.calculatedCreatorAtoms, 2_250_000_000n);
   assert.equal(result.creatorPaidAtoms, ACTIVE_RULE_REWARD_CAP_ATOMS);
   assert.equal(result.voterPoolPaidAtoms, 150_000_000n);
   assert.equal(result.remainingCampaignAtoms, 0n);
@@ -230,9 +231,14 @@ test("active-rule rewards cap independently and debit creator first", () => {
 });
 
 test("referral first-round bonus uses actually paid closed-list inputs", () => {
+  // 22.5% of the invitee base (0.3) + proposal (0.6) + supporter (0.09) legs.
   assert.equal(
-    calculateInviterFirstRoundBonus([30_000_000n, 400_000_000n, 60_000_000n]),
-    73_500_000n,
+    calculateInviterFirstRoundBonus([
+      REFERRAL_INVITEE_REWARD_ATOMS,
+      PROPOSAL_REWARD_ATOMS,
+      SUPPORTER_REWARD_ATOMS,
+    ]),
+    222_750_000n,
   );
 });
 

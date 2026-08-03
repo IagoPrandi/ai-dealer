@@ -18,6 +18,9 @@ custom-panic = []
 # binds this exception to the approved devnet program id, so a separate mainnet
 # identity continues to require a non-empty HTTPS URI.
 devnet-empty-metadata-uri = []
+# DEVNET ONLY: exposes the one-time, governance-controlled campaign-0 v1-to-v2
+# economic-hash migration. Production/mainnet builds must omit this feature.
+devnet-campaign-v2-migration = []
 idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 no-entrypoint = []
 no-idl = []

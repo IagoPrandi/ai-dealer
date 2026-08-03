@@ -2032,14 +2032,15 @@ test("reward distribution uses one individual alternative payout basis and split
     winnerCount: 10,
   });
 
-  assert.equal(rewards.creator?.calculatedRewardLamports, 1);
-  assert.equal(rewards.creator?.finalRewardLamports, 1);
-  assert.equal(rewards.voterRewardPool.calculatedPoolLamports, 1);
-  assert.equal(rewards.voterRewardPool.finalPoolLamports, 1);
+  // 22.5% of one individual alternative payout, creator first, then the pool.
+  assert.equal(rewards.creator?.calculatedRewardLamports, 2);
+  assert.equal(rewards.creator?.finalRewardLamports, 2);
+  assert.equal(rewards.voterRewardPool.calculatedPoolLamports, 2);
+  assert.equal(rewards.voterRewardPool.finalPoolLamports, 2);
   assert.equal(rewards.voterRewardPool.individualRewardLamports, 0);
-  assert.equal(rewards.voterRewardPool.remainderLamports, 1);
+  assert.equal(rewards.voterRewardPool.remainderLamports, 2);
   assert.equal(rewards.voters.length, 3);
-  assert.equal(rewards.remainingReserveLamports, 28);
+  assert.equal(rewards.remainingReserveLamports, 26);
 });
 
 test("creator and voter reward records are stored without reducing winner payouts", () => {
@@ -2122,9 +2123,9 @@ test("creator and voter reward records are stored without reducing winner payout
   assert.equal(winners.alternative.individualPayoutLamports, 14_250_000);
   assert.equal(rewards.creatorRewardReserveLamports, 600_000);
   assert.equal(rewards.creator?.creatorWallet, wallet);
-  assert.equal(rewards.creator?.calculatedRewardLamports, 2_137_500);
+  assert.equal(rewards.creator?.calculatedRewardLamports, 3_206_250);
   assert.equal(rewards.creator?.finalRewardLamports, 600_000);
-  assert.equal(rewards.voterRewardPool.calculatedPoolLamports, 2_137_500);
+  assert.equal(rewards.voterRewardPool.calculatedPoolLamports, 3_206_250);
   assert.equal(rewards.voterRewardPool.finalPoolLamports, 0);
   assert.equal(rewards.voters.length, 2);
   assert.equal(voterRecords.length, 2);

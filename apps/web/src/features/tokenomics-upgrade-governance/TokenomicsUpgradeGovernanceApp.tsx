@@ -74,8 +74,9 @@ export function TokenomicsUpgradeGovernanceApp() {
     isReady,
     wallet,
   } = useWalletConnection();
-  const preparedRef =
-    useRef<PreparedTokenomicsUpgradeGovernanceAction | null>(null);
+  const preparedRef = useRef<PreparedTokenomicsUpgradeGovernanceAction | null>(
+    null,
+  );
   const walletAddress = wallet?.account.address.toString() ?? "";
   const walletName = wallet?.connector.name ?? "";
   const [accepted, setAccepted] = useState(false);
@@ -87,8 +88,9 @@ export function TokenomicsUpgradeGovernanceApp() {
     useState<TokenomicsUpgradeGovernanceAction | null>(null);
   const [result, setResult] =
     useState<TokenomicsUpgradeGovernanceResult | null>(null);
-  const [state, setState] =
-    useState<TokenomicsUpgradeGovernanceState | null>(null);
+  const [state, setState] = useState<TokenomicsUpgradeGovernanceState | null>(
+    null,
+  );
   const member = useMemo(
     () =>
       SQUADS_DEVNET_CONFIG.members.find(
@@ -118,9 +120,7 @@ export function TokenomicsUpgradeGovernanceApp() {
     setError(null);
     try {
       setState(
-        await readTokenomicsUpgradeGovernanceState(
-          cluster.endpoint.toString(),
-        ),
+        await readTokenomicsUpgradeGovernanceState(cluster.endpoint.toString()),
       );
     } catch (readError) {
       setState(null);
@@ -192,11 +192,11 @@ export function TokenomicsUpgradeGovernanceApp() {
           </div>
           <span className="tm-network">Devnet only</span>
           <p className="tm-eyebrow">Squads governance - M10</p>
-          <h1>Approve and execute the Idealer upgrade</h1>
+          <h1>Approve and execute the Tokenomics Core upgrade</h1>
           <p className="tm-lead">
             {state?.status === "Executed"
-              ? `Idealer upgrade proposal ${TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex.toString()} was approved and executed. The deployed program matches the reviewed buffer and remains controlled by Squads vault 0.`
-              : `Two different members approve Idealer upgrade proposal ${TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex.toString()}. After the 2-of-3 threshold, any authorized devnet member can execute the exact stored upgrade.`}
+              ? `Tokenomics Core upgrade proposal ${TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex.toString()} was approved and executed. The deployed program matches the reviewed buffer and remains controlled by Squads vault 0.`
+              : `Two different members approve Tokenomics Core upgrade proposal ${TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex.toString()}. After the 2-of-3 threshold, any authorized devnet member can execute the exact stored upgrade.`}
           </p>
         </header>
 
@@ -206,9 +206,7 @@ export function TokenomicsUpgradeGovernanceApp() {
               <p className="tm-eyebrow">Step 1</p>
               <h2 id="state-title">Read the finalized proposal</h2>
             </div>
-            <span
-              className={`tm-status${state ? " tm-status-ready" : ""}`}
-            >
+            <span className={`tm-status${state ? " tm-status-ready" : ""}`}>
               {state?.status ?? "Not loaded"}
             </span>
           </div>
@@ -223,7 +221,9 @@ export function TokenomicsUpgradeGovernanceApp() {
             onClick={() => void refresh()}
             type="button"
           >
-            {busy === "reading" ? "Verifying devnet..." : "Refresh strict state"}
+            {busy === "reading"
+              ? "Verifying devnet..."
+              : "Refresh strict state"}
           </button>
 
           {state ? (
@@ -287,65 +287,67 @@ export function TokenomicsUpgradeGovernanceApp() {
 
         {state?.status !== "Executed" ? (
           <section className="tm-card" aria-labelledby="wallet-title">
-          <div className="tm-section-heading">
-            <div>
-              <p className="tm-eyebrow">Step 2</p>
-              <h2 id="wallet-title">Connect one multisig member</h2>
-            </div>
-            <span
-              className={`tm-status${member ? " tm-status-ready" : ""}`}
-            >
-              {member ? member.label : "Required"}
-            </span>
-          </div>
-          {!isReady ? <p className="tm-muted">Detecting wallets...</p> : null}
-          {isReady && !connected ? (
-            <div className="tug-connectors">
-              {connectors.length > 0 ? (
-                connectors.map((connector) => (
-                  <button
-                    className="tm-button tm-button-secondary"
-                    disabled={connecting}
-                    key={connector.id}
-                    onClick={() =>
-                      void connect(connector.id).catch((connectError) =>
-                        setError(describeError(connectError)),
-                      )
-                    }
-                    type="button"
-                  >
-                    {connecting ? "Connecting..." : `Connect ${connector.name}`}
-                  </button>
-                ))
-              ) : (
-                <p className="tm-error">No Wallet Standard wallet was detected.</p>
-              )}
-            </div>
-          ) : null}
-          {connected && walletAddress ? (
-            <div className="tm-wallet-row">
+            <div className="tm-section-heading">
               <div>
-                <span>
-                  {member?.label ?? "Unknown account"} via {walletName}
-                </span>
-                <code title={walletAddress}>{walletAddress}</code>
+                <p className="tm-eyebrow">Step 2</p>
+                <h2 id="wallet-title">Connect one multisig member</h2>
               </div>
-              <button
-                className="tm-button tm-button-secondary"
-                disabled={busy !== null}
-                onClick={() => void disconnect()}
-                type="button"
-              >
-                Disconnect
-              </button>
+              <span className={`tm-status${member ? " tm-status-ready" : ""}`}>
+                {member ? member.label : "Required"}
+              </span>
             </div>
-          ) : null}
-          {connected && !member ? (
-            <p className="tm-error">
-              Select wallet A, B, or C. This account is not a devnet multisig
-              member.
-            </p>
-          ) : null}
+            {!isReady ? <p className="tm-muted">Detecting wallets...</p> : null}
+            {isReady && !connected ? (
+              <div className="tug-connectors">
+                {connectors.length > 0 ? (
+                  connectors.map((connector) => (
+                    <button
+                      className="tm-button tm-button-secondary"
+                      disabled={connecting}
+                      key={connector.id}
+                      onClick={() =>
+                        void connect(connector.id).catch((connectError) =>
+                          setError(describeError(connectError)),
+                        )
+                      }
+                      type="button"
+                    >
+                      {connecting
+                        ? "Connecting..."
+                        : `Connect ${connector.name}`}
+                    </button>
+                  ))
+                ) : (
+                  <p className="tm-error">
+                    No Wallet Standard wallet was detected.
+                  </p>
+                )}
+              </div>
+            ) : null}
+            {connected && walletAddress ? (
+              <div className="tm-wallet-row">
+                <div>
+                  <span>
+                    {member?.label ?? "Unknown account"} via {walletName}
+                  </span>
+                  <code title={walletAddress}>{walletAddress}</code>
+                </div>
+                <button
+                  className="tm-button tm-button-secondary"
+                  disabled={busy !== null}
+                  onClick={() => void disconnect()}
+                  type="button"
+                >
+                  Disconnect
+                </button>
+              </div>
+            ) : null}
+            {connected && !member ? (
+              <p className="tm-error">
+                Select wallet A, B, or C. This account is not a devnet multisig
+                member.
+              </p>
+            ) : null}
           </section>
         ) : null}
 
@@ -363,7 +365,7 @@ export function TokenomicsUpgradeGovernanceApp() {
             <p className="tm-muted">
               Approval records one vote only. Once two different approvals are
               finalized, one member can execute the stored Squads transaction.
-              Execution deploys only the reviewed 1,049,304-byte artifact,
+              Execution deploys only the reviewed 1,092,904-byte artifact,
               closes the consumed buffer, and returns its rent to vault 0.
             </p>
             <div className="tug-actions">
@@ -414,9 +416,9 @@ export function TokenomicsUpgradeGovernanceApp() {
                 type="checkbox"
               />
               <span>
-                I reviewed devnet, Idealer upgrade proposal{" "}
-                {TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex.toString()},
-                the exact stored loader upgrade, reviewed buffer address,
+                I reviewed devnet, Tokenomics Core upgrade proposal{" "}
+                {TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex.toString()}
+                , the exact stored loader upgrade, reviewed buffer address,
                 artifact length and SHA-256, current deployed hash, ProgramData
                 authority and capacity, current votes, and connected member{" "}
                 {member ? memberLabel(member.address) : ""}.
@@ -439,11 +441,14 @@ export function TokenomicsUpgradeGovernanceApp() {
         ) : null}
 
         {result ? (
-          <section className="tm-card tm-success" aria-labelledby="result-title">
+          <section
+            className="tm-card tm-success"
+            aria-labelledby="result-title"
+          >
             <p className="tm-eyebrow">Strict verification passed</p>
             <h2 id="result-title">
               {result.action === "execute"
-                ? "Idealer program upgraded"
+                ? "Tokenomics Core program upgraded"
                 : "Approval finalized"}
             </h2>
             <p>

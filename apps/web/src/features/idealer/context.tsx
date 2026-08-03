@@ -15,6 +15,7 @@ export type Screen =
   | "claims"
   | "create"
   | "home"
+  | "invite"
   | "play"
   | "profile"
   | "rewards"

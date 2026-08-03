@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import bs58 from "bs58";
+import { CAMPAIGN_V2_ECONOMIC_CONFIG_HASH } from "@idealer/tokenomics";
 import {
   Commitment,
   Connection,
@@ -36,6 +37,12 @@ const SETTLE_SUPPORTER_TOKEN_REWARD_DISCRIMINATOR = Buffer.from([
 const RULE_PROPOSAL_DISCRIMINATOR = accountDiscriminator("RuleProposal");
 const RULE_VOTE_DISCRIMINATOR = accountDiscriminator("RuleVote");
 const CAMPAIGN_RESERVE_DISCRIMINATOR = accountDiscriminator("CampaignReserve");
+const CAMPAIGN_ECONOMIC_CONFIG_HASH_OFFSET = 105;
+const CAMPAIGN_ECONOMIC_CONFIG_HASH_END = 137;
+const REQUIRED_CAMPAIGN_ECONOMIC_CONFIG_HASH = Buffer.from(
+  CAMPAIGN_V2_ECONOMIC_CONFIG_HASH,
+  "hex",
+);
 
 export type ActionRewardKind = "proposal" | "supporter";
 
@@ -139,10 +146,7 @@ export function selectTokenRewardActions({
 }
 
 function accountDiscriminator(name: string) {
-  return createHash("sha256")
-    .update(`account:${name}`)
-    .digest()
-    .subarray(0, 8);
+  return createHash("sha256").update(`account:${name}`).digest().subarray(0, 8);
 }
 
 function u64Le(value: bigint) {
@@ -199,9 +203,7 @@ export function decodeTokenRewardAction({
 }): TokenRewardAction {
   const bytes = Buffer.from(data);
   const expected =
-    kind === "proposal"
-      ? RULE_PROPOSAL_DISCRIMINATOR
-      : RULE_VOTE_DISCRIMINATOR;
+    kind === "proposal" ? RULE_PROPOSAL_DISCRIMINATOR : RULE_VOTE_DISCRIMINATOR;
   if (bytes.length < 56 || !bytes.subarray(0, 8).equals(expected)) {
     throw new Error(`Invalid ${kind} reward source account.`);
   }
@@ -223,11 +225,23 @@ export function decodeCampaignAccounts({
 }): CampaignAccounts {
   const bytes = Buffer.from(data);
   if (
-    bytes.length < 104 ||
+    bytes.length < 171 ||
     !bytes.subarray(0, 8).equals(CAMPAIGN_RESERVE_DISCRIMINATOR) ||
     bytes.readBigUInt64LE(8) !== 0n
   ) {
     throw new Error("Initial Tokenomics campaign account is invalid.");
+  }
+  if (
+    !bytes
+      .subarray(
+        CAMPAIGN_ECONOMIC_CONFIG_HASH_OFFSET,
+        CAMPAIGN_ECONOMIC_CONFIG_HASH_END,
+      )
+      .equals(REQUIRED_CAMPAIGN_ECONOMIC_CONFIG_HASH)
+  ) {
+    throw new Error(
+      "JDR campaign rewards are unavailable until the governed v2 migration is finalized.",
+    );
   }
   return {
     campaign,
@@ -541,7 +555,9 @@ export async function runTokenRewardSettlementOnce(
     DEFAULT_COMMITMENT,
   );
   if (!campaignInfo || !campaignInfo.owner.equals(tokenomicsProgramId)) {
-    throw new Error("Initial Tokenomics campaign is missing or has wrong owner.");
+    throw new Error(
+      "Initial Tokenomics campaign is missing or has wrong owner.",
+    );
   }
   const campaignAccounts = decodeCampaignAccounts({
     campaign,
@@ -563,9 +579,7 @@ export async function runTokenRewardSettlementOnce(
       campaign,
       tokenomicsProgramId,
     });
-    if (
-      await connection.getAccountInfo(rewardReceipt, DEFAULT_COMMITMENT)
-    ) {
+    if (await connection.getAccountInfo(rewardReceipt, DEFAULT_COMMITMENT)) {
       continue;
     }
     unsettled.push({

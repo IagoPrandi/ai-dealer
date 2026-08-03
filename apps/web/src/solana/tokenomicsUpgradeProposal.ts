@@ -59,8 +59,7 @@ export interface PreparedTokenomicsUpgradeProposal {
   summary: TokenomicsUpgradeProposalSummary;
 }
 
-export interface TokenomicsUpgradeProposalResult
-  extends TokenomicsUpgradeProposalSummary {
+export interface TokenomicsUpgradeProposalResult extends TokenomicsUpgradeProposalSummary {
   signature: string;
 }
 
@@ -79,10 +78,7 @@ function convertLegacyInstruction(
   return {
     accounts: instruction.keys.map((accountMeta) => ({
       address: address(accountMeta.pubkey.toBase58()),
-      role: roleForLegacyAccount(
-        accountMeta.isSigner,
-        accountMeta.isWritable,
-      ),
+      role: roleForLegacyAccount(accountMeta.isSigner, accountMeta.isWritable),
     })),
     data: new Uint8Array(instruction.data),
     programAddress: address(instruction.programId.toBase58()),
@@ -144,9 +140,7 @@ export function formatRpcDiagnostic(value: unknown) {
   try {
     return (
       JSON.stringify(value, (_key, nestedValue) =>
-        typeof nestedValue === "bigint"
-          ? nestedValue.toString()
-          : nestedValue,
+        typeof nestedValue === "bigint" ? nestedValue.toString() : nestedValue,
       ) ?? String(value)
     );
   } catch (serializationError) {
@@ -190,21 +184,23 @@ async function assertDevnetConnection(connection: Connection) {
 
 function decodeProgramDataAuthority(data: Buffer) {
   if (data.length < 13 || data.readUInt32LE(0) !== 3) {
-    throw new Error("Idealer has an invalid ProgramData account.");
+    throw new Error("Tokenomics Core has an invalid ProgramData account.");
   }
   const authorityOption = data.readUInt8(12);
   if (authorityOption === 0) {
     return null;
   }
   if (authorityOption !== 1 || data.length < 45) {
-    throw new Error("Idealer has an invalid upgrade authority option.");
+    throw new Error("Tokenomics Core has an invalid upgrade authority option.");
   }
   return new PublicKey(data.subarray(13, 45)).toBase58();
 }
 
 function decodeBufferAuthority(data: Buffer) {
   if (data.length < BUFFER_METADATA_LENGTH || data.readUInt32LE(0) !== 1) {
-    throw new Error("The reviewed account is not an upgradeable-loader buffer.");
+    throw new Error(
+      "The reviewed account is not an upgradeable-loader buffer.",
+    );
   }
   const authorityOption = data.readUInt8(4);
   if (authorityOption !== 1) {
@@ -277,38 +273,39 @@ async function assertReviewedProgramAndBuffer(connection: Connection) {
     programInfo.data.length < 36 ||
     programInfo.data.readUInt32LE(0) !== 2
   ) {
-    throw new Error("Idealer is not the reviewed upgradeable program.");
+    throw new Error("Tokenomics Core is not the reviewed upgradeable program.");
   }
   const linkedProgramData = new PublicKey(programInfo.data.subarray(4, 36));
   if (!linkedProgramData.equals(programData)) {
-    throw new Error("Idealer links to a different ProgramData account.");
+    throw new Error(
+      "Tokenomics Core links to a different ProgramData account.",
+    );
   }
   if (!programDataInfo || !programDataInfo.owner.equals(loader)) {
-    throw new Error("Idealer ProgramData could not be verified.");
+    throw new Error("Tokenomics Core ProgramData could not be verified.");
   }
-  if (decodeProgramDataAuthority(programDataInfo.data) !== config.vaultAddress) {
-    throw new Error(
-      "Idealer upgrade authority is not Squads vault 0.",
-    );
+  if (
+    decodeProgramDataAuthority(programDataInfo.data) !== config.vaultAddress
+  ) {
+    throw new Error("Tokenomics Core upgrade authority is not Squads vault 0.");
   }
   const deployedBytes = programDataInfo.data.subarray(45);
   if (deployedBytes.length !== config.programDataCapacity) {
-    throw new Error("Idealer ProgramData capacity does not match the review.");
+    throw new Error(
+      "Tokenomics Core ProgramData capacity does not match the review.",
+    );
   }
   const deployedPrefix = deployedBytes.subarray(
     0,
     config.currentProgramPrefixLength,
   );
-  const zeroPadding = deployedBytes.subarray(
-    config.currentProgramPrefixLength,
-  );
+  const zeroPadding = deployedBytes.subarray(config.currentProgramPrefixLength);
   if (
-    (await sha256Hex(deployedPrefix)) !==
-      config.currentProgramPrefixSha256 ||
+    (await sha256Hex(deployedPrefix)) !== config.currentProgramPrefixSha256 ||
     zeroPadding.some((byte) => byte !== 0)
   ) {
     throw new Error(
-      "Idealer deployed bytes or pre-upgrade zero padding differ from the review.",
+      "Tokenomics Core deployed bytes or pre-upgrade zero padding differ from the review.",
     );
   }
   if (!bufferInfo || !bufferInfo.owner.equals(loader)) {
@@ -454,8 +451,7 @@ async function verifyCreatedProposal(
   ]);
   const walletA = SQUADS_DEVNET_CONFIG.members[0]!.address;
   if (
-    vaultTransaction.multisig.toBase58() !==
-      prepared.summary.multisigAddress ||
+    vaultTransaction.multisig.toBase58() !== prepared.summary.multisigAddress ||
     vaultTransaction.creator.toBase58() !== walletA ||
     bigintFromSdkValue(vaultTransaction.index) !==
       prepared.summary.transactionIndex ||
@@ -489,16 +485,14 @@ async function verifyCreatedProposal(
     throw new Error("The stored proposal does not contain only one upgrade.");
   }
   const loader = message.accountKeys[inner.programIdIndex];
-  const innerAccounts = Array.from(
-    inner.accountIndexes,
-    (index) => message.accountKeys[index]?.toBase58(),
+  const innerAccounts = Array.from(inner.accountIndexes, (index) =>
+    message.accountKeys[index]?.toBase58(),
   );
   const expectedAccounts = createTokenomicsUpgradeInstruction().keys.map(
     (key) => key.pubkey.toBase58(),
   );
   if (
-    loader?.toBase58() !==
-      TOKENOMICS_UPGRADE_PROPOSAL_CONFIG.loaderProgramId ||
+    loader?.toBase58() !== TOKENOMICS_UPGRADE_PROPOSAL_CONFIG.loaderProgramId ||
     innerAccounts.length !== expectedAccounts.length ||
     innerAccounts.some((account, index) => account !== expectedAccounts[index])
   ) {
@@ -518,7 +512,7 @@ export async function submitConfirmedAndAwaitFinalized({
   return signature;
 }
 
-async function waitForFinalizedSignature({
+export async function waitForFinalizedSignature({
   rpcEndpoint,
   signature,
 }: {

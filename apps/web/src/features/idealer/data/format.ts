@@ -41,6 +41,17 @@ export function truncateAddress(value: string): string {
   return `${value.slice(0, 5)}…${value.slice(-4)}`;
 }
 
+/** JDR atoms (9 decimals) → trimmed decimal string (e.g. 75_000_000 → "0.075"). */
+export function formatTokenAtoms(value: bigint | string): string {
+  const atoms = BigInt(value);
+  const whole = atoms / 1_000_000_000n;
+  const fraction = (atoms % 1_000_000_000n)
+    .toString()
+    .padStart(9, "0")
+    .replace(/0+$/, "");
+  return fraction ? `${whole}.${fraction}` : whole.toString();
+}
+
 /** Turn id → display label (e.g. 42 → "#0042"). */
 export function fmtTurnId(turnId: number): string {
   return `#${turnId.toString().padStart(4, "0")}`;

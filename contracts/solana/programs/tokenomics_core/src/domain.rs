@@ -16,12 +16,40 @@ pub const DEFAULT_CHALLENGE_BOND_LAMPORTS: u64 = 20_000_000;
 // but the owner-approved execution delay is zero.
 pub const TREASURY_OPERATION_DELAY_SECONDS: i64 = 0;
 pub const UNPAUSE_NOTICE_SECONDS: i64 = 24 * 60 * 60;
-pub const PROPOSAL_REWARD_ATOMS: u64 = 400_000_000;
-pub const SUPPORTER_REWARD_ATOMS: u64 = 60_000_000;
+/// Legacy devnet campaign-0 economics committed during the v1 rehearsal.
+pub const INITIAL_CAMPAIGN_V1_ECONOMIC_CONFIG_HASH: [u8; 32] = [
+    20, 94, 122, 189, 225, 96, 199, 214, 130, 134, 36, 235, 18, 243, 32, 181, 112, 182, 116, 173,
+    70, 112, 134, 89, 207, 94, 100, 7, 81, 133, 78, 253,
+];
+/// Approved v2 campaign economics shared by every settlement in this binary.
+pub const CAMPAIGN_V2_ECONOMIC_CONFIG_HASH: [u8; 32] = [
+    161, 112, 79, 134, 171, 89, 145, 100, 218, 250, 208, 46, 160, 157, 132, 130, 158, 213, 151, 97,
+    0, 248, 38, 83, 58, 94, 156, 170, 100, 222, 121, 148,
+];
+/// Exhaustion-only policy implemented by this binary.
+pub const CAMPAIGN_UNUSED_BALANCE_POLICY_HASH: [u8; 32] = [
+    146, 246, 21, 62, 28, 72, 68, 15, 165, 247, 191, 94, 143, 164, 85, 35, 163, 211, 149, 110, 111,
+    215, 98, 180, 28, 162, 9, 124, 69, 34, 219, 253,
+];
+// Campaign reward economics (PRD-TOKENOMICS §5.2-5.4). These values mirror the
+// canonical TypeScript declarations in packages/constants/src/index.ts; the unit
+// tests below assert every documented ratio so the two sides cannot drift.
+/// 0.6 JDR per confirmed `propose_rule` action.
+pub const PROPOSAL_REWARD_ATOMS: u64 = 600_000_000;
+/// 0.09 JDR per confirmed in-favour `vote` action - 15% of the proposal reward.
+pub const SUPPORTER_REWARD_ATOMS: u64 = 90_000_000;
+/// 0.2 JDR for the inviter once a referral qualifies.
 pub const REFERRAL_INVITER_REWARD_ATOMS: u64 = 200_000_000;
-pub const REFERRAL_INVITEE_REWARD_ATOMS: u64 = 30_000_000;
+/// The invitee base reward as a share of the inviter base reward.
+pub const REFERRAL_INVITEE_REWARD_RATE_BPS: u128 = 15_000;
+/// 0.3 JDR for the invitee - 150% of the inviter reward.
+pub const REFERRAL_INVITEE_REWARD_ATOMS: u64 = 300_000_000;
+/// Independent 0.25 JDR cap for the creator reward and for the voter pool.
 pub const ACTIVE_RULE_REWARD_CAP_ATOMS: u64 = 250_000_000;
-pub const REWARD_RATE_BPS: u128 = 1_500;
+/// Creator reward and voter pool share of one individual alternative payout.
+pub const ACTIVE_RULE_REWARD_RATE_BPS: u128 = 2_250;
+/// The inviter's one-time share of the invitee's first-round campaign rewards.
+pub const REFERRAL_INVITER_FIRST_ROUND_BONUS_RATE_BPS: u128 = 2_250;
 pub const BPS_DENOMINATOR: u128 = 10_000;
 pub const MAX_MERKLE_PROOF_DEPTH: usize = 32;
 
@@ -163,7 +191,7 @@ pub fn active_rule_rewards(
     require!(winner_count > 0, TokenomicsError::InvalidWinnerCount);
     let individual_payout = alternative_prize_pool_lamports / winner_count;
     let calculated = u128::from(individual_payout)
-        .checked_mul(REWARD_RATE_BPS)
+        .checked_mul(ACTIVE_RULE_REWARD_RATE_BPS)
         .ok_or(TokenomicsError::ArithmeticOverflow)?
         / BPS_DENOMINATOR;
     let calculated = u64::try_from(calculated).map_err(|_| TokenomicsError::ArithmeticOverflow)?;
@@ -205,7 +233,7 @@ pub fn voter_payment(pool_atoms: u64, voter_count: u64, sorted_index: u64) -> Re
 
 pub fn referral_bonus(actually_paid_invitee_atoms: u64) -> Result<u64> {
     let bonus = u128::from(actually_paid_invitee_atoms)
-        .checked_mul(REWARD_RATE_BPS)
+        .checked_mul(REFERRAL_INVITER_FIRST_ROUND_BONUS_RATE_BPS)
         .ok_or(TokenomicsError::ArithmeticOverflow)?
         / BPS_DENOMINATOR;
     u64::try_from(bonus).map_err(|_| error!(TokenomicsError::ArithmeticOverflow))
@@ -335,9 +363,32 @@ mod tests {
     }
 
     #[test]
+    fn campaign_reward_ratios_match_the_canonical_typescript_values() {
+        assert_eq!(
+            u128::from(PROPOSAL_REWARD_ATOMS) * 1_500 / BPS_DENOMINATOR,
+            u128::from(SUPPORTER_REWARD_ATOMS)
+        );
+        assert_eq!(
+            u128::from(REFERRAL_INVITER_REWARD_ATOMS) * REFERRAL_INVITEE_REWARD_RATE_BPS
+                / BPS_DENOMINATOR,
+            u128::from(REFERRAL_INVITEE_REWARD_ATOMS)
+        );
+        assert_eq!(PROPOSAL_REWARD_ATOMS, 600_000_000);
+        assert_eq!(REFERRAL_INVITEE_REWARD_ATOMS, 300_000_000);
+        assert_eq!(ACTIVE_RULE_REWARD_RATE_BPS, 2_250);
+        assert_eq!(REFERRAL_INVITER_FIRST_ROUND_BONUS_RATE_BPS, 2_250);
+    }
+
+    #[test]
+    fn first_round_bonus_uses_the_closed_invitee_reward_list() {
+        let paid = REFERRAL_INVITEE_REWARD_ATOMS + PROPOSAL_REWARD_ATOMS + SUPPORTER_REWARD_ATOMS;
+        assert_eq!(referral_bonus(paid).expect("bonus"), 222_750_000);
+    }
+
+    #[test]
     fn creator_is_debited_before_voter_pool() {
         let result = active_rule_rewards(10_000_000_000, 1, 400_000_000, true).expect("reward");
-        assert_eq!(result.calculated_creator_atoms, 1_500_000_000);
+        assert_eq!(result.calculated_creator_atoms, 2_250_000_000);
         assert_eq!(result.creator_paid_atoms, 250_000_000);
         assert_eq!(result.voter_pool_paid_atoms, 150_000_000);
         assert_eq!(result.remaining_campaign_atoms, 0);

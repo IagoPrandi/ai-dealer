@@ -11,9 +11,39 @@
     "drawVrfConfig": "EYiAmGSdsQTuCw413V5BzaruWuCCSDgTPtBGvLkXHbe7",
     "electionVrfConfig": "EYiAmGSdsQTuCw413V5BzaruWuCCSDgTPtBGvLkXHbe7"
   },
+  "tokenomicsCore": {
+    "programId": "BRK6G8Sep66LFREp2nGMLiganfw2nbWe1f8zeAdoP1Fm",
+    "programDataAddress": "DBM5tfyUMcThsXyvMuYMEU1Xgfar4KZpXtSAh9LXusaS",
+    "upgradeAuthority": "DB5nz633YioWzEUnLb97ypUra5RUE11SJDFW9ar23KTp",
+    "lastDeployedSlot": 480757757,
+    "programDataCapacity": 1093160,
+    "artifactProgramLength": 1092904,
+    "artifactSha256": "8f97ec2d4881f47df1e77109def9c1269c58cfc18845a6b0d53e6252fa4a69b4",
+    "trailingZeroBytes": 256,
+    "upgradeProposalIndex": 9,
+    "upgradeProposalAddress": "CC5PXs7X68jynmxeFvcxg7BxhVCcu1W5Tukur3Xv18LH",
+    "upgradeExecutionSignature": "2VjQoHVg2ToVbTTYYPvLwiW65pugcm8oXjmumnmzeaTSHPrUDRwRxPS9bPfSPtencJRhzNeZChtxByGr5tVhXteG",
+    "closedBufferAddress": "3hXmY4FCSBMa5gStMcbKvnvfPz2uFVCHAn5CBaKS5dXs"
+  },
+  "jdrCampaignV2": {
+    "mint": "FssXNhB2mUSjavX7jsXLuZevfGnJ5zn98nNNUbrY16rr",
+    "campaign": "426KgUGKdFfAAVkwg1oSep8Ki5AtFpmwCbA3ccBkyYi7",
+    "campaignVault": "2Ye9hSxMPwiAAgeMnuUoaCNDGBKTLcrTAekjJ7EwqbQq",
+    "economicConfigHash": "a1704f86ab599164dafad02ea09d84829ed5976100f826533a5e9caa64de7994",
+    "unusedBalancePolicyHash": "92f6153e1c48440fa5f7bf5e8fa45523a3d3956e6fd762b41ca2097c4522dbfd",
+    "originalAllocationAtoms": "200000000000000000",
+    "cumulativeDistributedAtomsAtMigration": "5395925000",
+    "remainingAtomsAtMigration": "199999994604075000",
+    "migrationProposalIndex": 10,
+    "migrationProposalAddress": "4saa7Baohb9wPXvC71K56DQucVfUxYPo7aaDqos1pgjF",
+    "migrationExecutionSignature": "2cPHmcXqYP9Kz8XdCW5VCD3djrEb2NHL8f72bw12ehCm1gPyzgFb8sGgS7758mgbdwzTvkCtesVF357JkHCtYwA5",
+    "migrationSlot": 480923188
+  },
   "notes": [
     "M5.0 uses the public Switchboard On-Demand devnet queue for draw and election randomness.",
     "The queue PDA is documented for SDK/on-chain verification context; GlobalConfig stores the queue address for both VRF config fields.",
+    "Tokenomics Core proposal 9 and campaign migration proposal 10 were executed through the existing 2-of-3 Squads governance on devnet.",
+    "JDR campaign 0 is active under the v2 economic hash. The migration changed only the economic configuration hash and moved no tokens.",
     "No private keys or secret material belong in this file."
   ]
 }

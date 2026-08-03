@@ -1,0 +1,4 @@
+interface:
+  display_name: "Idealer Solana Upgrade"
+  short_description: "Safely change and upgrade Solana programs"
+  default_prompt: "Use $idealer-solana-contract-upgrade to safely modify and upgrade an Idealer Solana program."

@@ -8,7 +8,13 @@ import {
   getProgramDerivedAddress,
 } from "@solana/kit";
 
+import {
+  PROPOSAL_REWARD_ATOMS,
+  SUPPORTER_REWARD_ATOMS,
+} from "@idealer/constants";
+
 import { IDEALER_PROGRAM_ID, SYSTEM_PROGRAM_ID } from "./idealerProgram";
+import { INITIAL_CAMPAIGN_CONFIG_HASH } from "./tokenomicsGenesisConfig";
 
 export const TOKENOMICS_CORE_PROGRAM_ID = address(
   process.env.NEXT_PUBLIC_TOKENOMICS_CORE_PROGRAM_ID ??
@@ -42,6 +48,9 @@ const TOKEN_CONFIG_DISCRIMINATOR = Uint8Array.from([
 ]);
 const LOCK_POSITION_DISCRIMINATOR = Uint8Array.from([
   95, 235, 144, 78, 23, 171, 45, 9,
+]);
+const CAMPAIGN_RESERVE_DISCRIMINATOR = Uint8Array.from([
+  17, 82, 252, 196, 188, 99, 152, 96,
 ]);
 const RULE_PROPOSAL_DISCRIMINATOR = Uint8Array.from([
   233, 212, 161, 38, 30, 217, 172, 177,
@@ -287,6 +296,32 @@ export async function fetchManualTokenRewards({
     programAddress: TOKENOMICS_CORE_PROGRAM_ID,
     seeds: ["campaign", u64Le(0n)],
   });
+  const campaignResult = await client.runtime.rpc
+    .getAccountInfo(campaign, {
+      commitment: "confirmed",
+      encoding: "base64",
+    })
+    .send();
+  const campaignBytes = requireOwnedAccountBytes(
+    campaignResult,
+    TOKENOMICS_CORE_PROGRAM_ID,
+    "JDR campaign",
+  );
+  if (
+    campaignBytes.length < 171 ||
+    !equalBytes(campaignBytes.subarray(0, 8), CAMPAIGN_RESERVE_DISCRIMINATOR)
+  ) {
+    throw new Error("JDR campaign data is invalid.");
+  }
+  const economicConfigHash = Array.from(
+    campaignBytes.subarray(105, 137),
+    (byte) => byte.toString(16).padStart(2, "0"),
+  ).join("");
+  if (economicConfigHash !== INITIAL_CAMPAIGN_CONFIG_HASH) {
+    throw new Error(
+      "JDR campaign rewards are unavailable until the governed v2 migration is finalized.",
+    );
+  }
   const candidates = actions.flatMap(({ account, pubkey }) => {
     if (account.owner !== IDEALER_PROGRAM_ID.toString()) {
       return [];
@@ -297,7 +332,10 @@ export async function fetchManualTokenRewards({
       : equalBytes(bytes.subarray(0, 8), RULE_VOTE_DISCRIMINATOR)
         ? "supporter"
         : null;
-    if (!kind || !equalBytes(bytes.subarray(24, 56), addressEncoder.encode(owner))) {
+    if (
+      !kind ||
+      !equalBytes(bytes.subarray(24, 56), addressEncoder.encode(owner))
+    ) {
       return [];
     }
     return [{ action: address(pubkey), kind }];
@@ -306,22 +344,34 @@ export async function fetchManualTokenRewards({
     candidates.map(async ({ action, kind }) => {
       const [receipt] = await getProgramDerivedAddress({
         programAddress: TOKENOMICS_CORE_PROGRAM_ID,
-        seeds: ["campaign_reward", addressEncoder.encode(campaign), addressEncoder.encode(action)],
+        seeds: [
+          "campaign_reward",
+          addressEncoder.encode(campaign),
+          addressEncoder.encode(action),
+        ],
       });
       const result = await client.runtime.rpc
-        .getAccountInfo(receipt, { commitment: "confirmed", encoding: "base64" })
+        .getAccountInfo(receipt, {
+          commitment: "confirmed",
+          encoding: "base64",
+        })
         .send();
       return result.value
         ? null
         : {
             action,
-            atoms: (kind === "proposal" ? 400_000_000n : 60_000_000n).toString(),
+            atoms: (kind === "proposal"
+              ? PROPOSAL_REWARD_ATOMS
+              : SUPPORTER_REWARD_ATOMS
+            ).toString(),
             kind,
             receipt,
           };
     }),
   );
-  return pending.filter((reward): reward is ManualTokenReward => reward !== null);
+  return pending.filter(
+    (reward): reward is ManualTokenReward => reward !== null,
+  );
 }
 
 export async function createManualTokenRewardClaimInstruction(args: {
@@ -331,7 +381,10 @@ export async function createManualTokenRewardClaimInstruction(args: {
   tokenAccount: ReturnType<typeof address>;
 }) {
   const [globalConfig, tokenConfig, campaign] = await Promise.all([
-    getProgramDerivedAddress({ programAddress: IDEALER_PROGRAM_ID, seeds: ["global_config"] }).then(([pda]) => pda),
+    getProgramDerivedAddress({
+      programAddress: IDEALER_PROGRAM_ID,
+      seeds: ["global_config"],
+    }).then(([pda]) => pda),
     derivePda(["token_config"]),
     derivePda(["campaign", u64Le(0n)]),
   ]);
@@ -402,11 +455,19 @@ function addressFromBytes(bytes: Uint8Array) {
 }
 
 function readU32(bytes: Uint8Array, offset: number) {
-  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(offset, true);
+  return new DataView(
+    bytes.buffer,
+    bytes.byteOffset,
+    bytes.byteLength,
+  ).getUint32(offset, true);
 }
 
 function readU64(bytes: Uint8Array, offset: number) {
-  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getBigUint64(offset, true);
+  return new DataView(
+    bytes.buffer,
+    bytes.byteOffset,
+    bytes.byteLength,
+  ).getBigUint64(offset, true);
 }
 
 function equalBytes(left: ArrayLike<number>, right: ArrayLike<number>) {

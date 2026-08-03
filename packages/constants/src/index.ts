@@ -58,13 +58,52 @@ export const RULE_REMOVAL_CONFIG = {
 } as const;
 
 export const TREASURY_FEE_BPS = 500;
-export const CREATOR_REWARD_RATE_BPS = 1_500;
+// Active-rule creator reward and elected-rule voter pool are each this share of
+// one individual alternative-rule winner payout (PRD-TOKENOMICS §5.3.1). Both
+// legs always use the same rate, so they share one declaration.
+export const ACTIVE_RULE_REWARD_RATE_BPS = 2_250;
+export const CREATOR_REWARD_RATE_BPS = ACTIVE_RULE_REWARD_RATE_BPS;
 export const CREATOR_REWARD_RESERVE_SHARE_BPS = 2_000;
 export const CREATOR_REWARD_CAP_SOL = 0.25;
-export const VOTER_REWARD_RATE_BPS = 1_500;
+export const VOTER_REWARD_RATE_BPS = ACTIVE_RULE_REWARD_RATE_BPS;
 export const VOTER_REWARD_CONFIG = {
   capPerTurnLamports: 250_000_000,
 } as const;
+
+// JDR promotional-campaign reward economics (PRD-TOKENOMICS §5.2–5.4). This is
+// the canonical TypeScript source consumed by @idealer/tokenomics, the API and
+// the web app, and it is mirrored by
+// contracts/solana/programs/tokenomics_core/src/domain.rs. Atom amounts use nine
+// decimals: 1 JDR = 1_000_000_000 atoms.
+export const CAMPAIGN_REWARD_BPS_DENOMINATOR = 10_000n;
+/** Economic hash recorded by the superseded devnet campaign 0 deployment. */
+export const CAMPAIGN_V1_ECONOMIC_CONFIG_HASH =
+  "145e7abde160c7d6828624eb12f320b570b674ad46708659cf5e640751854efd";
+/** Economic hash required by every v2 campaign settlement path. */
+export const CAMPAIGN_V2_ECONOMIC_CONFIG_HASH =
+  "a1704f86ab599164dafad02ea09d84829ed5976100f826533a5e9caa64de7994";
+/** Frozen exhaustion-only policy shared by the v1 and v2 campaign records. */
+export const CAMPAIGN_UNUSED_BALANCE_POLICY_HASH =
+  "92f6153e1c48440fa5f7bf5e8fa45523a3d3956e6fd762b41ca2097c4522dbfd";
+/** 0.6 JDR per confirmed `propose_rule` action. */
+export const PROPOSAL_REWARD_ATOMS = 600_000_000n;
+/** 0.09 JDR per confirmed in-favour `vote` action — 15% of the proposal reward. */
+export const SUPPORTER_REWARD_ATOMS = 90_000_000n;
+/** 0.2 JDR for the inviter once a referral qualifies. */
+export const REFERRAL_INVITER_REWARD_ATOMS = 200_000_000n;
+/** The invitee base reward as a share of the inviter base reward. */
+export const REFERRAL_INVITEE_REWARD_RATE_BPS = 15_000n;
+/** 0.3 JDR for the invitee — 150% of the inviter reward. */
+export const REFERRAL_INVITEE_REWARD_ATOMS =
+  (REFERRAL_INVITER_REWARD_ATOMS * REFERRAL_INVITEE_REWARD_RATE_BPS) /
+  CAMPAIGN_REWARD_BPS_DENOMINATOR;
+/**
+ * The inviter's one-time bonus as a share of the campaign rewards actually paid
+ * to the invitee during the invitee's first playing round.
+ */
+export const REFERRAL_INVITER_FIRST_ROUND_BONUS_RATE_BPS = 2_250n;
+/** Independent 0.25 JDR cap for the creator reward and for the voter pool. */
+export const ACTIVE_RULE_REWARD_CAP_ATOMS = 250_000_000n;
 export const MINIMUM_CLAIM_THRESHOLD_SOL = 0.005;
 export const CLAIM_WINDOW_TURNS = 12;
 export const CLAIM_WINDOW_DAYS = 7;

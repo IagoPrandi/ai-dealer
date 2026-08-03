@@ -138,7 +138,7 @@ cmd_test_sbf() {
   ensure_toolchain
   local test_out_dir="${SBF_TEST_OUT_DIR:-/sbf-target/test-deploy}"
   local test_features="${SBF_TEST_FEATURES:-sb-devnet}"
-  local tokenomics_test_features="${TOKENOMICS_SBF_TEST_FEATURES:-devnet-empty-metadata-uri}"
+  local tokenomics_test_features="${TOKENOMICS_SBF_TEST_FEATURES:-devnet-empty-metadata-uri,devnet-campaign-v2-migration}"
   echo "[test:sbf] building an isolated Switchboard-devnet SBF artifact..."
   SBF_OUT_DIR="${test_out_dir}" \
     SBF_FEATURES="${test_features}" \

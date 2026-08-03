@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import { address, getAddressEncoder } from "@solana/kit";
 import { IDEALER_PROGRAM_ID } from "./idealerProgram.js";
+import { INITIAL_CAMPAIGN_CONFIG_HASH } from "./tokenomicsGenesisConfig.js";
 
 import {
   createManualTokenRewardClaimInstruction,
@@ -24,6 +25,15 @@ const owner = address("11111111111111111111111111111111");
 const mint = "So11111111111111111111111111111111111111112";
 const tokenAccount = "SysvarRent111111111111111111111111111111111";
 const escrow = "SysvarC1ock11111111111111111111111111111111";
+
+function campaignAccountData(
+  economicConfigHash = INITIAL_CAMPAIGN_CONFIG_HASH,
+) {
+  const data = new Uint8Array(171);
+  data.set([17, 82, 252, 196, 188, 99, 152, 96], 0);
+  data.set(Buffer.from(economicConfigHash, "hex"), 105);
+  return [Buffer.from(data).toString("base64"), "base64"] as const;
+}
 
 function tokenAccountData({
   amount,
@@ -230,7 +240,10 @@ test("reads lock configuration and position directly from Tokenomics Core", asyn
                         owner: TOKENOMICS_CORE_PROGRAM_ID,
                       }
                     : {
-                        data: [Buffer.from(lockData).toString("base64"), "base64"] as const,
+                        data: [
+                          Buffer.from(lockData).toString("base64"),
+                          "base64",
+                        ] as const,
                         owner: TOKENOMICS_CORE_PROGRAM_ID,
                       },
               }),
@@ -256,15 +269,29 @@ test("discovers beneficiary-bound JDR rewards for a manual claim", async () => {
   const vote = new Uint8Array(56);
   vote.set([218, 17, 7, 255, 16, 223, 234, 149], 0);
   vote.set(encoder.encode(owner), 24);
+  let accountReadCount = 0;
   const client = {
     runtime: {
       rpc: {
-        getAccountInfo: () => ({ send: async () => ({ value: null }) }),
+        getAccountInfo: () => ({
+          send: async () => ({
+            value:
+              accountReadCount++ === 0
+                ? {
+                    data: campaignAccountData(),
+                    owner: TOKENOMICS_CORE_PROGRAM_ID.toString(),
+                  }
+                : null,
+          }),
+        }),
         getProgramAccounts: () => ({
           send: async () => [
             {
               account: {
-                data: [Buffer.from(proposal).toString("base64"), "base64"] as const,
+                data: [
+                  Buffer.from(proposal).toString("base64"),
+                  "base64",
+                ] as const,
                 owner: IDEALER_PROGRAM_ID,
               },
               pubkey: tokenAccount,
@@ -285,8 +312,8 @@ test("discovers beneficiary-bound JDR rewards for a manual claim", async () => {
   assert.deepEqual(
     rewards.map((reward) => [reward.kind, reward.atoms]),
     [
-      ["proposal", "400000000"],
-      ["supporter", "60000000"],
+      ["proposal", "600000000"],
+      ["supporter", "90000000"],
     ],
   );
   const instruction = await createManualTokenRewardClaimInstruction({
@@ -297,4 +324,29 @@ test("discovers beneficiary-bound JDR rewards for a manual claim", async () => {
   });
   assert.equal(instruction.accounts.length, 12);
   assert.deepEqual([...instruction.data], [102, 19, 56, 179, 43, 237, 219, 1]);
+});
+
+test("blocks manual reward amounts until campaign v2 migration is finalized", async () => {
+  const client = {
+    runtime: {
+      rpc: {
+        getAccountInfo: () => ({
+          send: async () => ({
+            value: {
+              data: campaignAccountData(
+                "145e7abde160c7d6828624eb12f320b570b674ad46708659cf5e640751854efd",
+              ),
+              owner: TOKENOMICS_CORE_PROGRAM_ID.toString(),
+            },
+          }),
+        }),
+        getProgramAccounts: () => ({ send: async () => [] }),
+      },
+    },
+  };
+
+  await assert.rejects(
+    fetchManualTokenRewards({ client, owner }),
+    /governed v2 migration/,
+  );
 });

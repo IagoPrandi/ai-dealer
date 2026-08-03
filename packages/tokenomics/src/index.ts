@@ -1,5 +1,20 @@
 import { createHash } from "node:crypto";
 
+import {
+  ACTIVE_RULE_REWARD_CAP_ATOMS,
+  ACTIVE_RULE_REWARD_RATE_BPS as ACTIVE_RULE_REWARD_RATE_BPS_NUMBER,
+  CAMPAIGN_REWARD_BPS_DENOMINATOR,
+  CAMPAIGN_UNUSED_BALANCE_POLICY_HASH,
+  CAMPAIGN_V1_ECONOMIC_CONFIG_HASH,
+  CAMPAIGN_V2_ECONOMIC_CONFIG_HASH,
+  PROPOSAL_REWARD_ATOMS,
+  REFERRAL_INVITEE_REWARD_ATOMS,
+  REFERRAL_INVITEE_REWARD_RATE_BPS,
+  REFERRAL_INVITER_FIRST_ROUND_BONUS_RATE_BPS,
+  REFERRAL_INVITER_REWARD_ATOMS,
+  SUPPORTER_REWARD_ATOMS,
+} from "@idealer/constants";
+
 export const TOKEN_DECIMALS = 9;
 export const TOKEN_ATOMS_PER_TOKEN = 1_000_000_000n;
 export const FIXED_SUPPLY_ATOMS = 1_000_000_000n * TOKEN_ATOMS_PER_TOKEN;
@@ -15,13 +30,25 @@ export const DEFAULT_CHALLENGE_BOND_LAMPORTS = 20_000_000n;
 // for treasury operations is intentionally zero.
 export const TREASURY_OPERATION_DELAY_SECONDS = 0n;
 export const UNPAUSE_NOTICE_SECONDS = 24n * 60n * 60n;
-export const PROPOSAL_REWARD_ATOMS = 400_000_000n;
-export const SUPPORTER_REWARD_ATOMS = 60_000_000n;
-export const REFERRAL_INVITER_REWARD_ATOMS = 200_000_000n;
-export const REFERRAL_INVITEE_REWARD_ATOMS = 30_000_000n;
-export const REWARD_RATE_BPS = 1_500n;
-export const BPS_DENOMINATOR = 10_000n;
-export const ACTIVE_RULE_REWARD_CAP_ATOMS = 250_000_000n;
+// Campaign reward economics live in @idealer/constants so the API, the web app
+// and this package cannot drift apart; they are re-exported here because the
+// on-chain mirror and the epoch calculators are consumed through this module.
+export {
+  ACTIVE_RULE_REWARD_CAP_ATOMS,
+  CAMPAIGN_UNUSED_BALANCE_POLICY_HASH,
+  CAMPAIGN_V1_ECONOMIC_CONFIG_HASH,
+  CAMPAIGN_V2_ECONOMIC_CONFIG_HASH,
+  PROPOSAL_REWARD_ATOMS,
+  REFERRAL_INVITEE_REWARD_ATOMS,
+  REFERRAL_INVITEE_REWARD_RATE_BPS,
+  REFERRAL_INVITER_FIRST_ROUND_BONUS_RATE_BPS,
+  REFERRAL_INVITER_REWARD_ATOMS,
+  SUPPORTER_REWARD_ATOMS,
+};
+export const BPS_DENOMINATOR = CAMPAIGN_REWARD_BPS_DENOMINATOR;
+export const ACTIVE_RULE_REWARD_RATE_BPS = BigInt(
+  ACTIVE_RULE_REWARD_RATE_BPS_NUMBER,
+);
 
 const LEAF_DOMAIN = utf8("idealer:treasury-distribution-leaf:v1");
 const NODE_DOMAIN = utf8("idealer:treasury-distribution-node:v1");
@@ -561,7 +588,8 @@ export function calculateActiveRuleRewards(
   const individualAlternativePayoutLamports =
     alternativePrizePoolLamports / winnerCount;
   const calculatedCreatorAtoms =
-    (individualAlternativePayoutLamports * REWARD_RATE_BPS) / BPS_DENOMINATOR;
+    (individualAlternativePayoutLamports * ACTIVE_RULE_REWARD_RATE_BPS) /
+    BPS_DENOMINATOR;
   const calculatedVoterPoolAtoms = calculatedCreatorAtoms;
   const creatorPaidAtoms = minBigInt(
     calculatedCreatorAtoms,
@@ -598,7 +626,10 @@ export function calculateInviterFirstRoundBonus(
     }
     return sum + amount;
   }, 0n);
-  return (eligibleBase * REWARD_RATE_BPS) / BPS_DENOMINATOR;
+  return (
+    (eligibleBase * REFERRAL_INVITER_FIRST_ROUND_BONUS_RATE_BPS) /
+    BPS_DENOMINATOR
+  );
 }
 
 export function rootLifecycleTimes(

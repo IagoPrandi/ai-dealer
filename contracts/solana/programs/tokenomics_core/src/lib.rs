@@ -11,9 +11,12 @@ use solana_sha256_hasher::hashv;
 
 pub mod domain;
 
+#[cfg(any(feature = "devnet-campaign-v2-migration", test))]
+use domain::INITIAL_CAMPAIGN_V1_ECONOMIC_CONFIG_HASH;
 use domain::{
     active_rule_rewards, debit_campaign, distribution_leaf_hash, epoch_accounting, referral_bonus,
-    verify_merkle_proof, voter_payment, CHALLENGE_RESOLUTION_SECONDS, CREATOR_TREASURY_ATOMS,
+    verify_merkle_proof, voter_payment, CAMPAIGN_UNUSED_BALANCE_POLICY_HASH,
+    CAMPAIGN_V2_ECONOMIC_CONFIG_HASH, CHALLENGE_RESOLUTION_SECONDS, CREATOR_TREASURY_ATOMS,
     DEFAULT_CHALLENGE_BOND_LAMPORTS, FIXED_SUPPLY_ATOMS, INITIAL_CAMPAIGN_ATOMS,
     PROPOSAL_REWARD_ATOMS, REFERRAL_INVITEE_REWARD_ATOMS, REFERRAL_INVITER_REWARD_ATOMS,
     REVIEW_WINDOW_SECONDS, SUPPORTER_REWARD_ATOMS, TOKEN_DECIMALS,
@@ -26,6 +29,9 @@ const MAX_NETWORK_BYTES: usize = 32;
 const MAX_ARTIFACT_URI_BYTES: usize = 200;
 const MAX_REASON_URI_BYTES: usize = 200;
 const MAX_METADATA_URI_BYTES: usize = 200;
+#[cfg(feature = "devnet-campaign-v2-migration")]
+const INITIAL_CAMPAIGN_ECONOMICS_MIGRATED_EVENT_DISCRIMINATOR: [u8; 8] =
+    [63, 13, 24, 245, 206, 177, 36, 112];
 const TOKEN_NAME: &str = "JUSDEALER";
 const TOKEN_SYMBOL: &str = "JDR";
 const DEVNET_TOKENOMICS_PROGRAM_ID: Pubkey =
@@ -50,6 +56,11 @@ pub mod tokenomics_core {
         ctx: Context<InitializeGenesis>,
         args: InitializeGenesisArgs,
     ) -> Result<()> {
+        require!(
+            args.initial_campaign_config_hash == CAMPAIGN_V2_ECONOMIC_CONFIG_HASH
+                && args.initial_unused_balance_policy_hash == CAMPAIGN_UNUSED_BALANCE_POLICY_HASH,
+            TokenomicsError::InvalidCampaignConfiguration
+        );
         require!(
             args.governance != Pubkey::default()
                 && args.guardian != Pubkey::default()
@@ -1449,7 +1460,8 @@ pub mod tokenomics_core {
         );
         require!(args.campaign_id > 0, TokenomicsError::InvalidCampaignId);
         require!(
-            args.economic_config_hash != [0; 32] && args.unused_balance_policy_hash != [0; 32],
+            args.economic_config_hash == CAMPAIGN_V2_ECONOMIC_CONFIG_HASH
+                && args.unused_balance_policy_hash == CAMPAIGN_UNUSED_BALANCE_POLICY_HASH,
             TokenomicsError::InvalidCampaignConfiguration
         );
         let campaign = &mut ctx.accounts.campaign;
@@ -1470,6 +1482,35 @@ pub mod tokenomics_core {
             economic_config_hash: campaign.economic_config_hash,
             unused_balance_policy_hash: campaign.unused_balance_policy_hash,
         });
+        Ok(())
+    }
+
+    /// Performs the single pre-mainnet devnet migration from the funded v1
+    /// campaign-0 commitment to the approved v2 economics. No tokens move and
+    /// every balance/accounting field is preserved.
+    #[cfg(feature = "devnet-campaign-v2-migration")]
+    pub fn migrate_initial_campaign_to_v2(ctx: Context<MigrateInitialCampaignToV2>) -> Result<()> {
+        require_keys_eq!(
+            crate::ID,
+            DEVNET_TOKENOMICS_PROGRAM_ID,
+            TokenomicsError::InvalidCampaignConfiguration
+        );
+        require_not_paused(&ctx.accounts.token_config)?;
+        require_keys_eq!(
+            ctx.accounts.governance.key(),
+            ctx.accounts.token_config.governance,
+            TokenomicsError::Unauthorized
+        );
+
+        let campaign = &mut ctx.accounts.campaign;
+        validate_initial_campaign_v2_migration(campaign, ctx.accounts.campaign_vault.amount)?;
+        campaign.economic_config_hash = CAMPAIGN_V2_ECONOMIC_CONFIG_HASH;
+
+        let remaining_atoms = campaign.remaining_atoms.to_le_bytes();
+        anchor_lang::solana_program::log::sol_log_data(&[
+            &INITIAL_CAMPAIGN_ECONOMICS_MIGRATED_EVENT_DISCRIMINATOR,
+            &remaining_atoms,
+        ]);
         Ok(())
     }
 
@@ -1980,8 +2021,34 @@ fn apply_campaign_debit(campaign: &mut CampaignReserve, amount: u64) -> Result<(
 
 fn require_campaign_active(campaign: &CampaignReserve) -> Result<()> {
     require!(
-        campaign.state == CampaignState::Funded && !campaign.paused,
+        campaign.state == CampaignState::Funded
+            && !campaign.paused
+            && campaign.economic_config_hash == CAMPAIGN_V2_ECONOMIC_CONFIG_HASH
+            && campaign.unused_balance_policy_hash == CAMPAIGN_UNUSED_BALANCE_POLICY_HASH,
         TokenomicsError::CampaignNotActive
+    );
+    Ok(())
+}
+
+#[cfg(any(feature = "devnet-campaign-v2-migration", test))]
+fn validate_initial_campaign_v2_migration(
+    campaign: &CampaignReserve,
+    vault_amount: u64,
+) -> Result<()> {
+    let accounted_atoms = campaign
+        .cumulative_distributed_atoms
+        .checked_add(campaign.remaining_atoms)
+        .ok_or(TokenomicsError::ArithmeticOverflow)?;
+    require!(
+        campaign.campaign_id == 0
+            && campaign.state == CampaignState::Funded
+            && !campaign.paused
+            && campaign.economic_config_hash == INITIAL_CAMPAIGN_V1_ECONOMIC_CONFIG_HASH
+            && campaign.unused_balance_policy_hash == CAMPAIGN_UNUSED_BALANCE_POLICY_HASH
+            && campaign.original_allocation_atoms == INITIAL_CAMPAIGN_ATOMS
+            && accounted_atoms == campaign.original_allocation_atoms
+            && vault_amount == campaign.remaining_atoms,
+        TokenomicsError::InvalidCampaignConfiguration
     );
     Ok(())
 }
@@ -2898,6 +2965,21 @@ pub struct FundFutureCampaign<'info> {
     #[account(mut, address = campaign.vault)]
     pub campaign_vault: Account<'info, TokenAccount>,
     pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct MigrateInitialCampaignToV2<'info> {
+    pub governance: Signer<'info>,
+    #[account(seeds = [b"token_config"], bump = token_config.bump)]
+    pub token_config: Account<'info, TokenConfig>,
+    #[account(
+        mut,
+        seeds = [b"campaign", 0u64.to_le_bytes().as_ref()],
+        bump = campaign.bump
+    )]
+    pub campaign: Account<'info, CampaignReserve>,
+    #[account(address = campaign.vault)]
+    pub campaign_vault: Account<'info, TokenAccount>,
 }
 
 #[derive(Accounts)]
@@ -3827,6 +3909,48 @@ pub enum TokenomicsError {
 #[cfg(test)]
 mod metadata_uri_policy_tests {
     use super::*;
+
+    fn campaign_with_hash(economic_config_hash: [u8; 32]) -> CampaignReserve {
+        CampaignReserve {
+            campaign_id: 0,
+            mint: Pubkey::new_unique(),
+            vault: Pubkey::new_unique(),
+            original_allocation_atoms: INITIAL_CAMPAIGN_ATOMS,
+            cumulative_distributed_atoms: PROPOSAL_REWARD_ATOMS,
+            remaining_atoms: INITIAL_CAMPAIGN_ATOMS - PROPOSAL_REWARD_ATOMS,
+            state: CampaignState::Funded,
+            economic_config_hash,
+            unused_balance_policy_hash: CAMPAIGN_UNUSED_BALANCE_POLICY_HASH,
+            paused: false,
+            bump: 255,
+        }
+    }
+
+    #[test]
+    fn only_the_exact_legacy_campaign_can_migrate_to_v2() {
+        let campaign = campaign_with_hash(INITIAL_CAMPAIGN_V1_ECONOMIC_CONFIG_HASH);
+        assert!(
+            validate_initial_campaign_v2_migration(&campaign, campaign.remaining_atoms).is_ok()
+        );
+
+        let already_v2 = campaign_with_hash(CAMPAIGN_V2_ECONOMIC_CONFIG_HASH);
+        assert!(
+            validate_initial_campaign_v2_migration(&already_v2, already_v2.remaining_atoms)
+                .is_err()
+        );
+
+        let mismatched_vault = campaign.remaining_atoms - 1;
+        assert!(validate_initial_campaign_v2_migration(&campaign, mismatched_vault).is_err());
+    }
+
+    #[test]
+    fn campaign_settlement_requires_the_v2_hash() {
+        let legacy = campaign_with_hash(INITIAL_CAMPAIGN_V1_ECONOMIC_CONFIG_HASH);
+        assert!(require_campaign_active(&legacy).is_err());
+
+        let current = campaign_with_hash(CAMPAIGN_V2_ECONOMIC_CONFIG_HASH);
+        assert!(require_campaign_active(&current).is_ok());
+    }
 
     #[test]
     fn https_metadata_is_valid_and_non_https_metadata_is_rejected() {

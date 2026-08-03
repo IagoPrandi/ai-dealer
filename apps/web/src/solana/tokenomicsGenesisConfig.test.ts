@@ -1,13 +1,59 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
 import {
+  ACTIVE_RULE_REWARD_CAP_ATOMS,
+  ACTIVE_RULE_REWARD_RATE_BPS,
+  PROPOSAL_REWARD_ATOMS,
+  REFERRAL_INVITEE_REWARD_ATOMS,
+  REFERRAL_INVITEE_REWARD_RATE_BPS,
+  REFERRAL_INVITER_FIRST_ROUND_BONUS_RATE_BPS,
+  REFERRAL_INVITER_REWARD_ATOMS,
+  SUPPORTER_REWARD_ATOMS,
+} from "@idealer/constants";
+
+import {
   CLASSIC_SPL_TOKEN_PROGRAM_ID,
+  INITIAL_CAMPAIGN_CONFIG_HASH,
+  INITIAL_CAMPAIGN_CONFIG_PREIMAGE,
+  INITIAL_UNUSED_BALANCE_POLICY_HASH,
+  INITIAL_UNUSED_BALANCE_POLICY_PREIMAGE,
   TOKENOMICS_DEVNET_PROGRAM_ID,
   TOKENOMICS_GENESIS_CONFIG,
   validateTokenomicsMetadataUri,
   validateTokenomicsGenesisSnapshot,
 } from "./tokenomicsGenesisConfig";
+
+const sha256Hex = (value: string) =>
+  createHash("sha256").update(value, "utf8").digest("hex");
+
+test("the genesis config hashes are exactly the sha256 of their preimages", () => {
+  assert.equal(sha256Hex(INITIAL_CAMPAIGN_CONFIG_PREIMAGE), INITIAL_CAMPAIGN_CONFIG_HASH);
+  assert.equal(
+    sha256Hex(INITIAL_UNUSED_BALANCE_POLICY_PREIMAGE),
+    INITIAL_UNUSED_BALANCE_POLICY_HASH,
+  );
+});
+
+test("the hashed campaign economics match the approved reward constants", () => {
+  assert.equal(
+    INITIAL_CAMPAIGN_CONFIG_PREIMAGE,
+    [
+      "idealer:jdr:initial-campaign-config:v2",
+      `proposal=${PROPOSAL_REWARD_ATOMS}`,
+      `supporter=${SUPPORTER_REWARD_ATOMS}`,
+      `referral-inviter=${REFERRAL_INVITER_REWARD_ATOMS}`,
+      `referral-invitee=${REFERRAL_INVITEE_REWARD_ATOMS}`,
+      `referral-invitee-rate-bps=${REFERRAL_INVITEE_REWARD_RATE_BPS}`,
+      `referral-first-round-bonus-rate-bps=${REFERRAL_INVITER_FIRST_ROUND_BONUS_RATE_BPS}`,
+      `active-rule-rate-bps=${ACTIVE_RULE_REWARD_RATE_BPS}`,
+      `active-rule-cap=${ACTIVE_RULE_REWARD_CAP_ATOMS}`,
+      "creator-before-voters=true",
+      "campaign=0",
+    ].join("|"),
+  );
+});
 
 test("the pinned devnet genesis accepts an empty off-chain metadata URI", () => {
   assert.deepEqual(

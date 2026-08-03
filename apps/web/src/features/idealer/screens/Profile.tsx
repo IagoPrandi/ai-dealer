@@ -206,6 +206,10 @@ export function ProfileScreen() {
           <Ico.gift style={{ color: "var(--green)" }} /> Reward history
         </button>
 
+        <button onClick={() => go("invite")} className="ide-btn-ghost ide-btn" style={{ width: "100%", padding: 13, marginBottom: 6 }} type="button">
+          <Ico.users style={{ color: "var(--purple-soft)" }} /> Invite friends
+        </button>
+
         {/* accumulated metrics — 2x2 grid divided by hairlines (no boxes) */}
         <div className="ide-metrics rows2" style={{ margin: "18px 0 26px" }}>
           <MetricCell icon={<Ico.trophy style={{ color: "var(--gold)" }} />} n={fmtSol(earnedPrize)} unit="SOL" l="prize claimed" />

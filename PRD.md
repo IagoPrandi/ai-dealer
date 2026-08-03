@@ -215,7 +215,7 @@ If no alternative rule is active, only the original rule is evaluated and the al
 
 If no winner exists in either category, that category's share accumulates into the next turn's pool.
 
-When an alternative rule is active and produces winners, the creator of the active rule receives a creator reward equal to 15% of a single individual alternative-rule winner payout. In addition, the wallets that voted for the elected rule share equally a voter reward equal to 15% of a single individual alternative-rule winner payout. Both rewards are funded from the creator reward reserve sourced from platform monetization and must not reduce the winner payout.
+When an alternative rule is active and produces winners, the creator of the active rule receives a creator reward equal to 22.5% of a single individual alternative-rule winner payout. In addition, the wallets that voted for the elected rule share equally a voter reward equal to 22.5% of a single individual alternative-rule winner payout. Both rewards are funded from the creator reward reserve sourced from platform monetization and must not reduce the winner payout.
 
 ### 2.5 Prize Pool
 
@@ -2679,21 +2679,22 @@ If no alternative rule is active, if the alternative rule is invalidated, or if 
 
 ### 8.4 Active Rule Creator Reward and Elected-Rule Voter Reward
 
-> **SUPERSEDED (currency & funding) — see PRD-TOKENOMICS-v2.8 §5.3, §5.3.1, §4.1.**
-> The 15%-of-one-individual-payout formula is preserved, but the creator and
+> **SUPERSEDED (currency, funding & rate) — see PRD-TOKENOMICS-v2.8 §5.3, §5.3.1, §4.1.**
+> The rate is now **22.5%** of one individual payout (the former 15% was raised by
+> 50% with the action rewards), and the creator and
 > voter rewards are now paid in **Idealer tokens from a campaign reserve vault**,
 > not in SOL from platform monetization. No direct SOL is paid for these rewards,
 > and they are never deducted from the treasury-fee (locker) distribution. The
 > SOL amount is converted to token atoms via the reward-only relation
 > `1 calculated reward lamport = 1 token atom` (not a market peg).
 
-When an alternative rule is active in a turn and that rule produces winners, the creator of the active rule receives a reward equal to **15% of a single individual alternative-rule winner payout**.
+When an alternative rule is active in a turn and that rule produces winners, the creator of the active rule receives a reward equal to **22.5% of a single individual alternative-rule winner payout**.
 
 This reward is calculated from the individual payout but funded from the creator reward reserve sourced from platform monetization. It must not reduce the winner's individual payout.
 
 In addition to the creator reward, the wallets that voted for the elected rule share an **elected-rule voter reward**:
 
-- the voter reward pool equals **15% of a single individual alternative-rule winner payout** (a fixed amount that does not scale with the number of winners);
+- the voter reward pool equals **22.5% of a single individual alternative-rule winner payout** (a fixed amount that does not scale with the number of winners);
 - the pool is split **equally** among the unique wallets that hold at least one recorded `RuleVote` for the elected rule: `per_voter = voter_reward_pool / elected_rule_voter_wallet_count`;
 - repeated approval votes by the same wallet help the elected rule's vote count, but do not create additional voter-reward shares for that wallet;
 - the voter reward is funded from the **same creator reward reserve** sourced from platform monetization;
@@ -2704,8 +2705,8 @@ Default assumption:
 
 ```text
 Winner individual payout remains unchanged.
-Creator reward is calculated as 15% of a single individual alternative-rule winner payout.
-Voter reward pool is calculated as 15% of a single individual alternative-rule winner payout.
+Creator reward is calculated as 22.5% of a single individual alternative-rule winner payout.
+Voter reward pool is calculated as 22.5% of a single individual alternative-rule winner payout.
 Both rewards are paid from the creator reward reserve sourced from platform monetization.
 ```
 
@@ -2717,11 +2718,11 @@ Alternative-rule winners: 10
 Individual payout: 100 / 10 = 10
 Final payout per winner: 10 (unchanged)
 
-Creator reward: 15% × 10 = 1.5 (from a single individual payout)
+Creator reward: 22.5% × 10 = 2.25 (from a single individual payout)
 
-Voter reward pool: 15% × 10 = 1.5 (from a single individual payout)
+Voter reward pool: 22.5% × 10 = 2.25 (from a single individual payout)
 Elected-rule voters: 4
-Voter reward per voter: 1.5 / 4 = 0.375
+Voter reward per voter: 2.25 / 4 = 0.5625
 ```
 
 ### 8.5 Creator Reward Reserve and Cap
@@ -2757,7 +2758,7 @@ Default MVP/devnet creator reward configuration:
 
 ```typescript
 const CREATOR_REWARD_CONFIG = {
-  rateBps: 1_500, // 15%
+  rateBps: 2_250, // 22.5%
   capPerTurnLamports: 250_000_000, // 0.25 SOL maximum creator reward per turn
   reserveSource: "platform_monetization",
   reserveShareOfPlatformMonetizationBps: 2_000, // 20% of platform monetization reserved for the creator reward reserve
@@ -2770,7 +2771,7 @@ Default MVP/devnet voter reward configuration:
 
 ```typescript
 const VOTER_REWARD_CONFIG = {
-  rateBps: 1_500, // 15% of a single individual alternative-rule winner payout
+  rateBps: 2_250, // 22.5% of a single individual alternative-rule winner payout
   capPerTurnLamports: 250_000_000, // 0.25 SOL maximum voter reward pool per turn
   reserveSource: "platform_monetization", // same creator reward reserve
   reserveDrawOrder: "creator_first_then_voter",
@@ -4688,9 +4689,9 @@ Establish the product baseline, architecture baseline, monorepo structure, Docke
   for the current devnet continuation; Switchboard remains compatible.
 - [x] Confirm no deterministic fallback finalist activation.
 - [x] Confirm paid rule removal is included in MVP with fixed prize-pool fee destination.
-- [x] Confirm active rule creator reward: 15% of a single individual alternative-rule winner payout.
+- [x] Confirm active rule creator reward: 15% of a single individual alternative-rule winner payout. Historical baseline; the rate is now 22.5% per PRD-TOKENOMICS-v2.8 §5.3.1.
 - [x] Confirm creator reward is funded from the creator reward reserve sourced from platform monetization, not deducted from the winner-visible payout.
-- [x] Confirm elected-rule voter reward: 15% of a single individual payout, split equally among the elected rule's voters, funded from the same reserve with its own per-turn cap.
+- [x] Confirm elected-rule voter reward: 15% of a single individual payout, split equally among the elected rule's voters, funded from the same reserve with its own per-turn cap. Historical baseline; the rate is now 22.5% per PRD-TOKENOMICS-v2.8 §5.3.1.
 - [x] Confirm vote fee from turn 100 onward, destination prize pool, with the current-turn Game Token requirement retained. Historical baseline; superseded by PRD v1.5.1 repeated approval-vote fee handling in sections 6.14 and 8.2.
 - [x] Confirm PRD v1.5.1 repeated vote policy: same wallet may repeatedly vote for or against the same rule; fee is `2^n * VOTE_FEE` where `n` is previous votes by that wallet on the same rule and same side; first same-side vote is free before turn 100 only; voter rewards remain unique per wallet.
 - [x] Confirm admin/transparency console is separate from privileged game administration.
@@ -5593,10 +5594,10 @@ Implement prize pool accounting, treasury/platform monetization, payouts, rollov
 - [x] Identify creator of active rule in the turn.
 - [x] Check whether active rule produced alternative-rule winners.
 - [x] Calculate individual alternative-rule winner payout.
-- [x] Calculate creator reward as `15% × a single individual alternative-rule winner payout`.
+- [x] Calculate creator reward as `15% × a single individual alternative-rule winner payout`. Historical baseline; the rate is now `22.5%` per PRD-TOKENOMICS-v2.8 §5.3.1.
 - [x] Resolve the elected-rule voter set from recorded `RuleVote` accounts. Historical baseline; PRD v1.5.1 requires wallet-unique voter resolution even when repeated `RuleVote` records exist.
 - [ ] Resolve the elected-rule voter reward set from unique wallets, not from total repeated vote records.
-- [x] Calculate voter reward pool as `15% × a single individual alternative-rule winner payout` and split it equally among elected-rule voters. Historical baseline; PRD v1.5.1 requires equal split among unique voter wallets only.
+- [x] Calculate voter reward pool as `15% × a single individual alternative-rule winner payout` and split it equally among elected-rule voters. Historical baseline; PRD v1.5.1 requires equal split among unique voter wallets only and the rate is now `22.5%` per PRD-TOKENOMICS-v2.8 §5.3.1.
 - [ ] Add reward tests proving repeated approval votes by the same wallet do not increase that wallet's voter reward share.
 - [x] Fund creator reward first, then voter reward from the remaining creator reward reserve (sourced from platform monetization).
 - [x] Cap voter reward pool by `VOTER_REWARD_CONFIG.capPerTurnLamports`.
@@ -5605,13 +5606,13 @@ Implement prize pool accounting, treasury/platform monetization, payouts, rollov
 - [x] Handle no alternative-rule winner case (no creator or voter reward).
 - [x] Handle multiple alternative-rule winner case.
 - [x] Handle elected rule with zero recorded voters (no voter reward).
-- [x] Add example test: total prize 100, 10 winners, individual payout 10, creator reward basis 15% of 10 once, voter reward pool 15% of 10 split among voters.
+- [x] Add example test: total prize 100, 10 winners, individual payout 10, creator reward basis 15% of 10 once, voter reward pool 15% of 10 split among voters. Historical baseline; the rate is now 22.5% per PRD-TOKENOMICS-v2.8 §5.3.1.
 - [x] Add accounting tests to ensure the reserve covers creator reward first, then voter reward.
 
 **Approval criteria:**
 
 - [x] Creator reward is computed from the individual winner payout basis.
-- [x] Voter reward pool is 15% of a single individual payout, split equally among elected-rule voters. Historical baseline; PRD v1.5.1 narrows this to unique voter wallets.
+- [x] Voter reward pool is 15% of a single individual payout, split equally among elected-rule voters. Historical baseline; PRD v1.5.1 narrows this to unique voter wallets and the rate is now 22.5% per PRD-TOKENOMICS-v2.8 §5.3.1.
 - [x] Repeated approval votes affect election vote count but not voter reward recipient count.
 - [x] Winner payout is not reduced by creator or voter reward display/accounting.
 - [x] Reward source is the creator reward reserve sourced from platform monetization, drawn creator-first then voter.
@@ -6653,7 +6654,7 @@ This section replaces the former open questions list. The following decisions ar
 6. The finalist set is exactly 10 rules whenever at least 10 eligible rules exist: 3 top-voted eligible rules plus 7 VRF-random eligible rules. If fewer than 10 eligible rules exist, all available eligible rules form the finalist set.
 7. Every production turn has ~22h of phase 1 (create rules + pick numbers, closing at the 9167-bps rule-election/guess cutoff). The shortlist VRF starts only after phase 1 closes. Phase 2 starts when the finalist shortlist is published and then runs for ~2h; the decision/elimination window spans the whole of phase 2 and closes at the turn end, after which the active-rule election and draw run as an untimed post-phase-2 settlement stage. (Revised 2026-07; replaces the former `2h → 2h → 8h → 8h` cycle.)
 8. The alternative rule pool remains 50% of the post-treasury playable prize pool. If no alternative rule is active or no alternative-rule winners exist, the alternative bucket follows the rollover rules.
-9. Creator rewards remain fixed at 15% of a single individual alternative-rule winner payout, funded from the creator reward reserve sourced from platform monetization and subject to reserve and cap.
+9. Creator rewards are fixed at 22.5% of a single individual alternative-rule winner payout (raised from 15% together with the action rewards; see PRD-TOKENOMICS-v2.8 §5.3.1), funded from the creator reward reserve sourced from platform monetization and subject to reserve and cap.
 10. MVP reserves 20% of platform monetization for the creator reward reserve. This is a configurable treasury policy, but winner-visible payouts must never be reduced to fund creator rewards.
 11. Normal users see simple rule explanations, status, difficulty labels, and audit links. Detailed AI/compiler reasoning appears only in expandable audit panels, public-safe audit views, or restricted operator views when it contains non-public operational detail.
 12. Proposed rules cannot be edited after on-chain submission. A user must submit a new paid proposal if they want a different rule text. Preflight and precompilation artifacts are therefore immutable per proposal.
@@ -6708,7 +6709,7 @@ This section replaces the former open questions list. The following decisions ar
 10. Rule may enter the finalist set as a top-voted or VRF-random finalist.
 11. Rule may be VRF-elected and frozen.
 12. Creator receives status if rule becomes active.
-13. If the active rule produced winners, creator receives 15% of a single individual alternative-rule winner payout funded from the creator reward reserve sourced from platform monetization.
+13. If the active rule produced winners, creator receives 22.5% of a single individual alternative-rule winner payout funded from the creator reward reserve sourced from platform monetization.
 14. Creator profile updates after round.
 
 ---

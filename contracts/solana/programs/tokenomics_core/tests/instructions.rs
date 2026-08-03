@@ -8,6 +8,7 @@ use solana_account_info::AccountInfo;
 use solana_program_error::ProgramResult;
 use solana_program_test::{processor, BanksClientError, ProgramTest, ProgramTestContext};
 use solana_sdk::{
+    account::AccountSharedData,
     instruction::Instruction,
     signature::{Keypair, Signer},
     sysvar,
@@ -22,6 +23,73 @@ use tokenomics_core::{
 
 fn pda(seeds: &[&[u8]]) -> Pubkey {
     Pubkey::find_program_address(seeds, &tokenomics_core::ID).0
+}
+
+#[cfg(feature = "devnet-campaign-v2-migration")]
+#[tokio::test]
+#[ignore = "requires an SBF build and SBF_OUT_DIR; run the explicit SBF integration suite"]
+async fn governed_initial_campaign_migration_changes_only_the_economic_hash_once() {
+    let mut context = tokenomics_program_test().start_with_context().await;
+    let authority = context.payer.pubkey();
+    let fixture = GenesisFixture::new(authority);
+    initialize_genesis(&mut context, &fixture, Pubkey::new_unique()).await;
+
+    let campaign_account = context
+        .banks_client
+        .get_account(fixture.campaign)
+        .await
+        .unwrap()
+        .unwrap();
+    let mut legacy_data = campaign_account.data.clone();
+    legacy_data[105..137].copy_from_slice(&domain::INITIAL_CAMPAIGN_V1_ECONOMIC_CONFIG_HASH);
+    let mut legacy_account = AccountSharedData::from(campaign_account);
+    legacy_account.set_data_from_slice(&legacy_data);
+    context.set_account(&fixture.campaign, &legacy_account);
+
+    let legacy_campaign: CampaignReserve =
+        read_anchor_account(&mut context, fixture.campaign).await;
+    let vault_before = read_token_account(&mut context, fixture.campaign_vault).await;
+    assert_eq!(
+        legacy_campaign.economic_config_hash,
+        domain::INITIAL_CAMPAIGN_V1_ECONOMIC_CONFIG_HASH
+    );
+
+    let migration = Instruction {
+        program_id: tokenomics_core::ID,
+        accounts: accounts::MigrateInitialCampaignToV2 {
+            governance: authority,
+            token_config: fixture.token_config,
+            campaign: fixture.campaign,
+            campaign_vault: fixture.campaign_vault,
+        }
+        .to_account_metas(None),
+        data: instruction::MigrateInitialCampaignToV2 {}.data(),
+    };
+    process(&mut context, migration.clone(), &[]).await.unwrap();
+
+    let migrated_campaign: CampaignReserve =
+        read_anchor_account(&mut context, fixture.campaign).await;
+    let vault_after = read_token_account(&mut context, fixture.campaign_vault).await;
+    assert_eq!(
+        migrated_campaign.economic_config_hash,
+        domain::CAMPAIGN_V2_ECONOMIC_CONFIG_HASH
+    );
+    assert_eq!(
+        migrated_campaign.original_allocation_atoms,
+        legacy_campaign.original_allocation_atoms
+    );
+    assert_eq!(
+        migrated_campaign.cumulative_distributed_atoms,
+        legacy_campaign.cumulative_distributed_atoms
+    );
+    assert_eq!(
+        migrated_campaign.remaining_atoms,
+        legacy_campaign.remaining_atoms
+    );
+    assert_eq!(vault_after.amount, vault_before.amount);
+    let clock = context.banks_client.get_sysvar::<Clock>().await.unwrap();
+    context.warp_to_slot(clock.slot + 1).unwrap();
+    assert!(process(&mut context, migration, &[]).await.is_err());
 }
 
 fn process_tokenomics_instruction<'a, 'b, 'c, 'info>(
@@ -147,6 +215,7 @@ async fn initialize_genesis(
     guardian: Pubkey,
 ) {
     let authority = context.payer.pubkey();
+    let metadata_uri = "https://metadata.example/jdr.json".to_owned();
     process(
         context,
         Instruction {
@@ -179,9 +248,9 @@ async fn initialize_genesis(
                     game_authority: authority,
                     epoch_root_publisher: authority,
                     network: "devnet".to_owned(),
-                    metadata_uri: String::new(),
-                    initial_campaign_config_hash: [1; 32],
-                    initial_unused_balance_policy_hash: [2; 32],
+                    metadata_uri,
+                    initial_campaign_config_hash: domain::CAMPAIGN_V2_ECONOMIC_CONFIG_HASH,
+                    initial_unused_balance_policy_hash: domain::CAMPAIGN_UNUSED_BALANCE_POLICY_HASH,
                 },
             }
             .data(),
@@ -208,7 +277,7 @@ async fn genesis_revokes_authorities_and_pause_keeps_treasury_unlock_open() {
     let config: TokenConfig = read_anchor_account(&mut context, fixture.token_config).await;
     assert_eq!(config.metadata, fixture.metadata);
     assert_eq!(config.metadata_update_authority, authority);
-    assert!(config.metadata_uri.is_empty());
+    assert_eq!(config.metadata_uri, "https://metadata.example/jdr.json");
     assert!(config.metadata_mutable);
 
     let campaign_vault = read_token_account(&mut context, fixture.campaign_vault).await;

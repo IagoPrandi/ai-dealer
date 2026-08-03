@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { formatTokenAtoms } from "../data/format";
 import type { ClaimRecordApi } from "../data/types";
 import {
   formatLamportString,
-  formatTokenAtoms,
   parseTokenAmountToAtoms,
   summarizeRewardClaims,
+  type JdrStateSnapshot,
+  waitForExpectedJdrState,
 } from "./Rewards";
 
 const records: ClaimRecordApi[] = [
@@ -56,4 +58,48 @@ test("token and SOL formatting stays exact above Number safe integer range", () 
     "9007199254.740993",
   );
   assert.throws(() => parseTokenAmountToAtoms("1.0000000001"), /up to 9/);
+});
+
+function jdrSnapshot(
+  balanceAtoms: string,
+  lockedAtoms: string,
+): JdrStateSnapshot {
+  return {
+    balance: { atoms: balanceAtoms },
+    position: { lockedAtoms },
+  } as JdrStateSnapshot;
+}
+
+test("confirmed JDR state retries stale RPC reads before updating the UI", async () => {
+  let reads = 0;
+  const snapshots = [
+    jdrSnapshot("3220000000", "0"),
+    jdrSnapshot("3220000000", "0"),
+    jdrSnapshot("0", "3220000000"),
+  ];
+
+  const result = await waitForExpectedJdrState({
+    attempts: snapshots.length,
+    expectedBalanceAtoms: "0",
+    expectedLockedAtoms: "3220000000",
+    read: async () => snapshots[reads++]!,
+    wait: async () => {},
+  });
+
+  assert.equal(reads, 3);
+  assert.equal(result.balance.atoms, "0");
+  assert.equal(result.position.lockedAtoms, "3220000000");
+});
+
+test("confirmed JDR state reports when the RPC never catches up", async () => {
+  await assert.rejects(
+    waitForExpectedJdrState({
+      attempts: 2,
+      expectedBalanceAtoms: "0",
+      expectedLockedAtoms: "3220000000",
+      read: async () => jdrSnapshot("3220000000", "0"),
+      wait: async () => {},
+    }),
+    /not visible through RPC/,
+  );
 });

@@ -2104,9 +2104,11 @@ async fn proposal_reward_cpi_debits_campaign_and_creates_one_receipt() {
                     game_authority: global_config,
                     epoch_root_publisher: governance,
                     network: "devnet".to_owned(),
-                    metadata_uri: String::new(),
-                    initial_campaign_config_hash: [1; 32],
-                    initial_unused_balance_policy_hash: [2; 32],
+                    metadata_uri: "https://idealer.example/metadata/jdr.json".to_owned(),
+                    initial_campaign_config_hash:
+                        tokenomics_domain::CAMPAIGN_V2_ECONOMIC_CONFIG_HASH,
+                    initial_unused_balance_policy_hash:
+                        tokenomics_domain::CAMPAIGN_UNUSED_BALANCE_POLICY_HASH,
                 },
             }
             .data(),

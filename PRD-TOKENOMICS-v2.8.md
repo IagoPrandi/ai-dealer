@@ -471,6 +471,43 @@ The initial campaign vault requirements are:
 - the vault address, token mint, programme authority, original allocation,
   current balance, cumulative issuance, and all transfers are public.
 
+#### 3.6.0 Initial campaign economic configuration versions
+
+Genesis records the initial campaign's economics as a hashed preimage in
+`Campaign.economic_config_hash`, and funding freezes them. Amending them is
+therefore a new configuration version, never an in-place edit:
+
+| Version | Preimage domain                             | Proposal | Supporter | Inviter | Invitee            | First-round bonus | Active-rule rate |
+| ------- | ------------------------------------------- | -------: | --------: | ------: | -----------------: | ----------------: | ---------------: |
+| v1      | `idealer:jdr:initial-campaign-config:v1`    |    `0.4` |    `0.06` |   `0.2` | `0.03` (15%)       |             `15%` |            `15%` |
+| v2      | `idealer:jdr:initial-campaign-config:v2`    |    `0.6` |    `0.09` |   `0.2` | `0.3` (150%)       |           `22.5%` |          `22.5%` |
+
+v2 is the approved configuration. Because the reward values are programme
+constants, every settlement path must fail closed unless the campaign records
+the exact v2 economic hash and the frozen unused-balance policy hash.
+
+The pre-mainnet devnet campaign `0` was funded under the v1 hash. It may be
+migrated once, through a devnet-only instruction controlled by the existing
+2-of-3 governance vault, after an upgraded programme has already made v1
+settlement unavailable. The migration must require the canonical campaign `0`,
+the exact v1 source hash, the exact unchanged allocation and unused-balance
+policy, a funded and unpaused campaign, and full reconciliation between its
+cumulative issuance, remaining amount, original allocation, and vault balance.
+It changes only `Campaign.economic_config_hash` from v1 to v2, moves no tokens,
+does not reallocate the account, emits an auditable event, and rejects a second
+execution. Programme upgrade and campaign migration are separate governed
+actions. No mainnet genesis has occurred, and this migration path must reject
+every non-devnet programme ID, so no funded production campaign is amended.
+
+Devnet activation completed on 2026-08-03. Squads proposal `9` upgraded
+Tokenomics Core to artifact SHA-256
+`8f97ec2d4881f47df1e77109def9c1269c58cfc18845a6b0d53e6252fa4a69b4`,
+and proposal `10` migrated canonical campaign `0` to the v2 economic hash
+`a1704f86ab599164dafad02ea09d84829ed5976100f826533a5e9caa64de7994`.
+Finalized readback reconciled the unchanged campaign allocation, cumulative
+distribution, remaining amount, and vault balance; the migration moved no JDR.
+This evidence is devnet-only and does not satisfy any mainnet launch gate.
+
 #### 3.6.1 Manual campaign-reward claims
 
 Campaign rewards must not be credited by a background settlement loop. A user
@@ -899,8 +936,8 @@ built. From the configured cutover onward, normal game fees apply while eligible
 promotional-token rewards may continue until the reserve is exhausted.
 
 Every successfully confirmed on-chain `propose_rule` action has a nominal
-reward of `0.4` tokens. Every successfully confirmed on-chain in-favour `vote`
-action has a nominal reward of `0.06` tokens, equal to 15% of the proposal-action
+reward of `0.6` tokens. Every successfully confirmed on-chain in-favour `vote`
+action has a nominal reward of `0.09` tokens, equal to 15% of the proposal-action
 reward. The terminal partial-payment rule in Section 5.1.1 applies when the
 remaining campaign balance is below either nominal amount. Each confirmed action creates its nominal reward obligation; repeated proposals
 and repeated in-favour votes remain independently eligible, subject only to the
@@ -929,9 +966,9 @@ Eligibility requirements:
 - the active alternative rule produced at least one valid winner;
 - the individual alternative-rule winner payout is calculated first in SOL,
   using the final alternative prize bucket and valid winner count;
-- the creator reward equals `15%` of one individual alternative-rule winner
+- the creator reward equals `22.5%` of one individual alternative-rule winner
   payout;
-- the elected-rule voter reward pool also equals `15%` of one individual
+- the elected-rule voter reward pool also equals `22.5%` of one individual
   alternative-rule winner payout;
 - the voter reward pool is split equally among the unique wallets with at least
   one confirmed in-favour vote for the elected rule;
@@ -967,10 +1004,10 @@ individual_alternative_payout_lamports =
   floor(alternative_rule_prize_pool_lamports / alternative_rule_winner_count)
 
 calculated_creator_reward_atoms =
-  floor(individual_alternative_payout_lamports * 1,500 / 10,000)
+  floor(individual_alternative_payout_lamports * 2,250 / 10,000)
 
 calculated_voter_reward_pool_atoms =
-  floor(individual_alternative_payout_lamports * 1,500 / 10,000)
+  floor(individual_alternative_payout_lamports * 2,250 / 10,000)
 
 creator_reward_cap_atoms = 250,000,000
 voter_reward_pool_cap_atoms = 250,000,000
@@ -1025,15 +1062,16 @@ A referral is eligible only when all conditions hold:
 4. The guess is finalised and non-reverted.
 
 Once eligibility is confirmed, the inviter has a nominal reward of `0.2`
-tokens. The invitee has a nominal reward of `0.03` tokens, equal to 15% of the
-inviter reward. These are separate canonical reward legs and are subject to the
+tokens. The invitee has a nominal reward of `0.3` tokens, equal to 150% of the
+inviter reward: joining through an invite is deliberately rewarded more than
+sending one. These are separate canonical reward legs and are subject to the
 terminal partial-payment rule in Section 5.1.1. In the invitee's
-first playing round, the inviter also receives a one-time bonus equal to 15% of
+first playing round, the inviter also receives a one-time bonus equal to 22.5% of
 the promotional-token rewards granted to that invitee in that round:
 
 ```text
-invitee_referral_reward = 0.2 × 15% = 0.03 tokens
-inviter_first_round_bonus = floor(invitee_first_round_promotion_rewards × 15%)
+invitee_referral_reward = 0.2 × 150% = 0.3 tokens
+inviter_first_round_bonus = floor(invitee_first_round_promotion_rewards × 22.5%)
 ```
 
 All three rewards debit the same 200M promotional reserve and are settled in
@@ -1055,6 +1093,30 @@ nominal shortfalls, rewards earned by the invitee for inviting another user, and
 any downstream referral-chain bonus. This closed list prevents recursive bonus
 calculation. Self-referrals, duplicate wallet attribution, and rewards based
 solely on visiting a link are forbidden.
+
+#### 5.4.1 Invite mechanic
+
+The invite artifact is the inviter's own wallet address: it is the code, it is
+what the invite link carries (`/play?ref=<inviter>`), and it is what the
+attribution stores. No off-chain code registry exists, so an invite survives any
+API restart and can be verified from chain state alone.
+
+```text
+referral_code_hash = sha256("idealer:referral-code:v1|" || inviter_address)
+```
+
+The hash is deterministic, so any client can rebuild and verify it from the
+inviter address. It records which link produced an attribution; it is not a
+secret and grants nothing on its own.
+
+The **invitee** signs and pays for their own `attribute_referral`. The DApp
+captures `?ref=` before any wallet exists, keeps it until the attribution is
+recorded, and then removes it from the URL so a shared screenshot cannot
+re-attribute another player. Because the reward requires an attribution recorded
+before the invitee's first confirmed guess, the DApp must read the invitee's
+`GameToken` accounts and refuse to offer registration to a wallet that has
+already played, and it must never present an attribution as a claimable reward.
+Self-referral is rejected in the client and again on-chain.
 
 ### 5.5 Anti-abuse and infrastructure controls
 
@@ -1353,12 +1415,12 @@ user confirmation.
     next nominal reward, one canonical final partial reward consumes the full
     balance, records the shortfall, and leaves the vault at exactly zero; tests also prove that a residual remains isolated if no later eligible event occurs and cannot be swept administratively.
 - [ ] **M10.3.2 — Proposal and supporter action rewards.**
-  - Approval: the `0.4` proposal-action and `0.06` in-favour-vote-action formulas,
+  - Approval: the `0.6` proposal-action and `0.09` in-favour-vote-action formulas,
     every-confirmed-action eligibility, rounds 1–30 first-action fee policy,
     normal fees from round 31, atomic reserve enforcement, and exhaustion-only
     termination are tested.
 - [ ] **M10.3.3 — Active-rule creator and elected-rule voter rewards.**
-  - Approval: deterministic tests preserve the original formula of `15%` of one
+  - Approval: deterministic tests apply the approved formula of `22.5%` of one
     individual alternative-rule winner payout for both the creator reward and
     voter reward pool; the atom-level relation `1 calculated reward lamport = 1 token atom`
     is applied without creating a market peg or redemption right; each reward
@@ -1370,7 +1432,7 @@ user confirmation.
     the treasury-fee distribution vault.
 - [ ] **M10.3.4 — Referral campaign.**
   - Approval: one-time attribution, first-guess (free-or-paid) proof, nominal
-    `0.2` inviter, nominal `0.03` invitee, 15%-of-first-round-invitee-rewards
+    `0.2` inviter, nominal `0.3` invitee, 22.5%-of-first-round-invitee-rewards
     bonus using the closed list of actually paid invitee referral/proposal/supporter/creator/voter rewards, exclusion of prizes, fee claims, transfers, unpaid amounts, and downstream referrals, canonical leg ordering, terminal partial payment, one-reward-per-invitee uniqueness, no per-inviter cap, aggregate campaign-vault cap, and idempotent settlement are tested.
 - [ ] **M10.3.5 — Future campaign vault isolation.**
   - Approval: a devnet campaign is funded by a disclosed, multisig-approved tranche
@@ -1421,7 +1483,7 @@ user confirmation.
     fee deposit, epoch seal, fixed-destination treasury claim, approved
     operating allocation, genesis-funded PDA-controlled Initial Campaign Reserve
     Vault, proposal/supporter action rewards, alternative-winner payout calculation,
-    `15%` creator and voter formulas, atom-level `1 calculated reward lamport = 1 token atom` conversion,
+    `22.5%` creator and voter formulas, atom-level `1 calculated reward lamport = 1 token atom` conversion,
     independent `0.25`-token caps, creator-first reserve ordering, voter split,
     referral rewards, future-campaign vault tranche funding and isolation,
     unlock, zero-weight epoch rollover, provisional-root challenge and
@@ -1442,7 +1504,7 @@ user confirmation.
 | Locks              | No backdated accrual; partial changes are exact; the TreasuryPolicyExecutor-controlled reserve vault and programme-controlled escrow are distinct; only the bound beneficial owner can request unlock and treasury tokens return only to the canonical reserve vault.                                                                                                                                                                                                                                                                  |
 | Distribution       | Two-user and multi-interval calculations match; zero total weight rolls 100% forward without claims; `gross_distributable = sum_of_merkle_claims + rounding_dust` for positive-weight epochs; claims never exceed the sealed liability.                                                                                                                                                                                                                                                                                                |
 | Proofs and roots   | Wrong wallet, beneficiary, amount, epoch, network, or root fails; replay fails; provisional-root challenge/replacement and 24-hour review work; sealed roots are immutable after Tokenomics Core upgrade-authority revocation; optimistic settlement limitations are explicit.                                                                                                                                                                                                                                                         |
-| Campaigns          | Genesis funds exactly 200M into the dedicated PDA-controlled Initial Campaign Reserve Vault; campaign tokens earn no locking weight; exact action/referral formulas, creator/voter `15%` formulas, atom-level `1 calculated reward lamport = 1 token atom` conversion, independent 0.25-token caps, canonical reward-leg ordering, final partial payment to exact zero upon the next eligible leg, referral uniqueness and closed bonus base, vault isolation, future-campaign tranche funding, and atomic no-overspend behavior hold. |
+| Campaigns          | Genesis funds exactly 200M into the dedicated PDA-controlled Initial Campaign Reserve Vault; campaign tokens earn no locking weight; exact action/referral formulas, creator/voter `22.5%` formulas, atom-level `1 calculated reward lamport = 1 token atom` conversion, independent 0.25-token caps, canonical reward-leg ordering, final partial payment to exact zero upon the next eligible leg, referral uniqueness and closed bonus base, vault isolation, future-campaign tranche funding, and atomic no-overspend behavior hold. |
 | Accounting         | Finalised events only; retries/reorgs are idempotent; on-chain/API/indexer totals reconcile.                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | Custody            | Initial `2-of-3` rejects one-signer movement; independent-device recovery works; canonical treasury lock/unlock moves only between the reserve vault and escrow without delay; discretionary outbound vault movements require the active multisig threshold and cannot bypass its executor; a rehearsed expansion to `3-of-5` preserves authority and records founder-controlled signer concentration.                                                                                                                                 |
 | Treasury cash-flow | The distribution vault is not a treasury spending vault; ordinary claims pay their leaf-bound holder beneficiaries and the treasury-position claim pays the fixed Treasury SOL Vault, all without treasury-operation approval; claims do not unlock tokens; later operating withdrawals are separately scheduled, multisig-authorised or spending-limit constrained, and reconciled.                                                                                                                                                   |
@@ -1480,18 +1542,18 @@ user confirmation.
 | Holder autonomy                          | The project defines only official protocol utility; transfer, external integration, holding, or voluntary burning of unlocked tokens is outside project scope.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | Free-action transition                   | The first-action free period end is environment-configured (`freeActionWindowEndsBeforeTurnIndex`, main PRD §8.2): it ends after round 30 in production/mainnet, and after turn 99 in development/staging/devnet while the project is being built. From the configured cutover onward, normal game fees apply while token promotions may continue.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Supporter                                | A wallet that casts an in-favour vote; every confirmed in-favour vote action is rewarded.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| Proposal and supporter action rewards    | While the initial reserve remains: every confirmed `propose_rule` creates a nominal 0.4-token reward and every confirmed in-favour `vote` creates a nominal 0.06-token reward; the final eligible leg may receive a partial amount that consumes the exact remaining vault balance.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Proposal and supporter action rewards    | While the initial reserve remains: every confirmed `propose_rule` creates a nominal 0.6-token reward and every confirmed in-favour `vote` creates a nominal 0.09-token reward; the final eligible leg may receive a partial amount that consumes the exact remaining vault balance.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | Initial promotion custody                | The complete 200M allocation is deposited at genesis into a dedicated Initial Campaign Reserve Vault controlled by the campaign-program PDA. The founder, app server, and general treasury cannot manually settle or redirect ordinary rewards.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | Campaign reserve fee eligibility         | Tokens held by an initial or future campaign vault remain liquid for rewards but are not locked and receive no treasury-fee distribution entitlement. Recipients may choose to lock tokens after settlement.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | Future campaign vaults                   | Every future campaign receives an approved existing-token tranche directly from Creator Treasury custody into a separate programme-controlled campaign vault after multisig approval. Funding freezes all economic configuration; amendments require a new campaign and vault. Campaign vaults cannot debit one another.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | Unused campaign balance                  | Each future campaign must define its unused-balance policy before funding. Unless another rule is explicitly approved, unused tokens remain isolated in that campaign's vault.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Active-rule creator reward               | When an active alternative rule produces winners, its creator receives tokens equal to 15% of one individual alternative-rule winner payout in SOL, using the atom-level relation `1 calculated reward lamport = 1 token atom`, capped at 0.25 token per turn and subject to campaign-reserve availability.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Elected-rule voter reward                | A token pool equal to 15% of one individual alternative-rule winner payout in SOL is calculated using the atom-level relation `1 calculated reward lamport = 1 token atom`, capped at 0.25 token per turn, then divided among unique eligible wallets; token-atom remainder is assigned by canonical public-key order, so shares differ by at most one atom; repeated votes do not multiply a wallet's share.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Active-rule creator reward               | When an active alternative rule produces winners, its creator receives tokens equal to 22.5% of one individual alternative-rule winner payout in SOL, using the atom-level relation `1 calculated reward lamport = 1 token atom`, capped at 0.25 token per turn and subject to campaign-reserve availability.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Elected-rule voter reward                | A token pool equal to 22.5% of one individual alternative-rule winner payout in SOL is calculated using the atom-level relation `1 calculated reward lamport = 1 token atom`, capped at 0.25 token per turn, then divided among unique eligible wallets; token-atom remainder is assigned by canonical public-key order, so shares differ by at most one atom; repeated votes do not multiply a wallet's share.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | Reward-only accounting relation          | With nine decimals, `1 calculated reward lamport = 1 Idealer token atom` exclusively for creator/voter calculations; integer math uses `u128`, multiplication before division, and floor rounding. This is not a market peg, redemption right, price promise, or general conversion rule.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | Direct fund rewards                      | Active-rule creator and elected-rule voter rewards are not paid directly in SOL from platform monetisation or the treasury-fee distribution vault.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Future campaigns                         | Future promotions may use disclosed allocations transferred from the existing 800M Creator Treasury Reserve under multisig controls.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | Referral qualification                   | The referred player's first confirmed guess, whether free or paid.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| Referral rewards                         | Inviter: 0.2 tokens. Invitee: 0.03 tokens. Inviter first-round bonus: 15% of the invitee's actually paid first-round invitee referral, proposal, supporter, creator, and voter rewards; prizes, fee claims, transfers, unpaid amounts, and downstream referral rewards are excluded. No per-inviter cap; the active campaign-vault balance is the aggregate cap.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Referral rewards                         | Inviter: 0.2 tokens. Invitee: 0.3 tokens. Inviter first-round bonus: 22.5% of the invitee's actually paid first-round invitee referral, proposal, supporter, creator, and voter rewards; prizes, fee claims, transfers, unpaid amounts, and downstream referral rewards are excluded. No per-inviter cap; the active campaign-vault balance is the aggregate cap.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | Initial promotion end                    | Only when the Initial Campaign Reserve Vault reaches exactly zero; there is no round-based expiry. The next eligible reward leg consumes any residual balance through partial payment. If no further eligible event occurs, the residual remains isolated and the campaign stays open.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
 ### 10.2 Remaining owner decisions required
@@ -1531,7 +1593,7 @@ The draft replaces balance-only transferable revenue sharing with locking-based,
 time-weighted, closed-seven-turn-epoch distributions; removes the former
 round-200 campaign expiry; changes the first-action free window from 100 to 30
 rounds; and preserves the original active-rule creator and elected-rule voter
-formula of `15%` of one individual alternative-rule winner payout while paying
+formula of `22.5%` of one individual alternative-rule winner payout while paying
 the resulting numerical amount in token atoms under the exclusive relation
 `1 calculated reward lamport = 1 token atom`. This relation is not a market peg
 or redemption promise. The draft now also

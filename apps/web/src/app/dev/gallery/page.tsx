@@ -51,6 +51,7 @@ const CARDS: Array<{ label: string; screen: Screen }> = [
   { label: "Create rule (dealer chat)", screen: "create" },
   { label: "Stake & earn", screen: "rewards" },
   { label: "Account (claims)", screen: "profile" },
+  { label: "Invite friends", screen: "invite" },
   { label: "Result", screen: "result" },
 ];
 

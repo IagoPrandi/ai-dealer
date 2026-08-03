@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
+import {
+  CAMPAIGN_V1_ECONOMIC_CONFIG_HASH,
+  CAMPAIGN_V2_ECONOMIC_CONFIG_HASH,
+} from "@idealer/tokenomics";
 import { PublicKey } from "@solana/web3.js";
 import {
   createActionRewardInstructions,
@@ -67,12 +71,13 @@ test("decodes the beneficiary only from canonical proposal and vote accounts", (
 });
 
 test("decodes campaign zero and derives its canonical token config", () => {
-  const data = Buffer.alloc(104);
+  const data = Buffer.alloc(171);
   discriminator("account", "CampaignReserve").copy(data, 0);
   data.writeBigUInt64LE(0n, 8);
   MINT.toBuffer().copy(data, 16);
   CAMPAIGN_VAULT.toBuffer().copy(data, 48);
   data.writeBigUInt64LE(199_999_997_180_000_000n, 96);
+  Buffer.from(CAMPAIGN_V2_ECONOMIC_CONFIG_HASH, "hex").copy(data, 105);
 
   const decoded = decodeCampaignAccounts({
     campaign: CAMPAIGN,
@@ -99,6 +104,18 @@ test("decodes campaign zero and derives its canonical token config", () => {
       }),
     /Initial Tokenomics campaign account is invalid/,
   );
+
+  data.writeBigUInt64LE(0n, 8);
+  Buffer.from(CAMPAIGN_V1_ECONOMIC_CONFIG_HASH, "hex").copy(data, 105);
+  assert.throws(
+    () =>
+      decodeCampaignAccounts({
+        campaign: CAMPAIGN,
+        data,
+        tokenomicsProgramId: TOKENOMICS_PROGRAM,
+      }),
+    /governed v2 migration is finalized/,
+  );
 });
 
 test("derives classic SPL ATA and one receipt per immutable action account", () => {
@@ -109,9 +126,7 @@ test("derives classic SPL ATA and one receipt per immutable action account", () 
   const [expectedAta] = PublicKey.findProgramAddressSync(
     [
       BENEFICIARY.toBuffer(),
-      new PublicKey(
-        "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-      ).toBuffer(),
+      new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA").toBuffer(),
       MINT.toBuffer(),
     ],
     new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"),
@@ -124,11 +139,7 @@ test("derives classic SPL ATA and one receipt per immutable action account", () 
     tokenomicsProgramId: TOKENOMICS_PROGRAM,
   });
   const [expectedReceipt] = PublicKey.findProgramAddressSync(
-    [
-      Buffer.from("campaign_reward"),
-      CAMPAIGN.toBuffer(),
-      ACTION.toBuffer(),
-    ],
+    [Buffer.from("campaign_reward"), CAMPAIGN.toBuffer(), ACTION.toBuffer()],
     TOKENOMICS_PROGRAM,
   );
   assert.equal(receipt.toBase58(), expectedReceipt.toBase58());

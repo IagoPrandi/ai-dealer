@@ -9,15 +9,15 @@ import {
 
 const [walletA, walletB] = SQUADS_DEVNET_CONFIG.members;
 
-test("pins governance to the finalized Idealer upgrade proposal", () => {
-  assert.equal(TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex, 7n);
+test("pins governance to the reviewed Tokenomics Core upgrade proposal", () => {
+  assert.equal(TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex, 9n);
   assert.equal(
     TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.proposalAddress,
-    "9c62Wu3rZ5Rjco6x2nXQk4jDGyxRUj7iNnpXfjeQtGm8",
+    "CC5PXs7X68jynmxeFvcxg7BxhVCcu1W5Tukur3Xv18LH",
   );
   assert.equal(
     TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionAddress,
-    "FJK34FoQ124G4Z9QLcZaUZaNWA4L9LF4BYGYewDeGtnT",
+    "5JAZrf9fzxA33h2DKcKY3V2cPkPLRWLpUc6TbM5vpTdy",
   );
 });
 

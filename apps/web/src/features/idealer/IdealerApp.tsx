@@ -59,6 +59,7 @@ import { VoteScreen } from "./screens/Vote";
 import { CreateScreen } from "./screens/Create";
 import { ProfileScreen } from "./screens/Profile";
 import { ClaimsScreen } from "./screens/Claims";
+import { InviteScreen, storePendingInvite } from "./screens/Invite";
 import { RewardsScreen } from "./screens/Rewards";
 import { ResultScreen } from "./screens/Result";
 import { ShareScreen } from "./screens/Share";
@@ -204,6 +205,29 @@ export function IdealerApp({
   const requestConnect = useCallback(() => {
     setConnectError(null);
     setShowConnect(true);
+  }, []);
+
+  // An invite link (`/play?ref=<inviter>`) is captured once, before any wallet
+  // exists, and kept until the invitee registers their attribution. The query
+  // parameter is dropped afterwards so a shared screenshot cannot re-attribute
+  // another player.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("ref");
+    if (!code) {
+      return;
+    }
+    const stored = storePendingInvite(window.localStorage, code);
+    params.delete("ref");
+    const query = params.toString();
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${query ? `?${query}` : ""}`,
+    );
+    if (stored) {
+      setScreen("invite");
+    }
   }, []);
 
   const sendVote = useCallback(
@@ -461,6 +485,7 @@ export function IdealerApp({
             {screen === "create" ? <CreateScreen /> : null}
             {screen === "profile" ? <ProfileScreen /> : null}
             {screen === "claims" ? <ClaimsScreen /> : null}
+            {screen === "invite" ? <InviteScreen /> : null}
             {screen === "rewards" ? <RewardsScreen /> : null}
             {screen === "result" ? <ResultScreen /> : null}
             {screen === "share" ? <ShareScreen /> : null}
