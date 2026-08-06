@@ -9,6 +9,7 @@
     "dev:mock": "next dev --webpack --hostname 0.0.0.0 --port 3000",
     "dev:https": "next dev --webpack --hostname 0.0.0.0 --port 3000 --experimental-https",
     "dev:tunnel": "cloudflared tunnel --url http://localhost:3000",
+    "icons": "node scripts/build-icons.mjs",
     "lint": "eslint src next.config.ts --max-warnings=0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test --import tsx \"src/**/*.test.ts\"",

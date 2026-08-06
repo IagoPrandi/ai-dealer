@@ -52,6 +52,20 @@
 
 .ide-num { font-family: var(--num-font, 'Space Grotesk'), system-ui, sans-serif; font-feature-settings: "tnum" 1; letter-spacing: -0.02em; }
 
+/* Canonical dealer mark: a strict 1:1 crop of the supplied gradient bust,
+   rendered without a border or background tile. */
+.ide-dealer {
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+  overflow: hidden;
+}
+
+.ide-dealer-image {
+  object-fit: cover;
+  object-position: center top;
+}
+
 /* scrollbars hidden inside phone */
 .ide-scroll { -ms-overflow-style: none; scrollbar-width: none; }
 .ide-scroll::-webkit-scrollbar { width: 0; height: 0; display: none; }

@@ -1,17 +1,12 @@
-// Regenerates the PWA / home-screen icons from a monochrome source SVG.
-//
-// The source (public/icons/icon-source.svg) is a full-bleed square filled with
-// a single color, with the Idealer dealer figure carved out as negative space.
-// We recolor the tile to the brand dark, paint the brand purple->green gradient
-// behind it (so the figure reads as the gradient), and emit the PNG sizes that
-// iOS and Android actually accept for installed home-screen icons.
+// Regenerates the favicon and PWA / home-screen icons from the canonical
+// transparent blindfolded-bust artwork. The portrait is cropped from the top
+// into a strict square, filled with the brand gradient, and kept transparent.
 //
 // Usage:
 //   node scripts/build-icons.mjs [srcSvg] [outDir]
-// Defaults: public/icons/icon-source.svg -> public/icons
+// Defaults: public/illustrations/busto-vendado.svg -> public/icons
 
 import { createRequire } from "node:module";
-import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -22,25 +17,37 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(here, "..");
 const srcPath = process.argv[2]
   ? path.resolve(process.cwd(), process.argv[2])
-  : path.join(webRoot, "public/icons/icon-source.svg");
+  : path.join(webRoot, "public/illustrations/busto-vendado.svg");
 const outDir = process.argv[3]
   ? path.resolve(process.cwd(), process.argv[3])
   : path.join(webRoot, "public/icons");
 
-const DARK = "#0b0910";
-const PURPLE = "#a78bfa";
-const GREEN = "#7cf29b";
+const GRADIENT = ["#c77dff", "#9945ff", "#2ed6a6", "#14f195"];
 const M = 1024; // master render size
 
-const src = readFileSync(srcPath, "utf8");
-const darkLogoSvg = Buffer.from(src.replace(/fill="#000000"/g, `fill="${DARK}"`), "utf8");
+const squareBust = await sharp(srcPath, { density: 200, limitInputPixels: false })
+  .resize(M, M, { fit: "cover", position: "north" })
+  .png()
+  .toBuffer();
+
+// The supplied transparent source is a white/black master. Flattening it on
+// black turns the visible white artwork into a luminance mask while preserving
+// the blindfold, facial shadows, and transparent background as negative space.
+const { data: bustMask, info: maskInfo } = await sharp(squareBust)
+  .flatten({ background: "#000000" })
+  .greyscale()
+  .removeAlpha()
+  .raw()
+  .toBuffer({ resolveWithObject: true });
 
 const gradientSvg = Buffer.from(
   `<svg xmlns="http://www.w3.org/2000/svg" width="${M}" height="${M}">
      <defs>
        <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-         <stop offset="0" stop-color="${PURPLE}"/>
-         <stop offset="1" stop-color="${GREEN}"/>
+         <stop offset="0" stop-color="${GRADIENT[0]}"/>
+         <stop offset="0.34" stop-color="${GRADIENT[1]}"/>
+         <stop offset="0.78" stop-color="${GRADIENT[2]}"/>
+         <stop offset="1" stop-color="${GRADIENT[3]}"/>
        </linearGradient>
      </defs>
      <rect width="${M}" height="${M}" fill="url(#g)"/>
@@ -48,16 +55,26 @@ const gradientSvg = Buffer.from(
   "utf8",
 );
 
-const darkLogoPng = await sharp(darkLogoSvg, { density: 200, limitInputPixels: false })
-  .resize(M, M, { fit: "contain" })
+const { data: gradientRgb, info: gradientInfo } = await sharp(gradientSvg)
+  .removeAlpha()
+  .raw()
+  .toBuffer({ resolveWithObject: true });
+
+const gradientBust = await sharp(gradientRgb, {
+  raw: {
+    width: gradientInfo.width,
+    height: gradientInfo.height,
+    channels: 3,
+  },
+})
+  .joinChannel(bustMask, {
+    raw: { width: maskInfo.width, height: maskInfo.height, channels: 1 },
+  })
   .png()
   .toBuffer();
 
-// Full-bleed master (iOS + "any"): figure runs to the tile edges.
-const masterFullBleed = await sharp(gradientSvg, { limitInputPixels: false })
-  .composite([{ input: darkLogoPng, top: 0, left: 0 }])
-  .png()
-  .toBuffer();
+// Full-bleed master (browser, iOS, and PWA "any").
+const masterFullBleed = gradientBust;
 
 // Maskable master (Android): figure shrunk into the ~78% safe zone so the
 // circle/squircle mask never clips the head or shoulders.
@@ -65,7 +82,12 @@ const safe = Math.round(M * 0.78);
 const pad = Math.round((M - safe) / 2);
 const shrunk = await sharp(masterFullBleed).resize(safe, safe).png().toBuffer();
 const masterMaskable = await sharp({
-  create: { width: M, height: M, channels: 4, background: DARK },
+  create: {
+    width: M,
+    height: M,
+    channels: 4,
+    background: { r: 0, g: 0, b: 0, alpha: 0 },
+  },
 })
   .composite([{ input: shrunk, top: pad, left: pad }])
   .png()

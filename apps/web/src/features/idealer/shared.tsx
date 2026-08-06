@@ -5,6 +5,7 @@
  * countdown / prize hooks. Ported from the design handoff's `shared.jsx`
  * (window globals replaced with ES exports; copy translated to English).
  */
+import Image from "next/image";
 import { useEffect, useState, type CSSProperties, type SVGProps } from "react";
 
 import { fmtCountdown, fmtSol } from "./data/format";
@@ -86,19 +87,20 @@ export function useLivePrize(target: number): number {
 
 export function Dealer({ size = 38 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" style={{ display: "block" }}>
-      <defs>
-        <linearGradient id="dlrg" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#C77DFF" /><stop offset="1" stopColor="#14F195" />
-        </linearGradient>
-      </defs>
-      <circle cx="24" cy="25" r="15" fill="#1E1830" stroke="url(#dlrg)" strokeWidth="2" />
-      <path d="M11 16c2.5-5 23-5 26 0l-2 2H13l-2-2z" fill="url(#dlrg)" />
-      <rect x="9" y="15.5" width="30" height="2.6" rx="1.3" fill="url(#dlrg)" />
-      <circle cx="19" cy="24" r="2.1" fill="#14F195" />
-      <circle cx="29" cy="24" r="2.1" fill="#14F195" />
-      <path d="M19 30c2.6 2.4 7.4 2.4 10 0" stroke="#C77DFF" strokeWidth="2" strokeLinecap="round" />
-    </svg>
+    <span
+      aria-hidden="true"
+      className="ide-dealer"
+      style={{ height: size, width: size }}
+    >
+      <Image
+        alt=""
+        className="ide-dealer-image"
+        fill
+        sizes={`${size}px`}
+        src="/icons/icon-192.png?v=blindfolded-bust-transparent-v2"
+        unoptimized
+      />
+    </span>
   );
 }
 
