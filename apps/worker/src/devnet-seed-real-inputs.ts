@@ -26,12 +26,12 @@ import { persistFinalizedTransaction } from "./durable-indexer.js";
 /**
  * M5.4 devnet operator: seed one open turn with real player inputs.
  *
- * Dry-run by default. Set IDEALER_M5_INPUTS_BROADCAST=1 to send real devnet
+ * Dry-run by default. Set TYCHE_M5_INPUTS_BROADCAST=1 to send real devnet
  * transactions. This signs only with deterministic devnet test players and the
  * configured devnet authority; it does not read or persist any player secrets.
  */
 
-const OPEN_TURN_IF_MISSING = process.env.IDEALER_M5_INPUTS_OPEN_TURN === "1";
+const OPEN_TURN_IF_MISSING = process.env.TYCHE_M5_INPUTS_OPEN_TURN === "1";
 const DEFAULT_API_BASE_URL = "http://127.0.0.1:3002";
 const DEFAULT_PLAYER_COUNT = 3;
 const MAX_PLAYER_COUNT = 17;
@@ -64,7 +64,7 @@ const PRECOMPILE_RULE_DISCRIMINATOR = Buffer.from([
 ]);
 
 function isInputBroadcastEnabled() {
-  return process.env.IDEALER_M5_INPUTS_BROADCAST === "1";
+  return process.env.TYCHE_M5_INPUTS_BROADCAST === "1";
 }
 
 function wasSubmittedInThisRun(signature: string) {
@@ -132,21 +132,21 @@ interface SeededInputSummary {
 }
 
 export function readSeedConfig(env = process.env): SeedConfig {
-  const playerCount = Number(env.IDEALER_M5_INPUTS_PLAYER_COUNT ?? DEFAULT_PLAYER_COUNT);
+  const playerCount = Number(env.TYCHE_M5_INPUTS_PLAYER_COUNT ?? DEFAULT_PLAYER_COUNT);
   if (!Number.isInteger(playerCount) || playerCount < 1 || playerCount > MAX_PLAYER_COUNT) {
     throw new Error(
-      `IDEALER_M5_INPUTS_PLAYER_COUNT must be an integer from 1 to ${MAX_PLAYER_COUNT}.`,
+      `TYCHE_M5_INPUTS_PLAYER_COUNT must be an integer from 1 to ${MAX_PLAYER_COUNT}.`,
     );
   }
 
   const fundLamportsPerPlayer = Number(
-    env.IDEALER_M5_INPUTS_FUND_LAMPORTS ?? DEFAULT_FUND_LAMPORTS,
+    env.TYCHE_M5_INPUTS_FUND_LAMPORTS ?? DEFAULT_FUND_LAMPORTS,
   );
   if (!Number.isSafeInteger(fundLamportsPerPlayer) || fundLamportsPerPlayer < 0) {
-    throw new Error("IDEALER_M5_INPUTS_FUND_LAMPORTS must be a non-negative safe integer.");
+    throw new Error("TYCHE_M5_INPUTS_FUND_LAMPORTS must be a non-negative safe integer.");
   }
   const paidGuessPlayerCount = Number(
-    env.IDEALER_M5_INPUTS_PAID_GUESS_PLAYER_COUNT ?? "0",
+    env.TYCHE_M5_INPUTS_PAID_GUESS_PLAYER_COUNT ?? "0",
   );
   if (
     !Number.isInteger(paidGuessPlayerCount) ||
@@ -154,10 +154,10 @@ export function readSeedConfig(env = process.env): SeedConfig {
     paidGuessPlayerCount > playerCount
   ) {
     throw new Error(
-      "IDEALER_M5_INPUTS_PAID_GUESS_PLAYER_COUNT must be an integer from 0 to the player count.",
+      "TYCHE_M5_INPUTS_PAID_GUESS_PLAYER_COUNT must be an integer from 0 to the player count.",
     );
   }
-  const configuredGuess = env.IDEALER_M5_INPUTS_GUESS_NUMBERS?.trim();
+  const configuredGuess = env.TYCHE_M5_INPUTS_GUESS_NUMBERS?.trim();
   const guessNumbers = configuredGuess
     ? configuredGuess.split(",").map((value) => Number(value.trim()))
     : null;
@@ -173,18 +173,18 @@ export function readSeedConfig(env = process.env): SeedConfig {
       ))
   ) {
     throw new Error(
-      "IDEALER_M5_INPUTS_GUESS_NUMBERS must contain six unique ascending integers from 1 to 100.",
+      "TYCHE_M5_INPUTS_GUESS_NUMBERS must contain six unique ascending integers from 1 to 100.",
     );
   }
 
   return {
-    apiBaseUrl: env.IDEALER_API_BASE_URL ?? DEFAULT_API_BASE_URL,
+    apiBaseUrl: env.TYCHE_API_BASE_URL ?? DEFAULT_API_BASE_URL,
     fundLamportsPerPlayer,
     guessNumbers,
     paidGuessPlayerCount,
     playerCount,
     ruleText:
-      env.IDEALER_M5_RULE_TEXT ??
+      env.TYCHE_M5_RULE_TEXT ??
       "Win if at least 1 of your numbers appears in the draw.",
   };
 }
@@ -286,7 +286,7 @@ function ruleVotePda(
 }
 
 export function deterministicPlayer(turnId: number, index: number) {
-  const seed = hash32(`idealer:m5.4:devnet-player:v1:${turnId}:${index}`);
+  const seed = hash32(`tyche:m5.4:devnet-player:v1:${turnId}:${index}`);
   return Keypair.fromSeed(seed);
 }
 
@@ -636,7 +636,7 @@ async function ensureOpenTurn() {
   if (!globalConfig.snapshot.hasActiveTurn && OPEN_TURN_IF_MISSING) {
     if (!isInputBroadcastEnabled()) {
       throw new Error(
-        "IDEALER_M5_INPUTS_OPEN_TURN=1 would open a real devnet turn. Set IDEALER_M5_INPUTS_BROADCAST=1 to use it.",
+        "TYCHE_M5_INPUTS_OPEN_TURN=1 would open a real devnet turn. Set TYCHE_M5_INPUTS_BROADCAST=1 to use it.",
       );
     }
     const manualConfig = await createManualControlConfig();
@@ -652,7 +652,7 @@ async function ensureOpenTurn() {
 
   if (!globalConfig.snapshot.hasActiveTurn || globalConfig.snapshot.activeTurnId <= 0) {
     throw new Error(
-      "No active devnet turn. Open one first or set IDEALER_M5_INPUTS_OPEN_TURN=1 with manual control enabled.",
+      "No active devnet turn. Open one first or set TYCHE_M5_INPUTS_OPEN_TURN=1 with manual control enabled.",
     );
   }
 
@@ -691,7 +691,7 @@ export async function seedRealInputs(): Promise<SeededInputSummary> {
   const { authority, programId, rpcUrl, turnId } = await ensureOpenTurn();
   if (!authority) {
     throw new Error(
-      "M5.4 input seeding requires IDEALER_TURN_AUTHORITY_KEYPAIR or IDEALER_TURN_AUTHORITY_KEYPAIR_PATH.",
+      "M5.4 input seeding requires TYCHE_TURN_AUTHORITY_KEYPAIR or TYCHE_TURN_AUTHORITY_KEYPAIR_PATH.",
     );
   }
 
@@ -976,7 +976,7 @@ if (
       console.log(JSON.stringify(summary, null, 2));
       if (!isInputBroadcastEnabled()) {
         console.log(
-          "Dry run only. Set IDEALER_M5_INPUTS_BROADCAST=1 to submit real devnet inputs.",
+          "Dry run only. Set TYCHE_M5_INPUTS_BROADCAST=1 to submit real devnet inputs.",
         );
       }
     })

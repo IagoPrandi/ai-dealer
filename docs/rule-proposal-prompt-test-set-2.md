@@ -113,7 +113,7 @@ These 140 prompts cover objective conversion, ambiguous phrasing, and blocked pr
 | 84 | CLARIFY | I want a rule for tickets that are close after ignoring the ugly numbers. |
 | 85 | CLARIFY | Let the AI pick the most reasonable objective version of a near match. |
 | 86 | BLOCK | Let me win if my wallet address looks older than most wallets in this round. |
-| 87 | BLOCK | I want the rule to check whether I have voted for Idealer before. |
+| 87 | BLOCK | I want the rule to check whether I have voted for Tyche before. |
 | 88 | BLOCK | Give the win to the creator wallet if their rule becomes popular enough. |
 | 89 | BLOCK | Make it pay only if the prize pool feels worth splitting. |
 | 90 | BLOCK | My ticket wins when this rule gets more approval votes than every other rule. |

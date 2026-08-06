@@ -1,6 +1,6 @@
-# Idealer
+# Tyche
 
-Idealer is a mobile-first Solana DApp monorepo for a social lottery game where each turn can have a community-elected alternative winning rule.
+Tyche is a mobile-first Solana DApp monorepo for a social lottery game where each turn can have a community-elected alternative winning rule.
 
 ## Workspace
 
@@ -63,10 +63,10 @@ docker compose up -d postgres redis
 Run application services from the host in separate terminals:
 
 ```bash
-pnpm --filter @idealer/api dev
-pnpm --filter @idealer/worker dev
-pnpm --filter @idealer/web dev
-pnpm --filter @idealer/admin dev
+pnpm --filter @tyche/api dev
+pnpm --filter @tyche/worker dev
+pnpm --filter @tyche/web dev
+pnpm --filter @tyche/admin dev
 ```
 
 Stop the Dockerized data stores:

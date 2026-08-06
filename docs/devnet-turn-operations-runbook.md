@@ -41,32 +41,32 @@ Copy-Item .env.example .env
 Set or verify these common devnet values in `.env`:
 
 ```dotenv
-IDEALER_SOLANA_RPC_URL=https://api.devnet.solana.com
-IDEALER_PROGRAM_ID=ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd
+TYCHE_SOLANA_RPC_URL=https://api.devnet.solana.com
+TYCHE_PROGRAM_ID=ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd
 TOKENOMICS_CORE_PROGRAM_ID=BRK6G8Sep66LFREp2nGMLiganfw2nbWe1f8zeAdoP1Fm
-IDEALER_TURN_MANUAL_CONTROL_ENABLED=true
-IDEALER_TURN_AUTOMATION_ENABLED=false
-IDEALER_TURN_MANUAL_OPEN_DURATION_SECONDS=1200
-IDEALER_DEVNET_TURN_DURATION_SCALE_BPS=139
-IDEALER_SETTLEMENT_AUTOMATION_ENABLED=false
-IDEALER_TOKEN_REWARD_SETTLEMENT_ENABLED=false
-IDEALER_ACTIVE_RULE_REWARD_SETTLEMENT_ENABLED=false
-IDEALER_REFERRAL_REWARD_SETTLEMENT_ENABLED=false
-IDEALER_REFERRAL_REWARD_TARGET_ALLOWLIST=
+TYCHE_TURN_MANUAL_CONTROL_ENABLED=true
+TYCHE_TURN_AUTOMATION_ENABLED=false
+TYCHE_TURN_MANUAL_OPEN_DURATION_SECONDS=1200
+TYCHE_DEVNET_TURN_DURATION_SCALE_BPS=139
+TYCHE_SETTLEMENT_AUTOMATION_ENABLED=false
+TYCHE_TOKEN_REWARD_SETTLEMENT_ENABLED=false
+TYCHE_ACTIVE_RULE_REWARD_SETTLEMENT_ENABLED=false
+TYCHE_REFERRAL_REWARD_SETTLEMENT_ENABLED=false
+TYCHE_REFERRAL_REWARD_TARGET_ALLOWLIST=
 ```
 
 The following two values depend on the runtime mode:
 
-| Mode | `IDEALER_API_BASE_URL` | `IDEALER_TURN_AUTHORITY_KEYPAIR_PATH` |
+| Mode | `TYCHE_API_BASE_URL` | `TYCHE_TURN_AUTHORITY_KEYPAIR_PATH` |
 | --- | --- | --- |
-| Host-native API and worker | `http://127.0.0.1:3002` | An existing ACL-protected host path, for example `C:/Users/<user>/.config/idealer/devnet/idealer-deployer-keypair.json` |
-| Containerized API and worker | `http://api:3002` | `/solana-home/.config/idealer/devnet/idealer-deployer-keypair.json` |
+| Host-native API and worker | `http://127.0.0.1:3002` | An existing ACL-protected host path, for example `C:/Users/<user>/.config/tyche/devnet/tyche-deployer-keypair.json` |
+| Containerized API and worker | `http://api:3002` | `/solana-home/.config/tyche/devnet/tyche-deployer-keypair.json` |
 
-The technical keypair must already exist in the `idealer-solana-home` Docker
+The technical keypair must already exist in the `tyche-solana-home` Docker
 volume. This read-only check prints only its public address:
 
 ```powershell
-docker run --rm -v idealer-solana-home:/solana-home:ro rust:1.91-bookworm bash -lc 'export PATH=/solana-home/.local/share/solana/install/active_release/bin:$PATH; solana-keygen pubkey /solana-home/.config/idealer/devnet/idealer-deployer-keypair.json'
+docker run --rm -v tyche-solana-home:/solana-home:ro rust:1.91-bookworm bash -lc 'export PATH=/solana-home/.local/share/solana/install/active_release/bin:$PATH; solana-keygen pubkey /solana-home/.config/tyche/devnet/tyche-deployer-keypair.json'
 ```
 
 Do not open a turn if this public address is not the approved technical payer,
@@ -87,16 +87,16 @@ host with fast reload and visible terminal logs.
 Set the host-mode values in `.env`, especially:
 
 ```dotenv
-IDEALER_API_BASE_URL=http://127.0.0.1:3002
-IDEALER_TURN_AUTHORITY_KEYPAIR_PATH=C:/Users/<user>/.config/idealer/devnet/idealer-deployer-keypair.json
+TYCHE_API_BASE_URL=http://127.0.0.1:3002
+TYCHE_TURN_AUTHORITY_KEYPAIR_PATH=C:/Users/<user>/.config/tyche/devnet/tyche-deployer-keypair.json
 ```
 
 Before starting the worker, verify that the host can read the existing keypair
 without printing its secret:
 
 ```powershell
-Test-Path $env:USERPROFILE\.config\idealer\devnet\idealer-deployer-keypair.json
-solana-keygen pubkey $env:USERPROFILE\.config\idealer\devnet\idealer-deployer-keypair.json
+Test-Path $env:USERPROFILE\.config\tyche\devnet\tyche-deployer-keypair.json
+solana-keygen pubkey $env:USERPROFILE\.config\tyche\devnet\tyche-deployer-keypair.json
 ```
 
 If the key exists only in the Docker volume, use container mode instead. Do not
@@ -111,9 +111,9 @@ docker compose up -d postgres redis
 Then start each service in its own PowerShell terminal:
 
 ```powershell
-pnpm --filter @idealer/api dev
-pnpm --filter @idealer/worker dev
-pnpm --filter @idealer/web dev
+pnpm --filter @tyche/api dev
+pnpm --filter @tyche/worker dev
+pnpm --filter @tyche/web dev
 ```
 
 Stop a host-native service with `Ctrl+C` in its terminal. After a worker `.env`
@@ -156,8 +156,8 @@ Confirm the effective worker configuration rather than relying only on a stale
 browser page:
 
 ```powershell
-docker inspect idealer-worker --format '{{range .Config.Env}}{{println .}}{{end}}' |
-  Select-String 'IDEALER_(TURN_AUTOMATION_ENABLED|TURN_MANUAL_CONTROL_ENABLED|TURN_MANUAL_OPEN_DURATION_SECONDS|SETTLEMENT_AUTOMATION_ENABLED|.*REWARD.*ENABLED)'
+docker inspect tyche-worker --format '{{range .Config.Env}}{{println .}}{{end}}' |
+  Select-String 'TYCHE_(TURN_AUTOMATION_ENABLED|TURN_MANUAL_CONTROL_ENABLED|TURN_MANUAL_OPEN_DURATION_SECONDS|SETTLEMENT_AUTOMATION_ENABLED|.*REWARD.*ENABLED)'
 ```
 
 For a manual test round, `TURN_AUTOMATION_ENABLED` must be `false` and
@@ -223,7 +223,7 @@ selected runtime:
 Invoke-RestMethod http://127.0.0.1:3003/turn/active | ConvertTo-Json -Depth 8
 # Containerized worker only:
 docker compose logs --tail 100 -f worker
-# Host-native worker: read the terminal that runs `pnpm --filter @idealer/worker dev`.
+# Host-native worker: read the terminal that runs `pnpm --filter @tyche/worker dev`.
 ```
 
 ## 6. Seed or use the turn
@@ -233,9 +233,9 @@ scripts. The input seeder is dry-run by default; it broadcasts only when its
 explicit broadcast flag is set:
 
 ```powershell
-docker exec -e IDEALER_M5_INPUTS_BROADCAST=0 idealer-worker pnpm --filter @idealer/worker exec tsx src/devnet-seed-real-inputs.ts
+docker exec -e TYCHE_M5_INPUTS_BROADCAST=0 tyche-worker pnpm --filter @tyche/worker exec tsx src/devnet-seed-real-inputs.ts
 # Host-native worker:
-pnpm --filter @idealer/worker devnet:seed-real-inputs
+pnpm --filter @tyche/worker devnet:seed-real-inputs
 ```
 
 Do not enable a reward worker merely because a turn is open. Reward automation
@@ -248,13 +248,13 @@ election/draw flow, first enable the settlement scheduler in `.env`, then restar
 the worker in the selected runtime:
 
 ```dotenv
-IDEALER_SETTLEMENT_AUTOMATION_ENABLED=true
+TYCHE_SETTLEMENT_AUTOMATION_ENABLED=true
 ```
 
 ```powershell
 # Containerized worker:
 docker compose up -d --force-recreate worker
-# Host-native worker: stop its `pnpm --filter @idealer/worker dev` process, then run it again.
+# Host-native worker: stop its `pnpm --filter @tyche/worker dev` process, then run it again.
 ```
 
 Then end the play window:
@@ -290,13 +290,13 @@ skips the phase-2 game flow and is only an emergency test escape hatch.
 After `CLOSED`, restore the controlled default and recreate the worker:
 
 ```dotenv
-IDEALER_SETTLEMENT_AUTOMATION_ENABLED=false
+TYCHE_SETTLEMENT_AUTOMATION_ENABLED=false
 ```
 
 ```powershell
 # Containerized worker:
 docker compose up -d --force-recreate worker
-# Host-native worker: restart `pnpm --filter @idealer/worker dev`.
+# Host-native worker: restart `pnpm --filter @tyche/worker dev`.
 ```
 
 ## 8. Reward-worker policy
@@ -304,18 +304,18 @@ docker compose up -d --force-recreate worker
 Keep these disabled unless the exact transfer scope has been reviewed:
 
 ```dotenv
-IDEALER_TOKEN_REWARD_SETTLEMENT_ENABLED=false
-IDEALER_ACTIVE_RULE_REWARD_SETTLEMENT_ENABLED=false
-IDEALER_REFERRAL_REWARD_SETTLEMENT_ENABLED=false
+TYCHE_TOKEN_REWARD_SETTLEMENT_ENABLED=false
+TYCHE_ACTIVE_RULE_REWARD_SETTLEMENT_ENABLED=false
+TYCHE_REFERRAL_REWARD_SETTLEMENT_ENABLED=false
 ```
 
 Referral automation is intentionally target-bound. A temporary devnet target
 uses this form and must be removed after verification:
 
 ```dotenv
-IDEALER_REFERRAL_REWARD_SETTLEMENT_ENABLED=true
-IDEALER_REFERRAL_REWARD_SETTLEMENT_INTERVAL_MS=300000
-IDEALER_REFERRAL_REWARD_TARGET_ALLOWLIST=<turnId>:<invitee-public-key>
+TYCHE_REFERRAL_REWARD_SETTLEMENT_ENABLED=true
+TYCHE_REFERRAL_REWARD_SETTLEMENT_INTERVAL_MS=300000
+TYCHE_REFERRAL_REWARD_TARGET_ALLOWLIST=<turnId>:<invitee-public-key>
 ```
 
 The worker verifies the referral-attribution PDA, the invitee's first
@@ -351,8 +351,8 @@ Common problems:
 | Symptom | Safe response |
 | --- | --- |
 | `429 Too Many Requests` from devnet RPC | Wait and retry the read-only check. Do not change recipients or resend a completed reward; receipt checks are idempotent. |
-| Worker cannot reach API | In a container, use `IDEALER_API_BASE_URL=http://api:3002`, not `http://localhost:3002`. |
-| Host-native worker cannot reach API | Use `IDEALER_API_BASE_URL=http://127.0.0.1:3002` and confirm the host API process is listening. |
+| Worker cannot reach API | In a container, use `TYCHE_API_BASE_URL=http://api:3002`, not `http://localhost:3002`. |
+| Host-native worker cannot reach API | Use `TYCHE_API_BASE_URL=http://127.0.0.1:3002` and confirm the host API process is listening. |
 | Keypair path missing in worker | In a container use the mounted `/solana-home/...` path; on the host use the protected Windows path. Restart the relevant worker after correcting `.env`. |
 | `active_turn_exists` | Read `/turn/active`; use the existing turn or settle it. Do not try to open another one. |
 | Predecessor not `CLOSED` | Run the normal settlement flow until its terminal transition is recorded. |

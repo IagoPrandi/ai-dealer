@@ -3,7 +3,7 @@
 import { address } from "@solana/kit";
 
 import { getWorkerBaseUrl } from "../lib/workerBase";
-import type { ActiveTurnSnapshot } from "./idealerProgram";
+import type { ActiveTurnSnapshot } from "./tycheProgram";
 
 interface ActiveTurnApiResponse {
   globalConfig: {

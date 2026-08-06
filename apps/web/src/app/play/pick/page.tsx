@@ -1,10 +1,10 @@
-import { IdealerApp } from "../../../features/idealer/IdealerApp";
+import { TycheApp } from "../../../features/tyche/TycheApp";
 import { SolanaProviders } from "../../../solana/SolanaProviders";
 
 export default function PlayPickPage() {
   return (
     <SolanaProviders>
-      <IdealerApp initialScreen="play" />
+      <TycheApp initialScreen="play" />
     </SolanaProviders>
   );
 }

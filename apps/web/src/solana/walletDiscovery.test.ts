@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { isSupportedIdealerWallet } from "./walletDiscovery";
+import { isSupportedTycheWallet } from "./walletDiscovery";
 
 test("supports Solana wallet-standard wallets", () => {
   assert.equal(
-    isSupportedIdealerWallet({
+    isSupportedTycheWallet({
       chains: ["solana:devnet"],
       features: {
         "solana:signTransaction": {},
@@ -19,7 +19,7 @@ test("supports Solana wallet-standard wallets", () => {
 
 test("rejects non-Solana wallets", () => {
   assert.equal(
-    isSupportedIdealerWallet({
+    isSupportedTycheWallet({
       chains: ["eip155:1"],
       features: {
         "standard:connect": {},
@@ -32,7 +32,7 @@ test("rejects non-Solana wallets", () => {
 
 test("rejects MetaMask even if it advertises Solana features", () => {
   assert.equal(
-    isSupportedIdealerWallet({
+    isSupportedTycheWallet({
       chains: ["solana:devnet"],
       features: {
         "solana:signTransaction": {},
@@ -46,7 +46,7 @@ test("rejects MetaMask even if it advertises Solana features", () => {
 
 test("rejects MetaMask name variants", () => {
   assert.equal(
-    isSupportedIdealerWallet({
+    isSupportedTycheWallet({
       chains: ["solana:devnet"],
       features: {
         "solana:signTransaction": {},

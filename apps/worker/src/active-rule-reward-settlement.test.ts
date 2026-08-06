@@ -13,7 +13,7 @@ import {
 } from "./active-rule-reward-settlement.js";
 import { CURRENT_TURN_STATE_DATA_LENGTH } from "./settlement.js";
 
-const IDEALER_PROGRAM = key(1);
+const TYCHE_PROGRAM = key(1);
 const TOKENOMICS_PROGRAM = key(2);
 const AUTHORITY = key(3);
 const GLOBAL_CONFIG = key(4);
@@ -178,7 +178,7 @@ test("accepts only winner summaries that exactly reconcile quotient and remainde
   );
 });
 
-test("builds the exact Idealer CPI with canonical voter account order", () => {
+test("builds the exact Tyche CPI with canonical voter account order", () => {
   const voterTokenAccounts = [key(31), key(32)];
   const plan: ActiveRuleRewardPlan = {
     activeRuleId: 7,
@@ -213,7 +213,7 @@ test("builds the exact Idealer CPI with canonical voter account order", () => {
     authority: AUTHORITY,
     campaign: plan.campaign,
     globalConfig: GLOBAL_CONFIG,
-    idealerProgramId: IDEALER_PROGRAM,
+    tycheProgramId: TYCHE_PROGRAM,
     plan,
     ruleProposal: RULE_PROPOSAL,
     tokenomicsProgramId: TOKENOMICS_PROGRAM,

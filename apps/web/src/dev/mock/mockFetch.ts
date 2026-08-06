@@ -1,6 +1,6 @@
 /**
  * Intercepta window.fetch no modo galeria e responde os endpoints da API do
- * Idealer com dados canned. Qualquer URL desconhecida segue para o fetch real.
+ * Tyche com dados canned. Qualquer URL desconhecida segue para o fetch real.
  *
  * Idempotente: chamar installMockFetch() mais de uma vez não empilha patches.
  */
@@ -18,7 +18,7 @@ import {
   MOCK_RULE_VOTES,
 } from "./mockData";
 
-const INSTALLED_FLAG = "__idealerMockFetchInstalled";
+const INSTALLED_FLAG = "__tycheMockFetchInstalled";
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {

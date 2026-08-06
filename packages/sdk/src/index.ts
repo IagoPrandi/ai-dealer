@@ -1,6 +1,6 @@
-import type { TurnId } from "@idealer/types";
+import type { TurnId } from "@tyche/types";
 
-export interface IdealerSdkConfig {
+export interface TycheSdkConfig {
   apiBaseUrl: string;
 }
 

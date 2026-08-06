@@ -72,7 +72,7 @@ function tokenCount(prompt: string) {
 
 test("the compile_rule_to_ast skill prompt is versioned and covers both rule modes", () => {
   const prompt = buildRuleCompilerSkillPrompt();
-  assert.match(RULE_COMPILER_SKILL_VERSION, /^idealer_rule_compiler_skill_/);
+  assert.match(RULE_COMPILER_SKILL_VERSION, /^tyche_rule_compiler_skill_/);
   assert.ok(prompt.includes('"schemaVersion":3'));
   assert.ok(prompt.includes("predicate") && prompt.includes("ranking"));
   // It must teach the digit + ranking path (the previously-impossible case).
@@ -1529,7 +1529,7 @@ test("allows an LLM-emitted ALWAYS_TRUE rule but labels its difficulty", async (
 test("exposes the prompt contract for audit", () => {
   const contract = getRuleValidationPromptContract();
 
-  assert.equal(contract.version, "idealer_rule_validation_prompt_v1");
+  assert.equal(contract.version, "tyche_rule_validation_prompt_v1");
   assert.deepEqual(contract.allowedInputs, ["guess", "draw"]);
 });
 

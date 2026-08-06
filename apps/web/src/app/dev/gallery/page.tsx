@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Galeria de validação de UI — renderiza as telas do Idealer lado a lado, já no
+ * Galeria de validação de UI — renderiza as telas do Tyche lado a lado, já no
  * estado "carregado", sem backend, devnet ou carteira real.
  *
  * Só funciona com o flag de mock ligado:  npm run dev:mock
@@ -14,8 +14,8 @@
 import { Component, type ReactNode } from "react";
 
 import { installMockFetch } from "../../../dev/mock/mockFetch";
-import { IdealerApp } from "../../../features/idealer/IdealerApp";
-import type { Screen } from "../../../features/idealer/context";
+import { TycheApp } from "../../../features/tyche/TycheApp";
+import type { Screen } from "../../../features/tyche/context";
 import { SolanaProviders } from "../../../solana/SolanaProviders";
 
 if (typeof window !== "undefined") {
@@ -73,7 +73,7 @@ export default function GalleryPage() {
     <main className="gx-root">
       <style>{GALLERY_CSS}</style>
       <header className="gx-top">
-        <h1>Idealer — screen gallery</h1>
+        <h1>Tyche — screen gallery</h1>
         <p>
           Every screen with state already loaded (wallet connected, round open,
           canned data). No backend, devnet, or on-chain execution. Each frame is
@@ -90,7 +90,7 @@ export default function GalleryPage() {
               </div>
               <div className="gx-frame">
                 <CardBoundary>
-                  <IdealerApp initialScreen={card.screen} />
+                  <TycheApp initialScreen={card.screen} />
                 </CardBoundary>
               </div>
             </section>

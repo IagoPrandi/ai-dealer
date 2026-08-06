@@ -2167,6 +2167,7 @@ fn mark_operation_executed(operation: &mut ScheduledTreasuryOperation) -> Result
 
 fn spending_limit_hash(args: &ActivateSpendingLimitArgs) -> [u8; 32] {
     hashv(&[
+        // Existing scheduled operations commit to this legacy protocol domain.
         b"idealer:treasury-spending-limit:v1",
         &args.limit_id.to_le_bytes(),
         args.operator.as_ref(),

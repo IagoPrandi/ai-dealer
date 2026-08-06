@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tyche UI Coherence"
+  short_description: "Preserve Tyche visual identity"
+  default_prompt: "Use $tyche-ui-coherence before extending any Tyche screen or component."

@@ -1,28 +1,28 @@
 #!/usr/bin/env bash
 # SBF build / SBF integration test / devnet upgrade-deploy helper for the
-# Idealer program. Designed to run INSIDE the pinned toolchain container with
+# Tyche program. Designed to run INSIDE the pinned toolchain container with
 # these mounts:
 #   - workspace        -> /workspace
-#   - idealer-solana-home -> /root   (persists the Agave toolchain + deploy keys)
-#   - idealer-cargo-registry -> /usr/local/cargo/registry
-#   - idealer-sbf-target -> /sbf-target  (CARGO_TARGET_DIR)
+#   - tyche-solana-home -> /root   (persists the Agave toolchain + deploy keys)
+#   - tyche-cargo-registry -> /usr/local/cargo/registry
+#   - tyche-sbf-target -> /sbf-target  (CARGO_TARGET_DIR)
 #
 # Never prints or copies keypair contents. Keypairs are read from the mounted
-# volume at /root/.config/idealer/devnet/.
+# volume at /root/.config/tyche/devnet/.
 set -euo pipefail
 
 AGAVE_VERSION="${AGAVE_VERSION:-2.1.21}"
-DEPLOY_DIR="/root/.config/idealer/devnet"
-DEPLOY_PROGRAM="${DEPLOY_PROGRAM:-idealer}"
+DEPLOY_DIR="/root/.config/tyche/devnet"
+DEPLOY_PROGRAM="${DEPLOY_PROGRAM:-tyche}"
 case "${DEPLOY_PROGRAM}" in
-  idealer)
-    default_program_keypair="${DEPLOY_DIR}/idealer-program-keypair.json"
+  tyche)
+    default_program_keypair="${DEPLOY_DIR}/tyche-program-keypair.json"
     ;;
   tokenomics_core)
     default_program_keypair="${DEPLOY_DIR}/tokenomics-core-program-keypair.json"
     ;;
   *)
-    echo "[config] DEPLOY_PROGRAM must be idealer or tokenomics_core" >&2
+    echo "[config] DEPLOY_PROGRAM must be tyche or tokenomics_core" >&2
     exit 2
     ;;
 esac
@@ -73,7 +73,7 @@ ensure_toolchain() {
 cmd_build() {
   ensure_toolchain
   cd /workspace/contracts/solana
-  local idealer_feature_args=()
+  local tyche_feature_args=()
   local tokenomics_feature_args=()
   if [ -n "${TOKENOMICS_SBF_FEATURES:-}" ]; then
     echo "[build] tokenomics-core features: ${TOKENOMICS_SBF_FEATURES}"
@@ -83,7 +83,7 @@ cmd_build() {
     # Optional cargo features (e.g. SBF_FEATURES=devnet-test). Defaults to none
     # so production builds never include test-only instructions.
     echo "[build] features: ${SBF_FEATURES}"
-    idealer_feature_args=(--features "${SBF_FEATURES}")
+    tyche_feature_args=(--features "${SBF_FEATURES}")
   fi
   echo "[build] cargo build-sbf (tokenomics-core, isolated entrypoint)..."
   local build_log
@@ -91,7 +91,7 @@ cmd_build() {
   build_log="$(mktemp)"
   set +e
   # Build each deployable independently. A workspace-wide build unifies
-  # idealer's tokenomics-core/cpi dependency into tokenomics-core itself and
+  # tyche's tokenomics-core/cpi dependency into tokenomics-core itself and
   # silently produces a tokenomics artifact with no entrypoint.
   cargo-build-sbf \
     --manifest-path programs/tokenomics_core/Cargo.toml \
@@ -107,18 +107,18 @@ cmd_build() {
   fi
   rm -f "${build_log}"
 
-  echo "[build] cargo build-sbf (idealer)..."
+  echo "[build] cargo build-sbf (tyche)..."
   build_log="$(mktemp)"
   set +e
   cargo-build-sbf \
-    --manifest-path programs/idealer/Cargo.toml \
+    --manifest-path programs/tyche/Cargo.toml \
     --sbf-out-dir "${SBF_OUT_DIR}" \
-    "${idealer_feature_args[@]}" 2>&1 \
+    "${tyche_feature_args[@]}" 2>&1 \
     | tee "${build_log}"
   build_status="${PIPESTATUS[0]}"
   set -e
   if [ "${build_status}" -ne 0 ] || grep -q '^Error:' "${build_log}"; then
-    echo "[build] idealer cargo build-sbf reported compiler errors" >&2
+    echo "[build] tyche cargo build-sbf reported compiler errors" >&2
     rm -f "${build_log}"
     return 1
   fi
@@ -127,11 +127,11 @@ cmd_build() {
   # cargo-build-sbf may create deploy keypairs as a side effect. The programs
   # use declared ids and verification never needs these disposable secrets.
   rm -f \
-    "${SBF_OUT_DIR}/idealer-keypair.json" \
+    "${SBF_OUT_DIR}/tyche-keypair.json" \
     "${SBF_OUT_DIR}/tokenomics_core-keypair.json"
   ls -la \
     "${SBF_OUT_DIR}/tokenomics_core.so" \
-    "${SBF_OUT_DIR}/idealer.so"
+    "${SBF_OUT_DIR}/tyche.so"
 }
 
 cmd_test_sbf() {
@@ -148,18 +148,18 @@ cmd_test_sbf() {
   echo "[test:sbf] running ignored instruction suite against the SBF build..."
   # These stateful integration suites must run serially. `--test-threads=1`
   # only serializes cases inside one test binary; Cargo can still launch the
-  # Idealer and Tokenomics Core binaries concurrently when addressed through
+  # Tyche and Tokenomics Core binaries concurrently when addressed through
   # the workspace, which makes the SBF run flaky.
   SBF_OUT_DIR="${test_out_dir}" BPF_OUT_DIR="${test_out_dir}" \
     cargo test -p tokenomics-core --test instructions --all-features --locked -- --ignored --test-threads=1
   SBF_OUT_DIR="${test_out_dir}" BPF_OUT_DIR="${test_out_dir}" \
-    cargo test -p idealer --test instructions --all-features --locked -- --ignored --test-threads=1
+    cargo test -p tyche --test instructions --all-features --locked -- --ignored --test-threads=1
 }
 
 cmd_deploy() {
   ensure_toolchain
   solana config set --url devnet >/dev/null
-  local deployer="${DEPLOY_DIR}/idealer-deployer-keypair.json"
+  local deployer="${DEPLOY_DIR}/tyche-deployer-keypair.json"
   local program_kp="${PROGRAM_KEYPAIR_PATH}"
   local program_id
   program_id="$(resolve_program_id)"
@@ -191,7 +191,7 @@ cmd_set_upgrade_authority() {
     echo "[config] NEW_UPGRADE_AUTHORITY is required" >&2
     return 1
   fi
-  local deployer="${DEPLOY_DIR}/idealer-deployer-keypair.json"
+  local deployer="${DEPLOY_DIR}/tyche-deployer-keypair.json"
   local program_id
   program_id="$(resolve_program_id)"
   assert_declared_program_id "${program_id}"
@@ -210,7 +210,7 @@ cmd_set_upgrade_authority() {
 cmd_fund() {
   ensure_toolchain
   local deployer_pub
-  deployer_pub="$(solana-keygen pubkey "${DEPLOY_DIR}/idealer-deployer-keypair.json")"
+  deployer_pub="$(solana-keygen pubkey "${DEPLOY_DIR}/tyche-deployer-keypair.json")"
   local target_sol="${2:-4}"
   for attempt in $(seq 1 12); do
     local balance

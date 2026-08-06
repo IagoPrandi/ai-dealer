@@ -1,4 +1,4 @@
-﻿# Idealer — Product Requirements Document
+# Tyche — Product Requirements Document
 
 > **Version:** 1.5.2
 > **Status:** Implementation Baseline — MVP defaults integrated; governed verifiable-randomness provider abstraction added; local/self-hosted LLM support added; rule elimination decision phase added; repeated paid action fee escalation specified
@@ -36,12 +36,12 @@
 ## 2026-07-24 Verifiable-Randomness Provider Amendment
 
 This amendment supersedes every provider-specific clause below that names
-Switchboard as the only permitted MVP provider. Idealer uses a
+Switchboard as the only permitted MVP provider. Tyche uses a
 Squads-governed, allowlisted verifiable-randomness provider for finalist
 selection, active-rule selection, and the number draw:
 
 - **ORAO v2 is the primary provider for the devnet continuation.** The official
-  ORAO programme identity is compiled into the Idealer programme. The existing
+  ORAO programme identity is compiled into the Tyche programme. The existing
   draw/election VRF configuration fields select ORAO only when they equal its
   canonical Network State PDA.
 - **Switchboard On-Demand remains a compatible provider.** Existing configured
@@ -49,9 +49,9 @@ selection, active-rule selection, and the number draw:
   same owner, queue, seed-slot, and same-transaction reveal verification.
 - **The provider is bound when a request is recorded.** There is no automatic
   or operator-selected fallback after commitment. ORAO request creation and the
-  corresponding Idealer request instruction must execute atomically.
+  corresponding Tyche request instruction must execute atomically.
 - **ORAO v2 requests are bound to the official programme, their canonical seed
-  PDA, and the Idealer authority as client.** Pre-fulfilled requests are
+  PDA, and the Tyche authority as client.** Pre-fulfilled requests are
   rejected. A fulfilled 64-byte ORAO result is SHA-256 compressed to the
   protocol's existing 32-byte randomness input.
 - **Persistent requests cannot be discarded.** Once an ORAO request is
@@ -72,13 +72,13 @@ selection, active-rule selection, and the number draw:
 
 ### 1.1 Product Summary
 
-Idealer is a decentralized, mobile-first on-chain lottery game built on Solana where players bet on sequences of six unique numbers drawn every turn.
+Tyche is a decentralized, mobile-first on-chain lottery game built on Solana where players bet on sequences of six unique numbers drawn every turn.
 
-What differentiates Idealer from conventional lotteries is its **community-governed rule engine**: players can propose, vote on, and activate alternative winning conditions each turn. These alternative rules are written in natural language, compiled by an AI Rule Compiler into a constrained DSL/AST, tested before activation, frozen before the draw, and executed deterministically by a sandboxed runtime.
+What differentiates Tyche from conventional lotteries is its **community-governed rule engine**: players can propose, vote on, and activate alternative winning conditions each turn. These alternative rules are written in natural language, compiled by an AI Rule Compiler into a constrained DSL/AST, tested before activation, frozen before the draw, and executed deterministically by a sandboxed runtime.
 
 The AI system does **not** directly decide `WIN` or `LOSE`. It converts user intent into a formal rule artifact. The deterministic game engine and rule runtime evaluate winners.
 
-The product is not positioned only as a lottery. Idealer is positioned as a **social game of mutable rules**, where the community does not only play the game; it helps define how winning can happen in each round.
+The product is not positioned only as a lottery. Tyche is positioned as a **social game of mutable rules**, where the community does not only play the game; it helps define how winning can happen in each round.
 
 ### 1.2 Vision
 
@@ -86,7 +86,7 @@ To create a transparent, mobile-native, community-programmable lottery game wher
 
 ### 1.3 Product Thesis
 
-Traditional lotteries are static: users pick numbers, wait for a draw, and either win or lose. Idealer adds a second layer of participation: the community can propose and vote on alternative ways to win.
+Traditional lotteries are static: users pick numbers, wait for a draw, and either win or lose. Tyche adds a second layer of participation: the community can propose and vote on alternative ways to win.
 
 This turns each round into a live event driven by:
 
@@ -116,7 +116,7 @@ Secondary audience:
 
 ### 1.5 Platform
 
-Idealer is primarily a **mobile-first DApp**.
+Tyche is primarily a **mobile-first DApp**.
 
 The main product experience is designed for users opening the app from a mobile browser, wallet browser, or mobile wallet deep link. Desktop web is supported, but it is secondary.
 
@@ -129,8 +129,8 @@ The main product experience is designed for users opening the app from a mobile 
 - **Frontend Framework:** Next.js
 - **Repository Architecture:** Monorepo
 - **Local Runtime:** Docker / Docker Compose
-- **Docker Compose Project Name:** `idealer`
-- **Container Group Prefix:** `idealer-*`
+- **Docker Compose Project Name:** `tyche`
+- **Container Group Prefix:** `tyche-*`
 - **Wallet Support:** Phantom, Backpack, Solflare, and mobile wallet adapters
 - **Randomness:** Squads-governed on-chain verifiable randomness; ORAO v2 is primary for the current devnet continuation and Switchboard On-Demand remains compatible
 - **AI Rule Compilation:** Multi-agent AI Rule Compiler harness
@@ -263,11 +263,11 @@ It should be shown prominently in the UI with:
 
 ### 3.1 Product Narrative
 
-Idealer is not positioned to the public as a traditional lottery, nor as a purely technical on-chain randomness protocol.
+Tyche is not positioned to the public as a traditional lottery, nor as a purely technical on-chain randomness protocol.
 
 Its public narrative is:
 
-> **Idealer is the game where every round has a new way to win — and the community helps decide the rules.**
+> **Tyche is the game where every round has a new way to win — and the community helps decide the rules.**
 
 The emotional hook is not only the chance of matching numbers. The core fantasy is that players participate in a living game where luck, creativity, voting, and timing all matter.
 
@@ -308,9 +308,9 @@ Desired player perception:
 
 ### 3.4 Positioning Statement
 
-For crypto-native players who enjoy mobile DApps, randomness, community mechanics, and on-chain transparency, Idealer is a social lottery game where each round can have a community-created alternative winning rule.
+For crypto-native players who enjoy mobile DApps, randomness, community mechanics, and on-chain transparency, Tyche is a social lottery game where each round can have a community-created alternative winning rule.
 
-Unlike conventional lotteries, where the experience is static, Idealer makes the rule layer part of the gameplay: players do not only participate in the draw; they help shape what winning can mean in that round.
+Unlike conventional lotteries, where the experience is static, Tyche makes the rule layer part of the gameplay: players do not only participate in the draw; they help shape what winning can mean in that round.
 
 ### 3.5 Audience Segments
 
@@ -375,7 +375,7 @@ Motivations:
 
 ### 4.1 UX Goal
 
-The UI should make Idealer feel like a live, social, repeatable mobile game — not a static lottery form.
+The UI should make Tyche feel like a live, social, repeatable mobile game — not a static lottery form.
 
 The primary experience is mobile/DApp. Every core flow must work smoothly on small screens, inside wallet browsers, and through mobile wallet transaction prompts.
 
@@ -489,7 +489,7 @@ const RULE_TOKEN_LIMIT = {
   // Phi, Llama, Gemma, Qwen, Claude, ...) is active. Never derive the limit
   // tokenizer from the currently selected model, because tokenizers diverge
   // 10-30% across model families.
-  tokenizer: "idealer_canonical_tokenizer_v1",
+  tokenizer: "tyche_canonical_tokenizer_v1",
   enforcement: "server_side",
 };
 ```
@@ -665,7 +665,7 @@ Each share card should include:
 
 ### 4.9 Mobile Onboarding UX
 
-First-time experience should explain Idealer in three steps:
+First-time experience should explain Tyche in three steps:
 
 ```text
 1. Pick 6 numbers.
@@ -682,7 +682,7 @@ Mobile onboarding must also explain wallet connection in plain language:
 ```text
 Connect your wallet to play.
 You will confirm actions in your wallet app.
-Return to Idealer after approval.
+Return to Tyche after approval.
 ```
 
 The DApp should avoid overwhelming new users with blockchain terminology before they understand the round loop.
@@ -784,7 +784,7 @@ Phase 2 — shortlist & draw (~2h): starts when the 10-rule finalist shortlist i
 The on-chain 4-slot duration-cycle machinery is retained with equal slots
 (`[86400, 86400, 86400, 86400]` seconds), so existing accounts, instructions,
 and automation keep working. Test/devnet environments scale the turn duration
-down at runtime (`IDEALER_DEVNET_TURN_DURATION_SCALE_BPS`) while preserving the
+down at runtime (`TYCHE_DEVNET_TURN_DURATION_SCALE_BPS`) while preserving the
 same phase shape. The decision window has no duration constant to scale: it
 simply spans phase 2 and closes at the turn end in all builds. The on-chain
 `end_timestamp` may shift after finalist settlement so phase 2 receives its full
@@ -1104,7 +1104,7 @@ This value is configurable by deployment.
 Token limit requirements:
 
 - tokenization must run server-side;
-- tokenization must use the fixed canonical tokenizer (`idealer_canonical_tokenizer_v1`), independent of the active inference provider/model, so the limit is stable across cloud and local backends;
+- tokenization must use the fixed canonical tokenizer (`tyche_canonical_tokenizer_v1`), independent of the active inference provider/model, so the limit is stable across cloud and local backends;
 - frontend may display an approximate live counter;
 - backend is the source of truth;
 - rules exceeding the token limit are rejected before payment or on-chain submission;
@@ -1957,7 +1957,7 @@ interface LLMProviderConfig {
     | string;
   mode: "cloud" | "local";
   model: string; // e.g. "phi4", "llama3.2", "qwen2.5:14b-instruct-q4_K_M"
-  baseUrl?: string; // required for local; e.g. "http://idealer-llm:11434/v1"
+  baseUrl?: string; // required for local; e.g. "http://tyche-llm:11434/v1"
   apiKey?: string; // optional; local endpoints may use a dummy value or none
   timeoutMs: number;
   maxRetries: number;
@@ -2447,7 +2447,7 @@ Required MCP server groups:
 
 MCP restrictions:
 
-- no network tool for the agent; the only permitted, network-isolated egress is the configured LLM inference endpoint (cloud provider or the local `idealer-llm` service);
+- no network tool for the agent; the only permitted, network-isolated egress is the configured LLM inference endpoint (cloud provider or the local `tyche-llm` service);
 - no filesystem browsing tool;
 - no shell execution;
 - no arbitrary code execution;
@@ -2463,7 +2463,7 @@ The prompt contract must instruct agents to compile, not judge winners.
 Compiler system behavior:
 
 ```text
-You are an AI Rule Compiler for Idealer.
+You are an AI Rule Compiler for Tyche.
 Your job is to convert a user-written lottery rule into a constrained DSL/AST.
 You do not decide whether a player wins.
 You do not execute payouts.
@@ -2476,7 +2476,7 @@ Return only valid JSON matching the required schema.
 Normalizer system behavior:
 
 ```text
-You are a Rule Normalizer for Idealer.
+You are a Rule Normalizer for Tyche.
 Your job is to add explicit operational clauses needed to make a rule safe, bounded, and executable.
 You must preserve the user's core intent.
 You may add range guards, division guards, modulo guards, bounded removal guards, finite iteration limits, and no-op fallbacks for invalid transformations.
@@ -2488,7 +2488,7 @@ Return the normalized text, added clauses, preserved intent explanation, and con
 Reviewer system behavior:
 
 ```text
-You are a Rule Reviewer for Idealer.
+You are a Rule Reviewer for Tyche.
 Compare the original rule, official interpretation, and DSL/AST.
 Flag any mismatch, ambiguity, unsupported operation, or hidden dependency.
 Return only valid JSON.
@@ -2497,7 +2497,7 @@ Return only valid JSON.
 Adversarial tester behavior:
 
 ```text
-You are an Adversarial Rule Tester for Idealer.
+You are an Adversarial Rule Tester for Tyche.
 Generate edge cases that could break, exploit, or reveal ambiguity in the compiled rule.
 Do not use external data.
 Return bounded test cases only.
@@ -2573,13 +2573,13 @@ The repository must include `AGENTS.md` defining:
 
 ### 8.1 Token
 
-> **SUPERSEDED — see PRD-TOKENOMICS-v2.8 §1.1, §3.** Idealer now introduces a
+> **SUPERSEDED — see PRD-TOKENOMICS-v2.8 §1.1, §3.** Tyche now introduces a
 > fixed-supply 1,000,000,000 SPL token as the only entitlement mechanism for
 > treasury-fee distributions. The "native SOL / no SPL token" statements below
 > are legacy and no longer binding. Native SOL remains the prize and game-fee
 > currency; the SPL token governs locking, treasury-fee claims, and promotions.
 
-Idealer uses native SOL.
+Tyche uses native SOL.
 
 No SPL token is required for MVP.
 
@@ -2682,7 +2682,7 @@ If no alternative rule is active, if the alternative rule is invalidated, or if 
 > **SUPERSEDED (currency, funding & rate) — see PRD-TOKENOMICS-v2.8 §5.3, §5.3.1, §4.1.**
 > The rate is now **22.5%** of one individual payout (the former 15% was raised by
 > 50% with the action rewards), and the creator and
-> voter rewards are now paid in **Idealer tokens from a campaign reserve vault**,
+> voter rewards are now paid in **Tyche tokens from a campaign reserve vault**,
 > not in SOL from platform monetization. No direct SOL is paid for these rewards,
 > and they are never deducted from the treasury-fee (locker) distribution. The
 > SOL amount is converted to token atoms via the reward-only relation
@@ -3753,7 +3753,7 @@ Recommended tooling:
 Recommended repository structure:
 
 ```text
-idealer/
+tyche/
 ├── apps/
 │   ├── web/                    # Mobile-first Next.js DApp / PWA
 │   ├── api/                    # Backend API service
@@ -3824,7 +3824,7 @@ Docker is required for local infrastructure services and recommended for backend
 The Docker Compose project name must be fixed as:
 
 ```text
-idealer
+tyche
 ```
 
 This makes the local container group predictable across machines and CI environments.
@@ -3832,16 +3832,16 @@ This makes the local container group predictable across machines and CI environm
 The recommended `.env.docker` or shell configuration should include:
 
 ```bash
-COMPOSE_PROJECT_NAME=idealer
+COMPOSE_PROJECT_NAME=tyche
 ```
 
 The root `docker-compose.yml` may also define the project name explicitly:
 
 ```yaml
-name: idealer
+name: tyche
 ```
 
-All local containers must use the `idealer-*` naming pattern.
+All local containers must use the `tyche-*` naming pattern.
 
 Benefits:
 
@@ -3858,62 +3858,62 @@ Minimum Docker Compose services:
 
 | Service    | Container name     | Purpose                                                                                         | Default port |
 | ---------- | ------------------ | ----------------------------------------------------------------------------------------------- | -----------: |
-| `postgres` | `idealer-postgres` | Primary relational database for turns, rules, votes, guesses, logs, profiles, metrics snapshots |       `5432` |
-| `redis`    | `idealer-redis`    | Queue backend, cache, rate-limit state, live event coordination                                 |       `6379` |
-| `api`      | `idealer-api`      | Backend API for mobile DApp, rule preflight, round state, audit endpoints                       |       `4000` |
-| `worker`   | `idealer-worker`   | Background processor for rule compilation, runtime evaluation, attestation, scheduled jobs      |     internal |
-| `web`      | `idealer-web`      | Mobile-first Next.js DApp / PWA                                                                 |       `3000` |
+| `postgres` | `tyche-postgres` | Primary relational database for turns, rules, votes, guesses, logs, profiles, metrics snapshots |       `5432` |
+| `redis`    | `tyche-redis`    | Queue backend, cache, rate-limit state, live event coordination                                 |       `6379` |
+| `api`      | `tyche-api`      | Backend API for mobile DApp, rule preflight, round state, audit endpoints                       |       `4000` |
+| `worker`   | `tyche-worker`   | Background processor for rule compilation, runtime evaluation, attestation, scheduled jobs      |     internal |
+| `web`      | `tyche-web`      | Mobile-first Next.js DApp / PWA                                                                 |       `3000` |
 
 Optional local containers:
 
 | Service      | Container name       | Purpose                                                                                                                                                      | Default port |
 | ------------ | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -----------: |
-| `admin`      | `idealer-admin`      | Optional read-only transparency console for public turn/rule/fee/prize/reward/settlement/audit metrics plus restricted AI operations monitoring. |       `3001` |
-| `mcp`        | `idealer-mcp`        | Local bounded MCP tools for rule schema, compiler, runtime, test harness, game engine and audit logging.                                                     |     internal |
-| `llm`        | `idealer-llm`        | Optional local/self-hosted LLM inference (Ollama/vLLM) exposing an OpenAI-compatible endpoint for the rule compiler. GPU recommended; CPU viable for models ≤4B. Not in the default required stack. |      `11434` |
-| `prometheus` | `idealer-prometheus` | Local metrics collection                                                                                                                                     |       `9090` |
-| `grafana`    | `idealer-grafana`    | Local metrics dashboards                                                                                                                                     |       `3002` |
-| `mailpit`    | `idealer-mailpit`    | Local email testing, if email notifications are introduced                                                                                                   |       `8025` |
+| `admin`      | `tyche-admin`      | Optional read-only transparency console for public turn/rule/fee/prize/reward/settlement/audit metrics plus restricted AI operations monitoring. |       `3001` |
+| `mcp`        | `tyche-mcp`        | Local bounded MCP tools for rule schema, compiler, runtime, test harness, game engine and audit logging.                                                     |     internal |
+| `llm`        | `tyche-llm`        | Optional local/self-hosted LLM inference (Ollama/vLLM) exposing an OpenAI-compatible endpoint for the rule compiler. GPU recommended; CPU viable for models ≤4B. Not in the default required stack. |      `11434` |
+| `prometheus` | `tyche-prometheus` | Local metrics collection                                                                                                                                     |       `9090` |
+| `grafana`    | `tyche-grafana`    | Local metrics dashboards                                                                                                                                     |       `3002` |
+| `mailpit`    | `tyche-mailpit`    | Local email testing, if email notifications are introduced                                                                                                   |       `8025` |
 
 #### 12.3.3 Required Docker Compose Definition
 
 The local Docker Compose file should define explicit service names, container names, a shared network, and named volumes.
 
 ```yaml
-name: idealer
+name: tyche
 
 services:
   postgres:
     image: postgres:16
-    container_name: idealer-postgres
+    container_name: tyche-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: idealer
-      POSTGRES_USER: idealer
-      POSTGRES_PASSWORD: idealer
+      POSTGRES_DB: tyche
+      POSTGRES_USER: tyche
+      POSTGRES_PASSWORD: tyche
     ports:
       - "5432:5432"
     volumes:
-      - idealer-postgres-data:/var/lib/postgresql/data
+      - tyche-postgres-data:/var/lib/postgresql/data
     networks:
-      - idealer-network
+      - tyche-network
 
   redis:
     image: redis:7
-    container_name: idealer-redis
+    container_name: tyche-redis
     restart: unless-stopped
     ports:
       - "6379:6379"
     volumes:
-      - idealer-redis-data:/data
+      - tyche-redis-data:/data
     networks:
-      - idealer-network
+      - tyche-network
 
   api:
     build:
       context: .
       dockerfile: infra/docker/api.Dockerfile
-    container_name: idealer-api
+    container_name: tyche-api
     restart: unless-stopped
     depends_on:
       - postgres
@@ -3921,18 +3921,18 @@ services:
     env_file:
       - .env.docker
     environment:
-      DATABASE_URL: postgresql://idealer:idealer@postgres:5432/idealer
+      DATABASE_URL: postgresql://tyche:tyche@postgres:5432/tyche
       REDIS_URL: redis://redis:6379
     ports:
       - "4000:4000"
     networks:
-      - idealer-network
+      - tyche-network
 
   worker:
     build:
       context: .
       dockerfile: infra/docker/worker.Dockerfile
-    container_name: idealer-worker
+    container_name: tyche-worker
     restart: unless-stopped
     depends_on:
       - postgres
@@ -3940,16 +3940,16 @@ services:
     env_file:
       - .env.docker
     environment:
-      DATABASE_URL: postgresql://idealer:idealer@postgres:5432/idealer
+      DATABASE_URL: postgresql://tyche:tyche@postgres:5432/tyche
       REDIS_URL: redis://redis:6379
     networks:
-      - idealer-network
+      - tyche-network
 
   web:
     build:
       context: .
       dockerfile: infra/docker/web.Dockerfile
-    container_name: idealer-web
+    container_name: tyche-web
     restart: unless-stopped
     depends_on:
       - api
@@ -3960,20 +3960,20 @@ services:
     ports:
       - "3000:3000"
     networks:
-      - idealer-network
+      - tyche-network
 
 volumes:
-  idealer-postgres-data:
-  idealer-redis-data:
+  tyche-postgres-data:
+  tyche-redis-data:
 
 networks:
-  idealer-network:
-    name: idealer-network
+  tyche-network:
+    name: tyche-network
 ```
 
 #### 12.3.4 Container Responsibilities
 
-##### `idealer-postgres`
+##### `tyche-postgres`
 
 Stores persistent relational data:
 
@@ -3988,7 +3988,7 @@ Stores persistent relational data:
 - share events;
 - metrics snapshots.
 
-##### `idealer-redis`
+##### `tyche-redis`
 
 Supports volatile and queue-oriented workloads:
 
@@ -3999,7 +3999,7 @@ Supports volatile and queue-oriented workloads:
 - lightweight cache;
 - live update fanout if needed.
 
-##### `idealer-api`
+##### `tyche-api`
 
 Runs the main backend API.
 
@@ -4013,7 +4013,7 @@ Responsibilities:
 - expose player and creator history;
 - coordinate with database and queue.
 
-##### `idealer-worker`
+##### `tyche-worker`
 
 Runs background and asynchronous jobs.
 
@@ -4026,7 +4026,7 @@ Responsibilities:
 - generate attestation payloads;
 - process scheduled turn lifecycle jobs where applicable.
 
-##### `idealer-web`
+##### `tyche-web`
 
 Runs the mobile-first DApp.
 
@@ -4074,15 +4074,15 @@ Recommended checks:
 
 | Container          | Health check                                                                        |
 | ------------------ | ----------------------------------------------------------------------------------- |
-| `idealer-postgres` | `pg_isready -U idealer`                                                             |
-| `idealer-redis`    | `redis-cli ping`                                                                    |
-| `idealer-api`      | `GET /health`                                                                       |
-| `idealer-worker`   | Queue heartbeat or `GET /health` if worker exposes a lightweight HTTP health server |
-| `idealer-web`      | `GET /` or `GET /play`                                                              |
+| `tyche-postgres` | `pg_isready -U tyche`                                                             |
+| `tyche-redis`    | `redis-cli ping`                                                                    |
+| `tyche-api`      | `GET /health`                                                                       |
+| `tyche-worker`   | Queue heartbeat or `GET /health` if worker exposes a lightweight HTTP health server |
+| `tyche-web`      | `GET /` or `GET /play`                                                              |
 
 The API should not accept traffic as healthy unless PostgreSQL and Redis are reachable.
 
-The worker should not be considered healthy unless it can reach PostgreSQL, Redis, and the configured LLM provider layer. The LLM provider layer may be a cloud provider endpoint or the local `idealer-llm` OpenAI-compatible endpoint; the health check targets whichever is configured.
+The worker should not be considered healthy unless it can reach PostgreSQL, Redis, and the configured LLM provider layer. The LLM provider layer may be a cloud provider endpoint or the local `tyche-llm` OpenAI-compatible endpoint; the health check targets whichever is configured.
 
 Recommended local commands:
 
@@ -4187,7 +4187,7 @@ Alerts:
 
 ### 12.6 Public Transparency Console
 
-Idealer must include a read-only transparency console for public product, economy, rule, and settlement insights. The same deployment may also include a restricted operator-only area for AI agent operations monitoring.
+Tyche must include a read-only transparency console for public product, economy, rule, and settlement insights. The same deployment may also include a restricted operator-only area for AI agent operations monitoring.
 
 The public transparency surface may be deployed separately or exposed as a clearly named transparency surface. It must not depend on private analytics or privileged user-tracking data. The restricted AI operations area must require authentication and role-based access control through an explicitly authorized operator wallet signature, and must not be exposed through public navigation.
 
@@ -4196,7 +4196,7 @@ Requirements:
 - no privileged `/admin` route inside the main mobile app;
 - optional public navigation link only if the surface is clearly framed as transparency/audit, not as administration;
 - separate deployment target, subdomain, or clearly separated transparency route;
-- separate container: `idealer-admin`;
+- separate container: `tyche-admin`;
 - read-only data loaders;
 - public transparency data loaders use public/on-chain or publicly derivable data only;
 - no IP, device, session, wallet-funnel, private retention, or private behavioral analytics fields in either public transparency or restricted AI operations views;
@@ -4531,7 +4531,7 @@ Requirements:
 
 - secret rotation;
 - provider API key isolation;
-- local inference hardening when the `idealer-llm` service is used: keep raw rule text on-prem (no data egress), verify model weights by signature/digest before deploy (supply chain), mount model weights read-only, run the inference container non-root, and network-segment the endpoint (not publicly exposed; mTLS between services);
+- local inference hardening when the `tyche-llm` service is used: keep raw rule text on-prem (no data egress), verify model weights by signature/digest before deploy (supply chain), mount model weights read-only, run the inference container non-root, and network-segment the endpoint (not publicly exposed; mTLS between services);
 - rate limits;
 - restricted operator access controls;
 - audit logs;
@@ -4642,7 +4642,7 @@ Requirements:
 
 ## 15. Implementation Milestones & Submilestones
 
-This section defines the implementation path for Idealer as a **mobile-first Solana DApp**, built in a **monorepo**, with local development and service orchestration through **Docker / Docker Compose**.
+This section defines the implementation path for Tyche as a **mobile-first Solana DApp**, built in a **monorepo**, with local development and service orchestration through **Docker / Docker Compose**.
 
 The implementation plan is organized only by **milestones** and **submilestones**. There are no implementation phases.
 
@@ -4666,7 +4666,7 @@ Establish the product baseline, architecture baseline, monorepo structure, Docke
 ---
 #### R - Review
 
-- [] Replace and change name Idealer to Justealer
+- [] Replace and change name Tyche to Justealer
 
 #### M0.1 — PRD Baseline
 
@@ -4674,7 +4674,7 @@ Establish the product baseline, architecture baseline, monorepo structure, Docke
 
 **Checklist:**
 
-- [x] Confirm Idealer as a **mobile-first DApp**.
+- [x] Confirm Tyche as a **mobile-first DApp**.
 - [x] Confirm desktop web as secondary surface.
 - [x] Confirm rule creation is free-form, not template-based.
 - [x] Confirm rule length is limited by AI-context token count.
@@ -4775,16 +4775,16 @@ Establish the product baseline, architecture baseline, monorepo structure, Docke
 
 **Checklist:**
 
-- [x] Define `COMPOSE_PROJECT_NAME=idealer`.
-- [x] Define required container `idealer-postgres`.
-- [x] Define required container `idealer-redis`.
-- [x] Define required container `idealer-api`.
-- [x] Define required container `idealer-worker`.
-- [x] Define required container `idealer-web`.
-- [x] Define optional container `idealer-admin`.
-- [x] Define optional container `idealer-prometheus`.
-- [x] Define optional container `idealer-grafana`.
-- [x] Define optional container `idealer-mailpit`.
+- [x] Define `COMPOSE_PROJECT_NAME=tyche`.
+- [x] Define required container `tyche-postgres`.
+- [x] Define required container `tyche-redis`.
+- [x] Define required container `tyche-api`.
+- [x] Define required container `tyche-worker`.
+- [x] Define required container `tyche-web`.
+- [x] Define optional container `tyche-admin`.
+- [x] Define optional container `tyche-prometheus`.
+- [x] Define optional container `tyche-grafana`.
+- [x] Define optional container `tyche-mailpit`.
 - [x] Add Docker network for internal service communication.
 - [x] Add named volume for PostgreSQL data.
 - [x] Add named volume for Redis data if persistence is enabled.
@@ -4796,7 +4796,7 @@ Establish the product baseline, architecture baseline, monorepo structure, Docke
 **Approval criteria:**
 
 - [x] `docker compose up` starts required services.
-- [x] Container names follow the `idealer-*` convention.
+- [x] Container names follow the `tyche-*` convention.
 - [x] API can connect to Postgres and Redis.
 - [x] Worker can connect to Redis and database.
 - [x] Web can reach API locally.
@@ -5717,7 +5717,7 @@ Implement prize pool accounting, treasury/platform monetization, payouts, rollov
 - [x] Double-claim is rejected on-chain; below-minimum claims are never recorded.
 - [x] Winner payouts draw from the prize vault and rewards from the treasury reserve, without reducing the winner-visible payout.
 
-**Status: ✅ Done — confirmed by user 2026-06-26.** Implementation verified across contract/worker/API/frontend (`Claim` PDA + `record_claim`/`claim_prize`/`claim_reward` in `contracts/solana/programs/idealer/src/lib.rs`; `pay_from_vault` rent-floor + CEI mark-claimed-before-transfer; worker `recordClaimsForTurn` wired into the M5.3 settlement loop; frontend `createClaimPrize/RewardInstruction` + `/claim-records/request`→`/complete`; SBF tests for record→claim, double-claim, wrong-wallet, below-minimum, kind/vault mismatch, vault rent floor; worker/API claim tests). **Live devnet acceptance:** on turn 37, `record_claim` recorded 5 winner-payout `Claim` PDAs; a real claimant-signed `claim_prize` (winner `GBSpqDzF…`, claim PDA `rxTZ1ax8…`) transferred 0.018 SOL from the prize vault (sig `3WM8BtYeHtEMmiNSamB37eeuYYq5KNPB28APFnCs3ivvzgRkKTFdvQAmJPUZwaBDVUWkBTJRtSzQgbovWUNzWgh2`, balance delta +18,045,000 lamports; API claim → `claimed`); a re-claim was rejected on-chain (`ClaimNotAvailable`, custom error 6058); the creator reward stayed `unavailable` (below `minimum_claim_threshold_lamports`), demonstrating below-minimum is never recorded. The creator/voter `claim_reward` (treasury-reserve pull) is implemented, SBF-tested, and frontend-wired; it was not exercised live because no reward on the validated turns exceeded the claim threshold (a live reward claim only needs a turn whose reward clears the minimum). Gated operator: `apps/worker/src/devnet-claim-prize.ts`.
+**Status: ✅ Done — confirmed by user 2026-06-26.** Implementation verified across contract/worker/API/frontend (`Claim` PDA + `record_claim`/`claim_prize`/`claim_reward` in `contracts/solana/programs/tyche/src/lib.rs`; `pay_from_vault` rent-floor + CEI mark-claimed-before-transfer; worker `recordClaimsForTurn` wired into the M5.3 settlement loop; frontend `createClaimPrize/RewardInstruction` + `/claim-records/request`→`/complete`; SBF tests for record→claim, double-claim, wrong-wallet, below-minimum, kind/vault mismatch, vault rent floor; worker/API claim tests). **Live devnet acceptance:** on turn 37, `record_claim` recorded 5 winner-payout `Claim` PDAs; a real claimant-signed `claim_prize` (winner `GBSpqDzF…`, claim PDA `rxTZ1ax8…`) transferred 0.018 SOL from the prize vault (sig `3WM8BtYeHtEMmiNSamB37eeuYYq5KNPB28APFnCs3ivvzgRkKTFdvQAmJPUZwaBDVUWkBTJRtSzQgbovWUNzWgh2`, balance delta +18,045,000 lamports; API claim → `claimed`); a re-claim was rejected on-chain (`ClaimNotAvailable`, custom error 6058); the creator reward stayed `unavailable` (below `minimum_claim_threshold_lamports`), demonstrating below-minimum is never recorded. The creator/voter `claim_reward` (treasury-reserve pull) is implemented, SBF-tested, and frontend-wired; it was not exercised live because no reward on the validated turns exceeded the claim threshold (a live reward claim only needs a turn whose reward clears the minimum). Gated operator: `apps/worker/src/devnet-claim-prize.ts`.
 
 ---
 
@@ -6647,7 +6647,7 @@ Public release is approved only if:
 This section replaces the former open questions list. The following decisions are binding for MVP implementation unless a future PRD version explicitly changes them.
 
 1. `RULE_MAX_TOKENS` is fixed at `80` for MVP and remains configurable by deployment environment.
-2. Idealer launches as a mobile-first browser DApp with in-wallet browser and mobile wallet deep-link support. PWA capability is included, but PWA installation is not the primary launch path.
+2. Tyche launches as a mobile-first browser DApp with in-wallet browser and mobile wallet deep-link support. PWA capability is included, but PWA installation is not the primary launch path.
 3. Wallet integration remains wallet-adapter neutral, with QA priority for Phantom, Backpack, and Solflare mobile paths.
 4. Full sanitized original rule text is stored on-chain in the `RuleProposal` account. Off-chain copies may exist only for indexing, search, analytics, and UI performance.
 5. Rule votes are on-chain through `RuleVote` accounts or an equivalent on-chain account model. MVP does not use off-chain vote commitments as the primary voting record.
@@ -6665,7 +6665,7 @@ This section replaces the former open questions list. The following decisions ar
 17. Production MCP tools are limited to the bounded MCP server groups listed in section 7.11. Shell execution, arbitrary filesystem access, arbitrary network access, and direct smart contract mutation remain forbidden.
 18. Long turns use in-app countdowns and return prompts in MVP. Push notifications remain push-notification-ready architecture only and are not required for MVP launch.
 19. Production deploys API and worker as separate services from the start.
-20. Optional local observability containers (`idealer-prometheus`, `idealer-grafana`) are included under a separate Docker Compose observability profile, not in the default required local stack.
+20. Optional local observability containers (`tyche-prometheus`, `tyche-grafana`) are included under a separate Docker Compose observability profile, not in the default required local stack.
 21. M9 Mainnet Readiness Gates are mandatory before M6 can process any real SOL payment, payout, claim, treasury transfer, or creator reward on mainnet.
 22. Launch-blocking metrics are the M9 approval gates plus the M6/M7 approval criteria for mobile reliability, turn automation, job completion, claims, abuse visibility, and payout/accounting reconciliation.
 23. Default MVP/devnet base fees are: guess submission `0.01 SOL`, rule proposal `0.02 SOL`, paid rule removal `0.05 SOL`, approval/elimination side vote base fee `0.005 SOL`, repeated action exponent base `2`, and report `0 SOL`, with `treasuryFeeBps = 500`. Before turn 100, the first same-wallet action in each scope (guess, rule proposal, approval side, elimination side) is free; repeats start paid immediately at `2^n * BASE_FEE`.
@@ -6680,7 +6680,7 @@ This section replaces the former open questions list. The following decisions ar
 
 ### New Mobile User Flow
 
-1. User opens Idealer from mobile browser, wallet browser, or shared link.
+1. User opens Tyche from mobile browser, wallet browser, or shared link.
 2. User lands directly in the current Live Round Hub.
 3. User sees prize pool, countdown, and leading rule in under 10 seconds.
 4. User connects mobile wallet.
@@ -6720,7 +6720,7 @@ The UI should constantly answer one question:
 
 > **Why should I care about this round, even if I do not win?**
 
-If the product answers that well, Idealer becomes more than a lottery. It becomes a mobile social game where every round creates a new story.
+If the product answers that well, Tyche becomes more than a lottery. It becomes a mobile social game where every round creates a new story.
 
 ---
 

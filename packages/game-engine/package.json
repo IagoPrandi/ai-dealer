@@ -1,5 +1,5 @@
 {
-  "name": "@idealer/game-engine",
+  "name": "@tyche/game-engine",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -10,12 +10,12 @@
     "build": "tsc -p tsconfig.json",
     "lint": "eslint src --max-warnings=0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node -e \"console.log('@idealer/game-engine ok')\""
+    "test": "node -e \"console.log('@tyche/game-engine ok')\""
   },
   "dependencies": {
-    "@idealer/constants": "workspace:*"
+    "@tyche/constants": "workspace:*"
   },
   "devDependencies": {
-    "@idealer/config": "workspace:*"
+    "@tyche/config": "workspace:*"
   }
 }

@@ -1,6 +1,6 @@
 [workspace]
 members = [
-  "programs/idealer",
+  "programs/tyche",
   "programs/tokenomics_core",
   "tools/tokenomics-calculator",
 ]

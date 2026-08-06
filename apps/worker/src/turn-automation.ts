@@ -20,7 +20,7 @@ import { persistFinalizedTransaction } from "./durable-indexer.js";
 
 const DEFAULT_DEVNET_RPC_URL = "https://api.devnet.solana.com";
 const DEFAULT_API_BASE_URL = "http://localhost:3002";
-const DEFAULT_IDEALER_PROGRAM_ID =
+const DEFAULT_TYCHE_PROGRAM_ID =
   "ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd";
 export const SYSTEM_PROGRAM_ID = address("11111111111111111111111111111111");
 export const UPGRADEABLE_LOADER_PROGRAM_ID = address(
@@ -171,18 +171,18 @@ function envNumber(value: string | undefined, fallback: number) {
 }
 
 function resolveDesiredTurnDurationCycle(env: NodeJS.ProcessEnv) {
-  if (!env.IDEALER_DEVNET_TURN_DURATION_SCALE_BPS) {
+  if (!env.TYCHE_DEVNET_TURN_DURATION_SCALE_BPS) {
     return null;
   }
 
-  const scaleBps = Number(env.IDEALER_DEVNET_TURN_DURATION_SCALE_BPS);
+  const scaleBps = Number(env.TYCHE_DEVNET_TURN_DURATION_SCALE_BPS);
   if (
     !Number.isInteger(scaleBps) ||
     scaleBps <= 0 ||
     scaleBps > BASIS_POINTS_DENOMINATOR
   ) {
     throw new Error(
-      "IDEALER_DEVNET_TURN_DURATION_SCALE_BPS must be an integer between 1 and 10000.",
+      "TYCHE_DEVNET_TURN_DURATION_SCALE_BPS must be an integer between 1 and 10000.",
     );
   }
 
@@ -245,13 +245,13 @@ function parseAuthorityKeypairBytes(raw: string) {
 }
 
 export async function loadAuthorityKeypairBytesFromEnv(env = process.env) {
-  if (env.IDEALER_TURN_AUTHORITY_KEYPAIR_PATH) {
-    const raw = await readFile(env.IDEALER_TURN_AUTHORITY_KEYPAIR_PATH, "utf8");
+  if (env.TYCHE_TURN_AUTHORITY_KEYPAIR_PATH) {
+    const raw = await readFile(env.TYCHE_TURN_AUTHORITY_KEYPAIR_PATH, "utf8");
     return parseAuthorityKeypairBytes(raw);
   }
 
-  if (env.IDEALER_TURN_AUTHORITY_KEYPAIR) {
-    return parseAuthorityKeypairBytes(env.IDEALER_TURN_AUTHORITY_KEYPAIR);
+  if (env.TYCHE_TURN_AUTHORITY_KEYPAIR) {
+    return parseAuthorityKeypairBytes(env.TYCHE_TURN_AUTHORITY_KEYPAIR);
   }
 
   return null;
@@ -261,19 +261,19 @@ export async function createTurnAutomationConfig(
   env = process.env,
 ): Promise<TurnAutomationConfig> {
   return {
-    apiBaseUrl: env.IDEALER_API_BASE_URL ?? DEFAULT_API_BASE_URL,
+    apiBaseUrl: env.TYCHE_API_BASE_URL ?? DEFAULT_API_BASE_URL,
     authorityKeypairBytes: await loadAuthorityKeypairBytesFromEnv(env),
-    deferCloseToSettlement: envFlag(env.IDEALER_SETTLEMENT_AUTOMATION_ENABLED),
+    deferCloseToSettlement: envFlag(env.TYCHE_SETTLEMENT_AUTOMATION_ENABLED),
     desiredTurnDurationCycle: resolveDesiredTurnDurationCycle(env),
-    enabled: envFlag(env.IDEALER_TURN_AUTOMATION_ENABLED),
-    intervalMs: envNumber(env.IDEALER_TURN_AUTOMATION_INTERVAL_MS, 30_000),
+    enabled: envFlag(env.TYCHE_TURN_AUTOMATION_ENABLED),
+    intervalMs: envNumber(env.TYCHE_TURN_AUTOMATION_INTERVAL_MS, 30_000),
     programId: address(
-      env.IDEALER_PROGRAM_ID ??
-        env.NEXT_PUBLIC_IDEALER_PROGRAM_ID ??
-        DEFAULT_IDEALER_PROGRAM_ID,
+      env.TYCHE_PROGRAM_ID ??
+        env.NEXT_PUBLIC_TYCHE_PROGRAM_ID ??
+        DEFAULT_TYCHE_PROGRAM_ID,
     ),
     rpcUrl:
-      env.IDEALER_SOLANA_RPC_URL ??
+      env.TYCHE_SOLANA_RPC_URL ??
       env.NEXT_PUBLIC_SOLANA_RPC_URL ??
       DEFAULT_DEVNET_RPC_URL,
   };
@@ -357,7 +357,7 @@ function getAccountDataBase64(
   }
 
   if (account.owner !== expectedOwner.toString()) {
-    throw new Error("Account owner does not match the Idealer program.");
+    throw new Error("Account owner does not match the Tyche program.");
   }
 
   if (Array.isArray(account.data) && typeof account.data[0] === "string") {
@@ -986,7 +986,7 @@ export async function simulateAndSend({
   await persistFinalizedTransaction({
     cluster: "devnet",
     connection: new Connection(
-      process.env.IDEALER_SOLANA_RPC_URL ?? DEFAULT_DEVNET_RPC_URL,
+      process.env.TYCHE_SOLANA_RPC_URL ?? DEFAULT_DEVNET_RPC_URL,
       "finalized",
     ),
     eventKind: "turn_automation.authority_instruction",
@@ -1045,7 +1045,7 @@ export async function runTurnAutomationOnce(
 
   if (!config.authorityKeypairBytes) {
     throw new Error(
-      "Turn automation is enabled but IDEALER_TURN_AUTHORITY_KEYPAIR or IDEALER_TURN_AUTHORITY_KEYPAIR_PATH is not set.",
+      "Turn automation is enabled but TYCHE_TURN_AUTHORITY_KEYPAIR or TYCHE_TURN_AUTHORITY_KEYPAIR_PATH is not set.",
     );
   }
 

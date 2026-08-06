@@ -18,8 +18,8 @@ test("10-player simulation defaults to the required rule prompt test set", () =>
 
 test("10-player simulation reads funder wallet config", () => {
   const config = readTenPlayerSimulationConfig({
-    IDEALER_10P_SIM_FUNDER_KEYPAIR_PATH: "/tmp/funder.json",
-    IDEALER_10P_SIM_FUNDER_SOL_PER_PLAYER: "0.25",
+    TYCHE_10P_SIM_FUNDER_KEYPAIR_PATH: "/tmp/funder.json",
+    TYCHE_10P_SIM_FUNDER_SOL_PER_PLAYER: "0.25",
   });
 
   assert.equal(config.funderKeypairPath, "/tmp/funder.json");

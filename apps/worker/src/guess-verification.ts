@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { evaluatePredicate, scoreGuess } from "@idealer/rule-runtime";
-import { isRankingRule, type RuleAst } from "@idealer/rule-schema";
+import { evaluatePredicate, scoreGuess } from "@tyche/rule-runtime";
+import { isRankingRule, type RuleAst } from "@tyche/rule-schema";
 
 export type GuessVerificationJobStatus =
   | "completed"

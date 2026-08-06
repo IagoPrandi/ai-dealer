@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import type { PredicateNode, RuleAst } from "@idealer/rule-schema";
+import type { PredicateNode, RuleAst } from "@tyche/rule-schema";
 
 import {
   evaluatePredicate,

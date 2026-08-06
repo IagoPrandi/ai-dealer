@@ -1,4 +1,4 @@
-import { buildRuleCompilerSkillPrompt } from "@idealer/rule-compiler";
+import { buildRuleCompilerSkillPrompt } from "@tyche/rule-compiler";
 
 // Real AI Rule Compiler bridge. Talks to an OpenAI-compatible chat-completions
 // endpoint (local Ollama / vLLM / llama.cpp, or a cloud provider) so the dealer
@@ -53,7 +53,7 @@ const DEFAULT_TIMEOUT_MS = MIN_TIMEOUT_MS;
 const DEFAULT_SEED = 7;
 
 const SYSTEM_PROMPT = [
-  "You are the Idealer Dealer, the AI Rule Compiler for an on-chain lottery game.",
+  "You are the Tyche Dealer, the AI Rule Compiler for an on-chain lottery game.",
   "A player proposes an alternative winning rule in natural language. You convert",
   "their intent into a single, objective, measurable winning condition.",
   "",
@@ -718,14 +718,14 @@ export async function translateRuleToEnglish(
 // Compile step (PRD §7.3.1): ask the model to EMIT a rule AST conforming to the
 // DSL JSON schema. The JSON schema is embedded in the prompt and json_object
 // response mode is requested (Ollama-compatible). The returned object is raw and
-// is schema-validated by @idealer/rule-compiler — this function never decides
+// is schema-validated by @tyche/rule-compiler — this function never decides
 // validity. Throws a typed RuleAgentError so the caller can escalate.
 export async function compileRuleToAst(
   normalizedText: string,
   config: RuleAgentConfig = resolveRuleAgentConfig(),
 ): Promise<unknown> {
   // The compile-step guidance lives in the versioned `compile_rule_to_ast` agent
-  // skill (PRD §7.10/§7.12), co-located with the DSL schema in @idealer/rule-compiler.
+  // skill (PRD §7.10/§7.12), co-located with the DSL schema in @tyche/rule-compiler.
   // The full JSON schema is intentionally NOT embedded (it bloats the prompt and
   // stalls small local models); the skill conveys the grammar compactly and Zod
   // re-validates the output against the real schema.

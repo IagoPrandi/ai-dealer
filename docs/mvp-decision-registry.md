@@ -5,7 +5,7 @@ This registry records binding MVP decisions from `PRD.md` version 1.5.0. Changes
 | ID | Decision | Status | Source |
 |---:|---|---|---|
 | 1 | `RULE_MAX_TOKENS` is fixed at `80` for MVP and remains configurable by deployment environment. | Locked | PRD section 16 |
-| 2 | Idealer launches as a mobile-first browser DApp with in-wallet browser and mobile wallet deep-link support. PWA capability is included, but installation is not the primary launch path. | Locked | PRD section 16 |
+| 2 | Tyche launches as a mobile-first browser DApp with in-wallet browser and mobile wallet deep-link support. PWA capability is included, but installation is not the primary launch path. | Locked | PRD section 16 |
 | 3 | Wallet integration remains wallet-adapter neutral, with QA priority for Phantom, Backpack, and Solflare mobile paths. | Locked | PRD section 16 |
 | 4 | Full sanitized original rule text is stored on-chain in the `RuleProposal` account. Off-chain copies may exist for indexing, search, analytics, and UI performance. | Locked | PRD section 16 |
 | 5 | Rule votes are on-chain through `RuleVote` accounts or an equivalent on-chain account model. MVP does not use off-chain vote commitments as the primary voting record. | Locked | PRD section 16 |

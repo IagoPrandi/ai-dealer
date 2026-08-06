@@ -32,7 +32,7 @@ function loadFetchHandler() {
         claim: async () => undefined,
       },
       location: {
-        origin: "https://idealer.example",
+        origin: "https://tyche.example",
       },
       skipWaiting: () => undefined,
     },
@@ -53,7 +53,7 @@ function dispatchFetch(method: string, url: string) {
 }
 
 test("the service worker handles same-origin GET requests", () => {
-  assert.equal(dispatchFetch("GET", "https://idealer.example/play").length, 1);
+  assert.equal(dispatchFetch("GET", "https://tyche.example/play").length, 1);
 });
 
 test("the service worker leaves cross-origin loopback requests to the document", () => {
@@ -61,5 +61,5 @@ test("the service worker leaves cross-origin loopback requests to the document",
 });
 
 test("the service worker ignores non-GET requests", () => {
-  assert.equal(dispatchFetch("POST", "https://idealer.example/api").length, 0);
+  assert.equal(dispatchFetch("POST", "https://tyche.example/api").length, 0);
 });

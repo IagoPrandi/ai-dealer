@@ -1,10 +1,10 @@
-import { IdealerApp } from "../../../features/idealer/IdealerApp";
+import { TycheApp } from "../../../features/tyche/TycheApp";
 import { SolanaProviders } from "../../../solana/SolanaProviders";
 
 export default function PlayResultsPage() {
   return (
     <SolanaProviders>
-      <IdealerApp initialScreen="claims" />
+      <TycheApp initialScreen="claims" />
     </SolanaProviders>
   );
 }

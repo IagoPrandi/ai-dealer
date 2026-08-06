@@ -56,11 +56,11 @@ import {
  * from docs/rule-proposal-prompt-test-set.md, real guess/proposal/approval
  * votes, elimination votes, settlement, claim attempt, and expired-claim probe.
  *
- * Dry-run by default. Set IDEALER_10P_SIM_BROADCAST=1 to send devnet
+ * Dry-run by default. Set TYCHE_10P_SIM_BROADCAST=1 to send devnet
  * transactions. This is intentionally manual-control based and test-only.
  */
 
-const BROADCAST = process.env.IDEALER_10P_SIM_BROADCAST === "1";
+const BROADCAST = process.env.TYCHE_10P_SIM_BROADCAST === "1";
 const PLAYER_COUNT = 10;
 const DEFAULT_API_BASE_URL = "http://127.0.0.1:3002";
 const COMMITMENT: Commitment = "confirmed";
@@ -93,16 +93,16 @@ export function readTenPlayerSimulationConfig(
   env = process.env,
 ): SimulationConfig {
   return {
-    apiBaseUrl: env.IDEALER_API_BASE_URL ?? DEFAULT_API_BASE_URL,
-    funderKeypairPath: env.IDEALER_10P_SIM_FUNDER_KEYPAIR_PATH ?? null,
+    apiBaseUrl: env.TYCHE_API_BASE_URL ?? DEFAULT_API_BASE_URL,
+    funderKeypairPath: env.TYCHE_10P_SIM_FUNDER_KEYPAIR_PATH ?? null,
     fundLamportsPerPlayer: parseSolToLamports(
-      env.IDEALER_10P_SIM_FUNDER_SOL_PER_PLAYER ?? "2",
+      env.TYCHE_10P_SIM_FUNDER_SOL_PER_PLAYER ?? "2",
     ),
     promptFile:
-      env.IDEALER_10P_SIM_PROMPT_FILE ??
+      env.TYCHE_10P_SIM_PROMPT_FILE ??
       "docs/rule-proposal-prompt-test-set.md",
-    promptMarkdown: env.IDEALER_10P_SIM_PROMPT_MARKDOWN ?? null,
-    skipAirdrop: env.IDEALER_10P_SIM_SKIP_AIRDROP === "1",
+    promptMarkdown: env.TYCHE_10P_SIM_PROMPT_MARKDOWN ?? null,
+    skipAirdrop: env.TYCHE_10P_SIM_SKIP_AIRDROP === "1",
   };
 }
 
@@ -110,7 +110,7 @@ export function parseSolToLamports(value: string) {
   const trimmed = value.trim();
   if (!/^\d+(\.\d{1,9})?$/.test(trimmed)) {
     throw new Error(
-      "IDEALER_10P_SIM_FUNDER_SOL_PER_PLAYER must be a positive SOL amount with up to 9 decimal places.",
+      "TYCHE_10P_SIM_FUNDER_SOL_PER_PLAYER must be a positive SOL amount with up to 9 decimal places.",
     );
   }
   const parts = trimmed.split(".");
@@ -118,7 +118,7 @@ export function parseSolToLamports(value: string) {
   const fractionalPart = parts[1] ?? "";
   if (!wholePart) {
     throw new Error(
-      "IDEALER_10P_SIM_FUNDER_SOL_PER_PLAYER must include a whole SOL part.",
+      "TYCHE_10P_SIM_FUNDER_SOL_PER_PLAYER must include a whole SOL part.",
     );
   }
   const lamports =
@@ -126,7 +126,7 @@ export function parseSolToLamports(value: string) {
     BigInt(fractionalPart.padEnd(9, "0"));
   if (lamports <= 0n || lamports > BigInt(Number.MAX_SAFE_INTEGER)) {
     throw new Error(
-      "IDEALER_10P_SIM_FUNDER_SOL_PER_PLAYER must resolve to a safe positive lamport amount.",
+      "TYCHE_10P_SIM_FUNDER_SOL_PER_PLAYER must resolve to a safe positive lamport amount.",
     );
   }
   return Number(lamports);
@@ -600,14 +600,14 @@ export async function runTenPlayerSimulation() {
       readFileSync(resolvePromptFilePath(config.promptFile), "utf8"),
   );
 
-  process.env.IDEALER_M5_INPUTS_BROADCAST = BROADCAST ? "1" : "0";
+  process.env.TYCHE_M5_INPUTS_BROADCAST = BROADCAST ? "1" : "0";
 
   const automation = await createTurnAutomationConfig();
   const programId = new PublicKey(automation.programId.toString());
   const connection = new Connection(automation.rpcUrl, COMMITMENT);
 
   if (!BROADCAST) {
-    const dryTurnId = Number(process.env.IDEALER_10P_SIM_DRY_TURN_ID ?? 1);
+    const dryTurnId = Number(process.env.TYCHE_10P_SIM_DRY_TURN_ID ?? 1);
     const dryPlayers = Array.from({ length: PLAYER_COUNT }, (_, index) =>
       deterministicPlayer(dryTurnId, index),
     );
@@ -646,7 +646,7 @@ export async function runTenPlayerSimulation() {
   const manualConfig = await createManualControlConfig();
   if (!automation.authorityKeypairBytes) {
     throw new Error(
-      "10-player simulation requires IDEALER_TURN_AUTHORITY_KEYPAIR or IDEALER_TURN_AUTHORITY_KEYPAIR_PATH.",
+      "10-player simulation requires TYCHE_TURN_AUTHORITY_KEYPAIR or TYCHE_TURN_AUTHORITY_KEYPAIR_PATH.",
     );
   }
   const authority = Keypair.fromSecretKey(automation.authorityKeypairBytes);
@@ -996,7 +996,7 @@ if (
       console.log(JSON.stringify(summary, null, 2));
       if (!BROADCAST) {
         console.log(
-          "Dry run only. Set IDEALER_10P_SIM_BROADCAST=1 to run the real devnet simulation.",
+          "Dry run only. Set TYCHE_10P_SIM_BROADCAST=1 to run the real devnet simulation.",
         );
       }
     })

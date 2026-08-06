@@ -1,5 +1,5 @@
 export const workspaceConfig = {
-  appName: "Idealer",
-  dockerComposeProjectName: "idealer",
-  environmentVariablePrefix: "IDEALER_"
+  appName: "Tyche",
+  dockerComposeProjectName: "tyche",
+  environmentVariablePrefix: "TYCHE_"
 } as const;

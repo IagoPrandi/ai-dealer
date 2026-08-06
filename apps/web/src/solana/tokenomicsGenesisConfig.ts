@@ -2,9 +2,9 @@ import { address } from "@solana/kit";
 import {
   CAMPAIGN_UNUSED_BALANCE_POLICY_HASH,
   CAMPAIGN_V2_ECONOMIC_CONFIG_HASH,
-} from "@idealer/constants";
+} from "@tyche/constants";
 
-import { IDEALER_PROGRAM_ID } from "./idealerProgram";
+import { TYCHE_PROGRAM_ID } from "./tycheProgram";
 import { SQUADS_DEVNET_CONFIG } from "./squadsDevnetConfig";
 
 export const TOKENOMICS_PLACEHOLDER_PROGRAM_ID =
@@ -24,9 +24,13 @@ export const CLASSIC_SPL_TOKEN_PROGRAM_ID =
 // (PRD-TOKENOMICS §5.2-5.4). Every field is part of the hashed preimage, so the
 // existing funded devnet campaign 0 (v1 hash `145e7abd…`) remains unavailable
 // until its one-time, governance-controlled v2 migration is finalized.
+// This committed preimage is part of the finalized devnet campaign state and
+// must remain byte-for-byte stable across the Tyche rebrand.
 export const INITIAL_CAMPAIGN_CONFIG_PREIMAGE =
   "idealer:jdr:initial-campaign-config:v2|proposal=600000000|supporter=90000000|referral-inviter=200000000|referral-invitee=300000000|referral-invitee-rate-bps=15000|referral-first-round-bonus-rate-bps=2250|active-rule-rate-bps=2250|active-rule-cap=250000000|creator-before-voters=true|campaign=0";
 export const INITIAL_CAMPAIGN_CONFIG_HASH = CAMPAIGN_V2_ECONOMIC_CONFIG_HASH;
+// This finalized policy commitment is likewise a legacy protocol identifier,
+// not a user-facing brand string.
 export const INITIAL_UNUSED_BALANCE_POLICY_PREIMAGE =
   "idealer:jdr:initial-campaign-unused-balance:v1|stop=exhaustion-only|final-partial=true|residual=isolated|admin-sweep=false";
 export const INITIAL_UNUSED_BALANCE_POLICY_HASH =
@@ -39,13 +43,13 @@ export const TOKENOMICS_GENESIS_CONFIG = Object.freeze({
   decimals: 9,
   epochRootPublisher: SQUADS_DEVNET_CONFIG.members[0]!.address,
   fixedSupplyAtoms: 1_000_000_000n * TOKEN_ATOMS_PER_TOKEN,
-  gameProgramId: IDEALER_PROGRAM_ID.toString(),
+  gameProgramId: TYCHE_PROGRAM_ID.toString(),
   genesisPayer: SQUADS_DEVNET_CONFIG.members[0]!.address,
   governance: SQUADS_DEVNET_CONFIG.vaultAddress,
   guardian: SQUADS_DEVNET_CONFIG.members[0]!.address,
   metadataMutable: true,
   metadataUpdateAuthority: SQUADS_DEVNET_CONFIG.vaultAddress,
-  metadataUri: process.env.NEXT_PUBLIC_IDEALER_TOKEN_METADATA_URI?.trim() ?? "",
+  metadataUri: process.env.NEXT_PUBLIC_TYCHE_TOKEN_METADATA_URI?.trim() ?? "",
   multisigAddress: SQUADS_DEVNET_CONFIG.multisigAddress,
   name: "JUSDEALER",
   network: "devnet",

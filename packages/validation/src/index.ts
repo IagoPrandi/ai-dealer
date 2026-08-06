@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { RULE_MAX_TOKENS } from "@idealer/constants";
+import { RULE_MAX_TOKENS } from "@tyche/constants";
 
 export const walletAddressSchema = z.string().min(32).max(64);
 

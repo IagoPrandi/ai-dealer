@@ -13,7 +13,7 @@ import {
   REFERRAL_INVITER_FIRST_ROUND_BONUS_RATE_BPS,
   REFERRAL_INVITER_REWARD_ATOMS,
   SUPPORTER_REWARD_ATOMS,
-} from "@idealer/constants";
+} from "@tyche/constants";
 
 export const TOKEN_DECIMALS = 9;
 export const TOKEN_ATOMS_PER_TOKEN = 1_000_000_000n;
@@ -30,7 +30,7 @@ export const DEFAULT_CHALLENGE_BOND_LAMPORTS = 20_000_000n;
 // for treasury operations is intentionally zero.
 export const TREASURY_OPERATION_DELAY_SECONDS = 0n;
 export const UNPAUSE_NOTICE_SECONDS = 24n * 60n * 60n;
-// Campaign reward economics live in @idealer/constants so the API, the web app
+// Campaign reward economics live in @tyche/constants so the API, the web app
 // and this package cannot drift apart; they are re-exported here because the
 // on-chain mirror and the epoch calculators are consumed through this module.
 export {
@@ -50,6 +50,8 @@ export const ACTIVE_RULE_REWARD_RATE_BPS = BigInt(
   ACTIVE_RULE_REWARD_RATE_BPS_NUMBER,
 );
 
+// Legacy protocol domains are immutable because they commit distribution roots
+// and manifests that must remain verifiable after the Tyche rebrand.
 const LEAF_DOMAIN = utf8("idealer:treasury-distribution-leaf:v1");
 const NODE_DOMAIN = utf8("idealer:treasury-distribution-node:v1");
 const MANIFEST_DOMAIN = "idealer:epoch-calculation-manifest:v1";

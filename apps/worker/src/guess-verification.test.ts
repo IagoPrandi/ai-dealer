@@ -13,7 +13,7 @@ const activeArtifact: FrozenRuleArtifact = {
   ast: { node: { kind: "match_count_at_least", value: 4 }, schemaVersion: 1 },
   compiledArtifactHash: artifactHash,
   normalizedText: "at least four matches",
-  promptContractVersion: "idealer_rule_validation_prompt_v1",
+  promptContractVersion: "tyche_rule_validation_prompt_v1",
   ruleId: 7,
   schemaVersion: 1,
 };

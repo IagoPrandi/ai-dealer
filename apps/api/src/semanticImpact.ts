@@ -1,4 +1,4 @@
-import type { RuleAst } from "@idealer/rule-compiler";
+import type { RuleAst } from "@tyche/rule-compiler";
 
 export interface RuleSemanticImpact {
   drawIndependent: boolean;

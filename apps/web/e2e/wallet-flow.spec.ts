@@ -26,7 +26,7 @@ test("wallet flow exposes mobile handoff and recovers an interrupted action", as
 
   await page.evaluate(() => {
     window.localStorage.setItem(
-      "idealer.wallet.pending-action",
+      "tyche.wallet.pending-action",
       JSON.stringify({
         action: "devnet_test_transaction",
         createdAt: new Date().toISOString(),
@@ -46,7 +46,7 @@ test("wallet flow exposes mobile handoff and recovers an interrupted action", as
 
   await page.evaluate(() => {
     window.localStorage.setItem(
-      "idealer.wallet.pending-action",
+      "tyche.wallet.pending-action",
       JSON.stringify({
         action: "devnet_test_transaction",
         createdAt: new Date().toISOString(),

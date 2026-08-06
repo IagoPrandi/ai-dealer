@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { calculateActiveRuleRewards } from "@idealer/tokenomics";
+import { calculateActiveRuleRewards } from "@tyche/tokenomics";
 import bs58 from "bs58";
 import {
   type Commitment,
@@ -288,7 +288,7 @@ export function createActiveRuleRewardInstruction({
   authority,
   campaign,
   globalConfig,
-  idealerProgramId,
+  tycheProgramId,
   plan,
   ruleProposal,
   tokenomicsProgramId,
@@ -297,7 +297,7 @@ export function createActiveRuleRewardInstruction({
   authority: PublicKey;
   campaign: CampaignAccounts;
   globalConfig: PublicKey;
-  idealerProgramId: PublicKey;
+  tycheProgramId: PublicKey;
   plan: ActiveRuleRewardPlan;
   ruleProposal: PublicKey;
   tokenomicsProgramId: PublicKey;
@@ -342,7 +342,7 @@ export function createActiveRuleRewardInstruction({
         pubkey,
       })),
     ],
-    programId: idealerProgramId,
+    programId: tycheProgramId,
   });
 }
 
@@ -372,9 +372,9 @@ async function fetchWinnerSummary({
 
 async function listActiveRuleVotes(
   connection: Connection,
-  idealerProgramId: PublicKey,
+  tycheProgramId: PublicKey,
 ) {
-  const accounts = await connection.getProgramAccounts(idealerProgramId, {
+  const accounts = await connection.getProgramAccounts(tycheProgramId, {
     commitment: DEFAULT_COMMITMENT,
     filters: [
       {
@@ -392,18 +392,18 @@ export async function inspectActiveRuleRewardSettlement({
   apiBaseUrl,
   connection,
   fetchImpl = fetch,
-  idealerProgramId,
+  tycheProgramId,
   tokenomicsProgramId,
   turnId,
 }: {
   apiBaseUrl: string;
   connection: Connection;
   fetchImpl?: typeof fetch;
-  idealerProgramId: PublicKey;
+  tycheProgramId: PublicKey;
   tokenomicsProgramId: PublicKey;
   turnId: number;
 }): Promise<ActiveRuleRewardInspection> {
-  const turnState = derivePda(idealerProgramId, [
+  const turnState = derivePda(tycheProgramId, [
     Buffer.from("turn"),
     u64Le(BigInt(turnId)),
   ]);
@@ -411,7 +411,7 @@ export async function inspectActiveRuleRewardSettlement({
     turnState,
     DEFAULT_COMMITMENT,
   );
-  if (!turnInfo || !turnInfo.owner.equals(idealerProgramId)) {
+  if (!turnInfo || !turnInfo.owner.equals(tycheProgramId)) {
     throw new Error(`Turn ${turnId} is missing or has the wrong owner.`);
   }
   if (turnInfo.data.length !== CURRENT_TURN_STATE_DATA_LENGTH) {
@@ -434,7 +434,7 @@ export async function inspectActiveRuleRewardSettlement({
   }
 
   const activeRuleId = turn.activeRuleId;
-  const ruleProposal = derivePda(idealerProgramId, [
+  const ruleProposal = derivePda(tycheProgramId, [
     Buffer.from("rule"),
     u64Le(BigInt(turnId)),
     u64Le(BigInt(activeRuleId)),
@@ -455,7 +455,7 @@ export async function inspectActiveRuleRewardSettlement({
       connection.getAccountInfo(campaignAddress, DEFAULT_COMMITMENT),
       connection.getAccountInfo(activeRuleReward, DEFAULT_COMMITMENT),
       fetchWinnerSummary({ apiBaseUrl, fetchImpl, turnId }),
-      listActiveRuleVotes(connection, idealerProgramId),
+      listActiveRuleVotes(connection, tycheProgramId),
     ]);
   if (settlementInfo) {
     if (!settlementInfo.owner.equals(tokenomicsProgramId)) {
@@ -467,7 +467,7 @@ export async function inspectActiveRuleRewardSettlement({
       turnId,
     };
   }
-  if (!proposalInfo || !proposalInfo.owner.equals(idealerProgramId)) {
+  if (!proposalInfo || !proposalInfo.owner.equals(tycheProgramId)) {
     throw new Error("Active-rule proposal is missing or has the wrong owner.");
   }
   if (!campaignInfo || !campaignInfo.owner.equals(tokenomicsProgramId)) {
@@ -531,7 +531,7 @@ export async function inspectActiveRuleRewardSettlement({
         mint: campaign.mint,
         owner: proposal.proposer,
       }),
-      globalConfig: derivePda(idealerProgramId, [
+      globalConfig: derivePda(tycheProgramId, [
         Buffer.from("global_config"),
       ]),
       individualAlternativePayoutLamports:
@@ -555,13 +555,13 @@ export async function inspectActiveRuleRewardSettlement({
 export async function simulateActiveRuleRewardSettlement({
   authority,
   connection,
-  idealerProgramId,
+  tycheProgramId,
   plan,
   tokenomicsProgramId,
 }: {
   authority: Keypair;
   connection: Connection;
-  idealerProgramId: PublicKey;
+  tycheProgramId: PublicKey;
   plan: ActiveRuleRewardPlan;
   tokenomicsProgramId: PublicKey;
 }) {
@@ -595,7 +595,7 @@ export async function simulateActiveRuleRewardSettlement({
       authority: authority.publicKey,
       campaign: plan.campaign,
       globalConfig: plan.globalConfig,
-      idealerProgramId,
+      tycheProgramId,
       plan,
       ruleProposal: plan.ruleProposal,
       tokenomicsProgramId,
@@ -695,13 +695,13 @@ export async function createActiveRuleRewardSettlementConfig(
   env = process.env,
 ): Promise<ActiveRuleRewardSettlementConfig> {
   const enabled = envFlag(
-    env.IDEALER_ACTIVE_RULE_REWARD_SETTLEMENT_ENABLED,
+    env.TYCHE_ACTIVE_RULE_REWARD_SETTLEMENT_ENABLED,
   );
   const tokenomicsProgramId = env.TOKENOMICS_CORE_PROGRAM_ID
     ? new PublicKey(env.TOKENOMICS_CORE_PROGRAM_ID)
     : null;
   const turnAllowlist = parseActiveRuleRewardTurnAllowlist(
-    env.IDEALER_ACTIVE_RULE_REWARD_TURN_ALLOWLIST,
+    env.TYCHE_ACTIVE_RULE_REWARD_TURN_ALLOWLIST,
   );
   if (enabled && !tokenomicsProgramId) {
     throw new Error(
@@ -714,11 +714,11 @@ export async function createActiveRuleRewardSettlementConfig(
     );
   }
   return {
-    apiBaseUrl: env.IDEALER_API_BASE_URL ?? "http://localhost:3002",
+    apiBaseUrl: env.TYCHE_API_BASE_URL ?? "http://localhost:3002",
     automation: await createTurnAutomationConfig(env),
     enabled,
     intervalMs: envNumber(
-      env.IDEALER_ACTIVE_RULE_REWARD_SETTLEMENT_INTERVAL_MS,
+      env.TYCHE_ACTIVE_RULE_REWARD_SETTLEMENT_INTERVAL_MS,
       DEFAULT_INTERVAL_MS,
     ),
     tokenomicsProgramId,
@@ -744,7 +744,7 @@ export async function runActiveRuleRewardSettlementOnce(
     config.automation.rpcUrl,
     DEFAULT_COMMITMENT,
   );
-  const idealerProgramId = new PublicKey(
+  const tycheProgramId = new PublicKey(
     config.automation.programId.toString(),
   );
 
@@ -752,7 +752,7 @@ export async function runActiveRuleRewardSettlementOnce(
     const inspection = await inspectActiveRuleRewardSettlement({
       apiBaseUrl: config.apiBaseUrl,
       connection,
-      idealerProgramId,
+      tycheProgramId,
       tokenomicsProgramId: config.tokenomicsProgramId,
       turnId,
     });
@@ -772,7 +772,7 @@ export async function runActiveRuleRewardSettlementOnce(
           authority: authority.publicKey,
           campaign: inspection.plan.campaign,
           globalConfig: inspection.plan.globalConfig,
-          idealerProgramId,
+          tycheProgramId,
           plan: inspection.plan,
           ruleProposal: inspection.plan.ruleProposal,
           tokenomicsProgramId: config.tokenomicsProgramId,

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { address, getAddressEncoder } from "@solana/kit";
-import { IDEALER_PROGRAM_ID } from "./idealerProgram.js";
+import { TYCHE_PROGRAM_ID } from "./tycheProgram.js";
 import { INITIAL_CAMPAIGN_CONFIG_HASH } from "./tokenomicsGenesisConfig.js";
 
 import {
@@ -16,7 +16,7 @@ import {
   fetchManualTokenRewards,
   fetchOnChainTokenBalance,
   fetchOnChainTokenomicsPosition,
-  IDEALER_TOKEN_MINT,
+  TYCHE_TOKEN_MINT,
   SPL_TOKEN_PROGRAM_ID,
   TOKENOMICS_CORE_PROGRAM_ID,
 } from "./tokenomicsProgram.js";
@@ -209,7 +209,7 @@ function tokenConfigData() {
   const data = new Uint8Array(723);
   const encoder = getAddressEncoder();
   data.set([92, 73, 255, 43, 107, 51, 117, 101], 0);
-  data.set(encoder.encode(IDEALER_TOKEN_MINT), 136);
+  data.set(encoder.encode(TYCHE_TOKEN_MINT), 136);
   new DataView(data.buffer).setUint32(232, 0, true);
   data.set(encoder.encode(address(escrow)), 269);
   data.set(encoder.encode(address(tokenAccount)), 301);
@@ -223,7 +223,7 @@ test("reads lock configuration and position directly from Tokenomics Core", asyn
   lockData.set([95, 235, 144, 78, 23, 171, 45, 9], 0);
   lockData.set(encoder.encode(owner), 8);
   lockData.set(encoder.encode(address(tokenAccount)), 72);
-  lockData.set(encoder.encode(IDEALER_TOKEN_MINT), 136);
+  lockData.set(encoder.encode(TYCHE_TOKEN_MINT), 136);
   new DataView(lockData.buffer).setBigUint64(168, 900_000_000n, true);
 
   const position = await fetchOnChainTokenomicsPosition({
@@ -292,14 +292,14 @@ test("discovers beneficiary-bound JDR rewards for a manual claim", async () => {
                   Buffer.from(proposal).toString("base64"),
                   "base64",
                 ] as const,
-                owner: IDEALER_PROGRAM_ID,
+                owner: TYCHE_PROGRAM_ID,
               },
               pubkey: tokenAccount,
             },
             {
               account: {
                 data: [Buffer.from(vote).toString("base64"), "base64"] as const,
-                owner: IDEALER_PROGRAM_ID,
+                owner: TYCHE_PROGRAM_ID,
               },
               pubkey: escrow,
             },

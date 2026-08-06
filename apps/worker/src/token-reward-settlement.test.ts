@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   CAMPAIGN_V1_ECONOMIC_CONFIG_HASH,
   CAMPAIGN_V2_ECONOMIC_CONFIG_HASH,
-} from "@idealer/tokenomics";
+} from "@tyche/tokenomics";
 import { PublicKey } from "@solana/web3.js";
 import {
   createActionRewardInstructions,
@@ -16,7 +16,7 @@ import {
   selectTokenRewardActions,
 } from "./token-reward-settlement.js";
 
-const IDEALER_PROGRAM = key(1);
+const TYCHE_PROGRAM = key(1);
 const TOKENOMICS_PROGRAM = key(2);
 const AUTHORITY = key(3);
 const BENEFICIARY = key(4);
@@ -145,7 +145,7 @@ test("derives classic SPL ATA and one receipt per immutable action account", () 
   assert.equal(receipt.toBase58(), expectedReceipt.toBase58());
 });
 
-test("creates ATA idempotently before the exact Idealer reward CPI", () => {
+test("creates ATA idempotently before the exact Tyche reward CPI", () => {
   const beneficiaryTokenAccount = deriveAssociatedTokenAddress({
     mint: MINT,
     owner: BENEFICIARY,
@@ -172,7 +172,7 @@ test("creates ATA idempotently before the exact Idealer reward CPI", () => {
     authority: AUTHORITY,
     beneficiary: BENEFICIARY,
     beneficiaryTokenAccountExists: false,
-    idealerProgramId: IDEALER_PROGRAM,
+    tycheProgramId: TYCHE_PROGRAM,
     kind: "proposal",
     tokenomicsProgramId: TOKENOMICS_PROGRAM,
   });
@@ -184,7 +184,7 @@ test("creates ATA idempotently before the exact Idealer reward CPI", () => {
   assert.deepEqual([...instructions[0]!.data], [1]);
   assert.equal(
     instructions[1]?.programId.toBase58(),
-    IDEALER_PROGRAM.toBase58(),
+    TYCHE_PROGRAM.toBase58(),
   );
   assert.deepEqual(
     [...instructions[1]!.data],
@@ -243,7 +243,7 @@ test("creates ATA idempotently before the exact Idealer reward CPI", () => {
       authority: AUTHORITY,
       beneficiary: BENEFICIARY,
       beneficiaryTokenAccountExists: true,
-      idealerProgramId: IDEALER_PROGRAM,
+      tycheProgramId: TYCHE_PROGRAM,
       kind: "supporter",
       tokenomicsProgramId: TOKENOMICS_PROGRAM,
     }).length,

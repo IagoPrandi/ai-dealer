@@ -1,5 +1,5 @@
 {
-  "name": "@idealer/rule-test-harness",
+  "name": "@tyche/rule-test-harness",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -13,10 +13,10 @@
     "test": "node --test --import tsx \"src/**/*.test.ts\""
   },
   "dependencies": {
-    "@idealer/rule-runtime": "workspace:*",
-    "@idealer/rule-schema": "workspace:*"
+    "@tyche/rule-runtime": "workspace:*",
+    "@tyche/rule-schema": "workspace:*"
   },
   "devDependencies": {
-    "@idealer/config": "workspace:*"
+    "@tyche/config": "workspace:*"
   }
 }

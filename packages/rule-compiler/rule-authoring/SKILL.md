@@ -1,6 +1,6 @@
 ---
 name: rule-authoring
-description: Authoring guidance for the Idealer AI Rule Compiler — converts a player's natural-language lottery rule (English or Portuguese) into the verifiable rule DSL/AST (schemaVersion 3 compositional core). Covers the core node grammar, binder scopes, the predicate-vs-ranking decision, the macro cookbook for common intents, and correct handling of negation/inverse, compound (AND/OR), threshold ("at least N"), and ambiguous terms (e.g. "dezena"). Use this when emitting a rule AST from a proposed rule, or when extending the rule compiler's capabilities. This is a RUNTIME asset of the LLM compile harness, not developer tooling.
+description: Authoring guidance for the Tyche AI Rule Compiler — converts a player's natural-language lottery rule (English or Portuguese) into the verifiable rule DSL/AST (schemaVersion 3 compositional core). Covers the core node grammar, binder scopes, the predicate-vs-ranking decision, the macro cookbook for common intents, and correct handling of negation/inverse, compound (AND/OR), threshold ("at least N"), and ambiguous terms (e.g. "dezena"). Use this when emitting a rule AST from a proposed rule, or when extending the rule compiler's capabilities. This is a RUNTIME asset of the LLM compile harness, not developer tooling.
 ---
 
 # Rule Authoring (compile_rule_to_ast)

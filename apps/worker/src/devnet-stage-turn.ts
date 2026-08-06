@@ -14,7 +14,7 @@ import {
  * Needed because an older devnet turn was opened under a previous account layout
  * and the trustless program (M5.1) can no longer deserialize it. The automation
  * force-skips that legacy turn, opens a fresh one, shrinks its duration so it
- * ends immediately, and closes it. Set `IDEALER_DEVNET_TURN_DURATION_SCALE_BPS`
+ * ends immediately, and closes it. Set `TYCHE_DEVNET_TURN_DURATION_SCALE_BPS`
  * low (e.g. `1`) so the staged turn ends right away. This is a manual tool, not
  * the production scheduler (M5.3).
  */
@@ -29,16 +29,16 @@ function sleep(ms: number) {
 export async function stageFreshClosedTurn() {
   const config = await createTurnAutomationConfig();
   if (!config.enabled) {
-    throw new Error("Set IDEALER_TURN_AUTOMATION_ENABLED=true to stage a turn.");
+    throw new Error("Set TYCHE_TURN_AUTOMATION_ENABLED=true to stage a turn.");
   }
   if (!config.authorityKeypairBytes) {
     throw new Error(
-      "Staging a turn requires IDEALER_TURN_AUTHORITY_KEYPAIR or IDEALER_TURN_AUTHORITY_KEYPAIR_PATH.",
+      "Staging a turn requires TYCHE_TURN_AUTHORITY_KEYPAIR or TYCHE_TURN_AUTHORITY_KEYPAIR_PATH.",
     );
   }
   if (!config.desiredTurnDurationCycle) {
     throw new Error(
-      "Set IDEALER_DEVNET_TURN_DURATION_SCALE_BPS low (e.g. 1) so the staged turn ends immediately.",
+      "Set TYCHE_DEVNET_TURN_DURATION_SCALE_BPS low (e.g. 1) so the staged turn ends immediately.",
     );
   }
 

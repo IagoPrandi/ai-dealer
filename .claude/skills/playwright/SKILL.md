@@ -18,10 +18,10 @@ Use the official Playwright container for browser checks:
 ```powershell
 docker run --rm -t --ipc=host `
   -v "${PWD}:/work" `
-  -v idealer-playwright-node-modules:/work/node_modules `
+  -v tyche-playwright-node-modules:/work/node_modules `
   -w /work `
   mcr.microsoft.com/playwright:v1.60.0-noble `
-  bash -lc "corepack enable && pnpm install --frozen-lockfile && pnpm --filter @idealer/web test:e2e"
+  bash -lc "corepack enable && pnpm install --frozen-lockfile && pnpm --filter @tyche/web test:e2e"
 ```
 
 For a one-off screenshot script, still run it inside the same container image and write artifacts under `output/playwright/`:
@@ -29,21 +29,21 @@ For a one-off screenshot script, still run it inside the same container image an
 ```powershell
 docker run --rm -t --ipc=host `
   -v "${PWD}:/work" `
-  -v idealer-playwright-node-modules:/work/node_modules `
+  -v tyche-playwright-node-modules:/work/node_modules `
   -w /work `
   mcr.microsoft.com/playwright:v1.60.0-noble `
-  bash -lc "corepack enable && pnpm install --frozen-lockfile && pnpm --filter @idealer/web exec playwright screenshot http://host.docker.internal:3000 output/playwright/container-check.png"
+  bash -lc "corepack enable && pnpm install --frozen-lockfile && pnpm --filter @tyche/web exec playwright screenshot http://host.docker.internal:3000 output/playwright/container-check.png"
 ```
 
 When testing services already running through `docker compose`, attach the Playwright container to the project network and target service DNS names such as `http://web:3000`, `http://admin:3001`, or `http://api:3002`:
 
 ```powershell
-docker run --rm -t --ipc=host --network idealer-internal `
+docker run --rm -t --ipc=host --network tyche-internal `
   -v "${PWD}:/work" `
-  -v idealer-playwright-node-modules:/work/node_modules `
+  -v tyche-playwright-node-modules:/work/node_modules `
   -w /work `
   mcr.microsoft.com/playwright:v1.60.0-noble `
-  bash -lc "corepack enable && pnpm install --frozen-lockfile && pnpm --filter @idealer/web exec playwright screenshot http://web:3000/play output/playwright/container-play.png"
+  bash -lc "corepack enable && pnpm install --frozen-lockfile && pnpm --filter @tyche/web exec playwright screenshot http://web:3000/play output/playwright/container-play.png"
 ```
 
 Only use host-side `npx`, `agent-browser`, or explicit Windows browser paths when Docker is unavailable or the user explicitly asks for host-side verification.

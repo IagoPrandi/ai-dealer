@@ -1,5 +1,5 @@
 {
-  "name": "@idealer/rule-schema",
+  "name": "@tyche/rule-schema",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -16,6 +16,6 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@idealer/config": "workspace:*"
+    "@tyche/config": "workspace:*"
   }
 }

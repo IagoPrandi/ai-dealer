@@ -1,5 +1,5 @@
 {
-  "name": "@idealer/solana-programs",
+  "name": "@tyche/solana-programs",
   "version": "0.0.0",
   "private": true,
   "scripts": {

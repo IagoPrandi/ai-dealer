@@ -18,9 +18,10 @@ import {
   getProgramDerivedAddress,
 } from "@solana/kit";
 
-import { IDEALER_PROGRAM_ID, SYSTEM_PROGRAM_ID } from "./idealerProgram";
+import { TYCHE_PROGRAM_ID, SYSTEM_PROGRAM_ID } from "./tycheProgram";
 import { TOKENOMICS_CORE_PROGRAM_ID } from "./tokenomicsProgram";
 
+// Preserved for compatibility with referrals already committed on-chain.
 export const REFERRAL_CODE_DOMAIN = "idealer:referral-code:v1";
 export const REFERRAL_LINK_PARAM = "ref";
 
@@ -104,7 +105,7 @@ export async function countPlayerGameTokens({
   const rpc = client.runtime.rpc as typeof client.runtime.rpc &
     ProgramAccountsRpc;
   const accounts = await rpc
-    .getProgramAccounts(IDEALER_PROGRAM_ID, {
+    .getProgramAccounts(TYCHE_PROGRAM_ID, {
       commitment: "confirmed",
       encoding: "base64",
       filters: [
@@ -119,7 +120,7 @@ export async function countPlayerGameTokens({
     })
     .send();
   return accounts.filter(({ account }) => {
-    if (account.owner !== IDEALER_PROGRAM_ID.toString()) {
+    if (account.owner !== TYCHE_PROGRAM_ID.toString()) {
       return false;
     }
     const bytes = decodeBase64Data(account.data);
@@ -218,7 +219,10 @@ export async function fetchReferralAttribution({
 }): Promise<null | ReferralAttribution> {
   const attribution = await deriveReferralAttributionAddress(invitee);
   const result = await client.runtime.rpc
-    .getAccountInfo(attribution, { commitment: "confirmed", encoding: "base64" })
+    .getAccountInfo(attribution, {
+      commitment: "confirmed",
+      encoding: "base64",
+    })
     .send();
   if (!result.value) {
     return null;

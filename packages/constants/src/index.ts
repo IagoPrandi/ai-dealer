@@ -31,7 +31,7 @@ export const FREE_ACTION_WINDOW_ENDS_BEFORE_TURN_INDEX =
   resolveFreeActionWindowEndsBeforeTurnIndex(
     process.env.NEXT_PUBLIC_SOLANA_NETWORK ??
       process.env.SOLANA_NETWORK ??
-      process.env.IDEALER_NETWORK,
+      process.env.TYCHE_NETWORK,
   );
 /** @deprecated Use FREE_ACTION_WINDOW_ENDS_BEFORE_TURN_INDEX. */
 export const VOTE_FEE_START_TURN = FREE_ACTION_WINDOW_ENDS_BEFORE_TURN_INDEX;
@@ -71,7 +71,7 @@ export const VOTER_REWARD_CONFIG = {
 } as const;
 
 // JDR promotional-campaign reward economics (PRD-TOKENOMICS §5.2–5.4). This is
-// the canonical TypeScript source consumed by @idealer/tokenomics, the API and
+// the canonical TypeScript source consumed by @tyche/tokenomics, the API and
 // the web app, and it is mirrored by
 // contracts/solana/programs/tokenomics_core/src/domain.rs. Atom amounts use nine
 // decimals: 1 JDR = 1_000_000_000 atoms.

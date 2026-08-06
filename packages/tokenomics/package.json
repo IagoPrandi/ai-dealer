@@ -1,5 +1,5 @@
 {
-  "name": "@idealer/tokenomics",
+  "name": "@tyche/tokenomics",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -13,9 +13,9 @@
     "test": "node --test --import tsx \"src/**/*.test.ts\""
   },
   "dependencies": {
-    "@idealer/constants": "workspace:*"
+    "@tyche/constants": "workspace:*"
   },
   "devDependencies": {
-    "@idealer/config": "workspace:*"
+    "@tyche/config": "workspace:*"
   }
 }

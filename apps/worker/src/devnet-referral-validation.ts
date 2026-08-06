@@ -41,7 +41,7 @@ import {
  * invitee's first GameToken/guess. It therefore proves the attribution exists
  * no later than the first GameToken without exposing or retaining any key.
  *
- * Dry-run is the default. Set IDEALER_REFERRAL_TEST_BROADCAST=1 only after the
+ * Dry-run is the default. Set TYCHE_REFERRAL_TEST_BROADCAST=1 only after the
  * exact preflight summary has been reviewed and approved.
  */
 
@@ -103,7 +103,7 @@ function readFundingLamports(value: string | undefined) {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 1) {
     throw new Error(
-      "IDEALER_REFERRAL_TEST_FUND_LAMPORTS must be a positive safe integer.",
+      "TYCHE_REFERRAL_TEST_FUND_LAMPORTS must be a positive safe integer.",
     );
   }
   return parsed;
@@ -180,7 +180,7 @@ export async function runAtomicReferralValidation(
   const tokenomicsProgramId = new PublicKey(
     env.TOKENOMICS_CORE_PROGRAM_ID ?? "BRK6G8Sep66LFREp2nGMLiganfw2nbWe1f8zeAdoP1Fm",
   );
-  const idealerProgramId = new PublicKey(automation.programId.toString());
+  const tycheProgramId = new PublicKey(automation.programId.toString());
   const connection = new Connection(automation.rpcUrl, COMMITMENT);
   const rpc = createSolanaRpc(automation.rpcUrl);
   const globalConfig = await fetchGlobalConfig({
@@ -204,11 +204,11 @@ export async function runAtomicReferralValidation(
   }
   const invitee = deterministicPlayer(turnId, 0);
   const inviter = new PublicKey(
-    env.IDEALER_REFERRAL_TEST_INVITER ??
+    env.TYCHE_REFERRAL_TEST_INVITER ??
       "EHHVmFK3FM9qb2eyc8wnEwpHtVH3yW1FGZzrEGn4iSea",
   );
   const referralCodeHash = hash32(
-    `idealer:devnet:referral-validation:v1:${turnId}:${inviter.toBase58()}:${invitee.publicKey.toBase58()}`,
+    `tyche:devnet:referral-validation:v1:${turnId}:${inviter.toBase58()}:${invitee.publicKey.toBase58()}`,
   );
   const referral = createAttributeReferralInstruction({
     invitee: invitee.publicKey,
@@ -219,7 +219,7 @@ export async function runAtomicReferralValidation(
   const [attributionInfo, gameTokenInfo] = await Promise.all([
     connection.getAccountInfo(referral.attribution, COMMITMENT),
     connection.getAccountInfo(
-      derivePda(idealerProgramId, [
+      derivePda(tycheProgramId, [
         Buffer.from("game_token"),
         u64Le(turnId),
         invitee.publicKey.toBuffer(),
@@ -257,11 +257,11 @@ export async function runAtomicReferralValidation(
   const guess = createSubmitGuessInstruction({
     numbers: deterministicGuess(0),
     player: invitee.publicKey,
-    programId: idealerProgramId,
+    programId: tycheProgramId,
     sequence: 1,
     turnId,
   });
-  const fundingLamports = readFundingLamports(env.IDEALER_REFERRAL_TEST_FUND_LAMPORTS);
+  const fundingLamports = readFundingLamports(env.TYCHE_REFERRAL_TEST_FUND_LAMPORTS);
   const instructions = [
     SystemProgram.transfer({
       fromPubkey: authority.publicKey,
@@ -299,7 +299,7 @@ export async function runAtomicReferralValidation(
   }
 
   let signature: null | string = null;
-  if (envFlag(env.IDEALER_REFERRAL_TEST_BROADCAST)) {
+  if (envFlag(env.TYCHE_REFERRAL_TEST_BROADCAST)) {
     signature = await connection.sendTransaction(transaction, {
       maxRetries: 3,
       preflightCommitment: COMMITMENT,
@@ -331,7 +331,7 @@ export async function runAtomicReferralValidation(
 
   return {
     attribution: referral.attribution.toBase58(),
-    broadcast: envFlag(env.IDEALER_REFERRAL_TEST_BROADCAST),
+    broadcast: envFlag(env.TYCHE_REFERRAL_TEST_BROADCAST),
     cluster: "devnet",
     estimatedNetworkFeeLamports: networkFee.value,
     fundingLamports,

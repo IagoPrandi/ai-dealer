@@ -1,5 +1,5 @@
 {
-  "name": "@idealer/agent-core",
+  "name": "@tyche/agent-core",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -10,9 +10,9 @@
     "build": "tsc -p tsconfig.json",
     "lint": "eslint src --max-warnings=0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node -e \"console.log('@idealer/agent-core ok')\""
+    "test": "node -e \"console.log('@tyche/agent-core ok')\""
   },
   "devDependencies": {
-    "@idealer/config": "workspace:*"
+    "@tyche/config": "workspace:*"
   }
 }

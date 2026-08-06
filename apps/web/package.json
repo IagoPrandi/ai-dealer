@@ -1,5 +1,5 @@
 {
-  "name": "@idealer/web",
+  "name": "@tyche/web",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -16,7 +16,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@idealer/constants": "workspace:*",
+    "@tyche/constants": "workspace:*",
     "@solana-mobile/wallet-standard-mobile": "0.5.2",
     "@solana/client": "1.7.0",
     "@solana/kit": "5.5.1",
@@ -29,7 +29,7 @@
     "react-dom": "19.2.7"
   },
   "devDependencies": {
-    "@idealer/config": "workspace:*",
+    "@tyche/config": "workspace:*",
     "@playwright/test": "^1.60.0",
     "@types/react": "19.2.16",
     "@types/react-dom": "19.2.3",

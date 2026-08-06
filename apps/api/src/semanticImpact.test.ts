@@ -3,7 +3,7 @@ import { test } from "node:test";
 import {
   validateAndPrecompileRule,
   type RuleAst,
-} from "@idealer/rule-compiler";
+} from "@tyche/rule-compiler";
 import { analyzeRuleSemanticImpact } from "./semanticImpact.js";
 
 const drawOnlyRangeAst = {

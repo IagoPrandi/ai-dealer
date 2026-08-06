@@ -14,14 +14,14 @@ import { createTurnAutomationConfig, stringifySimulationError } from "./turn-aut
  * M4.7 devnet operator: execute a real, claimant-signed `claim_prize` (winner
  * payout pull-payment) on devnet for a turn seeded by `devnet-seed-real-inputs`.
  *
- * Dry-run by default; set IDEALER_SETTLE_BROADCAST=1 to broadcast. The claimant
+ * Dry-run by default; set TYCHE_SETTLE_BROADCAST=1 to broadcast. The claimant
  * is reconstructed deterministically from the same seed the input-seeder used
- * (idealer:m5.4:devnet-player:v1:<turnId>:<index>), so no real wallet secret is
+ * (tyche:m5.4:devnet-player:v1:<turnId>:<index>), so no real wallet secret is
  * read or stored. It then mirrors the frontend flow by POSTing the signature to
  * /claim-records/complete, and re-sends once to prove the double-claim guard.
  */
 
-const BROADCAST = process.env.IDEALER_SETTLE_BROADCAST === "1";
+const BROADCAST = process.env.TYCHE_SETTLE_BROADCAST === "1";
 const COMMITMENT: Commitment = "confirmed";
 const DEFAULT_API_BASE_URL = "http://127.0.0.1:3002";
 const MAX_PLAYER_INDEX = 17;
@@ -42,7 +42,7 @@ function derivePda(programId: PublicKey, seeds: Buffer[]) {
 
 function deterministicPlayer(turnId: number, index: number) {
   const seed = createHash("sha256")
-    .update(`idealer:m5.4:devnet-player:v1:${turnId}:${index}`)
+    .update(`tyche:m5.4:devnet-player:v1:${turnId}:${index}`)
     .digest()
     .subarray(0, 32);
   return Keypair.fromSeed(seed);
@@ -165,7 +165,7 @@ async function sendClaim({
 
 export async function runClaimPrize() {
   const turnId = resolveTurnId();
-  const apiBaseUrl = process.env.IDEALER_API_BASE_URL ?? DEFAULT_API_BASE_URL;
+  const apiBaseUrl = process.env.TYCHE_API_BASE_URL ?? DEFAULT_API_BASE_URL;
   const config = await createTurnAutomationConfig();
   const programId = new PublicKey(config.programId.toString());
   const connection = new Connection(config.rpcUrl, COMMITMENT);
@@ -223,7 +223,7 @@ export async function runClaimPrize() {
 
   if (!BROADCAST) {
     console.log(
-      "Dry run only. Set IDEALER_SETTLE_BROADCAST=1 to broadcast claim_prize.",
+      "Dry run only. Set TYCHE_SETTLE_BROADCAST=1 to broadcast claim_prize.",
     );
     return;
   }

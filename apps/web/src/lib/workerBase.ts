@@ -11,12 +11,12 @@ function stripTrailingSlash(value: string) {
 
 export function getWorkerBaseUrl() {
   const configuredWorkerBaseUrl =
-    process.env.NEXT_PUBLIC_IDEALER_WORKER_URL?.trim();
+    process.env.NEXT_PUBLIC_TYCHE_WORKER_URL?.trim();
 
   // Server-side rendering: reach the worker directly over loopback.
   if (typeof window === "undefined") {
     return stripTrailingSlash(
-      process.env.IDEALER_WORKER_BASE_URL ?? "http://localhost:3003",
+      process.env.TYCHE_WORKER_BASE_URL ?? "http://localhost:3003",
     );
   }
 

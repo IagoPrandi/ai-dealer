@@ -2,8 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 
 // Next 16 allows a single dev server per project dir. When one is already
 // running (pnpm dev), point the tests at it instead of starting another:
-//   IDEALER_WEB_E2E_BASE_URL=http://localhost:3000 pnpm test:e2e
-const externalBaseUrl = process.env.IDEALER_WEB_E2E_BASE_URL?.trim();
+//   TYCHE_WEB_E2E_BASE_URL=http://localhost:3000 pnpm test:e2e
+const externalBaseUrl = process.env.TYCHE_WEB_E2E_BASE_URL?.trim();
 
 export default defineConfig({
   testDir: "./e2e",

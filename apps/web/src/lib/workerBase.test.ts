@@ -53,7 +53,7 @@ function withBrowserLocation(
 }
 
 test("worker base defaults browser calls to the same-origin proxy", () => {
-  withEnv({ NEXT_PUBLIC_IDEALER_WORKER_URL: undefined }, () => {
+  withEnv({ NEXT_PUBLIC_TYCHE_WORKER_URL: undefined }, () => {
     withBrowserLocation({ hostname: "localhost", protocol: "http:" }, () => {
       assert.equal(getWorkerBaseUrl(), "/__worker");
     });
@@ -62,7 +62,7 @@ test("worker base defaults browser calls to the same-origin proxy", () => {
 
 test("worker base honors explicit browser override and strips trailing slash", () => {
   withEnv(
-    { NEXT_PUBLIC_IDEALER_WORKER_URL: "http://localhost:3003///" },
+    { NEXT_PUBLIC_TYCHE_WORKER_URL: "http://localhost:3003///" },
     () => {
       withBrowserLocation({ hostname: "localhost", protocol: "http:" }, () => {
         assert.equal(getWorkerBaseUrl(), "http://localhost:3003");
@@ -74,8 +74,8 @@ test("worker base honors explicit browser override and strips trailing slash", (
 test("worker base uses direct loopback URL during server-side execution", () => {
   withEnv(
     {
-      IDEALER_WORKER_BASE_URL: undefined,
-      NEXT_PUBLIC_IDEALER_WORKER_URL: undefined,
+      TYCHE_WORKER_BASE_URL: undefined,
+      NEXT_PUBLIC_TYCHE_WORKER_URL: undefined,
     },
     () => {
       assert.equal(getWorkerBaseUrl(), "http://localhost:3003");
@@ -84,7 +84,7 @@ test("worker base uses direct loopback URL during server-side execution", () => 
 });
 
 test("worker base honors explicit server-side worker URL", () => {
-  withEnv({ IDEALER_WORKER_BASE_URL: "http://worker.internal:3003/" }, () => {
+  withEnv({ TYCHE_WORKER_BASE_URL: "http://worker.internal:3003/" }, () => {
     assert.equal(getWorkerBaseUrl(), "http://worker.internal:3003");
   });
 });

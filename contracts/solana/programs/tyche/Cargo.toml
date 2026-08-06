@@ -1,0 +1,57 @@
+[package]
+name = "tyche"
+version = "0.1.0"
+description = "Tyche core devnet program"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "tyche"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+custom-heap = []
+# TEST-ONLY (devnet): enables `reinitialize_global_config_for_migration`, used to
+# repair a stale `global_config` whose layout predates the current program. OFF
+# by default and MUST stay off for production builds so the instruction is
+# excluded from the program entirely.
+devnet-test = []
+# TEST-ONLY (devnet): human-scale 2-minute elimination/decision window for
+# hands-on manual playtesting. Takes precedence over `devnet-test`'s 5-second
+# window. OFF by default and MUST stay off for production builds.
+manual-test = []
+# Selects which Switchboard On-Demand program id is accepted as the owner of
+# randomness accounts consumed by the trustless `settle_*` instructions. Enable
+# for devnet builds (binds the devnet Switchboard program); OFF for production
+# mainnet builds so the mainnet Switchboard program id is enforced instead.
+sb-devnet = []
+custom-panic = []
+idl-build = [
+  "anchor-lang/idl-build",
+  "anchor-spl/idl-build",
+  "tokenomics-core/idl-build",
+]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+
+[dependencies]
+anchor-lang = { workspace = true }
+anchor-spl = { workspace = true }
+solana-sha256-hasher = { workspace = true }
+orao-solana-vrf = { version = "0.7.0", default-features = false, features = ["no-entrypoint"] }
+switchboard-on-demand = { version = "0.13.0", features = ["anchor"] }
+tokenomics-core = { path = "../tokenomics_core", features = ["cpi"] }
+
+[dev-dependencies]
+solana-account-info = "2.3.0"
+solana-client = "2.3.13"
+solana-program-error = "2.2.2"
+solana-program-test = "2.3.13"
+solana-sdk = "2.3.1"
+solana-system-interface = { version = "1.0.0", features = ["bincode"] }
+tokio = { version = "1.48.0", features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

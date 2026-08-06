@@ -6,16 +6,16 @@
  *  - runtime.rpc.getBalance      -> devolve um saldo plausível para o cofre
  *
  * Os bytes seguem EXATAMENTE o layout lido por decodeGlobalConfigAccount /
- * decodeTurnStateAccount em idealerProgram.ts (discriminador de 8 bytes + campos
+ * decodeTurnStateAccount em tycheProgram.ts (discriminador de 8 bytes + campos
  * em little-endian). Ações de escrita (transaction/solTransfer) são stubs que
  * falham de forma clara — elas só rodam em cliques, nunca ao montar a tela.
  */
 import { address, getAddressEncoder, getProgramDerivedAddress } from "@solana/kit";
 
 import {
-  IDEALER_PROGRAM_ID,
+  TYCHE_PROGRAM_ID,
   type ActiveTurnSnapshot,
-} from "../../solana/idealerProgram";
+} from "../../solana/tycheProgram";
 import {
   MOCK_GLOBAL_CONFIG,
   MOCK_TURN_STATE,
@@ -23,7 +23,7 @@ import {
 } from "./mockData";
 import {
   deriveAssociatedTokenAddress,
-  IDEALER_TOKEN_MINT,
+  TYCHE_TOKEN_MINT,
   SPL_TOKEN_PROGRAM_ID,
   TOKENOMICS_CORE_PROGRAM_ID,
 } from "../../solana/tokenomicsProgram";
@@ -107,17 +107,17 @@ function encodeTokenConfig(): Uint8Array {
   const data = new Uint8Array(723);
   const encoder = getAddressEncoder();
   data.set([92, 73, 255, 43, 107, 51, 117, 101], 0);
-  data.set(encoder.encode(IDEALER_TOKEN_MINT), 136);
+  data.set(encoder.encode(TYCHE_TOKEN_MINT), 136);
   new DataView(data.buffer).setUint32(232, 0, true);
-  data.set(encoder.encode(IDEALER_TOKEN_MINT), 269);
-  data.set(encoder.encode(IDEALER_TOKEN_MINT), 301);
+  data.set(encoder.encode(TYCHE_TOKEN_MINT), 269);
+  data.set(encoder.encode(TYCHE_TOKEN_MINT), 301);
   return data;
 }
 
 function encodeJdrBalance(): Uint8Array {
   const data = new Uint8Array(165);
   const encoder = getAddressEncoder();
-  data.set(encoder.encode(IDEALER_TOKEN_MINT), 0);
+  data.set(encoder.encode(TYCHE_TOKEN_MINT), 0);
   data.set(encoder.encode(address(MOCK_WALLET_ADDRESS)), 32);
   new DataView(data.buffer).setBigUint64(64, 2_300_000_000n, true);
   return data;
@@ -149,13 +149,13 @@ let accountMapPromise: Promise<Map<string, AccountData>> | null = null;
 async function getAccountMap(): Promise<Map<string, AccountData>> {
   if (!accountMapPromise) {
     accountMapPromise = (async () => {
-      const owner = IDEALER_PROGRAM_ID.toString();
+      const owner = TYCHE_PROGRAM_ID.toString();
       const [globalConfigAddress] = await getProgramDerivedAddress({
-        programAddress: IDEALER_PROGRAM_ID,
+        programAddress: TYCHE_PROGRAM_ID,
         seeds: ["global_config"],
       });
       const [turnStateAddress] = await getProgramDerivedAddress({
-        programAddress: IDEALER_PROGRAM_ID,
+        programAddress: TYCHE_PROGRAM_ID,
         seeds: ["turn", u64LeBytes(MOCK_GLOBAL_CONFIG.activeTurnId)],
       });
       const [tokenConfigAddress] = await getProgramDerivedAddress({
@@ -218,7 +218,7 @@ export const mockSolanaClient = {
             {
               account: {
                 data: [toBase64(encodeProposalRewardSource()), "base64"] as const,
-                owner: IDEALER_PROGRAM_ID.toString(),
+                owner: TYCHE_PROGRAM_ID.toString(),
               },
               pubkey: "SysvarRent111111111111111111111111111111111",
             },

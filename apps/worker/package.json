@@ -1,5 +1,5 @@
 {
-  "name": "@idealer/worker",
+  "name": "@tyche/worker",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -22,11 +22,11 @@
     "test": "node --test --import tsx \"src/**/*.test.ts\""
   },
   "dependencies": {
-    "@idealer/game-engine": "workspace:*",
-    "@idealer/rule-compiler": "workspace:*",
-    "@idealer/rule-runtime": "workspace:*",
-    "@idealer/rule-schema": "workspace:*",
-    "@idealer/tokenomics": "workspace:*",
+    "@tyche/game-engine": "workspace:*",
+    "@tyche/rule-compiler": "workspace:*",
+    "@tyche/rule-runtime": "workspace:*",
+    "@tyche/rule-schema": "workspace:*",
+    "@tyche/tokenomics": "workspace:*",
     "@orao-network/solana-vrf": "0.8.0",
     "@solana/kit": "5.5.1",
     "@solana/web3.js": "1.98.4",
@@ -36,7 +36,7 @@
     "redis": "6.0.0"
   },
   "devDependencies": {
-    "@idealer/config": "workspace:*",
+    "@tyche/config": "workspace:*",
     "@types/pg": "8.20.0"
   }
 }

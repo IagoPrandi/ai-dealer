@@ -35,7 +35,7 @@ importers:
 
   apps/admin:
     dependencies:
-      '@idealer/constants':
+      '@tyche/constants':
         specifier: workspace:*
         version: link:../../packages/constants
       next:
@@ -48,7 +48,7 @@ importers:
         specifier: 19.2.7
         version: 19.2.7(react@19.2.7)
     devDependencies:
-      '@idealer/config':
+      '@tyche/config':
         specifier: workspace:*
         version: link:../../packages/config
       '@types/react':
@@ -60,10 +60,10 @@ importers:
 
   apps/api:
     dependencies:
-      '@idealer/constants':
+      '@tyche/constants':
         specifier: workspace:*
         version: link:../../packages/constants
-      '@idealer/rule-compiler':
+      '@tyche/rule-compiler':
         specifier: workspace:*
         version: link:../../packages/rule-compiler
       pg:
@@ -73,7 +73,7 @@ importers:
         specifier: 6.0.0
         version: 6.0.0
     devDependencies:
-      '@idealer/config':
+      '@tyche/config':
         specifier: workspace:*
         version: link:../../packages/config
       '@types/pg':
@@ -82,9 +82,6 @@ importers:
 
   apps/web:
     dependencies:
-      '@idealer/constants':
-        specifier: workspace:*
-        version: link:../../packages/constants
       '@solana-mobile/wallet-standard-mobile':
         specifier: 0.5.2
         version: 0.5.2(fastestsmallesttextencoderdecoder@1.0.22)(react-native@0.85.3(@babel/core@7.29.7)(@types/react@19.2.16)(bufferutil@4.1.0)(react@19.2.7)(utf-8-validate@6.0.6))(typescript@6.0.3)
@@ -103,6 +100,9 @@ importers:
       '@sqds/multisig':
         specifier: 2.1.4
         version: 2.1.4(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)
+      '@tyche/constants':
+        specifier: workspace:*
+        version: link:../../packages/constants
       lucide-react:
         specifier: ^1.17.0
         version: 1.17.0(react@19.2.7)
@@ -116,12 +116,12 @@ importers:
         specifier: 19.2.7
         version: 19.2.7(react@19.2.7)
     devDependencies:
-      '@idealer/config':
-        specifier: workspace:*
-        version: link:../../packages/config
       '@playwright/test':
         specifier: ^1.60.0
         version: 1.60.0
+      '@tyche/config':
+        specifier: workspace:*
+        version: link:../../packages/config
       '@types/react':
         specifier: 19.2.16
         version: 19.2.16
@@ -134,21 +134,6 @@ importers:
 
   apps/worker:
     dependencies:
-      '@idealer/game-engine':
-        specifier: workspace:*
-        version: link:../../packages/game-engine
-      '@idealer/rule-compiler':
-        specifier: workspace:*
-        version: link:../../packages/rule-compiler
-      '@idealer/rule-runtime':
-        specifier: workspace:*
-        version: link:../../packages/rule-runtime
-      '@idealer/rule-schema':
-        specifier: workspace:*
-        version: link:../../packages/rule-schema
-      '@idealer/tokenomics':
-        specifier: workspace:*
-        version: link:../../packages/tokenomics
       '@orao-network/solana-vrf':
         specifier: 0.8.0
         version: 0.8.0(bufferutil@4.1.0)(typescript@6.0.3)
@@ -161,6 +146,21 @@ importers:
       '@switchboard-xyz/on-demand':
         specifier: 3.10.4
         version: 3.10.4(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
+      '@tyche/game-engine':
+        specifier: workspace:*
+        version: link:../../packages/game-engine
+      '@tyche/rule-compiler':
+        specifier: workspace:*
+        version: link:../../packages/rule-compiler
+      '@tyche/rule-runtime':
+        specifier: workspace:*
+        version: link:../../packages/rule-runtime
+      '@tyche/rule-schema':
+        specifier: workspace:*
+        version: link:../../packages/rule-schema
+      '@tyche/tokenomics':
+        specifier: workspace:*
+        version: link:../../packages/tokenomics
       bs58:
         specifier: 6.0.0
         version: 6.0.0
@@ -171,7 +171,7 @@ importers:
         specifier: 6.0.0
         version: 6.0.0
     devDependencies:
-      '@idealer/config':
+      '@tyche/config':
         specifier: workspace:*
         version: link:../../packages/config
       '@types/pg':
@@ -182,7 +182,7 @@ importers:
 
   packages/agent-core:
     devDependencies:
-      '@idealer/config':
+      '@tyche/config':
         specifier: workspace:*
         version: link:../config
 
@@ -190,58 +190,58 @@ importers:
 
   packages/constants:
     devDependencies:
-      '@idealer/config':
+      '@tyche/config':
         specifier: workspace:*
         version: link:../config
 
   packages/game-engine:
     dependencies:
-      '@idealer/constants':
+      '@tyche/constants':
         specifier: workspace:*
         version: link:../constants
     devDependencies:
-      '@idealer/config':
+      '@tyche/config':
         specifier: workspace:*
         version: link:../config
 
   packages/hooks:
     devDependencies:
-      '@idealer/config':
+      '@tyche/config':
         specifier: workspace:*
         version: link:../config
 
   packages/mcp-tools:
     devDependencies:
-      '@idealer/config':
+      '@tyche/config':
         specifier: workspace:*
         version: link:../config
 
   packages/rule-compiler:
     dependencies:
-      '@idealer/agent-core':
+      '@tyche/agent-core':
         specifier: workspace:*
         version: link:../agent-core
-      '@idealer/rule-runtime':
+      '@tyche/rule-runtime':
         specifier: workspace:*
         version: link:../rule-runtime
-      '@idealer/rule-schema':
+      '@tyche/rule-schema':
         specifier: workspace:*
         version: link:../rule-schema
-      '@idealer/rule-test-harness':
+      '@tyche/rule-test-harness':
         specifier: workspace:*
         version: link:../rule-test-harness
     devDependencies:
-      '@idealer/config':
+      '@tyche/config':
         specifier: workspace:*
         version: link:../config
 
   packages/rule-runtime:
     dependencies:
-      '@idealer/rule-schema':
+      '@tyche/rule-schema':
         specifier: workspace:*
         version: link:../rule-schema
     devDependencies:
-      '@idealer/config':
+      '@tyche/config':
         specifier: workspace:*
         version: link:../config
 
@@ -251,59 +251,59 @@ importers:
         specifier: 4.4.3
         version: 4.4.3
     devDependencies:
-      '@idealer/config':
+      '@tyche/config':
         specifier: workspace:*
         version: link:../config
 
   packages/rule-test-harness:
     dependencies:
-      '@idealer/rule-runtime':
+      '@tyche/rule-runtime':
         specifier: workspace:*
         version: link:../rule-runtime
-      '@idealer/rule-schema':
+      '@tyche/rule-schema':
         specifier: workspace:*
         version: link:../rule-schema
     devDependencies:
-      '@idealer/config':
+      '@tyche/config':
         specifier: workspace:*
         version: link:../config
 
   packages/sdk:
     dependencies:
-      '@idealer/types':
+      '@tyche/types':
         specifier: workspace:*
         version: link:../types
     devDependencies:
-      '@idealer/config':
+      '@tyche/config':
         specifier: workspace:*
         version: link:../config
 
   packages/tokenomics:
     dependencies:
-      '@idealer/constants':
+      '@tyche/constants':
         specifier: workspace:*
         version: link:../constants
     devDependencies:
-      '@idealer/config':
+      '@tyche/config':
         specifier: workspace:*
         version: link:../config
 
   packages/types:
     devDependencies:
-      '@idealer/config':
+      '@tyche/config':
         specifier: workspace:*
         version: link:../config
 
   packages/validation:
     dependencies:
-      '@idealer/constants':
+      '@tyche/constants':
         specifier: workspace:*
         version: link:../constants
       zod:
         specifier: 4.4.3
         version: 4.4.3
     devDependencies:
-      '@idealer/config':
+      '@tyche/config':
         specifier: workspace:*
         version: link:../config
 

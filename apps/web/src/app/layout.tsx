@@ -3,13 +3,13 @@ import { PwaRegistrar } from "./PwaRegistrar";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  applicationName: "Idealer",
+  applicationName: "Tyche",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "Idealer",
+    title: "Tyche",
   },
-  title: "Idealer",
+  title: "Tyche",
   description: "Mobile-first Solana DApp for community-elected lottery rules.",
   icons: {
     apple: "/icons/apple-touch-icon.png?v=blindfolded-bust-transparent-v2",

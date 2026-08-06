@@ -22,7 +22,7 @@ import {
   VOTER_REWARD_CONFIG,
   VOTER_REWARD_RATE_BPS,
   VOTE_FEE_START_TURN,
-} from "@idealer/constants";
+} from "@tyche/constants";
 import {
   compileRuleArtifact,
   externalDependencyGateText,
@@ -42,7 +42,7 @@ import {
   type RuleValidationDecision,
   type RuleValidationReasonCode,
   type RuleValidationTestResult,
-} from "@idealer/rule-compiler";
+} from "@tyche/rule-compiler";
 import pg from "pg";
 import { createClient } from "redis";
 import {
@@ -926,8 +926,8 @@ export interface SettlementTransitionRecord {
   turnId: number;
 }
 
-const IDEALER_ACTIVE_TURN_ID = Number(
-  process.env.IDEALER_ACTIVE_TURN_ID ?? "1",
+const TYCHE_ACTIVE_TURN_ID = Number(
+  process.env.TYCHE_ACTIVE_TURN_ID ?? "1",
 );
 const guessReceipts = new Map<string, GuessReceiptRecord>();
 const ruleProposals = new Map<string, RuleProposalRecord>();
@@ -3224,7 +3224,7 @@ function sendCsv(
   response: import("node:http").ServerResponse,
   statusCode: number,
   body: string,
-  filename = "idealer-transparency.csv",
+  filename = "tyche-transparency.csv",
 ) {
   response.writeHead(statusCode, {
     "content-disposition": `attachment; filename="${filename}"`,
@@ -6030,20 +6030,20 @@ function envFlag(value: string | undefined) {
 export function resolveEffectiveTurnDurationCycleSeconds(
   env: NodeJS.ProcessEnv = process.env,
 ): readonly number[] {
-  if (envFlag(env.IDEALER_TURN_MANUAL_CONTROL_ENABLED)) {
+  if (envFlag(env.TYCHE_TURN_MANUAL_CONTROL_ENABLED)) {
     const rawDuration =
-      env.IDEALER_TURN_MANUAL_OPEN_DURATION_SECONDS ??
+      env.TYCHE_TURN_MANUAL_OPEN_DURATION_SECONDS ??
       String(DEFAULT_MANUAL_OPEN_DURATION_SECONDS);
     const durationSeconds = Number(rawDuration);
     if (!Number.isInteger(durationSeconds) || durationSeconds <= 0) {
       throw new Error(
-        "IDEALER_TURN_MANUAL_OPEN_DURATION_SECONDS must be a positive integer number of seconds.",
+        "TYCHE_TURN_MANUAL_OPEN_DURATION_SECONDS must be a positive integer number of seconds.",
       );
     }
     return [durationSeconds, durationSeconds, durationSeconds, durationSeconds];
   }
 
-  const rawScale = env.IDEALER_DEVNET_TURN_DURATION_SCALE_BPS;
+  const rawScale = env.TYCHE_DEVNET_TURN_DURATION_SCALE_BPS;
   if (!rawScale) {
     return TURN_DURATION_CYCLE_SECONDS;
   }
@@ -6051,7 +6051,7 @@ export function resolveEffectiveTurnDurationCycleSeconds(
   const scaleBps = Number(rawScale);
   if (!Number.isInteger(scaleBps) || scaleBps <= 0 || scaleBps > 10_000) {
     throw new Error(
-      "IDEALER_DEVNET_TURN_DURATION_SCALE_BPS must be an integer between 1 and 10000.",
+      "TYCHE_DEVNET_TURN_DURATION_SCALE_BPS must be an integer between 1 and 10000.",
     );
   }
 
@@ -6665,7 +6665,7 @@ export function getRepeatedVoteFeeReconciliation(
 
 export function getRoundSummary(
   turnId: number,
-  activeTurnId: number = IDEALER_ACTIVE_TURN_ID,
+  activeTurnId: number = TYCHE_ACTIVE_TURN_ID,
 ): RoundSummary {
   const proposals = listRuleProposals(turnId);
   const { counts, votes } = listRuleVotes(turnId);
@@ -6764,7 +6764,7 @@ export function getRoundSummary(
 }
 
 function getPublicTurnIds() {
-  const turnIds = new Set<number>([IDEALER_ACTIVE_TURN_ID]);
+  const turnIds = new Set<number>([TYCHE_ACTIVE_TURN_ID]);
 
   for (const receipt of guessReceipts.values()) {
     turnIds.add(receipt.turnId);
@@ -6828,7 +6828,7 @@ function getPublicTurnIds() {
 }
 
 export function getDefaultActiveTurnId() {
-  return getPublicTurnIds().at(-1) ?? IDEALER_ACTIVE_TURN_ID;
+  return getPublicTurnIds().at(-1) ?? TYCHE_ACTIVE_TURN_ID;
 }
 
 function addNumber(total: number, value: number | undefined) {
@@ -7603,7 +7603,7 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
     incrementCount(queueStatusCounts, job.status);
     addLatency({
       model: job.activeRuleArtifact ? "rule-runtime" : "original-rule-runtime",
-      provider: "idealer-worker",
+      provider: "tyche-worker",
       role: "final_validation",
       source: "guess_verification_queue_projection",
       valueMs: getJobLatencyMs(job),
@@ -7975,7 +7975,7 @@ export function buildOperatorAiAccessMessage(args: {
   wallet: string;
 }) {
   return [
-    "Idealer AI Operations Console",
+    "Tyche AI Operations Console",
     `Wallet: ${args.wallet}`,
     `Nonce: ${args.nonce}`,
     `Issued At: ${args.issuedAt}`,
@@ -8168,8 +8168,8 @@ export function getTransparencySnapshot(
   filters: TransparencyFilters = {},
 ): TransparencySnapshot {
   const allTurnIds = getPublicTurnIds();
-  const minTurnId = allTurnIds[0] ?? IDEALER_ACTIVE_TURN_ID;
-  const maxTurnId = allTurnIds.at(-1) ?? IDEALER_ACTIVE_TURN_ID;
+  const minTurnId = allTurnIds[0] ?? TYCHE_ACTIVE_TURN_ID;
+  const maxTurnId = allTurnIds.at(-1) ?? TYCHE_ACTIVE_TURN_ID;
   const fromTurnId = filters.fromTurnId ?? minTurnId;
   const toTurnId = filters.toTurnId ?? maxTurnId;
   const turnIds = allTurnIds.filter(
@@ -8273,7 +8273,7 @@ export function getTransparencySnapshot(
   }
 
   return {
-    activeTurnId: IDEALER_ACTIVE_TURN_ID,
+    activeTurnId: TYCHE_ACTIVE_TURN_ID,
     dataBoundary: {
       consoleSafetyBoundary: getConsoleSafetyBoundary(),
       deniedPrivateFields: [
@@ -8471,7 +8471,7 @@ async function checkRedis(redisUrl: string): Promise<"ok" | "error"> {
 
 function getEffectiveTurnDurationHealth() {
   const manualControlEnabled = envFlag(
-    process.env.IDEALER_TURN_MANUAL_CONTROL_ENABLED,
+    process.env.TYCHE_TURN_MANUAL_CONTROL_ENABLED,
   );
   const turnDurationCycleSeconds = resolveEffectiveTurnDurationCycleSeconds();
 
@@ -8482,7 +8482,7 @@ function getEffectiveTurnDurationHealth() {
     turnDurationCycleSeconds,
     turnDurationScaleBps: manualControlEnabled
       ? null
-      : Number(process.env.IDEALER_DEVNET_TURN_DURATION_SCALE_BPS) || null,
+      : Number(process.env.TYCHE_DEVNET_TURN_DURATION_SCALE_BPS) || null,
   };
 }
 
@@ -10006,7 +10006,7 @@ if (isMainModule()) {
           response,
           200,
           exportOperatorAiOperationsCsv(snapshot),
-          "idealer-operator-ai-operations.csv",
+          "tyche-operator-ai-operations.csv",
         );
         return;
       }
@@ -10042,7 +10042,7 @@ if (isMainModule()) {
   void persistenceReady
     .then(() => {
       server.listen(port, host, () => {
-        console.log(`@idealer/api listening on ${host}:${port}`);
+        console.log(`@tyche/api listening on ${host}:${port}`);
         void warmDealerModels();
       });
     })

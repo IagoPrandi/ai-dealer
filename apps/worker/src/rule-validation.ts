@@ -4,7 +4,7 @@ import {
   type AgentProviderAttemptLog,
   type RuleCompiledArtifact,
   type RuleValidationResult,
-} from "@idealer/rule-compiler";
+} from "@tyche/rule-compiler";
 
 export interface PendingRuleValidation {
   ruleId: number;

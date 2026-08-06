@@ -125,11 +125,11 @@ export async function createPrecompileLoopConfig(
   env = process.env,
 ): Promise<PrecompileLoopConfig> {
   return {
-    apiBaseUrl: env.IDEALER_API_BASE_URL ?? DEFAULT_API_BASE_URL,
+    apiBaseUrl: env.TYCHE_API_BASE_URL ?? DEFAULT_API_BASE_URL,
     automation: await createTurnAutomationConfig(env),
-    enabled: envFlag(env.IDEALER_RULE_PRECOMPILE_ENABLED),
+    enabled: envFlag(env.TYCHE_RULE_PRECOMPILE_ENABLED),
     intervalMs: envNumber(
-      env.IDEALER_RULE_PRECOMPILE_INTERVAL_MS,
+      env.TYCHE_RULE_PRECOMPILE_INTERVAL_MS,
       DEFAULT_INTERVAL_MS,
     ),
   };
@@ -184,7 +184,7 @@ export function createPrecompileLoopDeps(
     sendPrecompile: async ({ compiledArtifactHash, passed, ruleId, turnId }) => {
       if (!authorityBytes) {
         throw new Error(
-          "Rule precompilation requires IDEALER_TURN_AUTHORITY_KEYPAIR or IDEALER_TURN_AUTHORITY_KEYPAIR_PATH.",
+          "Rule precompilation requires TYCHE_TURN_AUTHORITY_KEYPAIR or TYCHE_TURN_AUTHORITY_KEYPAIR_PATH.",
         );
       }
       const authority = Keypair.fromSecretKey(authorityBytes);
@@ -302,7 +302,7 @@ export async function runPrecompileLoopOnce(
   }
   if (!config.automation.authorityKeypairBytes) {
     throw new Error(
-      "Rule precompilation is enabled but IDEALER_TURN_AUTHORITY_KEYPAIR or IDEALER_TURN_AUTHORITY_KEYPAIR_PATH is not set.",
+      "Rule precompilation is enabled but TYCHE_TURN_AUTHORITY_KEYPAIR or TYCHE_TURN_AUTHORITY_KEYPAIR_PATH is not set.",
     );
   }
 

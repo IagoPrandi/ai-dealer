@@ -6,16 +6,16 @@ This runbook covers the local development baseline.
 
 Docker Compose starts only the local data stores:
 
-- `idealer-postgres`
-- `idealer-redis`
+- `tyche-postgres`
+- `tyche-redis`
 
 Run API, worker, public DApp, and admin from the host with `pnpm`; this avoids
 slow Docker rebuilds and gives each service native hot reload.
 
 Optional Docker profiles define:
 
-- `idealer-prometheus` and `idealer-grafana` with `--profile observability`
-- `idealer-mailpit` with `--profile mail`
+- `tyche-prometheus` and `tyche-grafana` with `--profile observability`
+- `tyche-mailpit` with `--profile mail`
 - containerized application services with `--profile containerized` for an
   explicit container-only diagnostic; this is not the normal local workflow.
 
@@ -36,10 +36,10 @@ docker compose up -d postgres redis
 Start the application services from the host in separate terminals:
 
 ```bash
-pnpm --filter @idealer/api dev
-pnpm --filter @idealer/worker dev
-pnpm --filter @idealer/web dev
-pnpm --filter @idealer/admin dev
+pnpm --filter @tyche/api dev
+pnpm --filter @tyche/worker dev
+pnpm --filter @tyche/web dev
+pnpm --filter @tyche/admin dev
 ```
 
 Start with observability and mail tooling:
@@ -60,7 +60,7 @@ docker compose --profile observability --profile mail up -d
 
 ## Testing on a Real Phone (PWA install)
 
-Idealer is a **mobile-first PWA**, not a native/Expo app. The "app on the phone"
+Tyche is a **mobile-first PWA**, not a native/Expo app. The "app on the phone"
 experience comes from installing the PWA to the home screen (`display: standalone`),
 which requires a **secure (HTTPS) origin** — the service worker will not register
 over plain `http://<LAN-IP>`, so the install prompt never appears there.
@@ -72,9 +72,9 @@ the same network for option B):
 
 ```bash
 # terminal 1 — app (already binds 0.0.0.0:3000)
-pnpm --filter @idealer/web dev
+pnpm --filter @tyche/web dev
 # terminal 2 — public HTTPS URL that proxies to localhost:3000
-pnpm --filter @idealer/web dev:tunnel
+pnpm --filter @tyche/web dev:tunnel
 ```
 
 `dev:tunnel` prints a `https://<random>.trycloudflare.com` URL. Open it on the phone,
@@ -84,7 +84,7 @@ trusted, the service worker registers and the app opens full-screen like a nativ
 ### Option B — Next.js self-signed HTTPS over LAN
 
 ```bash
-pnpm --filter @idealer/web dev:https
+pnpm --filter @tyche/web dev:https
 ```
 
 Open `https://<your-computer-LAN-IP>:3000` on the phone and accept the certificate
@@ -126,8 +126,8 @@ docker compose ps
 
 Expected Docker containers:
 
-- `idealer-postgres`: healthy
-- `idealer-redis`: healthy
+- `tyche-postgres`: healthy
+- `tyche-redis`: healthy
 
 Check host-run services directly:
 

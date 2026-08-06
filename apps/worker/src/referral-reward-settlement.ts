@@ -204,12 +204,12 @@ function decodeGameTokenFact(data: Uint8Array) {
 
 function createReferralBaseRewardInstruction({
   authority,
-  idealerProgramId,
+  tycheProgramId,
   plan,
   tokenomicsProgramId,
 }: {
   authority: PublicKey;
-  idealerProgramId: PublicKey;
+  tycheProgramId: PublicKey;
   plan: ReferralRewardPlan;
   tokenomicsProgramId: PublicKey;
 }) {
@@ -229,18 +229,18 @@ function createReferralBaseRewardInstruction({
       { isSigner: false, isWritable: true, pubkey: plan.inviteeTokenAccount },
       { isSigner: false, isWritable: false, pubkey: TOKEN_PROGRAM_ID },
     ],
-    programId: idealerProgramId,
+    programId: tycheProgramId,
   });
 }
 
 function createReferralBonusInstruction({
   authority,
-  idealerProgramId,
+  tycheProgramId,
   plan,
   tokenomicsProgramId,
 }: {
   authority: PublicKey;
-  idealerProgramId: PublicKey;
+  tycheProgramId: PublicKey;
   plan: ReferralRewardPlan;
   tokenomicsProgramId: PublicKey;
 }) {
@@ -258,18 +258,18 @@ function createReferralBonusInstruction({
       { isSigner: false, isWritable: true, pubkey: plan.inviterTokenAccount },
       { isSigner: false, isWritable: false, pubkey: TOKEN_PROGRAM_ID },
     ],
-    programId: idealerProgramId,
+    programId: tycheProgramId,
   });
 }
 
 export async function inspectReferralRewardSettlement({
   connection,
-  idealerProgramId,
+  tycheProgramId,
   target,
   tokenomicsProgramId,
 }: {
   connection: Connection;
-  idealerProgramId: PublicKey;
+  tycheProgramId: PublicKey;
   target: ReferralRewardTarget;
   tokenomicsProgramId: PublicKey;
 }): Promise<null | ReferralRewardPlan> {
@@ -292,7 +292,7 @@ export async function inspectReferralRewardSettlement({
     return null;
   }
 
-  const gameToken = derivePda(idealerProgramId, [
+  const gameToken = derivePda(tycheProgramId, [
     Buffer.from("game_token"),
     u64Le(target.turnId),
     target.invitee.toBuffer(),
@@ -301,7 +301,7 @@ export async function inspectReferralRewardSettlement({
   if (!gameTokenInfo) {
     return null;
   }
-  if (!gameTokenInfo.owner.equals(idealerProgramId)) {
+  if (!gameTokenInfo.owner.equals(tycheProgramId)) {
     throw new Error("Referral GameToken has an unexpected owner.");
   }
   const gameTokenFact = decodeGameTokenFact(gameTokenInfo.data);
@@ -333,7 +333,7 @@ export async function inspectReferralRewardSettlement({
     bonusSettled: fact.bonusSettled,
     campaign: decodedCampaign,
     gameToken,
-    globalConfig: derivePda(idealerProgramId, [Buffer.from("global_config")]),
+    globalConfig: derivePda(tycheProgramId, [Buffer.from("global_config")]),
     invitee: fact.invitee,
     inviteeTokenAccount: deriveAssociatedTokenAddress({
       mint: decodedCampaign.mint,
@@ -383,12 +383,12 @@ async function ensureTokenAccounts({
 export async function createReferralRewardSettlementConfig(
   env = process.env,
 ): Promise<ReferralRewardSettlementConfig> {
-  const enabled = envFlag(env.IDEALER_REFERRAL_REWARD_SETTLEMENT_ENABLED);
+  const enabled = envFlag(env.TYCHE_REFERRAL_REWARD_SETTLEMENT_ENABLED);
   const tokenomicsProgramId = env.TOKENOMICS_CORE_PROGRAM_ID
     ? new PublicKey(env.TOKENOMICS_CORE_PROGRAM_ID)
     : null;
   const targets = parseReferralRewardTargetAllowlist(
-    env.IDEALER_REFERRAL_REWARD_TARGET_ALLOWLIST,
+    env.TYCHE_REFERRAL_REWARD_TARGET_ALLOWLIST,
   );
   if (enabled && !tokenomicsProgramId) {
     throw new Error(
@@ -404,7 +404,7 @@ export async function createReferralRewardSettlementConfig(
     automation: await createTurnAutomationConfig(env),
     enabled,
     intervalMs: envNumber(
-      env.IDEALER_REFERRAL_REWARD_SETTLEMENT_INTERVAL_MS,
+      env.TYCHE_REFERRAL_REWARD_SETTLEMENT_INTERVAL_MS,
       30_000,
     ),
     targets,
@@ -425,12 +425,12 @@ export async function runReferralRewardSettlementOnce(
   }
   const authority = Keypair.fromSecretKey(config.automation.authorityKeypairBytes);
   const connection = new Connection(config.automation.rpcUrl, COMMITMENT);
-  const idealerProgramId = new PublicKey(config.automation.programId.toString());
+  const tycheProgramId = new PublicKey(config.automation.programId.toString());
 
   for (const target of config.targets) {
     const plan = await inspectReferralRewardSettlement({
       connection,
-      idealerProgramId,
+      tycheProgramId,
       target,
       tokenomicsProgramId: config.tokenomicsProgramId,
     });
@@ -446,7 +446,7 @@ export async function runReferralRewardSettlementOnce(
         instructions: [
           createReferralBaseRewardInstruction({
             authority: authority.publicKey,
-            idealerProgramId,
+            tycheProgramId,
             plan,
             tokenomicsProgramId: config.tokenomicsProgramId,
           }),
@@ -469,7 +469,7 @@ export async function runReferralRewardSettlementOnce(
       instructions: [
         createReferralBonusInstruction({
           authority: authority.publicKey,
-          idealerProgramId,
+          tycheProgramId,
           plan,
           tokenomicsProgramId: config.tokenomicsProgramId,
         }),

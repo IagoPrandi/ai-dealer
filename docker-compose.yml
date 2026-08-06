@@ -1,13 +1,13 @@
-name: idealer
+name: tyche
 
 services:
   postgres:
     image: postgres:18.1-alpine
-    container_name: idealer-postgres
+    container_name: tyche-postgres
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-idealer_dev}
-      POSTGRES_USER: ${POSTGRES_USER:-idealer}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-idealer_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-tyche_dev}
+      POSTGRES_USER: ${POSTGRES_USER:-tyche}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tyche_dev_password}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
@@ -15,15 +15,15 @@ services:
       retries: 5
       start_period: 10s
     networks:
-      - idealer-internal
+      - tyche-internal
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - idealer-postgres-data:/var/lib/postgresql
+      - tyche-postgres-data:/var/lib/postgresql
 
   redis:
     image: redis:8.4.0-alpine
-    container_name: idealer-redis
+    container_name: tyche-redis
     command: ["redis-server", "--appendonly", "yes"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -32,19 +32,19 @@ services:
       retries: 5
       start_period: 5s
     networks:
-      - idealer-internal
+      - tyche-internal
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
-      - idealer-redis-data:/data
+      - tyche-redis-data:/data
 
   api:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.node
-    container_name: idealer-api
+    container_name: tyche-api
     profiles: ["containerized"]
-    command: ["pnpm", "--filter", "@idealer/api", "dev"]
+    command: ["pnpm", "--filter", "@tyche/api", "dev"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -53,10 +53,10 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: 3002
-      DATABASE_URL: postgresql://${POSTGRES_USER:-idealer}:${POSTGRES_PASSWORD:-idealer_dev_password}@postgres:5432/${POSTGRES_DB:-idealer_dev}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tyche}:${POSTGRES_PASSWORD:-tyche_dev_password}@postgres:5432/${POSTGRES_DB:-tyche_dev}
       REDIS_URL: redis://redis:6379
       OPERATOR_AI_CONSOLE_AUTHORIZED_WALLETS: ${OPERATOR_AI_CONSOLE_AUTHORIZED_WALLETS:-}
-      IDEALER_DEVNET_TURN_DURATION_SCALE_BPS: ${IDEALER_DEVNET_TURN_DURATION_SCALE_BPS:-1500}
+      TYCHE_DEVNET_TURN_DURATION_SCALE_BPS: ${TYCHE_DEVNET_TURN_DURATION_SCALE_BPS:-1500}
       LLM_MODE: ${LLM_MODE:-local}
       LLM_BASE_URL: ${LLM_CONTAINER_BASE_URL:-http://host.docker.internal:11434/v1}
       LLM_MODEL: ${LLM_MODEL:-gemma4:latest}
@@ -103,7 +103,7 @@ services:
       retries: 10
       start_period: 20s
     networks:
-      - idealer-internal
+      - tyche-internal
     ports:
       - "${API_PORT:-3002}:3002"
     volumes:
@@ -113,9 +113,9 @@ services:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.node
-    container_name: idealer-worker
+    container_name: tyche-worker
     profiles: ["containerized"]
-    command: ["pnpm", "--filter", "@idealer/worker", "dev"]
+    command: ["pnpm", "--filter", "@tyche/worker", "dev"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -124,43 +124,43 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: 3003
-      DATABASE_URL: postgresql://${POSTGRES_USER:-idealer}:${POSTGRES_PASSWORD:-idealer_dev_password}@postgres:5432/${POSTGRES_DB:-idealer_dev}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tyche}:${POSTGRES_PASSWORD:-tyche_dev_password}@postgres:5432/${POSTGRES_DB:-tyche_dev}
       REDIS_URL: redis://redis:6379
-      IDEALER_SOLANA_RPC_URL: ${IDEALER_SOLANA_RPC_URL:-https://api.devnet.solana.com}
-      IDEALER_PROGRAM_ID: ${IDEALER_PROGRAM_ID:-ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd}
-      IDEALER_TURN_AUTOMATION_ENABLED: ${IDEALER_TURN_AUTOMATION_ENABLED:-true}
-      IDEALER_TURN_AUTOMATION_INTERVAL_MS: ${IDEALER_TURN_AUTOMATION_INTERVAL_MS:-10000}
+      TYCHE_SOLANA_RPC_URL: ${TYCHE_SOLANA_RPC_URL:-https://api.devnet.solana.com}
+      TYCHE_PROGRAM_ID: ${TYCHE_PROGRAM_ID:-ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd}
+      TYCHE_TURN_AUTOMATION_ENABLED: ${TYCHE_TURN_AUTOMATION_ENABLED:-true}
+      TYCHE_TURN_AUTOMATION_INTERVAL_MS: ${TYCHE_TURN_AUTOMATION_INTERVAL_MS:-10000}
       # TEST-ONLY manual turn control (POST /manual/open|close|cycle on the worker).
       # Keep disabled in production; the automatic loop above advances turns there.
-      IDEALER_TURN_MANUAL_CONTROL_ENABLED: ${IDEALER_TURN_MANUAL_CONTROL_ENABLED:-false}
-      IDEALER_TURN_MANUAL_OPEN_DURATION_SECONDS: ${IDEALER_TURN_MANUAL_OPEN_DURATION_SECONDS:-3600}
-      IDEALER_DEVNET_TURN_DURATION_SCALE_BPS: ${IDEALER_DEVNET_TURN_DURATION_SCALE_BPS:-1500}
-      IDEALER_TURN_AUTHORITY_KEYPAIR_PATH: ${IDEALER_TURN_AUTHORITY_KEYPAIR_PATH:-/solana-home/.config/idealer/devnet/idealer-deployer-keypair.json}
-      IDEALER_TURN_AUTHORITY_KEYPAIR: ${IDEALER_TURN_AUTHORITY_KEYPAIR:-}
+      TYCHE_TURN_MANUAL_CONTROL_ENABLED: ${TYCHE_TURN_MANUAL_CONTROL_ENABLED:-false}
+      TYCHE_TURN_MANUAL_OPEN_DURATION_SECONDS: ${TYCHE_TURN_MANUAL_OPEN_DURATION_SECONDS:-3600}
+      TYCHE_DEVNET_TURN_DURATION_SCALE_BPS: ${TYCHE_DEVNET_TURN_DURATION_SCALE_BPS:-1500}
+      TYCHE_TURN_AUTHORITY_KEYPAIR_PATH: ${TYCHE_TURN_AUTHORITY_KEYPAIR_PATH:-/solana-home/.config/tyche/devnet/tyche-deployer-keypair.json}
+      TYCHE_TURN_AUTHORITY_KEYPAIR: ${TYCHE_TURN_AUTHORITY_KEYPAIR:-}
       # M5.3 settlement scheduler (OFF by default; turn automation defers close to
       # it when enabled). The API base URL points at the in-network API service.
-      IDEALER_SETTLEMENT_AUTOMATION_ENABLED: ${IDEALER_SETTLEMENT_AUTOMATION_ENABLED:-false}
-      IDEALER_SETTLEMENT_AUTOMATION_INTERVAL_MS: ${IDEALER_SETTLEMENT_AUTOMATION_INTERVAL_MS:-30000}
-      IDEALER_SETTLEMENT_MAX_STEPS_PER_TICK: ${IDEALER_SETTLEMENT_MAX_STEPS_PER_TICK:-10}
+      TYCHE_SETTLEMENT_AUTOMATION_ENABLED: ${TYCHE_SETTLEMENT_AUTOMATION_ENABLED:-false}
+      TYCHE_SETTLEMENT_AUTOMATION_INTERVAL_MS: ${TYCHE_SETTLEMENT_AUTOMATION_INTERVAL_MS:-30000}
+      TYCHE_SETTLEMENT_MAX_STEPS_PER_TICK: ${TYCHE_SETTLEMENT_MAX_STEPS_PER_TICK:-10}
       # M10 campaign action-reward settlement. Keep OFF until the reviewed
-      # Idealer artifact containing the Tokenomics Core CPI is deployed.
-      IDEALER_TOKEN_REWARD_SETTLEMENT_ENABLED: ${IDEALER_TOKEN_REWARD_SETTLEMENT_ENABLED:-false}
-      IDEALER_TOKEN_REWARD_SETTLEMENT_INTERVAL_MS: ${IDEALER_TOKEN_REWARD_SETTLEMENT_INTERVAL_MS:-30000}
-      IDEALER_TOKEN_REWARD_MAX_PER_PASS: ${IDEALER_TOKEN_REWARD_MAX_PER_PASS:-20}
-      IDEALER_TOKEN_REWARD_ACTION_ALLOWLIST: ${IDEALER_TOKEN_REWARD_ACTION_ALLOWLIST:-}
-      IDEALER_ACTIVE_RULE_REWARD_SETTLEMENT_ENABLED: ${IDEALER_ACTIVE_RULE_REWARD_SETTLEMENT_ENABLED:-false}
-      IDEALER_ACTIVE_RULE_REWARD_SETTLEMENT_INTERVAL_MS: ${IDEALER_ACTIVE_RULE_REWARD_SETTLEMENT_INTERVAL_MS:-30000}
-      IDEALER_ACTIVE_RULE_REWARD_TURN_ALLOWLIST: ${IDEALER_ACTIVE_RULE_REWARD_TURN_ALLOWLIST:-}
-      IDEALER_ACTIVE_RULE_REWARD_BROADCAST: ${IDEALER_ACTIVE_RULE_REWARD_BROADCAST:-0}
+      # Tyche artifact containing the Tokenomics Core CPI is deployed.
+      TYCHE_TOKEN_REWARD_SETTLEMENT_ENABLED: ${TYCHE_TOKEN_REWARD_SETTLEMENT_ENABLED:-false}
+      TYCHE_TOKEN_REWARD_SETTLEMENT_INTERVAL_MS: ${TYCHE_TOKEN_REWARD_SETTLEMENT_INTERVAL_MS:-30000}
+      TYCHE_TOKEN_REWARD_MAX_PER_PASS: ${TYCHE_TOKEN_REWARD_MAX_PER_PASS:-20}
+      TYCHE_TOKEN_REWARD_ACTION_ALLOWLIST: ${TYCHE_TOKEN_REWARD_ACTION_ALLOWLIST:-}
+      TYCHE_ACTIVE_RULE_REWARD_SETTLEMENT_ENABLED: ${TYCHE_ACTIVE_RULE_REWARD_SETTLEMENT_ENABLED:-false}
+      TYCHE_ACTIVE_RULE_REWARD_SETTLEMENT_INTERVAL_MS: ${TYCHE_ACTIVE_RULE_REWARD_SETTLEMENT_INTERVAL_MS:-30000}
+      TYCHE_ACTIVE_RULE_REWARD_TURN_ALLOWLIST: ${TYCHE_ACTIVE_RULE_REWARD_TURN_ALLOWLIST:-}
+      TYCHE_ACTIVE_RULE_REWARD_BROADCAST: ${TYCHE_ACTIVE_RULE_REWARD_BROADCAST:-0}
       # Referral rewards are constrained to explicit turn:invitee targets. This
       # prevents a worker restart from sweeping historical attributions.
-      IDEALER_REFERRAL_REWARD_SETTLEMENT_ENABLED: ${IDEALER_REFERRAL_REWARD_SETTLEMENT_ENABLED:-false}
-      IDEALER_REFERRAL_REWARD_SETTLEMENT_INTERVAL_MS: ${IDEALER_REFERRAL_REWARD_SETTLEMENT_INTERVAL_MS:-30000}
-      IDEALER_REFERRAL_REWARD_TARGET_ALLOWLIST: ${IDEALER_REFERRAL_REWARD_TARGET_ALLOWLIST:-}
+      TYCHE_REFERRAL_REWARD_SETTLEMENT_ENABLED: ${TYCHE_REFERRAL_REWARD_SETTLEMENT_ENABLED:-false}
+      TYCHE_REFERRAL_REWARD_SETTLEMENT_INTERVAL_MS: ${TYCHE_REFERRAL_REWARD_SETTLEMENT_INTERVAL_MS:-30000}
+      TYCHE_REFERRAL_REWARD_TARGET_ALLOWLIST: ${TYCHE_REFERRAL_REWARD_TARGET_ALLOWLIST:-}
       TOKENOMICS_CORE_PROGRAM_ID: ${TOKENOMICS_CORE_PROGRAM_ID:-BRK6G8Sep66LFREp2nGMLiganfw2nbWe1f8zeAdoP1Fm}
-      IDEALER_API_BASE_URL: ${IDEALER_API_BASE_URL:-http://api:3002}
-      IDEALER_ELECTION_TOP_VOTED_FINALISTS: ${IDEALER_ELECTION_TOP_VOTED_FINALISTS:-3}
-      IDEALER_ELECTION_RANDOM_FINALISTS: ${IDEALER_ELECTION_RANDOM_FINALISTS:-7}
+      TYCHE_API_BASE_URL: ${TYCHE_API_BASE_URL:-http://api:3002}
+      TYCHE_ELECTION_TOP_VOTED_FINALISTS: ${TYCHE_ELECTION_TOP_VOTED_FINALISTS:-3}
+      TYCHE_ELECTION_RANDOM_FINALISTS: ${TYCHE_ELECTION_RANDOM_FINALISTS:-7}
       LLM_MODE: ${LLM_MODE:-local}
       LLM_BASE_URL: ${LLM_CONTAINER_BASE_URL:-http://host.docker.internal:11434/v1}
       LLM_MODEL: ${LLM_MODEL:-gemma4:latest}
@@ -201,7 +201,7 @@ services:
       retries: 10
       start_period: 20s
     networks:
-      - idealer-internal
+      - tyche-internal
     ports:
       - "${WORKER_PORT:-3003}:3003"
     volumes:
@@ -210,25 +210,25 @@ services:
       # read-only so worker tests and operators run against the same inputs.
       - ./docs:/app/docs:ro
       - ./deployments:/app/deployments:ro
-      - idealer-solana-home:/solana-home:ro
+      - tyche-solana-home:/solana-home:ro
 
   web:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.node
-    container_name: idealer-web
+    container_name: tyche-web
     profiles: ["containerized"]
-    command: ["pnpm", "--filter", "@idealer/web", "dev"]
+    command: ["pnpm", "--filter", "@tyche/web", "dev"]
     depends_on:
       api:
         condition: service_healthy
       worker:
         condition: service_healthy
     environment:
-      IDEALER_API_PROXY_TARGET: http://api:3002
-      IDEALER_WORKER_PROXY_TARGET: http://worker:3003
-      NEXT_PUBLIC_IDEALER_API_URL: /__api
-      NEXT_PUBLIC_IDEALER_WORKER_URL: /__worker
+      TYCHE_API_PROXY_TARGET: http://api:3002
+      TYCHE_WORKER_PROXY_TARGET: http://worker:3003
+      NEXT_PUBLIC_TYCHE_API_URL: /__api
+      NEXT_PUBLIC_TYCHE_WORKER_URL: /__worker
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
@@ -236,7 +236,7 @@ services:
       retries: 10
       start_period: 30s
     networks:
-      - idealer-internal
+      - tyche-internal
     ports:
       - "${WEB_PORT:-3000}:3000"
 
@@ -244,14 +244,14 @@ services:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.node
-    container_name: idealer-admin
-    command: ["pnpm", "--filter", "@idealer/admin", "dev"]
+    container_name: tyche-admin
+    command: ["pnpm", "--filter", "@tyche/admin", "dev"]
     profiles: ["containerized"]
     depends_on:
       api:
         condition: service_healthy
     environment:
-      NEXT_PUBLIC_IDEALER_API_URL: http://localhost:3002
+      NEXT_PUBLIC_TYCHE_API_URL: http://localhost:3002
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
@@ -259,19 +259,19 @@ services:
       retries: 10
       start_period: 30s
     networks:
-      - idealer-internal
+      - tyche-internal
     ports:
       - "${ADMIN_PORT:-3001}:3001"
 
   prometheus:
     image: prom/prometheus:v3.8.1
-    container_name: idealer-prometheus
+    container_name: tyche-prometheus
     profiles: ["observability"]
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
     networks:
-      - idealer-internal
+      - tyche-internal
     ports:
       - "${PROMETHEUS_PORT:-9090}:9090"
     volumes:
@@ -279,41 +279,41 @@ services:
 
   grafana:
     image: grafana/grafana:12.4.0
-    container_name: idealer-grafana
+    container_name: tyche-grafana
     profiles: ["observability"]
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
     networks:
-      - idealer-internal
+      - tyche-internal
     ports:
       - "${GRAFANA_PORT:-3004}:3000"
     volumes:
-      - idealer-grafana-data:/var/lib/grafana
+      - tyche-grafana-data:/var/lib/grafana
 
   mailpit:
     image: axllent/mailpit:v1.28.0
-    container_name: idealer-mailpit
+    container_name: tyche-mailpit
     profiles: ["mail"]
     networks:
-      - idealer-internal
+      - tyche-internal
     ports:
       - "${MAILPIT_SMTP_PORT:-1025}:1025"
       - "${MAILPIT_UI_PORT:-8025}:8025"
 
 networks:
-  idealer-internal:
-    name: idealer-internal
+  tyche-internal:
+    name: tyche-internal
 
 volumes:
-  idealer-postgres-data:
+  tyche-postgres-data:
     external: true
-    name: idealer-postgres-data
-  idealer-redis-data:
+    name: tyche-postgres-data
+  tyche-redis-data:
     external: true
-    name: idealer-redis-data
-  idealer-grafana-data:
-    name: idealer-grafana-data
-  idealer-solana-home:
+    name: tyche-redis-data
+  tyche-grafana-data:
+    name: tyche-grafana-data
+  tyche-solana-home:
     external: true
-    name: idealer-solana-home
+    name: tyche-solana-home

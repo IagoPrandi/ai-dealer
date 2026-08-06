@@ -1,4 +1,4 @@
-import { ruleAstSchema } from "@idealer/rule-schema";
+import { ruleAstSchema } from "@tyche/rule-schema";
 import type {
   ArrayExpr,
   ArrayExprV3,
@@ -8,7 +8,7 @@ import type {
   RuleAst,
   ScalarExpr,
   ScalarExprV3,
-} from "@idealer/rule-schema";
+} from "@tyche/rule-schema";
 
 // Deterministic, sandboxed interpreter for the frozen rule DSL/AST (PRD §7.7).
 // The same (guess, draw, frozen artifact) always produces the same result.

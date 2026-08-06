@@ -11,7 +11,7 @@ import {
   REFERRAL_INVITER_FIRST_ROUND_BONUS_RATE_BPS,
   REFERRAL_INVITER_REWARD_ATOMS,
   SUPPORTER_REWARD_ATOMS,
-} from "@idealer/constants";
+} from "@tyche/constants";
 
 import {
   CLASSIC_SPL_TOKEN_PROGRAM_ID,
@@ -29,7 +29,10 @@ const sha256Hex = (value: string) =>
   createHash("sha256").update(value, "utf8").digest("hex");
 
 test("the genesis config hashes are exactly the sha256 of their preimages", () => {
-  assert.equal(sha256Hex(INITIAL_CAMPAIGN_CONFIG_PREIMAGE), INITIAL_CAMPAIGN_CONFIG_HASH);
+  assert.equal(
+    sha256Hex(INITIAL_CAMPAIGN_CONFIG_PREIMAGE),
+    INITIAL_CAMPAIGN_CONFIG_HASH,
+  );
   assert.equal(
     sha256Hex(INITIAL_UNUSED_BALANCE_POLICY_PREIMAGE),
     INITIAL_UNUSED_BALANCE_POLICY_HASH,

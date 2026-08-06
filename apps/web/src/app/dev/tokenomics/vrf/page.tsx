@@ -1,10 +1,10 @@
-import { IdealerVrfConfigApp } from "../../../../features/idealer-vrf-config/IdealerVrfConfigApp";
+import { TycheVrfConfigApp } from "../../../../features/tyche-vrf-config/TycheVrfConfigApp";
 import { SolanaProviders } from "../../../../solana/SolanaProviders";
 
-export default function IdealerVrfConfigPage() {
+export default function TycheVrfConfigPage() {
   return (
     <SolanaProviders>
-      <IdealerVrfConfigApp />
+      <TycheVrfConfigApp />
     </SolanaProviders>
   );
 }

@@ -5,7 +5,7 @@ import { MOCK_ACTIVE_TURN_ID } from "./mockData.js";
 import { installMockFetch } from "./mockFetch.js";
 
 type TestWindow = {
-  __idealerMockFetchInstalled?: boolean;
+  __tycheMockFetchInstalled?: boolean;
   fetch: typeof fetch;
 };
 

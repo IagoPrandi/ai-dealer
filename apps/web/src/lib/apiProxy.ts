@@ -8,12 +8,12 @@ function cleanEnvValue(value: string | undefined): string {
 }
 
 export function getApiProxyTarget(env: EnvLike = process.env) {
-  const target = cleanEnvValue(env.IDEALER_API_PROXY_TARGET);
+  const target = cleanEnvValue(env.TYCHE_API_PROXY_TARGET);
   return (target || DEFAULT_API_PROXY_TARGET).replace(/\/+$/u, "");
 }
 
 export function getApiProxyTimeoutMs(env: EnvLike = process.env) {
-  const raw = Number(cleanEnvValue(env.IDEALER_API_PROXY_TIMEOUT_MS));
+  const raw = Number(cleanEnvValue(env.TYCHE_API_PROXY_TIMEOUT_MS));
   return Number.isFinite(raw) && raw > 0
     ? raw
     : DEFAULT_API_PROXY_TIMEOUT_MS;

@@ -1,6 +1,6 @@
 {
-  "name": "Idealer",
-  "short_name": "Idealer",
+  "name": "Tyche",
+  "short_name": "Tyche",
   "description": "Mobile-first Solana DApp for community-elected lottery rules.",
   "id": "/play",
   "start_url": "/play",

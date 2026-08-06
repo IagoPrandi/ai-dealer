@@ -1,7 +1,7 @@
 [package]
 name = "tokenomics-calculator"
 version = "0.1.0"
-description = "Independent Rust epoch calculator for Idealer Tokenomics Core"
+description = "Independent Rust epoch calculator for Tyche Tokenomics Core"
 edition = "2021"
 
 [dependencies]

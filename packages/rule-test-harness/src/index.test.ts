@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import type { RuleAst } from "@idealer/rule-schema";
+import type { RuleAst } from "@tyche/rule-schema";
 
 import { classifyDifficulty, generateAndRunTests } from "./index.js";
 

@@ -21,10 +21,10 @@ import {
 const AUTHORIZED_MANIFEST_SHA256 =
   "18aba6cddb7bb3068f350f8ee4ae7f7b07cb56248796cdfee9c006025dd4090c";
 const DEVNET_GENESIS_HASH = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
-const IDEALER_PROGRAM_DATA = "AWGUseV1DEsoSvdW7CDMxxBDUPQXAKqTXyxHVzeTnL8g";
-const IDEALER_PROGRAM_SHA256 =
+const TYCHE_PROGRAM_DATA = "AWGUseV1DEsoSvdW7CDMxxBDUPQXAKqTXyxHVzeTnL8g";
+const TYCHE_PROGRAM_SHA256 =
   "2ca0484a3fef56bfa9f5831022474f3cef839bc27db36758d83cb8f57bf012d1";
-const IDEALER_PROGRAM_LENGTH = 1_023_336;
+const TYCHE_PROGRAM_LENGTH = 1_023_336;
 const SQUADS_VAULT = "DB5nz633YioWzEUnLb97ypUra5RUE11SJDFW9ar23KTp";
 const BPF_UPGRADEABLE_LOADER = new PublicKey(
   "BPFLoaderUpgradeab1e11111111111111111111111",
@@ -57,7 +57,7 @@ interface RewardManifest {
   cluster: string;
   commitment: string;
   estimatedPayerLamports: string;
-  idealerProgram: string;
+  tycheProgram: string;
   mint: string;
   technicalFeePayer: string;
   tokenomicsCoreProgram: string;
@@ -145,12 +145,12 @@ async function readStrictState(
   connection: Connection,
   manifest: RewardManifest,
 ): Promise<StrictState> {
-  const idealerProgram = new PublicKey(manifest.idealerProgram);
+  const tycheProgram = new PublicKey(manifest.tycheProgram);
   const tokenomicsProgram = new PublicKey(manifest.tokenomicsCoreProgram);
   const campaign = new PublicKey(manifest.campaign);
   const campaignVault = new PublicKey(manifest.campaignVault);
   const mint = new PublicKey(manifest.mint);
-  const programData = new PublicKey(IDEALER_PROGRAM_DATA);
+  const programData = new PublicKey(TYCHE_PROGRAM_DATA);
   const actionKeys = manifest.actions.map(
     ({ action }) => new PublicKey(action),
   );
@@ -167,7 +167,7 @@ async function readStrictState(
       connection.getGenesisHash(),
       connection.getMultipleAccountsInfoAndContext(
         [
-          idealerProgram,
+          tycheProgram,
           programData,
           tokenomicsProgram,
           campaign,
@@ -191,7 +191,7 @@ async function readStrictState(
   );
 
   const [
-    idealerInfo,
+    tycheInfo,
     programDataInfo,
     tokenomicsInfo,
     campaignInfo,
@@ -199,16 +199,16 @@ async function readStrictState(
     mintInfo,
   ] = base.value;
   assertCondition(
-    idealerInfo?.executable &&
-      idealerInfo.owner.equals(BPF_UPGRADEABLE_LOADER) &&
-      idealerInfo.data.length >= 36 &&
-      idealerInfo.data.readUInt32LE(0) === 2 &&
-      new PublicKey(idealerInfo.data.subarray(4, 36)).equals(programData),
-    "The finalized Idealer program linkage is invalid.",
+    tycheInfo?.executable &&
+      tycheInfo.owner.equals(BPF_UPGRADEABLE_LOADER) &&
+      tycheInfo.data.length >= 36 &&
+      tycheInfo.data.readUInt32LE(0) === 2 &&
+      new PublicKey(tycheInfo.data.subarray(4, 36)).equals(programData),
+    "The finalized Tyche program linkage is invalid.",
   );
   assertCondition(
     programDataInfo,
-    "The finalized Idealer ProgramData account is missing.",
+    "The finalized Tyche ProgramData account is missing.",
   );
   assertCondition(
     programDataInfo.owner.equals(BPF_UPGRADEABLE_LOADER) &&
@@ -217,16 +217,16 @@ async function readStrictState(
       programDataInfo.data.readUInt8(12) === 1 &&
       new PublicKey(programDataInfo.data.subarray(13, 45)).toBase58() ===
         SQUADS_VAULT,
-    "The finalized Idealer ProgramData authority is invalid.",
+    "The finalized Tyche ProgramData authority is invalid.",
   );
   const programBytes = programDataInfo.data.subarray(
     PROGRAM_DATA_METADATA_LENGTH,
   );
   assertCondition(
-    programBytes.length === IDEALER_PROGRAM_LENGTH &&
+    programBytes.length === TYCHE_PROGRAM_LENGTH &&
       createHash("sha256").update(programBytes).digest("hex") ===
-        IDEALER_PROGRAM_SHA256,
-    "The finalized Idealer program does not match the reviewed artifact.",
+        TYCHE_PROGRAM_SHA256,
+    "The finalized Tyche program does not match the reviewed artifact.",
   );
   assertCondition(
     tokenomicsInfo?.executable &&
@@ -286,7 +286,7 @@ async function readStrictState(
       `Manifest action is missing: ${action.action}.`,
     );
     assertCondition(
-      actionInfo.owner.equals(idealerProgram),
+      actionInfo.owner.equals(tycheProgram),
       `Manifest action is missing or has the wrong owner: ${action.action}.`,
     );
     const decoded = decodeTokenRewardAction({
@@ -433,7 +433,7 @@ async function main() {
   }
   const { manifest, sha256, totalRewardAtoms } = loadManifest();
   const rpcUrl =
-    process.env.IDEALER_SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
+    process.env.TYCHE_SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
   const connection = new Connection(rpcUrl, "finalized");
   const pre = await readStrictState(connection, manifest);
   const unsettled = manifest.actions.filter(
@@ -448,7 +448,7 @@ async function main() {
     "The technical fee payer is underfunded for the estimated batch cost.",
   );
 
-  if (process.env.IDEALER_JDR_REWARD_MANIFEST_BROADCAST !== "1") {
+  if (process.env.TYCHE_JDR_REWARD_MANIFEST_BROADCAST !== "1") {
     console.log(
       JSON.stringify({
         action: "dry_run",
@@ -467,15 +467,15 @@ async function main() {
   }
 
   assertCondition(
-    process.env.IDEALER_JDR_REWARD_MANIFEST_AUTHORIZED_SHA256 === sha256,
+    process.env.TYCHE_JDR_REWARD_MANIFEST_AUTHORIZED_SHA256 === sha256,
     "Broadcast requires the exact authorized JDR reward manifest SHA-256.",
   );
   const allowlist = manifest.actions.map(({ action }) => action).join(",");
   const config = await createTokenRewardSettlementConfig({
     ...process.env,
-    IDEALER_TOKEN_REWARD_ACTION_ALLOWLIST: allowlist,
-    IDEALER_TOKEN_REWARD_MAX_PER_PASS: String(manifest.actions.length),
-    IDEALER_TOKEN_REWARD_SETTLEMENT_ENABLED: "true",
+    TYCHE_TOKEN_REWARD_ACTION_ALLOWLIST: allowlist,
+    TYCHE_TOKEN_REWARD_MAX_PER_PASS: String(manifest.actions.length),
+    TYCHE_TOKEN_REWARD_SETTLEMENT_ENABLED: "true",
     TOKENOMICS_CORE_PROGRAM_ID: manifest.tokenomicsCoreProgram,
   });
   assertCondition(

@@ -300,24 +300,24 @@ export function createDurableIndexerConfig(
     return null;
   }
   const reconciliationIntervalMs = Number(
-    env.IDEALER_DURABLE_INDEXER_RECONCILIATION_INTERVAL_MS ?? "300000",
+    env.TYCHE_DURABLE_INDEXER_RECONCILIATION_INTERVAL_MS ?? "300000",
   );
   if (
     !Number.isInteger(reconciliationIntervalMs) ||
     reconciliationIntervalMs < 10_000
   ) {
     throw new Error(
-      "IDEALER_DURABLE_INDEXER_RECONCILIATION_INTERVAL_MS must be an integer of at least 10000.",
+      "TYCHE_DURABLE_INDEXER_RECONCILIATION_INTERVAL_MS must be an integer of at least 10000.",
     );
   }
   return {
     cluster: "devnet",
     connection: new Connection(
-      env.IDEALER_SOLANA_RPC_URL ?? "https://api.devnet.solana.com",
+      env.TYCHE_SOLANA_RPC_URL ?? "https://api.devnet.solana.com",
       "finalized",
     ),
     databaseUrl,
-    enabled: env.IDEALER_DURABLE_INDEXER_ENABLED !== "false",
+    enabled: env.TYCHE_DURABLE_INDEXER_ENABLED !== "false",
     reconciliationIntervalMs,
   };
 }

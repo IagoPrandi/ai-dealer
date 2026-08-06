@@ -76,7 +76,7 @@ test("turn automation is disabled unless explicitly enabled", async () => {
 
 test("turn automation defers the close when settlement automation is enabled", async () => {
   const config = await createTurnAutomationConfig({
-    IDEALER_SETTLEMENT_AUTOMATION_ENABLED: "true",
+    TYCHE_SETTLEMENT_AUTOMATION_ENABLED: "true",
   });
 
   assert.equal(config.deferCloseToSettlement, true);
@@ -134,8 +134,8 @@ test("turn automation settlement gate fails closed on an invalid API response", 
 
 test("turn automation can be explicitly enabled for the worker loop", async () => {
   const config = await createTurnAutomationConfig({
-    IDEALER_TURN_AUTOMATION_ENABLED: "true",
-    IDEALER_TURN_AUTOMATION_INTERVAL_MS: "10000",
+    TYCHE_TURN_AUTOMATION_ENABLED: "true",
+    TYCHE_TURN_AUTOMATION_INTERVAL_MS: "10000",
   });
 
   assert.equal(config.enabled, true);
@@ -146,7 +146,7 @@ test("turn automation can be explicitly enabled for the worker loop", async () =
 
 test("turn automation resolves shortened devnet duration cycle", async () => {
   const config = await createTurnAutomationConfig({
-    IDEALER_DEVNET_TURN_DURATION_SCALE_BPS: "1500",
+    TYCHE_DEVNET_TURN_DURATION_SCALE_BPS: "1500",
   });
 
   // 15% of the 24h production turn (86400s) = 12960s per slot.
@@ -158,7 +158,7 @@ test("turn automation resolves shortened devnet duration cycle", async () => {
 test("turn automation validates Solana keypair byte shape", async () => {
   await assert.rejects(
     loadAuthorityKeypairBytesFromEnv({
-      IDEALER_TURN_AUTHORITY_KEYPAIR: JSON.stringify([1, 2, 3]),
+      TYCHE_TURN_AUTHORITY_KEYPAIR: JSON.stringify([1, 2, 3]),
     }),
     /64-byte Solana keypair JSON array or base58-encoded/,
   );
@@ -169,14 +169,14 @@ test("turn automation accepts a base58-encoded authority keypair", async () => {
     Array.from({ length: 64 }, (_, index) => index),
   );
   const parsed = await loadAuthorityKeypairBytesFromEnv({
-    IDEALER_TURN_AUTHORITY_KEYPAIR: bs58.encode(keypairBytes),
+    TYCHE_TURN_AUTHORITY_KEYPAIR: bs58.encode(keypairBytes),
   });
 
   assert.deepEqual(parsed, keypairBytes);
 });
 
 test("turn automation prefers authority keypair path over inline value", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "idealer-worker-"));
+  const dir = await mkdtemp(join(tmpdir(), "tyche-worker-"));
   try {
     const pathBytes = Uint8Array.from(
       Array.from({ length: 64 }, (_, index) => 63 - index),
@@ -188,8 +188,8 @@ test("turn automation prefers authority keypair path over inline value", async (
     await writeFile(keypairPath, JSON.stringify([...pathBytes]));
 
     const parsed = await loadAuthorityKeypairBytesFromEnv({
-      IDEALER_TURN_AUTHORITY_KEYPAIR_PATH: keypairPath,
-      IDEALER_TURN_AUTHORITY_KEYPAIR: bs58.encode(inlineBytes),
+      TYCHE_TURN_AUTHORITY_KEYPAIR_PATH: keypairPath,
+      TYCHE_TURN_AUTHORITY_KEYPAIR: bs58.encode(inlineBytes),
     });
 
     assert.deepEqual(parsed, pathBytes);
@@ -310,6 +310,6 @@ test("enabled turn automation requires an authority keypair", async () => {
       programId: address("ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd"),
       rpcUrl: "http://127.0.0.1:9",
     }),
-    /IDEALER_TURN_AUTHORITY_KEYPAIR/,
+    /TYCHE_TURN_AUTHORITY_KEYPAIR/,
   );
 });

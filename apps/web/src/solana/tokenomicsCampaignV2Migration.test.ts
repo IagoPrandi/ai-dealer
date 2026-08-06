@@ -5,7 +5,7 @@ import {
   CAMPAIGN_UNUSED_BALANCE_POLICY_HASH,
   CAMPAIGN_V1_ECONOMIC_CONFIG_HASH,
   CAMPAIGN_V2_ECONOMIC_CONFIG_HASH,
-} from "@idealer/constants";
+} from "@tyche/constants";
 
 import { SQUADS_DEVNET_CONFIG } from "./squadsDevnetConfig";
 import {

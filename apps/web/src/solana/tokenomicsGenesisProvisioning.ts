@@ -13,7 +13,7 @@ import {
 } from "@solana/kit";
 import { Connection, PublicKey } from "@solana/web3.js";
 
-import { IDEALER_PROGRAM_ID, SYSTEM_PROGRAM_ID } from "./idealerProgram";
+import { TYCHE_PROGRAM_ID, SYSTEM_PROGRAM_ID } from "./tycheProgram";
 import { SQUADS_DEVNET_CONFIG } from "./squadsDevnetConfig";
 import { verifyExpectedDevnetMultisig } from "./squadsProvisioning";
 import {
@@ -214,7 +214,7 @@ export async function deriveTokenomicsGenesisAddresses(
     pda(coreProgram, ["correction_reserve_vault"]),
     pda(coreProgram, ["distribution_vault"]),
     pda(coreProgram, ["treasury_policy_executor"]),
-    pda(IDEALER_PROGRAM_ID, ["global_config"]),
+    pda(TYCHE_PROGRAM_ID, ["global_config"]),
     pda(METADATA_PROGRAM_ID, ["metadata", metadataProgramBytes, mintBytes]),
     pda(coreProgram, ["token_config"]),
     pda(coreProgram, ["treasury_lock_escrow"]),
@@ -466,10 +466,10 @@ async function assertGenesisAccountsAvailable(
   }
   if (
     !gameAuthorityInfo ||
-    !gameAuthorityInfo.owner.equals(new PublicKey(IDEALER_PROGRAM_ID))
+    !gameAuthorityInfo.owner.equals(new PublicKey(TYCHE_PROGRAM_ID))
   ) {
     throw new Error(
-      "The configured Idealer GlobalConfig game authority is missing or has the wrong owner.",
+      "The configured Tyche GlobalConfig game authority is missing or has the wrong owner.",
     );
   }
 }

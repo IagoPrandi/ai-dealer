@@ -10,14 +10,14 @@ import {
 import { autoDiscover, createClient } from "@solana/client";
 import { SolanaProvider } from "@solana/react-hooks";
 
-import { isSupportedIdealerWallet } from "./walletDiscovery";
+import { isSupportedTycheWallet } from "./walletDiscovery";
 
 const DEVNET_RPC_ENDPOINT =
   process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
 const DEVNET_WEBSOCKET_ENDPOINT =
   process.env.NEXT_PUBLIC_SOLANA_WS_URL ?? "wss://api.devnet.solana.com";
 const DEVNET_CHAIN = "solana:devnet";
-const MWA_REGISTRATION_KEY = "__idealerMwaRegistered";
+const MWA_REGISTRATION_KEY = "__tycheMwaRegistered";
 
 function registerMobileWalletAdapter() {
   if (typeof window === "undefined") {
@@ -32,7 +32,7 @@ function registerMobileWalletAdapter() {
   registrationState[MWA_REGISTRATION_KEY] = true;
   registerMwa({
     appIdentity: {
-      name: "Idealer",
+      name: "Tyche",
       uri: window.location.origin,
     },
     authorizationCache: createDefaultAuthorizationCache(),
@@ -43,14 +43,14 @@ function registerMobileWalletAdapter() {
   });
 }
 
-function createIdealerSolanaClient() {
+function createTycheSolanaClient() {
   registerMobileWalletAdapter();
 
   return createClient({
     commitment: "confirmed",
     endpoint: DEVNET_RPC_ENDPOINT,
     walletConnectors: autoDiscover({
-      filter: isSupportedIdealerWallet,
+      filter: isSupportedTycheWallet,
       overrides: () => ({
         defaultChain: DEVNET_CHAIN,
       }),
@@ -62,7 +62,7 @@ function createIdealerSolanaClient() {
 export function SolanaProviders({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  const [client] = useState(createIdealerSolanaClient);
+  const [client] = useState(createTycheSolanaClient);
 
   return (
     <SolanaProvider
@@ -73,7 +73,7 @@ export function SolanaProviders({
       walletPersistence={{
         autoConnect: true,
         storage: typeof window === "undefined" ? null : window.localStorage,
-        storageKey: "idealer.solana.wallet",
+        storageKey: "tyche.solana.wallet",
       }}
     >
       {children}

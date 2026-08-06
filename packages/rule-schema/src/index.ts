@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// Idealer rule DSL/AST.
+// Tyche rule DSL/AST.
 //
 // A compiled rule is a small, recursive, auditable expression tree over exactly
 // two inputs: the player's `guess` (6 numbers, 1-100) and the official `draw`
@@ -26,7 +26,7 @@ import { z } from "zod";
 
 export const CURRENT_SCHEMA_VERSION = 3 as const;
 
-// Runtime/compile bounds (mirrors @idealer/constants.MAX_REMOVABLE_NUMBERS = 4;
+// Runtime/compile bounds (mirrors @tyche/constants.MAX_REMOVABLE_NUMBERS = 4;
 // kept local so rule-schema stays dependency-free besides zod). The compiler
 // asserts these stay in sync with the canonical constants.
 export const MAX_AST_DEPTH = 16;

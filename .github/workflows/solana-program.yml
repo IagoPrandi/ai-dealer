@@ -41,8 +41,8 @@ jobs:
         run: |
           set -euo pipefail
           export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
-          mkdir -p /tmp/idealer-deploy
-          trap 'rm -f /tmp/idealer-deploy/*-keypair.json' EXIT
-          cargo build-sbf --sbf-out-dir /tmp/idealer-deploy --jobs 1
-          rm -f /tmp/idealer-deploy/*-keypair.json
-          SBF_OUT_DIR=/tmp/idealer-deploy cargo test --workspace --test instructions --all-features --locked --jobs 1 -- --ignored
+          mkdir -p /tmp/tyche-deploy
+          trap 'rm -f /tmp/tyche-deploy/*-keypair.json' EXIT
+          cargo build-sbf --sbf-out-dir /tmp/tyche-deploy --jobs 1
+          rm -f /tmp/tyche-deploy/*-keypair.json
+          SBF_OUT_DIR=/tmp/tyche-deploy cargo test --workspace --test instructions --all-features --locked --jobs 1 -- --ignored

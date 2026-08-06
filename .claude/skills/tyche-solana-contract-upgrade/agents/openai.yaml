@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tyche Solana Upgrade"
+  short_description: "Safely change and upgrade Solana programs"
+  default_prompt: "Use $tyche-solana-contract-upgrade to safely modify and upgrade an Tyche Solana program."

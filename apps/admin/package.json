@@ -1,5 +1,5 @@
 {
-  "name": "@idealer/admin",
+  "name": "@tyche/admin",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -8,16 +8,16 @@
     "dev": "next dev --hostname 0.0.0.0 --port 3001",
     "lint": "eslint src next.config.ts --max-warnings=0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node -e \"console.log('@idealer/admin ok')\""
+    "test": "node -e \"console.log('@tyche/admin ok')\""
   },
   "dependencies": {
-    "@idealer/constants": "workspace:*",
+    "@tyche/constants": "workspace:*",
     "next": "16.2.7",
     "react": "19.2.7",
     "react-dom": "19.2.7"
   },
   "devDependencies": {
-    "@idealer/config": "workspace:*",
+    "@tyche/config": "workspace:*",
     "@types/react": "19.2.16",
     "@types/react-dom": "19.2.3"
   }

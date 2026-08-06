@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import bs58 from "bs58";
-import { CAMPAIGN_V2_ECONOMIC_CONFIG_HASH } from "@idealer/tokenomics";
+import { CAMPAIGN_V2_ECONOMIC_CONFIG_HASH } from "@tyche/tokenomics";
 import {
   Commitment,
   Connection,
@@ -285,14 +285,14 @@ export function createActionRewardInstruction({
   accounts,
   action,
   authority,
-  idealerProgramId,
+  tycheProgramId,
   kind,
   tokenomicsProgramId,
 }: {
   accounts: ActionRewardAccounts;
   action: PublicKey;
   authority: PublicKey;
-  idealerProgramId: PublicKey;
+  tycheProgramId: PublicKey;
   kind: ActionRewardKind;
   tokenomicsProgramId: PublicKey;
 }) {
@@ -331,7 +331,7 @@ export function createActionRewardInstruction({
         pubkey: SystemProgram.programId,
       },
     ],
-    programId: idealerProgramId,
+    programId: tycheProgramId,
   });
 }
 
@@ -341,7 +341,7 @@ export function createActionRewardInstructions({
   authority,
   beneficiary,
   beneficiaryTokenAccountExists,
-  idealerProgramId,
+  tycheProgramId,
   kind,
   tokenomicsProgramId,
 }: {
@@ -350,7 +350,7 @@ export function createActionRewardInstructions({
   authority: PublicKey;
   beneficiary: PublicKey;
   beneficiaryTokenAccountExists: boolean;
-  idealerProgramId: PublicKey;
+  tycheProgramId: PublicKey;
   kind: ActionRewardKind;
   tokenomicsProgramId: PublicKey;
 }) {
@@ -370,7 +370,7 @@ export function createActionRewardInstructions({
       accounts,
       action,
       authority,
-      idealerProgramId,
+      tycheProgramId,
       kind,
       tokenomicsProgramId,
     }),
@@ -380,10 +380,10 @@ export function createActionRewardInstructions({
 
 async function listRewardActions(
   connection: Connection,
-  idealerProgramId: PublicKey,
+  tycheProgramId: PublicKey,
 ) {
   const [proposals, votes] = await Promise.all([
-    connection.getProgramAccounts(idealerProgramId, {
+    connection.getProgramAccounts(tycheProgramId, {
       commitment: DEFAULT_COMMITMENT,
       filters: [
         {
@@ -394,7 +394,7 @@ async function listRewardActions(
         },
       ],
     }),
-    connection.getProgramAccounts(idealerProgramId, {
+    connection.getProgramAccounts(tycheProgramId, {
       commitment: DEFAULT_COMMITMENT,
       filters: [
         {
@@ -493,7 +493,7 @@ export async function sendRewardTransaction({
 export async function createTokenRewardSettlementConfig(
   env = process.env,
 ): Promise<TokenRewardSettlementConfig> {
-  const enabled = envFlag(env.IDEALER_TOKEN_REWARD_SETTLEMENT_ENABLED);
+  const enabled = envFlag(env.TYCHE_TOKEN_REWARD_SETTLEMENT_ENABLED);
   const tokenomicsProgramId = env.TOKENOMICS_CORE_PROGRAM_ID
     ? new PublicKey(env.TOKENOMICS_CORE_PROGRAM_ID)
     : null;
@@ -504,16 +504,16 @@ export async function createTokenRewardSettlementConfig(
   }
   return {
     actionAllowlist: parseTokenRewardActionAllowlist(
-      env.IDEALER_TOKEN_REWARD_ACTION_ALLOWLIST,
+      env.TYCHE_TOKEN_REWARD_ACTION_ALLOWLIST,
     ),
     automation: await createTurnAutomationConfig(env),
     enabled,
     intervalMs: envNumber(
-      env.IDEALER_TOKEN_REWARD_SETTLEMENT_INTERVAL_MS,
+      env.TYCHE_TOKEN_REWARD_SETTLEMENT_INTERVAL_MS,
       DEFAULT_INTERVAL_MS,
     ),
     maxRewardsPerPass: envNumber(
-      env.IDEALER_TOKEN_REWARD_MAX_PER_PASS,
+      env.TYCHE_TOKEN_REWARD_MAX_PER_PASS,
       DEFAULT_MAX_REWARDS_PER_PASS,
     ),
     tokenomicsProgramId,
@@ -539,11 +539,11 @@ export async function runTokenRewardSettlementOnce(
     config.automation.rpcUrl,
     DEFAULT_COMMITMENT,
   );
-  const idealerProgramId = new PublicKey(
+  const tycheProgramId = new PublicKey(
     config.automation.programId.toString(),
   );
   const tokenomicsProgramId = config.tokenomicsProgramId;
-  const globalConfig = derivePda(idealerProgramId, [
+  const globalConfig = derivePda(tycheProgramId, [
     Buffer.from("global_config"),
   ]);
   const campaign = derivePda(tokenomicsProgramId, [
@@ -566,7 +566,7 @@ export async function runTokenRewardSettlementOnce(
   });
 
   const actions = selectTokenRewardActions({
-    actions: await listRewardActions(connection, idealerProgramId),
+    actions: await listRewardActions(connection, tycheProgramId),
     allowlist: config.actionAllowlist,
   });
   const unsettled: Array<{
@@ -620,7 +620,7 @@ export async function runTokenRewardSettlementOnce(
       authority: authority.publicKey,
       beneficiary: item.action.beneficiary,
       beneficiaryTokenAccountExists,
-      idealerProgramId,
+      tycheProgramId,
       kind: item.action.kind,
       tokenomicsProgramId,
     });

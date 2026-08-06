@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { RuleAst } from "@idealer/rule-schema";
+import type { RuleAst } from "@tyche/rule-schema";
 import type { PublishedDraw } from "./draw.js";
 import type { PublishedRuleElection } from "./election.js";
 import {

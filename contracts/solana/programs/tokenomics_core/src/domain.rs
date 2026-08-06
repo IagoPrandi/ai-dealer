@@ -53,6 +53,8 @@ pub const REFERRAL_INVITER_FIRST_ROUND_BONUS_RATE_BPS: u128 = 2_250;
 pub const BPS_DENOMINATOR: u128 = 10_000;
 pub const MAX_MERKLE_PROOF_DEPTH: usize = 32;
 
+// Compatibility domains for distribution commitments created before the Tyche
+// rebrand. Changing either would invalidate existing proofs.
 const LEAF_DOMAIN: &[u8] = b"idealer:treasury-distribution-leaf:v1";
 const NODE_DOMAIN: &[u8] = b"idealer:treasury-distribution-node:v1";
 

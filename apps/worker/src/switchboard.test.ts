@@ -18,9 +18,9 @@ test("switchboard devnet defaults expose the on-demand queue", () => {
 test("switchboard proof config requires an authority keypair", async () => {
   await assert.rejects(
     createSwitchboardProofConfig({
-      IDEALER_SOLANA_RPC_URL: "https://api.devnet.solana.com",
+      TYCHE_SOLANA_RPC_URL: "https://api.devnet.solana.com",
     }),
-    /IDEALER_TURN_AUTHORITY_KEYPAIR/,
+    /TYCHE_TURN_AUTHORITY_KEYPAIR/,
   );
 });
 

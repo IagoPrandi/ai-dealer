@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { CREATOR_REWARD_RESERVE_SHARE_BPS, TREASURY_FEE_BPS } from "@idealer/constants";
+import { CREATOR_REWARD_RESERVE_SHARE_BPS, TREASURY_FEE_BPS } from "@tyche/constants";
 
 type LoadState = "error" | "loading" | "ready";
 
@@ -330,7 +330,7 @@ interface OperatorAiOperationsSnapshot {
   }>;
 }
 
-const CONFIGURED_API_BASE_URL = process.env.NEXT_PUBLIC_IDEALER_API_URL?.trim();
+const CONFIGURED_API_BASE_URL = process.env.NEXT_PUBLIC_TYCHE_API_URL?.trim();
 
 function stripTrailingSlash(value: string) {
   return value.replace(/\/+$/, "");
@@ -358,7 +358,7 @@ function getApiBaseUrl() {
     return "http://localhost:3002";
   }
   throw new Error(
-    "NEXT_PUBLIC_IDEALER_API_URL must be set outside local development.",
+    "NEXT_PUBLIC_TYCHE_API_URL must be set outside local development.",
   );
 }
 
@@ -587,8 +587,8 @@ export function OperatorAiOperationsPage() {
       link.href = href;
       link.download =
         format === "csv"
-          ? "idealer-operator-ai-operations.csv"
-          : "idealer-operator-ai-operations.json";
+          ? "tyche-operator-ai-operations.csv"
+          : "tyche-operator-ai-operations.json";
       link.click();
       URL.revokeObjectURL(href);
     } catch (fetchError) {
@@ -996,7 +996,7 @@ export default function AdminPage() {
       <section className="hero-panel">
         <div>
           <p className="eyebrow">Public transparency</p>
-          <h1>Idealer Transparency Console</h1>
+          <h1>Tyche Transparency Console</h1>
           <p>
             Read-only public metrics derived from devnet game state, public API
             projections, on-chain references, and hash-chained audit logs.

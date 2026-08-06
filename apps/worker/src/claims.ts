@@ -164,7 +164,7 @@ export async function recordClaimsForTurn({
 }): Promise<RecordClaimResult[]> {
   if (!config.authorityKeypairBytes) {
     throw new Error(
-      "Claim recording requires IDEALER_TURN_AUTHORITY_KEYPAIR or IDEALER_TURN_AUTHORITY_KEYPAIR_PATH.",
+      "Claim recording requires TYCHE_TURN_AUTHORITY_KEYPAIR or TYCHE_TURN_AUTHORITY_KEYPAIR_PATH.",
     );
   }
 

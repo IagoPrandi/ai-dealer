@@ -9,12 +9,12 @@ import { Keypair, PublicKey } from "@solana/web3.js";
 
 test("M5 input seeding accepts up to 17 deterministic players", () => {
   assert.equal(
-    readSeedConfig({ IDEALER_M5_INPUTS_PLAYER_COUNT: "17" }).playerCount,
+    readSeedConfig({ TYCHE_M5_INPUTS_PLAYER_COUNT: "17" }).playerCount,
     17,
   );
 
   assert.throws(
-    () => readSeedConfig({ IDEALER_M5_INPUTS_PLAYER_COUNT: "18" }),
+    () => readSeedConfig({ TYCHE_M5_INPUTS_PLAYER_COUNT: "18" }),
     /1 to 17/,
   );
 });
@@ -22,16 +22,16 @@ test("M5 input seeding accepts up to 17 deterministic players", () => {
 test("M5 input seeding requires an explicit bounded paid-guess count", () => {
   assert.equal(
     readSeedConfig({
-      IDEALER_M5_INPUTS_PAID_GUESS_PLAYER_COUNT: "3",
-      IDEALER_M5_INPUTS_PLAYER_COUNT: "17",
+      TYCHE_M5_INPUTS_PAID_GUESS_PLAYER_COUNT: "3",
+      TYCHE_M5_INPUTS_PLAYER_COUNT: "17",
     }).paidGuessPlayerCount,
     3,
   );
   assert.throws(
     () =>
       readSeedConfig({
-        IDEALER_M5_INPUTS_PAID_GUESS_PLAYER_COUNT: "4",
-        IDEALER_M5_INPUTS_PLAYER_COUNT: "3",
+        TYCHE_M5_INPUTS_PAID_GUESS_PLAYER_COUNT: "4",
+        TYCHE_M5_INPUTS_PLAYER_COUNT: "3",
       }),
     /paid_guess_player_count/i,
   );
@@ -57,7 +57,7 @@ test("17 deterministic M5 guesses cover every possible draw number", () => {
 test("M5 input seeding accepts only a canonical explicit guess", () => {
   assert.deepEqual(
     readSeedConfig({
-      IDEALER_M5_INPUTS_GUESS_NUMBERS: "95,96,97,98,99,100",
+      TYCHE_M5_INPUTS_GUESS_NUMBERS: "95,96,97,98,99,100",
     }).guessNumbers,
     [95, 96, 97, 98, 99, 100],
   );
@@ -70,7 +70,7 @@ test("M5 input seeding accepts only a canonical explicit guess", () => {
     assert.throws(
       () =>
         readSeedConfig({
-          IDEALER_M5_INPUTS_GUESS_NUMBERS: invalid,
+          TYCHE_M5_INPUTS_GUESS_NUMBERS: invalid,
         }),
       /six unique ascending integers/,
     );

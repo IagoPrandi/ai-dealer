@@ -15,7 +15,7 @@ test("api proxy defaults to the local API target", () => {
 
 test("api proxy strips trailing slashes from configured target", () => {
   assert.equal(
-    getApiProxyTarget({ IDEALER_API_PROXY_TARGET: "http://api.local:3002///" }),
+    getApiProxyTarget({ TYCHE_API_PROXY_TARGET: "http://api.local:3002///" }),
     "http://api.local:3002",
   );
 });
@@ -23,7 +23,7 @@ test("api proxy strips trailing slashes from configured target", () => {
 test("api proxy builds encoded upstream URLs with query strings", () => {
   assert.equal(
     buildApiProxyUrl({
-      env: { IDEALER_API_PROXY_TARGET: "http://api.local:3002" },
+      env: { TYCHE_API_PROXY_TARGET: "http://api.local:3002" },
       path: ["players", "wallet/with/slash"],
       search: "?limit=10",
     }),
@@ -33,8 +33,8 @@ test("api proxy builds encoded upstream URLs with query strings", () => {
 
 test("api proxy timeout defaults high enough for local rule compilation", () => {
   assert.equal(getApiProxyTimeoutMs({}), 300_000);
-  assert.equal(getApiProxyTimeoutMs({ IDEALER_API_PROXY_TIMEOUT_MS: "90000" }), 90_000);
-  assert.equal(getApiProxyTimeoutMs({ IDEALER_API_PROXY_TIMEOUT_MS: "nope" }), 300_000);
+  assert.equal(getApiProxyTimeoutMs({ TYCHE_API_PROXY_TIMEOUT_MS: "90000" }), 90_000);
+  assert.equal(getApiProxyTimeoutMs({ TYCHE_API_PROXY_TIMEOUT_MS: "nope" }), 300_000);
 });
 
 test("api proxy drops hop-by-hop request headers", () => {

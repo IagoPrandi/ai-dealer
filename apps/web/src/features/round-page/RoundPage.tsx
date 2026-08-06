@@ -3,14 +3,14 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { address } from "@solana/kit";
-import { RULE_MAX_TOKENS } from "@idealer/constants";
+import { RULE_MAX_TOKENS } from "@tyche/constants";
 import { useSolanaClient, useWalletConnection } from "@solana/react-hooks";
 import { getApiBaseUrl } from "../../lib/apiBase";
 import {
   deriveRoundAccounts,
   deriveSubmitGuessAccounts,
-  IDEALER_PROGRAM_ID,
-} from "../../solana/idealerProgram";
+  TYCHE_PROGRAM_ID,
+} from "../../solana/tycheProgram";
 
 interface RoundRuleSummary {
   compiledArtifactHash: string | null;
@@ -984,11 +984,11 @@ export function RoundPage({ turnId: rawTurnId }: { turnId: string }) {
               <li>
                 <span>Program</span>
                 <a
-                  href={explorerLink(IDEALER_PROGRAM_ID.toString())}
+                  href={explorerLink(TYCHE_PROGRAM_ID.toString())}
                   rel="noreferrer"
                   target="_blank"
                 >
-                  {truncateAddress(IDEALER_PROGRAM_ID.toString())}
+                  {truncateAddress(TYCHE_PROGRAM_ID.toString())}
                 </a>
               </li>
               <li>

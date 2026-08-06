@@ -19,7 +19,7 @@ import {
 
 /**
  * Production settlement scheduler loop (M5.3). Env-gated and OFF by default, so
- * wiring it changes nothing until `IDEALER_SETTLEMENT_AUTOMATION_ENABLED` is
+ * wiring it changes nothing until `TYCHE_SETTLEMENT_AUTOMATION_ENABLED` is
  * set. When enabled it advances the post-play-window pipeline for the current
  * settlement turn each tick by calling `runSettlementCycle` until the next step
  * has to wait (VRF reveal latency, open elimination window, before draw time)
@@ -66,25 +66,25 @@ export async function createSettlementSchedulerConfig(
   env = process.env,
 ): Promise<SettlementSchedulerConfig> {
   return {
-    apiBaseUrl: env.IDEALER_API_BASE_URL ?? DEFAULT_API_BASE_URL,
+    apiBaseUrl: env.TYCHE_API_BASE_URL ?? DEFAULT_API_BASE_URL,
     automation: await createTurnAutomationConfig(env),
     electionConfig: {
       randomFinalistCount: envNumber(
-        env.IDEALER_ELECTION_RANDOM_FINALISTS,
+        env.TYCHE_ELECTION_RANDOM_FINALISTS,
         DEFAULT_RANDOM_FINALISTS,
       ),
       topVotedFinalistCount: envNumber(
-        env.IDEALER_ELECTION_TOP_VOTED_FINALISTS,
+        env.TYCHE_ELECTION_TOP_VOTED_FINALISTS,
         DEFAULT_TOP_VOTED_FINALISTS,
       ),
     },
-    enabled: envFlag(env.IDEALER_SETTLEMENT_AUTOMATION_ENABLED),
+    enabled: envFlag(env.TYCHE_SETTLEMENT_AUTOMATION_ENABLED),
     intervalMs: envNumber(
-      env.IDEALER_SETTLEMENT_AUTOMATION_INTERVAL_MS,
+      env.TYCHE_SETTLEMENT_AUTOMATION_INTERVAL_MS,
       DEFAULT_INTERVAL_MS,
     ),
     maxStepsPerTick: envNumber(
-      env.IDEALER_SETTLEMENT_MAX_STEPS_PER_TICK,
+      env.TYCHE_SETTLEMENT_MAX_STEPS_PER_TICK,
       DEFAULT_MAX_STEPS_PER_TICK,
     ),
   };
@@ -150,7 +150,7 @@ async function executeSettlementSchedulerOnce(
   }
   if (!config.automation.authorityKeypairBytes) {
     throw new Error(
-      "Settlement automation is enabled but IDEALER_TURN_AUTHORITY_KEYPAIR or IDEALER_TURN_AUTHORITY_KEYPAIR_PATH is not set.",
+      "Settlement automation is enabled but TYCHE_TURN_AUTHORITY_KEYPAIR or TYCHE_TURN_AUTHORITY_KEYPAIR_PATH is not set.",
     );
   }
 

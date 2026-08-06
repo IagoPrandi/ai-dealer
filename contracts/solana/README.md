@@ -1,6 +1,6 @@
 # Solana Programs
 
-This Anchor workspace contains the updateable Idealer game program and the
+This Anchor workspace contains the updateable Tyche game program and the
 separate Tokenomics Core program specified by `PRD-TOKENOMICS-v2.8.md`.
 
 ## Tokenomics Core
@@ -8,7 +8,7 @@ separate Tokenomics Core program specified by `PRD-TOKENOMICS-v2.8.md`.
 `programs/tokenomics_core` is a separate custody boundary. Its externally
 managed devnet program identity is
 `BRK6G8Sep66LFREp2nGMLiganfw2nbWe1f8zeAdoP1Fm`; the keypair is stored only in
-the external `idealer-solana-home` volume and is never committed. This address
+the external `tyche-solana-home` volume and is never committed. This address
 is devnet-only and does not select a mainnet program identity. The programme
 was deployed at finalized devnet slot `477455064` by transaction
 `2CFWENLszmB7YJH8D6q2BjGeUEPL5o7XuM2dkEbg2SQmeD2EHFtfWs8BsUytqykrTAr27iyhMHXgJYtKVPF6kT5k`.
@@ -51,7 +51,7 @@ The program remains upgradeable only for local development, audit, and devnet
 rehearsal. Its upgrade authority must be revoked before any real-value mainnet
 lock, fee deposit, campaign reward, or treasury funding.
 
-The updateable Idealer game program is configured as the Core's
+The updateable Tyche game program is configured as the Core's
 `game_authority` through its `global_config` PDA. It tracks each turn's exact
 treasury share and can bridge a closed turn once into a collecting epoch. Its
 CPI entry points bind proposal/supporter recipients to immutable game records,
@@ -82,27 +82,27 @@ The existing `draw_vrf_config` and `election_vrf_config` fields select ORAO
 only when set to its canonical Network State PDA
 `5ER1oENnV4srxYdAynUfRzWeQCPQaqMiAp4VqyMbSqnK`; every other value continues
 to be interpreted as a Switchboard queue. The ORAO programme is hardcoded as
-`VRFzZoJdhFWL8rkvu87LpKM3RbcVezpMEc6X5GVDr7y`. Idealer accepts only v2
-request PDAs owned by that programme, bound to the Idealer authority as client,
+`VRFzZoJdhFWL8rkvu87LpKM3RbcVezpMEc6X5GVDr7y`. Tyche accepts only v2
+request PDAs owned by that programme, bound to the Tyche authority as client,
 and rejects pre-fulfilled requests. Fulfilled 64-byte ORAO values are SHA-256
 compressed to the existing 32-byte protocol input.
 
 ### SBF build, SBF tests, and devnet deploy
 
-`scripts/sbf.sh` runs inside the pinned Rust container with Agave + `cargo-build-sbf` persisted in `idealer-solana-home`, the workspace, cargo registry cache, and `idealer-sbf-target` as `CARGO_TARGET_DIR`. Every invocation logs the active Agave/SBF versions. Tokenomics Core and Idealer are built as isolated deployables so Idealer's `tokenomics-core/cpi` dependency cannot disable the Tokenomics Core entrypoint through Cargo feature unification:
+`scripts/sbf.sh` runs inside the pinned Rust container with Agave + `cargo-build-sbf` persisted in `tyche-solana-home`, the workspace, cargo registry cache, and `tyche-sbf-target` as `CARGO_TARGET_DIR`. Every invocation logs the active Agave/SBF versions. Tokenomics Core and Tyche are built as isolated deployables so Tyche's `tokenomics-core/cpi` dependency cannot disable the Tokenomics Core entrypoint through Cargo feature unification:
 
 ```bash
 # from the repo root (PowerShell avoids MSYS path mangling)
 docker run --rm -e CARGO_TARGET_DIR=/sbf-target \
-  -v idealer-cargo-registry:/usr/local/cargo/registry \
-  -v idealer-sbf-target:/sbf-target \
-  -v idealer-solana-home:/root \
+  -v tyche-cargo-registry:/usr/local/cargo/registry \
+  -v tyche-sbf-target:/sbf-target \
+  -v tyche-solana-home:/root \
   -v "<repo>:/workspace" -w /workspace/contracts/solana \
   rust:1.91-bookworm bash /workspace/contracts/solana/scripts/sbf.sh <build|test-sbf|fund|deploy>
 ```
 
-`deploy` defaults to the Idealer program and uses the deployer (and initial
-upgrade-authority) keypair stored only in the `idealer-solana-home` volume.
+`deploy` defaults to the Tyche program and uses the deployer (and initial
+upgrade-authority) keypair stored only in the `tyche-solana-home` volume.
 Keypair contents are never printed or committed. Set
 `DEPLOY_PROGRAM=tokenomics_core` and provide the externally managed
 `tokenomics-core-program-keypair.json` in the same volume to deploy Tokenomics
@@ -140,7 +140,7 @@ bash scripts/sbf.sh set-upgrade-authority
 This command is a network write and must be run only after explicit transaction
 review and approval. The genesis page at `/dev/tokenomics/genesis` remains
 disabled until the program is executable, its upgrade authority is that vault,
-the Idealer `GlobalConfig` PDA exists, all genesis PDAs are unused, and the
+the Tyche `GlobalConfig` PDA exists, all genesis PDAs are unused, and the
 metadata input matches the devnet-only policy. An empty devnet URI is not
 permission to omit the canonical Metadata account and does not satisfy the
 future mainnet metadata gate.
@@ -158,23 +158,23 @@ Run these commands from `contracts/solana`.
 On Windows, the package scripts run these checks in a pinned Linux Rust container because the Solana/Anchor toolchain requires WSL or Linux:
 
 ```bash
-pnpm --filter @idealer/solana-programs typecheck
-pnpm --filter @idealer/solana-programs lint
-pnpm --filter @idealer/solana-programs test
+pnpm --filter @tyche/solana-programs typecheck
+pnpm --filter @tyche/solana-programs lint
+pnpm --filter @tyche/solana-programs test
 ```
 
-The complete instruction suite requires Docker and the SBF toolchain. The helper builds isolated `sb-devnet` Idealer and `devnet-empty-metadata-uri` Tokenomics Core artifacts under `/sbf-target/test-deploy`, leaving the production-feature deploy artifact untouched, and then runs the ignored tests serially:
+The complete instruction suite requires Docker and the SBF toolchain. The helper builds isolated `sb-devnet` Tyche and `devnet-empty-metadata-uri` Tokenomics Core artifacts under `/sbf-target/test-deploy`, leaving the production-feature deploy artifact untouched, and then runs the ignored tests serially:
 
 ```bash
 docker run --rm -e CARGO_TARGET_DIR=/sbf-target \
-  -v idealer-cargo-registry:/usr/local/cargo/registry \
-  -v idealer-sbf-target:/sbf-target \
-  -v idealer-solana-home:/root \
+  -v tyche-cargo-registry:/usr/local/cargo/registry \
+  -v tyche-sbf-target:/sbf-target \
+  -v tyche-solana-home:/root \
   -v "<repo>:/workspace" -w /workspace/contracts/solana \
   rust:1.91-bookworm bash /workspace/contracts/solana/scripts/sbf.sh test-sbf
 ```
 
-The SBF suite executes 8 Idealer scenarios covering initialization, turn opening, guess/Game Token creation, rule proposal, sequenced vote idempotency, VRF request/settlement, invalid-input rejection, turn closing, winner claims, and rejection of legacy creator/voter SOL claims. It also executes 2 Tokenomics Core scenarios covering one-time fixed-supply genesis and authority revocation, pause-safe canonical treasury unlock, epoch review and sealing, fixed-destination treasury claims, replay rejection, exact liability/dust accounting, and correction-epoch binding to an original sealed epoch. The build helper treats any compiler `Error:` diagnostic as fatal even if `cargo-build-sbf` exits successfully and removes disposable keypair files that `cargo-build-sbf` may generate beside the artifacts.
+The SBF suite executes 8 Tyche scenarios covering initialization, turn opening, guess/Game Token creation, rule proposal, sequenced vote idempotency, VRF request/settlement, invalid-input rejection, turn closing, winner claims, and rejection of legacy creator/voter SOL claims. It also executes 2 Tokenomics Core scenarios covering one-time fixed-supply genesis and authority revocation, pause-safe canonical treasury unlock, epoch review and sealing, fixed-destination treasury claims, replay rejection, exact liability/dust accounting, and correction-epoch binding to an original sealed epoch. The build helper treats any compiler `Error:` diagnostic as fatal even if `cargo-build-sbf` exits successfully and removes disposable keypair files that `cargo-build-sbf` may generate beside the artifacts.
 
 ## Devnet Deployment Gate
 
@@ -192,11 +192,11 @@ Current M2.2 devnet deployer address to fund:
 4bY5krt2VnnSNB1R4c1bhiWdQYkTc1FvFTN1LaV5JxCH
 ```
 
-The local keypairs for this M2.2 deploy attempt are stored outside the repository in the Docker `idealer-solana-home` volume under `/root/.config/idealer/devnet/`. Do not paste keypair JSON, seed phrases, or private keys into chat, commits, docs, or logs.
+The local keypairs for this M2.2 deploy attempt are stored outside the repository in the Docker `tyche-solana-home` volume under `/root/.config/tyche/devnet/`. Do not paste keypair JSON, seed phrases, or private keys into chat, commits, docs, or logs.
 
 1. Fund the deployer address above on devnet. The latest deploy attempt required `2.95675416 SOL` plus a `0.00212 SOL` fee.
-2. Run `cargo build-sbf --sbf-out-dir /tmp/idealer-deploy --jobs 1`.
-3. Deploy with `solana program deploy /tmp/idealer-deploy/idealer.so --program-id /root/.config/idealer/devnet/idealer-program-keypair.json --keypair /root/.config/idealer/devnet/idealer-deployer-keypair.json --url devnet`.
+2. Run `cargo build-sbf --sbf-out-dir /tmp/tyche-deploy --jobs 1`.
+3. Deploy with `solana program deploy /tmp/tyche-deploy/tyche.so --program-id /root/.config/tyche/devnet/tyche-program-keypair.json --keypair /root/.config/tyche/devnet/tyche-deployer-keypair.json --url devnet`.
 4. Verify with `solana program show 6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4 --url devnet`.
 5. Run cluster smoke tests before M2.3 UI integration.
 

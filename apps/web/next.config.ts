@@ -16,12 +16,12 @@ const mockEnabled =
 // served on — notably an HTTPS Cloudflare tunnel used to install the PWA on a
 // phone — without mixed-content or CORS problems.
 const workerProxyTarget =
-  process.env.IDEALER_WORKER_PROXY_TARGET ?? "http://localhost:3003";
+  process.env.TYCHE_WORKER_PROXY_TARGET ?? "http://localhost:3003";
 
 const nextConfig: NextConfig = {
   // Quick Tunnels use a random trusted hostname on every run. Allow that
   // development-only origin so React assets and the HMR WebSocket can hydrate
-  // an installed PWA reached through `pnpm --filter @idealer/web dev:tunnel`.
+  // an installed PWA reached through `pnpm --filter @tyche/web dev:tunnel`.
   allowedDevOrigins: ["*.trycloudflare.com"],
   env: {
     NEXT_PUBLIC_UI_MOCK: mockEnabled ? "1" : "0",

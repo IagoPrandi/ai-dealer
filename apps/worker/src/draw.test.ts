@@ -69,7 +69,7 @@ test("deriveDrawNumbers rejects non-32-byte randomness", () => {
 
 test("deriveDrawNumbers matches the on-chain known vectors", () => {
   // Identical assertions live in the Rust suite
-  // (`contracts/solana/programs/idealer/tests/core.rs`) to lock cross-language
+  // (`contracts/solana/programs/tyche/tests/core.rs`) to lock cross-language
   // parity between the worker mirror and the on-chain derivation.
   assert.deepEqual(deriveDrawNumbers(new Uint8Array(32).fill(7), 1), [
     20, 18, 99, 69, 90, 37,

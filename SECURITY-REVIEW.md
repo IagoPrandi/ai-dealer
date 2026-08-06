@@ -1,12 +1,12 @@
-# Idealer — Security Review (Stressed Red-Team)
+# Tyche — Security Review (Stressed Red-Team)
 
 - **Date:** 2026-07-19
-- **Scope:** on-chain programs (`idealer`, `tokenomics_core`), `apps/{api,worker,web,admin}`, `packages/*`, infra/CI/Docker, dependencies
+- **Scope:** on-chain programs (`tyche`, `tokenomics_core`), `apps/{api,worker,web,admin}`, `packages/*`, infra/CI/Docker, dependencies
 - **Method:** multi-specialist parallel review + direct auditing + a dedicated adversarial-verification pass that built working exploit chains
 - **Status:** review-only — no source files were modified
 - **Docs consulted (per CLAUDE.md):** `PRD.md`, `PRD-TOKENOMICS-v2.8.md`, `PRD-eligibility-gate.md`, `SETTLEMENT_TRUSTLESS_PLAN.md`
 
-> **Caveats.** One reviewer (idealer remaining-instruction stress) stopped early on a session token limit; its ground was largely covered by the attack-surface and economic reviewers. Two reviewers ran while the automated safety classifier was unavailable; the single CRITICAL claim they raised (v3 minimize-ranking inversion, H2) was independently re-verified against current code. File:line citations are point-in-time — re-verify before acting.
+> **Caveats.** One reviewer (tyche remaining-instruction stress) stopped early on a session token limit; its ground was largely covered by the attack-surface and economic reviewers. Two reviewers ran while the automated safety classifier was unavailable; the single CRITICAL claim they raised (v3 minimize-ranking inversion, H2) was independently re-verified against current code. File:line citations are point-in-time — re-verify before acting.
 
 ---
 
@@ -40,7 +40,7 @@ Browser
                                                                               │ holds the on-chain AUTHORITY KEYPAIR
                                                                               │ trusts API projections verbatim
                                                                               ▼
-                                              idealer / tokenomics_core   ✅ strong (VRF, checked math, IDOR-safe)
+                                              tyche / tokenomics_core   ✅ strong (VRF, checked math, IDOR-safe)
                                                                               │ but blindly trusts the authority key
                                                                               ▼
                                               Switchboard On-Demand oracle  (trusted for randomness)
@@ -80,7 +80,7 @@ Guess/propose/vote/eliminate/remove/claim signatures are only `isBase58Like` sha
 `verifyGuessJob` feeds `job.draw` into rule evaluation without ever checking `draw === deriveDrawNumbers(onChainRandomness, turnId)` or `hash(draw) === draw_hash` ([`apps/worker/src/guess-verification.ts:252`](apps/worker/src/guess-verification.ts#L252)). The verification pass is therefore **not** a compensating control for ①.
 
 ### ⑤ Unauthenticated worker `/manual/*` — **CONFIRMED (flag-on)**
-When `IDEALER_TURN_MANUAL_CONTROL_ENABLED` is set, `/manual/force-close|migrate|settle|cycle` require **no credential** and drive the authority key on-chain ([`apps/worker/src/index.ts:504`](apps/worker/src/index.ts#L504), `manual-control.ts`). `/__worker` makes them **publicly reachable**. `force-close` wedges settlement permanently (`closed_without_fulfilled_draw`), locking the prize pool.
+When `TYCHE_TURN_MANUAL_CONTROL_ENABLED` is set, `/manual/force-close|migrate|settle|cycle` require **no credential** and drive the authority key on-chain ([`apps/worker/src/index.ts:504`](apps/worker/src/index.ts#L504), `manual-control.ts`). `/__worker` makes them **publicly reachable**. `force-close` wedges settlement permanently (`closed_without_fulfilled_draw`), locking the prize pool.
 
 ---
 
@@ -92,7 +92,7 @@ When `IDEALER_TURN_MANUAL_CONTROL_ENABLED` is set, `/manual/force-close|migrate|
 ~25 unauthenticated state-mutating API routes feed the authority's on-chain signing (chains ①②③④). The economically load-bearing ones: `/winner-records/calculate-turn`, `/reward-records/calculate-turn`, `/claim-records/*`, `/draws`, `/elections`, `/verification-results`, `/prize-pool-rollovers`, `/turn-rollovers/settle`, `/settlement-transitions`. **The** issue.
 
 **C2 — Sybil election capture (profitable).**
-All fee escalation is **per-wallet, not per-identity** ([`idealer/src/domain.rs:241`](contracts/solana/programs/idealer/src/domain.rs#L241)), so N fresh wallets defeat the `2^n` wall linearly. An attacker: (1) seats their 3 rules as top-voted via free approval votes; (2) floods the eligible pool to dominate the random-7 finalists; (3) eliminates 5 rival finalists for ~1 vote each — random finalists' frozen approval is ~0, so `elim(1) > approval(0)` qualifies ([`lib.rs:1010`](contracts/solana/programs/idealer/src/lib.rs#L1010)); (4) their rule is VRF-selected active → they win the alternative pool + creator/voter rewards. Cost ≈ a few `VOTE_FEE`, ~free in the early free-window.
+All fee escalation is **per-wallet, not per-identity** ([`tyche/src/domain.rs:241`](contracts/solana/programs/tyche/src/domain.rs#L241)), so N fresh wallets defeat the `2^n` wall linearly. An attacker: (1) seats their 3 rules as top-voted via free approval votes; (2) floods the eligible pool to dominate the random-7 finalists; (3) eliminates 5 rival finalists for ~1 vote each — random finalists' frozen approval is ~0, so `elim(1) > approval(0)` qualifies ([`lib.rs:1010`](contracts/solana/programs/tyche/src/lib.rs#L1010)); (4) their rule is VRF-selected active → they win the alternative pool + creator/voter rewards. Cost ≈ a few `VOTE_FEE`, ~free in the early free-window.
 
 ### HIGH
 
@@ -114,7 +114,7 @@ All fee escalation is **per-wallet, not per-identity** ([`idealer/src/domain.rs:
 
 | ID | Finding | Reference |
 |---|---|---|
-| M1 | `record_claim` has no on-chain conservation cap — authority can direct the whole vault to one wallet (the on-chain half of C1) | [idealer lib.rs:1711](contracts/solana/programs/idealer/src/lib.rs#L1711) |
+| M1 | `record_claim` has no on-chain conservation cap — authority can direct the whole vault to one wallet (the on-chain half of C1) | [tyche lib.rs:1711](contracts/solana/programs/tyche/src/lib.rs#L1711) |
 | M2 | Treasury timelock is a no-op (`DELAY=0`, immutable) → schedule+execute drain in one bundle; permissionless `execute_treasury_sol/token_operation` cranks make it worse | [tokenomics domain.rs:17](contracts/solana/programs/tokenomics_core/src/domain.rs#L17) |
 | M3 | `initialize_genesis` front-runnable — authorities taken from caller args | [tokenomics lib.rs:49](contracts/solana/programs/tokenomics_core/src/lib.rs#L49) |
 | M4 | No key rotation for governance/guardian/game_authority/publisher | tokenomics_core (whole) |
@@ -161,16 +161,16 @@ All fee escalation is **per-wallet, not per-identity** ([`idealer/src/domain.rs:
 - `POST /manual/{open,close,cycle,force-close,migrate,settle}` — **env-flag gated only**, drive the authority key on-chain; publicly reachable via `/__worker`.
 
 ### On-chain — permissionless-but-stateful instructions (flagged)
-- **idealer:** `settle_proposal_token_reward`, `settle_supporter_token_reward` (beneficiary-bound cranks; permissionless triggering).
+- **tyche:** `settle_proposal_token_reward`, `settle_supporter_token_reward` (beneficiary-bound cranks; permissionless triggering).
 - **tokenomics_core:** `open_distribution_epoch`, `publish_provisional_root`, `refund_expired_challenge`, `expire_unresolved_root`, `seal_epoch_root`, `fund_future_campaign`, `execute_treasury_token_operation`, `execute_treasury_sol_operation`, `fund_correction_reserve`. All optimistic/challenge-gated or bound to a governance-scheduled op + timelock — but the **timelock delay is 0** (M2), so scheduled treasury ops are executable immediately by anyone.
-- `reinitialize_global_config_for_migration` (idealer) uses an `UncheckedAccount` global_config with manual discriminator/authority validation — deeper review recommended.
+- `reinitialize_global_config_for_migration` (tyche) uses an `UncheckedAccount` global_config with manual discriminator/authority validation — deeper review recommended.
 
 ### Admin — `apps/admin`
 - `/` public transparency dashboard (unauth by design).
 - `/operator/ai-operations` — client-side wallet gate only; real enforcement is the API's `OPERATOR_AI_CONSOLE_AUTHORIZED_WALLETS` allowlist. No `middleware.ts`, no session.
 
 ### Beyond HTTP
-- Env-flag features (`IDEALER_TURN_MANUAL_CONTROL_ENABLED` highest-value), the automation/settlement/precompile loops (all sign with the authority key), and operator CLI scripts that load keypairs. `packages/mcp-tools` has **no** live tool surface. No inbound oracle webhooks (Switchboard is pull-based).
+- Env-flag features (`TYCHE_TURN_MANUAL_CONTROL_ENABLED` highest-value), the automation/settlement/precompile loops (all sign with the authority key), and operator CLI scripts that load keypairs. `packages/mcp-tools` has **no** live tool surface. No inbound oracle webhooks (Switchboard is pull-based).
 
 ---
 
@@ -194,7 +194,7 @@ All fee escalation is **per-wallet, not per-identity** ([`idealer/src/domain.rs:
 ## 7. Verified NOT vulnerable
 
 - On-chain VRF draw: trustless, atomic reveal+settle (one-shot, no grinding), rejection-sampled (no modulo bias), no `Math.random`/timestamp/blockhash anywhere in selection.
-- idealer claim IDOR: claim PDA seeded by `turn_id+claimant+kind`, `claim.claimant == signer`, `init` (no flag-reset), CEI + state flag, `pay_from_vault` checked-sub with rent floor.
+- tyche claim IDOR: claim PDA seeded by `turn_id+claimant+kind`, `claim.claimant == signer`, `init` (no flag-reset), CEI + state flag, `pay_from_vault` checked-sub with rent floor.
 - **Rule interpreter sandbox is genuinely hardened:** no `eval`/`Function`/`RegExp`/`require`/`child_process`; depth/op/array/scalar caps; zod strips unknown keys (no prototype pollution); integer-only (no cross-machine FP divergence).
 - tokenomics_core: mint & freeze authority revoked + supply-invariant asserted; `transfer_checked` everywhere; Merkle leaf/node domain separation; cumulative vault solvency; strictly-increasing voter accounts block aliasing; all singletons `init` (no reinit).
 - Web proxy is **not** SSRF/open-proxy (fixed base host, `encodeURIComponent` segments, minimal header forwarding).

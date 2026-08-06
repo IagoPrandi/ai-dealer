@@ -1,5 +1,5 @@
 {
-  "name": "@idealer/api",
+  "name": "@tyche/api",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -11,13 +11,13 @@
     "test": "node --test --import tsx \"src/**/*.test.ts\""
   },
   "dependencies": {
-    "@idealer/constants": "workspace:*",
-    "@idealer/rule-compiler": "workspace:*",
+    "@tyche/constants": "workspace:*",
+    "@tyche/rule-compiler": "workspace:*",
     "pg": "8.21.0",
     "redis": "6.0.0"
   },
   "devDependencies": {
-    "@idealer/config": "workspace:*",
+    "@tyche/config": "workspace:*",
     "@types/pg": "8.20.0"
   }
 }

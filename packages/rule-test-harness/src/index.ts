@@ -1,11 +1,11 @@
-import type { RuleAst } from "@idealer/rule-schema";
-import { isRankingRule, rankingDirection, ruleAstSchema } from "@idealer/rule-schema";
+import type { RuleAst } from "@tyche/rule-schema";
+import { isRankingRule, rankingDirection, ruleAstSchema } from "@tyche/rule-schema";
 import {
   evaluatePredicate,
   resolveRankingWinners,
   RuleRuntimeError,
   scoreGuess,
-} from "@idealer/rule-runtime";
+} from "@tyche/rule-runtime";
 
 // Validates a compiled rule (PRD §7.8) before it can be accepted: it runs the
 // rule in the deterministic runtime over generated + Monte-Carlo inputs, derives

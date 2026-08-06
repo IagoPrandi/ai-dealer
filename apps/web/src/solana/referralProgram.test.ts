@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { address, getAddressEncoder } from "@solana/kit";
 
-import { IDEALER_PROGRAM_ID } from "./idealerProgram";
+import { TYCHE_PROGRAM_ID } from "./tycheProgram";
 import {
   buildReferralLink,
   countPlayerGameTokens,
@@ -69,12 +69,12 @@ test("an invite code is accepted from a link, a query string or a bare address",
   assert.equal(parseReferralCode(INVITER), INVITER);
   assert.equal(parseReferralCode(`  ${INVITER}  `), INVITER);
   assert.equal(
-    parseReferralCode(`https://idealer.example/play?ref=${INVITER}`),
+    parseReferralCode(`https://tyche.example/play?ref=${INVITER}`),
     INVITER,
   );
   assert.equal(parseReferralCode(`?ref=${INVITER}`), INVITER);
   assert.equal(
-    parseReferralCode(`https://idealer.example/play?utm=x&ref=${INVITER}#top`),
+    parseReferralCode(`https://tyche.example/play?utm=x&ref=${INVITER}#top`),
     INVITER,
   );
 });
@@ -89,8 +89,8 @@ test("invalid invite codes are rejected instead of silently accepted", () => {
 
 test("the invite link points at the play route and carries the inviter", () => {
   assert.equal(
-    buildReferralLink("https://idealer.example/", INVITER),
-    `https://idealer.example/play?ref=${INVITER}`,
+    buildReferralLink("https://tyche.example/", INVITER),
+    `https://tyche.example/play?ref=${INVITER}`,
   );
 });
 
@@ -168,7 +168,7 @@ test("an attribution owned by another program is rejected", async () => {
                 Buffer.from(attributionAccount()).toString("base64"),
                 "base64",
               ] as const,
-              owner: IDEALER_PROGRAM_ID.toString(),
+              owner: TYCHE_PROGRAM_ID.toString(),
             },
           }),
         }),
@@ -224,14 +224,14 @@ test("only real GameToken accounts of the wallet are counted", async () => {
                   Buffer.from(gameTokenAccount(INVITEE)).toString("base64"),
                   "base64",
                 ] as const,
-                owner: IDEALER_PROGRAM_ID.toString(),
+                owner: TYCHE_PROGRAM_ID.toString(),
               },
               pubkey: INVITEE,
             },
             {
               account: {
                 data: [Buffer.from(foreign).toString("base64"), "base64"] as const,
-                owner: IDEALER_PROGRAM_ID.toString(),
+                owner: TYCHE_PROGRAM_ID.toString(),
               },
               pubkey: INVITER,
             },

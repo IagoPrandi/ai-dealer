@@ -1,5 +1,5 @@
 {
-  "name": "@idealer/rule-compiler",
+  "name": "@tyche/rule-compiler",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -13,12 +13,12 @@
     "test": "node --test --import tsx \"src/**/*.test.ts\""
   },
   "dependencies": {
-    "@idealer/agent-core": "workspace:*",
-    "@idealer/rule-runtime": "workspace:*",
-    "@idealer/rule-schema": "workspace:*",
-    "@idealer/rule-test-harness": "workspace:*"
+    "@tyche/agent-core": "workspace:*",
+    "@tyche/rule-runtime": "workspace:*",
+    "@tyche/rule-schema": "workspace:*",
+    "@tyche/rule-test-harness": "workspace:*"
   },
   "devDependencies": {
-    "@idealer/config": "workspace:*"
+    "@tyche/config": "workspace:*"
   }
 }

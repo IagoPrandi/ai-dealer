@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tyche Test & Verify"
+  short_description: "Verify changes correctly across the tyche monorepo."
+  default_prompt: "Verify my changes correctly before marking anything done."

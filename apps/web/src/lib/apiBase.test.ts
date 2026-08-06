@@ -53,7 +53,7 @@ function withBrowserLocation(
 }
 
 test("api base defaults browser calls to the same-origin proxy", () => {
-  withEnv({ NEXT_PUBLIC_IDEALER_API_URL: undefined }, () => {
+  withEnv({ NEXT_PUBLIC_TYCHE_API_URL: undefined }, () => {
     withBrowserLocation({ hostname: "localhost", protocol: "http:" }, () => {
       assert.equal(getApiBaseUrl(), "/api/proxy");
     });
@@ -61,7 +61,7 @@ test("api base defaults browser calls to the same-origin proxy", () => {
 });
 
 test("api base uses the same-origin proxy from public HTTPS origins", () => {
-  withEnv({ NEXT_PUBLIC_IDEALER_API_URL: undefined }, () => {
+  withEnv({ NEXT_PUBLIC_TYCHE_API_URL: undefined }, () => {
     withBrowserLocation(
       { hostname: "example.trycloudflare.com", protocol: "https:" },
       () => {
@@ -72,7 +72,7 @@ test("api base uses the same-origin proxy from public HTTPS origins", () => {
 });
 
 test("api base maps the legacy same-origin proxy override to the route handler", () => {
-  withEnv({ NEXT_PUBLIC_IDEALER_API_URL: "/__api" }, () => {
+  withEnv({ NEXT_PUBLIC_TYCHE_API_URL: "/__api" }, () => {
     withBrowserLocation({ hostname: "localhost", protocol: "http:" }, () => {
       assert.equal(getApiBaseUrl(), "/api/proxy");
     });
@@ -80,7 +80,7 @@ test("api base maps the legacy same-origin proxy override to the route handler",
 });
 
 test("api base honors explicit browser override and strips trailing slash", () => {
-  withEnv({ NEXT_PUBLIC_IDEALER_API_URL: "http://localhost:3002///" }, () => {
+  withEnv({ NEXT_PUBLIC_TYCHE_API_URL: "http://localhost:3002///" }, () => {
     withBrowserLocation({ hostname: "localhost", protocol: "http:" }, () => {
       assert.equal(getApiBaseUrl(), "http://localhost:3002");
     });
@@ -90,8 +90,8 @@ test("api base honors explicit browser override and strips trailing slash", () =
 test("api base uses direct loopback URL during server-side execution", () => {
   withEnv(
     {
-      IDEALER_API_BASE_URL: undefined,
-      NEXT_PUBLIC_IDEALER_API_URL: undefined,
+      TYCHE_API_BASE_URL: undefined,
+      NEXT_PUBLIC_TYCHE_API_URL: undefined,
     },
     () => {
       assert.equal(getApiBaseUrl(), "http://localhost:3002");
@@ -100,7 +100,7 @@ test("api base uses direct loopback URL during server-side execution", () => {
 });
 
 test("api base honors explicit server-side API URL", () => {
-  withEnv({ IDEALER_API_BASE_URL: "http://api.internal:3002/" }, () => {
+  withEnv({ TYCHE_API_BASE_URL: "http://api.internal:3002/" }, () => {
     assert.equal(getApiBaseUrl(), "http://api.internal:3002");
   });
 });

@@ -6,7 +6,7 @@ import {
   calculateEpochAccounting,
   type EpochClaimInput,
   type TreasuryDistributionLeaf,
-} from "@idealer/tokenomics";
+} from "@tyche/tokenomics";
 
 const execFileAsync = promisify(execFile);
 
@@ -121,9 +121,9 @@ export function requireIndependentEpochAgreement(
 export async function runRustEpochCalculator(
   inputPath: string,
 ): Promise<EpochCalculatorOutput> {
-  const executable = process.env.IDEALER_TOKENOMICS_RUST_CALCULATOR;
+  const executable = process.env.TYCHE_TOKENOMICS_RUST_CALCULATOR;
   if (!executable) {
-    throw new Error("IDEALER_TOKENOMICS_RUST_CALCULATOR is required");
+    throw new Error("TYCHE_TOKENOMICS_RUST_CALCULATOR is required");
   }
   const { stdout } = await execFileAsync(executable, [inputPath], {
     encoding: "utf8",

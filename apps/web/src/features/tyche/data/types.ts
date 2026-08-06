@@ -1,0 +1,328 @@
+/**
+ * Types the Tyche UI consumes. The `*Api` types mirror the subset of the
+ * Tyche API (apps/api) responses we read; the `Ui*` types are the
+ * screen-facing shapes derived by the hooks in `hooks.ts`.
+ */
+
+/* ----------------------------- API shapes ----------------------------- */
+
+export interface RuleProposalApi {
+  compiledArtifactHash?: string | null;
+  feeLamports?: number;
+  precompilationStatus?: "failed" | "passed" | "pending";
+  proposer: string;
+  ruleId: number;
+  ruleProposal?: string;
+  normalizedText: string;
+  officialInterpretation: string;
+  sanitizedText: string;
+  sequence?: number;
+  state?: "eligible" | "invalidated" | "proposed" | "removed_paid";
+  title: string;
+  tokenCount?: number;
+  turnId?: number;
+}
+
+export interface RuleVoteApi {
+  feeLamports?: number;
+  ruleId: number;
+  sequence?: number;
+  signature: string;
+  submittedAt?: string;
+  turnId: number;
+  voter: string;
+}
+
+export interface RuleVotesApi {
+  counts: Record<string, number>;
+  votes: RuleVoteApi[];
+}
+
+export interface TokenomicsPublicApi {
+  available: boolean;
+  projection: {
+    allocation: {
+      campaignReserveAtoms: string;
+      creatorTreasuryAtoms: string;
+      fixedSupplyAtoms: string;
+      freezeAuthorityRevoked: boolean;
+      mintAuthorityRevoked: boolean;
+    };
+    campaigns: Array<{
+      campaignId: string;
+      cumulativeDistributedAtoms: string;
+      originalAllocationAtoms: string;
+      remainingAtoms: string;
+      state: "draft" | "ended" | "exhausted" | "funded";
+      vault: string;
+    }>;
+    cluster: string;
+    currentEpoch: {
+      epochId: string;
+      grossDistributableLamports: string;
+      manifestHash: string | null;
+      merkleRoot: string | null;
+      remainingClaimLiabilityLamports: string;
+      rolloverOutLamports: string;
+      rootVersion: number;
+      status:
+        | "calculating"
+        | "challenged"
+        | "collecting"
+        | "expired_unresolved"
+        | "provisional"
+        | "rolled_over_no_weight"
+        | "sealed";
+      sumOfMerkleClaimsLamports: string;
+      totalWeight: string;
+      verificationWindowEndsAt: string | null;
+    } | null;
+    indexedAt: string;
+    indexedFinalizedSlot: string;
+    lockConcentrationBps: number;
+    lockedSupplyAtoms: string;
+    mint: string;
+    programId: string;
+    uniqueLockers: number;
+    vaults: {
+      correctionReserve: string;
+      correctionReserveLamports: string;
+      distribution: string;
+      distributionAvailableLamports: string;
+      initialCampaign: string;
+      treasuryLockEscrow: string;
+      treasuryReserve: string;
+      treasurySol: string;
+      treasurySolLamports: string;
+    };
+  } | null;
+  reason: "not_indexed" | null;
+}
+
+export interface TokenomicsWalletApi {
+  claimableLamports: string;
+  claimedLamports: string;
+  claimRecords: Array<{
+    amountLamports: string;
+    beneficiary: string;
+    epochId: string;
+    epochKind: "correction" | "standard";
+    position: string;
+    proof: string[];
+    rootVersion: number;
+    signature: string;
+    status: "claimable" | "claimed";
+  }>;
+  currentEpochWeight: string;
+  lockedAtoms: string;
+  promotionalRewardAtoms: string;
+  unlockedAtoms: string;
+  unlockedTokenAccount: string;
+  wallet: string;
+}
+
+export interface EliminationFinalistApi {
+  approvalVotes: number;
+  eliminated: boolean;
+  eliminationVotes: number;
+  ruleId: number;
+  status: "eliminated" | "survived";
+  threshold: number;
+}
+
+export interface RoundSummaryApi {
+  draw: {
+    drawResult: number[] | null;
+    drawnAt: string | null;
+    status: string;
+    turnId: number;
+  } | null;
+  election: {
+    activeRuleId: number | null;
+    eligibleRuleIds: number[];
+    finalistRuleIds: number[];
+    randomRuleIds: number[];
+    status: "locked" | "original_only" | "requested" | "settled";
+    topVotedRuleIds: number[];
+  } | null;
+  elimination: {
+    decisionWindowClosesAt: string | null;
+    eliminatedRuleIds: number[];
+    finalists: EliminationFinalistApi[];
+    status: "closed" | "not_started" | "open";
+    survivorRuleIds: number[];
+  };
+  pool: {
+    accounting: {
+      buckets: {
+        alternative: { rolloverLamports: number; totalLamports: number };
+        original: { rolloverLamports: number; totalLamports: number };
+      };
+    };
+    guesses: number;
+    indicativeSol: number;
+    totalVisiblePrizePoolSol: number;
+  };
+  rules: RoundSummaryRuleApi[];
+  status: "completed" | "current" | "upcoming";
+  totalVotes: number;
+  turnId: number;
+  winners?: WinnerSummaryApi;
+}
+
+export interface RoundSummaryRuleApi {
+  proposer: string;
+  ruleId: number;
+  sanitizedText: string;
+  state: "eligible" | "invalidated" | "proposed" | "removed_paid";
+  title: string;
+  tokenCount: number;
+  votes: number;
+}
+
+export interface WinnerRecordApi {
+  activeRuleId: number | null;
+  category: "alternative" | "original";
+  payoutLamports: number;
+  player: string;
+  turnId: number;
+  winnerCount: number;
+}
+
+export interface WinnerCategorySummaryApi {
+  bucketLamports: number;
+  individualPayoutLamports: number;
+  winnerCount: number;
+}
+
+export interface WinnerSummaryApi {
+  alternative: WinnerCategorySummaryApi;
+  original: WinnerCategorySummaryApi;
+  records: WinnerRecordApi[];
+  turnId: number;
+}
+
+export type ClaimKind = "creator_reward" | "voter_reward" | "winner_payout";
+export type ClaimStatus =
+  | "available"
+  | "claimed"
+  | "failed"
+  | "pending_wallet_approval"
+  | "unavailable";
+
+export interface ClaimRecordApi {
+  amountLamports: number;
+  category: "alternative" | "original" | null;
+  claimId: string;
+  claimWindowExpiresAt?: string;
+  kind: ClaimKind;
+  status: ClaimStatus;
+  statusReason: string;
+  turnId: number;
+}
+
+export interface PlayerClaimsApi {
+  availableLamports: number;
+  claimedLamports: number;
+  records: ClaimRecordApi[];
+  totalLamports: number;
+  wallet: string;
+}
+
+export type PlayerHistoryType =
+  | "claim"
+  | "elimination_vote"
+  | "guess"
+  | "rule_proposal"
+  | "vote";
+
+export interface PlayerHistoryEventApi {
+  amountLamports?: number;
+  createdAt: string;
+  id: string;
+  ruleId?: number;
+  status: string;
+  summary: string;
+  title: string;
+  turnId: number;
+  type: PlayerHistoryType;
+}
+
+export interface PlayerHistoryApi {
+  cursor: string | null;
+  events: PlayerHistoryEventApi[];
+  limit: number;
+  nextCursor: string | null;
+  wallet: string;
+}
+
+export type ConversationDraftStatus = "draft" | "submitted";
+
+export interface ConversationMessage {
+  text: string;
+  who: "ai" | "user";
+}
+
+export interface ConversationDraftApi {
+  createdAt: string;
+  draftId: string;
+  lastMessage: string;
+  messages?: ConversationMessage[];
+  normalizedText: string | null;
+  officialInterpretation: string | null;
+  prompt: string;
+  ruleId: number | null;
+  status: ConversationDraftStatus;
+  tokenCount: number;
+  turnId: number;
+  updatedAt: string;
+  wallet: string;
+}
+
+export interface GuessReceiptApi {
+  feeLamports?: number;
+  gameToken?: string;
+  numbers: number[];
+  playerGuess?: string;
+  sequence?: number;
+  signature: string;
+  submittedAt: string;
+}
+
+/* ----------------------------- UI shapes ----------------------------- */
+
+/** A rule as the voting / detail UI needs it. `against` only exists for
+ * finalists while elimination voting is open (all of phase 2); 0 otherwise. */
+export interface UiRule {
+  against: number;
+  approve: number;
+  created: string;
+  finalist: boolean;
+  handle: string;
+  how: string;
+  id: string;
+  mine: boolean;
+  myAgainstCount: number;
+  myApproveCount: number;
+  nextAgainstFeeSol: number;
+  nextApproveFeeSol: number;
+  removed: boolean;
+  ruleId: number;
+  ruleProposal: string | undefined;
+  seed: string;
+  src: "top" | "vrf" | null;
+  state: RuleProposalApi["state"];
+  summary: string;
+  title: string;
+  tokens: number;
+  wallet: string;
+}
+
+/** Aggregated, screen-facing view of the active round. */
+export interface UiRound {
+  decisionPhase: boolean;
+  players: number;
+  prizeSol: number;
+  rulesCount: number;
+  turnId: number;
+}

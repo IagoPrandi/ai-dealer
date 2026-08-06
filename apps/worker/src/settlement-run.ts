@@ -17,13 +17,13 @@ import {
  * scheduler over the current settlement turn until it reaches CLOSED.
  *
  * Dry-run by default — it only reads on-chain + API + recorded state and prints
- * the next planned action, broadcasting nothing. Set `IDEALER_SETTLE_BROADCAST=1`
+ * the next planned action, broadcasting nothing. Set `TYCHE_SETTLE_BROADCAST=1`
  * to actually drive the pipeline (request/settle/close + API projections).
  *
  * This is a manual operator tool (like `switchboard-settle-draw.ts`), separate
  * from the production loop (`startSettlementLoop`). It must run inside the
  * worker container so it can sign with the on-chain authority keypair, and it
- * needs the API reachable (set `IDEALER_API_BASE_URL`).
+ * needs the API reachable (set `TYCHE_API_BASE_URL`).
  */
 
 const ROOT_ENV_PATH = resolve(
@@ -34,7 +34,7 @@ if (existsSync(ROOT_ENV_PATH)) {
   process.loadEnvFile(ROOT_ENV_PATH);
 }
 
-const BROADCAST = process.env.IDEALER_SETTLE_BROADCAST === "1";
+const BROADCAST = process.env.TYCHE_SETTLE_BROADCAST === "1";
 const TIMEOUT_MS = 15 * 60_000;
 const POLL_INTERVAL_MS = 8_000;
 
@@ -57,7 +57,7 @@ export async function runManualSettlement() {
   const config = { ...(await createSettlementSchedulerConfig()), enabled: true };
   if (!config.automation.authorityKeypairBytes) {
     throw new Error(
-      "Settlement run requires IDEALER_TURN_AUTHORITY_KEYPAIR or IDEALER_TURN_AUTHORITY_KEYPAIR_PATH.",
+      "Settlement run requires TYCHE_TURN_AUTHORITY_KEYPAIR or TYCHE_TURN_AUTHORITY_KEYPAIR_PATH.",
     );
   }
 
@@ -123,7 +123,7 @@ export async function runManualSettlement() {
 
   if (!BROADCAST) {
     console.log(
-      "Dry run only. Set IDEALER_SETTLE_BROADCAST=1 to drive the settlement pipeline.",
+      "Dry run only. Set TYCHE_SETTLE_BROADCAST=1 to drive the settlement pipeline.",
     );
     return;
   }

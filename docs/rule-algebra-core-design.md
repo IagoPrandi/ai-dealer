@@ -32,7 +32,7 @@ A probe script replicates the API pre-LLM gates from
 (sanitize → `RULE_PREVENTED_PATTERNS` → `RULE_EXTERNAL_BLOCK_PATTERNS` →
 `hasExternalDependency` → `hasInvalidConstraint` → token/byte limits) and then
 runs the offline deterministic compiler
-(`validateAndPrecompileRule` from `@idealer/rule-compiler`). No LLM is invoked,
+(`validateAndPrecompileRule` from `@tyche/rule-compiler`). No LLM is invoked,
 so the run isolates harness logic from model behavior (same technique as the
 test-set-1 probe).
 
@@ -356,7 +356,7 @@ All six steps above are implemented and verified:
    `schemaVersion: 1 | 2 | 3`. Offline regex fast path still emits v1/v2
    (valid + executable) and is no longer a growth surface.
 5. Skill rewritten around the core grammar + macro cookbook + idioms
-   (`idealer_rule_compiler_skill_v6`); every worked example is validated
+   (`tyche_rule_compiler_skill_v6`); every worked example is validated
    against the schema by a compiler test.
 6. Text gates: dismissal-clause/simile/objective-clarification-aware external
    matching (compiler + API preflight share `externalDependencyGateText`);

@@ -18,7 +18,7 @@ if (existsSync(ROOT_ENV_PATH)) {
 }
 
 const BROADCAST =
-  process.env.IDEALER_ACTIVE_RULE_REWARD_BROADCAST === "1";
+  process.env.TYCHE_ACTIVE_RULE_REWARD_BROADCAST === "1";
 
 function printable(value: unknown) {
   return JSON.stringify(
@@ -51,7 +51,7 @@ export async function runActiveRuleRewardOperator() {
   }
   if (config.turnAllowlist.length === 0) {
     throw new Error(
-      "Set IDEALER_ACTIVE_RULE_REWARD_TURN_ALLOWLIST to the reviewed turn IDs.",
+      "Set TYCHE_ACTIVE_RULE_REWARD_TURN_ALLOWLIST to the reviewed turn IDs.",
     );
   }
 
@@ -65,14 +65,14 @@ export async function runActiveRuleRewardOperator() {
   }
 
   const connection = new Connection(config.automation.rpcUrl, "finalized");
-  const idealerProgramId = new PublicKey(
+  const tycheProgramId = new PublicKey(
     config.automation.programId.toString(),
   );
   for (const turnId of config.turnAllowlist) {
     const inspection = await inspectActiveRuleRewardSettlement({
       apiBaseUrl: config.apiBaseUrl,
       connection,
-      idealerProgramId,
+      tycheProgramId,
       tokenomicsProgramId: config.tokenomicsProgramId,
       turnId,
     });
@@ -85,7 +85,7 @@ export async function runActiveRuleRewardOperator() {
           config.automation.authorityKeypairBytes,
         ),
         connection,
-        idealerProgramId,
+        tycheProgramId,
         plan: inspection.plan,
         tokenomicsProgramId: config.tokenomicsProgramId,
       });
@@ -95,7 +95,7 @@ export async function runActiveRuleRewardOperator() {
     }
   }
   console.log(
-    "Dry run only. Review the exact turn, beneficiaries, amounts, reserve delta, and fee estimate before setting IDEALER_ACTIVE_RULE_REWARD_BROADCAST=1.",
+    "Dry run only. Review the exact turn, beneficiaries, amounts, reserve delta, and fee estimate before setting TYCHE_ACTIVE_RULE_REWARD_BROADCAST=1.",
   );
 }
 

@@ -1,4 +1,4 @@
-# Idealer — Feature PRD: Social Eligibility Gate
+# Tyche — Feature PRD: Social Eligibility Gate
 
 > **Version:** 0.1.0 (Draft for review)
 > **Status:** Proposal — not implemented; no code or schema changes made yet
@@ -30,7 +30,7 @@
 
 ## 1. Summary
 
-This feature extends the Idealer rule engine so that a community rule can condition winning on **social / election state** (how a player participated in governance for the current turn) — **but only as a conjunctive gate on top of a mandatory numeric core** evaluated over `guess` and `draw`.
+This feature extends the Tyche rule engine so that a community rule can condition winning on **social / election state** (how a player participated in governance for the current turn) — **but only as a conjunctive gate on top of a mandatory numeric core** evaluated over `guess` and `draw`.
 
 The win is always anchored to the drawn numbers. Social conditions can only **narrow** the winning set; they can never be the sole determinant of a win, and they can never make a rule easier.
 
@@ -171,7 +171,7 @@ Consequence: difficulty classification becomes **per-turn**, not static. This af
 - Rule cards render the gate in plain language, e.g. *"Win if you match ≥4 numbers **and** you voted for this rule."*
 - The proposal composer suggests the four closed gate predicates (not free-form). It must remain clear that the gate only restricts who can win.
 - The result screen shows whether the player was gate-eligible, distinct from whether their numbers matched, so near-miss messaging stays accurate ("Your numbers matched, but this rule only paid voters").
-- All UI must follow the `idealer-design-system` conventions and reuse the existing voter-reward narrative (parent §2.4 / §4.6).
+- All UI must follow the `tyche-design-system` conventions and reuse the existing voter-reward narrative (parent §2.4 / §4.6).
 
 ## 10. Security & Abuse Analysis
 
@@ -208,7 +208,7 @@ This feature must pass the `security-threat-checklist` before merge.
 - `apps/web/src/features/rule-voting/RuleVotingPanel.tsx` and `draw-result/DrawResultPanel.tsx` — render gate; show eligibility in the result.
 
 **Phase 5 — Contract (evaluate necessity).**
-- `contracts/solana/programs/idealer` — **likely no on-chain change**: the gate is evaluated off-chain over data already on-chain (votes, creator, elected rule). Only needed if `snapshotHash` must be committed on-chain for strong audit. Decision deferred to Phase 0.
+- `contracts/solana/programs/tyche` — **likely no on-chain change**: the gate is evaluated off-chain over data already on-chain (votes, creator, elected rule). Only needed if `snapshotHash` must be committed on-chain for strong audit. Decision deferred to Phase 0.
 
 ## 12. Definition of Done
 
@@ -216,7 +216,7 @@ This feature must pass the `security-threat-checklist` before merge.
 - Compiler rejects literal-wallet targeting and accepts the four social gates only inside the gate.
 - Difficulty classification is per-turn over the joint (core × gate).
 - `TurnSocialSnapshot` is deterministic, hashed, and sealed into the frozen artifact before the draw.
-- UX follows `idealer-design-system`; result screen distinguishes numeric match from gate eligibility.
+- UX follows `tyche-design-system`; result screen distinguishes numeric match from gate eligibility.
 - `security-threat-checklist` passed; product/compliance sign-off on the social-only boundary.
 - PROGRESS_TRACKER submilestone ticked **only after user confirmation**.
 

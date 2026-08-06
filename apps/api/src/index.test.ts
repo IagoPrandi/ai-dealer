@@ -99,23 +99,23 @@ test("effective turn duration follows the isolated dev-cycle configuration", () 
   ]);
   assert.deepEqual(
     resolveEffectiveTurnDurationCycleSeconds({
-      IDEALER_DEVNET_TURN_DURATION_SCALE_BPS: "139",
+      TYCHE_DEVNET_TURN_DURATION_SCALE_BPS: "139",
     }),
     [1_200, 1_200, 1_200, 1_200],
   );
   assert.deepEqual(
     resolveEffectiveTurnDurationCycleSeconds({
-      IDEALER_DEVNET_TURN_DURATION_SCALE_BPS: "10000",
-      IDEALER_TURN_MANUAL_CONTROL_ENABLED: "true",
-      IDEALER_TURN_MANUAL_OPEN_DURATION_SECONDS: "1200",
+      TYCHE_DEVNET_TURN_DURATION_SCALE_BPS: "10000",
+      TYCHE_TURN_MANUAL_CONTROL_ENABLED: "true",
+      TYCHE_TURN_MANUAL_OPEN_DURATION_SECONDS: "1200",
     }),
     [1_200, 1_200, 1_200, 1_200],
   );
   assert.throws(
     () =>
       resolveEffectiveTurnDurationCycleSeconds({
-        IDEALER_TURN_MANUAL_CONTROL_ENABLED: "true",
-        IDEALER_TURN_MANUAL_OPEN_DURATION_SECONDS: "invalid",
+        TYCHE_TURN_MANUAL_CONTROL_ENABLED: "true",
+        TYCHE_TURN_MANUAL_OPEN_DURATION_SECONDS: "invalid",
       }),
     /must be a positive integer/,
   );
@@ -503,7 +503,7 @@ test("M9.3 backend accounting matches the contract domain vector", () => {
   });
 
   // Mirrors `prize_pool_accounting_tracks_sources_buckets_and_rollover` in
-  // `contracts/solana/programs/idealer/tests/core.rs`.
+  // `contracts/solana/programs/tyche/tests/core.rs`.
   assert.deepEqual(
     {
       alternativeBucketCurrent: accounting.buckets.alternative.currentTurnLamports,

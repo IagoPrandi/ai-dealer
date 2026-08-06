@@ -4,7 +4,7 @@ This document summarizes the product rules that must remain stable during MVP im
 
 ## Core Product Position
 
-Idealer is a mobile-first Solana DApp where each turn is a lottery-style game with a community-governed alternative winning rule. The public product experience is a live social game, not an AI infrastructure product, governance protocol, or randomness protocol.
+Tyche is a mobile-first Solana DApp where each turn is a lottery-style game with a community-governed alternative winning rule. The public product experience is a live social game, not an AI infrastructure product, governance protocol, or randomness protocol.
 
 Desktop web is supported as a secondary surface. The primary user experience must work in mobile browsers, in-wallet browsers, and mobile wallet deep-link flows.
 
@@ -102,7 +102,7 @@ The admin console is separate from the public DApp. It is for insights, analytic
 - Repository architecture: monorepo.
 - Frontend framework: Next.js.
 - Local runtime: Docker / Docker Compose.
-- Docker Compose project name: `idealer`.
+- Docker Compose project name: `tyche`.
 - Production API and worker must deploy as separate services from the start.
 - Optional observability containers belong under a separate Docker Compose observability profile.
 

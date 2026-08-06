@@ -525,7 +525,7 @@ async function createSettlementContext(
 ): Promise<SettlementContext> {
   if (!config.authorityKeypairBytes) {
     throw new Error(
-      "Settlement senders require IDEALER_TURN_AUTHORITY_KEYPAIR or IDEALER_TURN_AUTHORITY_KEYPAIR_PATH.",
+      "Settlement senders require TYCHE_TURN_AUTHORITY_KEYPAIR or TYCHE_TURN_AUTHORITY_KEYPAIR_PATH.",
     );
   }
 
@@ -533,11 +533,11 @@ async function createSettlementContext(
   const authority = Keypair.fromSecretKey(config.authorityKeypairBytes);
   const connection = new Connection(config.rpcUrl, commitment);
   const switchboardProgramId = publicKeyFromOption(
-    options.switchboardProgramId ?? process.env.IDEALER_SWITCHBOARD_ON_DEMAND_PROGRAM_ID,
+    options.switchboardProgramId ?? process.env.TYCHE_SWITCHBOARD_ON_DEMAND_PROGRAM_ID,
     ON_DEMAND_DEVNET_PID,
   );
   const queue = publicKeyFromOption(
-    options.switchboardQueue ?? process.env.IDEALER_SWITCHBOARD_ON_DEMAND_QUEUE,
+    options.switchboardQueue ?? process.env.TYCHE_SWITCHBOARD_ON_DEMAND_QUEUE,
     ON_DEMAND_DEVNET_QUEUE,
   );
   const switchboardProgram = await AnchorUtils.loadProgramFromConnection(
@@ -730,7 +730,7 @@ async function sendRandomnessRequest({
   if (isOraoProviderConfig(configuredProvider)) {
     if (!prepared) {
       throw new Error(
-        `ORAO request ${address} was not prepared in this worker process; refusing a non-atomic Idealer request.`,
+        `ORAO request ${address} was not prepared in this worker process; refusing a non-atomic Tyche request.`,
       );
     }
     const signature = await sendInstructions({
@@ -927,7 +927,7 @@ async function fetchTurnAccountData(context: SettlementContext, turnId: number) 
     return null;
   }
   if (!account.owner.equals(context.programId)) {
-    throw new Error("TurnState account owner does not match the Idealer program.");
+    throw new Error("TurnState account owner does not match the Tyche program.");
   }
   return account.data;
 }
@@ -954,7 +954,7 @@ export async function fetchRuleElectionCutoffBps({
     throw new Error("GlobalConfig account was not found on-chain.");
   }
   if (!account.owner.equals(programId)) {
-    throw new Error("GlobalConfig account owner does not match the Idealer program.");
+    throw new Error("GlobalConfig account owner does not match the Tyche program.");
   }
   return decodeGlobalConfigAccount(account.data).ruleElectionCutoffBps;
 }

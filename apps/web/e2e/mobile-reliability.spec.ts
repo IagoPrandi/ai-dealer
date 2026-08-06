@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 
-const PENDING_ACTION_KEY = "idealer.wallet.pending-action";
+const PENDING_ACTION_KEY = "tyche.wallet.pending-action";
 
 type Status =
   | "awaiting_approval"

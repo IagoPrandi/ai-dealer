@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { getTurnDurationHours } from "@idealer/game-engine";
+import { getTurnDurationHours } from "@tyche/game-engine";
 import { createSolanaRpc } from "@solana/kit";
 import pg from "pg";
 import { createClient } from "redis";
@@ -73,7 +73,7 @@ export * from "./token-reward-settlement.js";
 export * from "./turn-automation.js";
 
 // Load the repo-root .env for native (non-Docker) dev so DATABASE_URL/REDIS_URL,
-// the turn-authority keypair path, and the LLM/IDEALER_* settings are available
+// the turn-authority keypair path, and the LLM/TYCHE_* settings are available
 // without Docker Compose injecting them. Existing process env wins over the file.
 const ROOT_ENV_PATH = resolve(
   fileURLToPath(new URL("../../..", import.meta.url)),
@@ -219,7 +219,7 @@ function getAllowedCorsOrigin(origin: string | undefined) {
     return null;
   }
 
-  const configuredOrigins = (process.env.IDEALER_WORKER_CORS_ORIGINS ?? "")
+  const configuredOrigins = (process.env.TYCHE_WORKER_CORS_ORIGINS ?? "")
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
@@ -540,7 +540,7 @@ if (
   });
 
   server.listen(port, host, () => {
-    console.log(`@idealer/worker listening on ${host}:${port}`);
+    console.log(`@tyche/worker listening on ${host}:${port}`);
   });
 
   void createTurnAutomationConfig().then((config) => {

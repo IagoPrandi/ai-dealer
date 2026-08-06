@@ -88,7 +88,7 @@ export async function createSwitchboardProofConfig(
   const authorityKeypairBytes = await loadAuthorityKeypairBytesFromEnv(env);
   if (!authorityKeypairBytes) {
     throw new Error(
-      "Switchboard proof requires IDEALER_TURN_AUTHORITY_KEYPAIR or IDEALER_TURN_AUTHORITY_KEYPAIR_PATH.",
+      "Switchboard proof requires TYCHE_TURN_AUTHORITY_KEYPAIR or TYCHE_TURN_AUTHORITY_KEYPAIR_PATH.",
     );
   }
 
@@ -96,11 +96,11 @@ export async function createSwitchboardProofConfig(
   return {
     authorityKeypairBytes,
     programId: publicKeyFromEnv(
-      env.IDEALER_SWITCHBOARD_ON_DEMAND_PROGRAM_ID,
+      env.TYCHE_SWITCHBOARD_ON_DEMAND_PROGRAM_ID,
       ON_DEMAND_DEVNET_PID,
     ),
     queue: publicKeyFromEnv(
-      env.IDEALER_SWITCHBOARD_ON_DEMAND_QUEUE,
+      env.TYCHE_SWITCHBOARD_ON_DEMAND_QUEUE,
       ON_DEMAND_DEVNET_QUEUE,
     ),
     rpcUrl: automation.rpcUrl,
@@ -112,7 +112,7 @@ export async function setConfiguredVrfToSwitchboardDevnet(
 ) {
   void env;
   throw new Error(
-    "Direct VRF configuration is disabled. Create and execute a Squads proposal signed by the Idealer ProgramData upgrade authority.",
+    "Direct VRF configuration is disabled. Create and execute a Squads proposal signed by the Tyche ProgramData upgrade authority.",
   );
 }
 

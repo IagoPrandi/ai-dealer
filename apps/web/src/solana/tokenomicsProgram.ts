@@ -11,17 +11,17 @@ import {
 import {
   PROPOSAL_REWARD_ATOMS,
   SUPPORTER_REWARD_ATOMS,
-} from "@idealer/constants";
+} from "@tyche/constants";
 
-import { IDEALER_PROGRAM_ID, SYSTEM_PROGRAM_ID } from "./idealerProgram";
+import { TYCHE_PROGRAM_ID, SYSTEM_PROGRAM_ID } from "./tycheProgram";
 import { INITIAL_CAMPAIGN_CONFIG_HASH } from "./tokenomicsGenesisConfig";
 
 export const TOKENOMICS_CORE_PROGRAM_ID = address(
   process.env.NEXT_PUBLIC_TOKENOMICS_CORE_PROGRAM_ID ??
     "BRK6G8Sep66LFREp2nGMLiganfw2nbWe1f8zeAdoP1Fm",
 );
-export const IDEALER_TOKEN_MINT = address(
-  process.env.NEXT_PUBLIC_IDEALER_TOKEN_MINT ??
+export const TYCHE_TOKEN_MINT = address(
+  process.env.NEXT_PUBLIC_TYCHE_TOKEN_MINT ??
     "FssXNhB2mUSjavX7jsXLuZevfGnJ5zn98nNNUbrY16rr",
 );
 export const SPL_TOKEN_PROGRAM_ID = address(
@@ -94,7 +94,7 @@ export interface OnChainTokenBalance {
 
 export async function deriveAssociatedTokenAddress(
   owner: ReturnType<typeof address>,
-  mint: ReturnType<typeof address> = IDEALER_TOKEN_MINT,
+  mint: ReturnType<typeof address> = TYCHE_TOKEN_MINT,
 ) {
   const [tokenAccount] = await getProgramDerivedAddress({
     programAddress: ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -109,7 +109,7 @@ export async function deriveAssociatedTokenAddress(
 
 export async function fetchOnChainTokenBalance({
   client,
-  mint = IDEALER_TOKEN_MINT,
+  mint = TYCHE_TOKEN_MINT,
   owner,
 }: {
   client: TokenBalanceRpcReader;
@@ -206,7 +206,7 @@ export async function fetchOnChainTokenomicsPosition({
     throw new Error("Tokenomics configuration data is truncated.");
   }
   const mint = addressFromBytes(configBytes.subarray(136, 168));
-  if (mint !== IDEALER_TOKEN_MINT) {
+  if (mint !== TYCHE_TOKEN_MINT) {
     throw new Error("Tokenomics configuration uses an unexpected JDR mint.");
   }
 
@@ -286,7 +286,7 @@ export async function fetchManualTokenRewards({
     ) => { send: () => Promise<ProgramAccountResult[]> };
   };
   const actions = await rpc
-    .getProgramAccounts(IDEALER_PROGRAM_ID, {
+    .getProgramAccounts(TYCHE_PROGRAM_ID, {
       commitment: "confirmed",
       encoding: "base64",
       filters: [{ memcmp: { bytes: owner.toString(), offset: 24n } }],
@@ -323,7 +323,7 @@ export async function fetchManualTokenRewards({
     );
   }
   const candidates = actions.flatMap(({ account, pubkey }) => {
-    if (account.owner !== IDEALER_PROGRAM_ID.toString()) {
+    if (account.owner !== TYCHE_PROGRAM_ID.toString()) {
       return [];
     }
     const bytes = decodeBase64Data(account.data);
@@ -382,7 +382,7 @@ export async function createManualTokenRewardClaimInstruction(args: {
 }) {
   const [globalConfig, tokenConfig, campaign] = await Promise.all([
     getProgramDerivedAddress({
-      programAddress: IDEALER_PROGRAM_ID,
+      programAddress: TYCHE_PROGRAM_ID,
       seeds: ["global_config"],
     }).then(([pda]) => pda),
     derivePda(["token_config"]),
@@ -395,7 +395,7 @@ export async function createManualTokenRewardClaimInstruction(args: {
       { address: args.reward.action, role: AccountRole.READONLY },
       { address: TOKENOMICS_CORE_PROGRAM_ID, role: AccountRole.READONLY },
       { address: tokenConfig, role: AccountRole.READONLY },
-      { address: IDEALER_TOKEN_MINT, role: AccountRole.READONLY },
+      { address: TYCHE_TOKEN_MINT, role: AccountRole.READONLY },
       { address: campaign, role: AccountRole.WRITABLE },
       { address: args.campaignVault, role: AccountRole.WRITABLE },
       { address: args.tokenAccount, role: AccountRole.WRITABLE },
@@ -407,7 +407,7 @@ export async function createManualTokenRewardClaimInstruction(args: {
       args.reward.kind === "proposal"
         ? SETTLE_PROPOSAL_TOKEN_REWARD_DISCRIMINATOR
         : SETTLE_SUPPORTER_TOKEN_REWARD_DISCRIMINATOR,
-    programAddress: IDEALER_PROGRAM_ID,
+    programAddress: TYCHE_PROGRAM_ID,
   };
 }
 
@@ -421,7 +421,7 @@ export function createAssociatedTokenAccountInstruction(args: {
       { address: args.payer, role: AccountRole.WRITABLE_SIGNER },
       { address: args.tokenAccount, role: AccountRole.WRITABLE },
       { address: args.owner, role: AccountRole.READONLY },
-      { address: IDEALER_TOKEN_MINT, role: AccountRole.READONLY },
+      { address: TYCHE_TOKEN_MINT, role: AccountRole.READONLY },
       { address: SYSTEM_PROGRAM_ID, role: AccountRole.READONLY },
       { address: SPL_TOKEN_PROGRAM_ID, role: AccountRole.READONLY },
     ],

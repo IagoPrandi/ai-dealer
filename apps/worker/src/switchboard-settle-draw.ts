@@ -16,7 +16,7 @@ import {
  *
  * This is a manual operator tool (like `switchboard-proof.ts`), NOT the
  * production scheduler (that wiring is M5.3). It refuses to broadcast unless
- * `IDEALER_SETTLE_BROADCAST=1` so a default run is a safe, read-only inspection
+ * `TYCHE_SETTLE_BROADCAST=1` so a default run is a safe, read-only inspection
  * of the live turn state.
  */
 
@@ -43,7 +43,7 @@ export async function runManualDrawSettlement() {
   const config = await createTurnAutomationConfig();
   if (!config.authorityKeypairBytes) {
     throw new Error(
-      "Manual draw settlement requires IDEALER_TURN_AUTHORITY_KEYPAIR or IDEALER_TURN_AUTHORITY_KEYPAIR_PATH.",
+      "Manual draw settlement requires TYCHE_TURN_AUTHORITY_KEYPAIR or TYCHE_TURN_AUTHORITY_KEYPAIR_PATH.",
     );
   }
 
@@ -64,7 +64,7 @@ export async function runManualDrawSettlement() {
   console.log(
     JSON.stringify(
       {
-        broadcast: process.env.IDEALER_SETTLE_BROADCAST === "1",
+        broadcast: process.env.TYCHE_SETTLE_BROADCAST === "1",
         globalConfig: {
           activeTurnId: globalConfig.snapshot.activeTurnId,
           drawVrfConfig: globalConfig.snapshot.drawVrfConfig.toString(),
@@ -85,9 +85,9 @@ export async function runManualDrawSettlement() {
     ),
   );
 
-  if (process.env.IDEALER_SETTLE_BROADCAST !== "1") {
+  if (process.env.TYCHE_SETTLE_BROADCAST !== "1") {
     console.log(
-      "Dry run only. Set IDEALER_SETTLE_BROADCAST=1 to drive request_draw -> reveal -> settle_draw.",
+      "Dry run only. Set TYCHE_SETTLE_BROADCAST=1 to drive request_draw -> reveal -> settle_draw.",
     );
     return;
   }

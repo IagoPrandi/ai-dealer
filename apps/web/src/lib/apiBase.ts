@@ -18,12 +18,12 @@ function normalizeConfiguredApiBaseUrl(value: string) {
 }
 
 export function getApiBaseUrl() {
-  const configuredApiBaseUrl = process.env.NEXT_PUBLIC_IDEALER_API_URL?.trim();
+  const configuredApiBaseUrl = process.env.NEXT_PUBLIC_TYCHE_API_URL?.trim();
 
   // Server-side rendering: reach the API directly over loopback.
   if (typeof window === "undefined") {
     return stripTrailingSlash(
-      process.env.IDEALER_API_BASE_URL ?? "http://localhost:3002",
+      process.env.TYCHE_API_BASE_URL ?? "http://localhost:3002",
     );
   }
 

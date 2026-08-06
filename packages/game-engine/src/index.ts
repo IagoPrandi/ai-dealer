@@ -1,4 +1,4 @@
-import { TURN_DURATION_CYCLE_HOURS } from "@idealer/constants";
+import { TURN_DURATION_CYCLE_HOURS } from "@tyche/constants";
 
 export function getTurnDurationHours(cycleIndex: number): number {
   const normalizedIndex = cycleIndex % TURN_DURATION_CYCLE_HOURS.length;

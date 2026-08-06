@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { desugarToV3, ruleAstSchema } from "@idealer/rule-schema";
-import type { RuleAst, RuleAstV3 } from "@idealer/rule-schema";
+import { desugarToV3, ruleAstSchema } from "@tyche/rule-schema";
+import type { RuleAst, RuleAstV3 } from "@tyche/rule-schema";
 
 import { evaluatePredicate, evaluateRule, scoreGuess } from "./index.js";
 

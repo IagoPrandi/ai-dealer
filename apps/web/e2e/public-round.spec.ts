@@ -95,7 +95,7 @@ const completedRound = {
       validation: {
         decision: "VALID",
         finalConfidence: 0.9125,
-        model: "idealer-rule-validator-v1",
+        model: "tyche-rule-validator-v1",
         reasonCodes: ["SUPPORTED_RULE"],
         reasonSummary: "Rule accepted with final confidence 0.9125.",
         validatedAt: "2026-06-08T00:01:00.000Z",

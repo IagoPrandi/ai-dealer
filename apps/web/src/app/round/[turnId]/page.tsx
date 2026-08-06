@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 
-import { IdealerApp } from "../../../features/idealer/IdealerApp";
+import { TycheApp } from "../../../features/tyche/TycheApp";
 import { SolanaProviders } from "../../../solana/SolanaProviders";
 
 export default async function Round({
@@ -17,7 +17,7 @@ export default async function Round({
 
   return (
     <SolanaProviders>
-      <IdealerApp initialScreen="result" initialResultTurnId={parsedTurnId} />
+      <TycheApp initialScreen="result" initialResultTurnId={parsedTurnId} />
     </SolanaProviders>
   );
 }

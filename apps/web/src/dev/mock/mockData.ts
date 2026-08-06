@@ -12,7 +12,7 @@ export const MOCK_WALLET_ADDRESS = "GZRY3NG9xUxkzF9Z9z4N5Q7A9k7X8vB2c5E9F3Q7tHe"
 // Turn ativo que o snapshot on-chain "falso" descreve.
 export const MOCK_ACTIVE_TURN_ID = 7;
 
-// Valores de GlobalConfig (ver decodeGlobalConfigAccount em idealerProgram.ts).
+// Valores de GlobalConfig (ver decodeGlobalConfigAccount em tycheProgram.ts).
 export const MOCK_GLOBAL_CONFIG = {
   activeTurnId: MOCK_ACTIVE_TURN_ID,
   guessCutoffBps: 7500,

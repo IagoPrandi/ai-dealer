@@ -15,7 +15,7 @@ import {
   type CompilerConfidenceBreakdown,
   type CompilerConfidenceThresholds,
   type CompilerConfidenceWeights,
-} from "@idealer/agent-core";
+} from "@tyche/agent-core";
 import {
   isRankingRule,
   MAX_AST_DEPTH,
@@ -25,14 +25,14 @@ import {
   type PredicateNode,
   type RuleAst,
   type ScalarExpr,
-} from "@idealer/rule-schema";
-import { evaluatePredicate, scoreGuess } from "@idealer/rule-runtime";
+} from "@tyche/rule-schema";
+import { evaluatePredicate, scoreGuess } from "@tyche/rule-runtime";
 import {
   generateAndRunTests,
   RULE_TEST_HARNESS_VERSION,
   type RuleDifficultyClass,
   type RuleTestCaseResult,
-} from "@idealer/rule-test-harness";
+} from "@tyche/rule-test-harness";
 import { RULE_COMPILER_SKILL_VERSION } from "./skill.js";
 
 export type {
@@ -42,26 +42,26 @@ export type {
   CompilerConfidenceBreakdown,
   CompilerConfidenceThresholds,
   CompilerConfidenceWeights,
-} from "@idealer/agent-core";
+} from "@tyche/agent-core";
 
 export {
   createDefaultProviderRoutingPolicy,
   createLocalOnlyProviderRoutingPolicy,
-} from "@idealer/agent-core";
+} from "@tyche/agent-core";
 
 export {
   getRuleAstJsonSchema,
   isRankingRule,
   ruleAstSchema,
   type RuleAst,
-} from "@idealer/rule-schema";
+} from "@tyche/rule-schema";
 export {
   evaluatePredicate,
   resolveRankingWinners,
   scoreGuess,
   type RankingEntry,
-} from "@idealer/rule-runtime";
-export { type RuleDifficultyClass } from "@idealer/rule-test-harness";
+} from "@tyche/rule-runtime";
+export { type RuleDifficultyClass } from "@tyche/rule-test-harness";
 export {
   buildRuleCompilerSkillPrompt,
   RULE_COMPILER_SKILL,
@@ -200,7 +200,7 @@ export interface RuleValidationPromptContract {
   output: "RuleAst | INVALID";
   prohibitedReferences: readonly string[];
   requiredChecks: readonly string[];
-  version: "idealer_rule_validation_prompt_v1";
+  version: "tyche_rule_validation_prompt_v1";
 }
 
 const NUMBER_WORDS = new Map<string, number>([
@@ -307,7 +307,7 @@ const PROMPT_CONTRACT: RuleValidationPromptContract = {
     "execute tests through the deterministic runtime",
     "compute confidence breakdown",
   ],
-  version: "idealer_rule_validation_prompt_v1",
+  version: "tyche_rule_validation_prompt_v1",
 };
 
 export function getRuleValidationPromptContract(): RuleValidationPromptContract {

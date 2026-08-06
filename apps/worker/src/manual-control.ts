@@ -33,7 +33,7 @@
  * opens the next turn.
  *
  * This is intentionally NOT wired into production: it is gated behind
- * `IDEALER_TURN_MANUAL_CONTROL_ENABLED` and must stay off outside testing.
+ * `TYCHE_TURN_MANUAL_CONTROL_ENABLED` and must stay off outside testing.
  */
 import { AccountRole, createSolanaRpc } from "@solana/kit";
 import {
@@ -146,7 +146,7 @@ function resolveOpenDurationSeconds(value: string | undefined) {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) {
     throw new Error(
-      "IDEALER_TURN_MANUAL_OPEN_DURATION_SECONDS must be a positive integer number of seconds.",
+      "TYCHE_TURN_MANUAL_OPEN_DURATION_SECONDS must be a positive integer number of seconds.",
     );
   }
 
@@ -163,12 +163,12 @@ export async function createManualControlConfig(
   return {
     apiBaseUrl: automation.apiBaseUrl,
     authorityKeypairBytes: automation.authorityKeypairBytes,
-    enabled: envFlag(env.IDEALER_TURN_MANUAL_CONTROL_ENABLED),
+    enabled: envFlag(env.TYCHE_TURN_MANUAL_CONTROL_ENABLED),
     migrateNextTurnId: resolveMigrateNextTurnId(
-      env.IDEALER_TURN_MANUAL_MIGRATE_NEXT_TURN_ID,
+      env.TYCHE_TURN_MANUAL_MIGRATE_NEXT_TURN_ID,
     ),
     openDurationSeconds: resolveOpenDurationSeconds(
-      env.IDEALER_TURN_MANUAL_OPEN_DURATION_SECONDS,
+      env.TYCHE_TURN_MANUAL_OPEN_DURATION_SECONDS,
     ),
     programId: automation.programId,
     rpcUrl: automation.rpcUrl,
@@ -183,7 +183,7 @@ function resolveMigrateNextTurnId(value: string | undefined) {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 1) {
     throw new Error(
-      "IDEALER_TURN_MANUAL_MIGRATE_NEXT_TURN_ID must be a positive integer turn id.",
+      "TYCHE_TURN_MANUAL_MIGRATE_NEXT_TURN_ID must be a positive integer turn id.",
     );
   }
 
@@ -197,13 +197,13 @@ function assertEnabled(
 } {
   if (!config.enabled) {
     throw new Error(
-      "Manual turn control is disabled. Set IDEALER_TURN_MANUAL_CONTROL_ENABLED=true to use it (testing only).",
+      "Manual turn control is disabled. Set TYCHE_TURN_MANUAL_CONTROL_ENABLED=true to use it (testing only).",
     );
   }
 
   if (!config.authorityKeypairBytes) {
     throw new Error(
-      "Manual turn control is enabled but IDEALER_TURN_AUTHORITY_KEYPAIR or IDEALER_TURN_AUTHORITY_KEYPAIR_PATH is not set.",
+      "Manual turn control is enabled but TYCHE_TURN_AUTHORITY_KEYPAIR or TYCHE_TURN_AUTHORITY_KEYPAIR_PATH is not set.",
     );
   }
 }
@@ -526,7 +526,7 @@ export async function forceCloseTurnManually(
  *
  * The new `next_turn_id` defaults to one past the current/active turn (read via
  * the dual-layout decoder) so it skips any pre-existing turn PDAs; override with
- * `IDEALER_TURN_MANUAL_MIGRATE_NEXT_TURN_ID`.
+ * `TYCHE_TURN_MANUAL_MIGRATE_NEXT_TURN_ID`.
  */
 export async function migrateGlobalConfigManually(
   config: ManualControlConfig,

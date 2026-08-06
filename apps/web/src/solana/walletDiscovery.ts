@@ -12,7 +12,7 @@ function normalizeWalletName(name: string) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
-export function isSupportedIdealerWallet(wallet: WalletDiscoveryCandidate) {
+export function isSupportedTycheWallet(wallet: WalletDiscoveryCandidate) {
   const walletName = normalizeWalletName(wallet.name);
   if (BLOCKED_WALLET_NAME_PARTS.some((part) => walletName.includes(part))) {
     return false;
