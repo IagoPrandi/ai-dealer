@@ -304,7 +304,8 @@ export function RewardsScreen() {
   );
   const [tokenAmount, setTokenAmount] = useState("");
   const [tokenBusy, setTokenBusy] = useState(false);
-  const [tokenMessage, setTokenMessage] = useState<string | null>(null);
+  const [claimMessage, setClaimMessage] = useState<string | null>(null);
+  const [epochMessage, setEpochMessage] = useState<string | null>(null);
   const [onChainBalance, setOnChainBalance] = useState<{
     atoms: string | null;
     error: boolean;
@@ -470,7 +471,7 @@ export function RewardsScreen() {
       return;
     }
     setTokenBusy(true);
-    setTokenMessage(null);
+    setEpochMessage(null);
     try {
       const amountAtoms = parseTokenAmountToAtoms(tokenAmount);
       const availableAtoms = BigInt(
@@ -541,7 +542,7 @@ export function RewardsScreen() {
         error: false,
         loading: true,
       });
-      setTokenMessage(
+      setEpochMessage(
         `${action === "lock" ? "Lock" : "Unlock"} confirmed: ${truncateAddress(signature)}. Syncing live balances…`,
       );
       setTokenAction(null);
@@ -571,19 +572,19 @@ export function RewardsScreen() {
           error: false,
           loading: false,
         });
-        setTokenMessage(
+        setEpochMessage(
           `${action === "lock" ? "Lock" : "Unlock"} confirmed: ${truncateAddress(signature)}.`,
         );
       } catch (syncCause) {
         console.warn("Confirmed JDR state is still syncing.", syncCause);
         setOnChainBalance((current) => ({ ...current, loading: false }));
         setOnChainPosition((current) => ({ ...current, loading: false }));
-        setTokenMessage(
+        setEpochMessage(
           `${action === "lock" ? "Lock" : "Unlock"} confirmed: ${truncateAddress(signature)}. Live balances will refresh when this page regains focus.`,
         );
       }
     } catch (cause) {
-      setTokenMessage(describeTxError(cause));
+      setEpochMessage(describeTxError(cause));
     } finally {
       setTokenBusy(false);
     }
@@ -600,7 +601,7 @@ export function RewardsScreen() {
       return;
     }
     setTokenBusy(true);
-    setTokenMessage(null);
+    setClaimMessage(null);
     try {
       const owner = address(walletAddress);
       const batch = manualRewards.pending.slice(0, 4);
@@ -627,12 +628,12 @@ export function RewardsScreen() {
         )),
       );
       const signature = await sendInstructions(client, wallet, instructions);
-      setTokenMessage(
+      setClaimMessage(
         `${batch.length} JDR reward${batch.length === 1 ? "" : "s"} claimed: ${truncateAddress(signature)}.`,
       );
       setBalanceReload((value) => value + 1);
     } catch (cause) {
-      setTokenMessage(describeTxError(cause));
+      setClaimMessage(describeTxError(cause));
     } finally {
       setTokenBusy(false);
     }
@@ -648,7 +649,7 @@ export function RewardsScreen() {
       return;
     }
     setTokenBusy(true);
-    setTokenMessage(null);
+    setEpochMessage(null);
     try {
       const instruction = await createTokenomicsClaimInstruction({
         amountLamports: BigInt(claimableTokenomics.amountLamports),
@@ -663,12 +664,12 @@ export function RewardsScreen() {
         treasurySolVault: publicProjection.vaults.treasurySol,
       });
       const signature = await sendInstruction(client, wallet, instruction);
-      setTokenMessage(
+      setEpochMessage(
         `Treasury-fee claim confirmed: ${truncateAddress(signature)}.`,
       );
       tokenomics.reload();
     } catch (cause) {
-      setTokenMessage(describeTxError(cause));
+      setEpochMessage(describeTxError(cause));
     } finally {
       setTokenBusy(false);
     }
@@ -746,11 +747,13 @@ export function RewardsScreen() {
             </div>
             <div className="ide-rewards-balance-strip">
               <div>
-                <span>Locked</span>
+                <span>Claimable</span>
                 <strong className="ide-num">
-                  {onChainPosition.data
-                    ? formatTokenAtoms(onChainPosition.data.lockedAtoms)
-                    : "—"}
+                  {manualRewards.loading
+                    ? "Loading…"
+                    : manualRewards.error
+                      ? "Unavailable"
+                      : `${formatTokenAtoms(manualClaimableAtoms.toString())} ${TOKEN_SYMBOL}`}
                 </strong>
               </div>
               <i aria-hidden="true" />
@@ -762,115 +765,39 @@ export function RewardsScreen() {
               </div>
             </div>
             <div
-              className="ide-rewards-actions"
-              aria-describedby="staking-unavailable-note"
+              className="ide-rewards-actions is-single"
+              aria-describedby="jdr-claim-note"
             >
               <button
                 className="ide-btn"
                 disabled={
-                  !onChainPosition.data ||
-                  BigInt(onChainBalance.atoms ?? "0") === 0n ||
-                  tokenBusy
+                  manualRewards.loading ||
+                  manualRewards.error ||
+                  manualRewards.pending.length === 0 ||
+                  tokenBusy ||
+                  !onChainPosition.data
                 }
-                onClick={() => setTokenAction("lock")}
+                onClick={() => void claimManualJdr()}
                 type="button"
               >
-                <Ico.lock /> Lock
-              </button>
-              <button
-                className="ide-btn ide-btn-ghost"
-                disabled={
-                  !onChainPosition.data ||
-                  BigInt(onChainPosition.data?.lockedAtoms ?? "0") === 0n ||
-                  tokenBusy
-                }
-                onClick={() => setTokenAction("unlock")}
-                type="button"
-              >
-                <Ico.unlock /> Unlock
+                <Ico.withdraw />
+                {tokenBusy ? "Waiting for wallet…" : "Claim JDR"}
               </button>
             </div>
-            {tokenAction ? (
-              <form
-                className="ide-rewards-token-form"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void submitTokenAction();
-                }}
-              >
-                <div className="ide-rewards-token-field">
-                  <div className="ide-rewards-token-field-heading">
-                    <label htmlFor="token-lock-amount">
-                      {tokenAction === "lock"
-                        ? "Amount to lock"
-                        : "Amount to unlock"}
-                    </label>
-                    {tokenAction === "lock" ? (
-                      <button
-                        aria-label="Use 100% of available JDR"
-                        className="ide-btn ide-btn-ghost ide-rewards-token-max"
-                        disabled={
-                          tokenBusy ||
-                          BigInt(onChainBalance.atoms ?? "0") === 0n
-                        }
-                        onClick={() =>
-                          setTokenAmount(
-                            formatTokenAtoms(onChainBalance.atoms ?? "0"),
-                          )
-                        }
-                        type="button"
-                      >
-                        100%
-                      </button>
-                    ) : null}
-                  </div>
-                  <div className="ide-rewards-token-input">
-                    <input
-                      className="ide-num"
-                      id="token-lock-amount"
-                      inputMode="decimal"
-                      maxLength={30}
-                      onChange={(event) => setTokenAmount(event.target.value)}
-                      placeholder="0.0"
-                      value={tokenAmount}
-                    />
-                    <span>{TOKEN_SYMBOL}</span>
-                  </div>
-                </div>
-                <div className="ide-rewards-token-form-actions">
-                  <button
-                    className="ide-btn"
-                    disabled={tokenBusy || !tokenAmount}
-                    type="submit"
-                  >
-                    {tokenBusy
-                      ? "Waiting for wallet…"
-                      : `Confirm ${tokenAction}`}
-                  </button>
-                  <button
-                    className="ide-btn ide-btn-ghost"
-                    disabled={tokenBusy}
-                    onClick={() => {
-                      setTokenAction(null);
-                      setTokenAmount("");
-                    }}
-                    type="button"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </form>
-            ) : null}
-            <p id="staking-unavailable-note">
+            <p id="jdr-claim-note">
               {onChainBalance.error
                 ? "The live JDR wallet balance could not be read from devnet."
-                : onChainPosition.error
-                  ? "The JDR lock configuration could not be read from devnet."
-                  : onChainPosition.loading
-                    ? "Checking your on-chain JDR lock position."
-                    : "Claim JDR manually, then lock it to participate in future revenue epochs."}
+                : manualRewards.error
+                  ? "Pending JDR rewards could not be read from devnet."
+                  : manualRewards.loading
+                    ? "Checking your pending proposal and supporter rewards."
+                    : manualRewards.pending.length === 0
+                      ? "No unclaimed proposal or supporter rewards were found."
+                      : manualRewards.pending.length > 4
+                        ? "Up to four rewards are claimed per transaction. Claim again for the remaining rewards."
+                        : "Claim proposal and supporter rewards with an explicit wallet approval."}
             </p>
-            {tokenMessage ? <p role="status">{tokenMessage}</p> : null}
+            {claimMessage ? <p role="status">{claimMessage}</p> : null}
           </div>
         </section>
 
@@ -955,69 +882,133 @@ export function RewardsScreen() {
               >
                 <Ico.withdraw /> Claim sealed SOL
               </button>
-            </section>
 
-            <section className="ide-card ide-rewards-overview-card">
-              <div className="ide-rewards-claim-summary">
-                <div>
-                  <span>Available JDR rewards</span>
-                  <strong className="ide-num">
-                    {manualRewards.loading
-                      ? "Loading…"
-                      : manualRewards.error
-                        ? "Unavailable"
-                        : `${formatTokenAtoms(manualClaimableAtoms.toString())} ${TOKEN_SYMBOL}`}
-                  </strong>
+              <div className="ide-rewards-lock-panel">
+                <div className="ide-rewards-claim-summary">
+                  <div>
+                    <span>Locked {TOKEN_SYMBOL}</span>
+                    <strong className="ide-num">
+                      {onChainPosition.data
+                        ? formatTokenAtoms(onChainPosition.data.lockedAtoms)
+                        : "—"}
+                    </strong>
+                  </div>
                 </div>
-                <button
-                  className="ide-btn"
-                  disabled={
-                    manualRewards.loading ||
-                    manualRewards.error ||
-                    manualRewards.pending.length === 0 ||
-                    tokenBusy ||
-                    !onChainPosition.data
-                  }
-                  onClick={() => void claimManualJdr()}
-                  type="button"
+                <div
+                  className="ide-rewards-actions"
+                  aria-describedby="staking-lock-note"
                 >
-                  <Ico.withdraw />
-                  {tokenBusy ? "Waiting for wallet…" : "Claim JDR"}
-                </button>
-              </div>
-              {manualRewards.error ? (
-                <p className="ide-rewards-inline-state">
-                  Pending JDR rewards could not be read from devnet.
-                </p>
-              ) : !manualRewards.loading && manualRewards.pending.length === 0 ? (
-                <p className="ide-rewards-inline-state">
-                  No unclaimed proposal or supporter rewards were found.
-                </p>
-              ) : manualRewards.pending.length > 4 ? (
-                <p className="ide-rewards-inline-state">
-                  Up to four rewards are claimed per transaction. Claim again
-                  for the remaining rewards.
-                </p>
-              ) : (
-                <p className="ide-rewards-inline-state">
-                  Claim proposal and supporter rewards with an explicit wallet
-                  approval.
-                </p>
-              )}
-              {!loading && !error ? (
-                <p className="ide-rewards-claimed-total ide-num">
-                  {fmtSol(summary.availableSol)} SOL available ·{" "}
-                  {fmtSol(summary.claimedSol)} SOL claimed from game rewards
-                </p>
-              ) : null}
-              {error ? (
-                <div className="ide-rewards-retry">
-                  <span>The game claim ledger could not be loaded.</span>
-                  <button onClick={() => reload()} type="button">
-                    Try again
+                  <button
+                    className="ide-btn"
+                    disabled={
+                      !onChainPosition.data ||
+                      BigInt(onChainBalance.atoms ?? "0") === 0n ||
+                      tokenBusy
+                    }
+                    onClick={() => setTokenAction("lock")}
+                    type="button"
+                  >
+                    <Ico.lock /> Lock
+                  </button>
+                  <button
+                    className="ide-btn ide-btn-ghost"
+                    disabled={
+                      !onChainPosition.data ||
+                      BigInt(onChainPosition.data?.lockedAtoms ?? "0") === 0n ||
+                      tokenBusy
+                    }
+                    onClick={() => setTokenAction("unlock")}
+                    type="button"
+                  >
+                    <Ico.unlock /> Unlock
                   </button>
                 </div>
-              ) : null}
+                {tokenAction ? (
+                  <form
+                    className="ide-rewards-token-form"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void submitTokenAction();
+                    }}
+                  >
+                    <div className="ide-rewards-token-field">
+                      <div className="ide-rewards-token-field-heading">
+                        <label htmlFor="token-lock-amount">
+                          {tokenAction === "lock"
+                            ? "Amount to lock"
+                            : "Amount to unlock"}
+                        </label>
+                        {tokenAction === "lock" ? (
+                          <button
+                            aria-label="Use 100% of available JDR"
+                            className="ide-btn ide-btn-ghost ide-rewards-token-max"
+                            disabled={
+                              tokenBusy ||
+                              BigInt(onChainBalance.atoms ?? "0") === 0n
+                            }
+                            onClick={() =>
+                              setTokenAmount(
+                                formatTokenAtoms(onChainBalance.atoms ?? "0"),
+                              )
+                            }
+                            type="button"
+                          >
+                            100%
+                          </button>
+                        ) : null}
+                      </div>
+                      <div className="ide-rewards-token-input">
+                        <input
+                          className="ide-num"
+                          id="token-lock-amount"
+                          inputMode="decimal"
+                          maxLength={30}
+                          onChange={(event) =>
+                            setTokenAmount(event.target.value)
+                          }
+                          placeholder="0.0"
+                          value={tokenAmount}
+                        />
+                        <span>{TOKEN_SYMBOL}</span>
+                      </div>
+                    </div>
+                    <div className="ide-rewards-token-form-actions">
+                      <button
+                        className="ide-btn"
+                        disabled={tokenBusy || !tokenAmount}
+                        type="submit"
+                      >
+                        {tokenBusy
+                          ? "Waiting for wallet…"
+                          : `Confirm ${tokenAction}`}
+                      </button>
+                      <button
+                        className="ide-btn ide-btn-ghost"
+                        disabled={tokenBusy}
+                        onClick={() => {
+                          setTokenAction(null);
+                          setTokenAmount("");
+                        }}
+                        type="button"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                ) : null}
+                <p className="ide-rewards-lock-note" id="staking-lock-note">
+                  {onChainPosition.error
+                    ? "The JDR lock configuration could not be read from devnet."
+                    : onChainPosition.loading
+                      ? "Checking your on-chain JDR lock position."
+                      : "Locked JDR sets your weight in future revenue epochs."}
+                </p>
+                {epochMessage ? (
+                  <p className="ide-rewards-lock-note" role="status">
+                    {epochMessage}
+                  </p>
+                ) : null}
+              </div>
             </section>
 
             <div className="ide-rewards-disclosure">

@@ -439,8 +439,7 @@
 .ide-rewards-icon-button:focus-visible,
 .ide-rewards-text-button:focus-visible,
 .ide-rewards-tabs button:focus-visible,
-.ide-rewards-token-form button:focus-visible,
-.ide-rewards-retry button:focus-visible {
+.ide-rewards-token-form button:focus-visible {
   outline: 2px solid var(--green);
   outline-offset: 2px;
 }
@@ -524,6 +523,7 @@
   white-space: nowrap;
 }
 .ide-rewards-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+.ide-rewards-actions.is-single { grid-template-columns: minmax(0, 1fr); }
 .ide-rewards-actions .ide-btn { min-height: 48px; padding: 12px; font-size: 15px; }
 .ide-rewards-actions .ide-btn:disabled { opacity: .42; cursor: not-allowed; box-shadow: none; }
 .ide-rewards-token-form {
@@ -651,25 +651,23 @@
   line-height: 1.45;
 }
 .ide-rewards-epoch-state svg { flex-shrink: 0; margin-top: 2px; }
+.ide-rewards-lock-panel {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.ide-rewards-lock-note {
+  margin: 10px 2px 0;
+  color: var(--dim);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
 .ide-rewards-claim-summary { display: flex; align-items: center; gap: 12px; }
 .ide-rewards-claim-summary > div { flex: 1; min-width: 0; }
 .ide-rewards-claim-summary span { display: block; color: var(--dim); font-size: 12px; }
 .ide-rewards-claim-summary strong { display: block; margin-top: 4px; font-size: 21px; font-weight: 800; }
 .ide-rewards-claim-summary .ide-btn { min-height: 44px; padding: 11px 13px; font-size: 14px; }
 .ide-rewards-claim-summary .ide-btn:disabled { opacity: .42; cursor: not-allowed; box-shadow: none; }
-.ide-rewards-claimed-total { margin: 12px 0 0; color: var(--muted); font-size: 12px; }
-.ide-rewards-retry {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
-  color: var(--red);
-  font-size: 12.5px;
-}
-.ide-rewards-retry button,
 .ide-rewards-text-button {
   min-height: 44px;
   padding: 8px;

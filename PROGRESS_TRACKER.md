@@ -4808,3 +4808,24 @@ Passed:
 - Created and executed separate governed campaign migration proposal `10` at `4saa7Baohb9wPXvC71K56DQucVfUxYPo7aaDqos1pgjF`. Creation signature: `3Ff9EXKtdAvXQR1Yi51t3Ci8KjJsDo2TSD5BxvhGrUPMTiNpDUj9YL3VgwTgCp1xRF2Bi9rvYFUWpDtLPZGL9Xv2`; Wallet A approval: `4FqPeg82vpJRJo8fvafU4GqBj3aHyo3sjZWD8CRo5FnNz5Hv7PVfao19pWTVoTxAygVD6o19Yz6y4JNWiUxQrKWw`; Wallet B approval: `4PHa7d9hQvFio3wyhhhQF93qV6MAnLAZtZVvD8dhRXR86Ppx5phhsmuiioVNkzi9dfA8gPVbLZKKSJRMPear2SZh`; execution: `2cPHmcXqYP9Kz8XdCW5VCD3djrEb2NHL8f72bw12ehCm1gPyzgFb8sGgS7758mgbdwzTvkCtesVF357JkHCtYwA5`, finalized at slot `480923188` with no error.
 - Final devnet state is effective: campaign `426KgUGKdFfAAVkwg1oSep8Ki5AtFpmwCbA3ccBkyYi7` stores v2 economic hash `a1704f86ab599164dafad02ea09d84829ed5976100f826533a5e9caa64de7994` and policy hash `92f6153e1c48440fa5f7bf5e8fa45523a3d3956e6fd762b41ca2097c4522dbfd`; original allocation is `200000000000000000` atoms, cumulative distribution at migration was `5395925000`, and both campaign remaining and vault balance were `199999994604075000`. The worker's live canonical account decoder reports its settlement gate open under v2.
 - Final inconsistency review corrected the durable verifier so later legitimate rewards remain valid only when cumulative distribution, remaining amount, original allocation, and vault balance still reconcile exactly; immediate migration execution still compares exact pre/post balances and proves that neither upgrade nor migration moved JDR. The activated values are proposal `0.6 JDR`, supporter `0.09 JDR`, inviter `0.2 JDR`, invitee `0.3 JDR` (150%), active-rule rate `22.5%`, and inviter first-round bonus `22.5%`. Deployment evidence was recorded in `deployments/solana-devnet.json`. No mainnet action occurred and no milestone checkbox was marked because milestone completion still requires explicit user confirmation.
+
+### 2026-08-03 (Invite reward maximum clarified)
+
+- Opened `PRD.md`, `PRD-TOKENOMICS-v2.8.md`, `AGENTS.md`, and the Progress Tracker; inspected `.claude/skills`; and applied the frontend, Idealer design-system, UI-coherence, test-and-verify, and Playwright guidance.
+- Corrected the Invite card to display the maximum referral payout of `0.42275 JDR`: the `0.2 JDR` inviter reward plus a `0.22275 JDR` first-round bonus. The bonus is `22.5%` of the invitee's documented first-round campaign reward vector: `0.3 JDR` referral/first-play reward, `0.6 JDR` rule-proposal reward, and `0.09 JDR` supporter-vote reward.
+- Replaced the inline bonus sentence with an accessible informational note that exposes the calculation and retains all amounts as canonical constants rather than duplicated literals. Added regression coverage for the bonus and total display labels.
+- Validation passed: `@idealer/web` tests `156/156`, TypeScript typecheck, ESLint with zero warnings, and the webpack production build. A real 390 px browser check showed the full Invite screen with no clipped reward note; screenshot: `output/playwright/invite-reward-390.png`.
+- No transaction was signed or broadcast, no JDR/SOL moved, and no milestone checkbox was changed. Final inconsistency review confirms the displayed total includes the first-play referral reward rather than treating it as a separate, omitted bonus.
+
+### 2026-08-03 (Invite reward details relocated)
+
+- Reopened `PRD.md` and `AGENTS.md`, inspected `.claude/skills`, and applied the Idealer UI-coherence, design-system, and test-and-verify guidance.
+- Moved the referral-reward calculation from the rewards card into the informational note at the end of the Invite screen. The reward-detail block now uses the same `--dim` text token as the preceding attribution and campaign-reserve notice.
+- Prettier and `git diff --check` passed. The full web verification ladder is temporarily blocked by app-local dependency links that were rewritten to invalid Linux targets during an isolated browser-container install attempt; the attempted repair was not forced when the environment blocked removal of the generated `apps/web/node_modules` directory. No source error was found in the reviewed diff.
+- No transaction was signed or broadcast, no JDR/SOL moved, and no milestone checkbox was changed. Final consistency review confirms the only UI change is the requested content relocation and color alignment.
+
+### 2026-08-03 (Invite rewards card spacing)
+
+- Reopened `PRD.md` and `AGENTS.md`, inspected `.claude/skills`, and applied the Idealer UI-coherence guidance.
+- Removed the residual lower space from the Referral rewards card after relocating its explanatory note: the reward grid no longer has a bottom margin, and the card uses a compact 12 px bottom padding while retaining its 18 px top and side padding.
+- No transaction was signed or broadcast, no JDR/SOL moved, and no milestone checkbox was changed. Final consistency review confirms the change is limited to the empty vertical space beneath the reward tiles.

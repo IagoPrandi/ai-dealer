@@ -13,9 +13,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { address } from "@solana/kit";
 
 import {
+  CAMPAIGN_REWARD_BPS_DENOMINATOR,
+  PROPOSAL_REWARD_ATOMS,
   REFERRAL_INVITEE_REWARD_ATOMS,
   REFERRAL_INVITER_FIRST_ROUND_BONUS_RATE_BPS,
   REFERRAL_INVITER_REWARD_ATOMS,
+  SUPPORTER_REWARD_ATOMS,
 } from "@idealer/constants";
 
 import {
@@ -36,7 +39,16 @@ const PENDING_INVITE_STORAGE_KEY = "idealer:pending-invite";
 
 export const INVITER_REWARD_LABEL = `${formatTokenAtoms(REFERRAL_INVITER_REWARD_ATOMS)} ${TOKEN_SYMBOL}`;
 export const INVITEE_REWARD_LABEL = `${formatTokenAtoms(REFERRAL_INVITEE_REWARD_ATOMS)} ${TOKEN_SYMBOL}`;
+export const PROPOSAL_REWARD_LABEL = `${formatTokenAtoms(PROPOSAL_REWARD_ATOMS)} ${TOKEN_SYMBOL}`;
+export const SUPPORTER_REWARD_LABEL = `${formatTokenAtoms(SUPPORTER_REWARD_ATOMS)} ${TOKEN_SYMBOL}`;
 export const FIRST_ROUND_BONUS_LABEL = `${Number(REFERRAL_INVITER_FIRST_ROUND_BONUS_RATE_BPS) / 100}%`;
+export const INVITEE_FIRST_ROUND_MAXIMUM_REWARD_ATOMS =
+  REFERRAL_INVITEE_REWARD_ATOMS + PROPOSAL_REWARD_ATOMS + SUPPORTER_REWARD_ATOMS;
+export const INVITER_FIRST_ROUND_MAXIMUM_BONUS_ATOMS =
+  (INVITEE_FIRST_ROUND_MAXIMUM_REWARD_ATOMS * REFERRAL_INVITER_FIRST_ROUND_BONUS_RATE_BPS) /
+  CAMPAIGN_REWARD_BPS_DENOMINATOR;
+export const INVITER_REWARD_WITH_MAXIMUM_BONUS_LABEL = `${formatTokenAtoms(REFERRAL_INVITER_REWARD_ATOMS + INVITER_FIRST_ROUND_MAXIMUM_BONUS_ATOMS)} ${TOKEN_SYMBOL}`;
+export const INVITER_FIRST_ROUND_MAXIMUM_BONUS_LABEL = `${formatTokenAtoms(INVITER_FIRST_ROUND_MAXIMUM_BONUS_ATOMS)} ${TOKEN_SYMBOL}`;
 
 export type InviteAction =
   | { kind: "attributed" }
@@ -284,43 +296,26 @@ export function InviteScreen() {
       >
         <ScreenHead onBack={() => go("profile")} title="Invite friends" />
 
-        <div className="ide-card" style={{ padding: 18, marginBottom: 14 }}>
+        <div className="ide-card" style={{ padding: "18px 18px 12px", marginBottom: 14 }}>
           <SectionLabel>Referral rewards</SectionLabel>
           <div
             style={{
               display: "grid",
               gridTemplateColumns: "1fr 1fr",
               gap: 9,
-              margin: "10px 0 12px",
+              margin: "10px 0 0",
             }}
           >
             <RewardTile
-              hint="paid to you"
+              hint="maximum referral payout"
               label="You earn"
-              value={INVITER_REWARD_LABEL}
+              value={INVITER_REWARD_WITH_MAXIMUM_BONUS_LABEL}
             />
             <RewardTile
               hint="paid to them"
               label="They earn"
               value={INVITEE_REWARD_LABEL}
             />
-          </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              color: "var(--muted)",
-              fontSize: 13.5,
-              lineHeight: 1.5,
-            }}
-          >
-            <Ico.spark style={{ color: "var(--purple-soft)", flexShrink: 0 }} />
-            <span>
-              Plus a one-time bonus of {FIRST_ROUND_BONUS_LABEL} of every{" "}
-              {TOKEN_SYMBOL} reward they actually receive in their first playing
-              round.
-            </span>
           </div>
         </div>
 
@@ -538,14 +533,21 @@ export function InviteScreen() {
           ) : null}
         </div>
 
-        <div className="ide-notice" style={{ display: "flex", gap: 9, alignItems: "flex-start" }}>
+        <div className="ide-notice" role="note" style={{ display: "flex", gap: 9, alignItems: "flex-start" }}>
           <Ico.info style={{ color: "var(--dim)", flexShrink: 0, marginTop: 3 }} />
-          <p style={{ margin: 0, color: "var(--dim)", fontSize: 12.5, lineHeight: 1.6 }}>
-            One attribution per wallet, set once and never editable. Rewards are
-            paid from the promotional campaign reserve, are never a guaranteed
-            return, and can be partial when the reserve reaches its final atoms.
-            Visiting a link pays nothing on its own.
-          </p>
+          <div>
+            <p style={{ margin: 0, color: "var(--dim)", fontSize: 12.5, lineHeight: 1.6 }}>
+              One attribution per wallet, set once and never editable. Rewards are
+              paid from the promotional campaign reserve, are never a guaranteed
+              return, and can be partial when the reserve reaches its final atoms.
+              Visiting a link pays nothing on its own.
+            </p>
+            <p style={{ margin: "10px 0 0", color: "var(--dim)", fontSize: 12.5, lineHeight: 1.6 }}>
+              <strong style={{ color: "var(--text)" }}>Reward details.</strong>{" "}
+              The maximum includes your {INVITER_REWARD_LABEL} referral reward
+              and a {INVITER_FIRST_ROUND_MAXIMUM_BONUS_LABEL} bonus: {FIRST_ROUND_BONUS_LABEL} of their {INVITEE_REWARD_LABEL} invite reward, {PROPOSAL_REWARD_LABEL} rule reward, and {SUPPORTER_REWARD_LABEL} vote reward in their first round.
+            </p>
+          </div>
         </div>
       </div>
     </div>

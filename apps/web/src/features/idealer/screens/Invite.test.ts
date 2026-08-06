@@ -5,8 +5,10 @@ import type { ReferralAttribution } from "../../../solana/referralProgram";
 import {
   describeAttributionProgress,
   FIRST_ROUND_BONUS_LABEL,
+  INVITER_FIRST_ROUND_MAXIMUM_BONUS_LABEL,
   INVITEE_REWARD_LABEL,
   INVITER_REWARD_LABEL,
+  INVITER_REWARD_WITH_MAXIMUM_BONUS_LABEL,
   readPendingInvite,
   resolveInviteAction,
   storePendingInvite,
@@ -43,6 +45,8 @@ test("the displayed reward terms come from the approved constants", () => {
   assert.equal(INVITER_REWARD_LABEL, "0.2 JDR");
   assert.equal(INVITEE_REWARD_LABEL, "0.3 JDR");
   assert.equal(FIRST_ROUND_BONUS_LABEL, "22.5%");
+  assert.equal(INVITER_FIRST_ROUND_MAXIMUM_BONUS_LABEL, "0.22275 JDR");
+  assert.equal(INVITER_REWARD_WITH_MAXIMUM_BONUS_LABEL, "0.42275 JDR");
 });
 
 test("a wallet-less visitor is asked to connect", () => {
