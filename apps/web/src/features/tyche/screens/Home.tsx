@@ -109,9 +109,6 @@ export function HomeScreen() {
             <span style={{ fontWeight: 800, fontSize: 19, letterSpacing: "-0.02em" }}>Tyche</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <button onClick={() => go("share")} aria-label="Share round" style={{ width: 38, height: 38, borderRadius: 13, background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--purple-soft)", display: "grid", placeItems: "center", cursor: "pointer", flexShrink: 0 }} type="button">
-              <Ico.send style={{ color: "currentColor", width: 18, height: 18 }} />
-            </button>
             <WalletBtn />
           </div>
         </div>

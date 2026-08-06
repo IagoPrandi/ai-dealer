@@ -167,11 +167,8 @@ export function ProfileScreen() {
       <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", overflowX: "hidden", padding: "var(--ide-shell-content-top) 20px 96px" }}>
 
         {/* identity — no box */}
-        <div style={{ display: "flex", alignItems: "center", gap: 13, marginBottom: 30 }}>
-          <div style={{ width: 46, height: 46, borderRadius: 15, background: "var(--grad)", display: "grid", placeItems: "center", flexShrink: 0 }}>
-            <span style={{ fontWeight: 800, fontSize: 18, color: "#0B0910" }}>{walletAddress?.slice(0, 1).toUpperCase() ?? "I"}</span>
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ marginBottom: 30 }}>
+          <div style={{ minWidth: 0 }}>
             <div style={{ fontWeight: 800, fontSize: 18 }}>{walletAddress ? truncateAddress(walletAddress) : "Wallet"}</div>
             <div style={{ color: "var(--muted)", fontSize: 13.5 }} className="ide-num">Solana devnet</div>
           </div>

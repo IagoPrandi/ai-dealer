@@ -2,6 +2,15 @@
 
 This tracker records milestone status, work logs, and required document confirmations for Tyche implementation.
 
+## Work Log
+
+### 2026-08-06 (Account and home header cleanup)
+
+- Opened `PRD.md`, `AGENTS.md`, the local skills directory, and the relevant frontend, Tyche design-system, UI-coherence, and verification guidance.
+- Removed the wallet-derived avatar tile from the Account header and the Share round button from the Home header. The wallet address button remains the sole control in the Home header.
+- Passed `@tyche/web` typecheck, 156 unit tests, ESLint with zero warnings, and the production build. Browser review at 390 px found no page errors and confirmed the cleaned Home header; screenshot: `output/playwright/header-cleanup-390.png`.
+- No milestone checkbox was changed; milestone completion still requires explicit user confirmation.
+
 ## Required Markdown Confirmation
 
 Opened before starting `M0.1`:
@@ -4845,3 +4854,11 @@ Passed:
 - Renamed the product, workspace packages, UI, PWA manifest, service and Docker names, environment-variable namespace, source paths, documentation, and local scripts to Tyche. The existing Solana program addresses, token identity, and finalized protocol commitments remain unchanged because they are on-chain compatibility boundaries, not mutable display branding.
 - Recreated workspace package links after prior generated links were held open by host development services; the obsolete generated links were moved outside the repository instead of stopping those services. No transaction was signed or broadcast, no SOL/JDR moved, and no milestone checkbox was changed.
 - Final consistency review completed: package namespace and source path validation are complete, with all remaining legacy strings restricted to explicitly documented finalized protocol preimages/domains required for proof and referral compatibility. Web, API, worker, tokenomics, and admin checks passed; native Solana typecheck and clippy passed. The full native Solana test run was stopped during its first-time dependency rebuild after the changed test targets had compiled, so it did not produce a test result.
+
+### 2026-08-06 (Local Tyche data-service migration)
+
+- Reopened the required `PRD.md`, `AGENTS.md`, local skills directory, and local-development runbook; followed the project test-and-verify and browser-verification guidance before diagnosing the unavailable-round banner.
+- Traced the banner to PostgreSQL and Redis being offline: Docker Compose referenced the renamed external volumes `tyche-postgres-data` and `tyche-redis-data`, while the preserved local data still existed only in the former volumes. Created the new Tyche volumes and copied the stopped source volumes read-only, leaving both originals intact as recovery copies.
+- Migrated the copied PostgreSQL cluster from database `idealer_dev` to `tyche_dev`, created the active `tyche` login, transferred database ownership, and renamed the PostgreSQL-required bootstrap superuser to the non-login `tyche_bootstrap` identity. The effective local connection remains fully `tyche`; no legacy database or role name remains in the migrated cluster.
+- Runtime verification passed: PostgreSQL and Redis are healthy, the Tyche API reports HTTP `200` with PostgreSQL and Redis `ok`, and `/rounds` returns preserved round `38`. A real mobile Playwright load of `/play` returned HTTP `200`, title `Tyche`, rendered the live round statistics, and contained no `Round data unavailable` banner. The only browser console messages were development HMR WebSocket handshake failures, unrelated to the API/data recovery.
+- No original volume was deleted, no on-chain transaction was signed or broadcast, no SOL/JDR moved, and no milestone checkbox was changed. Final consistency review confirmed the Compose resources, active database, login, API package, page title, and rendered application all use Tyche naming. The already-running worker process predates the rebrand and still reports PostgreSQL unavailable because it retained its old process environment; it was not restarted because settlement automation is enabled and restarting it could resume on-chain work. This does not affect the recovered read-only round path used by the page.
