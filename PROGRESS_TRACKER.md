@@ -4,6 +4,15 @@ This tracker records milestone status, work logs, and required document confirma
 
 ## Work Log
 
+### 2026-08-07 (Containerized phase lifecycle recovery)
+
+- Reopened the required `PRD.md`, `AGENTS.md`, and `PROGRESS_TRACKER.md`; inspected `.claude/skills`; and followed the local automation-upkeep, Tyche test/verification, devnet verification, browser-verification, and `docs/devnet-turn-operations-runbook.md` guidance before changing the runtime.
+- Verified without exposing secret bytes that the protected legacy Docker keypair resolves to the approved operational authority `4bY5krt2VnnSNB1R4c1bhiWdQYkTc1FvFTN1LaV5JxCH`. Preserved the legacy volume, created the required external `tyche-solana-home` volume, and copied only the authority keypair to the documented container path with read-only worker mounting and restrictive permissions.
+- Switched the local API/worker runtime consistently to container mode, rebuilt and restarted both services, and corrected `docker-compose.yml` so the rule-precompilation enable/interval flags are actually passed to the worker. The live worker now runs settlement and precompile automation with the configured API service URL; the devnet settlement pass is limited to one step per tick to reduce pressure on the public RPC.
+- Reproduced the public-devnet `429` worker crash and traced it to web3.js WebSocket transaction confirmation, whose handshake error escaped the awaited settlement pass. Settlement now decodes already-fetched ORAO account bytes locally and confirms submitted transactions by explicit finalized-status HTTP polling, keeping rate-limit failures inside the scheduler's retry boundary. Added regressions for successful polling and finalized transaction errors.
+- Completed the authorized turn `41` lifecycle on devnet. Final readback reports the round `completed`, election `settled`, finalist and active rule `1786066142651324`, draw `fulfilled` with `[35, 41, 100, 14, 65, 11]`, and terminal settlement transition `CLOSED`; GlobalConfig has no active turn and `nextTurnId = 42`. Turn `42` was not opened because that requires separate operator authorization.
+- Verification passed: worker typecheck, ESLint, build, and `137/137` tests; web typecheck and `161/161` tests; `8/8` isolated Playwright clarification/proposal scenarios (including interpretation-first and clarification detection); Compose validation; `git diff --check`; live API/worker health; and a sustained worker run through repeated RPC 429 responses without process termination. Web, API, and worker are listening on ports `3000`, `3002`, and `3003`. No milestone checkbox was changed. Final consistency review distinguishes a completed turn from authorization to open the next one, recoverable RPC throttling from service failure, and container-only secret restoration from copying credentials into the repository.
+
 ### 2026-08-06 (On-chain round-phase gate)
 
 - Opened `PRD.md`, `AGENTS.md`, the local skills directory, the frontend/UI-coherence/test-verification guidance, and the live-devnet safety reference before changing the phase flow.
@@ -12,6 +21,12 @@ This tracker records milestone status, work logs, and required document confirma
 - Added regression coverage for phase-1 approval, post-cutoff shortlist lock, phase-2 finalist-only approval/elimination, and post-window settlement lock; added a worker decoder test for finalist fields. Updated active-turn browser fixtures to the expanded worker contract.
 - Verification passed: `@tyche/web` typecheck, `161/161` tests, ESLint with zero warnings, and production build; `@tyche/worker` typecheck, `135/135` tests, ESLint with zero warnings, and build; 11 Playwright rule-authoring/draw scenarios passed; `git diff --check` passed.
 - The API remains healthy, but the worker remains stopped. Its current local configuration enables settlement automation and rule precompilation, which may submit on-chain transactions; it was intentionally not restarted as part of this code change. No on-chain state, database record, automation configuration, or milestone checkbox was modified. Final consistency review confirms phase-specific UI actions and the transaction guard now share the same on-chain input.
+
+### 2026-08-07 (Authorized worker restart attempt)
+
+- Reopened `PRD.md` and the live-devnet verification guidance, confirmed the owner's authorization to resume the configured settlement and precompilation automations, and attempted to start `pnpm --filter @tyche/worker dev`.
+- The worker reached its listener setup but exited before servicing port `3003`: `TYCHE_TURN_AUTHORITY_KEYPAIR_PATH` points to the missing host file `C:/Users/iagoo/.config/tyche/devnet/tyche-deployer-keypair.json`. The configured external Docker volume `tyche-solana-home`, which should hold the container-mounted authority keypair, is also absent. Port `3003` consequently remains unavailable.
+- No transaction was signed or broadcast, no on-chain state, database record, or automation configuration was changed, and no milestone checkbox was modified. The operational restart remains blocked until the existing authority keypair or its protected Docker volume is restored; no new key was generated and no secret was read or exposed.
 
 ### 2026-08-06 (Round-phase operational review)
 

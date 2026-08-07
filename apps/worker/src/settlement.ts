@@ -592,14 +592,7 @@ async function simulateAndSendWeb3({
     preflightCommitment: commitment,
     skipPreflight: false,
   });
-  const confirmation = await connection.confirmTransaction(signature, commitment);
-  if (confirmation.value.err) {
-    throw new Error(
-      `${label} transaction ${signature} failed after send: ${stringifySimulationError(
-        confirmation.value.err,
-      )}`,
-    );
-  }
+  await waitForFinalizedWeb3Signature({ connection, label, signature });
   await persistFinalizedTransaction({
     cluster: "devnet",
     connection,
@@ -611,6 +604,75 @@ async function simulateAndSendWeb3({
     signature,
   });
   return signature;
+}
+
+interface FinalizedSignatureStatus {
+  confirmationStatus?: null | string;
+  err?: unknown;
+}
+
+/**
+ * Poll transaction status over HTTP. `Connection.confirmTransaction` opens a
+ * WebSocket subscription whose handshake errors are emitted outside the
+ * awaited promise by web3.js; a public-RPC 429 could therefore terminate the
+ * entire worker. HTTP polling keeps every failure in the scheduler's awaited
+ * control flow, where the periodic loop can report it and retry safely.
+ */
+export async function waitForFinalizedSignatureStatus({
+  label,
+  nowMs = () => Date.now(),
+  readStatus,
+  signature,
+  sleep = (milliseconds: number) =>
+    new Promise<void>((resolve) => setTimeout(resolve, milliseconds)),
+  timeoutMs = 60_000,
+}: {
+  label: string;
+  nowMs?: () => number;
+  readStatus: () => Promise<FinalizedSignatureStatus | null>;
+  signature: string;
+  sleep?: (milliseconds: number) => Promise<void>;
+  timeoutMs?: number;
+}) {
+  const deadline = nowMs() + timeoutMs;
+  while (nowMs() < deadline) {
+    const status = await readStatus();
+    if (status?.err) {
+      throw new Error(
+        `${label} transaction ${signature} failed after send: ${stringifySimulationError(
+          status.err,
+        )}`,
+      );
+    }
+    if (status?.confirmationStatus === "finalized") {
+      return;
+    }
+    await sleep(1_000);
+  }
+  throw new Error(
+    `${label} transaction ${signature} was not finalized within ${timeoutMs}ms.`,
+  );
+}
+
+async function waitForFinalizedWeb3Signature({
+  connection,
+  label,
+  signature,
+}: {
+  connection: Connection;
+  label: string;
+  signature: string;
+}) {
+  await waitForFinalizedSignatureStatus({
+    label,
+    readStatus: async () =>
+      (
+        await connection.getSignatureStatuses([signature], {
+          searchTransactionHistory: true,
+        })
+      ).value[0] ?? null,
+    signature,
+  });
 }
 
 async function sendInstructions({
@@ -1000,14 +1062,20 @@ interface OraoRandomnessV2Data {
     | { pending: [OraoRequestFields] };
 }
 
-async function fetchOraoRandomness(
+function decodeOraoRandomness(
   context: SettlementContext,
   randomnessAccount: PublicKey,
+  accountData: Buffer,
 ) {
-  const decoded = (await context.oraoProgram.account.randomnessV2.fetch(
-    randomnessAccount,
-    context.commitment,
-  )) as unknown as OraoRandomnessV2Data;
+  // `fetchCommittedRandomness` already loaded and owner-checked this account.
+  // Decode those exact bytes locally instead of issuing a second Anchor RPC
+  // read. Besides avoiding a redundant request, this keeps public-devnet 429s
+  // inside the awaited `getAccountInfo` call so the scheduler can catch them
+  // and retry on its next pass without terminating the worker process.
+  const decoded = context.oraoProgram.coder.accounts.decode(
+    "randomnessV2",
+    accountData,
+  ) as unknown as OraoRandomnessV2Data;
   const request =
     "pending" in decoded.request
       ? decoded.request.pending[0]
@@ -1055,7 +1123,11 @@ async function fetchCommittedRandomness({
     return null;
   }
   if (account.owner.equals(ORAO_PROGRAM_ID)) {
-    const randomness = await fetchOraoRandomness(context, randomnessAccount);
+    const randomness = decodeOraoRandomness(
+      context,
+      randomnessAccount,
+      account.data,
+    );
     if (!randomness) {
       return { status: "pending" };
     }
@@ -1127,7 +1199,11 @@ async function revealAndSendCallback({
     throw new Error(`Randomness account ${randomnessAccount.toBase58()} is missing.`);
   }
   if (account.owner.equals(ORAO_PROGRAM_ID)) {
-    const randomness = await fetchOraoRandomness(context, randomnessAccount);
+    const randomness = decodeOraoRandomness(
+      context,
+      randomnessAccount,
+      account.data,
+    );
     if (!randomness) {
       throw new Error(
         `ORAO randomness ${randomnessAccount.toBase58()} is still pending.`,

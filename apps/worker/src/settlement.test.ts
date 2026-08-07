@@ -16,6 +16,7 @@ import {
   decodeSettlementTurnState,
   hashOraoFulfillment,
   isOraoProviderConfig,
+  waitForFinalizedSignatureStatus,
 } from "./settlement.js";
 import type { ElectionCandidate } from "./election.js";
 
@@ -80,6 +81,44 @@ test("ORAO provider identity and 64-byte fulfillment hashing are deterministic",
   assert.throws(
     () => hashOraoFulfillment(raw.subarray(0, 32)),
     /exactly 64 bytes/,
+  );
+});
+
+test("settlement confirmation polls finalized status without a websocket", async () => {
+  let reads = 0;
+  const sleeps: number[] = [];
+  await waitForFinalizedSignatureStatus({
+    label: "settle_rule_election",
+    nowMs: () => 0,
+    readStatus: async () => {
+      reads += 1;
+      return reads === 1
+        ? { confirmationStatus: "confirmed", err: null }
+        : { confirmationStatus: "finalized", err: null };
+    },
+    signature: "test-signature",
+    sleep: async (milliseconds) => {
+      sleeps.push(milliseconds);
+    },
+  });
+
+  assert.equal(reads, 2);
+  assert.deepEqual(sleeps, [1_000]);
+});
+
+test("settlement confirmation surfaces finalized transaction errors", async () => {
+  await assert.rejects(
+    waitForFinalizedSignatureStatus({
+      label: "settle_rule_election",
+      nowMs: () => 0,
+      readStatus: async () => ({
+        confirmationStatus: "finalized",
+        err: { InstructionError: [0, "Custom"] },
+      }),
+      signature: "failed-signature",
+      sleep: async () => undefined,
+    }),
+    /failed after send/,
   );
 });
 

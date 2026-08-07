@@ -142,6 +142,10 @@ services:
       TYCHE_SETTLEMENT_AUTOMATION_ENABLED: ${TYCHE_SETTLEMENT_AUTOMATION_ENABLED:-false}
       TYCHE_SETTLEMENT_AUTOMATION_INTERVAL_MS: ${TYCHE_SETTLEMENT_AUTOMATION_INTERVAL_MS:-30000}
       TYCHE_SETTLEMENT_MAX_STEPS_PER_TICK: ${TYCHE_SETTLEMENT_MAX_STEPS_PER_TICK:-10}
+      # Phase-1 proposals must be precompiled before they become eligible for
+      # election. Keep the loop explicitly configurable in container mode.
+      TYCHE_RULE_PRECOMPILE_ENABLED: ${TYCHE_RULE_PRECOMPILE_ENABLED:-false}
+      TYCHE_RULE_PRECOMPILE_INTERVAL_MS: ${TYCHE_RULE_PRECOMPILE_INTERVAL_MS:-15000}
       # M10 campaign action-reward settlement. Keep OFF until the reviewed
       # Tyche artifact containing the Tokenomics Core CPI is deployed.
       TYCHE_TOKEN_REWARD_SETTLEMENT_ENABLED: ${TYCHE_TOKEN_REWARD_SETTLEMENT_ENABLED:-false}
