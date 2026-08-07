@@ -270,6 +270,8 @@ export interface ConversationDraftApi {
   messages?: ConversationMessage[];
   normalizedText: string | null;
   officialInterpretation: string | null;
+  /** The rule preflight job this draft was last waiting on, if any. */
+  preflightJobId?: null | string;
   prompt: string;
   ruleId: number | null;
   status: ConversationDraftStatus;

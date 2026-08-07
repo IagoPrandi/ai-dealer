@@ -6,15 +6,33 @@ import type { ConversationMessage } from "./data/types";
 import type { RulePreflightProgress } from "./data/apiClient";
 import type { RuleGuidanceContext } from "./ruleRefinement";
 
+/** The server-side run this snapshot is following, if any. */
+export interface ConversationRunJob {
+  /** Last event id seen, so a reconnect resumes instead of replaying. */
+  cursor: null | string;
+  jobId: string;
+  phase: "compile" | "interpret";
+  /** Kept so "Run again" never asks the player to retype their rule. */
+  ruleText: string;
+  startedAt: number;
+  turnId: number;
+}
+
 export interface ConversationRunSnapshot {
+  // Connection health is deliberately a separate field rather than a new
+  // `status` member: `status === "pending"` drives the typing spinner and the
+  // guidance suppression in several places, and widening it would break those
+  // silently.
+  connection: "closed" | "live" | "reconnecting";
   draftId: string;
   error: null | string;
   guidanceContext?: RuleGuidanceContext | null;
   interpretation: RuleInterpretationApiResult | null;
+  job: ConversationRunJob | null;
   messages: ConversationMessage[];
   progress: RulePreflightProgress | null;
   rule: RulePreflightResult | null;
-  status: "done" | "error" | "pending";
+  status: "disconnected" | "done" | "error" | "expired" | "pending";
 }
 
 type Listener = (snapshot: ConversationRunSnapshot) => void;
@@ -72,6 +90,21 @@ export function patchConversationRun(
     return;
   }
   upsertConversationRun({ ...current, ...patch });
+}
+
+/** Merges into the current job rather than replacing it, for cursor updates. */
+export function patchConversationRunJob(
+  draftId: null | string,
+  patch: Partial<ConversationRunJob>,
+) {
+  if (!draftId) {
+    return;
+  }
+  const current = runs.get(draftId);
+  if (!current?.job) {
+    return;
+  }
+  upsertConversationRun({ ...current, job: { ...current.job, ...patch } });
 }
 
 export function subscribeConversationRun(

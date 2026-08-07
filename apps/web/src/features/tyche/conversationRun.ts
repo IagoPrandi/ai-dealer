@@ -4,19 +4,27 @@ import type { RulePreflightResult } from "../../solana/tycheProgram";
 import { buildConversationDraftBody, type ConversationDraftBody } from "./conversationDraft";
 import {
   ApiRequestError,
+  consumeRulePreflightJob,
   postConversationDraft,
-  postRuleInterpretation,
-  postRulePreflight,
-  type RuleInterpretationApiResult,
-  type RulePreflightProgress,
+  SseStreamDisconnectedError,
+  SseStreamExpiredError,
+  startRulePreflightJob,
+  type ConsumeRulePreflightJobArgs,
+  type RulePreflightJobOutcome,
 } from "./data/apiClient";
 import type { ConversationMessage } from "./data/types";
 import { describeTxError } from "./data/tx";
 import {
   patchConversationRun,
+  patchConversationRunJob,
   rememberLatestConversationRun,
   upsertConversationRun,
+  type ConversationRunJob,
 } from "./conversationRunStore";
+import {
+  clearPersistedPreflightJob,
+  writePersistedPreflightJob,
+} from "./preflightJobStore";
 
 type DraftResponse = {
   draft: {
@@ -24,25 +32,17 @@ type DraftResponse = {
   };
 };
 
-type PreflightResponse = {
-  preflight: unknown;
-};
-
-type InterpretationResponse = {
-  interpretation: RuleInterpretationApiResult;
-};
-
 export interface ConversationRunDeps {
+  consumePreflightJob: (
+    args: ConsumeRulePreflightJobArgs,
+  ) => Promise<RulePreflightJobOutcome>;
   describeError: (cause: unknown) => string;
   postDraft: (wallet: string, body: ConversationDraftBody) => Promise<DraftResponse>;
-  postPreflight: (
-    text: string,
-    onProgress?: (progress: RulePreflightProgress) => void,
-  ) => Promise<PreflightResponse>;
-  postInterpretation: (
-    text: string,
-    onProgress?: (progress: RulePreflightProgress) => void,
-  ) => Promise<InterpretationResponse>;
+  readStorage: () => null | Storage;
+  startPreflightJob: (args: {
+    phase: "compile" | "interpret";
+    text: string;
+  }) => Promise<{ jobId: string }>;
 }
 
 export interface StartConversationRunArgs {
@@ -57,14 +57,28 @@ export interface StartConversationRunArgs {
   wallet: null | string | undefined;
 }
 
+export interface ResumeConversationRunArgs {
+  cursor: null | string;
+  draftId: string;
+  jobId: string;
+  messages: ConversationMessage[];
+  phase: "compile" | "interpret";
+  ruleText: string;
+  turnId: number;
+  wallet: null | string | undefined;
+}
+
 const defaultDeps: ConversationRunDeps = {
+  consumePreflightJob: consumeRulePreflightJob,
   describeError: describeTxError,
   postDraft: postConversationDraft,
-  postInterpretation: postRuleInterpretation,
-  postPreflight: postRulePreflight,
+  readStorage: () =>
+    typeof window === "undefined" ? null : window.localStorage,
+  startPreflightJob: startRulePreflightJob,
 };
 
 const activeRuns = new Map<string, Promise<void>>();
+const runAborts = new Map<string, AbortController>();
 
 export function isConversationDraftSaveError(error: null | string) {
   return error?.toLowerCase().includes("could not be saved") ?? false;
@@ -77,6 +91,7 @@ export async function saveConversationDraftSnapshot({
   messages,
   normalizedText,
   officialInterpretation,
+  preflightJobId,
   prompt,
   ruleId,
   status,
@@ -89,6 +104,7 @@ export async function saveConversationDraftSnapshot({
   messages: ConversationMessage[];
   normalizedText?: null | string;
   officialInterpretation?: null | string;
+  preflightJobId?: null | string;
   prompt: string;
   ruleId?: null | number;
   status?: "draft" | "submitted";
@@ -108,6 +124,7 @@ export async function saveConversationDraftSnapshot({
     wallet,
     ...(normalizedText !== undefined ? { normalizedText } : {}),
     ...(officialInterpretation !== undefined ? { officialInterpretation } : {}),
+    ...(preflightJobId !== undefined ? { preflightJobId } : {}),
     ...(ruleId !== undefined ? { ruleId } : {}),
     ...(status !== undefined ? { status } : {}),
   });
@@ -128,6 +145,22 @@ export function isConversationRunActive(draftId: string) {
   return activeRuns.has(draftId);
 }
 
+/**
+ * Stops following a run and forgets its durable pointer. The server-side job is
+ * untouched — this is "I am done with this", not "cancel the work".
+ */
+export function abandonConversationRun(
+  draftId: null | string,
+  deps: ConversationRunDeps = defaultDeps,
+) {
+  if (!draftId) {
+    return;
+  }
+  runAborts.get(draftId)?.abort();
+  runAborts.delete(draftId);
+  clearPersistedPreflightJob(deps.readStorage(), draftId);
+}
+
 export function startConversationRun(
   args: StartConversationRunArgs,
   deps: ConversationRunDeps = defaultDeps,
@@ -143,10 +176,12 @@ export function startConversationRun(
     wallet: args.wallet,
   });
   upsertConversationRun({
+    connection: "closed",
     draftId: args.draftId,
     error: null,
     guidanceContext: null,
     interpretation: null,
+    job: null,
     messages: args.initialMessages,
     progress: {
       message: args.phase === "interpret" ? "Reading your rule..." : "Building your rule...",
@@ -158,6 +193,70 @@ export function startConversationRun(
 
   const task = runConversation(args, deps).finally(() => {
     activeRuns.delete(args.draftId);
+    runAborts.delete(args.draftId);
+  });
+  activeRuns.set(args.draftId, task);
+  return task;
+}
+
+/**
+ * Reattaches to a job that outlived the page. Used on mount when a persisted
+ * pointer or a draft record names a job we were waiting on.
+ */
+export function resumeConversationRun(
+  args: ResumeConversationRunArgs,
+  deps: ConversationRunDeps = defaultDeps,
+) {
+  const existing = activeRuns.get(args.draftId);
+  if (existing) {
+    // Same tab, screen just remounted: the store subscription already covers it.
+    return existing;
+  }
+
+  rememberLatestConversationRun({
+    draftId: args.draftId,
+    turnId: args.turnId,
+    wallet: args.wallet,
+  });
+
+  const job: ConversationRunJob = {
+    cursor: args.cursor,
+    jobId: args.jobId,
+    phase: args.phase,
+    ruleText: args.ruleText,
+    startedAt: Date.now(),
+    turnId: args.turnId,
+  };
+  // Must be an upsert: after a reload there is no snapshot for this draftId and
+  // patchConversationRun silently no-ops on an unknown one, which would swallow
+  // every progress and cursor update that follows.
+  upsertConversationRun({
+    connection: "reconnecting",
+    draftId: args.draftId,
+    error: null,
+    guidanceContext: null,
+    interpretation: null,
+    job,
+    messages: args.messages,
+    progress: {
+      message: "Reconnecting to the dealer...",
+      stage: "checking_input",
+    },
+    rule: null,
+    status: "pending",
+  });
+
+  const task = settlePreflightJob({
+    deps,
+    draftId: args.draftId,
+    job,
+    persistedDraftId: args.draftId,
+    transcript: args.messages,
+    turnId: args.turnId,
+    wallet: args.wallet,
+  }).finally(() => {
+    activeRuns.delete(args.draftId);
+    runAborts.delete(args.draftId);
   });
   activeRuns.set(args.draftId, task);
   return task;
@@ -242,18 +341,108 @@ async function runConversation(
       });
     }
 
-    if (args.phase === "interpret") {
-      const body = await deps.postInterpretation(args.ruleText, (progress) => {
-        patchConversationRun(args.draftId, { progress });
-      });
-      const interpretation = body.interpretation;
+    const { jobId } = await deps.startPreflightJob({
+      phase: args.phase,
+      text: args.ruleText,
+    });
+    const job: ConversationRunJob = {
+      cursor: null,
+      jobId,
+      phase: args.phase,
+      ruleText: args.ruleText,
+      startedAt: Date.now(),
+      turnId: args.turnId,
+    };
+    patchConversationRun(args.draftId, { connection: "live", job });
+    writePersistedPreflightJob(deps.readStorage(), {
+      ...job,
+      // The pointer follows the draft record's id, not the client-minted one:
+      // reopening from the conversation list only ever knows the server id.
+      draftId,
+      wallet: args.wallet ?? null,
+    });
+
+    await settlePreflightJob({
+      deps,
+      draftId: args.draftId,
+      job,
+      persistedDraftId: draftId,
+      transcript,
+      turnId: args.turnId,
+      wallet: args.wallet,
+    });
+    return;
+  } catch (cause) {
+    reportConversationRunFailure({
+      cause,
+      deps,
+      draftId: args.draftId,
+      ruleText: args.ruleText,
+      transcript,
+    });
+  }
+}
+
+/**
+ * Follows a job to its result and lands the outcome. Shared by a fresh run and
+ * by a resume, so both produce exactly the same UI states.
+ */
+async function settlePreflightJob(ctx: {
+  deps: ConversationRunDeps;
+  draftId: string;
+  job: ConversationRunJob;
+  /** The draft record id, which may differ from the store key. */
+  persistedDraftId: string;
+  transcript: ConversationMessage[];
+  turnId: number;
+  wallet: null | string | undefined;
+}) {
+  const { deps, draftId, job } = ctx;
+  let transcript = ctx.transcript;
+  let cursor = job.cursor;
+
+  const controller = new AbortController();
+  runAborts.set(draftId, controller);
+
+  const persist = () => {
+    writePersistedPreflightJob(deps.readStorage(), {
+      ...job,
+      cursor,
+      draftId: ctx.persistedDraftId,
+      wallet: ctx.wallet ?? null,
+    });
+  };
+
+  try {
+    const outcome = await deps.consumePreflightJob({
+      cursor,
+      jobId: job.jobId,
+      onCursor: (next) => {
+        cursor = next;
+        patchConversationRunJob(draftId, { cursor: next });
+        persist();
+      },
+      onOpen: () => patchConversationRun(draftId, { connection: "live" }),
+      onProgress: (progress) =>
+        patchConversationRun(draftId, { connection: "live", progress }),
+      onReconnecting: () =>
+        patchConversationRun(draftId, { connection: "reconnecting" }),
+      signal: controller.signal,
+    });
+
+    clearPersistedPreflightJob(deps.readStorage(), ctx.persistedDraftId);
+
+    if ("interpretation" in outcome) {
+      const { interpretation } = outcome;
       const dealerMessage = interpretation.dealerMessage ||
         "Here is how I understood your rule. Confirm it before I generate the executable rule.";
       transcript = [...transcript, { text: dealerMessage, who: "ai" }];
-      patchConversationRun(args.draftId, {
+      patchConversationRun(draftId, {
+        connection: "closed",
         error: null,
         guidanceContext: null,
         interpretation,
+        job: null,
         messages: transcript,
         progress: null,
         rule: null,
@@ -262,17 +451,18 @@ async function runConversation(
       try {
         await saveConversationDraftSnapshot({
           deps,
-          draftId,
+          draftId: ctx.persistedDraftId,
           lastMessage: dealerMessage,
           messages: transcript,
           normalizedText: interpretation.normalizedText,
           officialInterpretation: interpretation.officialInterpretation,
+          preflightJobId: null,
           prompt: interpretation.sanitizedText,
-          turnId: args.turnId,
-          wallet: args.wallet,
+          turnId: ctx.turnId,
+          wallet: ctx.wallet,
         });
       } catch (draftError) {
-        patchConversationRun(args.draftId, {
+        patchConversationRun(draftId, {
           error: `Interpretation received, but the draft could not be saved. ${deps.describeError(draftError)}`,
           status: "error",
         });
@@ -280,10 +470,9 @@ async function runConversation(
       return;
     }
 
-    const body = await deps.postPreflight(args.ruleText, (progress) => {
-      patchConversationRun(args.draftId, { progress });
-    });
-    const preflight = body.preflight as RulePreflightResult;
+    // RulePreflightApiResult is a narrower mirror of what the API actually
+    // sends; the on-chain fields the Create screen needs ride along untyped.
+    const preflight = outcome.preflight as unknown as RulePreflightResult;
     const valid = preflight.decision === "VALID" && !preflight.needsClarification;
     const dealerMessage =
       preflight.dealerMessage ||
@@ -291,10 +480,12 @@ async function runConversation(
         ? "Done! I compiled your rule. Review it - if you like it, submit it to the round."
         : "Almost there! Try describing the win condition in a few clear words.");
     transcript = [...transcript, { text: dealerMessage, who: "ai" }];
-    patchConversationRun(args.draftId, {
+    patchConversationRun(draftId, {
+      connection: "closed",
       error: null,
       guidanceContext: null,
       interpretation: null,
+      job: null,
       messages: transcript,
       progress: null,
       rule: preflight,
@@ -304,64 +495,126 @@ async function runConversation(
     try {
       await saveConversationDraftSnapshot({
         deps,
-        draftId,
+        draftId: ctx.persistedDraftId,
         lastMessage: dealerMessage,
         messages: transcript,
         normalizedText: preflight.normalizedText || null,
         officialInterpretation: preflight.officialInterpretation || null,
+        preflightJobId: null,
         prompt: preflight.sanitizedText,
         ruleId: preflight.ruleId,
         status: "draft",
-        turnId: args.turnId,
-        wallet: args.wallet,
+        turnId: ctx.turnId,
+        wallet: ctx.wallet,
       });
     } catch (draftError) {
-      patchConversationRun(args.draftId, {
+      patchConversationRun(draftId, {
         error: `Rule compiled, but the draft could not be saved. ${deps.describeError(draftError)}`,
         status: "error",
       });
     }
   } catch (cause) {
-    if (
-      cause instanceof ApiRequestError &&
-      cause.status < 500 &&
-      cause.code !== "invalid_json" &&
-      cause.code !== "invalid_rule_text"
-    ) {
-      const blockedMessage =
-        cause.code === "RULE_PROMPT_INJECTION"
-          ? "That is blocked because it asks the compiler to ignore or hide the app rules. Choose a clean measurable rule instead."
-          : cause.code === "RULE_EXTERNAL_DEPENDENCY"
-            ? "That is blocked because it depends on information outside this guess and draw. Choose a rewrite that only compares your guess with the official draw."
-            : cause.message;
-      patchConversationRun(args.draftId, {
-        error: null,
-        guidanceContext: {
-          apiCode: cause.code,
-          reasonSummary: cause.message,
-          sanitizedText: args.ruleText,
-        },
-        interpretation: null,
-        messages: [...transcript, { text: blockedMessage, who: "ai" }],
-        progress: null,
-        rule: null,
-        status: "done",
-      });
-      return;
-    }
+    reportConversationRunFailure({
+      cause,
+      deps,
+      draftId,
+      persistedDraftId: ctx.persistedDraftId,
+      ruleText: job.ruleText,
+      transcript,
+    });
+  } finally {
+    runAborts.delete(draftId);
+  }
+}
 
-    const message = deps.describeError(cause);
-    patchConversationRun(args.draftId, {
-      error: message,
+function reportConversationRunFailure(ctx: {
+  cause: unknown;
+  deps: ConversationRunDeps;
+  draftId: string;
+  persistedDraftId?: string;
+  ruleText: string;
+  transcript: ConversationMessage[];
+}) {
+  const { cause, deps, draftId, transcript } = ctx;
+
+  // These two are checked before the ApiRequestError branch on purpose. An
+  // expired job is an HTTP 404, and the blocked-rule branch below accepts any
+  // 4xx — so modelling expiry as an ApiRequestError would tell the player their
+  // rule asks the compiler to ignore the app rules.
+  if (cause instanceof SseStreamExpiredError) {
+    clearPersistedPreflightJob(deps.readStorage(), ctx.persistedDraftId ?? draftId);
+    patchConversationRun(draftId, {
+      connection: "closed",
+      error: null,
       guidanceContext: null,
       interpretation: null,
-      messages: [
-        ...transcript,
-        { text: "Dealer engine unavailable. The compiler must be online before I can lock a rule.", who: "ai" },
-      ],
+      job: null,
+      messages: transcript,
       progress: null,
       rule: null,
-      status: "error",
+      status: "expired",
     });
+    return;
   }
+
+  if (cause instanceof SseStreamDisconnectedError) {
+    // The job is kept so the player can reconnect to work that may still be
+    // running.
+    patchConversationRun(draftId, {
+      connection: "closed",
+      error: null,
+      guidanceContext: null,
+      messages: transcript,
+      progress: null,
+      status: "disconnected",
+    });
+    return;
+  }
+
+  if (
+    cause instanceof ApiRequestError &&
+    cause.status < 500 &&
+    cause.code !== "invalid_json" &&
+    cause.code !== "invalid_rule_text"
+  ) {
+    const blockedMessage =
+      cause.code === "RULE_PROMPT_INJECTION"
+        ? "That is blocked because it asks the compiler to ignore or hide the app rules. Choose a clean measurable rule instead."
+        : cause.code === "RULE_EXTERNAL_DEPENDENCY"
+          ? "That is blocked because it depends on information outside this guess and draw. Choose a rewrite that only compares your guess with the official draw."
+          : cause.message;
+    clearPersistedPreflightJob(deps.readStorage(), ctx.persistedDraftId ?? draftId);
+    patchConversationRun(draftId, {
+      connection: "closed",
+      error: null,
+      guidanceContext: {
+        apiCode: cause.code,
+        reasonSummary: cause.message,
+        sanitizedText: ctx.ruleText,
+      },
+      interpretation: null,
+      job: null,
+      messages: [...transcript, { text: blockedMessage, who: "ai" }],
+      progress: null,
+      rule: null,
+      status: "done",
+    });
+    return;
+  }
+
+  clearPersistedPreflightJob(deps.readStorage(), ctx.persistedDraftId ?? draftId);
+  patchConversationRun(draftId, {
+    connection: "closed",
+    error: deps.describeError(cause),
+    guidanceContext: null,
+    interpretation: null,
+    job: null,
+    messages: [
+      ...transcript,
+      { text: "Dealer engine unavailable. The compiler must be online before I can lock a rule.", who: "ai" },
+    ],
+    progress: null,
+    rule: null,
+    status: "error",
+  });
 }

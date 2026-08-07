@@ -27,8 +27,64 @@ function jsonResponse(body: unknown): Response {
   });
 }
 
+const MOCK_PREFLIGHT_JOB_ID = "mock-preflight-job";
+const RULE_PREFLIGHT_JOB_EVENTS = /\/rule-preflight\/jobs\/[^/]+\/events/u;
+
+function sseResponse(
+  frames: { data: unknown; event: string; id: number }[],
+): Response {
+  return new Response(
+    frames
+      .map(
+        (frame) =>
+          `id: ${frame.id}\nevent: ${frame.event}\ndata: ${JSON.stringify(frame.data)}\n\n`,
+      )
+      .join(""),
+    {
+      headers: {
+        "cache-control": "no-cache, no-transform",
+        "content-type": "text/event-stream",
+      },
+      status: 200,
+    },
+  );
+}
+
+/**
+ * Streamed mocks, resolved before resolveMock because they must produce a
+ * Response rather than a JSON body.
+ */
+function resolveStreamMock(url: string): Response | undefined {
+  if (!RULE_PREFLIGHT_JOB_EVENTS.test(url)) {
+    return undefined;
+  }
+  return sseResponse([
+    {
+      data: {
+        progress: {
+          message: "Interpreting your winning condition...",
+          stage: "interpreting",
+        },
+        type: "progress",
+      },
+      event: "progress",
+      id: 1,
+    },
+    {
+      data: { ...MOCK_RULE_PREFLIGHT, type: "result" },
+      event: "result",
+      id: 2,
+    },
+  ]);
+}
+
 function resolveMock(url: string): unknown | undefined {
   // Ordem importa: rotas mais específicas primeiro.
+  if (RULE_PREFLIGHT_JOB_EVENTS.test(url)) {
+    // Já tratado por resolveStreamMock; o include de /rule-preflight abaixo
+    // casaria com esta URL.
+    return undefined;
+  }
   if (url.includes("/turn/active")) {
     return {
       globalConfig: {
@@ -58,7 +114,7 @@ function resolveMock(url: string): unknown | undefined {
     };
   }
   if (url.includes("/rule-preflight")) {
-    return MOCK_RULE_PREFLIGHT;
+    return { idempotent: false, jobId: MOCK_PREFLIGHT_JOB_ID, phase: "compile", status: "running" };
   }
   if (url.includes("/rule-proposals")) {
     return MOCK_RULE_PROPOSALS;
@@ -123,6 +179,10 @@ export function installMockFetch(): void {
           ? input.toString()
           : input.url;
 
+    const stream = resolveStreamMock(url);
+    if (stream) {
+      return stream;
+    }
     const mock = resolveMock(url);
     if (mock !== undefined) {
       return jsonResponse(mock);

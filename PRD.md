@@ -1792,6 +1792,73 @@ Implementation requirements:
 - gate outcomes are recorded as gate-check logs, separate from compiler logs;
 - `RuleCompilationResult` must not include any text-similarity or dedup fields.
 
+#### 6.15.1 Resumable preflight jobs
+
+A preflight run is a chain of LLM calls that typically takes ~150s and can
+exceed four minutes. It must not be tied to the lifetime of the HTTP response
+that started it: a dropped connection, a backgrounded tab, or a page reload
+would otherwise discard minutes of completed work and force the player to
+retype the rule.
+
+A preflight run is therefore a **job** with its own identity, and every HTTP
+response is a *view* onto it. Closing the socket detaches a reader; it never
+cancels the pipeline. This corresponds to the `PREFLIGHT_PENDING` rule state of
+Section 6.16 — that state now has an addressable server-side object behind it.
+
+`POST /rule-preflight` selects its transport from the `accept` header:
+
+| `accept` | Behaviour |
+|---|---|
+| `text/event-stream` | `202 { idempotent, jobId, phase, status }` plus a `location` header pointing at the events stream. The pipeline is already running. |
+| `application/x-ndjson` | Legacy inline NDJSON stream, unchanged on the wire. Deprecated. |
+| anything else | Blocking JSON, unchanged. |
+
+```http
+GET /rule-preflight/jobs/{jobId}/events
+```
+
+Serves `text/event-stream`. Every real job event carries an `id:` (a
+monotonic sequence number) and one of the event names `progress`, `result`,
+`interpretation` or `failed`. A job failure is named `failed`, not `error`, so
+it cannot be confused with an SSE transport error; its payload keeps
+`"type": "error"` so the body is identical to the NDJSON envelope.
+
+Resume semantics:
+
+- the replay position is read from the `Last-Event-ID` header, falling back to
+  a `?cursor=` query parameter — the fallback is mandatory, because the web
+  proxy forwards only an allowlist of headers;
+- a malformed cursor degrades to `0`, which replays everything and is always
+  safe;
+- a cursor that has fallen out of the retained buffer produces a `reset`
+  control frame before the replay, telling the client to restart its progress
+  view rather than render a gap;
+- `reset` and `done` control frames deliberately carry **no** `id:`, so they
+  cannot move the client's stored position outside the sequence space;
+- the stream ends with a `done` frame, on which the client must close;
+- an unknown or expired job is `404`, which is what stops a reconnecting
+  client for good. A client must not treat that 404 as a rejected rule;
+- `: ping` heartbeats are emitted every 15s. They are not optional: model
+  loading, the guardian pass and translation each go silent for 60–180s, and
+  without a keepalive an intermediary idle timeout kills the socket mid-stage.
+
+Job lifecycle:
+
+- a job holds its progress ring buffer and its terminal event in memory for
+  `PREFLIGHT_JOB_TTL_MS` (10 minutes) after finishing; the same constant is
+  shared with the web client so a locally stale pointer is discarded without a
+  request;
+- a job still running after 15 minutes is failed by the sweeper;
+- a `POST` matching a **running** job's `{ phase, sanitizedText }` returns that
+  job with `idempotent: true` rather than starting a second chain. Finished
+  jobs are never reused: the computation is nondeterministic and a player who
+  got a poor reading must be able to run the same text again;
+- only terminal jobs are persisted, and only their terminal event: a running
+  job cannot survive a restart, and the progress buffer is ephemeral;
+- concurrency is capped (32 running jobs, 256 total, 8 readers per job). The
+  cap is load-bearing, not hygiene: returning `202` removes the ~150s socket
+  hold that used to rate-limit this unauthenticated endpoint by accident.
+
 ### 6.16 Formal Rule State Machine
 
 Rules are first-class game objects and must have a formal state machine shared by frontend, backend, worker, and contracts where applicable.

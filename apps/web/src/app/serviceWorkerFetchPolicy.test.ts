@@ -5,6 +5,7 @@ import vm from "node:vm";
 
 type FetchEvent = {
   request: {
+    headers: Headers;
     method: string;
     url: string;
   };
@@ -43,10 +44,14 @@ function loadFetchHandler() {
   return fetchHandler;
 }
 
-function dispatchFetch(method: string, url: string) {
+function dispatchFetch(
+  method: string,
+  url: string,
+  headers: Record<string, string> = {},
+) {
   const responses: Promise<unknown>[] = [];
   loadFetchHandler()({
-    request: { method, url },
+    request: { headers: new Headers(headers), method, url },
     respondWith: (response) => responses.push(response),
   });
   return responses;
@@ -62,4 +67,15 @@ test("the service worker leaves cross-origin loopback requests to the document",
 
 test("the service worker ignores non-GET requests", () => {
   assert.equal(dispatchFetch("POST", "https://tyche.example/api").length, 0);
+});
+
+test("the service worker leaves server-sent event streams to the network", () => {
+  assert.equal(
+    dispatchFetch(
+      "GET",
+      "https://tyche.example/api/proxy/rule-preflight/jobs/abc/events",
+      { accept: "text/event-stream" },
+    ).length,
+    0,
+  );
 });

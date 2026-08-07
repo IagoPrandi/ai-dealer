@@ -1,5 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { mockRulePreflight } from "./helpers/preflight";
+import { mockShellData } from "./helpers/shell";
+
 function hashBytes(seed: number) {
   return Array.from({ length: 32 }, (_, index) => (seed + index) % 256);
 }
@@ -125,66 +128,6 @@ function alwaysTruePreflight(text: string) {
   };
 }
 
-async function mockShellData(page: Page) {
-  await page.route("**/turn/active", async (route) => {
-    await route.fulfill({
-      contentType: "application/json",
-      json: {
-        globalConfig: {
-          activeTurnId: 7,
-          guessCutoffBps: 7500,
-          guessSubmissionFeeLamports: "10000000",
-          hasActiveTurn: true,
-          nextTurnId: 8,
-          paused: false,
-          ruleElectionCutoffBps: 6500,
-          ruleRemovalFeeLamports: "50000000",
-          voteFeeLamports: "5000000",
-        },
-        globalConfigAddress: "11111111111111111111111111111111",
-        turnState: {
-          eliminationWindowEndTimestamp: 0,
-          endTimestamp: Math.floor(Date.now() / 1000) + 3600,
-          finalistCount: 0,
-          finalistRuleIds: [],
-          startTimestamp: Math.floor(Date.now() / 1000) - 1800,
-          status: "open",
-          turnDurationSeconds: 5400,
-          turnId: 7,
-        },
-        turnStateAddress: "11111111111111111111111111111111",
-      },
-      status: 200,
-    });
-  });
-  await page.route("**/rounds/**", async (route) => {
-    await route.fulfill({
-      contentType: "application/json",
-      json: {
-        round: {
-          draw: null,
-          election: null,
-          elimination: null,
-          pool: { guesses: 0, indicativeSol: 0, proposals: 0, totalVisiblePrizePoolSol: 0 },
-          rules: [],
-          status: "open",
-          turnId: 7,
-          winners: { records: [] },
-        },
-      },
-      status: 200,
-    });
-  });
-  await page.route("**/rule-proposals?**", async (route) => {
-    await route.fulfill({ contentType: "application/json", json: { proposals: [] }, status: 200 });
-  });
-  await page.route("**/rule-votes?**", async (route) => {
-    await route.fulfill({ contentType: "application/json", json: { counts: {}, votes: [] }, status: 200 });
-  });
-  await page.route("**/rule-elimination-votes?**", async (route) => {
-    await route.fulfill({ contentType: "application/json", json: { counts: {}, votes: [] }, status: 200 });
-  });
-}
 
 // Regression for the clarification loop: when a vague rule (no suggestedRewrite,
 // never VALID) gets a clarification and the user answers with a short natural
@@ -199,28 +142,23 @@ test("answering a clarification on an unfixable base finalizes instead of re-ask
   // Track the exact text the client sends to preflight on each turn so we can
   // prove the answer was NOT merged onto the vague base.
   const preflightTexts: string[] = [];
-  await page.route("**/rule-preflight", async (route) => {
-    const body = (await route.request().postDataJSON()) as { phase?: string; text: string };
+  await mockRulePreflight(page, (body) => {
     preflightTexts.push(body.text);
     if (body.phase === "interpret") {
-      await route.fulfill({
-        contentType: "application/json",
+      return {
         json: interpretation(body.text, /close to the draw/i.test(body.text) && !/at least/i.test(body.text)),
         status: 200,
-      });
-      return;
+      };
     }
     // The initial vague rule needs clarification.
     if (/close to the draw/i.test(body.text) && !/at least/i.test(body.text)) {
-      await route.fulfill({ contentType: "application/json", json: clarifyPreflight(body.text), status: 200 });
-      return;
+      return { json: clarifyPreflight(body.text), status: 200 };
     }
     // A measurable answer compiles cleanly.
-    await route.fulfill({
-      contentType: "application/json",
+    return {
       json: validPreflight(body.text, 961),
       status: 200,
-    });
+    };
   });
 
   await page.goto("/play/propose");
@@ -272,21 +210,18 @@ test("an always-true rule is rejected with valid replacements instead of enterin
     "A guess wins if every guessed number is lower than the official drawn number in the corresponding position.";
   const preflightTexts: string[] = [];
 
-  await page.route("**/rule-preflight", async (route) => {
-    const body = (await route.request().postDataJSON()) as { phase?: string; text: string };
+  await mockRulePreflight(page, (body) => {
     preflightTexts.push(body.text);
     if (body.phase === "interpret") {
-      await route.fulfill({ contentType: "application/json", json: interpretation(body.text), status: 200 });
-      return;
+      return { json: interpretation(body.text), status: 200 };
     }
-    await route.fulfill({
-      contentType: "application/json",
+    return {
       json:
         body.text === original
           ? alwaysTruePreflight(body.text)
           : validPreflight(body.text, 963),
       status: 200,
-    });
+    };
   });
 
   await page.goto("/play/propose");

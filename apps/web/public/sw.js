@@ -19,5 +19,12 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  const accept = event.request.headers.get("accept") || "";
+  if (accept.includes("text/event-stream")) {
+    // Server-sent events must reach the network untouched: a service-worker hop
+    // can buffer the stream, and a worker restart would kill a live rule run.
+    return;
+  }
+
   event.respondWith(fetch(event.request));
 });

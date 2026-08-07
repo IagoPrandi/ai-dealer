@@ -2,6 +2,12 @@ export const RULE_MAX_TOKENS = 1000;
 export const MAX_REMOVABLE_NUMBERS = 4;
 export const LAMPORTS_PER_SOL = 1_000_000_000;
 
+// How long the API keeps a finished rule preflight job addressable so a client
+// that lost its connection can reattach and replay the result. Shared with the
+// web client, which drops a locally-stored job pointer older than this without
+// a network round-trip; keeping one source of truth stops the two from drifting.
+export const PREFLIGHT_JOB_TTL_MS = 10 * 60 * 1000;
+
 // Production turn timing (PRD §5.4): every turn lasts 24h and is composed of
 // phase 1 (create rules + pick numbers, ~22h) followed by phase 2 (finalist
 // shortlist, elimination voting, active rule, draw at turn end, ~2h). The

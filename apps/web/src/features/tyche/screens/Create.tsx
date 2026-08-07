@@ -38,7 +38,9 @@ import {
   type RuleGuidanceOption,
 } from "../ruleRefinement";
 import {
+  abandonConversationRun,
   isConversationDraftSaveError,
+  resumeConversationRun,
   saveConversationDraftSnapshot,
   startConversationRun,
 } from "../conversationRun";
@@ -48,8 +50,15 @@ import {
   getLatestConversationRun,
   rememberLatestConversationRun,
   subscribeConversationRun,
+  type ConversationRunJob,
   type ConversationRunSnapshot,
 } from "../conversationRunStore";
+import {
+  clearPersistedPreflightJob,
+  isPreflightJobFresh,
+  matchesPreflightJobScope,
+  readPersistedPreflightJob,
+} from "../preflightJobStore";
 import { Dealer, Ico, SectionLabel } from "../shared";
 
 interface ChatMessage {
@@ -362,7 +371,14 @@ function InterpretationConfirmation({
   );
 }
 
-function AgentProgress({ progress }: { progress: RulePreflightProgress | null }) {
+function AgentProgress({
+  connection,
+  progress,
+}: {
+  connection: ConversationRunSnapshot["connection"];
+  progress: RulePreflightProgress | null;
+}) {
+  const reconnecting = connection === "reconnecting";
   return (
     <div
       aria-atomic="true"
@@ -384,7 +400,7 @@ function AgentProgress({ progress }: { progress: RulePreflightProgress | null })
         style={{
           border: "2px solid var(--surface-3)",
           borderRadius: "50%",
-          borderTopColor: "var(--green)",
+          borderTopColor: reconnecting ? "var(--yellow)" : "var(--green)",
           height: 24,
           width: 24,
         }}
@@ -394,9 +410,68 @@ function AgentProgress({ progress }: { progress: RulePreflightProgress | null })
           Tyche
         </span>
         <span style={{ color: "var(--text)", fontSize: 14, lineHeight: 1.4 }}>
-          {progress?.message ?? "Preparing your rule..."}
+          {reconnecting
+            ? "Reconnecting to the dealer..."
+            : progress?.message ?? "Preparing your rule..."}
         </span>
+        {reconnecting && progress?.message ? (
+          <span style={{ color: "var(--dim)", fontSize: 12.5, lineHeight: 1.35 }}>
+            {progress.message}
+          </span>
+        ) : null}
       </span>
+    </div>
+  );
+}
+
+/**
+ * Shown when the stream ended but the rule did not. Yellow, not red: the red
+ * card below stays reserved for a hard failure the player cannot recover from.
+ */
+function RunInterruptedCard({
+  busy,
+  kind,
+  onRetry,
+}: {
+  busy: boolean;
+  kind: "disconnected" | "expired";
+  onRetry: () => void;
+}) {
+  const expired = kind === "expired";
+  return (
+    <div
+      style={{
+        animation: "ide-rise .3s ease both",
+        borderBottom: "1px solid var(--line)",
+        borderTop: "1px solid rgba(255,210,63,0.3)",
+        padding: "16px 2px",
+      }}
+    >
+      <div style={{ alignItems: "center", display: "flex", gap: 9, marginBottom: 7 }}>
+        <Ico.info style={{ color: "var(--yellow)", height: 16, width: 16 }} />
+        <b style={{ fontSize: 15 }}>{expired ? "This run expired" : "Connection lost"}</b>
+      </div>
+      <p style={{ color: "var(--muted)", fontSize: 13.5, lineHeight: 1.5, margin: "0 0 13px" }}>
+        {expired
+          ? "The dealer stopped holding this run. Run it again and I will compile your last message from scratch."
+          : "I lost the live connection, but your rule may still be compiling. Reconnect to pick it back up."}
+      </p>
+      <button
+        className="ide-btn"
+        disabled={busy}
+        onClick={onRetry}
+        style={{ opacity: busy ? 0.7 : 1, padding: 13, width: "100%" }}
+        type="button"
+      >
+        <Ico.bolt style={{ color: "#08110C" }} />{" "}
+        {busy
+          ? expired
+            ? "Starting..."
+            : "Reconnecting..."
+          : expired
+            ? "Run again"
+            : "Reconnect"}
+      </button>
     </div>
   );
 }
@@ -425,6 +500,10 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
   const [retryingDraftSave, setRetryingDraftSave] = useState(false);
   const [error, setError] = useState<null | string>(null);
   const [activeDraftId, setActiveDraftId] = useState<null | string>(null);
+  const [runStatus, setRunStatus] = useState<ConversationRunSnapshot["status"]>("done");
+  const [connection, setConnection] = useState<ConversationRunSnapshot["connection"]>("closed");
+  const [runJob, setRunJob] = useState<ConversationRunJob | null>(null);
+  const [resuming, setResuming] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const autoSentRef = useRef(false);
@@ -488,7 +567,16 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
     setInterpretation(snapshot.interpretation);
     setRule(snapshot.rule);
     setError(snapshot.error);
+    setRunStatus(snapshot.status);
+    setConnection(snapshot.connection);
+    setRunJob(snapshot.job);
     if (snapshot.status === "pending") {
+      setGuidance(null);
+      return;
+    }
+    if (snapshot.status === "disconnected" || snapshot.status === "expired") {
+      // An interrupted run is not a verdict on the rule: never open guidance.
+      setResuming(false);
       setGuidance(null);
       return;
     }
@@ -553,6 +641,47 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
     applyRunSnapshot(run);
   }, [activeDraftId, applyRunSnapshot, chatId, newConversationKey, seed, turnId, walletAddress]);
 
+  // Reattach to a job that outlived the page. The in-memory run above only
+  // survives a screen change; this pointer survives a reload or a killed tab.
+  useEffect(() => {
+    if (activeDraftId || chatId || seed || newConversationKey > 0) {
+      return;
+    }
+    const storage = typeof window === "undefined" ? null : window.localStorage;
+    const persisted = readPersistedPreflightJob(storage);
+    if (!persisted || !matchesPreflightJobScope(persisted, { turnId, wallet: walletAddress ?? null })) {
+      return;
+    }
+    autoSentRef.current = true;
+    if (!isPreflightJobFresh(persisted, Date.now())) {
+      // Older than the window the API keeps, so there is nothing to attach to.
+      // Say so without spending a request on a guaranteed 404.
+      clearPersistedPreflightJob(storage, persisted.draftId);
+      setActiveDraftId(persisted.draftId);
+      setRunStatus("expired");
+      setConnection("closed");
+      setRunJob(null);
+      setTyping(false);
+      setMsgs((current) =>
+        current.some((message) => message.text === persisted.ruleText)
+          ? current
+          : [...current, { text: persisted.ruleText, who: "user" }],
+      );
+      return;
+    }
+    setActiveDraftId(persisted.draftId);
+    void resumeConversationRun({
+      cursor: persisted.cursor,
+      draftId: persisted.draftId,
+      jobId: persisted.jobId,
+      messages: [{ text: persisted.ruleText, who: "user" }],
+      phase: persisted.phase,
+      ruleText: persisted.ruleText,
+      turnId,
+      wallet: walletAddress,
+    });
+  }, [activeDraftId, chatId, newConversationKey, seed, turnId, walletAddress]);
+
   function submitGuidance() {
     if (!guidance || typing) {
       return;
@@ -572,6 +701,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
     if (!interpretation || typing) {
       return;
     }
+    abandonConversationRun(activeDraftId);
     const confirmation = "Yes, generate this rule.";
     const transcript: ChatMessage[] = [...msgs, { text: confirmation, who: "user" }];
     setMsgs(transcript);
@@ -611,6 +741,9 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
     if (!t || typing) {
       return;
     }
+    // Sending is a legitimate escape hatch from a stuck run: stop following the
+    // old job before starting a new one.
+    abandonConversationRun(activeDraftId);
     const pendingRule = rule;
     const likelyRuleDraft = isLikelyRuleDraft(t);
     const explicitPatch = isExplicitRuleRefinementPatch(t);
@@ -852,6 +985,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
   }
 
   function reset(message = "On to the next one! How does your new rule decide the winner?") {
+    abandonConversationRun(activeDraftId);
     forgetLatestConversationRun({
       draftId: activeDraftId,
       turnId,
@@ -866,7 +1000,61 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
     setActiveDraftId(null);
     setGuidance(null);
     setSelectedGuidanceIndex(0);
+    setRunStatus("done");
+    setConnection("closed");
+    setRunJob(null);
+    setResuming(false);
     setMsgs([{ text: message, who: "ai" }]);
+  }
+
+  /**
+   * Reconnect keeps following the same server-side job; Run again starts a
+   * fresh one from the player's last message, with no new bubble because the
+   * transcript already ends with it.
+   */
+  function resumeOrRerun() {
+    if (resuming || !activeDraftId) {
+      return;
+    }
+    setResuming(true);
+    setError(null);
+
+    if (runStatus === "disconnected" && runJob) {
+      setTyping(true);
+      void resumeConversationRun({
+        cursor: runJob.cursor,
+        draftId: activeDraftId,
+        jobId: runJob.jobId,
+        messages: msgs,
+        phase: runJob.phase,
+        ruleText: runJob.ruleText,
+        turnId,
+        wallet: walletAddress,
+      });
+      return;
+    }
+
+    abandonConversationRun(activeDraftId);
+    const lastUserMessage = [...msgs].reverse().find((message) => message.who === "user")?.text;
+    const ruleText = runJob?.ruleText ?? lastUserMessage;
+    if (!ruleText) {
+      setResuming(false);
+      setRunStatus("done");
+      textareaRef.current?.focus();
+      return;
+    }
+    setTyping(true);
+    startConversationRun({
+      draftId: activeDraftId,
+      initialMessages: msgs,
+      lastUserMessage: lastUserMessage ?? ruleText,
+      localDealerReply: null,
+      phase: runJob?.phase ?? "interpret",
+      refinedDraft: null,
+      ruleText,
+      turnId,
+      wallet: walletAddress,
+    });
   }
 
   const valid = rule?.decision === "VALID" && !rule.needsClarification;
@@ -886,7 +1074,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
             <Dealer size={30} />
             <div>
               <div style={{ fontWeight: 800, fontSize: 16, lineHeight: 1.15, whiteSpace: "nowrap" }}>Tyche</div>
-              <div style={{ fontSize: 12, color: "var(--green)", marginTop: 1, whiteSpace: "nowrap" }}>{submitted ? "● rule submitted" : connected ? "● crafting your rule" : "● preflight is free"}</div>
+              <div style={{ fontSize: 12, color: connection === "reconnecting" ? "var(--yellow)" : "var(--green)", marginTop: 1, whiteSpace: "nowrap" }}>{submitted ? "● rule submitted" : connection === "reconnecting" ? "● reconnecting" : connected ? "● crafting your rule" : "● preflight is free"}</div>
             </div>
           </div>
           <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--dim)" }}>submit <span className="ide-num" style={{ color: "var(--muted)" }}>{fees.ruleNext === 0 ? "Free" : fmtSol(fees.ruleNext)}</span></span>
@@ -897,7 +1085,14 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
         {msgs.map((mm, i) => (
           <div key={i} className={mm.who === "ai" ? "ide-bubble-ai" : "ide-bubble-user"} style={{ animation: "ide-rise .3s ease both" }}>{mm.text}</div>
         ))}
-        {typing ? <AgentProgress progress={progress} /> : null}
+        {typing ? <AgentProgress connection={connection} progress={progress} /> : null}
+        {!typing && (runStatus === "disconnected" || runStatus === "expired") ? (
+          <RunInterruptedCard
+            busy={resuming}
+            kind={runStatus}
+            onRetry={resumeOrRerun}
+          />
+        ) : null}
 
         {interpretation && !interpretation.needsClarification && !typing ? (
           <InterpretationConfirmation

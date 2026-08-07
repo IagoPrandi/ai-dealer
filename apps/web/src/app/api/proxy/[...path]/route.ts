@@ -6,6 +6,7 @@ import {
   getApiProxyTimeoutMs,
   getForwardedApiHeaders,
   getProxiedResponseHeaders,
+  isStreamingProxyRequest,
 } from "../../../../lib/apiProxy";
 
 export const dynamic = "force-dynamic";
@@ -26,10 +27,7 @@ async function proxyApiRequest(request: NextRequest, context: ApiProxyContext) {
     search: request.nextUrl.search,
   });
   const timeoutMs = getApiProxyTimeoutMs();
-  const streamsProgress = request.headers
-    .get("accept")
-    ?.toLowerCase()
-    .includes("application/x-ndjson") === true;
+  const streaming = isStreamingProxyRequest(request.headers);
   const init: RequestInit = {
     cache: "no-store",
     headers: getForwardedApiHeaders(request.headers),
@@ -37,7 +35,9 @@ async function proxyApiRequest(request: NextRequest, context: ApiProxyContext) {
     // A streamed preflight sends headers immediately and has its own per-model
     // timeouts in the API. Applying the ordinary whole-request proxy timeout to
     // its body would recreate the HTTP 504 while useful progress is arriving.
-    ...(!streamsProgress ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
+    // Following the client's own signal instead also releases the upstream
+    // socket when the tab closes, which the previous timeout-less branch leaked.
+    signal: streaming ? request.signal : AbortSignal.timeout(timeoutMs),
   };
   if (request.method !== "GET" && request.method !== "HEAD") {
     init.body = await request.arrayBuffer();

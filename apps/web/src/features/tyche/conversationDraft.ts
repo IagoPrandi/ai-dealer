@@ -16,6 +16,7 @@ export function buildConversationDraftBody({
   messages,
   normalizedText = null,
   officialInterpretation = null,
+  preflightJobId,
   prompt,
   ruleId = null,
   status = "draft",
@@ -27,6 +28,7 @@ export function buildConversationDraftBody({
   messages: ConversationMessage[];
   normalizedText?: null | string;
   officialInterpretation?: null | string;
+  preflightJobId?: null | string;
   prompt: string;
   ruleId?: null | number;
   status?: ConversationDraftStatus;
@@ -46,6 +48,9 @@ export function buildConversationDraftBody({
     messages,
     normalizedText,
     officialInterpretation,
+    // Omitted entirely when not supplied, so an existing draft keeps whatever
+    // job pointer the server already holds.
+    ...(preflightJobId !== undefined ? { preflightJobId } : {}),
     prompt: sanitizedPrompt,
     ruleId,
     status,

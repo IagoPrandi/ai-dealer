@@ -7,6 +7,7 @@ import {
   getApiProxyTimeoutMs,
   getForwardedApiHeaders,
   getProxiedResponseHeaders,
+  isStreamingProxyRequest,
 } from "./apiProxy.js";
 
 test("api proxy defaults to the local API target", () => {
@@ -71,4 +72,51 @@ test("api proxy preserves response content metadata", () => {
   assert.equal(headers.get("cache-control"), "no-store");
   assert.equal(headers.has("content-length"), false);
   assert.equal(headers.has("transfer-encoding"), false);
+});
+
+test("api proxy forwards the stream resume position", () => {
+  const headers = getForwardedApiHeaders(
+    new Headers({
+      accept: "text/event-stream",
+      "last-event-id": "12",
+    }),
+  );
+
+  assert.equal(headers.get("last-event-id"), "12");
+});
+
+test("api proxy recognises both streaming transports", () => {
+  const streaming = (accept?: string) =>
+    isStreamingProxyRequest(new Headers(accept ? { accept } : {}));
+
+  assert.equal(streaming("text/event-stream"), true);
+  assert.equal(streaming("application/x-ndjson"), true);
+  assert.equal(streaming("TEXT/EVENT-STREAM"), true);
+  assert.equal(streaming("application/json"), false);
+  assert.equal(streaming(), false);
+});
+
+test("api proxy defeats buffering on server-sent event responses", () => {
+  const headers = getProxiedResponseHeaders(
+    new Headers({
+      "cache-control": "no-cache, no-store, no-transform",
+      "content-type": "text/event-stream; charset=utf-8",
+    }),
+  );
+
+  assert.equal(headers.get("content-type"), "text/event-stream; charset=utf-8");
+  assert.equal(headers.get("cache-control"), "no-cache, no-transform");
+  assert.equal(headers.get("x-accel-buffering"), "no");
+});
+
+test("api proxy leaves ordinary JSON responses untouched", () => {
+  const headers = getProxiedResponseHeaders(
+    new Headers({
+      "cache-control": "no-store",
+      "content-type": "application/json",
+    }),
+  );
+
+  assert.equal(headers.has("x-accel-buffering"), false);
+  assert.equal(headers.get("cache-control"), "no-store");
 });

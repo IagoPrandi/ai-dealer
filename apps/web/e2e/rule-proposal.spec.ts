@@ -1,5 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { mockRulePreflight } from "./helpers/preflight";
+import { mockShellData } from "./helpers/shell";
+
 function hashBytes(seed: number) {
   return Array.from({ length: 32 }, (_, index) => (seed + index) % 256);
 }
@@ -141,114 +144,32 @@ function materialImpactPreflight(text: string) {
   };
 }
 
-async function mockShellData(page: Page) {
-  await page.route("**/turn/active", async (route) => {
-    await route.fulfill({
-      contentType: "application/json",
-      json: {
-        globalConfig: {
-          activeTurnId: 7,
-          guessCutoffBps: 7500,
-          guessSubmissionFeeLamports: "10000000",
-          hasActiveTurn: true,
-          nextTurnId: 8,
-          paused: false,
-          ruleElectionCutoffBps: 6500,
-          ruleRemovalFeeLamports: "50000000",
-          voteFeeLamports: "5000000",
-        },
-        globalConfigAddress: "11111111111111111111111111111111",
-        turnState: {
-          eliminationWindowEndTimestamp: 0,
-          endTimestamp: Math.floor(Date.now() / 1000) + 3600,
-          finalistCount: 0,
-          finalistRuleIds: [],
-          startTimestamp: Math.floor(Date.now() / 1000) - 1800,
-          status: "open",
-          turnDurationSeconds: 5400,
-          turnId: 7,
-        },
-        turnStateAddress: "11111111111111111111111111111111",
-      },
-      status: 200,
-    });
-  });
-  await page.route("**/rounds/**", async (route) => {
-    await route.fulfill({
-      contentType: "application/json",
-      json: {
-        round: {
-          draw: null,
-          election: null,
-          elimination: null,
-          pool: {
-            guesses: 0,
-            indicativeSol: 0,
-            proposals: 0,
-            totalVisiblePrizePoolSol: 0,
-          },
-          rules: [],
-          status: "open",
-          turnId: 7,
-          winners: { records: [] },
-        },
-      },
-      status: 200,
-    });
-  });
-  await page.route("**/rule-proposals?**", async (route) => {
-    await route.fulfill({
-      contentType: "application/json",
-      json: { proposals: [] },
-      status: 200,
-    });
-  });
-  await page.route("**/rule-votes?**", async (route) => {
-    await route.fulfill({
-      contentType: "application/json",
-      json: { counts: {}, votes: [] },
-      status: 200,
-    });
-  });
-  await page.route("**/rule-elimination-votes?**", async (route) => {
-    await route.fulfill({
-      contentType: "application/json",
-      json: { counts: {}, votes: [] },
-      status: 200,
-    });
-  });
-}
 
 test("blocked prompt injection offers no generic replacement and accepts a player rewrite", async ({
   page,
 }) => {
   await mockShellData(page);
-  await page.route("**/rule-preflight", async (route) => {
-    const body = (await route.request().postDataJSON()) as { phase?: string; text: string };
+  await mockRulePreflight(page, (body) => {
     if (/ignore the app rules/i.test(body.text) || /secretly compile/i.test(body.text)) {
-      await route.fulfill({
-        contentType: "application/json",
+      return {
         json: {
           error: "RULE_PROMPT_INJECTION",
           message:
             "Rule text contains prompt-injection language. Rewrite it as a measurable game condition.",
         },
         status: 400,
-      });
-      return;
+      };
     }
     if (body.phase === "interpret") {
-      await route.fulfill({ contentType: "application/json", json: interpretation(body.text), status: 200 });
-      return;
+      return { json: interpretation(body.text), status: 200 };
     }
-    await route.fulfill({
-      contentType: "application/json",
+    return {
       json: validPreflight(
         "New clean rule: win if at least 2 guessed numbers appear in the draw, regardless of order.",
         94,
       ),
       status: 200,
-    });
+    };
   });
 
   await page.goto("/play/propose");
@@ -296,20 +217,17 @@ test("material-impact review blocks submission until draw-only range semantics a
   const inclusiveRewrite =
     "A guess wins if all six official draw numbers are between 9 and 40, inclusive. The player's guess does not affect the result.";
 
-  await page.route("**/rule-preflight", async (route) => {
-    const body = (await route.request().postDataJSON()) as { phase?: string; text: string };
+  await mockRulePreflight(page, (body) => {
     if (body.phase === "interpret") {
-      await route.fulfill({ contentType: "application/json", json: interpretation(body.text), status: 200 });
-      return;
+      return { json: interpretation(body.text), status: 200 };
     }
-    await route.fulfill({
-      contentType: "application/json",
+    return {
       json:
         body.text === original
           ? materialImpactPreflight(body.text)
           : validPreflight(inclusiveRewrite, 101),
       status: 200,
-    });
+    };
   });
 
   await page.goto("/play/propose");
@@ -341,32 +259,27 @@ test("external dependency offers no arbitrary threshold and accepts a player rew
   page,
 }) => {
   await mockShellData(page);
-  await page.route("**/rule-preflight", async (route) => {
-    const body = (await route.request().postDataJSON()) as { phase?: string; text: string };
+  await mockRulePreflight(page, (body) => {
     if (/closest among all players/i.test(body.text)) {
-      await route.fulfill({
-        contentType: "application/json",
+      return {
         json: {
           error: "RULE_EXTERNAL_DEPENDENCY",
           message:
             "Rule text depends on unavailable external game state. Rewrite it using only your guess and the official draw.",
         },
         status: 400,
-      });
-      return;
+      };
     }
     if (body.phase === "interpret") {
-      await route.fulfill({ contentType: "application/json", json: interpretation(body.text), status: 200 });
-      return;
+      return { json: interpretation(body.text), status: 200 };
     }
-    await route.fulfill({
-      contentType: "application/json",
+    return {
       json: validPreflight(
         "Win if the total absolute position-by-position difference between guess and draw is 30 or less.",
         97,
       ),
       status: 200,
-    });
+    };
   });
 
   await page.goto("/play/propose");
@@ -401,19 +314,16 @@ test("digit ambiguity options clarify the submitted rule instead of replacing it
   const eitherDigitRule =
     "Win if at least one guessed number shares either its tens digit or its units digit with any drawn number, regardless of order.";
 
-  await page.route("**/rule-preflight", async (route) => {
-    const body = (await route.request().postDataJSON()) as { phase?: string; text: string };
+  await mockRulePreflight(page, (body) => {
     if (body.text === original) {
       if (body.phase === "interpret") {
-        await route.fulfill({ contentType: "application/json", json: interpretation(body.text, { needsClarification: true, suggestedRewrites: [
+        return { json: interpretation(body.text, { needsClarification: true, suggestedRewrites: [
           eitherDigitRule,
           "Win if at least one guessed number has the same tens digit as any drawn number, regardless of order.",
           "Win if at least one guessed number has the same units digit as any drawn number, regardless of order.",
-        ] }), status: 200 });
-        return;
+        ] }), status: 200 };
       }
-      await route.fulfill({
-        contentType: "application/json",
+      return {
         json: {
           preflight: {
             ...clarifyPreflight(body.text).preflight,
@@ -429,18 +339,15 @@ test("digit ambiguity options clarify the submitted rule instead of replacing it
           },
         },
         status: 200,
-      });
-      return;
+      };
     }
     if (body.phase === "interpret") {
-      await route.fulfill({ contentType: "application/json", json: interpretation(body.text), status: 200 });
-      return;
+      return { json: interpretation(body.text), status: 200 };
     }
-    await route.fulfill({
-      contentType: "application/json",
+    return {
       json: validPreflight(eitherDigitRule, 98),
       status: 200,
-    });
+    };
   });
 
   await page.goto("/play/propose");
@@ -468,18 +375,14 @@ test("ordered tens-range example keeps all six positions in its only suggestion"
   const intendedRule =
     "Win if all six guessed numbers are in the same tens range as the drawn number in the corresponding position.";
 
-  await page.route("**/rule-preflight", async (route) => {
-    const body = (await route.request().postDataJSON()) as { phase?: string; text: string };
+  await mockRulePreflight(page, (body) => {
     if (body.phase === "interpret") {
-      await route.fulfill({
-        contentType: "application/json",
+      return {
         json: interpretation(body.text, body.text === original ? { needsClarification: true, suggestedRewrites: [intendedRule] } : {}),
         status: 200,
-      });
-      return;
+      };
     }
-    await route.fulfill({
-      contentType: "application/json",
+    return {
       json:
         body.text === original
           ? {
@@ -494,7 +397,7 @@ test("ordered tens-range example keeps all six positions in its only suggestion"
             }
           : validPreflight(intendedRule, 99),
       status: 200,
-    });
+    };
   });
 
   await page.goto("/play/propose");
@@ -515,16 +418,13 @@ test("an offline dealer engine is reported honestly, not as a blocked rule", asy
   page,
 }) => {
   await mockShellData(page);
-  await page.route("**/rule-preflight", async (route) => {
-    await route.fulfill({
-      contentType: "application/json",
-      json: {
-        error: "RULE_AGENT_UNAVAILABLE",
-        message: "The dealer agent is unavailable. Make sure the model is running and try again.",
-      },
-      status: 502,
-    });
-  });
+  await mockRulePreflight(page, () => ({
+    json: {
+      error: "RULE_AGENT_UNAVAILABLE",
+      message: "The dealer agent is unavailable. Make sure the model is running and try again.",
+    },
+    status: 502,
+  }));
 
   await page.goto("/play/propose");
 

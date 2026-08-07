@@ -14,6 +14,7 @@ import {
   MINIMUM_CLAIM_THRESHOLD_SOL,
   MVP_FEES_SOL,
   REPEATED_ACTION_FEE_MULTIPLIER,
+  PREFLIGHT_JOB_TTL_MS,
   RULE_MAX_TOKENS,
   RULE_REMOVAL_CONFIG,
   sanitizeRuleText,
@@ -211,6 +212,54 @@ export interface RulePreflightProgress {
 }
 
 type RulePreflightProgressReporter = (progress: RulePreflightProgress) => void;
+
+export type RulePreflightPhase = "compile" | "interpret";
+
+export type RulePreflightJobStatus = "completed" | "failed" | "running";
+
+/**
+ * Wire-identical to the NDJSON envelope the preflight stream already emits, so
+ * one value serializes either as `{...}\n` (NDJSON) or as `data: {...}` (SSE).
+ */
+export type RulePreflightJobEvent =
+  | { interpretation: RuleInterpretationResult; type: "interpretation" }
+  | { error: string; message: string; status: number; type: "error" }
+  | { preflight: RulePreflightResult; type: "result" }
+  | { progress: RulePreflightProgress; type: "progress" };
+
+/** Every event that finishes a job. Exactly one is ever appended. */
+export type RulePreflightJobTerminalEvent = Exclude<
+  RulePreflightJobEvent,
+  { type: "progress" }
+>;
+
+export interface RulePreflightJobEventEnvelope {
+  emittedAt: string;
+  event: RulePreflightJobEvent;
+  seq: number;
+}
+
+/**
+ * A rule preflight run that owns its own lifetime. The HTTP response that
+ * started it is only a view: closing the socket detaches a listener, it never
+ * cancels the pipeline. Listeners live in a separate map so this record stays
+ * plain JSON for the state snapshot.
+ */
+export interface RulePreflightJobRecord {
+  completedAt: string | null;
+  createdAt: string;
+  /** Progress events trimmed out of the ring buffer, for diagnostics. */
+  droppedEvents: number;
+  events: RulePreflightJobEventEnvelope[];
+  /** hashJson({ phase, sanitizedText }) — the dedupe key, never the id. */
+  fingerprint: string;
+  id: string;
+  lastSeq: number;
+  phase: RulePreflightPhase;
+  status: RulePreflightJobStatus;
+  terminalEvent: RulePreflightJobTerminalEvent | null;
+  updatedAt: string;
+}
 
 export interface RuleProposalRecord extends RulePreflightResult {
   compiledArtifactHash?: string | null;
@@ -773,6 +822,9 @@ export interface ConversationDraftRecord {
   messages?: ConversationMessage[];
   normalizedText: string | null;
   officialInterpretation: string | null;
+  /** The rule preflight job this draft was last waiting on, so reopening the
+   *  conversation on another device can reattach to a run still in flight. */
+  preflightJobId?: string | null;
   prompt: string;
   ruleId: number | null;
   status: ConversationDraftStatus;
@@ -974,6 +1026,38 @@ const auditLogs = new Map<string, AuditLogRecord>();
 const auditLogOrder: string[] = [];
 let lastAuditLogHash: string | null = null;
 
+// Rule preflight job registry sizing. The pipeline emits at most ~10 progress
+// events plus one terminal event, so a 64-entry ring is 6x headroom and caps
+// per-job progress at ~20 KB. The terminal payload (compiled artifact + impact
+// review) dominates at ~100 KB, giving a ~120 KB per-job ceiling — hence
+// MAX_TOTAL bounds the whole registry at roughly 30 MB. Raise MAX_TOTAL only
+// with that arithmetic in hand.
+const RULE_PREFLIGHT_JOB_MAX_EVENTS = 64;
+const RULE_PREFLIGHT_JOB_MAX_EVENT_BYTES = 256 * 1024;
+const RULE_PREFLIGHT_JOB_MAX_TOTAL = 256;
+// The load-bearing abuse control: returning 202 removes the ~150s socket hold
+// that used to rate-limit this unauthenticated endpoint by accident.
+const RULE_PREFLIGHT_JOB_MAX_ACTIVE = 32;
+const RULE_PREFLIGHT_JOB_TERMINAL_TTL_MS = PREFLIGHT_JOB_TTL_MS;
+// A hard fuse, not an expected path: a chain of LLM calls each flooring at
+// MIN_TIMEOUT_MS (300s in llm.ts) can plausibly reach ~10 minutes.
+const RULE_PREFLIGHT_JOB_RUNNING_TTL_MS = 15 * 60 * 1000;
+const RULE_PREFLIGHT_SSE_MAX_LISTENERS_PER_JOB = 8;
+const RULE_PREFLIGHT_SSE_MAX_BUFFERED_BYTES = 1024 * 1024;
+const RULE_PREFLIGHT_SSE_HEARTBEAT_MS = 15_000;
+const RULE_PREFLIGHT_SSE_RETRY_MS = 2_000;
+
+type RulePreflightJobListener = (
+  envelope: RulePreflightJobEventEnvelope,
+) => void;
+
+const rulePreflightJobs = new Map<string, RulePreflightJobRecord>();
+const rulePreflightJobIdsByFingerprint = new Map<string, string>();
+const rulePreflightJobListeners = new Map<
+  string,
+  Set<RulePreflightJobListener>
+>();
+
 export interface ApiStateSnapshotV1 {
   auditLogOrder: string[];
   auditLogs: [string, AuditLogRecord][];
@@ -988,6 +1072,7 @@ export interface ApiStateSnapshotV1 {
   ruleElectionProofAuditLogs: [number, string][];
   ruleEliminationVotes: [string, RuleEliminationVoteRecord][];
   ruleEliminations: [number, RuleEliminationRecord][];
+  rulePreflightJobs: [string, RulePreflightJobRecord][];
   ruleProposals: [string, RuleProposalRecord][];
   ruleValidations: [string, RuleValidationRecord][];
   ruleVotes: [string, RuleVoteRecord][];
@@ -1017,6 +1102,7 @@ let apiStatePool: InstanceType<typeof Pool> | null = null;
 let apiStatePersistenceQueue: Promise<void> = Promise.resolve();
 
 export function exportApiStateSnapshot(): ApiStateSnapshotV1 {
+  sweepRulePreflightJobs();
   return {
     auditLogOrder: [...auditLogOrder],
     auditLogs: [...auditLogs.entries()],
@@ -1031,6 +1117,28 @@ export function exportApiStateSnapshot(): ApiStateSnapshotV1 {
     ruleElectionProofAuditLogs: [...ruleElectionProofAuditLogs.entries()],
     ruleEliminationVotes: [...ruleEliminationVotes.entries()],
     ruleEliminations: [...ruleEliminations.entries()],
+    // Terminal jobs only, and only their terminal event. The progress buffer is
+    // ephemeral UI chatter, and a running job cannot survive a restart anyway.
+    // A client reattaching to a restored job presents cursor 0, takes the reset
+    // path, and gets "restart your progress view, here is the answer".
+    rulePreflightJobs: [...rulePreflightJobs.entries()]
+      .filter(([, job]) => job.status !== "running")
+      .map(([id, job]): [string, RulePreflightJobRecord] => [
+        id,
+        {
+          ...job,
+          droppedEvents: job.droppedEvents + Math.max(job.events.length - 1, 0),
+          events: job.terminalEvent
+            ? [
+                {
+                  emittedAt: job.updatedAt,
+                  event: job.terminalEvent,
+                  seq: job.lastSeq,
+                },
+              ]
+            : [],
+        },
+      ]),
     ruleProposals: [...ruleProposals.entries()],
     ruleValidations: [...ruleValidations.entries()],
     ruleVotes: [...ruleVotes.entries()],
@@ -1072,6 +1180,11 @@ export function restoreApiStateSnapshot(snapshot: ApiStateSnapshotV1) {
   replaceMap(ruleElectionProofAuditLogs, snapshot.ruleElectionProofAuditLogs);
   replaceMap(ruleEliminationVotes, snapshot.ruleEliminationVotes);
   replaceMap(ruleEliminations, snapshot.ruleEliminations);
+  // `version` stays 1 while the shape grows, so every field added after the
+  // initial release must tolerate its absence in an older stored blob. The
+  // fingerprint index is deliberately not rebuilt: restored jobs are all
+  // terminal, and only running jobs are deduplicated.
+  replaceMap(rulePreflightJobs, snapshot.rulePreflightJobs ?? []);
   replaceMap(ruleProposals, snapshot.ruleProposals);
   replaceMap(ruleValidations, snapshot.ruleValidations);
   replaceMap(ruleVotes, snapshot.ruleVotes);
@@ -1102,6 +1215,9 @@ async function initializeApiStatePersistence(databaseUrl: string) {
   const stored = result.rows[0]?.snapshot_json;
   if (stored) {
     restoreApiStateSnapshot(JSON.parse(stored) as ApiStateSnapshotV1);
+    // Swept here rather than inside restore, which would make the snapshot
+    // round-trip test depend on the clock.
+    sweepRulePreflightJobs();
   }
   apiStatePool = pool;
 }
@@ -1124,6 +1240,241 @@ function queueApiStatePersistence() {
     });
   return apiStatePersistenceQueue;
 }
+
+const RULE_PREFLIGHT_JOB_ID_PATTERN = /^[A-Za-z0-9_-]{32}$/u;
+
+/**
+ * 192 bits of CSPRNG, deliberately NOT the content-derived id convention used
+ * by GuessVerificationJobRecord. This id is the only authorization for reading
+ * another player's in-flight rule text and compiled artifact on an endpoint
+ * that has no authentication, so it must not be derivable from its inputs.
+ */
+function createRulePreflightJobId() {
+  return randomBytes(24).toString("base64url");
+}
+
+export function isRulePreflightJobId(value: string) {
+  return RULE_PREFLIGHT_JOB_ID_PATTERN.test(value);
+}
+
+export function getRulePreflightJobFingerprint(
+  phase: RulePreflightPhase,
+  text: string,
+) {
+  return hashJson({ phase, sanitizedText: sanitizeRuleText(text) });
+}
+
+export function createRulePreflightJob(args: {
+  createdAt?: string;
+  fingerprint: string;
+  id?: string;
+  phase: RulePreflightPhase;
+}): RulePreflightJobRecord {
+  const createdAt = args.createdAt ?? new Date().toISOString();
+  const record: RulePreflightJobRecord = {
+    completedAt: null,
+    createdAt,
+    droppedEvents: 0,
+    events: [],
+    fingerprint: args.fingerprint,
+    id: args.id ?? createRulePreflightJobId(),
+    lastSeq: 0,
+    phase: args.phase,
+    status: "running",
+    terminalEvent: null,
+    updatedAt: createdAt,
+  };
+  rulePreflightJobs.set(record.id, record);
+  rulePreflightJobIdsByFingerprint.set(record.fingerprint, record.id);
+  return record;
+}
+
+export function appendRulePreflightJobEvent(
+  jobId: string,
+  event: RulePreflightJobEvent,
+  emittedAt = new Date().toISOString(),
+): RulePreflightJobEventEnvelope | null {
+  const job = rulePreflightJobs.get(jobId);
+  if (!job || job.status !== "running") {
+    // Evicted or already terminal. A second terminal event is a no-op by
+    // construction, which is what keeps the four paths that can finish a job
+    // (success, handled error, crash fuse, sweeper) from racing each other.
+    return null;
+  }
+
+  const safeEvent =
+    JSON.stringify(event).length > RULE_PREFLIGHT_JOB_MAX_EVENT_BYTES
+      ? ({
+          error: "RULE_PREFLIGHT_PAYLOAD_TOO_LARGE",
+          message:
+            "The rule preflight result exceeded the streamable size limit.",
+          status: 500,
+          type: "error",
+        } as const)
+      : event;
+
+  job.lastSeq += 1;
+  const envelope: RulePreflightJobEventEnvelope = {
+    emittedAt,
+    event: safeEvent,
+    seq: job.lastSeq,
+  };
+  job.events.push(envelope);
+  while (job.events.length > RULE_PREFLIGHT_JOB_MAX_EVENTS) {
+    job.events.shift();
+    job.droppedEvents += 1;
+  }
+  job.updatedAt = emittedAt;
+
+  if (safeEvent.type !== "progress") {
+    job.status = safeEvent.type === "error" ? "failed" : "completed";
+    job.completedAt = emittedAt;
+    job.terminalEvent = safeEvent;
+    // Only running jobs are deduplicated: a finished job is a short-lived cache
+    // of a nondeterministic computation, and a player who got a bad reading
+    // must be able to run the same text again.
+    rulePreflightJobIdsByFingerprint.delete(job.fingerprint);
+  }
+
+  // Iterate a copy: the terminal listener detaches itself. Each listener is
+  // isolated because this runs inside the synchronous progress reporter of a
+  // live pipeline — an escaping exception would reject the pipeline promise.
+  for (const listener of [...(rulePreflightJobListeners.get(jobId) ?? [])]) {
+    try {
+      listener(envelope);
+    } catch (error) {
+      console.error("Rule preflight listener failed", error);
+    }
+  }
+  return envelope;
+}
+
+export function readRulePreflightJobEventsAfter(jobId: string, cursor: number) {
+  const job = rulePreflightJobs.get(jobId);
+  if (!job) {
+    return null;
+  }
+  const oldestSeq = job.events[0]?.seq ?? job.lastSeq + 1;
+  // The client asked for a position we can no longer serve contiguously, or a
+  // position ahead of us (a restored snapshot). Replay what we have and tell it
+  // to restart its progress view rather than silently showing a gap.
+  const reset = cursor > 0 && (cursor + 1 < oldestSeq || cursor > job.lastSeq);
+  const from = reset ? 0 : cursor;
+  return {
+    events: job.events.filter((envelope) => envelope.seq > from),
+    lastSeq: job.lastSeq,
+    reset,
+    status: job.status,
+  };
+}
+
+export function getRulePreflightJob(jobId: string) {
+  return rulePreflightJobs.get(jobId) ?? null;
+}
+
+export function findRunningRulePreflightJobByFingerprint(fingerprint: string) {
+  const jobId = rulePreflightJobIdsByFingerprint.get(fingerprint);
+  const job = jobId ? rulePreflightJobs.get(jobId) : undefined;
+  return job && job.status === "running" ? job : null;
+}
+
+export function subscribeToRulePreflightJob(
+  jobId: string,
+  listener: RulePreflightJobListener,
+) {
+  const listeners = rulePreflightJobListeners.get(jobId) ?? new Set();
+  listeners.add(listener);
+  rulePreflightJobListeners.set(jobId, listeners);
+}
+
+export function unsubscribeFromRulePreflightJob(
+  jobId: string,
+  listener: RulePreflightJobListener,
+) {
+  const listeners = rulePreflightJobListeners.get(jobId);
+  if (!listeners) {
+    return;
+  }
+  listeners.delete(listener);
+  if (listeners.size === 0) {
+    // Otherwise one empty Set leaks per job for the lifetime of the process.
+    rulePreflightJobListeners.delete(jobId);
+  }
+}
+
+export function countRulePreflightJobListeners(jobId: string) {
+  return rulePreflightJobListeners.get(jobId)?.size ?? 0;
+}
+
+export function getRulePreflightJobStats() {
+  let active = 0;
+  for (const job of rulePreflightJobs.values()) {
+    if (job.status === "running") {
+      active += 1;
+    }
+  }
+  return { active, total: rulePreflightJobs.size };
+}
+
+/**
+ * Lazy eviction, called from every POST, every stream attach and every snapshot
+ * export. Deliberately not a setInterval: this module has no timers, and a
+ * module-level interval would keep `node --test` alive.
+ */
+export function sweepRulePreflightJobs(now = new Date().toISOString()) {
+  const nowMs = Date.parse(now);
+  let evicted = 0;
+  for (const [jobId, job] of rulePreflightJobs) {
+    const ageMs = nowMs - Date.parse(job.updatedAt);
+    if (job.status === "running") {
+      if (ageMs > RULE_PREFLIGHT_JOB_RUNNING_TTL_MS) {
+        appendRulePreflightJobEvent(
+          jobId,
+          {
+            error: "RULE_PREFLIGHT_JOB_ABANDONED",
+            message: "The rule preflight job exceeded its maximum runtime.",
+            status: 504,
+            type: "error",
+          },
+          now,
+        );
+      }
+      continue;
+    }
+    if (ageMs > RULE_PREFLIGHT_JOB_TERMINAL_TTL_MS) {
+      rulePreflightJobs.delete(jobId);
+      rulePreflightJobIdsByFingerprint.delete(job.fingerprint);
+      rulePreflightJobListeners.delete(jobId);
+      evicted += 1;
+    }
+  }
+  return evicted;
+}
+
+export function reserveRulePreflightJobSlot() {
+  const stats = getRulePreflightJobStats();
+  if (stats.active >= RULE_PREFLIGHT_JOB_MAX_ACTIVE) {
+    return { error: "rule_preflight_busy", status: 429 } as const;
+  }
+  if (stats.total >= RULE_PREFLIGHT_JOB_MAX_TOTAL) {
+    const terminal = [...rulePreflightJobs.values()]
+      .filter((job) => job.status !== "running")
+      .sort((left, right) => Date.parse(left.updatedAt) - Date.parse(right.updatedAt));
+    for (const job of terminal) {
+      rulePreflightJobs.delete(job.id);
+      rulePreflightJobIdsByFingerprint.delete(job.fingerprint);
+      rulePreflightJobListeners.delete(job.id);
+      if (rulePreflightJobs.size < RULE_PREFLIGHT_JOB_MAX_TOTAL) {
+        break;
+      }
+    }
+    if (rulePreflightJobs.size >= RULE_PREFLIGHT_JOB_MAX_TOTAL) {
+      return { error: "rule_preflight_capacity", status: 503 } as const;
+    }
+  }
+  return { error: null, status: 202 } as const;
+}
+
 const AUDIT_LOG_KINDS = new Set<AuditLogKind>([
   "compiler.validation",
   "guess.verification",
@@ -1548,6 +1899,9 @@ export function resetApiStateForTests() {
   voterRewardRecords.clear();
   claimRecords.clear();
   conversationDrafts.clear();
+  rulePreflightJobs.clear();
+  rulePreflightJobIdsByFingerprint.clear();
+  rulePreflightJobListeners.clear();
   auditLogs.clear();
   auditLogOrder.length = 0;
   lastAuditLogHash = null;
@@ -2988,6 +3342,13 @@ export function isValidConversationDraft(value: unknown): value is Omit<
       typeof draft.normalizedText === "string") &&
     (draft.officialInterpretation === null ||
       typeof draft.officialInterpretation === "string") &&
+    // Validated explicitly rather than riding along on the record spread in
+    // saveConversationDraft: an unvalidated pass-through is exactly the kind of
+    // silent acceptance this codebase refuses.
+    (draft.preflightJobId === undefined ||
+      draft.preflightJobId === null ||
+      (typeof draft.preflightJobId === "string" &&
+        isRulePreflightJobId(draft.preflightJobId))) &&
     typeof draft.lastMessage === "string" &&
     Buffer.byteLength(draft.lastMessage, "utf8") <= MAX_RULE_TEXT_BYTES &&
     (draft.messages === undefined || isValidConversationMessages(draft.messages)) &&
@@ -3206,13 +3567,36 @@ function getCorsHeaders(request: import("node:http").IncomingMessage) {
     : "";
 
   return {
+    // `last-event-id` is here for a cross-origin fetch-based stream reader
+    // resuming a rule preflight job; a native EventSource never preflights.
     "access-control-allow-headers":
-      "authorization, content-type, x-operator-wallet, x-operator-nonce, x-operator-signature",
+      "authorization, content-type, last-event-id, x-operator-wallet, x-operator-nonce, x-operator-signature",
     "access-control-allow-methods": getAllowedMethodsForPath(pathname),
     "access-control-allow-origin": allowedOrigin,
     "access-control-max-age": "600",
     vary: "Origin",
   };
+}
+
+/**
+ * Plain JSON reply with no durable-state side effect. Used where waiting on the
+ * snapshot write would be wrong rather than merely slow — see the 202 accept
+ * branch of /rule-preflight, which must never trade a jobId for a 503 when the
+ * job it identifies is already consuming GPU.
+ */
+function sendJsonWithoutStatePersistence(
+  request: import("node:http").IncomingMessage,
+  response: import("node:http").ServerResponse,
+  statusCode: number,
+  body: unknown,
+  extraHeaders: Record<string, string> = {},
+) {
+  response.writeHead(statusCode, {
+    "content-type": "application/json",
+    ...extraHeaders,
+    ...getCorsHeaders(request),
+  });
+  response.end(JSON.stringify(body));
 }
 
 function sendJson(
@@ -3222,11 +3606,12 @@ function sendJson(
   body: unknown,
 ) {
   const writeResponse = (resolvedStatus: number, resolvedBody: unknown) => {
-    response.writeHead(resolvedStatus, {
-      "content-type": "application/json",
-      ...getCorsHeaders(request),
-    });
-    response.end(JSON.stringify(resolvedBody));
+    sendJsonWithoutStatePersistence(
+      request,
+      response,
+      resolvedStatus,
+      resolvedBody,
+    );
   };
 
   if (
@@ -3309,6 +3694,202 @@ function writeRulePreflightStreamEvent(
   if (!response.destroyed && !response.writableEnded) {
     response.write(`${JSON.stringify(event)}\n`);
   }
+}
+
+/**
+ * Runs the preflight pipeline and publishes it to the job registry. Written to
+ * never reject: every exit lands a terminal event, which is what lets attached
+ * readers rely on "one terminal event, exactly once".
+ */
+async function runRulePreflightJob(
+  job: RulePreflightJobRecord,
+  text: string,
+) {
+  try {
+    const reportProgress: RulePreflightProgressReporter = (progress) => {
+      appendRulePreflightJobEvent(job.id, { progress, type: "progress" });
+    };
+    if (job.phase === "interpret") {
+      const interpretation = await createRuleInterpretation(
+        text,
+        reportProgress,
+      );
+      appendRulePreflightJobEvent(job.id, {
+        interpretation,
+        type: "interpretation",
+      });
+    } else {
+      const preflight = await createRulePreflight(text, reportProgress);
+      appendRulePreflightJobEvent(job.id, { preflight, type: "result" });
+    }
+  } catch (error) {
+    const failure = describeRulePreflightError(error);
+    appendRulePreflightJobEvent(job.id, {
+      ...failure.body,
+      status: failure.status,
+      type: "error",
+    });
+  }
+
+  // Best effort, and deliberately AFTER the terminal event. Preflight is a
+  // read-only advisory computation: it mutates no game state, authorizes no
+  // payment and gates nothing on-chain, so the durable copy exists only so a
+  // reconnect after a restart can still render the answer. Withholding a good
+  // result because a snapshot write failed would burn minutes of GPU for
+  // nothing. The persist-before-ack rule in sendJson stays correct for the paid
+  // mutating routes.
+  if (apiStatePool) {
+    try {
+      await queueApiStatePersistence();
+    } catch (error) {
+      console.error("API state persistence failed", error);
+    }
+  }
+}
+
+function startDetachedRulePreflightJob(
+  job: RulePreflightJobRecord,
+  text: string,
+) {
+  void runRulePreflightJob(job, text).catch((error: unknown) => {
+    // A fuse. runRulePreflightJob is written not to reject, but without this an
+    // unexpected throw would leave the job running forever and every attached
+    // reader hanging until the sweeper fires.
+    console.error("Rule preflight job crashed", error);
+    appendRulePreflightJobEvent(job.id, {
+      error: "RULE_PREFLIGHT_JOB_CRASHED",
+      message: "The rule preflight job ended unexpectedly.",
+      status: 500,
+      type: "error",
+    });
+  });
+}
+
+/**
+ * The single entry point for every transport. Reuses a running job with the
+ * same phase and sanitized text: the failure this whole design exists to fix
+ * (a client dropping mid-run) is precisely the one that produces a duplicate
+ * request, and the local model serializes, so a second identical chain would
+ * only make both slower. Everything between the fingerprint lookup and the
+ * create is synchronous, so two requests resolving in the same turn of the
+ * event loop cannot both create a job.
+ */
+function ensureRulePreflightJob(args: {
+  phase: RulePreflightPhase;
+  text: string;
+}) {
+  const now = new Date().toISOString();
+  sweepRulePreflightJobs(now);
+
+  const fingerprint = getRulePreflightJobFingerprint(args.phase, args.text);
+  const existing = findRunningRulePreflightJobByFingerprint(fingerprint);
+  if (existing) {
+    return { idempotent: true, job: existing, rejection: null } as const;
+  }
+
+  const slot = reserveRulePreflightJobSlot();
+  if (slot.error) {
+    return { idempotent: false, job: null, rejection: slot } as const;
+  }
+
+  const job = createRulePreflightJob({
+    createdAt: now,
+    fingerprint,
+    phase: args.phase,
+  });
+  startDetachedRulePreflightJob(job, args.text);
+  return { idempotent: false, job, rejection: null } as const;
+}
+
+/** Resolves with the job's terminal event, from the buffer or from a listener. */
+export function awaitRulePreflightJobResult(job: RulePreflightJobRecord) {
+  return new Promise<RulePreflightJobTerminalEvent>((resolve) => {
+    if (job.terminalEvent) {
+      resolve(job.terminalEvent);
+      return;
+    }
+    const listener: RulePreflightJobListener = (envelope) => {
+      if (envelope.event.type === "progress") {
+        return;
+      }
+      unsubscribeFromRulePreflightJob(job.id, listener);
+      resolve(envelope.event);
+    };
+    subscribeToRulePreflightJob(job.id, listener);
+  });
+}
+
+export function matchRulePreflightJobEventsPath(pathname: string) {
+  const prefix = "/rule-preflight/jobs/";
+  if (!pathname.startsWith(prefix)) {
+    return null;
+  }
+  const segments = pathname.slice(prefix.length).split("/");
+  if (segments.length !== 2 || segments[1] !== "events") {
+    return null;
+  }
+  const jobId = segments[0] ?? "";
+  return isRulePreflightJobId(jobId) ? jobId : null;
+}
+
+/**
+ * The header wins over the query fallback: browsers set Last-Event-ID
+ * automatically on reconnect, so it is always the freshest position. Anything
+ * malformed degrades to 0, which means a full replay and is always safe.
+ */
+export function parseRulePreflightCursor(
+  lastEventIdHeader: string | string[] | undefined,
+  cursorParam: string | null,
+) {
+  const header = Array.isArray(lastEventIdHeader)
+    ? lastEventIdHeader[0]
+    : lastEventIdHeader;
+  const candidate = (header ?? cursorParam ?? "").trim();
+  return /^\d{1,9}$/u.test(candidate) ? Number(candidate) : 0;
+}
+
+export function formatRulePreflightSseFrame(
+  envelope: RulePreflightJobEventEnvelope,
+) {
+  // `event: error` would collide with the transport-level error of an SSE
+  // client, making a job failure indistinguishable from a dropped socket. The
+  // payload keeps "type":"error" so the wire shape stays identical to NDJSON.
+  const name =
+    envelope.event.type === "error" ? "failed" : envelope.event.type;
+  return `id: ${envelope.seq}\nevent: ${name}\ndata: ${JSON.stringify(envelope.event)}\n\n`;
+}
+
+function startRulePreflightEventStream(
+  request: import("node:http").IncomingMessage,
+  response: import("node:http").ServerResponse,
+) {
+  // Heartbeats are only useful if they leave immediately.
+  request.socket.setNoDelay(true);
+  response.writeHead(200, {
+    "cache-control": "no-cache, no-store, no-transform",
+    connection: "keep-alive",
+    "content-type": "text/event-stream; charset=utf-8",
+    "x-accel-buffering": "no",
+    ...getCorsHeaders(request),
+  });
+  response.flushHeaders();
+  response.write(`retry: ${RULE_PREFLIGHT_SSE_RETRY_MS}\n\n`);
+}
+
+function writeRulePreflightSseFrame(
+  response: import("node:http").ServerResponse,
+  frame: string,
+) {
+  if (response.destroyed || response.writableEnded) {
+    return false;
+  }
+  response.write(frame);
+  if (response.writableLength > RULE_PREFLIGHT_SSE_MAX_BUFFERED_BYTES) {
+    // A reader too slow to drain, on an endpoint with no authentication.
+    response.destroy();
+    return false;
+  }
+  return true;
 }
 
 function sendNoContent(
@@ -8615,6 +9196,1678 @@ export async function getHealth(): Promise<ServiceHealth> {
   };
 }
 
+/**
+ * The whole HTTP surface of the API. Exported (rather than inlined into
+ * `createServer`) so routes can be exercised by tests against a real server on
+ * an ephemeral port; nothing here may depend on the boot block below.
+ */
+export function handleApiRequest(
+  request: import("node:http").IncomingMessage,
+  response: import("node:http").ServerResponse,
+) {
+  const host = process.env.HOST ?? "0.0.0.0";
+  const url = new URL(
+    request.url ?? "/",
+    `http://${request.headers.host ?? host}`,
+  );
+
+  if (request.method === "GET" && url.pathname === "/health") {
+    void getHealth().then((health) => {
+      sendJson(request, response, health.status === "ok" ? 200 : 503, health);
+    });
+    return;
+  }
+
+  if (
+    request.method === "OPTIONS" &&
+    (CORS_PATHS.has(url.pathname) ||
+      url.pathname.startsWith("/admin/repeated-vote-fee-reconciliation/") ||
+      url.pathname.startsWith("/audit/") ||
+      url.pathname.startsWith("/api/v1/turns/") ||
+      url.pathname.startsWith("/players/") ||
+      url.pathname.startsWith("/prize-pool-accounting/") ||
+      url.pathname.startsWith("/rule-preflight/jobs/"))
+  ) {
+    sendNoContent(request, response);
+    return;
+  }
+
+  const consoleMethodRejection = getConsoleReadOnlyMethodRejection(
+    url.pathname,
+    request.method,
+  );
+  if (consoleMethodRejection) {
+    sendMethodNotAllowed(request, response, consoleMethodRejection);
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/rule-preflight") {
+    void readJsonBody(request)
+      .then(async (body) => {
+        const text =
+          body && typeof body === "object" && "text" in body
+            ? (body as { text?: unknown }).text
+            : null;
+        const phase =
+          body && typeof body === "object" && "phase" in body
+            ? (body as { phase?: unknown }).phase
+            : "compile";
+
+        if (typeof text !== "string") {
+          sendJson(request, response, 400, { error: "invalid_rule_text" });
+          return;
+        }
+        if (phase !== "compile" && phase !== "interpret") {
+          sendJson(request, response, 400, { error: "invalid_preflight_phase" });
+          return;
+        }
+
+        // Transport is chosen by `accept`, the dispatch this route already used
+        // and the one header the web proxy forwards. All three transports are
+        // views onto the same job registry, so the pipeline is called once.
+        const accept = request.headers.accept?.toLowerCase() ?? "";
+        const streamProgress = accept.includes("application/x-ndjson");
+        const acceptsEventStream = accept.includes("text/event-stream");
+
+        const outcome = ensureRulePreflightJob({ phase, text });
+        if (outcome.rejection) {
+          const headers =
+            outcome.rejection.status === 429 ? { "retry-after": "30" } : {};
+          sendJsonWithoutStatePersistence(
+            request,
+            response,
+            outcome.rejection.status,
+            { error: outcome.rejection.error },
+            headers,
+          );
+          return;
+        }
+        const job = outcome.job;
+
+        if (streamProgress) {
+          // Legacy transport, byte-identical on the wire: `envelope.event` is
+          // exactly what this route used to write.
+          startRulePreflightStream(request, response);
+          let lastWrittenSeq = 0;
+          for (const envelope of
+            readRulePreflightJobEventsAfter(job.id, 0)?.events ?? []) {
+            writeRulePreflightStreamEvent(response, envelope.event);
+            lastWrittenSeq = envelope.seq;
+          }
+          if (job.status !== "running") {
+            response.end();
+            return;
+          }
+          const listener: RulePreflightJobListener = (envelope) => {
+            if (envelope.seq <= lastWrittenSeq) {
+              return;
+            }
+            lastWrittenSeq = envelope.seq;
+            writeRulePreflightStreamEvent(response, envelope.event);
+            if (envelope.event.type !== "progress") {
+              unsubscribeFromRulePreflightJob(job.id, listener);
+              response.end();
+            }
+          };
+          subscribeToRulePreflightJob(job.id, listener);
+          // Detaching removes the listener only. The pipeline is owned by the
+          // registry and keeps running — that is the entire point.
+          request.on("close", () => {
+            unsubscribeFromRulePreflightJob(job.id, listener);
+          });
+          return;
+        }
+
+        if (acceptsEventStream) {
+          sendJsonWithoutStatePersistence(
+            request,
+            response,
+            202,
+            {
+              idempotent: outcome.idempotent,
+              jobId: job.id,
+              phase: job.phase,
+              status: job.status,
+            },
+            { location: `/rule-preflight/jobs/${job.id}/events` },
+          );
+          return;
+        }
+
+        const terminal = await awaitRulePreflightJobResult(job);
+        if (terminal.type === "error") {
+          sendJson(request, response, terminal.status, {
+            error: terminal.error,
+            message: terminal.message,
+          });
+          return;
+        }
+        sendJson(
+          request,
+          response,
+          200,
+          terminal.type === "interpretation"
+            ? { interpretation: terminal.interpretation }
+            : { preflight: terminal.preflight },
+        );
+      })
+      .catch((error: unknown) => {
+        sendJson(request, response, 400, {
+          error: "invalid_json",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return;
+  }
+
+  const matchedPreflightJobId = matchRulePreflightJobEventsPath(url.pathname);
+  if (request.method === "GET" && matchedPreflightJobId) {
+    const rulePreflightJobId = matchedPreflightJobId;
+    sweepRulePreflightJobs();
+
+    const cursor = parseRulePreflightCursor(
+      request.headers["last-event-id"],
+      url.searchParams.get("cursor"),
+    );
+    const replay = readRulePreflightJobEventsAfter(rulePreflightJobId, cursor);
+    if (!replay) {
+      // A non-2xx is what stops a reconnecting client for good once the job has
+      // aged out, instead of leaving it retrying against nothing.
+      sendJson(request, response, 404, {
+        error: "rule_preflight_job_not_found",
+      });
+      return;
+    }
+    if (
+      countRulePreflightJobListeners(rulePreflightJobId) >=
+      RULE_PREFLIGHT_SSE_MAX_LISTENERS_PER_JOB
+    ) {
+      sendJson(request, response, 429, {
+        error: "rule_preflight_stream_busy",
+      });
+      return;
+    }
+    if (
+      replay.status !== "running" &&
+      !replay.reset &&
+      replay.events.length === 0
+    ) {
+      // Finished and the client is already current: nothing left to stream.
+      sendNoContent(request, response);
+      return;
+    }
+
+    startRulePreflightEventStream(request, response);
+
+    // Read, write and subscribe in one synchronous block so no event can be
+    // appended between the replay and the subscription. The seq guard in the
+    // listener enforces that in code rather than by argument.
+    let lastWrittenSeq = replay.reset ? 0 : cursor;
+    if (replay.reset) {
+      // Control frames carry no `id:`, or they would advance the client's
+      // stored Last-Event-ID to a value outside the seq space.
+      writeRulePreflightSseFrame(
+        response,
+        `event: reset\ndata: {"type":"reset"}\n\n`,
+      );
+    }
+    for (const envelope of replay.events) {
+      writeRulePreflightSseFrame(
+        response,
+        formatRulePreflightSseFrame(envelope),
+      );
+      lastWrittenSeq = envelope.seq;
+    }
+
+    if (replay.status !== "running") {
+      writeRulePreflightSseFrame(
+        response,
+        `event: done\ndata: {"type":"done"}\n\n`,
+      );
+      response.end();
+      return;
+    }
+
+    // The slow stages (model load, guardian, translation) each emit one event
+    // and then go quiet for 60-180s. Without a keepalive, any intermediary idle
+    // timeout kills the socket mid-stage and the client reconnects into
+    // silence, repeatedly.
+    const heartbeat = setInterval(() => {
+      if (!writeRulePreflightSseFrame(response, `: ping\n\n`)) {
+        detach();
+      }
+    }, RULE_PREFLIGHT_SSE_HEARTBEAT_MS);
+    heartbeat.unref();
+
+    const listener: RulePreflightJobListener = (envelope) => {
+      if (envelope.seq <= lastWrittenSeq) {
+        return;
+      }
+      lastWrittenSeq = envelope.seq;
+      writeRulePreflightSseFrame(
+        response,
+        formatRulePreflightSseFrame(envelope),
+      );
+      if (envelope.event.type !== "progress") {
+        writeRulePreflightSseFrame(
+          response,
+          `event: done\ndata: {"type":"done"}\n\n`,
+        );
+        detach();
+        response.end();
+      }
+    };
+
+    // Idempotent, and removes the listener only: the pipeline belongs to the
+    // registry and survives the socket.
+    function detach() {
+      clearInterval(heartbeat);
+      unsubscribeFromRulePreflightJob(rulePreflightJobId, listener);
+    }
+
+    subscribeToRulePreflightJob(rulePreflightJobId, listener);
+    request.on("close", detach);
+    response.on("close", detach);
+    response.on("error", detach);
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/guess-receipts") {
+    void readJsonBody(request)
+      .then((body) => {
+        if (!isValidGuessReceipt(body)) {
+          sendJson(request, response, 400, {
+            error: "invalid_guess_receipt",
+          });
+          return;
+        }
+
+        const existing =
+          body.sequence === undefined
+            ? null
+            : getGuessReceiptBySequence(body.turnId, body.player, body.sequence);
+        if (existing && existing.signature !== body.signature) {
+          sendJson(request, response, 409, {
+            error: "duplicate_guess_receipt",
+            receipt: existing,
+          });
+          return;
+        }
+
+        sendJson(request, response, 201, { receipt: saveGuessReceipt(body) });
+      })
+      .catch((error: unknown) => {
+        sendJson(request, response, 400, {
+          error: "invalid_json",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/rule-proposals") {
+    void readJsonBody(request)
+      .then((body) => {
+        if (!isValidRuleProposal(body)) {
+          sendJson(request, response, 400, {
+            error: "invalid_rule_proposal",
+          });
+          return;
+        }
+
+        const existing = ruleProposals.get(
+          getRuleProposalKey(body.turnId, body.ruleId),
+        );
+        if (existing && existing.signature !== body.signature) {
+          sendJson(request, response, 409, {
+            error: "duplicate_rule_proposal",
+            proposal: existing,
+          });
+          return;
+        }
+
+        sendJson(request, response, 201, {
+          proposal: saveRuleProposal(body),
+        });
+      })
+      .catch((error: unknown) => {
+        sendJson(request, response, 400, {
+          error: "invalid_json",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/rule-proposals") {
+    const turnId = Number(url.searchParams.get("turnId"));
+
+    if (!Number.isInteger(turnId) || turnId <= 0) {
+      sendJson(request, response, 400, { error: "invalid_query" });
+      return;
+    }
+
+    sendJson(request, response, 200, {
+      proposals: listRuleProposals(turnId),
+    });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/rule-precompilations") {
+    void readJsonBody(request)
+      .then((body) => {
+        if (!isValidRulePrecompilation(body)) {
+          sendJson(request, response, 400, {
+            error: "invalid_rule_precompilation",
+          });
+          return;
+        }
+
+        try {
+          sendJson(request, response, 201, {
+            proposal: saveRulePrecompilation(body),
+          });
+        } catch (error) {
+          const code =
+            error instanceof Error ? error.message : "PRECOMPILATION_FAILED";
+          sendJson(request, response, 404, {
+            error: code,
+            message: "Rule proposal not found for precompilation update.",
+          });
+        }
+      })
+      .catch((error: unknown) => {
+        sendJson(request, response, 400, {
+          error: "invalid_json",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/rule-validations/run") {
+    void readJsonBody(request)
+      .then((body) => {
+        if (!isValidRuleValidationRunRequest(body)) {
+          sendJson(request, response, 400, {
+            error: "invalid_rule_validation_request",
+          });
+          return;
+        }
+
+        try {
+          const validation = runRuleValidationForProposal(body);
+          sendJson(request, response, 201, { validation });
+        } catch (error) {
+          const code =
+            error instanceof Error ? error.message : "RULE_VALIDATION_FAILED";
+          sendJson(request, response, 404, {
+            error: code,
+            message: "Rule proposal not found for validation.",
+          });
+        }
+      })
+      .catch((error: unknown) => {
+        sendJson(request, response, 400, {
+          error: "invalid_json",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/rule-validations") {
+    void readJsonBody(request)
+      .then((body) => {
+        if (!isValidRuleValidation(body)) {
+          sendJson(request, response, 400, {
+            error: "invalid_rule_validation",
+          });
+          return;
+        }
+
+        try {
+          sendJson(request, response, 201, {
+            validation: saveRuleValidation(body),
+          });
+        } catch (error) {
+          const code =
+            error instanceof Error ? error.message : "RULE_VALIDATION_FAILED";
+          sendJson(request, response, 404, {
+            error: code,
+            message: "Rule proposal not found for validation.",
+          });
+        }
+      })
+      .catch((error: unknown) => {
+        sendJson(request, response, 400, {
+          error: "invalid_json",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return;
+  }
+
+  if (
+    request.method === "GET" &&
+    url.pathname.startsWith("/rule-validations/")
+  ) {
+    const parts = url.pathname.slice("/rule-validations/".length).split("/");
+    const turnId = Number(parts[0]);
+    const ruleId = Number(parts[1]);
+
+    if (
+      !Number.isInteger(turnId) ||
+      turnId <= 0 ||
+      !Number.isInteger(ruleId) ||
+      ruleId <= 0
+    ) {
+      sendJson(request, response, 400, {
+        error: "invalid_rule_validation_id",
+      });
+      return;
+    }
+
+    const validation = getRuleValidation(turnId, ruleId);
+    sendJson(
+      request,
+      response,
+      validation ? 200 : 404,
+      validation ? { validation } : { error: "not_found" },
+    );
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/rule-votes") {
+    void readJsonBody(request)
+      .then((body) => {
+        if (!isValidRuleVote(body)) {
+          sendJson(request, response, 400, { error: "invalid_rule_vote" });
+          return;
+        }
+
+        const existing = ruleVotes.get(
+          getRuleVoteKey(
+            body.turnId,
+            body.ruleId,
+            body.voter,
+            body.sequence ?? 0,
+          ),
+        );
+        if (existing && existing.signature !== body.signature) {
+          sendJson(request, response, 409, {
+            error: "duplicate_rule_vote",
+            vote: existing,
+          });
+          return;
+        }
+
+        sendJson(request, response, 201, { vote: saveRuleVote(body) });
+      })
+      .catch((error: unknown) => {
+        sendJson(request, response, 400, {
+          error: "invalid_json",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/rule-votes") {
+    const turnId = Number(url.searchParams.get("turnId"));
+
+    if (!Number.isInteger(turnId) || turnId <= 0) {
+      sendJson(request, response, 400, { error: "invalid_query" });
+      return;
+    }
+
+    sendJson(request, response, 200, listRuleVotes(turnId));
+    return;
+  }
+
+  if (
+    request.method === "POST" &&
+    url.pathname === "/rule-elimination-votes"
+  ) {
+    void readJsonBody(request)
+      .then((body) => {
+        if (!isValidRuleEliminationVote(body)) {
+          sendJson(request, response, 400, {
+            error: "invalid_rule_elimination_vote",
+          });
+          return;
+        }
+
+        const existing = ruleEliminationVotes.get(
+          getRuleEliminationVoteKey(
+            body.turnId,
+            body.ruleId,
+            body.voter,
+            body.sequence ?? 0,
+          ),
+        );
+        if (existing && existing.signature !== body.signature) {
+          sendJson(request, response, 409, {
+            error: "duplicate_rule_elimination_vote",
+            vote: existing,
+          });
+          return;
+        }
+
+        sendJson(request, response, 201, {
+          vote: saveRuleEliminationVote(body),
+        });
+      })
+      .catch((error: unknown) => {
+        sendJson(request, response, 400, {
+          error: "invalid_json",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return;
+  }
+
+  if (
+    request.method === "GET" &&
+    url.pathname === "/rule-elimination-votes"
+  ) {
+    const turnId = Number(url.searchParams.get("turnId"));
+
+    if (!Number.isInteger(turnId) || turnId <= 0) {
+      sendJson(request, response, 400, { error: "invalid_query" });
+      return;
+    }
+
+    sendJson(request, response, 200, listRuleEliminationVotes(turnId));
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/rule-eliminations") {
+    void readJsonBody(request)
+      .then((body) => {
+        if (!isValidRuleEliminationProjection(body)) {
+          sendJson(request, response, 400, {
+            error: "invalid_rule_elimination",
+          });
+          return;
+        }
+
+        sendJson(request, response, 201, {
+          elimination: projectRuleElimination(body),
+        });
+      })
+      .catch((error: unknown) => {
+        sendJson(request, response, 400, {
+          error: "invalid_json",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return;
+  }
+
+  if (
+    request.method === "GET" &&
+    /^\/api\/v1\/turns\/\d+\/elimination$/.test(url.pathname)
+  ) {
+    const parts = url.pathname.split("/");
+    const turnId = Number(parts[4]);
+
+    if (!Number.isInteger(turnId) || turnId <= 0) {
+      sendJson(request, response, 400, { error: "invalid_turn_id" });
+      return;
+    }
+
+    sendJson(request, response, 200, {
+      elimination: getRuleElimination(turnId),
+    });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/rule-removals") {
+    void readJsonBody(request)
+      .then((body) => {
+        if (!isValidPaidRuleRemoval(body)) {
+          sendJson(request, response, 400, {
+            error: "invalid_rule_removal",
+          });
+          return;
+        }
+
+        // Idempotent replay: re-posting the identical removal returns the
+        // stored record; a conflicting signature for the same key is 409.
+        const existing = paidRuleRemovals.get(
+          getPaidRuleRemovalKey(body.turnId, body.ruleId, body.remover),
+        );
+        if (existing) {
+          if (existing.signature === body.signature) {
+            sendJson(request, response, 200, { removal: existing });
+          } else {
+            sendJson(request, response, 409, {
+              error: "duplicate_rule_removal",
+              removal: existing,
+            });
+          }
+          return;
+        }
+
+        try {
+          const { auditLog, removal } = removeRule(body);
+          sendJson(request, response, 201, { auditLog, removal });
+        } catch (error: unknown) {
+          if (error instanceof RuleRemovalRejectedError) {
+            sendJson(request, response, 409, {
+              code: error.code,
+              error: "rule_removal_rejected",
+              message: error.message,
+              threshold: error.threshold,
+              voteCount: error.voteCount,
+            });
+            return;
+          }
+          throw error;
+        }
+      })
+      .catch((error: unknown) => {
+        sendJson(request, response, 400, {
+          error: "invalid_json",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/rule-removals") {
+    const turnId = Number(url.searchParams.get("turnId"));
+
+    if (!Number.isInteger(turnId) || turnId <= 0) {
+      sendJson(request, response, 400, { error: "invalid_query" });
+      return;
+    }
+
+    sendJson(request, response, 200, {
+      removals: listPaidRuleRemovals(turnId),
+    });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/prize-pool-rollovers") {
+    void readJsonBody(request)
+      .then((body) => {
+        if (!isValidTurnRollover(body)) {
+          sendJson(request, response, 400, {
+            error: "invalid_prize_pool_rollover",
+          });
+          return;
+        }
+
+        sendJson(request, response, 201, {
+          rollover: saveTurnRollover(body),
+        });
+      })
+      .catch((error: unknown) => {
+        sendJson(request, response, 400, {
+          error: "invalid_json",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/prize-pool-rollovers") {
+    const turnId = Number(url.searchParams.get("turnId"));
+
+    if (!Number.isInteger(turnId) || turnId <= 0) {
+      sendJson(request, response, 400, { error: "invalid_query" });
+      return;
+    }
+
+    sendJson(request, response, 200, {
+      rollover: getTurnRollover(turnId),
+    });
+    return;
+  }
+
+  if (
+    request.method === "POST" &&
+    url.pathname === "/turn-rollovers/settle"
+  ) {
+    void readJsonBody(request)
+      .then((body) => {
+        if (!isValidGuessVerificationCreateRequest(body)) {
+          sendJson(request, response, 400, {
+            error: "invalid_rollover_settle_request",
+          });
+          return;
+        }
+
+        sendJson(request, response, 201, {
+          settlement: settleTurnRollover(body.turnId),
+        });
+      })
+      .catch((error: unknown) => {
+        sendJson(request, response, 400, {
+          error: "invalid_json",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return;
+  }
+
+  if (
+    request.method === "GET" &&
+    url.pathname === "/turn-rollovers/settlement"
+  ) {
+    const turnId = Number(url.searchParams.get("turnId"));
+
+    if (!Number.isInteger(turnId) || turnId <= 0) {
+      sendJson(request, response, 400, { error: "invalid_query" });
+      return;
+    }
+
+    sendJson(request, response, 200, {
+      activity: getRolloverActivityEvents(turnId),
+      settlement: getTurnRolloverSettlement(turnId),
+    });
+    return;
+  }
+
+  if (
+    request.method === "GET" &&
+    url.pathname.startsWith("/admin/repeated-vote-fee-reconciliation/")
+  ) {
+    const turnId = Number(
+      url.pathname.slice("/admin/repeated-vote-fee-reconciliation/".length),
+    );
+
+    if (!Number.isInteger(turnId) || turnId <= 0) {
+      sendJson(request, response, 400, { error: "invalid_turn_id" });
+      return;
+    }
+
+    sendJson(request, response, 200, {
+      reconciliation: getRepeatedVoteFeeReconciliation(turnId),
+    });
+    return;
+  }
+
+  if (
+    request.method === "GET" &&
+    url.pathname.startsWith("/prize-pool-accounting/")
+  ) {
+    const turnId = Number(
+      url.pathname.slice("/prize-pool-accounting/".length),
+    );
+
+    if (!Number.isInteger(turnId) || turnId <= 0) {
+      sendJson(request, response, 400, { error: "invalid_turn_id" });
+      return;
+    }
+
+    sendJson(request, response, 200, {
+      accounting: getPrizePoolAccounting(turnId),
+    });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/draws") {
+    void readJsonBody(request)
+      .then((body) => {
+        if (!isValidDrawRecord(body)) {
+          sendJson(request, response, 400, { error: "invalid_draw_record" });
+          return;
+        }
+
+        sendJson(request, response, 201, { draw: saveDraw(body) });
+      })
+      .catch((error: unknown) => {
+        sendJson(request, response, 400, {
+          error: "invalid_json",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname.startsWith("/draws/")) {
+    const turnId = Number(url.pathname.slice("/draws/".length));
+
+    if (!Number.isInteger(turnId) || turnId <= 0) {
+      sendJson(request, response, 400, { error: "invalid_turn_id" });
+      return;
+    }
+
+    const draw = getDraw(turnId);
+    sendJson(
+      request,
+      response,
+      draw ? 200 : 404,
+      draw ? { draw } : { error: "not_found" },
+    );
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/elections") {
+    void readJsonBody(request)
+      .then((body) => {
+        if (!isValidRuleElection(body)) {
+          sendJson(request, response, 400, {
+            error: "invalid_rule_election",
+          });
+          return;
+        }
+
+        sendJson(request, response, 201, {
+          election: saveRuleElection(body),
+        });
+      })
+      .catch((error: unknown) => {
+        sendJson(request, response, 400, {
+          error: "invalid_json",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname.startsWith("/elections/")) {
+    const turnId = Number(url.pathname.slice("/elections/".length));
+
+    if (!Number.isInteger(turnId) || turnId <= 0) {
+      sendJson(request, response, 400, { error: "invalid_turn_id" });
+      return;
+    }
+
+    const election = getRuleElection(turnId);
+    sendJson(
+      request,
+      response,
+      election ? 200 : 404,
+      election ? { election } : { error: "not_found" },
+    );
+    return;
+  }
+
+  if (
+    request.method === "POST" &&
+    url.pathname === "/verification-jobs/create-turn"
+  ) {
+    void readJsonBody(request)
+      .then((body) => {
+        if (!isValidGuessVerificationCreateRequest(body)) {
+          sendJson(request, response, 400, {
+            error: "invalid_verification_job_request",
+          });
+          return;
+        }
+
+        try {
+          const result = createGuessVerificationJobsForTurn(body.turnId);
+          sendJson(request, response, 201, result);
+        } catch (error) {
+          const code =
+            error instanceof Error
+              ? error.message
+              : "VERIFICATION_JOB_FAILED";
+          sendJson(request, response, 409, {
+            error: code,
+            message: "Verification jobs could not be created for this turn.",
+          });
+        }
+      })
+      .catch((error: unknown) => {
+        sendJson(request, response, 400, {
+          error: "invalid_json",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/verification-jobs") {
+    const turnId = Number(url.searchParams.get("turnId"));
+
+    if (!Number.isInteger(turnId) || turnId <= 0) {
+      sendJson(request, response, 400, { error: "invalid_query" });
+      return;
+    }
+
+    sendJson(request, response, 200, {
+      jobs: listVerificationJobs(turnId),
+      summary: getVerificationSummary(turnId),
+    });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/verification-results") {
+    void readJsonBody(request)
+      .then((body) => {
+        if (!isValidGuessVerificationResult(body)) {
+          sendJson(request, response, 400, {
+            error: "invalid_verification_result",
+          });
+          return;
+        }
+
+        try {
+          sendJson(request, response, 201, {
+            result: saveGuessVerificationResult(body),
+            summary: getVerificationSummary(body.turnId),
+          });
+        } catch (error) {
+          const code =
+            error instanceof Error
+              ? error.message
+              : "VERIFICATION_RESULT_FAILED";
+          sendJson(request, response, 404, {
+            error: code,
+            message: "Verification job not found for result update.",
+          });
+        }
+      })
+      .catch((error: unknown) => {
+        sendJson(request, response, 400, {
+          error: "invalid_json",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/verification-results") {
+    const turnId = Number(url.searchParams.get("turnId"));
+
+    if (!Number.isInteger(turnId) || turnId <= 0) {
+      sendJson(request, response, 400, { error: "invalid_query" });
+      return;
+    }
+
+    sendJson(request, response, 200, {
+      results: listVerificationResults(turnId),
+      summary: getVerificationSummary(turnId),
+    });
+    return;
+  }
+
+  if (
+    request.method === "POST" &&
+    url.pathname === "/winner-records/calculate-turn"
+  ) {
+    void readJsonBody(request)
+      .then((body) => {
+        if (!isValidGuessVerificationCreateRequest(body)) {
+          sendJson(request, response, 400, {
+            error: "invalid_winner_calculation_request",
+          });
+          return;
+        }
+
+        sendJson(request, response, 201, {
+          winners: calculateAndStoreWinnerRecords(body.turnId),
+        });
+      })
+      .catch((error: unknown) => {
+        sendJson(request, response, 400, {
+          error: "invalid_json",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/winner-records") {
+    const turnId = Number(url.searchParams.get("turnId"));
+
+    if (!Number.isInteger(turnId) || turnId <= 0) {
+      sendJson(request, response, 400, { error: "invalid_query" });
+      return;
+    }
+
+    sendJson(request, response, 200, {
+      winners: getWinnerSummary(turnId),
+    });
+    return;
+  }
+
+  if (
+    request.method === "POST" &&
+    url.pathname === "/reward-records/calculate-turn"
+  ) {
+    void readJsonBody(request)
+      .then((body) => {
+        if (!isValidGuessVerificationCreateRequest(body)) {
+          sendJson(request, response, 400, {
+            error: "invalid_reward_calculation_request",
+          });
+          return;
+        }
+
+        try {
+          sendJson(request, response, 201, {
+            rewards: calculateAndStoreRewardRecords(body.turnId),
+          });
+        } catch (error) {
+          const code =
+            error instanceof Error
+              ? error.message
+              : "REWARD_CALCULATION_FAILED";
+          sendJson(request, response, 404, {
+            error: code,
+          });
+        }
+      })
+      .catch((error: unknown) => {
+        sendJson(request, response, 400, {
+          error: "invalid_json",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/reward-records") {
+    const turnId = Number(url.searchParams.get("turnId"));
+
+    if (!Number.isInteger(turnId) || turnId <= 0) {
+      sendJson(request, response, 400, { error: "invalid_query" });
+      return;
+    }
+
+    sendJson(request, response, 200, {
+      rewards: getRewardSummary(turnId),
+    });
+    return;
+  }
+
+  if (
+    request.method === "POST" &&
+    url.pathname === "/claim-records/create-turn"
+  ) {
+    void readJsonBody(request)
+      .then((body) => {
+        if (!isValidClaimCreateRequest(body)) {
+          sendJson(request, response, 400, {
+            error: "invalid_claim_create_request",
+          });
+          return;
+        }
+
+        sendJson(request, response, 201, {
+          claims: createClaimRecordsForTurn(body.turnId, body.availableAt),
+        });
+      })
+      .catch((error: unknown) => {
+        sendJson(request, response, 400, {
+          error: "invalid_json",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/claim-records") {
+    const turnId = Number(url.searchParams.get("turnId"));
+    const wallet = url.searchParams.get("wallet") ?? undefined;
+
+    if (
+      !Number.isInteger(turnId) ||
+      turnId <= 0 ||
+      (wallet !== undefined && !isBase58Like(wallet))
+    ) {
+      sendJson(request, response, 400, { error: "invalid_query" });
+      return;
+    }
+
+    sendJson(request, response, 200, {
+      claims: getClaimSummary({ turnId, ...(wallet ? { wallet } : {}) }),
+    });
+    return;
+  }
+
+  if (
+    request.method === "POST" &&
+    url.pathname === "/claim-records/expire-unclaimed"
+  ) {
+    void readJsonBody(request)
+      .then((body) => {
+        if (!isValidExpiredUnclaimedClaimRequest(body)) {
+          sendJson(request, response, 400, {
+            error: "invalid_claim_expiry_request",
+          });
+          return;
+        }
+
+        sendJson(request, response, 201, {
+          settlement: settleExpiredUnclaimedClaims(body),
+        });
+      })
+      .catch((error: unknown) => {
+        sendJson(request, response, 400, {
+          error: "invalid_json",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return;
+  }
+
+  if (
+    request.method === "GET" &&
+    url.pathname.startsWith("/players/") &&
+    url.pathname.endsWith("/claims")
+  ) {
+    const wallet = url.pathname.slice(
+      "/players/".length,
+      url.pathname.length - "/claims".length,
+    );
+
+    if (!isBase58Like(wallet)) {
+      sendJson(request, response, 400, { error: "invalid_wallet" });
+      return;
+    }
+
+    sendJson(request, response, 200, {
+      claims: getPlayerClaimsSummary(wallet),
+    });
+    return;
+  }
+
+  if (
+    request.method === "GET" &&
+    url.pathname.startsWith("/players/") &&
+    url.pathname.endsWith("/history")
+  ) {
+    const wallet = url.pathname.slice(
+      "/players/".length,
+      url.pathname.length - "/history".length,
+    );
+    const cursor = url.searchParams.get("cursor");
+    const rawLimit = url.searchParams.get("limit");
+    const limit = rawLimit === null ? undefined : Number(rawLimit);
+
+    if (
+      !isBase58Like(wallet) ||
+      (cursor !== null && !/^\d+$/.test(cursor)) ||
+      (limit !== undefined && (!Number.isInteger(limit) || limit <= 0))
+    ) {
+      sendJson(request, response, 400, { error: "invalid_query" });
+      return;
+    }
+
+    sendJson(request, response, 200, {
+      history: listPlayerHistory({
+        ...(cursor === null ? {} : { cursor }),
+        ...(limit === undefined ? {} : { limit }),
+        wallet,
+      }),
+    });
+    return;
+  }
+
+  if (
+    request.method === "GET" &&
+    url.pathname.startsWith("/players/") &&
+    url.pathname.endsWith("/conversation-drafts")
+  ) {
+    const wallet = url.pathname.slice(
+      "/players/".length,
+      url.pathname.length - "/conversation-drafts".length,
+    );
+
+    if (!isBase58Like(wallet)) {
+      sendJson(request, response, 400, { error: "invalid_wallet" });
+      return;
+    }
+
+    sendJson(request, response, 200, {
+      drafts: listConversationDrafts(wallet),
+    });
+    return;
+  }
+
+  if (
+    request.method === "POST" &&
+    url.pathname.startsWith("/players/") &&
+    url.pathname.endsWith("/conversation-drafts")
+  ) {
+    const wallet = url.pathname.slice(
+      "/players/".length,
+      url.pathname.length - "/conversation-drafts".length,
+    );
+
+    if (!isBase58Like(wallet)) {
+      sendJson(request, response, 400, { error: "invalid_wallet" });
+      return;
+    }
+
+    void readJsonBody(request)
+      .then((body) => {
+        if (!isValidConversationDraft(body)) {
+          sendJson(request, response, 400, {
+            error: "invalid_conversation_draft",
+          });
+          return;
+        }
+
+        if (body.wallet !== wallet) {
+          sendJson(request, response, 409, {
+            error: "wallet_mismatch",
+            message: "Draft wallet must match the URL wallet.",
+          });
+          return;
+        }
+
+        sendJson(request, response, 201, {
+          draft: saveConversationDraft(body),
+        });
+      })
+      .catch((error: unknown) => {
+        sendJson(request, response, 400, {
+          error: "invalid_json",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return;
+  }
+
+  if (
+    request.method === "POST" &&
+    url.pathname === "/claim-records/request"
+  ) {
+    void readJsonBody(request)
+      .then((body) => {
+        if (!isValidClaimRequest(body)) {
+          sendJson(request, response, 400, {
+            error: "invalid_claim_request",
+          });
+          return;
+        }
+
+        try {
+          sendJson(request, response, 200, {
+            claim: requestClaimApproval(body),
+          });
+        } catch (error) {
+          const code =
+            error instanceof Error ? error.message : "CLAIM_FAILED";
+          sendJson(request, response, 409, { error: code });
+        }
+      })
+      .catch((error: unknown) => {
+        sendJson(request, response, 400, {
+          error: "invalid_json",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return;
+  }
+
+  if (
+    request.method === "POST" &&
+    url.pathname === "/claim-records/complete"
+  ) {
+    void readJsonBody(request)
+      .then((body) => {
+        if (!isValidClaimCompleteRequest(body)) {
+          sendJson(request, response, 400, {
+            error: "invalid_claim_completion_request",
+          });
+          return;
+        }
+
+        try {
+          sendJson(request, response, 200, {
+            claim: completeClaimApproval(body),
+          });
+        } catch (error) {
+          const code =
+            error instanceof Error ? error.message : "CLAIM_FAILED";
+          sendJson(request, response, 409, { error: code });
+        }
+      })
+      .catch((error: unknown) => {
+        sendJson(request, response, 400, {
+          error: "invalid_json",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return;
+  }
+
+  if (
+    request.method === "POST" &&
+    url.pathname === "/settlement-transitions"
+  ) {
+    void readJsonBody(request)
+      .then((body) => {
+        if (!isValidSettlementTransitionRequest(body)) {
+          sendJson(request, response, 400, {
+            error: "invalid_settlement_transition",
+          });
+          return;
+        }
+
+        sendJson(request, response, 201, {
+          transition: recordSettlementTransition(body),
+        });
+      })
+      .catch((error: unknown) => {
+        sendJson(request, response, 400, {
+          error: "invalid_json",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return;
+  }
+
+  if (
+    request.method === "GET" &&
+    url.pathname === "/settlement-transitions"
+  ) {
+    const turnId = Number(url.searchParams.get("turnId"));
+
+    if (!Number.isInteger(turnId) || turnId <= 0) {
+      sendJson(request, response, 400, { error: "invalid_query" });
+      return;
+    }
+
+    sendJson(request, response, 200, {
+      transitions: listSettlementTransitions(turnId),
+    });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/audit") {
+    const rawTurnId = url.searchParams.get("turnId");
+    const rawKind = url.searchParams.get("kind");
+    const turnId = rawTurnId === null ? undefined : Number(rawTurnId);
+    const kind =
+      rawKind !== null && AUDIT_LOG_KINDS.has(rawKind as AuditLogKind)
+        ? (rawKind as AuditLogKind)
+        : undefined;
+
+    if (
+      rawTurnId !== null &&
+      (!Number.isInteger(turnId) || Number(turnId) <= 0)
+    ) {
+      sendJson(request, response, 400, { error: "invalid_query" });
+      return;
+    }
+    if (rawKind !== null && kind === undefined) {
+      sendJson(request, response, 400, { error: "invalid_audit_kind" });
+      return;
+    }
+
+    const filters: { kind?: AuditLogKind; turnId?: number } = {};
+    if (kind !== undefined) {
+      filters.kind = kind;
+    }
+    if (turnId !== undefined) {
+      filters.turnId = turnId;
+    }
+
+    sendJson(request, response, 200, {
+      logs: listAuditLogs(filters),
+    });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname.startsWith("/audit/")) {
+    const logHash = url.pathname.slice("/audit/".length);
+    if (!isHexHash(logHash)) {
+      sendJson(request, response, 400, { error: "invalid_audit_log_hash" });
+      return;
+    }
+
+    const log = getAuditLog(logHash);
+    sendJson(
+      request,
+      response,
+      log ? 200 : 404,
+      log
+        ? { integrity: verifyAuditLogIntegrity(log), log }
+        : { error: "not_found" },
+    );
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/tokenomics/public") {
+    sendJson(request, response, 200, {
+      tokenomics: getPublicTokenomicsSnapshot(),
+    });
+    return;
+  }
+
+  if (
+    request.method === "GET" &&
+    url.pathname.startsWith("/tokenomics/wallets/")
+  ) {
+    const wallet = url.pathname.slice("/tokenomics/wallets/".length);
+    if (!isBase58Like(wallet)) {
+      sendJson(request, response, 400, { error: "invalid_wallet" });
+      return;
+    }
+    const walletProjection = getWalletTokenomicsProjection(wallet);
+    sendJson(
+      request,
+      response,
+      walletProjection ? 200 : 404,
+      walletProjection
+        ? { wallet: walletProjection }
+        : { error: "tokenomics_wallet_not_indexed" },
+    );
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/tokenomics/projection") {
+    const authorization = authorizeTokenomicsProjection(
+      request.headers.authorization,
+    );
+    if (!authorization.ok) {
+      sendJson(request, response, authorization.statusCode, {
+        error: authorization.error,
+      });
+      return;
+    }
+    void readJsonBody(request)
+      .then((body) => {
+        if (!isTokenomicsProjection(body)) {
+          sendJson(request, response, 400, {
+            error: "invalid_tokenomics_projection",
+          });
+          return;
+        }
+        sendJson(request, response, 201, {
+          projection: saveTokenomicsProjection(body),
+        });
+      })
+      .catch((error: unknown) => {
+        sendJson(request, response, 400, {
+          error: "invalid_json",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname.startsWith("/rounds/")) {
+    const turnId = Number(url.pathname.slice("/rounds/".length));
+    const activeTurnIdParam = url.searchParams.get("activeTurnId");
+    const activeTurnId =
+      activeTurnIdParam === null ? undefined : Number(activeTurnIdParam);
+
+    if (
+      !Number.isInteger(turnId) ||
+      turnId <= 0 ||
+      (activeTurnId !== undefined &&
+        (!Number.isInteger(activeTurnId) || activeTurnId <= 0))
+    ) {
+      sendJson(request, response, 400, { error: "invalid_turn_id" });
+      return;
+    }
+
+    sendJson(request, response, 200, {
+      round: getRoundSummary(turnId, activeTurnId),
+    });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/rounds") {
+    const activeTurnIdParam = url.searchParams.get("activeTurnId");
+    const activeTurnId =
+      activeTurnIdParam === null
+        ? getDefaultActiveTurnId()
+        : Number(activeTurnIdParam);
+    if (!Number.isInteger(activeTurnId) || activeTurnId <= 0) {
+      sendJson(request, response, 400, { error: "invalid_turn_id" });
+      return;
+    }
+    sendJson(request, response, 200, {
+      activeTurnId,
+      round: getRoundSummary(activeTurnId, activeTurnId),
+    });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/transparency") {
+    const parsed = parseTransparencyFilters(url);
+    if ("error" in parsed) {
+      sendJson(request, response, 400, { error: parsed.error });
+      return;
+    }
+
+    sendJson(request, response, 200, {
+      snapshot: getTransparencySnapshot(parsed.filters),
+    });
+    return;
+  }
+
+  if (
+    request.method === "GET" &&
+    url.pathname === "/transparency/export"
+  ) {
+    const parsed = parseTransparencyFilters(url);
+    if ("error" in parsed) {
+      sendJson(request, response, 400, { error: parsed.error });
+      return;
+    }
+
+    const format = url.searchParams.get("format") ?? "json";
+    if (format !== "json" && format !== "csv") {
+      sendJson(request, response, 400, { error: "invalid_export_format" });
+      return;
+    }
+
+    const snapshot = getTransparencySnapshot(parsed.filters);
+    if (format === "csv") {
+      sendCsv(request, response, 200, exportTransparencySnapshotCsv(snapshot));
+      return;
+    }
+
+    sendJson(request, response, 200, {
+      snapshot,
+    });
+    return;
+  }
+
+  if (
+    request.method === "POST" &&
+    url.pathname === "/operator/ai-operations/challenge"
+  ) {
+    void readJsonBody(request)
+      .then((body) => {
+        const wallet =
+          body && typeof body === "object" && "wallet" in body
+            ? (body as { wallet?: unknown }).wallet
+            : undefined;
+        const challenge = createOperatorAiAccessChallenge(wallet);
+        if (!challenge.ok) {
+          sendJson(request, response, challenge.statusCode, {
+            error: challenge.error,
+          });
+          return;
+        }
+
+        sendJson(request, response, 200, {
+          challenge: challenge.challenge,
+        });
+      })
+      .catch((error: unknown) => {
+        sendJson(request, response, 400, {
+          error: "invalid_json",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/operator/ai-operations") {
+    const auth = authorizeOperatorAiRequest(request.headers);
+    if (!auth.ok) {
+      sendJson(request, response, auth.statusCode, { error: auth.error });
+      return;
+    }
+
+    sendJson(request, response, 200, {
+      snapshot: getOperatorAiOperationsSnapshot(),
+    });
+    return;
+  }
+
+  if (
+    request.method === "GET" &&
+    url.pathname === "/operator/ai-operations/export"
+  ) {
+    const auth = authorizeOperatorAiRequest(request.headers);
+    if (!auth.ok) {
+      sendJson(request, response, auth.statusCode, { error: auth.error });
+      return;
+    }
+
+    const format = url.searchParams.get("format") ?? "json";
+    if (format !== "json" && format !== "csv") {
+      sendJson(request, response, 400, { error: "invalid_export_format" });
+      return;
+    }
+
+    const snapshot = getOperatorAiOperationsSnapshot();
+    if (format === "csv") {
+      sendCsv(
+        request,
+        response,
+        200,
+        exportOperatorAiOperationsCsv(snapshot),
+        "tyche-operator-ai-operations.csv",
+      );
+      return;
+    }
+
+    sendJson(request, response, 200, {
+      snapshot,
+    });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/guess-receipts") {
+    const player = url.searchParams.get("player");
+    const turnId = Number(url.searchParams.get("turnId"));
+
+    if (!player || !Number.isInteger(turnId) || turnId <= 0) {
+      sendJson(request, response, 400, { error: "invalid_query" });
+      return;
+    }
+
+    const receipt = getGuessReceipt(turnId, player);
+    sendJson(
+      request,
+      response,
+      receipt ? 200 : 404,
+      receipt ? { receipt } : { error: "not_found" },
+    );
+    return;
+  }
+
+  sendJson(request, response, 404, { error: "not_found" });
+}
+
 function isMainModule() {
   const entrypoint = process.argv[1];
   return (
@@ -8634,1527 +10887,7 @@ if (isMainModule()) {
   }
   const persistenceReady = initializeApiStatePersistence(databaseUrl);
 
-  const server = createServer((request, response) => {
-    const url = new URL(
-      request.url ?? "/",
-      `http://${request.headers.host ?? host}`,
-    );
-
-    if (request.method === "GET" && url.pathname === "/health") {
-      void getHealth().then((health) => {
-        sendJson(request, response, health.status === "ok" ? 200 : 503, health);
-      });
-      return;
-    }
-
-    if (
-      request.method === "OPTIONS" &&
-      (CORS_PATHS.has(url.pathname) ||
-        url.pathname.startsWith("/admin/repeated-vote-fee-reconciliation/") ||
-        url.pathname.startsWith("/audit/") ||
-        url.pathname.startsWith("/api/v1/turns/") ||
-        url.pathname.startsWith("/players/") ||
-        url.pathname.startsWith("/prize-pool-accounting/"))
-    ) {
-      sendNoContent(request, response);
-      return;
-    }
-
-    const consoleMethodRejection = getConsoleReadOnlyMethodRejection(
-      url.pathname,
-      request.method,
-    );
-    if (consoleMethodRejection) {
-      sendMethodNotAllowed(request, response, consoleMethodRejection);
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === "/rule-preflight") {
-      void readJsonBody(request)
-        .then(async (body) => {
-          const text =
-            body && typeof body === "object" && "text" in body
-              ? (body as { text?: unknown }).text
-              : null;
-          const phase =
-            body && typeof body === "object" && "phase" in body
-              ? (body as { phase?: unknown }).phase
-              : "compile";
-
-          if (typeof text !== "string") {
-            sendJson(request, response, 400, { error: "invalid_rule_text" });
-            return;
-          }
-          if (phase !== "compile" && phase !== "interpret") {
-            sendJson(request, response, 400, { error: "invalid_preflight_phase" });
-            return;
-          }
-
-          const streamProgress = request.headers.accept
-            ?.toLowerCase()
-            .includes("application/x-ndjson") === true;
-          if (streamProgress) {
-            startRulePreflightStream(request, response);
-            try {
-              const result = await (phase === "interpret"
-                ? createRuleInterpretation(text, (progress) => {
-                    writeRulePreflightStreamEvent(response, {
-                      progress,
-                      type: "progress",
-                    });
-                  })
-                : createRulePreflight(text, (progress) => {
-                    writeRulePreflightStreamEvent(response, {
-                      progress,
-                      type: "progress",
-                    });
-                  }));
-              if (apiStatePool) {
-                try {
-                  await queueApiStatePersistence();
-                } catch (error) {
-                  console.error("API state persistence failed", error);
-                  writeRulePreflightStreamEvent(response, {
-                    error: "api_state_persistence_failed",
-                    message: "The operation was not acknowledged because durable state persistence failed.",
-                    status: 503,
-                    type: "error",
-                  });
-                  return;
-                }
-              }
-              writeRulePreflightStreamEvent(response, {
-                ...(phase === "interpret" ? { interpretation: result } : { preflight: result }),
-                type: phase === "interpret" ? "interpretation" : "result",
-              });
-            } catch (error) {
-              const failure = describeRulePreflightError(error);
-              writeRulePreflightStreamEvent(response, {
-                ...failure.body,
-                status: failure.status,
-                type: "error",
-              });
-            } finally {
-              response.end();
-            }
-            return;
-          }
-
-          try {
-            sendJson(request, response, 200, {
-              ...(phase === "interpret"
-                ? { interpretation: await createRuleInterpretation(text) }
-                : { preflight: await createRulePreflight(text) }),
-            });
-          } catch (error) {
-            const failure = describeRulePreflightError(error);
-            sendJson(request, response, failure.status, failure.body);
-          }
-        })
-        .catch((error: unknown) => {
-          sendJson(request, response, 400, {
-            error: "invalid_json",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        });
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === "/guess-receipts") {
-      void readJsonBody(request)
-        .then((body) => {
-          if (!isValidGuessReceipt(body)) {
-            sendJson(request, response, 400, {
-              error: "invalid_guess_receipt",
-            });
-            return;
-          }
-
-          const existing =
-            body.sequence === undefined
-              ? null
-              : getGuessReceiptBySequence(body.turnId, body.player, body.sequence);
-          if (existing && existing.signature !== body.signature) {
-            sendJson(request, response, 409, {
-              error: "duplicate_guess_receipt",
-              receipt: existing,
-            });
-            return;
-          }
-
-          sendJson(request, response, 201, { receipt: saveGuessReceipt(body) });
-        })
-        .catch((error: unknown) => {
-          sendJson(request, response, 400, {
-            error: "invalid_json",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        });
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === "/rule-proposals") {
-      void readJsonBody(request)
-        .then((body) => {
-          if (!isValidRuleProposal(body)) {
-            sendJson(request, response, 400, {
-              error: "invalid_rule_proposal",
-            });
-            return;
-          }
-
-          const existing = ruleProposals.get(
-            getRuleProposalKey(body.turnId, body.ruleId),
-          );
-          if (existing && existing.signature !== body.signature) {
-            sendJson(request, response, 409, {
-              error: "duplicate_rule_proposal",
-              proposal: existing,
-            });
-            return;
-          }
-
-          sendJson(request, response, 201, {
-            proposal: saveRuleProposal(body),
-          });
-        })
-        .catch((error: unknown) => {
-          sendJson(request, response, 400, {
-            error: "invalid_json",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        });
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname === "/rule-proposals") {
-      const turnId = Number(url.searchParams.get("turnId"));
-
-      if (!Number.isInteger(turnId) || turnId <= 0) {
-        sendJson(request, response, 400, { error: "invalid_query" });
-        return;
-      }
-
-      sendJson(request, response, 200, {
-        proposals: listRuleProposals(turnId),
-      });
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === "/rule-precompilations") {
-      void readJsonBody(request)
-        .then((body) => {
-          if (!isValidRulePrecompilation(body)) {
-            sendJson(request, response, 400, {
-              error: "invalid_rule_precompilation",
-            });
-            return;
-          }
-
-          try {
-            sendJson(request, response, 201, {
-              proposal: saveRulePrecompilation(body),
-            });
-          } catch (error) {
-            const code =
-              error instanceof Error ? error.message : "PRECOMPILATION_FAILED";
-            sendJson(request, response, 404, {
-              error: code,
-              message: "Rule proposal not found for precompilation update.",
-            });
-          }
-        })
-        .catch((error: unknown) => {
-          sendJson(request, response, 400, {
-            error: "invalid_json",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        });
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === "/rule-validations/run") {
-      void readJsonBody(request)
-        .then((body) => {
-          if (!isValidRuleValidationRunRequest(body)) {
-            sendJson(request, response, 400, {
-              error: "invalid_rule_validation_request",
-            });
-            return;
-          }
-
-          try {
-            const validation = runRuleValidationForProposal(body);
-            sendJson(request, response, 201, { validation });
-          } catch (error) {
-            const code =
-              error instanceof Error ? error.message : "RULE_VALIDATION_FAILED";
-            sendJson(request, response, 404, {
-              error: code,
-              message: "Rule proposal not found for validation.",
-            });
-          }
-        })
-        .catch((error: unknown) => {
-          sendJson(request, response, 400, {
-            error: "invalid_json",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        });
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === "/rule-validations") {
-      void readJsonBody(request)
-        .then((body) => {
-          if (!isValidRuleValidation(body)) {
-            sendJson(request, response, 400, {
-              error: "invalid_rule_validation",
-            });
-            return;
-          }
-
-          try {
-            sendJson(request, response, 201, {
-              validation: saveRuleValidation(body),
-            });
-          } catch (error) {
-            const code =
-              error instanceof Error ? error.message : "RULE_VALIDATION_FAILED";
-            sendJson(request, response, 404, {
-              error: code,
-              message: "Rule proposal not found for validation.",
-            });
-          }
-        })
-        .catch((error: unknown) => {
-          sendJson(request, response, 400, {
-            error: "invalid_json",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        });
-      return;
-    }
-
-    if (
-      request.method === "GET" &&
-      url.pathname.startsWith("/rule-validations/")
-    ) {
-      const parts = url.pathname.slice("/rule-validations/".length).split("/");
-      const turnId = Number(parts[0]);
-      const ruleId = Number(parts[1]);
-
-      if (
-        !Number.isInteger(turnId) ||
-        turnId <= 0 ||
-        !Number.isInteger(ruleId) ||
-        ruleId <= 0
-      ) {
-        sendJson(request, response, 400, {
-          error: "invalid_rule_validation_id",
-        });
-        return;
-      }
-
-      const validation = getRuleValidation(turnId, ruleId);
-      sendJson(
-        request,
-        response,
-        validation ? 200 : 404,
-        validation ? { validation } : { error: "not_found" },
-      );
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === "/rule-votes") {
-      void readJsonBody(request)
-        .then((body) => {
-          if (!isValidRuleVote(body)) {
-            sendJson(request, response, 400, { error: "invalid_rule_vote" });
-            return;
-          }
-
-          const existing = ruleVotes.get(
-            getRuleVoteKey(
-              body.turnId,
-              body.ruleId,
-              body.voter,
-              body.sequence ?? 0,
-            ),
-          );
-          if (existing && existing.signature !== body.signature) {
-            sendJson(request, response, 409, {
-              error: "duplicate_rule_vote",
-              vote: existing,
-            });
-            return;
-          }
-
-          sendJson(request, response, 201, { vote: saveRuleVote(body) });
-        })
-        .catch((error: unknown) => {
-          sendJson(request, response, 400, {
-            error: "invalid_json",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        });
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname === "/rule-votes") {
-      const turnId = Number(url.searchParams.get("turnId"));
-
-      if (!Number.isInteger(turnId) || turnId <= 0) {
-        sendJson(request, response, 400, { error: "invalid_query" });
-        return;
-      }
-
-      sendJson(request, response, 200, listRuleVotes(turnId));
-      return;
-    }
-
-    if (
-      request.method === "POST" &&
-      url.pathname === "/rule-elimination-votes"
-    ) {
-      void readJsonBody(request)
-        .then((body) => {
-          if (!isValidRuleEliminationVote(body)) {
-            sendJson(request, response, 400, {
-              error: "invalid_rule_elimination_vote",
-            });
-            return;
-          }
-
-          const existing = ruleEliminationVotes.get(
-            getRuleEliminationVoteKey(
-              body.turnId,
-              body.ruleId,
-              body.voter,
-              body.sequence ?? 0,
-            ),
-          );
-          if (existing && existing.signature !== body.signature) {
-            sendJson(request, response, 409, {
-              error: "duplicate_rule_elimination_vote",
-              vote: existing,
-            });
-            return;
-          }
-
-          sendJson(request, response, 201, {
-            vote: saveRuleEliminationVote(body),
-          });
-        })
-        .catch((error: unknown) => {
-          sendJson(request, response, 400, {
-            error: "invalid_json",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        });
-      return;
-    }
-
-    if (
-      request.method === "GET" &&
-      url.pathname === "/rule-elimination-votes"
-    ) {
-      const turnId = Number(url.searchParams.get("turnId"));
-
-      if (!Number.isInteger(turnId) || turnId <= 0) {
-        sendJson(request, response, 400, { error: "invalid_query" });
-        return;
-      }
-
-      sendJson(request, response, 200, listRuleEliminationVotes(turnId));
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === "/rule-eliminations") {
-      void readJsonBody(request)
-        .then((body) => {
-          if (!isValidRuleEliminationProjection(body)) {
-            sendJson(request, response, 400, {
-              error: "invalid_rule_elimination",
-            });
-            return;
-          }
-
-          sendJson(request, response, 201, {
-            elimination: projectRuleElimination(body),
-          });
-        })
-        .catch((error: unknown) => {
-          sendJson(request, response, 400, {
-            error: "invalid_json",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        });
-      return;
-    }
-
-    if (
-      request.method === "GET" &&
-      /^\/api\/v1\/turns\/\d+\/elimination$/.test(url.pathname)
-    ) {
-      const parts = url.pathname.split("/");
-      const turnId = Number(parts[4]);
-
-      if (!Number.isInteger(turnId) || turnId <= 0) {
-        sendJson(request, response, 400, { error: "invalid_turn_id" });
-        return;
-      }
-
-      sendJson(request, response, 200, {
-        elimination: getRuleElimination(turnId),
-      });
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === "/rule-removals") {
-      void readJsonBody(request)
-        .then((body) => {
-          if (!isValidPaidRuleRemoval(body)) {
-            sendJson(request, response, 400, {
-              error: "invalid_rule_removal",
-            });
-            return;
-          }
-
-          // Idempotent replay: re-posting the identical removal returns the
-          // stored record; a conflicting signature for the same key is 409.
-          const existing = paidRuleRemovals.get(
-            getPaidRuleRemovalKey(body.turnId, body.ruleId, body.remover),
-          );
-          if (existing) {
-            if (existing.signature === body.signature) {
-              sendJson(request, response, 200, { removal: existing });
-            } else {
-              sendJson(request, response, 409, {
-                error: "duplicate_rule_removal",
-                removal: existing,
-              });
-            }
-            return;
-          }
-
-          try {
-            const { auditLog, removal } = removeRule(body);
-            sendJson(request, response, 201, { auditLog, removal });
-          } catch (error: unknown) {
-            if (error instanceof RuleRemovalRejectedError) {
-              sendJson(request, response, 409, {
-                code: error.code,
-                error: "rule_removal_rejected",
-                message: error.message,
-                threshold: error.threshold,
-                voteCount: error.voteCount,
-              });
-              return;
-            }
-            throw error;
-          }
-        })
-        .catch((error: unknown) => {
-          sendJson(request, response, 400, {
-            error: "invalid_json",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        });
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname === "/rule-removals") {
-      const turnId = Number(url.searchParams.get("turnId"));
-
-      if (!Number.isInteger(turnId) || turnId <= 0) {
-        sendJson(request, response, 400, { error: "invalid_query" });
-        return;
-      }
-
-      sendJson(request, response, 200, {
-        removals: listPaidRuleRemovals(turnId),
-      });
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === "/prize-pool-rollovers") {
-      void readJsonBody(request)
-        .then((body) => {
-          if (!isValidTurnRollover(body)) {
-            sendJson(request, response, 400, {
-              error: "invalid_prize_pool_rollover",
-            });
-            return;
-          }
-
-          sendJson(request, response, 201, {
-            rollover: saveTurnRollover(body),
-          });
-        })
-        .catch((error: unknown) => {
-          sendJson(request, response, 400, {
-            error: "invalid_json",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        });
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname === "/prize-pool-rollovers") {
-      const turnId = Number(url.searchParams.get("turnId"));
-
-      if (!Number.isInteger(turnId) || turnId <= 0) {
-        sendJson(request, response, 400, { error: "invalid_query" });
-        return;
-      }
-
-      sendJson(request, response, 200, {
-        rollover: getTurnRollover(turnId),
-      });
-      return;
-    }
-
-    if (
-      request.method === "POST" &&
-      url.pathname === "/turn-rollovers/settle"
-    ) {
-      void readJsonBody(request)
-        .then((body) => {
-          if (!isValidGuessVerificationCreateRequest(body)) {
-            sendJson(request, response, 400, {
-              error: "invalid_rollover_settle_request",
-            });
-            return;
-          }
-
-          sendJson(request, response, 201, {
-            settlement: settleTurnRollover(body.turnId),
-          });
-        })
-        .catch((error: unknown) => {
-          sendJson(request, response, 400, {
-            error: "invalid_json",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        });
-      return;
-    }
-
-    if (
-      request.method === "GET" &&
-      url.pathname === "/turn-rollovers/settlement"
-    ) {
-      const turnId = Number(url.searchParams.get("turnId"));
-
-      if (!Number.isInteger(turnId) || turnId <= 0) {
-        sendJson(request, response, 400, { error: "invalid_query" });
-        return;
-      }
-
-      sendJson(request, response, 200, {
-        activity: getRolloverActivityEvents(turnId),
-        settlement: getTurnRolloverSettlement(turnId),
-      });
-      return;
-    }
-
-    if (
-      request.method === "GET" &&
-      url.pathname.startsWith("/admin/repeated-vote-fee-reconciliation/")
-    ) {
-      const turnId = Number(
-        url.pathname.slice("/admin/repeated-vote-fee-reconciliation/".length),
-      );
-
-      if (!Number.isInteger(turnId) || turnId <= 0) {
-        sendJson(request, response, 400, { error: "invalid_turn_id" });
-        return;
-      }
-
-      sendJson(request, response, 200, {
-        reconciliation: getRepeatedVoteFeeReconciliation(turnId),
-      });
-      return;
-    }
-
-    if (
-      request.method === "GET" &&
-      url.pathname.startsWith("/prize-pool-accounting/")
-    ) {
-      const turnId = Number(
-        url.pathname.slice("/prize-pool-accounting/".length),
-      );
-
-      if (!Number.isInteger(turnId) || turnId <= 0) {
-        sendJson(request, response, 400, { error: "invalid_turn_id" });
-        return;
-      }
-
-      sendJson(request, response, 200, {
-        accounting: getPrizePoolAccounting(turnId),
-      });
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === "/draws") {
-      void readJsonBody(request)
-        .then((body) => {
-          if (!isValidDrawRecord(body)) {
-            sendJson(request, response, 400, { error: "invalid_draw_record" });
-            return;
-          }
-
-          sendJson(request, response, 201, { draw: saveDraw(body) });
-        })
-        .catch((error: unknown) => {
-          sendJson(request, response, 400, {
-            error: "invalid_json",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        });
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname.startsWith("/draws/")) {
-      const turnId = Number(url.pathname.slice("/draws/".length));
-
-      if (!Number.isInteger(turnId) || turnId <= 0) {
-        sendJson(request, response, 400, { error: "invalid_turn_id" });
-        return;
-      }
-
-      const draw = getDraw(turnId);
-      sendJson(
-        request,
-        response,
-        draw ? 200 : 404,
-        draw ? { draw } : { error: "not_found" },
-      );
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === "/elections") {
-      void readJsonBody(request)
-        .then((body) => {
-          if (!isValidRuleElection(body)) {
-            sendJson(request, response, 400, {
-              error: "invalid_rule_election",
-            });
-            return;
-          }
-
-          sendJson(request, response, 201, {
-            election: saveRuleElection(body),
-          });
-        })
-        .catch((error: unknown) => {
-          sendJson(request, response, 400, {
-            error: "invalid_json",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        });
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname.startsWith("/elections/")) {
-      const turnId = Number(url.pathname.slice("/elections/".length));
-
-      if (!Number.isInteger(turnId) || turnId <= 0) {
-        sendJson(request, response, 400, { error: "invalid_turn_id" });
-        return;
-      }
-
-      const election = getRuleElection(turnId);
-      sendJson(
-        request,
-        response,
-        election ? 200 : 404,
-        election ? { election } : { error: "not_found" },
-      );
-      return;
-    }
-
-    if (
-      request.method === "POST" &&
-      url.pathname === "/verification-jobs/create-turn"
-    ) {
-      void readJsonBody(request)
-        .then((body) => {
-          if (!isValidGuessVerificationCreateRequest(body)) {
-            sendJson(request, response, 400, {
-              error: "invalid_verification_job_request",
-            });
-            return;
-          }
-
-          try {
-            const result = createGuessVerificationJobsForTurn(body.turnId);
-            sendJson(request, response, 201, result);
-          } catch (error) {
-            const code =
-              error instanceof Error
-                ? error.message
-                : "VERIFICATION_JOB_FAILED";
-            sendJson(request, response, 409, {
-              error: code,
-              message: "Verification jobs could not be created for this turn.",
-            });
-          }
-        })
-        .catch((error: unknown) => {
-          sendJson(request, response, 400, {
-            error: "invalid_json",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        });
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname === "/verification-jobs") {
-      const turnId = Number(url.searchParams.get("turnId"));
-
-      if (!Number.isInteger(turnId) || turnId <= 0) {
-        sendJson(request, response, 400, { error: "invalid_query" });
-        return;
-      }
-
-      sendJson(request, response, 200, {
-        jobs: listVerificationJobs(turnId),
-        summary: getVerificationSummary(turnId),
-      });
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === "/verification-results") {
-      void readJsonBody(request)
-        .then((body) => {
-          if (!isValidGuessVerificationResult(body)) {
-            sendJson(request, response, 400, {
-              error: "invalid_verification_result",
-            });
-            return;
-          }
-
-          try {
-            sendJson(request, response, 201, {
-              result: saveGuessVerificationResult(body),
-              summary: getVerificationSummary(body.turnId),
-            });
-          } catch (error) {
-            const code =
-              error instanceof Error
-                ? error.message
-                : "VERIFICATION_RESULT_FAILED";
-            sendJson(request, response, 404, {
-              error: code,
-              message: "Verification job not found for result update.",
-            });
-          }
-        })
-        .catch((error: unknown) => {
-          sendJson(request, response, 400, {
-            error: "invalid_json",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        });
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname === "/verification-results") {
-      const turnId = Number(url.searchParams.get("turnId"));
-
-      if (!Number.isInteger(turnId) || turnId <= 0) {
-        sendJson(request, response, 400, { error: "invalid_query" });
-        return;
-      }
-
-      sendJson(request, response, 200, {
-        results: listVerificationResults(turnId),
-        summary: getVerificationSummary(turnId),
-      });
-      return;
-    }
-
-    if (
-      request.method === "POST" &&
-      url.pathname === "/winner-records/calculate-turn"
-    ) {
-      void readJsonBody(request)
-        .then((body) => {
-          if (!isValidGuessVerificationCreateRequest(body)) {
-            sendJson(request, response, 400, {
-              error: "invalid_winner_calculation_request",
-            });
-            return;
-          }
-
-          sendJson(request, response, 201, {
-            winners: calculateAndStoreWinnerRecords(body.turnId),
-          });
-        })
-        .catch((error: unknown) => {
-          sendJson(request, response, 400, {
-            error: "invalid_json",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        });
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname === "/winner-records") {
-      const turnId = Number(url.searchParams.get("turnId"));
-
-      if (!Number.isInteger(turnId) || turnId <= 0) {
-        sendJson(request, response, 400, { error: "invalid_query" });
-        return;
-      }
-
-      sendJson(request, response, 200, {
-        winners: getWinnerSummary(turnId),
-      });
-      return;
-    }
-
-    if (
-      request.method === "POST" &&
-      url.pathname === "/reward-records/calculate-turn"
-    ) {
-      void readJsonBody(request)
-        .then((body) => {
-          if (!isValidGuessVerificationCreateRequest(body)) {
-            sendJson(request, response, 400, {
-              error: "invalid_reward_calculation_request",
-            });
-            return;
-          }
-
-          try {
-            sendJson(request, response, 201, {
-              rewards: calculateAndStoreRewardRecords(body.turnId),
-            });
-          } catch (error) {
-            const code =
-              error instanceof Error
-                ? error.message
-                : "REWARD_CALCULATION_FAILED";
-            sendJson(request, response, 404, {
-              error: code,
-            });
-          }
-        })
-        .catch((error: unknown) => {
-          sendJson(request, response, 400, {
-            error: "invalid_json",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        });
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname === "/reward-records") {
-      const turnId = Number(url.searchParams.get("turnId"));
-
-      if (!Number.isInteger(turnId) || turnId <= 0) {
-        sendJson(request, response, 400, { error: "invalid_query" });
-        return;
-      }
-
-      sendJson(request, response, 200, {
-        rewards: getRewardSummary(turnId),
-      });
-      return;
-    }
-
-    if (
-      request.method === "POST" &&
-      url.pathname === "/claim-records/create-turn"
-    ) {
-      void readJsonBody(request)
-        .then((body) => {
-          if (!isValidClaimCreateRequest(body)) {
-            sendJson(request, response, 400, {
-              error: "invalid_claim_create_request",
-            });
-            return;
-          }
-
-          sendJson(request, response, 201, {
-            claims: createClaimRecordsForTurn(body.turnId, body.availableAt),
-          });
-        })
-        .catch((error: unknown) => {
-          sendJson(request, response, 400, {
-            error: "invalid_json",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        });
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname === "/claim-records") {
-      const turnId = Number(url.searchParams.get("turnId"));
-      const wallet = url.searchParams.get("wallet") ?? undefined;
-
-      if (
-        !Number.isInteger(turnId) ||
-        turnId <= 0 ||
-        (wallet !== undefined && !isBase58Like(wallet))
-      ) {
-        sendJson(request, response, 400, { error: "invalid_query" });
-        return;
-      }
-
-      sendJson(request, response, 200, {
-        claims: getClaimSummary({ turnId, ...(wallet ? { wallet } : {}) }),
-      });
-      return;
-    }
-
-    if (
-      request.method === "POST" &&
-      url.pathname === "/claim-records/expire-unclaimed"
-    ) {
-      void readJsonBody(request)
-        .then((body) => {
-          if (!isValidExpiredUnclaimedClaimRequest(body)) {
-            sendJson(request, response, 400, {
-              error: "invalid_claim_expiry_request",
-            });
-            return;
-          }
-
-          sendJson(request, response, 201, {
-            settlement: settleExpiredUnclaimedClaims(body),
-          });
-        })
-        .catch((error: unknown) => {
-          sendJson(request, response, 400, {
-            error: "invalid_json",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        });
-      return;
-    }
-
-    if (
-      request.method === "GET" &&
-      url.pathname.startsWith("/players/") &&
-      url.pathname.endsWith("/claims")
-    ) {
-      const wallet = url.pathname.slice(
-        "/players/".length,
-        url.pathname.length - "/claims".length,
-      );
-
-      if (!isBase58Like(wallet)) {
-        sendJson(request, response, 400, { error: "invalid_wallet" });
-        return;
-      }
-
-      sendJson(request, response, 200, {
-        claims: getPlayerClaimsSummary(wallet),
-      });
-      return;
-    }
-
-    if (
-      request.method === "GET" &&
-      url.pathname.startsWith("/players/") &&
-      url.pathname.endsWith("/history")
-    ) {
-      const wallet = url.pathname.slice(
-        "/players/".length,
-        url.pathname.length - "/history".length,
-      );
-      const cursor = url.searchParams.get("cursor");
-      const rawLimit = url.searchParams.get("limit");
-      const limit = rawLimit === null ? undefined : Number(rawLimit);
-
-      if (
-        !isBase58Like(wallet) ||
-        (cursor !== null && !/^\d+$/.test(cursor)) ||
-        (limit !== undefined && (!Number.isInteger(limit) || limit <= 0))
-      ) {
-        sendJson(request, response, 400, { error: "invalid_query" });
-        return;
-      }
-
-      sendJson(request, response, 200, {
-        history: listPlayerHistory({
-          ...(cursor === null ? {} : { cursor }),
-          ...(limit === undefined ? {} : { limit }),
-          wallet,
-        }),
-      });
-      return;
-    }
-
-    if (
-      request.method === "GET" &&
-      url.pathname.startsWith("/players/") &&
-      url.pathname.endsWith("/conversation-drafts")
-    ) {
-      const wallet = url.pathname.slice(
-        "/players/".length,
-        url.pathname.length - "/conversation-drafts".length,
-      );
-
-      if (!isBase58Like(wallet)) {
-        sendJson(request, response, 400, { error: "invalid_wallet" });
-        return;
-      }
-
-      sendJson(request, response, 200, {
-        drafts: listConversationDrafts(wallet),
-      });
-      return;
-    }
-
-    if (
-      request.method === "POST" &&
-      url.pathname.startsWith("/players/") &&
-      url.pathname.endsWith("/conversation-drafts")
-    ) {
-      const wallet = url.pathname.slice(
-        "/players/".length,
-        url.pathname.length - "/conversation-drafts".length,
-      );
-
-      if (!isBase58Like(wallet)) {
-        sendJson(request, response, 400, { error: "invalid_wallet" });
-        return;
-      }
-
-      void readJsonBody(request)
-        .then((body) => {
-          if (!isValidConversationDraft(body)) {
-            sendJson(request, response, 400, {
-              error: "invalid_conversation_draft",
-            });
-            return;
-          }
-
-          if (body.wallet !== wallet) {
-            sendJson(request, response, 409, {
-              error: "wallet_mismatch",
-              message: "Draft wallet must match the URL wallet.",
-            });
-            return;
-          }
-
-          sendJson(request, response, 201, {
-            draft: saveConversationDraft(body),
-          });
-        })
-        .catch((error: unknown) => {
-          sendJson(request, response, 400, {
-            error: "invalid_json",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        });
-      return;
-    }
-
-    if (
-      request.method === "POST" &&
-      url.pathname === "/claim-records/request"
-    ) {
-      void readJsonBody(request)
-        .then((body) => {
-          if (!isValidClaimRequest(body)) {
-            sendJson(request, response, 400, {
-              error: "invalid_claim_request",
-            });
-            return;
-          }
-
-          try {
-            sendJson(request, response, 200, {
-              claim: requestClaimApproval(body),
-            });
-          } catch (error) {
-            const code =
-              error instanceof Error ? error.message : "CLAIM_FAILED";
-            sendJson(request, response, 409, { error: code });
-          }
-        })
-        .catch((error: unknown) => {
-          sendJson(request, response, 400, {
-            error: "invalid_json",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        });
-      return;
-    }
-
-    if (
-      request.method === "POST" &&
-      url.pathname === "/claim-records/complete"
-    ) {
-      void readJsonBody(request)
-        .then((body) => {
-          if (!isValidClaimCompleteRequest(body)) {
-            sendJson(request, response, 400, {
-              error: "invalid_claim_completion_request",
-            });
-            return;
-          }
-
-          try {
-            sendJson(request, response, 200, {
-              claim: completeClaimApproval(body),
-            });
-          } catch (error) {
-            const code =
-              error instanceof Error ? error.message : "CLAIM_FAILED";
-            sendJson(request, response, 409, { error: code });
-          }
-        })
-        .catch((error: unknown) => {
-          sendJson(request, response, 400, {
-            error: "invalid_json",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        });
-      return;
-    }
-
-    if (
-      request.method === "POST" &&
-      url.pathname === "/settlement-transitions"
-    ) {
-      void readJsonBody(request)
-        .then((body) => {
-          if (!isValidSettlementTransitionRequest(body)) {
-            sendJson(request, response, 400, {
-              error: "invalid_settlement_transition",
-            });
-            return;
-          }
-
-          sendJson(request, response, 201, {
-            transition: recordSettlementTransition(body),
-          });
-        })
-        .catch((error: unknown) => {
-          sendJson(request, response, 400, {
-            error: "invalid_json",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        });
-      return;
-    }
-
-    if (
-      request.method === "GET" &&
-      url.pathname === "/settlement-transitions"
-    ) {
-      const turnId = Number(url.searchParams.get("turnId"));
-
-      if (!Number.isInteger(turnId) || turnId <= 0) {
-        sendJson(request, response, 400, { error: "invalid_query" });
-        return;
-      }
-
-      sendJson(request, response, 200, {
-        transitions: listSettlementTransitions(turnId),
-      });
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname === "/audit") {
-      const rawTurnId = url.searchParams.get("turnId");
-      const rawKind = url.searchParams.get("kind");
-      const turnId = rawTurnId === null ? undefined : Number(rawTurnId);
-      const kind =
-        rawKind !== null && AUDIT_LOG_KINDS.has(rawKind as AuditLogKind)
-          ? (rawKind as AuditLogKind)
-          : undefined;
-
-      if (
-        rawTurnId !== null &&
-        (!Number.isInteger(turnId) || Number(turnId) <= 0)
-      ) {
-        sendJson(request, response, 400, { error: "invalid_query" });
-        return;
-      }
-      if (rawKind !== null && kind === undefined) {
-        sendJson(request, response, 400, { error: "invalid_audit_kind" });
-        return;
-      }
-
-      const filters: { kind?: AuditLogKind; turnId?: number } = {};
-      if (kind !== undefined) {
-        filters.kind = kind;
-      }
-      if (turnId !== undefined) {
-        filters.turnId = turnId;
-      }
-
-      sendJson(request, response, 200, {
-        logs: listAuditLogs(filters),
-      });
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname.startsWith("/audit/")) {
-      const logHash = url.pathname.slice("/audit/".length);
-      if (!isHexHash(logHash)) {
-        sendJson(request, response, 400, { error: "invalid_audit_log_hash" });
-        return;
-      }
-
-      const log = getAuditLog(logHash);
-      sendJson(
-        request,
-        response,
-        log ? 200 : 404,
-        log
-          ? { integrity: verifyAuditLogIntegrity(log), log }
-          : { error: "not_found" },
-      );
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname === "/tokenomics/public") {
-      sendJson(request, response, 200, {
-        tokenomics: getPublicTokenomicsSnapshot(),
-      });
-      return;
-    }
-
-    if (
-      request.method === "GET" &&
-      url.pathname.startsWith("/tokenomics/wallets/")
-    ) {
-      const wallet = url.pathname.slice("/tokenomics/wallets/".length);
-      if (!isBase58Like(wallet)) {
-        sendJson(request, response, 400, { error: "invalid_wallet" });
-        return;
-      }
-      const walletProjection = getWalletTokenomicsProjection(wallet);
-      sendJson(
-        request,
-        response,
-        walletProjection ? 200 : 404,
-        walletProjection
-          ? { wallet: walletProjection }
-          : { error: "tokenomics_wallet_not_indexed" },
-      );
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === "/tokenomics/projection") {
-      const authorization = authorizeTokenomicsProjection(
-        request.headers.authorization,
-      );
-      if (!authorization.ok) {
-        sendJson(request, response, authorization.statusCode, {
-          error: authorization.error,
-        });
-        return;
-      }
-      void readJsonBody(request)
-        .then((body) => {
-          if (!isTokenomicsProjection(body)) {
-            sendJson(request, response, 400, {
-              error: "invalid_tokenomics_projection",
-            });
-            return;
-          }
-          sendJson(request, response, 201, {
-            projection: saveTokenomicsProjection(body),
-          });
-        })
-        .catch((error: unknown) => {
-          sendJson(request, response, 400, {
-            error: "invalid_json",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        });
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname.startsWith("/rounds/")) {
-      const turnId = Number(url.pathname.slice("/rounds/".length));
-      const activeTurnIdParam = url.searchParams.get("activeTurnId");
-      const activeTurnId =
-        activeTurnIdParam === null ? undefined : Number(activeTurnIdParam);
-
-      if (
-        !Number.isInteger(turnId) ||
-        turnId <= 0 ||
-        (activeTurnId !== undefined &&
-          (!Number.isInteger(activeTurnId) || activeTurnId <= 0))
-      ) {
-        sendJson(request, response, 400, { error: "invalid_turn_id" });
-        return;
-      }
-
-      sendJson(request, response, 200, {
-        round: getRoundSummary(turnId, activeTurnId),
-      });
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname === "/rounds") {
-      const activeTurnIdParam = url.searchParams.get("activeTurnId");
-      const activeTurnId =
-        activeTurnIdParam === null
-          ? getDefaultActiveTurnId()
-          : Number(activeTurnIdParam);
-      if (!Number.isInteger(activeTurnId) || activeTurnId <= 0) {
-        sendJson(request, response, 400, { error: "invalid_turn_id" });
-        return;
-      }
-      sendJson(request, response, 200, {
-        activeTurnId,
-        round: getRoundSummary(activeTurnId, activeTurnId),
-      });
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname === "/transparency") {
-      const parsed = parseTransparencyFilters(url);
-      if ("error" in parsed) {
-        sendJson(request, response, 400, { error: parsed.error });
-        return;
-      }
-
-      sendJson(request, response, 200, {
-        snapshot: getTransparencySnapshot(parsed.filters),
-      });
-      return;
-    }
-
-    if (
-      request.method === "GET" &&
-      url.pathname === "/transparency/export"
-    ) {
-      const parsed = parseTransparencyFilters(url);
-      if ("error" in parsed) {
-        sendJson(request, response, 400, { error: parsed.error });
-        return;
-      }
-
-      const format = url.searchParams.get("format") ?? "json";
-      if (format !== "json" && format !== "csv") {
-        sendJson(request, response, 400, { error: "invalid_export_format" });
-        return;
-      }
-
-      const snapshot = getTransparencySnapshot(parsed.filters);
-      if (format === "csv") {
-        sendCsv(request, response, 200, exportTransparencySnapshotCsv(snapshot));
-        return;
-      }
-
-      sendJson(request, response, 200, {
-        snapshot,
-      });
-      return;
-    }
-
-    if (
-      request.method === "POST" &&
-      url.pathname === "/operator/ai-operations/challenge"
-    ) {
-      void readJsonBody(request)
-        .then((body) => {
-          const wallet =
-            body && typeof body === "object" && "wallet" in body
-              ? (body as { wallet?: unknown }).wallet
-              : undefined;
-          const challenge = createOperatorAiAccessChallenge(wallet);
-          if (!challenge.ok) {
-            sendJson(request, response, challenge.statusCode, {
-              error: challenge.error,
-            });
-            return;
-          }
-
-          sendJson(request, response, 200, {
-            challenge: challenge.challenge,
-          });
-        })
-        .catch((error: unknown) => {
-          sendJson(request, response, 400, {
-            error: "invalid_json",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        });
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname === "/operator/ai-operations") {
-      const auth = authorizeOperatorAiRequest(request.headers);
-      if (!auth.ok) {
-        sendJson(request, response, auth.statusCode, { error: auth.error });
-        return;
-      }
-
-      sendJson(request, response, 200, {
-        snapshot: getOperatorAiOperationsSnapshot(),
-      });
-      return;
-    }
-
-    if (
-      request.method === "GET" &&
-      url.pathname === "/operator/ai-operations/export"
-    ) {
-      const auth = authorizeOperatorAiRequest(request.headers);
-      if (!auth.ok) {
-        sendJson(request, response, auth.statusCode, { error: auth.error });
-        return;
-      }
-
-      const format = url.searchParams.get("format") ?? "json";
-      if (format !== "json" && format !== "csv") {
-        sendJson(request, response, 400, { error: "invalid_export_format" });
-        return;
-      }
-
-      const snapshot = getOperatorAiOperationsSnapshot();
-      if (format === "csv") {
-        sendCsv(
-          request,
-          response,
-          200,
-          exportOperatorAiOperationsCsv(snapshot),
-          "tyche-operator-ai-operations.csv",
-        );
-        return;
-      }
-
-      sendJson(request, response, 200, {
-        snapshot,
-      });
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname === "/guess-receipts") {
-      const player = url.searchParams.get("player");
-      const turnId = Number(url.searchParams.get("turnId"));
-
-      if (!player || !Number.isInteger(turnId) || turnId <= 0) {
-        sendJson(request, response, 400, { error: "invalid_query" });
-        return;
-      }
-
-      const receipt = getGuessReceipt(turnId, player);
-      sendJson(
-        request,
-        response,
-        receipt ? 200 : 404,
-        receipt ? { receipt } : { error: "not_found" },
-      );
-      return;
-    }
-
-    sendJson(request, response, 404, { error: "not_found" });
-  });
+  const server = createServer(handleApiRequest);
 
   void persistenceReady
     .then(() => {

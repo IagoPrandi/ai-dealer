@@ -17,7 +17,13 @@ import type {
   TokenomicsPublicApi,
   TokenomicsWalletApi,
 } from "./types";
+import { readSseStream } from "./sseStream";
 import { getApiBaseUrl } from "../../../lib/apiBase";
+
+export {
+  SseStreamDisconnectedError,
+  SseStreamExpiredError,
+} from "./sseStream";
 
 export const API_BASE_URL = getApiBaseUrl;
 
@@ -99,10 +105,14 @@ function apiErrorCode(detail: unknown) {
   return typeof record.error === "string" ? record.error : null;
 }
 
-async function postStrictJson<T>(path: string, body: unknown): Promise<T> {
+async function postStrictJson<T>(
+  path: string,
+  body: unknown,
+  extraHeaders: Record<string, string> = {},
+): Promise<T> {
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
     body: JSON.stringify(body),
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...extraHeaders },
     method: "POST",
   });
 
@@ -287,148 +297,107 @@ function throwRulePreflightStreamError(event: Extract<RulePreflightStreamEvent, 
   });
 }
 
-export async function consumeRulePreflightResponse(
-  response: Response,
-  onProgress?: (progress: RulePreflightProgress) => void,
-) {
-  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
-  if (!contentType.includes("application/x-ndjson")) {
-    return (await response.json()) as { preflight: RulePreflightApiResult };
-  }
-  if (!response.body) {
-    throw new Error("The rule preflight stream did not include a response body.");
-  }
+export type RulePreflightPhase = "compile" | "interpret";
 
-  const decoder = new TextDecoder();
-  const reader = response.body.getReader();
-  let buffer = "";
-  let result: RulePreflightApiResult | null = null;
-
-  const consumeLine = (line: string) => {
-    if (!line.trim()) {
-      return;
-    }
-    const event = JSON.parse(line) as RulePreflightStreamEvent;
-    if (event.type === "progress") {
-      onProgress?.(event.progress);
-    } else if (event.type === "result") {
-      result = event.preflight;
-    } else if (event.type === "error") {
-      throwRulePreflightStreamError(event);
-    }
-  };
-
-  while (true) {
-    const { done, value } = await reader.read();
-    buffer += decoder.decode(value, { stream: !done });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-    lines.forEach(consumeLine);
-    if (done) {
-      break;
-    }
-  }
-  consumeLine(buffer);
-
-  if (!result) {
-    throw new Error("The rule preflight stream ended before returning a result.");
-  }
-  return { preflight: result };
+export function rulePreflightJobEventsPath(jobId: string) {
+  return `/rule-preflight/jobs/${encodeURIComponent(jobId)}/events`;
 }
 
-export async function postRulePreflight(
-  text: string,
-  onProgress?: (progress: RulePreflightProgress) => void,
-) {
-  const path = "/rule-preflight";
-  const response = await fetch(`${getApiBaseUrl()}${path}`, {
-    body: JSON.stringify({ text }),
-    headers: {
-      accept: "application/x-ndjson",
-      "content-type": "application/json",
-    },
-    method: "POST",
-  });
-
-  if (!response.ok) {
-    let detail: unknown;
-    try {
-      detail = await response.json();
-    } catch {
-      detail = undefined;
-    }
-    throw new ApiRequestError({
-      code: apiErrorCode(detail),
-      detail,
-      message: apiErrorMessage(path, response.status, detail),
-      status: response.status,
-    });
-  }
-
-  return consumeRulePreflightResponse(response, onProgress);
+/**
+ * Starts a rule preflight run and returns as soon as the API has accepted it.
+ * The pipeline then belongs to the server, not to this request — a synchronous
+ * rejection (prompt injection, token limit) still arrives here as an
+ * ApiRequestError, so the caller's blocked-rule handling is unchanged.
+ */
+export function startRulePreflightJob(args: {
+  phase: RulePreflightPhase;
+  text: string;
+}) {
+  return postStrictJson<{
+    idempotent: boolean;
+    jobId: string;
+    phase: RulePreflightPhase;
+    status: string;
+  }>("/rule-preflight", args, { accept: "text/event-stream" });
 }
 
-export async function postRuleInterpretation(
-  text: string,
-  onProgress?: (progress: RulePreflightProgress) => void,
-) {
-  const path = "/rule-preflight";
-  const response = await fetch(`${getApiBaseUrl()}${path}`, {
-    body: JSON.stringify({ phase: "interpret", text }),
-    headers: {
-      accept: "application/x-ndjson",
-      "content-type": "application/json",
+export interface ConsumeRulePreflightJobArgs {
+  cursor?: null | string;
+  fetchImpl?: typeof fetch;
+  jobId: string;
+  onCursor?: (cursor: string) => void;
+  onOpen?: () => void;
+  onProgress?: (progress: RulePreflightProgress) => void;
+  onReconnecting?: (attempt: number) => void;
+  signal?: AbortSignal;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+export type RulePreflightJobOutcome =
+  | { interpretation: RuleInterpretationApiResult }
+  | { preflight: RulePreflightApiResult };
+
+/**
+ * Follows a preflight job to its result, reconnecting and replaying from the
+ * last event id whenever the connection drops.
+ */
+export async function consumeRulePreflightJob(
+  args: ConsumeRulePreflightJobArgs,
+): Promise<RulePreflightJobOutcome> {
+  let outcome: null | RulePreflightJobOutcome = null;
+  let streamError: unknown = null;
+
+  await readSseStream({
+    cursor: args.cursor ?? null,
+    ...(args.fetchImpl ? { fetchImpl: args.fetchImpl } : {}),
+    onFrame: (frame) => {
+      if (frame.id) {
+        args.onCursor?.(frame.id);
+      }
+      if (frame.event === "reset" || frame.event === "done") {
+        return "continue";
+      }
+      const event = JSON.parse(frame.data) as RulePreflightStreamEvent;
+      if (event.type === "progress") {
+        args.onProgress?.(event.progress);
+        return "continue";
+      }
+      if (event.type === "result") {
+        outcome = { preflight: event.preflight };
+        return "stop";
+      }
+      if (event.type === "interpretation") {
+        outcome = { interpretation: event.interpretation };
+        return "stop";
+      }
+      if (event.type === "error") {
+        // Captured rather than thrown from inside the reader, which would look
+        // like a dropped connection and trigger a pointless reconnect.
+        try {
+          throwRulePreflightStreamError(event);
+        } catch (cause) {
+          streamError = cause;
+        }
+        return "stop";
+      }
+      return "continue";
     },
-    method: "POST",
+    ...(args.onOpen ? { onOpen: args.onOpen } : {}),
+    ...(args.onReconnecting ? { onReconnecting: args.onReconnecting } : {}),
+    ...(args.signal ? { signal: args.signal } : {}),
+    ...(args.sleep ? { sleep: args.sleep } : {}),
+    url: `${getApiBaseUrl()}${rulePreflightJobEventsPath(args.jobId)}`,
   });
 
-  if (!response.ok) {
-    let detail: unknown;
-    try {
-      detail = await response.json();
-    } catch {
-      detail = undefined;
-    }
-    throw new ApiRequestError({
-      code: apiErrorCode(detail),
-      detail,
-      message: apiErrorMessage(path, response.status, detail),
-      status: response.status,
-    });
+  if (streamError) {
+    throw streamError;
   }
-
-  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
-  if (!contentType.includes("application/x-ndjson")) {
-    return (await response.json()) as { interpretation: RuleInterpretationApiResult };
+  if (!outcome) {
+    throw new Error(
+      "The rule preflight job ended before returning a result.",
+    );
   }
-  if (!response.body) {
-    throw new Error("The rule interpretation stream did not include a response body.");
-  }
-
-  const decoder = new TextDecoder();
-  const reader = response.body.getReader();
-  let buffer = "";
-  let interpretation: RuleInterpretationApiResult | null = null;
-  const consumeLine = (line: string) => {
-    if (!line.trim()) return;
-    const event = JSON.parse(line) as RulePreflightStreamEvent;
-    if (event.type === "progress") onProgress?.(event.progress);
-    else if (event.type === "interpretation") interpretation = event.interpretation;
-    else if (event.type === "error") throwRulePreflightStreamError(event);
-  };
-  while (true) {
-    const { done, value } = await reader.read();
-    buffer += decoder.decode(value, { stream: !done });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-    lines.forEach(consumeLine);
-    if (done) break;
-  }
-  consumeLine(buffer);
-  if (!interpretation) {
-    throw new Error("The rule interpretation stream ended before returning a result.");
-  }
-  return { interpretation };
+  return outcome;
 }
 
 export function postRuleProposal(body: unknown) {
