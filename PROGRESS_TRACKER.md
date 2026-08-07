@@ -11,6 +11,13 @@ This tracker records milestone status, work logs, and required document confirma
 - Passed `@tyche/web` typecheck, 156 unit tests, ESLint with zero warnings, and the production build. Browser review at 390 px found no page errors and confirmed the cleaned Home header; screenshot: `output/playwright/header-cleanup-390.png`.
 - No milestone checkbox was changed; milestone completion still requires explicit user confirmation.
 
+### 2026-08-06 (Create-rule action after guess confirmation)
+
+- Opened `PRD.md`, `AGENTS.md`, the local skills directory, and the relevant frontend, Tyche design-system, UI-coherence, Playwright, and verification guidance.
+- Added a `Create a rule` button to the confirmed-guess screen. It starts a new rule-creation chat, while retaining the existing vote and return-to-round actions.
+- Passed `@tyche/web` typecheck, 156 unit tests, ESLint with zero warnings, the production build, and `git diff --check`.
+- No milestone checkbox was changed; milestone completion still requires explicit user confirmation.
+
 ## Required Markdown Confirmation
 
 Opened before starting `M0.1`:

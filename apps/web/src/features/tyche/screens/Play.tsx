@@ -186,6 +186,7 @@ function PlayDone({ sel }: { sel: number[] }) {
           {sel.map((n) => <span key={n} className="ide-chip" style={{ width: 40, height: 40, fontSize: 15 }}>{n}</span>)}
         </div>
         <button onClick={() => go("vote")} className="ide-btn" style={{ width: "100%", padding: 16, fontSize: 16 }} type="button"><Ico.vote style={{ color: "#08110C", width: 19, height: 19 }} /> Vote on the rules</button>
+        <button onClick={() => go("create", { newConversation: true })} className="ide-btn-ghost ide-btn" style={{ width: "100%", padding: 14, marginTop: 10 }} type="button"><Ico.chat style={{ color: "var(--purple-soft)" }} /> Create a rule</button>
         <button onClick={() => go("home")} className="ide-btn-ghost ide-btn" style={{ width: "100%", padding: 14, marginTop: 10 }} type="button">Back to the round</button>
       </div>
     </div>
