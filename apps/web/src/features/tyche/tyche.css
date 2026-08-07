@@ -392,6 +392,8 @@
   letter-spacing: -0.01em; white-space: nowrap;
 }
 .ide-tabs button.on { color: var(--text); border-bottom-color: var(--purple-soft); }
+.ide-tabs.ide-phase-create button:nth-child(2),
+.ide-tabs.ide-phase-finalists button:first-child { display: none; }
 
 /* metric grid — cells divided by internal hairlines, no boxes.
    4 items → 2x2 with an inner cross of hairlines. */

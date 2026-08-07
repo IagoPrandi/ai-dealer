@@ -27,7 +27,10 @@ export const MOCK_GLOBAL_CONFIG = {
 
 // Janela do turn: começou há 30 min, termina em 1 h (no futuro => "aberto").
 export const MOCK_TURN_STATE = {
+  eliminationWindowEndTimestamp: 0,
   endTimestamp: Math.floor(Date.now() / 1000) + 3600,
+  finalistCount: 0,
+  finalistRuleIds: [],
   startTimestamp: Math.floor(Date.now() / 1000) - 1800,
   status: "open" as const,
   turnDurationSeconds: 5400,

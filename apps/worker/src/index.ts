@@ -310,7 +310,11 @@ async function getActiveTurnStatus() {
     openingGate,
     turnState: turnState
       ? {
+          eliminationWindowEndTimestamp:
+            turnState.snapshot.eliminationWindowEndTimestamp,
           endTimestamp: turnState.snapshot.endTimestamp,
+          finalistCount: turnState.snapshot.finalistCount,
+          finalistRuleIds: turnState.snapshot.finalistRuleIds,
           startTimestamp: turnState.snapshot.startTimestamp,
           status: turnState.snapshot.status,
           turnDurationSeconds: turnState.snapshot.turnDurationSeconds,

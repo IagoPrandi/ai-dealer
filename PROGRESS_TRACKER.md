@@ -4,6 +4,36 @@ This tracker records milestone status, work logs, and required document confirma
 
 ## Work Log
 
+### 2026-08-06 (On-chain round-phase gate)
+
+- Opened `PRD.md`, `AGENTS.md`, the local skills directory, the frontend/UI-coherence/test-verification guidance, and the live-devnet safety reference before changing the phase flow.
+- Added one phase resolver derived from the on-chain `TurnState`: phase 1 (`create & play`), shortlist selection, phase 2 finalist voting, settlement, closed, and unavailable. The home banner, Rules view, and transaction submission guard now use it instead of independently trusting delayed API projections.
+- Extended the worker `GET /turn/active` response and the web snapshot decoder with the on-chain finalist IDs/count and elimination-window close time. Published finalist IDs are now merged into the UI rule view immediately, while approval/elimination controls are only visible in their valid phase and are guarded again immediately before a transaction is built.
+- Added regression coverage for phase-1 approval, post-cutoff shortlist lock, phase-2 finalist-only approval/elimination, and post-window settlement lock; added a worker decoder test for finalist fields. Updated active-turn browser fixtures to the expanded worker contract.
+- Verification passed: `@tyche/web` typecheck, `161/161` tests, ESLint with zero warnings, and production build; `@tyche/worker` typecheck, `135/135` tests, ESLint with zero warnings, and build; 11 Playwright rule-authoring/draw scenarios passed; `git diff --check` passed.
+- The API remains healthy, but the worker remains stopped. Its current local configuration enables settlement automation and rule precompilation, which may submit on-chain transactions; it was intentionally not restarted as part of this code change. No on-chain state, database record, automation configuration, or milestone checkbox was modified. Final consistency review confirms phase-specific UI actions and the transaction guard now share the same on-chain input.
+
+### 2026-08-06 (Round-phase operational review)
+
+- Opened `PRD.md`, `AGENTS.md`, the local skills directory, and the relevant frontend and verification guidance before reviewing the round lifecycle. No milestone checkbox was changed.
+- The contract and worker settlement unit suites pass: phase 1 accepts approval votes until the rule-election cutoff; after the cutoff the shortlist is settled; phase 2 accepts approval and elimination votes only for published finalists until the turn ends; then the active-rule election and draw run. `@tyche/worker` passed `134/134` tests and `@tyche/web` passed `157/157` tests.
+- The running environment is not currently able to execute or accurately report that lifecycle: the API on port `3002` is healthy, but the worker on port `3003`, which is the sole source for `/turn/active`, is not listening. Settlement automation is enabled in `.env`, so a stopped worker also prevents the shortlist, phase-2 opening, active-rule election, and draw settlement from advancing.
+- Reviewed a UI inconsistency independently of the stopped worker: the home phase label is computed from the worker/on-chain snapshot while the Rules page derives shortlist/elimination state from separate API projections. In addition, the `In voting` tab and its approval buttons remain available after phase 1 closes and can submit a vote that the contract will reject for a non-finalist. The UI therefore can advertise a phase that disagrees with the action the contract permits. A single authoritative phase state plus phase-gated controls and end-to-end boundary tests are required before this lifecycle can be considered working in the app.
+- Final consistency review: no source, worker configuration, database record, on-chain state, or milestone was modified during this diagnostic.
+
+### 2026-08-06 (Compact interpretation confirmation actions)
+
+- Opened `PRD.md`, `AGENTS.md`, the local skills directory, and the relevant frontend, Tyche UI-coherence/design-system, Playwright, and verification guidance.
+- Reduced the interpretation confirmation action buttons to a 14 px font, 44 px minimum tap height, and compact vertical padding while retaining the established button styles and mobile accessibility target.
+- Passed `@tyche/web` typecheck, ESLint with zero warnings, 6 Playwright rule-proposal scenarios against the running application, and `git diff --check`.
+- No milestone checkbox was changed; milestone completion still requires explicit user confirmation.
+
+### 2026-08-06 (API restart for interpretation-first flow)
+
+- Verified the API listener on port 3002, restarted only that process, and confirmed `GET /health` returns HTTP 200.
+- Restarted through `pnpm --filter @tyche/api dev`, which uses `tsx watch`, so the running API now loads the interpretation-first endpoint and watches subsequent source changes.
+- No milestone checkbox was changed; milestone completion still requires explicit user confirmation.
+
 ### 2026-08-06 (Interpret before rule generation)
 
 - Opened `PRD.md`, `AGENTS.md`, the local skills directory, and the relevant frontend, Tyche UI-coherence/design-system, Playwright, and verification guidance.

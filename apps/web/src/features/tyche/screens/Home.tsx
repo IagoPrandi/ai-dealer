@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useTyche } from "../context";
 import { fmtInt, fmtSol, fmtTurnId, lamportsToSol, truncateAddress } from "../data/format";
 import { usePlayerClaims } from "../data/hooks";
+import { getRoundPhase } from "../roundPhase";
 import { Dealer, Ico, Medal, VoteTally, useCountdownTo, useLivePrize } from "../shared";
 
 function WalletBtn() {
@@ -55,8 +56,8 @@ function PromptInput() {
 
 export function HomeScreen() {
   const {
-    apiUnavailable, bet, decisionPhase, endSeconds, entrySyncing, fees, go, openDetail, phase1EndsAt, played, players, prizeSol, reloadAll, rules, turnId,
-    resultTurnId, round, turnOpen, turnReadyToPlay, turnStatusMessage, walletAddress,
+    apiUnavailable, bet, endSeconds, entrySyncing, fees, go, openDetail, phase1EndsAt, played, players, prizeSol, reloadAll, rules, turnId,
+    resultTurnId, round, turnReadyToPlay, turnStatusMessage, turnState, walletAddress,
   } = useTyche();
 
   const [h, m, s] = useCountdownTo(endSeconds);
@@ -64,17 +65,11 @@ export function HomeScreen() {
   const { claims } = usePlayerClaims(walletAddress);
   const claimableSol = lamportsToSol(claims?.availableLamports ?? 0);
   const nowSec = Math.floor(Date.now() / 1000);
-  // Phase 1 is fixed by the rule-election cutoff. The shortlist draw happens
-  // after it closes; phase 2 starts when finalists are published.
-  const inPhase1 = turnOpen && phase1EndsAt !== null && nowSec < phase1EndsAt;
-  const hasFinalists = rules.rules.some((rule) => rule.finalist);
-  const shortlistDrawPending =
-    turnOpen &&
-    !inPhase1 &&
-    !hasFinalists &&
-    round?.election?.status !== "original_only";
-  const inPhase2 = turnOpen && !inPhase1 && hasFinalists && endSeconds !== null && nowSec < endSeconds;
-  const drawingNow = turnOpen && !inPhase1 && !inPhase2;
+  const phase = getRoundPhase({ nowSeconds: nowSec, phase1EndsAt, turn: turnState });
+  const inPhase1 = phase === "create_play";
+  const shortlistDrawPending = phase === "shortlist_selection";
+  const inPhase2 = phase === "shortlist_vote";
+  const drawingNow = phase === "settling";
   // Once phase 2 ends the rule is elected first, then the numbers are drawn.
   // While the draw runs, surface the elected rule on the main screen; once the
   // draw is fulfilled the result pop-up takes over.
@@ -204,7 +199,7 @@ export function HomeScreen() {
         ) : null}
 
         {/* ELIMINATION VOTING (open for all of phase 2) */}
-        {decisionPhase ? (
+        {inPhase2 ? (
           <button onClick={() => go("vote")} className="ide-tap" style={{
             width: "100%", textAlign: "left", marginBottom: 14, padding: "13px 16px", borderRadius: 16, cursor: "pointer", color: "var(--text)",
             border: "1px solid rgba(255,210,63,0.4)", background: "linear-gradient(110deg, rgba(255,210,63,0.13), var(--surface))",

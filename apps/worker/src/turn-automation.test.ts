@@ -51,7 +51,10 @@ test("turn automation decodes legacy and current TurnState offsets explicitly", 
   for (const length of [780, 789] as const) {
     assert.deepEqual(decodeTurnStateAccount(turnStateData(length)), {
       cycleIndex: 3,
+      eliminationWindowEndTimestamp: 0,
       endTimestamp: 900,
+      finalistCount: 0,
+      finalistRuleIds: [],
       startTimestamp: 100,
       status: "open",
       turnDurationSeconds: 800,
@@ -62,6 +65,26 @@ test("turn automation decodes legacy and current TurnState offsets explicitly", 
     () => decodeTurnStateAccount(new Uint8Array(789)),
     /recognized 780-byte legacy or 789-byte current layout/,
   );
+});
+
+test("current TurnState exposes finalist voting fields to the live status endpoint", () => {
+  const data = turnStateData(789);
+  data[261] = 2;
+  writeU64Le(data, 262, 7);
+  writeU64Le(data, 270, 11);
+  new DataView(data.buffer).setBigInt64(496, 900n, true);
+
+  assert.deepEqual(decodeTurnStateAccount(data), {
+    cycleIndex: 3,
+    eliminationWindowEndTimestamp: 900,
+    endTimestamp: 900,
+    finalistCount: 2,
+    finalistRuleIds: [7, 11],
+    startTimestamp: 100,
+    status: "open",
+    turnDurationSeconds: 800,
+    turnId: 42,
+  });
 });
 
 test("turn automation is disabled unless explicitly enabled", async () => {

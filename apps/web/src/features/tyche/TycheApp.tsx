@@ -53,6 +53,12 @@ import {
   RuleDetail,
   type RuleDetailVote,
 } from "./shared";
+import {
+  canVoteForRule,
+  canVoteRuleOut,
+  getRoundPhase,
+  getTurnEndTimestamp,
+} from "./roundPhase";
 import { HomeScreen } from "./screens/Home";
 import { PlayScreen } from "./screens/Play";
 import { VoteScreen } from "./screens/Vote";
@@ -129,8 +135,24 @@ export function TycheApp({
   const activeTurn = useActiveTurn();
   const turnId = activeTurn.activeTurnId;
   const { reload: reloadRound, round, loading: roundLoading, error: roundError } = useRound(turnId, turnId);
-  const rules = useRules(turnId, round);
+  const rules = useRules(
+    turnId,
+    round,
+    activeTurn.snapshot?.turnState?.finalistRuleIds,
+  );
   const { entrySyncing, playCount, played, receipt, reload: reloadPlayer } = usePlayerGuess(turnId, walletAddress);
+  // Phase 1 → phase 2 boundary, calculated from the same on-chain snapshot
+  // used by the action guard below.
+  const phase1EndsAt = useMemo(() => {
+    const snap = activeTurn.snapshot;
+    if (!snap?.turnState) {
+      return null;
+    }
+    return getActionCutoffTimestamp({
+      cutoffBps: snap.globalConfig.ruleElectionCutoffBps,
+      turn: snap.turnState,
+    });
+  }, [activeTurn.snapshot]);
 
   const latestResultTurnId = useMemo(() => {
     const currentTurnHasResult =
@@ -236,6 +258,26 @@ export function TycheApp({
         requestConnect();
         return;
       }
+      const turn = activeTurn.snapshot?.turnState ?? null;
+      const phase = getRoundPhase({
+        nowSeconds: Math.floor(Date.now() / 1_000),
+        phase1EndsAt,
+        turn,
+      });
+      const allowed =
+        kind === "approve"
+          ? canVoteForRule({ phase, ruleId, turn })
+          : canVoteRuleOut({ phase, ruleId, turn });
+      if (!allowed) {
+        setActionError(
+          phase === "unavailable"
+            ? "Live round state is unavailable. Voting is disabled until it reloads."
+            : kind === "approve"
+              ? "This rule is not open for an approval vote in the current phase."
+              : "Finalist elimination voting is not open in the current phase.",
+        );
+        return;
+      }
       setActionError(null);
       setVoteBusyRuleId(ruleId);
       try {
@@ -290,7 +332,17 @@ export function TycheApp({
         setVoteBusyRuleId(null);
       }
     },
-    [client, connected, wallet, walletAddress, turnId, rules, requestConnect],
+    [
+      activeTurn.snapshot?.turnState,
+      client,
+      connected,
+      phase1EndsAt,
+      requestConnect,
+      rules,
+      turnId,
+      wallet,
+      walletAddress,
+    ],
   );
 
   const sendRemoveRule = useCallback(
@@ -383,20 +435,6 @@ export function TycheApp({
     });
   }, [activeTurn.snapshot]);
 
-  // Phase 1 → phase 2 boundary: the rule-election cutoff. Phase 1 is create
-  // rules + pick numbers; phase 2 is the finalist shortlist, elimination
-  // voting, active rule and the draw at the turn's end (PRD §5.4).
-  const phase1EndsAt = useMemo(() => {
-    const snap = activeTurn.snapshot;
-    if (!snap?.turnState) {
-      return null;
-    }
-    return getActionCutoffTimestamp({
-      cutoffBps: snap.globalConfig.ruleElectionCutoffBps,
-      turn: snap.turnState,
-    });
-  }, [activeTurn.snapshot]);
-
   const turnOpen = activeTurn.snapshot?.turnState?.status === "open";
 
   // The round + rules come from the HTTP API; the turn status comes from the
@@ -418,9 +456,16 @@ export function TycheApp({
     // Elimination voting is open for the whole of phase 2; it has no separate
     // countdown — the single visible phase-2 timer (endSeconds) governs it, and
     // it closes at the turn end.
-    decisionPhase: round?.elimination?.status === "open",
+    decisionPhase:
+      getRoundPhase({
+        nowSeconds: Math.floor(Date.now() / 1_000),
+        phase1EndsAt,
+        turn: activeTurn.snapshot?.turnState ?? null,
+      }) === "shortlist_vote",
     eliminatedIds: rules.eliminatedIds,
-    endSeconds: activeTurn.endTimestamp,
+    endSeconds: activeTurn.snapshot?.turnState
+      ? getTurnEndTimestamp(activeTurn.snapshot.turnState)
+      : null,
     entrySyncing,
     fees,
     guessCutoffEndsAt,
@@ -446,6 +491,7 @@ export function TycheApp({
     turnId,
     turnReadyToPlay: activeTurn.state === "open",
     turnStatusMessage: activeTurn.message,
+    turnState: activeTurn.snapshot?.turnState ?? null,
     voteApprove: (ruleId) => sendVote(ruleId, "approve"),
     voteBusyRuleId,
     voteEliminate: (ruleId) => sendVote(ruleId, "eliminate"),

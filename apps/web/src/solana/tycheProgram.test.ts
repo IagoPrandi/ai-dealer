@@ -102,7 +102,10 @@ test("getActionCutoffTimestamp uses the base turn duration, not an extended draw
     getActionCutoffTimestamp({
       cutoffBps: 5_000,
       turn: {
+        eliminationWindowEndTimestamp: 0,
         endTimestamp: 1_000,
+        finalistCount: 0,
+        finalistRuleIds: [],
         startTimestamp: 100,
         status: "open",
         turnDurationSeconds: 200,

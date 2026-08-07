@@ -159,9 +159,13 @@ async function mockShellData(page: Page) {
         },
         globalConfigAddress: "11111111111111111111111111111111",
         turnState: {
+          eliminationWindowEndTimestamp: 0,
           endTimestamp: Math.floor(Date.now() / 1000) + 3600,
+          finalistCount: 0,
+          finalistRuleIds: [],
           startTimestamp: Math.floor(Date.now() / 1000) - 1800,
           status: "open",
+          turnDurationSeconds: 5400,
           turnId: 7,
         },
         turnStateAddress: "11111111111111111111111111111111",

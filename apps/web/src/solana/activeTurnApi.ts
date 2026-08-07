@@ -24,7 +24,10 @@ interface ActiveTurnApiResponse {
     code: "PREVIOUS_TURN_SETTLEMENT_PENDING" | "READY_TO_OPEN";
   };
   turnState: null | {
+    eliminationWindowEndTimestamp: number;
     endTimestamp: number;
+    finalistCount: number;
+    finalistRuleIds: number[];
     startTimestamp: number;
     status: "closed" | "open";
     turnDurationSeconds: number;

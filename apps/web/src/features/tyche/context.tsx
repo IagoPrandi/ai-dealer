@@ -8,6 +8,7 @@
 import { createContext, useContext } from "react";
 import type { useSolanaClient, useWalletConnection } from "@solana/react-hooks";
 
+import type { TurnStateSnapshot } from "../../solana/tycheProgram";
 import type { RulesView } from "./data/hooks";
 import type { RoundSummaryApi } from "./data/types";
 
@@ -82,6 +83,8 @@ export interface TycheContextValue {
   turnId: number;
   turnReadyToPlay: boolean;
   turnStatusMessage: string;
+  /** Current on-chain TurnState used to gate phase-specific actions. */
+  turnState: null | TurnStateSnapshot;
   voteApprove: (ruleId: number) => Promise<void>;
   voteBusyRuleId: null | number;
   voteEliminate: (ruleId: number) => Promise<void>;

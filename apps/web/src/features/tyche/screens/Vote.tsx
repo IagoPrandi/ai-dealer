@@ -1,13 +1,12 @@
 "use client";
 
 /** Rules: two-phase voting hub. Ported from app-vote.jsx, wired to live data. */
-import { useEffect, useRef, useState } from "react";
-
 import { VOTE_FEE_START_TURN } from "@tyche/constants";
 
 import { useTyche } from "../context";
 import { fmtSol, fmtTurnId } from "../data/format";
 import type { UiRule } from "../data/types";
+import { getRoundPhase } from "../roundPhase";
 import { Ico, Medal, VoteTally, finalistStatus, useCountdownTo } from "../shared";
 
 type FinalistPhaseKind = "decision" | "locked" | "original_only" | "pending" | "waiting";
@@ -102,7 +101,7 @@ function VoteGate() {
     </div>
   );
 }
-function RuleVoteRow({ rank, rule }: { rank: number; rule: UiRule }) {
+function RuleVoteRow({ rank, rule, votingOpen }: { rank: number; rule: UiRule; votingOpen: boolean }) {
   const { approvedIds, openDetail, played, voteApprove, voteBusyRuleId } = useTyche();
   const approved = approvedIds.includes(rule.ruleId);
   const isTop = rank <= 3;
@@ -120,9 +119,9 @@ function RuleVoteRow({ rank, rule }: { rank: number; rule: UiRule }) {
       </div>
       <button
         onClick={() => (played ? voteApprove(rule.ruleId) : openDetail(rule.ruleId, { canAgainst: false, rank }))}
-        disabled={busy}
+        disabled={busy || !votingOpen}
         className={"ide-votebtn for" + (approved ? " on" : "")}
-        style={{ flexShrink: 0, opacity: played && !busy ? 1 : 0.5 }}
+        style={{ flexShrink: 0, opacity: played && votingOpen && !busy ? 1 : 0.5 }}
         type="button"
       >
         <Ico.up style={{ color: "currentColor" }} /> {approved ? "again" : "in favor"} -{" "}
@@ -131,7 +130,7 @@ function RuleVoteRow({ rank, rule }: { rank: number; rule: UiRule }) {
     </div>
   );
 }
-function FinalistRow({ rule }: { rule: UiRule }) {
+function FinalistRow({ rule, votingOpen }: { rule: UiRule; votingOpen: boolean }) {
   const { approvedIds, eliminatedIds, openDetail, played, voteApprove, voteBusyRuleId, voteEliminate } = useTyche();
   const approved = approvedIds.includes(rule.ruleId);
   const eliminated = eliminatedIds.includes(rule.ruleId);
@@ -169,9 +168,9 @@ function FinalistRow({ rule }: { rule: UiRule }) {
         <div style={{ display: "flex", gap: 7, flexWrap: "wrap", justifyContent: "flex-end" }}>
           <button
             onClick={() => (played ? voteApprove(rule.ruleId) : openDetail(rule.ruleId, { canAgainst: true }))}
-            disabled={busy}
+            disabled={busy || !votingOpen || dead}
             className={"ide-votebtn for" + (approved ? " on" : "")}
-            style={{ opacity: played && !busy ? 1 : 0.5 }}
+            style={{ opacity: played && votingOpen && !dead && !busy ? 1 : 0.5 }}
             type="button"
           >
             <Ico.up style={{ color: "currentColor" }} /> {approved ? "again" : "in favor"} -{" "}
@@ -179,9 +178,9 @@ function FinalistRow({ rule }: { rule: UiRule }) {
           </button>
           <button
             onClick={() => (played ? voteEliminate(rule.ruleId) : openDetail(rule.ruleId, { canAgainst: true }))}
-            disabled={busy}
+            disabled={busy || !votingOpen || dead}
             className={"ide-votebtn against" + (eliminated ? " on" : "")}
-            style={{ opacity: played && !busy ? 1 : 0.5 }}
+            style={{ opacity: played && votingOpen && !dead && !busy ? 1 : 0.5 }}
             type="button"
           >
             <Ico.down style={{ color: "currentColor" }} /> {eliminated ? "again" : "against"} -{" "}
@@ -196,7 +195,6 @@ function FinalistRow({ rule }: { rule: UiRule }) {
 export function VoteScreen() {
   const {
     actionError,
-    decisionPhase,
     endSeconds,
     fees,
     phase1EndsAt,
@@ -206,39 +204,29 @@ export function VoteScreen() {
     roundLoading,
     rules,
     turnId,
-    turnOpen,
+    turnState,
   } = useTyche();
-  const [tab, setTab] = useState<"abertas" | "finalistas">(decisionPhase ? "finalistas" : "abertas");
   // Elimination voting spans all of phase 2 and closes at the turn end, so the
   // decision-window countdown is the single visible turn timer.
   const [h, m, s] = useCountdownTo(endSeconds);
   const nowSec = Math.floor(Date.now() / 1000);
-  const phase1Closed =
-    turnOpen &&
-    phase1EndsAt !== null &&
-    nowSec >= phase1EndsAt;
+  const phase = getRoundPhase({ nowSeconds: nowSec, phase1EndsAt, turn: turnState });
+  const phase1Open = phase === "create_play";
+  const finalistVotingOpen = phase === "shortlist_vote";
+  // Do not let a stale tab selection expose phase-1 rules after the on-chain
+  // cutoff. The displayed content follows the authoritative phase instead.
+  const tab = phase1Open ? "abertas" : "finalistas";
+  const setTab = (...args: ["abertas" | "finalistas"]) => void args;
   const all = rules.rules;
   const finalists = all.filter((r) => r.finalist);
   const shortlistPending =
-    phase1Closed &&
+    phase === "shortlist_selection" &&
     finalists.length === 0 &&
     round?.election?.status !== "original_only";
 
-  // When the play window closes or the decision window opens while this screen
-  // is mounted, jump to the finalists tab once so the settlement state is clear.
-  const prevDecisionPhase = useRef(decisionPhase);
-  const prevPhase1Closed = useRef(phase1Closed);
-  useEffect(() => {
-    if ((decisionPhase && !prevDecisionPhase.current) || (phase1Closed && !prevPhase1Closed.current)) {
-      setTab("finalistas");
-    }
-    prevDecisionPhase.current = decisionPhase;
-    prevPhase1Closed.current = phase1Closed;
-  }, [decisionPhase, phase1Closed]);
-
   const eliminatedCount = finalists.filter((r) => finalistStatus(r) === "eliminada").length;
   const finalistPhase = getFinalistPhaseView({
-    decisionPhase,
+    decisionPhase: finalistVotingOpen,
     electionStatus: round?.election?.status ?? null,
     finalistsCount: finalists.length,
     roundLoading,
@@ -262,12 +250,17 @@ export function VoteScreen() {
           <span className="ide-num" style={{ fontSize: 12.5, color: "var(--purple-soft)", fontWeight: 700, letterSpacing: "0.06em" }}>{fmtTurnId(turnId)}</span>
         </div>
 
-        <div className="ide-tabs" style={{ marginBottom: 18 }}>
+        <div className={`ide-tabs ${phase1Open ? "ide-phase-create" : "ide-phase-finalists"}`} style={{ marginBottom: 18 }}>
           <button className={tab === "abertas" ? "on" : ""} onClick={() => setTab("abertas")} type="button">In voting · {all.length}</button>
           <button className={tab === "finalistas" ? "on" : ""} onClick={() => setTab("finalistas")} type="button">Finalists · {finalists.length}</button>
         </div>
 
         {gated ? <VoteGate /> : null}
+        {phase === "unavailable" ? (
+          <div className="ide-notice" style={{ marginBottom: 18, borderTopColor: "rgba(255,107,107,0.28)" }}>
+            Live round status is unavailable. Voting is disabled until it reloads.
+          </div>
+        ) : null}
         {actionError ? (
           <div className="ide-card" style={{ padding: "11px 14px", marginBottom: 14, borderColor: "rgba(255,107,107,0.3)", color: "var(--red)", fontSize: 13 }}>{actionError}</div>
         ) : null}
@@ -284,7 +277,7 @@ export function VoteScreen() {
               <div className="ide-notice" style={{ textAlign: "center", color: "var(--muted)", fontSize: 14 }}>No rules to vote on yet.</div>
             ) : (
               <div className="ide-rule-stack" style={{ margin: "0 -20px" }}>
-                {all.map((r, i) => <RuleVoteRow key={r.id} rule={r} rank={i + 1} />)}
+                {all.map((r, i) => <RuleVoteRow key={r.id} rule={r} rank={i + 1} votingOpen />)}
               </div>
             )}
           </>
@@ -331,7 +324,7 @@ export function VoteScreen() {
               </div>
             ) : (
               <div className="ide-rule-stack" style={{ margin: "0 -20px" }}>
-                {finalists.map((r) => <FinalistRow key={r.id} rule={r} />)}
+                {finalists.map((r) => <FinalistRow key={r.id} rule={r} votingOpen={finalistVotingOpen} />)}
               </div>
             )}
           </>

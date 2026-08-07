@@ -249,7 +249,11 @@ export interface RulesView {
  * round summary's elimination/election state into UiRule[]. `against`/finalist
  * status only exist for finalists during the decision window.
  */
-export function useRules(turnId: number, round: RoundSummaryApi | null): RulesView {
+export function useRules(
+  turnId: number,
+  round: RoundSummaryApi | null,
+  onChainFinalistRuleIds: readonly number[] = [],
+): RulesView {
   const { wallet } = useWalletConnection();
   const walletAddress = wallet?.account.address.toString();
   const [proposals, setProposals] = useState<RuleProposalApi[]>([]);
@@ -333,6 +337,11 @@ export function useRules(turnId: number, round: RoundSummaryApi | null): RulesVi
     const topIds = new Set(round?.election?.topVotedRuleIds ?? []);
     const randomIds = new Set(round?.election?.randomRuleIds ?? []);
     const finalistIds = new Set(round?.election?.finalistRuleIds ?? []);
+    // The finalist list on TurnState is authoritative as soon as phase 2 opens;
+    // the API projection can arrive a polling interval later.
+    for (const id of onChainFinalistRuleIds) {
+      finalistIds.add(id);
+    }
     const finalistStates = new Map(
       (round?.elimination?.finalists ?? []).map((f) => [f.ruleId, f]),
     );
@@ -383,6 +392,7 @@ export function useRules(turnId: number, round: RoundSummaryApi | null): RulesVi
     myApproveCounts,
     myAgainstCounts,
     round,
+    onChainFinalistRuleIds,
     turnId,
     walletAddress,
   ]);

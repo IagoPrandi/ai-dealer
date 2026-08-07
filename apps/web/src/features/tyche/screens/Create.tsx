@@ -355,8 +355,8 @@ function InterpretationConfirmation({
       <p style={{ color: "var(--muted)", fontSize: 14, lineHeight: 1.55, margin: 0 }}>{interpretation.officialInterpretation}</p>
       <p style={{ color: "var(--dim)", fontSize: 13, lineHeight: 1.45, margin: 0 }}>Confirm this interpretation and I will generate the executable rule.</p>
       <div style={{ display: "flex", gap: 8 }}>
-        <button className="ide-btn-ghost ide-btn" onClick={onEdit} style={{ flex: 1, padding: 13 }} type="button">Edit wording</button>
-        <button className="ide-btn" onClick={onConfirm} style={{ flex: 1, padding: 13 }} type="button">Confirm and generate</button>
+        <button className="ide-btn-ghost ide-btn" onClick={onEdit} style={{ flex: 1, fontSize: 14, lineHeight: 1.2, minHeight: 44, padding: "9px 10px" }} type="button">Edit wording</button>
+        <button className="ide-btn" onClick={onConfirm} style={{ flex: 1, fontSize: 14, lineHeight: 1.2, minHeight: 44, padding: "9px 10px" }} type="button">Confirm and generate</button>
       </div>
     </div>
   );

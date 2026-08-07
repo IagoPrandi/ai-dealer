@@ -97,7 +97,7 @@ async function mockBackend(page: Page, drawSettled: boolean) {
         },
         globalConfigAddress: "11111111111111111111111111111111",
         // Turn still open, already past its planned end: the draw window.
-        turnState: { endTimestamp: nowSec - 30, startTimestamp: nowSec - 7_230, status: "open", turnDurationSeconds: 7_200, turnId: TURN_ID },
+        turnState: { eliminationWindowEndTimestamp: 0, endTimestamp: nowSec - 30, finalistCount: 0, finalistRuleIds: [], startTimestamp: nowSec - 7_230, status: "open", turnDurationSeconds: 7_200, turnId: TURN_ID },
         turnStateAddress: "11111111111111111111111111111111",
       },
     }),
@@ -143,7 +143,10 @@ async function mockCanonicalRoundNavigation(page: Page) {
         },
         globalConfigAddress: "11111111111111111111111111111111",
         turnState: {
+          eliminationWindowEndTimestamp: 0,
           endTimestamp: nowSec + 3_600,
+          finalistCount: 0,
+          finalistRuleIds: [],
           startTimestamp: nowSec - 1_800,
           status: "open",
           turnDurationSeconds: 5_400,

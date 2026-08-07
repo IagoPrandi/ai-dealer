@@ -88,7 +88,10 @@ export interface GlobalConfigSnapshot {
 }
 
 export interface TurnStateSnapshot {
+  eliminationWindowEndTimestamp: number;
   endTimestamp: number;
+  finalistCount: number;
+  finalistRuleIds: number[];
   startTimestamp: number;
   status: "open" | "closed";
   turnDurationSeconds: number;
@@ -484,9 +487,23 @@ export function decodeTurnStateAccount(data: Uint8Array): TurnStateSnapshot {
 
   reader.skip(8);
   const turnDurationSeconds = reader.readU32();
+  const currentLayout = data.length === 789;
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const finalistCount = currentLayout ? view.getUint8(261) : 0;
+  const finalistRuleIds = currentLayout
+    ? Array.from({ length: finalistCount }, (_, index) =>
+        Number(view.getBigUint64(262 + index * 8, true)),
+      )
+    : [];
+  const eliminationWindowEndTimestamp = currentLayout
+    ? Number(view.getBigInt64(496, true))
+    : 0;
 
   return {
+    eliminationWindowEndTimestamp,
     endTimestamp,
+    finalistCount,
+    finalistRuleIds,
     startTimestamp,
     status: statusIndex === 0 ? "open" : "closed",
     turnDurationSeconds,
