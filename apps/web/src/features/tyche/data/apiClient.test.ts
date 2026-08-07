@@ -160,3 +160,47 @@ test("the preflight job events path escapes the job id", () => {
     "/rule-preflight/jobs/abc%2F..%2Fdef/events",
   );
 });
+
+test("aborting a preflight stream cancels its active reader", async () => {
+  const controller = new AbortController();
+  let readerCancelled = false;
+  let rejectRead: (reason?: unknown) => void = () => undefined;
+  const reader = {
+    cancel: async () => {
+      readerCancelled = true;
+    },
+    read: () =>
+      new Promise<ReadableStreamReadResult<Uint8Array>>((_, reject) => {
+        rejectRead = reject;
+      }),
+  };
+  const fetchImpl = (async (
+    _input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    init?.signal?.addEventListener(
+      "abort",
+      () => rejectRead(init.signal?.reason),
+      { once: true },
+    );
+    return {
+      body: { getReader: () => reader },
+      ok: true,
+      status: 200,
+    } as Response;
+  }) as typeof fetch;
+
+  const task = consumeRulePreflightJob({
+    fetchImpl,
+    jobId: "job-abort",
+    signal: controller.signal,
+  });
+  await Promise.resolve();
+  controller.abort(new DOMException("cancelled", "AbortError"));
+
+  await assert.rejects(
+    task,
+    (error: unknown) => error instanceof Error && error.name === "AbortError",
+  );
+  assert.equal(readerCancelled, true);
+});

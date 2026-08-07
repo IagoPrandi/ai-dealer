@@ -250,13 +250,14 @@ export async function readSseStream(options: ReadSseStreamOptions) {
         }
       }
       if (stopped) {
-        await reader.cancel().catch(() => undefined);
         return;
       }
     } catch (error) {
       if (isAbortError(error)) {
         throw error;
       }
+    } finally {
+      await reader.cancel().catch(() => undefined);
     }
 
     // The body ended without a terminal frame: that is the mid-run drop.

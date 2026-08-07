@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  deleteConversationRun,
   forgetLatestConversationRun,
   getConversationRun,
   getLatestConversationRun,
@@ -11,6 +12,23 @@ import {
   subscribeConversationRun,
   upsertConversationRun,
 } from "./conversationRunStore.js";
+
+function snapshot(
+  draftId: string,
+  status: "done" | "pending" = "done",
+) {
+  return {
+    connection: "closed" as const,
+    draftId,
+    error: null,
+    interpretation: null,
+    job: null,
+    messages: [],
+    progress: null,
+    rule: null,
+    status,
+  };
+}
 
 test("conversation run subscribers reattach to pending progress and completion", () => {
   const draftId = "client:85:test-run";
@@ -125,4 +143,37 @@ test("patching a job is a no-op when there is no run or no job", () => {
   patchConversationRunJob(null, { cursor: "5" });
 
   assert.equal(getConversationRun(draftId)?.job, null);
+});
+
+test("deleting a run clears only pointers that still reference it", () => {
+  const deletedDraftId = "client:99:delete";
+  const pendingDraftId = "client:100:still-pending";
+  upsertConversationRun(snapshot(deletedDraftId, "pending"));
+  upsertConversationRun(snapshot(pendingDraftId, "pending"));
+  rememberLatestConversationRun({
+    draftId: deletedDraftId,
+    turnId: 99,
+    wallet: null,
+  });
+  rememberLatestConversationRun({
+    draftId: pendingDraftId,
+    turnId: 100,
+    wallet: null,
+  });
+
+  deleteConversationRun(deletedDraftId);
+
+  assert.equal(getConversationRun(deletedDraftId), null);
+  assert.equal(getLatestConversationRun(null, 99), null);
+  assert.equal(getLatestConversationRun(null, 100)?.draftId, pendingDraftId);
+  assert.equal(getConversationRun(pendingDraftId)?.status, "pending");
+});
+
+test("the run store cap removes the oldest non-pending snapshot", () => {
+  for (let index = 0; index < 21; index += 1) {
+    upsertConversationRun(snapshot(`client:101:cap-${index}`));
+  }
+
+  assert.equal(getConversationRun("client:101:cap-0"), null);
+  assert.equal(getConversationRun("client:101:cap-20")?.status, "done");
 });

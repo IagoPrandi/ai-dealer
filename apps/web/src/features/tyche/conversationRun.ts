@@ -4,6 +4,7 @@ import type { RulePreflightResult } from "../../solana/tycheProgram";
 import { buildConversationDraftBody, type ConversationDraftBody } from "./conversationDraft";
 import {
   ApiRequestError,
+  cancelRulePreflightJob,
   consumeRulePreflightJob,
   postConversationDraft,
   SseStreamDisconnectedError,
@@ -17,6 +18,7 @@ import { describeTxError } from "./data/tx";
 import {
   patchConversationRun,
   patchConversationRunJob,
+  getConversationRun,
   rememberLatestConversationRun,
   upsertConversationRun,
   type ConversationRunJob,
@@ -33,14 +35,20 @@ type DraftResponse = {
 };
 
 export interface ConversationRunDeps {
+  cancelPreflightJob: (jobId: string) => Promise<void>;
   consumePreflightJob: (
     args: ConsumeRulePreflightJobArgs,
   ) => Promise<RulePreflightJobOutcome>;
   describeError: (cause: unknown) => string;
-  postDraft: (wallet: string, body: ConversationDraftBody) => Promise<DraftResponse>;
+  postDraft: (
+    wallet: string,
+    body: ConversationDraftBody,
+    signal?: AbortSignal,
+  ) => Promise<DraftResponse>;
   readStorage: () => null | Storage;
   startPreflightJob: (args: {
     phase: "compile" | "interpret";
+    signal?: AbortSignal;
     text: string;
   }) => Promise<{ jobId: string }>;
 }
@@ -69,6 +77,7 @@ export interface ResumeConversationRunArgs {
 }
 
 const defaultDeps: ConversationRunDeps = {
+  cancelPreflightJob: cancelRulePreflightJob,
   consumePreflightJob: consumeRulePreflightJob,
   describeError: describeTxError,
   postDraft: postConversationDraft,
@@ -77,8 +86,10 @@ const defaultDeps: ConversationRunDeps = {
   startPreflightJob: startRulePreflightJob,
 };
 
-const activeRuns = new Map<string, Promise<void>>();
-const runAborts = new Map<string, AbortController>();
+const activeRuns = new Map<
+  string,
+  { controller: AbortController; task: Promise<void> }
+>();
 
 export function isConversationDraftSaveError(error: null | string) {
   return error?.toLowerCase().includes("could not be saved") ?? false;
@@ -95,6 +106,7 @@ export async function saveConversationDraftSnapshot({
   prompt,
   ruleId,
   status,
+  signal,
   turnId,
   wallet,
 }: {
@@ -108,6 +120,7 @@ export async function saveConversationDraftSnapshot({
   prompt: string;
   ruleId?: null | number;
   status?: "draft" | "submitted";
+  signal?: AbortSignal;
   turnId: number;
   wallet: null | string | undefined;
 }) {
@@ -132,7 +145,7 @@ export async function saveConversationDraftSnapshot({
     return draftId;
   }
 
-  const saved = await deps.postDraft(wallet, body);
+  const saved = await deps.postDraft(wallet, body, signal);
   rememberLatestConversationRun({
     draftId: saved.draft.draftId,
     turnId,
@@ -149,17 +162,27 @@ export function isConversationRunActive(draftId: string) {
  * Stops following a run and forgets its durable pointer. The server-side job is
  * untouched — this is "I am done with this", not "cancel the work".
  */
-export function abandonConversationRun(
+export function cancelConversationRun(
   draftId: null | string,
   deps: ConversationRunDeps = defaultDeps,
 ) {
   if (!draftId) {
     return;
   }
-  runAborts.get(draftId)?.abort();
-  runAborts.delete(draftId);
+  const jobId = getConversationRun(draftId)?.job?.jobId;
+  if (jobId) {
+    void deps.cancelPreflightJob(jobId).catch((error: unknown) => {
+      console.error(
+        "Could not cancel the discarded rule preflight job",
+        error instanceof Error ? error.name : "UnknownError",
+      );
+    });
+  }
+  activeRuns.get(draftId)?.controller.abort();
   clearPersistedPreflightJob(deps.readStorage(), draftId);
 }
+
+export const abandonConversationRun = cancelConversationRun;
 
 export function startConversationRun(
   args: StartConversationRunArgs,
@@ -167,7 +190,7 @@ export function startConversationRun(
 ) {
   const existing = activeRuns.get(args.draftId);
   if (existing) {
-    return existing;
+    return existing.task;
   }
 
   rememberLatestConversationRun({
@@ -191,11 +214,13 @@ export function startConversationRun(
     status: "pending",
   });
 
-  const task = runConversation(args, deps).finally(() => {
-    activeRuns.delete(args.draftId);
-    runAborts.delete(args.draftId);
+  const controller = new AbortController();
+  const task = runConversation(args, deps, controller.signal).finally(() => {
+    if (activeRuns.get(args.draftId)?.task === task) {
+      activeRuns.delete(args.draftId);
+    }
   });
-  activeRuns.set(args.draftId, task);
+  activeRuns.set(args.draftId, { controller, task });
   return task;
 }
 
@@ -210,7 +235,7 @@ export function resumeConversationRun(
   const existing = activeRuns.get(args.draftId);
   if (existing) {
     // Same tab, screen just remounted: the store subscription already covers it.
-    return existing;
+    return existing.task;
   }
 
   rememberLatestConversationRun({
@@ -246,6 +271,7 @@ export function resumeConversationRun(
     status: "pending",
   });
 
+  const controller = new AbortController();
   const task = settlePreflightJob({
     deps,
     draftId: args.draftId,
@@ -254,17 +280,20 @@ export function resumeConversationRun(
     transcript: args.messages,
     turnId: args.turnId,
     wallet: args.wallet,
+    signal: controller.signal,
   }).finally(() => {
-    activeRuns.delete(args.draftId);
-    runAborts.delete(args.draftId);
+    if (activeRuns.get(args.draftId)?.task === task) {
+      activeRuns.delete(args.draftId);
+    }
   });
-  activeRuns.set(args.draftId, task);
+  activeRuns.set(args.draftId, { controller, task });
   return task;
 }
 
 async function runConversation(
   args: StartConversationRunArgs,
   deps: ConversationRunDeps,
+  signal: AbortSignal,
 ) {
   let draftId = args.draftId;
   let transcript = args.initialMessages;
@@ -277,6 +306,7 @@ async function runConversation(
         lastMessage: args.lastUserMessage,
         messages: transcript,
         prompt: args.ruleText,
+        signal,
         turnId: args.turnId,
         wallet: args.wallet,
       }) ?? draftId;
@@ -317,6 +347,7 @@ async function runConversation(
           lastMessage: args.localDealerReply,
           messages: transcript,
           prompt: args.ruleText,
+          signal,
           turnId: args.turnId,
           wallet: args.wallet,
         });
@@ -343,6 +374,7 @@ async function runConversation(
 
     const { jobId } = await deps.startPreflightJob({
       phase: args.phase,
+      signal,
       text: args.ruleText,
     });
     const job: ConversationRunJob = {
@@ -370,6 +402,7 @@ async function runConversation(
       transcript,
       turnId: args.turnId,
       wallet: args.wallet,
+      signal,
     });
     return;
   } catch (cause) {
@@ -378,6 +411,7 @@ async function runConversation(
       deps,
       draftId: args.draftId,
       ruleText: args.ruleText,
+      signal,
       transcript,
     });
   }
@@ -396,13 +430,11 @@ async function settlePreflightJob(ctx: {
   transcript: ConversationMessage[];
   turnId: number;
   wallet: null | string | undefined;
+  signal: AbortSignal;
 }) {
   const { deps, draftId, job } = ctx;
   let transcript = ctx.transcript;
   let cursor = job.cursor;
-
-  const controller = new AbortController();
-  runAborts.set(draftId, controller);
 
   const persist = () => {
     writePersistedPreflightJob(deps.readStorage(), {
@@ -427,7 +459,7 @@ async function settlePreflightJob(ctx: {
         patchConversationRun(draftId, { connection: "live", progress }),
       onReconnecting: () =>
         patchConversationRun(draftId, { connection: "reconnecting" }),
-      signal: controller.signal,
+      signal: ctx.signal,
     });
 
     clearPersistedPreflightJob(deps.readStorage(), ctx.persistedDraftId);
@@ -458,6 +490,7 @@ async function settlePreflightJob(ctx: {
           officialInterpretation: interpretation.officialInterpretation,
           preflightJobId: null,
           prompt: interpretation.sanitizedText,
+          signal: ctx.signal,
           turnId: ctx.turnId,
           wallet: ctx.wallet,
         });
@@ -502,6 +535,7 @@ async function settlePreflightJob(ctx: {
         officialInterpretation: preflight.officialInterpretation || null,
         preflightJobId: null,
         prompt: preflight.sanitizedText,
+        signal: ctx.signal,
         ruleId: preflight.ruleId,
         status: "draft",
         turnId: ctx.turnId,
@@ -520,10 +554,9 @@ async function settlePreflightJob(ctx: {
       draftId,
       persistedDraftId: ctx.persistedDraftId,
       ruleText: job.ruleText,
+      signal: ctx.signal,
       transcript,
     });
-  } finally {
-    runAborts.delete(draftId);
   }
 }
 
@@ -533,9 +566,14 @@ function reportConversationRunFailure(ctx: {
   draftId: string;
   persistedDraftId?: string;
   ruleText: string;
+  signal?: AbortSignal;
   transcript: ConversationMessage[];
 }) {
   const { cause, deps, draftId, transcript } = ctx;
+
+  if (ctx.signal?.aborted) {
+    return;
+  }
 
   // These two are checked before the ApiRequestError branch on purpose. An
   // expired job is an HTTP 404, and the blocked-rule branch below accepts any

@@ -72,6 +72,7 @@ function guardianBlock(criteria: string, scoring: string): string {
 async function score(
   messages: GuardianMessage[],
   config: GuardianConfig,
+  signal?: AbortSignal,
 ): Promise<boolean> {
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (config.apiKey) {
@@ -90,9 +91,14 @@ async function score(
       }),
       headers,
       method: "POST",
-      signal: AbortSignal.timeout(config.timeoutMs),
+      signal: signal
+        ? AbortSignal.any([AbortSignal.timeout(config.timeoutMs), signal])
+        : AbortSignal.timeout(config.timeoutMs),
     });
   } catch (error) {
+    if (signal?.aborted) {
+      throw signal.reason ?? error;
+    }
     throw new GuardianError(
       "GUARDIAN_UNAVAILABLE",
       `The guardian model is unreachable: ${
@@ -127,6 +133,7 @@ async function score(
 export async function detectJailbreak(
   text: string,
   config: GuardianConfig = resolveGuardianConfig(),
+  signal?: AbortSignal,
 ): Promise<boolean> {
   return score(
     [
@@ -140,6 +147,7 @@ export async function detectJailbreak(
       },
     ],
     config,
+    signal,
   );
 }
 
@@ -248,6 +256,7 @@ export async function checkGroundedness(
   rule: string,
   interpretation: string,
   config: GuardianConfig = resolveGuardianConfig(),
+  signal?: AbortSignal,
 ): Promise<boolean> {
   if (isClearlyGroundedRuleInterpretation(rule, interpretation)) {
     return true;
@@ -268,6 +277,7 @@ export async function checkGroundedness(
       },
     ],
     config,
+    signal,
   );
   return !ungrounded;
 }

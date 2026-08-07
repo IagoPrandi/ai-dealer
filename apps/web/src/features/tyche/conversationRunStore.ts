@@ -40,6 +40,7 @@ type Listener = (snapshot: ConversationRunSnapshot) => void;
 const runs = new Map<string, ConversationRunSnapshot>();
 const latestRunByScope = new Map<string, string>();
 const listeners = new Map<string, Set<Listener>>();
+const MAX_CONVERSATION_RUNS = 20;
 
 function scopeKey(wallet: null | string | undefined, turnId: number) {
   return `${wallet ? wallet.toLowerCase() : "anonymous"}:${turnId}`;
@@ -73,8 +74,32 @@ export function forgetLatestConversationRun(args: {
   }
 }
 
+export function deleteConversationRun(draftId: null | string) {
+  if (!draftId) {
+    return;
+  }
+  runs.delete(draftId);
+  for (const [key, currentDraftId] of latestRunByScope) {
+    if (currentDraftId === draftId) {
+      latestRunByScope.delete(key);
+    }
+  }
+}
+
 export function upsertConversationRun(snapshot: ConversationRunSnapshot) {
+  // Refresh insertion order so the cap reflects the least recently updated
+  // terminal snapshots rather than arbitrary draft ids.
+  runs.delete(snapshot.draftId);
   runs.set(snapshot.draftId, snapshot);
+  while (runs.size > MAX_CONVERSATION_RUNS) {
+    const oldestTerminal = [...runs.entries()].find(
+      ([, candidate]) => candidate.status !== "pending",
+    );
+    if (!oldestTerminal) {
+      break;
+    }
+    deleteConversationRun(oldestTerminal[0]);
+  }
   listeners.get(snapshot.draftId)?.forEach((listener) => listener(snapshot));
 }
 

@@ -66,11 +66,16 @@ async function getJson<T>(
   return (await response.json()) as T;
 }
 
-async function postJson<T>(path: string, body: unknown): Promise<T> {
+async function postJson<T>(
+  path: string,
+  body: unknown,
+  signal?: AbortSignal,
+): Promise<T> {
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
     body: JSON.stringify(body),
     headers: { "content-type": "application/json" },
     method: "POST",
+    ...(signal ? { signal } : {}),
   });
 
   // 409 is a benign "already recorded" for receipts/votes — treat as success.
@@ -109,11 +114,13 @@ async function postStrictJson<T>(
   path: string,
   body: unknown,
   extraHeaders: Record<string, string> = {},
+  signal?: AbortSignal,
 ): Promise<T> {
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
     body: JSON.stringify(body),
     headers: { "content-type": "application/json", ...extraHeaders },
     method: "POST",
+    ...(signal ? { signal } : {}),
   });
 
   if (!response.ok) {
@@ -303,6 +310,17 @@ export function rulePreflightJobEventsPath(jobId: string) {
   return `/rule-preflight/jobs/${encodeURIComponent(jobId)}/events`;
 }
 
+export async function cancelRulePreflightJob(jobId: string) {
+  const path = `/rule-preflight/jobs/${encodeURIComponent(jobId)}`;
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
+    cache: "no-store",
+    method: "DELETE",
+  });
+  if (!response.ok && response.status !== 404) {
+    throw new Error(`DELETE ${path} returned HTTP ${response.status}.`);
+  }
+}
+
 /**
  * Starts a rule preflight run and returns as soon as the API has accepted it.
  * The pipeline then belongs to the server, not to this request — a synchronous
@@ -311,6 +329,7 @@ export function rulePreflightJobEventsPath(jobId: string) {
  */
 export function startRulePreflightJob(args: {
   phase: RulePreflightPhase;
+  signal?: AbortSignal;
   text: string;
 }) {
   return postStrictJson<{
@@ -318,7 +337,12 @@ export function startRulePreflightJob(args: {
     jobId: string;
     phase: RulePreflightPhase;
     status: string;
-  }>("/rule-preflight", args, { accept: "text/event-stream" });
+  }>(
+    "/rule-preflight",
+    { phase: args.phase, text: args.text },
+    { accept: "text/event-stream" },
+    args.signal,
+  );
 }
 
 export interface ConsumeRulePreflightJobArgs {
@@ -443,9 +467,11 @@ export function postConversationDraft(
     draftId?: string;
     updatedAt?: string;
   },
+  signal?: AbortSignal,
 ) {
   return postJson<{ draft: ConversationDraftApi }>(
     `/players/${wallet}/conversation-drafts`,
     body,
+    signal,
   );
 }

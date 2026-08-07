@@ -12,6 +12,7 @@ import {
 } from "./data/apiClient.js";
 import {
   abandonConversationRun,
+  cancelConversationRun,
   isConversationDraftSaveError,
   isConversationRunActive,
   resumeConversationRun,
@@ -72,6 +73,7 @@ function baseDeps(
   draftId: string,
 ): ConversationRunDeps {
   return {
+    cancelPreflightJob: async () => undefined,
     describeError: (cause) =>
       cause instanceof Error ? cause.message : String(cause),
     postDraft: async (_wallet, body) => ({
@@ -493,6 +495,53 @@ test("abandoning a run clears its persisted pointer", () => {
   abandonConversationRun(draftId, { ...deps, readStorage: () => storage });
 
   assert.equal(entries.has("tyche.preflightJob.v1"), false);
+});
+
+test("cancelling a pending run does not turn the abort into an error state", async () => {
+  const draftId = "client:102:cancelled";
+  const cancelledJobs: string[] = [];
+  const deps = baseDeps(
+    {
+      cancelPreflightJob: async (jobId) => {
+        cancelledJobs.push(jobId);
+      },
+      consumePreflightJob: async (args) =>
+        new Promise((_, reject) => {
+          args.signal?.addEventListener(
+            "abort",
+            () => reject(args.signal?.reason),
+            { once: true },
+          );
+        }),
+      startPreflightJob: async () => ({ jobId: "job-102" }),
+    },
+    draftId,
+  );
+
+  const task = startConversationRun(
+    {
+      draftId,
+      initialMessages: [{ text: "Win if exactly 2 numbers match.", who: "user" }],
+      lastUserMessage: "Win if exactly 2 numbers match.",
+      localDealerReply: null,
+      phase: "compile",
+      refinedDraft: null,
+      ruleText: "Win if exactly 2 numbers match.",
+      turnId: 102,
+      wallet: null,
+    },
+    deps,
+  );
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+
+  cancelConversationRun(draftId, deps);
+  await task;
+
+  assert.notEqual(getConversationRun(draftId)?.status, "error");
+  assert.equal(isConversationRunActive(draftId), false);
+  assert.deepEqual(cancelledJobs, ["job-102"]);
 });
 
 test("draft-save failures are eligible for an explicit retry", () => {

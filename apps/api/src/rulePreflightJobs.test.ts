@@ -15,6 +15,7 @@ import {
   isValidConversationDraft,
   listConversationDrafts,
   matchRulePreflightJobEventsPath,
+  matchRulePreflightJobPath,
   parseRulePreflightCursor,
   readRulePreflightJobEventsAfter,
   reserveRulePreflightJobSlot,
@@ -443,6 +444,20 @@ test("the events path matches only a valid job id on the events subpath", () => 
     matchRulePreflightJobEventsPath("/rule-preflight/jobs/..%2F..%2Fetc/events"),
     null,
   );
+});
+
+test("the cancellable job path matches only the exact opaque job id", () => {
+  const jobId = "a".repeat(32);
+
+  assert.equal(
+    matchRulePreflightJobPath(`/rule-preflight/jobs/${jobId}`),
+    jobId,
+  );
+  assert.equal(
+    matchRulePreflightJobPath(`/rule-preflight/jobs/${jobId}/events`),
+    null,
+  );
+  assert.equal(matchRulePreflightJobPath("/rule-preflight/jobs/short"), null);
 });
 
 test("terminal rule preflight jobs survive a snapshot round trip without their progress", () => {

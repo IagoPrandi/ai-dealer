@@ -38,13 +38,14 @@ import {
   type RuleGuidanceOption,
 } from "../ruleRefinement";
 import {
-  abandonConversationRun,
+  cancelConversationRun,
   isConversationDraftSaveError,
   resumeConversationRun,
   saveConversationDraftSnapshot,
   startConversationRun,
 } from "../conversationRun";
 import {
+  deleteConversationRun,
   forgetLatestConversationRun,
   getConversationRun,
   getLatestConversationRun,
@@ -701,7 +702,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
     if (!interpretation || typing) {
       return;
     }
-    abandonConversationRun(activeDraftId);
+    cancelConversationRun(activeDraftId);
     const confirmation = "Yes, generate this rule.";
     const transcript: ChatMessage[] = [...msgs, { text: confirmation, who: "user" }];
     setMsgs(transcript);
@@ -743,7 +744,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
     }
     // Sending is a legitimate escape hatch from a stuck run: stop following the
     // old job before starting a new one.
-    abandonConversationRun(activeDraftId);
+    cancelConversationRun(activeDraftId);
     const pendingRule = rule;
     const likelyRuleDraft = isLikelyRuleDraft(t);
     const explicitPatch = isExplicitRuleRefinementPatch(t);
@@ -937,6 +938,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
           turnId,
           wallet: walletAddress,
         });
+        deleteConversationRun(activeDraftId);
       } catch (draftError) {
         setError(`Rule submitted, but the draft status could not be updated. ${describeTxError(draftError)}`);
       }
@@ -985,12 +987,13 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
   }
 
   function reset(message = "On to the next one! How does your new rule decide the winner?") {
-    abandonConversationRun(activeDraftId);
+    cancelConversationRun(activeDraftId);
     forgetLatestConversationRun({
       draftId: activeDraftId,
       turnId,
       wallet: walletAddress,
     });
+    deleteConversationRun(activeDraftId);
     setRule(null);
     setInterpretation(null);
     setSubmitted(false);
@@ -1034,7 +1037,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
       return;
     }
 
-    abandonConversationRun(activeDraftId);
+    cancelConversationRun(activeDraftId);
     const lastUserMessage = [...msgs].reverse().find((message) => message.who === "user")?.text;
     const ruleText = runJob?.ruleText ?? lastUserMessage;
     if (!ruleText) {

@@ -45,14 +45,9 @@ import {
   type RuleValidationTestResult,
 } from "@tyche/rule-compiler";
 import pg from "pg";
-import { createClient } from "redis";
 import {
   compileRuleToAst,
-  ensureModelLoaded,
   interpretRuleWithAgent,
-  resolveEscalationModel,
-  resolveRuleAgentConfig,
-  resolveTranslateToEnglish,
   RuleAgentError,
   translateRuleToEnglish,
   type RuleAgentInterpretation,
@@ -60,8 +55,20 @@ import {
 import {
   checkGroundedness,
   detectJailbreak,
-  resolveGuardianConfig,
 } from "./guardian.js";
+import {
+  checkPostgresHealth,
+  checkRedisHealth,
+  closeHealthResources,
+  ensureDealerModelReady,
+  getDealerReadiness,
+  getDealerRuntime,
+  getShutdownSignal,
+  registerShutdownTask,
+  runShutdown,
+  storeDealerWarmup,
+  trackRequest,
+} from "./lifespan.js";
 import {
   analyzeRuleSemanticImpact,
   type RuleSemanticImpact,
@@ -112,6 +119,7 @@ const RULE_EXTERNAL_BLOCK_PATTERNS = [
 ] as const;
 
 export interface ServiceHealth {
+  dealer: "ready" | "unconfigured" | "warming";
   service: string;
   status: "ok" | "error";
   turnDurationCycleHours: readonly number[];
@@ -1057,6 +1065,8 @@ const rulePreflightJobListeners = new Map<
   string,
   Set<RulePreflightJobListener>
 >();
+const activeRulePreflightJobTasks = new Set<Promise<void>>();
+const rulePreflightJobControllers = new Map<string, AbortController>();
 
 export interface ApiStateSnapshotV1 {
   auditLogOrder: string[];
@@ -1207,19 +1217,24 @@ export function restoreApiStateSnapshot(snapshot: ApiStateSnapshotV1) {
 
 async function initializeApiStatePersistence(databaseUrl: string) {
   const pool = new Pool({ connectionString: databaseUrl });
-  await pool.query(API_STATE_POSTGRES_SCHEMA);
-  const result = await pool.query<{ snapshot_json: string }>(
-    "SELECT snapshot_json FROM api_state_snapshots WHERE snapshot_key = $1",
-    [API_STATE_SNAPSHOT_KEY],
-  );
-  const stored = result.rows[0]?.snapshot_json;
-  if (stored) {
-    restoreApiStateSnapshot(JSON.parse(stored) as ApiStateSnapshotV1);
-    // Swept here rather than inside restore, which would make the snapshot
-    // round-trip test depend on the clock.
-    sweepRulePreflightJobs();
+  try {
+    await pool.query(API_STATE_POSTGRES_SCHEMA);
+    const result = await pool.query<{ snapshot_json: string }>(
+      "SELECT snapshot_json FROM api_state_snapshots WHERE snapshot_key = $1",
+      [API_STATE_SNAPSHOT_KEY],
+    );
+    const stored = result.rows[0]?.snapshot_json;
+    if (stored) {
+      restoreApiStateSnapshot(JSON.parse(stored) as ApiStateSnapshotV1);
+      // Swept here rather than inside restore, which would make the snapshot
+      // round-trip test depend on the clock.
+      sweepRulePreflightJobs();
+    }
+    apiStatePool = pool;
+  } catch (error) {
+    await pool.end().catch(() => undefined);
+    throw error;
   }
-  apiStatePool = pool;
 }
 
 function queueApiStatePersistence() {
@@ -1902,6 +1917,7 @@ export function resetApiStateForTests() {
   rulePreflightJobs.clear();
   rulePreflightJobIdsByFingerprint.clear();
   rulePreflightJobListeners.clear();
+  rulePreflightJobControllers.clear();
   auditLogs.clear();
   auditLogOrder.length = 0;
   lastAuditLogHash = null;
@@ -2228,6 +2244,7 @@ export function buildRuleRefinementFeedback(
 async function createRuleInterpretation(
   text: string,
   reportProgress: RulePreflightProgressReporter = () => undefined,
+  signal?: AbortSignal,
 ): Promise<RuleInterpretationResult> {
   reportProgress({
     message: "Checking rule limits and allowed inputs...",
@@ -2247,15 +2264,17 @@ async function createRuleInterpretation(
   if (tokenCount > RULE_MAX_TOKENS) throw new Error("RULE_TOKEN_LIMIT_EXCEEDED");
   if (textByteLength > MAX_RULE_TEXT_BYTES) throw new Error("RULE_TEXT_TOO_LONG");
 
-  const agentConfig = resolveRuleAgentConfig();
-  const guardianConfig = resolveGuardianConfig();
+  const runtime = getDealerRuntime();
+  const { agent: agentConfig, guardian: guardianConfig } = runtime;
   reportProgress({
     message: "Preparing the local rule agents...",
     model: agentConfig.model,
     stage: "loading_models",
   });
-  if (guardianConfig.enabled) await ensureModelLoaded(guardianConfig.model, agentConfig);
-  await ensureModelLoaded(agentConfig.model, agentConfig);
+  if (guardianConfig.enabled) {
+    await ensureDealerModelReady(guardianConfig.model, signal);
+  }
+  await ensureDealerModelReady(agentConfig.model, signal);
 
   if (guardianConfig.enabled) {
     reportProgress({
@@ -2263,13 +2282,13 @@ async function createRuleInterpretation(
       model: guardianConfig.model,
       stage: "checking_safety",
     });
-    if (await detectJailbreak(sanitizedText, guardianConfig)) {
+    if (await detectJailbreak(sanitizedText, guardianConfig, signal)) {
       throw new Error("RULE_PROMPT_INJECTION");
     }
   }
 
   const knownInterpretation = createKnownRuleInterpretation(sanitizedText);
-  const shouldTranslate = !knownInterpretation && resolveTranslateToEnglish();
+  const shouldTranslate = !knownInterpretation && runtime.translateToEnglish;
   if (shouldTranslate) {
     reportProgress({
       message: "Translating the rule without changing its meaning...",
@@ -2278,7 +2297,9 @@ async function createRuleInterpretation(
     });
   }
   const englishText = knownInterpretation?.normalizedText ??
-    (shouldTranslate ? await translateRuleToEnglish(sanitizedText, agentConfig) : sanitizedText);
+    (shouldTranslate
+      ? await translateRuleToEnglish(sanitizedText, agentConfig, signal)
+      : sanitizedText);
   reportProgress({
     message: "Interpreting your winning condition...",
     model: agentConfig.model,
@@ -2286,7 +2307,7 @@ async function createRuleInterpretation(
   });
   const interpretation = knownInterpretation ?? enforceKnownRuleInterpretation(
     `${englishText} ${sanitizedText}`,
-    await interpretRuleWithAgent(englishText, agentConfig),
+    await interpretRuleWithAgent(englishText, agentConfig, signal),
   );
 
   return {
@@ -2308,6 +2329,7 @@ async function createRuleInterpretation(
 async function createRulePreflight(
   text: string,
   reportProgress: RulePreflightProgressReporter = () => undefined,
+  signal?: AbortSignal,
 ): Promise<RulePreflightResult> {
   reportProgress({
     message: "Checking rule limits and allowed inputs...",
@@ -2362,8 +2384,8 @@ async function createRulePreflight(
     throw new Error("RULE_TEXT_TOO_LONG");
   }
 
-  const agentConfig = resolveRuleAgentConfig();
-  const guardianConfig = resolveGuardianConfig();
+  const runtime = getDealerRuntime();
+  const { agent: agentConfig, guardian: guardianConfig } = runtime;
   let guardianNote = "";
 
   // 0. Make sure the models are actually loaded before any time-boxed call. A
@@ -2376,9 +2398,9 @@ async function createRulePreflight(
     stage: "loading_models",
   });
   if (guardianConfig.enabled) {
-    await ensureModelLoaded(guardianConfig.model, agentConfig);
+    await ensureDealerModelReady(guardianConfig.model, signal);
   }
-  await ensureModelLoaded(agentConfig.model, agentConfig);
+  await ensureDealerModelReady(agentConfig.model, signal);
 
   // 1. Guardian input gate (Granite Guardian) — an ML jailbreak classifier in
   // addition to the regex guard. If the guardian is down we keep the regex guard
@@ -2390,10 +2412,13 @@ async function createRulePreflight(
       stage: "checking_safety",
     });
     try {
-      if (await detectJailbreak(sanitizedText, guardianConfig)) {
+      if (await detectJailbreak(sanitizedText, guardianConfig, signal)) {
         throw new Error("RULE_PROMPT_INJECTION");
       }
     } catch (error) {
+      if (signal?.aborted) {
+        throw signal.reason ?? error;
+      }
       if (error instanceof Error && error.message === "RULE_PROMPT_INJECTION") {
         throw error;
       }
@@ -2409,7 +2434,7 @@ async function createRulePreflight(
   // carries a Portuguese trigger glossary — so this step can be turned off
   // (LLM_TRANSLATE_TO_ENGLISH=false) to save a call without losing consistency.
   const knownInterpretation = createKnownRuleInterpretation(sanitizedText);
-  const shouldTranslate = !knownInterpretation && resolveTranslateToEnglish();
+  const shouldTranslate = !knownInterpretation && runtime.translateToEnglish;
   if (shouldTranslate) {
     reportProgress({
       message: "Translating the rule without changing its meaning...",
@@ -2420,7 +2445,7 @@ async function createRulePreflight(
   const compileText =
     knownInterpretation?.normalizedText ??
     (shouldTranslate
-      ? await translateRuleToEnglish(sanitizedText, agentConfig)
+      ? await translateRuleToEnglish(sanitizedText, agentConfig, signal)
       : sanitizedText);
   const ruleId = createRuleId();
 
@@ -2440,7 +2465,7 @@ async function createRulePreflight(
       knownInterpretation ??
       enforceKnownRuleInterpretation(
         `${compileText} ${sanitizedText}`,
-        await interpretRuleWithAgent(compileText, passConfig),
+        await interpretRuleWithAgent(compileText, passConfig, signal),
       );
     reportProgress({
       message: "Building and testing the executable rule...",
@@ -2448,7 +2473,7 @@ async function createRulePreflight(
       stage: "compiling",
     });
     const astProvider: RuleAstProvider = async ({ prompt }) =>
-      compileRuleToAst(prompt, passConfig);
+      compileRuleToAst(prompt, passConfig, signal);
     const validation = await compileRuleArtifact(
       {
         model,
@@ -2476,8 +2501,12 @@ async function createRulePreflight(
           compileText,
           interpretation.officialInterpretation,
           guardianConfig,
+          signal,
         );
       } catch (error) {
+        if (signal?.aborted) {
+          throw signal.reason ?? error;
+        }
         guardianNote = `Guardian groundedness check unavailable: ${
           error instanceof Error ? error.message : String(error)
         }`;
@@ -2493,14 +2522,14 @@ async function createRulePreflight(
   // compound connectors ("and/or") are exactly where the small model produces a
   // wrong-but-plausible AST the guardian can miss. Route those straight to the
   // stronger model instead of relying on a reactive catch.
-  const escalationModel = resolveEscalationModel();
+  const escalationModel = runtime.escalationModel;
   const firstModel =
     escalationModel && isComplexRule(compileText)
       ? escalationModel
       : agentConfig.model;
 
   if (firstModel !== agentConfig.model) {
-    await ensureModelLoaded(firstModel, agentConfig);
+    await ensureDealerModelReady(firstModel, signal);
   }
   let pass = await dealerPass(firstModel);
   let escalated = firstModel !== agentConfig.model;
@@ -2510,13 +2539,16 @@ async function createRulePreflight(
     // The escalation attempt must never break the preflight: if the stronger
     // model is unavailable/slow, keep the primary result and surface the note.
     try {
-      await ensureModelLoaded(escalationModel, agentConfig);
+      await ensureDealerModelReady(escalationModel, signal);
       const strong = await dealerPass(escalationModel);
       if (strong.validation.decision === "VALID" && strong.grounded !== false) {
         pass = strong;
         escalated = true;
       }
     } catch (error) {
+      if (signal?.aborted) {
+        throw signal.reason ?? error;
+      }
       guardianNote = `Escalation to ${escalationModel} unavailable: ${
         error instanceof Error ? error.message : String(error)
       }`;
@@ -3696,6 +3728,14 @@ function writeRulePreflightStreamEvent(
   }
 }
 
+function endRulePreflightStream(
+  response: import("node:http").ServerResponse,
+) {
+  if (!response.destroyed && !response.writableEnded) {
+    response.end();
+  }
+}
+
 /**
  * Runs the preflight pipeline and publishes it to the job registry. Written to
  * never reject: every exit lands a terminal event, which is what lets attached
@@ -3704,6 +3744,7 @@ function writeRulePreflightStreamEvent(
 async function runRulePreflightJob(
   job: RulePreflightJobRecord,
   text: string,
+  signal?: AbortSignal,
 ) {
   try {
     const reportProgress: RulePreflightProgressReporter = (progress) => {
@@ -3713,22 +3754,43 @@ async function runRulePreflightJob(
       const interpretation = await createRuleInterpretation(
         text,
         reportProgress,
+        signal,
       );
       appendRulePreflightJobEvent(job.id, {
         interpretation,
         type: "interpretation",
       });
     } else {
-      const preflight = await createRulePreflight(text, reportProgress);
+      const preflight = await createRulePreflight(
+        text,
+        reportProgress,
+        signal,
+      );
       appendRulePreflightJobEvent(job.id, { preflight, type: "result" });
     }
   } catch (error) {
-    const failure = describeRulePreflightError(error);
-    appendRulePreflightJobEvent(job.id, {
-      ...failure.body,
-      status: failure.status,
-      type: "error",
-    });
+    if (getShutdownSignal().aborted) {
+      appendRulePreflightJobEvent(job.id, {
+        error: "api_shutting_down",
+        message: "The API is shutting down. Reconnect after it restarts.",
+        status: 503,
+        type: "error",
+      });
+    } else if (signal?.aborted) {
+      appendRulePreflightJobEvent(job.id, {
+        error: "rule_preflight_cancelled",
+        message: "The rule preflight run was cancelled.",
+        status: 499,
+        type: "error",
+      });
+    } else {
+      const failure = describeRulePreflightError(error);
+      appendRulePreflightJobEvent(job.id, {
+        ...failure.body,
+        status: failure.status,
+        type: "error",
+      });
+    }
   }
 
   // Best effort, and deliberately AFTER the terminal event. Preflight is a
@@ -3751,18 +3813,41 @@ function startDetachedRulePreflightJob(
   job: RulePreflightJobRecord,
   text: string,
 ) {
-  void runRulePreflightJob(job, text).catch((error: unknown) => {
-    // A fuse. runRulePreflightJob is written not to reject, but without this an
-    // unexpected throw would leave the job running forever and every attached
-    // reader hanging until the sweeper fires.
-    console.error("Rule preflight job crashed", error);
-    appendRulePreflightJobEvent(job.id, {
-      error: "RULE_PREFLIGHT_JOB_CRASHED",
-      message: "The rule preflight job ended unexpectedly.",
-      status: 500,
-      type: "error",
+  const controller = new AbortController();
+  rulePreflightJobControllers.set(job.id, controller);
+  const untrack = trackRequest(controller);
+  const task = runRulePreflightJob(job, text, controller.signal)
+    .catch((error: unknown) => {
+      // A fuse. runRulePreflightJob is written not to reject, but without this an
+      // unexpected throw would leave the job running forever and every attached
+      // reader hanging until the sweeper fires.
+      console.error("Rule preflight job crashed", error);
+      appendRulePreflightJobEvent(job.id, {
+        error: "RULE_PREFLIGHT_JOB_CRASHED",
+        message: "The rule preflight job ended unexpectedly.",
+        status: 500,
+        type: "error",
+      });
+    })
+    .finally(() => {
+      untrack();
+      rulePreflightJobControllers.delete(job.id);
+      activeRulePreflightJobTasks.delete(task);
     });
-  });
+  activeRulePreflightJobTasks.add(task);
+}
+
+async function drainRulePreflightJobs() {
+  await Promise.allSettled([...activeRulePreflightJobTasks]);
+}
+
+export function cancelRulePreflightJob(jobId: string) {
+  const controller = rulePreflightJobControllers.get(jobId);
+  if (!controller) {
+    return false;
+  }
+  controller.abort(new DOMException("The rule preflight was cancelled.", "AbortError"));
+  return true;
 }
 
 /**
@@ -3830,6 +3915,15 @@ export function matchRulePreflightJobEventsPath(pathname: string) {
   }
   const jobId = segments[0] ?? "";
   return isRulePreflightJobId(jobId) ? jobId : null;
+}
+
+export function matchRulePreflightJobPath(pathname: string) {
+  const prefix = "/rule-preflight/jobs/";
+  if (!pathname.startsWith(prefix)) {
+    return null;
+  }
+  const jobId = pathname.slice(prefix.length);
+  return !jobId.includes("/") && isRulePreflightJobId(jobId) ? jobId : null;
 }
 
 /**
@@ -9125,31 +9219,6 @@ function parseTransparencyFilters(
   };
 }
 
-async function checkPostgres(databaseUrl: string): Promise<"ok" | "error"> {
-  const pool = new Pool({ connectionString: databaseUrl });
-  try {
-    await pool.query("select 1");
-    return "ok";
-  } catch {
-    return "error";
-  } finally {
-    await pool.end();
-  }
-}
-
-async function checkRedis(redisUrl: string): Promise<"ok" | "error"> {
-  const client = createClient({ url: redisUrl });
-  try {
-    await client.connect();
-    await client.ping();
-    return "ok";
-  } catch {
-    return "error";
-  } finally {
-    await client.disconnect().catch(() => undefined);
-  }
-}
-
 function getEffectiveTurnDurationHealth() {
   const manualControlEnabled = envFlag(
     process.env.TYCHE_TURN_MANUAL_CONTROL_ENABLED,
@@ -9174,6 +9243,7 @@ export async function getHealth(): Promise<ServiceHealth> {
 
   if (!databaseUrl || !redisUrl) {
     return {
+      dealer: getDealerReadiness(),
       service: "api",
       status: "error",
       ...turnDurations,
@@ -9183,11 +9253,12 @@ export async function getHealth(): Promise<ServiceHealth> {
   }
 
   const [postgres, redis] = await Promise.all([
-    checkPostgres(databaseUrl),
-    checkRedis(redisUrl),
+    checkPostgresHealth(databaseUrl, apiStatePool),
+    checkRedisHealth(redisUrl),
   ]);
 
   return {
+    dealer: getDealerReadiness(),
     service: "api",
     status: postgres === "ok" && redis === "ok" ? "ok" : "error",
     ...turnDurations,
@@ -9295,7 +9366,7 @@ export function handleApiRequest(
             lastWrittenSeq = envelope.seq;
           }
           if (job.status !== "running") {
-            response.end();
+            endRulePreflightStream(response);
             return;
           }
           const listener: RulePreflightJobListener = (envelope) => {
@@ -9306,7 +9377,7 @@ export function handleApiRequest(
             writeRulePreflightStreamEvent(response, envelope.event);
             if (envelope.event.type !== "progress") {
               unsubscribeFromRulePreflightJob(job.id, listener);
-              response.end();
+              endRulePreflightStream(response);
             }
           };
           subscribeToRulePreflightJob(job.id, listener);
@@ -9357,6 +9428,23 @@ export function handleApiRequest(
           message: error instanceof Error ? error.message : String(error),
         });
       });
+    return;
+  }
+
+  const cancellablePreflightJobId = matchRulePreflightJobPath(url.pathname);
+  if (request.method === "DELETE" && cancellablePreflightJobId) {
+    const job = getRulePreflightJob(cancellablePreflightJobId);
+    if (!job) {
+      sendJsonWithoutStatePersistence(request, response, 404, {
+        error: "rule_preflight_job_not_found",
+      });
+      return;
+    }
+    const cancelled = cancelRulePreflightJob(cancellablePreflightJobId);
+    sendJsonWithoutStatePersistence(request, response, cancelled ? 202 : 200, {
+      cancelled,
+      jobId: cancellablePreflightJobId,
+    });
     return;
   }
 
@@ -9424,7 +9512,7 @@ export function handleApiRequest(
         response,
         `event: done\ndata: {"type":"done"}\n\n`,
       );
-      response.end();
+      endRulePreflightStream(response);
       return;
     }
 
@@ -9454,7 +9542,7 @@ export function handleApiRequest(
           `event: done\ndata: {"type":"done"}\n\n`,
         );
         detach();
-        response.end();
+        endRulePreflightStream(response);
       }
     };
 
@@ -10888,17 +10976,54 @@ if (isMainModule()) {
   const persistenceReady = initializeApiStatePersistence(databaseUrl);
 
   const server = createServer(handleApiRequest);
+  let shuttingDown = false;
+  registerShutdownTask(drainRulePreflightJobs);
+  registerShutdownTask(async () => {
+    await apiStatePersistenceQueue;
+    if (apiStatePool) {
+      await apiStatePool.end();
+      apiStatePool = null;
+    }
+  });
+  registerShutdownTask(closeHealthResources);
+
+  const shutdown = async (exitCode: number) => {
+    if (shuttingDown) {
+      return;
+    }
+    shuttingDown = true;
+
+    const serverClosed = server.listening
+      ? new Promise<void>((resolveClose, rejectClose) => {
+          server.close((error) =>
+            error ? rejectClose(error) : resolveClose(),
+          );
+        })
+      : Promise.resolve();
+
+    try {
+      await runShutdown();
+      await serverClosed;
+    } catch (error) {
+      console.error("API shutdown failed", error);
+      exitCode = 1;
+    }
+    process.exit(exitCode);
+  };
+
+  process.once("SIGINT", () => void shutdown(0));
+  process.once("SIGTERM", () => void shutdown(0));
 
   void persistenceReady
     .then(() => {
+      void storeDealerWarmup(warmDealerModels());
       server.listen(port, host, () => {
         console.log(`@tyche/api listening on ${host}:${port}`);
-        void warmDealerModels();
       });
     })
     .catch((error: unknown) => {
       console.error("API state persistence initialization failed", error);
-      process.exitCode = 1;
+      void shutdown(1);
     });
 }
 
@@ -10906,16 +11031,16 @@ if (isMainModule()) {
 // player request doesn't pay the cold-load latency. Best-effort: logs what it
 // did and never blocks or crashes startup if the LLM isn't configured/running.
 async function warmDealerModels() {
-  let agentConfig;
+  let runtime;
   try {
-    agentConfig = resolveRuleAgentConfig();
+    runtime = getDealerRuntime();
   } catch {
     console.log("[warmup] dealer LLM not configured; skipping model warm-up");
     return;
   }
 
-  const guardianConfig = resolveGuardianConfig();
-  const escalationModel = resolveEscalationModel();
+  const { agent: agentConfig, escalationModel, guardian: guardianConfig } =
+    runtime;
   const targets = [
     agentConfig.model,
     escalationModel,
@@ -10923,7 +11048,7 @@ async function warmDealerModels() {
   ].filter((model, index, all) => model && all.indexOf(model) === index);
 
   for (const model of targets) {
-    const result = await ensureModelLoaded(model, agentConfig);
+    const result = await ensureDealerModelReady(model, getShutdownSignal());
     if (result.skipped) {
       console.log(`[warmup] ${model}: endpoint is not Ollama-native; skipped`);
     } else if (result.loaded) {

@@ -313,11 +313,12 @@ function deriveOllamaNativeBase(baseUrl: string): string {
 async function listLoadedOllamaModels(
   nativeBase: string,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<string[] | null> {
   try {
     const response = await fetch(`${nativeBase}/api/ps`, {
       method: "GET",
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: combineAbortSignals(timeoutMs, signal),
     });
     if (!response.ok) {
       return null;
@@ -328,9 +329,18 @@ async function listLoadedOllamaModels(
     return (payload.models ?? [])
       .map((entry) => entry.model ?? entry.name ?? "")
       .filter((name) => name.length > 0);
-  } catch {
+  } catch (error) {
+    if (signal?.aborted) {
+      throw signal.reason ?? error;
+    }
     return null;
   }
+}
+
+function combineAbortSignals(timeoutMs: number, signal?: AbortSignal) {
+  return signal
+    ? AbortSignal.any([AbortSignal.timeout(timeoutMs), signal])
+    : AbortSignal.timeout(timeoutMs);
 }
 
 function modelMatches(loaded: string, wanted: string): boolean {
@@ -358,13 +368,14 @@ export async function ensureModelLoaded(
   model: string,
   config: RuleAgentConfig = resolveRuleAgentConfig(),
   loadTimeoutMs = 180_000,
+  signal?: AbortSignal,
 ): Promise<ModelWarmupResult> {
   if (!model) {
     return { loaded: false, model, note: "no model", skipped: true };
   }
 
   const nativeBase = deriveOllamaNativeBase(config.baseUrl);
-  const loaded = await listLoadedOllamaModels(nativeBase, 5_000);
+  const loaded = await listLoadedOllamaModels(nativeBase, 5_000, signal);
   if (loaded === null) {
     return { loaded: false, model, note: "ps unavailable", skipped: true };
   }
@@ -387,7 +398,7 @@ export async function ensureModelLoaded(
       body: JSON.stringify({ keep_alive: "10m", model }),
       headers,
       method: "POST",
-      signal: AbortSignal.timeout(loadTimeoutMs),
+      signal: combineAbortSignals(loadTimeoutMs, signal),
     });
     if (!response.ok) {
       return {
@@ -400,6 +411,9 @@ export async function ensureModelLoaded(
     await response.json().catch(() => undefined);
     return { loaded: true, model, skipped: false };
   } catch (error) {
+    if (signal?.aborted) {
+      throw signal.reason ?? error;
+    }
     return {
       loaded: false,
       model,
@@ -533,6 +547,7 @@ async function requestAgentJson(
   systemPrompt: string,
   userText: string,
   config: RuleAgentConfig,
+  signal?: AbortSignal,
 ): Promise<string> {
   const headers: Record<string, string> = {
     "content-type": "application/json",
@@ -568,9 +583,12 @@ async function requestAgentJson(
       }),
       headers,
       method: "POST",
-      signal: AbortSignal.timeout(config.timeoutMs),
+      signal: combineAbortSignals(config.timeoutMs, signal),
     });
   } catch (error) {
+    if (signal?.aborted) {
+      throw signal.reason ?? error;
+    }
     if (error instanceof Error && error.name === "TimeoutError") {
       throw new RuleAgentError(
         "RULE_AGENT_TIMEOUT",
@@ -633,8 +651,14 @@ async function requestAgentJson(
 export async function interpretRuleWithAgent(
   sanitizedText: string,
   config: RuleAgentConfig = resolveRuleAgentConfig(),
+  signal?: AbortSignal,
 ): Promise<RuleAgentInterpretation> {
-  const candidate = await requestAgentJson(SYSTEM_PROMPT, sanitizedText, config);
+  const candidate = await requestAgentJson(
+    SYSTEM_PROMPT,
+    sanitizedText,
+    config,
+    signal,
+  );
   return coerceInterpretation(extractJsonObject(candidate));
 }
 
@@ -662,6 +686,7 @@ const TRANSLATE_SYSTEM_PROMPT = [
 export async function translateRuleToEnglish(
   text: string,
   config: RuleAgentConfig = resolveRuleAgentConfig(),
+  signal?: AbortSignal,
 ): Promise<string> {
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (config.apiKey) {
@@ -686,9 +711,12 @@ export async function translateRuleToEnglish(
       }),
       headers,
       method: "POST",
-      signal: AbortSignal.timeout(config.timeoutMs),
+      signal: combineAbortSignals(config.timeoutMs, signal),
     });
   } catch (error) {
+    if (signal?.aborted) {
+      throw signal.reason ?? error;
+    }
     if (error instanceof Error && error.name === "TimeoutError") {
       throw new RuleAgentError("RULE_AGENT_TIMEOUT", "The translator did not respond in time.");
     }
@@ -723,6 +751,7 @@ export async function translateRuleToEnglish(
 export async function compileRuleToAst(
   normalizedText: string,
   config: RuleAgentConfig = resolveRuleAgentConfig(),
+  signal?: AbortSignal,
 ): Promise<unknown> {
   // The compile-step guidance lives in the versioned `compile_rule_to_ast` agent
   // skill (PRD §7.10/§7.12), co-located with the DSL schema in @tyche/rule-compiler.
@@ -733,6 +762,7 @@ export async function compileRuleToAst(
     buildRuleCompilerSkillPrompt(),
     normalizedText,
     config,
+    signal,
   );
   return extractJsonObject(candidate);
 }

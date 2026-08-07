@@ -51,6 +51,23 @@ function agentResponse() {
   );
 }
 
+function waitForAgent(signal?: AbortSignal) {
+  if (!signal) {
+    return agentGate;
+  }
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    void agentGate.then(resolve, reject).finally(() => {
+      signal.removeEventListener("abort", onAbort);
+    });
+  });
+}
+
 before(async () => {
   process.env.LLM_BASE_URL = "http://127.0.0.1:9/v1";
   process.env.LLM_MODEL = "test-dealer";
@@ -68,7 +85,7 @@ before(async () => {
         // Not an Ollama-native endpoint, so model loading is skipped outright.
         return new Response("not found", { status: 404 });
       }
-      await agentGate;
+      await waitForAgent(init?.signal ?? undefined);
       return agentResponse();
     }
     return originalFetch(input, init);
@@ -285,6 +302,33 @@ test("dropping the stream mid-run keeps the pipeline alive and the cursor resume
     resumed.frames.some((frame) => frame.event === "reset"),
     false,
   );
+});
+
+test("explicitly discarding a run cancels its server-owned job", async () => {
+  const { body } = await startJob("Win if the guessed sum is above 151.");
+  const cancellation = await fetch(
+    `${baseUrl}/rule-preflight/jobs/${body.jobId}`,
+    { method: "DELETE" },
+  );
+
+  assert.equal(cancellation.status, 202);
+  assert.deepEqual(await cancellation.json(), {
+    cancelled: true,
+    jobId: body.jobId,
+  });
+
+  const terminal = await readFrames(
+    `${baseUrl}/rule-preflight/jobs/${body.jobId}/events`,
+    { stopWhen: (frame) => frame.event === "failed" },
+  );
+  const failed = terminal.frames.find((frame) => frame.event === "failed");
+  assert.ok(failed);
+  assert.deepEqual(JSON.parse(failed.data), {
+    error: "rule_preflight_cancelled",
+    message: "The rule preflight run was cancelled.",
+    status: 499,
+    type: "error",
+  });
 });
 
 test("attaching to a finished rule preflight job replays the result and closes", async () => {

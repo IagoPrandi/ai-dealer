@@ -103,6 +103,23 @@ test("ensureModelLoaded loads the model when it is not resident", async () => {
   ]);
 });
 
+test("ensureModelLoaded propagates an already-aborted external signal", async () => {
+  const controller = new AbortController();
+  controller.abort(new DOMException("cancelled", "AbortError"));
+  globalThis.fetch = (async (
+    _input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    assert.equal(init?.signal?.aborted, true);
+    throw init?.signal?.reason;
+  }) as typeof fetch;
+
+  await assert.rejects(
+    ensureModelLoaded("gemma4:latest", CONFIG, 180_000, controller.signal),
+    (error: unknown) => error instanceof Error && error.name === "AbortError",
+  );
+});
+
 test("rule agent config ignores inline comments copied from .env examples", () => {
   const env = {
     LLM_API_KEY: "ollama # dummy value",
