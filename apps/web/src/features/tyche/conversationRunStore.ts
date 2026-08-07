@@ -1,6 +1,7 @@
 "use client";
 
 import type { RulePreflightResult } from "../../solana/tycheProgram";
+import type { RuleInterpretationApiResult } from "./data/apiClient";
 import type { ConversationMessage } from "./data/types";
 import type { RulePreflightProgress } from "./data/apiClient";
 import type { RuleGuidanceContext } from "./ruleRefinement";
@@ -9,6 +10,7 @@ export interface ConversationRunSnapshot {
   draftId: string;
   error: null | string;
   guidanceContext?: RuleGuidanceContext | null;
+  interpretation: RuleInterpretationApiResult | null;
   messages: ConversationMessage[];
   progress: RulePreflightProgress | null;
   rule: RulePreflightResult | null;

@@ -240,6 +240,21 @@ export interface RulePreflightApiResult {
   tokenCount: number;
 }
 
+export interface RuleInterpretationApiResult {
+  addedOperationalClauses: string[];
+  clarityNote: string;
+  dealerMessage: string;
+  englishText: string;
+  guardianChecked: boolean;
+  needsClarification: boolean;
+  normalizedText: string;
+  officialInterpretation: string;
+  sanitizedText: string;
+  suggestedRewrites: string[];
+  title: string;
+  tokenCount: number;
+}
+
 export type RulePreflightProgressStage =
   | "checking_input"
   | "loading_models"
@@ -260,6 +275,7 @@ export interface RulePreflightProgress {
 type RulePreflightStreamEvent =
   | { progress: RulePreflightProgress; type: "progress" }
   | { preflight: RulePreflightApiResult; type: "result" }
+  | { interpretation: RuleInterpretationApiResult; type: "interpretation" }
   | { error?: string; message?: string; status?: number; type: "error" };
 
 function throwRulePreflightStreamError(event: Extract<RulePreflightStreamEvent, { type: "error" }>) {
@@ -350,6 +366,69 @@ export async function postRulePreflight(
   }
 
   return consumeRulePreflightResponse(response, onProgress);
+}
+
+export async function postRuleInterpretation(
+  text: string,
+  onProgress?: (progress: RulePreflightProgress) => void,
+) {
+  const path = "/rule-preflight";
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
+    body: JSON.stringify({ phase: "interpret", text }),
+    headers: {
+      accept: "application/x-ndjson",
+      "content-type": "application/json",
+    },
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    let detail: unknown;
+    try {
+      detail = await response.json();
+    } catch {
+      detail = undefined;
+    }
+    throw new ApiRequestError({
+      code: apiErrorCode(detail),
+      detail,
+      message: apiErrorMessage(path, response.status, detail),
+      status: response.status,
+    });
+  }
+
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+  if (!contentType.includes("application/x-ndjson")) {
+    return (await response.json()) as { interpretation: RuleInterpretationApiResult };
+  }
+  if (!response.body) {
+    throw new Error("The rule interpretation stream did not include a response body.");
+  }
+
+  const decoder = new TextDecoder();
+  const reader = response.body.getReader();
+  let buffer = "";
+  let interpretation: RuleInterpretationApiResult | null = null;
+  const consumeLine = (line: string) => {
+    if (!line.trim()) return;
+    const event = JSON.parse(line) as RulePreflightStreamEvent;
+    if (event.type === "progress") onProgress?.(event.progress);
+    else if (event.type === "interpretation") interpretation = event.interpretation;
+    else if (event.type === "error") throwRulePreflightStreamError(event);
+  };
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value, { stream: !done });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    lines.forEach(consumeLine);
+    if (done) break;
+  }
+  consumeLine(buffer);
+  if (!interpretation) {
+    throw new Error("The rule interpretation stream ended before returning a result.");
+  }
+  return { interpretation };
 }
 
 export function postRuleProposal(body: unknown) {

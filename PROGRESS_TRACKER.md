@@ -4,6 +4,15 @@ This tracker records milestone status, work logs, and required document confirma
 
 ## Work Log
 
+### 2026-08-06 (Interpret before rule generation)
+
+- Opened `PRD.md`, `AGENTS.md`, the local skills directory, and the relevant frontend, Tyche UI-coherence/design-system, Playwright, and verification guidance.
+- Split rule authoring into two explicit phases: the dealer now returns its interpretation first, then waits for **Confirm and generate** before creating the executable rule and its preview card.
+- Preserved clarification detection in the interpretation phase. Ambiguous wording opens the existing clarification flow before any executable artifact is generated; impact-specific review remains enforced after compilation.
+- Added regression coverage for interpretation-first orchestration and ambiguity detection, and updated the browser scenarios for the explicit confirmation step.
+- Passed `@tyche/web` and `@tyche/api` typechecks, 157 web unit tests, 91 API tests, ESLint with zero warnings, both production builds, `git diff --check`, and 8 Playwright proposal/clarification scenarios against the existing local server.
+- No milestone checkbox was changed; milestone completion still requires explicit user confirmation.
+
 ### 2026-08-06 (Account and home header cleanup)
 
 - Opened `PRD.md`, `AGENTS.md`, the local skills directory, and the relevant frontend, Tyche design-system, UI-coherence, and verification guidance.

@@ -4,6 +4,25 @@ function hashBytes(seed: number) {
   return Array.from({ length: 32 }, (_, index) => (seed + index) % 256);
 }
 
+function interpretation(text: string, needsClarification = false) {
+  return {
+    interpretation: {
+      addedOperationalClauses: [],
+      clarityNote: needsClarification ? "The rule needs a precise measurable threshold." : "",
+      dealerMessage: needsClarification ? "I need clarification before I can generate this rule." : "This is how I understand your rule.",
+      englishText: text,
+      guardianChecked: false,
+      needsClarification,
+      normalizedText: text,
+      officialInterpretation: "The engine compares only the player's guess and the official draw.",
+      sanitizedText: text,
+      suggestedRewrites: [],
+      title: "Rule interpretation",
+      tokenCount: 12,
+    },
+  };
+}
+
 function validPreflight(text: string, ruleId: number) {
   return {
     preflight: {
@@ -177,8 +196,16 @@ test("answering a clarification on an unfixable base finalizes instead of re-ask
   // prove the answer was NOT merged onto the vague base.
   const preflightTexts: string[] = [];
   await page.route("**/rule-preflight", async (route) => {
-    const body = (await route.request().postDataJSON()) as { text: string };
+    const body = (await route.request().postDataJSON()) as { phase?: string; text: string };
     preflightTexts.push(body.text);
+    if (body.phase === "interpret") {
+      await route.fulfill({
+        contentType: "application/json",
+        json: interpretation(body.text, /close to the draw/i.test(body.text) && !/at least/i.test(body.text)),
+        status: 200,
+      });
+      return;
+    }
     // The initial vague rule needs clarification.
     if (/close to the draw/i.test(body.text) && !/at least/i.test(body.text)) {
       await route.fulfill({ contentType: "application/json", json: clarifyPreflight(body.text), status: 200 });
@@ -207,6 +234,7 @@ test("answering a clarification on an unfixable base finalizes instead of re-ask
   // User answers with a concrete, measurable rule instead of a fragment.
   await messageInput.fill("Win if at least 4 guessed numbers appear in the draw, regardless of order.");
   await sendButton.click();
+  await page.getByRole("button", { name: "Confirm and generate" }).click();
 
   // The flow must reach the finalized "valid rule" card (the pre-submit /
   // connect-wallet state) — NOT loop back to the same clarification.
@@ -221,8 +249,11 @@ test("answering a clarification on an unfixable base finalizes instead of re-ask
 
   // Prove the answer was sent standalone, not appended onto the vague base
   // (the old loop produced texts like "Win if my guess is close to the draw. ...").
-  expect(preflightTexts).toHaveLength(2);
+  expect(preflightTexts).toHaveLength(3);
   expect(preflightTexts[1]).toBe(
+    "Win if at least 4 guessed numbers appear in the draw, regardless of order.",
+  );
+  expect(preflightTexts[2]).toBe(
     "Win if at least 4 guessed numbers appear in the draw, regardless of order.",
   );
 });
@@ -238,8 +269,12 @@ test("an always-true rule is rejected with valid replacements instead of enterin
   const preflightTexts: string[] = [];
 
   await page.route("**/rule-preflight", async (route) => {
-    const body = (await route.request().postDataJSON()) as { text: string };
+    const body = (await route.request().postDataJSON()) as { phase?: string; text: string };
     preflightTexts.push(body.text);
+    if (body.phase === "interpret") {
+      await route.fulfill({ contentType: "application/json", json: interpretation(body.text), status: 200 });
+      return;
+    }
     await route.fulfill({
       contentType: "application/json",
       json:
@@ -253,6 +288,7 @@ test("an always-true rule is rejected with valid replacements instead of enterin
   await page.goto("/play/propose");
   await page.getByLabel("Message", { exact: true }).fill(original);
   await page.getByRole("button", { name: "Send message" }).click();
+  await page.getByRole("button", { name: "Confirm and generate" }).click();
 
   await expect(page.getByText("invalid rule", { exact: true })).toBeVisible();
   await expect(page.getByText(/this rule cannot pass preflight/i)).toBeVisible();
@@ -267,7 +303,8 @@ test("an always-true rule is rejected with valid replacements instead of enterin
 
   await page.getByRole("button", { name: /1 A guess wins.*lower/i }).click();
   await page.getByRole("button", { name: /^Use rule/ }).click();
+  await page.getByRole("button", { name: "Confirm and generate" }).click();
 
   await expect(page.getByText("valid rule", { exact: true })).toBeVisible();
-  expect(preflightTexts).toEqual([original, replacement]);
+  expect(preflightTexts).toEqual([original, original, replacement, replacement]);
 });

@@ -23,6 +23,7 @@ import { useTyche } from "../context";
 import {
   getConversationDrafts,
   postRuleProposal,
+  type RuleInterpretationApiResult,
   type RulePreflightProgress,
 } from "../data/apiClient";
 import { fmtSol, fmtTurnId } from "../data/format";
@@ -335,6 +336,32 @@ function ClarificationPrompt({
   );
 }
 
+function InterpretationConfirmation({
+  interpretation,
+  onConfirm,
+  onEdit,
+}: {
+  interpretation: RuleInterpretationApiResult;
+  onConfirm: () => void;
+  onEdit: () => void;
+}) {
+  return (
+    <div className="ide-card" style={{ animation: "ide-rise .3s ease both", display: "grid", gap: 12, padding: 16 }}>
+      <div>
+        <SectionLabel>My interpretation</SectionLabel>
+        <h2 style={{ fontSize: 19, lineHeight: 1.25, margin: "5px 0 7px" }}>{interpretation.title}</h2>
+        <p style={{ color: "var(--text)", fontSize: 15, fontWeight: 600, lineHeight: 1.48, margin: 0 }}>{interpretation.normalizedText}</p>
+      </div>
+      <p style={{ color: "var(--muted)", fontSize: 14, lineHeight: 1.55, margin: 0 }}>{interpretation.officialInterpretation}</p>
+      <p style={{ color: "var(--dim)", fontSize: 13, lineHeight: 1.45, margin: 0 }}>Confirm this interpretation and I will generate the executable rule.</p>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button className="ide-btn-ghost ide-btn" onClick={onEdit} style={{ flex: 1, padding: 13 }} type="button">Edit wording</button>
+        <button className="ide-btn" onClick={onConfirm} style={{ flex: 1, padding: 13 }} type="button">Confirm and generate</button>
+      </div>
+    </div>
+  );
+}
+
 function AgentProgress({ progress }: { progress: RulePreflightProgress | null }) {
   return (
     <div
@@ -389,6 +416,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
   const [val, setVal] = useState(seed ?? "");
   const [typing, setTyping] = useState(false);
   const [progress, setProgress] = useState<RulePreflightProgress | null>(null);
+  const [interpretation, setInterpretation] = useState<RuleInterpretationApiResult | null>(null);
   const [rule, setRule] = useState<RulePreflightResult | null>(null);
   const [guidance, setGuidance] = useState<RuleGuidanceState | null>(null);
   const [selectedGuidanceIndex, setSelectedGuidanceIndex] = useState<number | null>(0);
@@ -411,7 +439,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
     if (el) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [msgs, typing, progress, rule, guidance]);
+  }, [msgs, typing, progress, interpretation, rule, guidance]);
 
   useEffect(() => {
     if (!guidance) {
@@ -457,6 +485,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
     setMsgs(snapshot.messages);
     setTyping(snapshot.status === "pending");
     setProgress(snapshot.progress);
+    setInterpretation(snapshot.interpretation);
     setRule(snapshot.rule);
     setError(snapshot.error);
     if (snapshot.status === "pending") {
@@ -465,6 +494,21 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
     }
     if (snapshot.guidanceContext) {
       openGuidance(snapshot.guidanceContext);
+      return;
+    }
+    if (snapshot.interpretation) {
+      if (!snapshot.interpretation.needsClarification) {
+        setGuidance(null);
+        return;
+      }
+      clarificationAttemptsRef.current += 1;
+      openGuidance({
+        clarityNote: snapshot.interpretation.clarityNote,
+        currentRuleText: snapshot.interpretation.sanitizedText,
+        needsClarification: true,
+        refinementQuestions: [],
+        suggestedRewrites: snapshot.interpretation.suggestedRewrites,
+      });
       return;
     }
     if (!snapshot.rule) {
@@ -524,6 +568,44 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
     void send(selectedText);
   }
 
+  function confirmInterpretation() {
+    if (!interpretation || typing) {
+      return;
+    }
+    const confirmation = "Yes, generate this rule.";
+    const transcript: ChatMessage[] = [...msgs, { text: confirmation, who: "user" }];
+    setMsgs(transcript);
+    setTyping(true);
+    setError(null);
+    setGuidance(null);
+    setRule(null);
+    let draftIdForThisSend = activeDraftId;
+    if (!draftIdForThisSend) {
+      draftIdForThisSend = createClientDraftId(turnId);
+      setActiveDraftId(draftIdForThisSend);
+    }
+    startConversationRun({
+      draftId: draftIdForThisSend,
+      initialMessages: transcript,
+      lastUserMessage: confirmation,
+      localDealerReply: null,
+      phase: "compile",
+      refinedDraft: null,
+      ruleText: interpretation.sanitizedText,
+      turnId,
+      wallet: walletAddress,
+    });
+  }
+
+  function editInterpretation() {
+    if (!interpretation || typing) {
+      return;
+    }
+    setVal(interpretation.sanitizedText);
+    setInterpretation(null);
+    window.setTimeout(() => textareaRef.current?.focus(), 0);
+  }
+
   function send(text?: string) {
     const t = (text ?? val).trim();
     if (!t || typing) {
@@ -573,6 +655,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
       initialMessages: transcript,
       lastUserMessage: t,
       localDealerReply: !refinedDraft && !likelyRuleDraft ? getDealerChatReply(t, fees) : null,
+      phase: "interpret",
       refinedDraft,
       ruleText,
       turnId,
@@ -775,6 +858,7 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
       wallet: walletAddress,
     });
     setRule(null);
+    setInterpretation(null);
     setSubmitted(false);
     setTyping(false);
     setProgress(null);
@@ -814,6 +898,14 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
           <div key={i} className={mm.who === "ai" ? "ide-bubble-ai" : "ide-bubble-user"} style={{ animation: "ide-rise .3s ease both" }}>{mm.text}</div>
         ))}
         {typing ? <AgentProgress progress={progress} /> : null}
+
+        {interpretation && !interpretation.needsClarification && !typing ? (
+          <InterpretationConfirmation
+            interpretation={interpretation}
+            onConfirm={confirmInterpretation}
+            onEdit={editInterpretation}
+          />
+        ) : null}
 
         {rule && !typing ? <RulePreview rule={rule} /> : null}
 

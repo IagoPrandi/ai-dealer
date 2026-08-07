@@ -5,7 +5,9 @@ import { buildConversationDraftBody, type ConversationDraftBody } from "./conver
 import {
   ApiRequestError,
   postConversationDraft,
+  postRuleInterpretation,
   postRulePreflight,
+  type RuleInterpretationApiResult,
   type RulePreflightProgress,
 } from "./data/apiClient";
 import type { ConversationMessage } from "./data/types";
@@ -26,6 +28,10 @@ type PreflightResponse = {
   preflight: unknown;
 };
 
+type InterpretationResponse = {
+  interpretation: RuleInterpretationApiResult;
+};
+
 export interface ConversationRunDeps {
   describeError: (cause: unknown) => string;
   postDraft: (wallet: string, body: ConversationDraftBody) => Promise<DraftResponse>;
@@ -33,6 +39,10 @@ export interface ConversationRunDeps {
     text: string,
     onProgress?: (progress: RulePreflightProgress) => void,
   ) => Promise<PreflightResponse>;
+  postInterpretation: (
+    text: string,
+    onProgress?: (progress: RulePreflightProgress) => void,
+  ) => Promise<InterpretationResponse>;
 }
 
 export interface StartConversationRunArgs {
@@ -40,6 +50,7 @@ export interface StartConversationRunArgs {
   initialMessages: ConversationMessage[];
   lastUserMessage: string;
   localDealerReply: null | string;
+  phase: "compile" | "interpret";
   refinedDraft: null | string;
   ruleText: string;
   turnId: number;
@@ -49,6 +60,7 @@ export interface StartConversationRunArgs {
 const defaultDeps: ConversationRunDeps = {
   describeError: describeTxError,
   postDraft: postConversationDraft,
+  postInterpretation: postRuleInterpretation,
   postPreflight: postRulePreflight,
 };
 
@@ -134,9 +146,10 @@ export function startConversationRun(
     draftId: args.draftId,
     error: null,
     guidanceContext: null,
+    interpretation: null,
     messages: args.initialMessages,
     progress: {
-      message: "Sending your rule to the compiler...",
+      message: args.phase === "interpret" ? "Reading your rule..." : "Building your rule...",
       stage: "checking_input",
     },
     rule: null,
@@ -171,9 +184,10 @@ async function runConversation(
       patchConversationRun(args.draftId, {
         error: null,
         guidanceContext: null,
+        interpretation: null,
         messages: transcript,
         progress: {
-          message: "Sending your rule to the compiler...",
+          message: args.phase === "interpret" ? "Reading your rule..." : "Building your rule...",
           stage: "checking_input",
         },
         rule: null,
@@ -191,6 +205,7 @@ async function runConversation(
       patchConversationRun(args.draftId, {
         error: null,
         guidanceContext: null,
+        interpretation: null,
         messages: transcript,
         progress: null,
         rule: null,
@@ -227,6 +242,44 @@ async function runConversation(
       });
     }
 
+    if (args.phase === "interpret") {
+      const body = await deps.postInterpretation(args.ruleText, (progress) => {
+        patchConversationRun(args.draftId, { progress });
+      });
+      const interpretation = body.interpretation;
+      const dealerMessage = interpretation.dealerMessage ||
+        "Here is how I understood your rule. Confirm it before I generate the executable rule.";
+      transcript = [...transcript, { text: dealerMessage, who: "ai" }];
+      patchConversationRun(args.draftId, {
+        error: null,
+        guidanceContext: null,
+        interpretation,
+        messages: transcript,
+        progress: null,
+        rule: null,
+        status: "done",
+      });
+      try {
+        await saveConversationDraftSnapshot({
+          deps,
+          draftId,
+          lastMessage: dealerMessage,
+          messages: transcript,
+          normalizedText: interpretation.normalizedText,
+          officialInterpretation: interpretation.officialInterpretation,
+          prompt: interpretation.sanitizedText,
+          turnId: args.turnId,
+          wallet: args.wallet,
+        });
+      } catch (draftError) {
+        patchConversationRun(args.draftId, {
+          error: `Interpretation received, but the draft could not be saved. ${deps.describeError(draftError)}`,
+          status: "error",
+        });
+      }
+      return;
+    }
+
     const body = await deps.postPreflight(args.ruleText, (progress) => {
       patchConversationRun(args.draftId, { progress });
     });
@@ -241,6 +294,7 @@ async function runConversation(
     patchConversationRun(args.draftId, {
       error: null,
       guidanceContext: null,
+      interpretation: null,
       messages: transcript,
       progress: null,
       rule: preflight,
@@ -287,6 +341,7 @@ async function runConversation(
           reasonSummary: cause.message,
           sanitizedText: args.ruleText,
         },
+        interpretation: null,
         messages: [...transcript, { text: blockedMessage, who: "ai" }],
         progress: null,
         rule: null,
@@ -299,6 +354,7 @@ async function runConversation(
     patchConversationRun(args.draftId, {
       error: message,
       guidanceContext: null,
+      interpretation: null,
       messages: [
         ...transcript,
         { text: "Dealer engine unavailable. The compiler must be online before I can lock a rule.", who: "ai" },

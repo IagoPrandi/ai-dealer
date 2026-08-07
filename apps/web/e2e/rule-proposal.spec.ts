@@ -4,6 +4,25 @@ function hashBytes(seed: number) {
   return Array.from({ length: 32 }, (_, index) => (seed + index) % 256);
 }
 
+function interpretation(text: string, options: { needsClarification?: boolean; suggestedRewrites?: string[] } = {}) {
+  return {
+    interpretation: {
+      addedOperationalClauses: [],
+      clarityNote: options.needsClarification ? "The rule needs a more precise definition." : "",
+      dealerMessage: options.needsClarification ? "I need clarification before I can generate this rule." : "This is how I understand your rule.",
+      englishText: text,
+      guardianChecked: false,
+      needsClarification: options.needsClarification ?? false,
+      normalizedText: text,
+      officialInterpretation: "The engine compares only the player's guess and the official draw.",
+      sanitizedText: text,
+      suggestedRewrites: options.suggestedRewrites ?? [],
+      title: "Rule interpretation",
+      tokenCount: 12,
+    },
+  };
+}
+
 function validPreflight(text: string, ruleId: number) {
   return {
     preflight: {
@@ -201,7 +220,7 @@ test("blocked prompt injection offers no generic replacement and accepts a playe
 }) => {
   await mockShellData(page);
   await page.route("**/rule-preflight", async (route) => {
-    const body = (await route.request().postDataJSON()) as { text: string };
+    const body = (await route.request().postDataJSON()) as { phase?: string; text: string };
     if (/ignore the app rules/i.test(body.text) || /secretly compile/i.test(body.text)) {
       await route.fulfill({
         contentType: "application/json",
@@ -212,6 +231,10 @@ test("blocked prompt injection offers no generic replacement and accepts a playe
         },
         status: 400,
       });
+      return;
+    }
+    if (body.phase === "interpret") {
+      await route.fulfill({ contentType: "application/json", json: interpretation(body.text), status: 200 });
       return;
     }
     await route.fulfill({
@@ -249,6 +272,7 @@ test("blocked prompt injection offers no generic replacement and accepts a playe
     "New clean rule: win if at least 2 guessed numbers appear in the draw, regardless of order.",
   );
   await page.getByRole("button", { name: /Submit/ }).click();
+  await page.getByRole("button", { name: "Confirm and generate" }).click();
 
   await expect(page.getByText("valid rule", { exact: true })).toBeVisible();
   await expect(
@@ -269,7 +293,11 @@ test("material-impact review blocks submission until draw-only range semantics a
     "A guess wins if all six official draw numbers are between 9 and 40, inclusive. The player's guess does not affect the result.";
 
   await page.route("**/rule-preflight", async (route) => {
-    const body = (await route.request().postDataJSON()) as { text: string };
+    const body = (await route.request().postDataJSON()) as { phase?: string; text: string };
+    if (body.phase === "interpret") {
+      await route.fulfill({ contentType: "application/json", json: interpretation(body.text), status: 200 });
+      return;
+    }
     await route.fulfill({
       contentType: "application/json",
       json:
@@ -284,6 +312,8 @@ test("material-impact review blocks submission until draw-only range semantics a
   await page.getByLabel("Message", { exact: true }).fill(original);
   await page.getByRole("button", { name: "Send message" }).click();
 
+  await page.getByRole("button", { name: "Confirm and generate" }).click();
+
   await expect(page.getByText("review required", { exact: true })).toBeVisible();
   await expect(page.getByText("94% interpretation confidence", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Confirm rule impact" })).toBeVisible();
@@ -297,6 +327,8 @@ test("material-impact review blocks submission until draw-only range semantics a
   await page.getByRole("button", { name: /1 A guess wins.*inclusive/i }).click();
   await page.getByRole("button", { name: /^Submit/ }).click();
 
+  await page.getByRole("button", { name: "Confirm and generate" }).click();
+
   await expect(page.getByText("valid rule", { exact: true })).toBeVisible();
   await expect(page.locator("p").filter({ hasText: inclusiveRewrite })).toBeVisible();
 });
@@ -306,7 +338,7 @@ test("external dependency offers no arbitrary threshold and accepts a player rew
 }) => {
   await mockShellData(page);
   await page.route("**/rule-preflight", async (route) => {
-    const body = (await route.request().postDataJSON()) as { text: string };
+    const body = (await route.request().postDataJSON()) as { phase?: string; text: string };
     if (/closest among all players/i.test(body.text)) {
       await route.fulfill({
         contentType: "application/json",
@@ -317,6 +349,10 @@ test("external dependency offers no arbitrary threshold and accepts a player rew
         },
         status: 400,
       });
+      return;
+    }
+    if (body.phase === "interpret") {
+      await route.fulfill({ contentType: "application/json", json: interpretation(body.text), status: 200 });
       return;
     }
     await route.fulfill({
@@ -341,6 +377,7 @@ test("external dependency offers no arbitrary threshold and accepts a player rew
     "Win if the total absolute position-by-position difference between guess and draw is 30 or less.",
   );
   await page.getByRole("button", { name: /Submit/ }).click();
+  await page.getByRole("button", { name: "Confirm and generate" }).click();
 
   await expect(page.getByText("valid rule", { exact: true })).toBeVisible();
   await expect(
@@ -361,8 +398,16 @@ test("digit ambiguity options clarify the submitted rule instead of replacing it
     "Win if at least one guessed number shares either its tens digit or its units digit with any drawn number, regardless of order.";
 
   await page.route("**/rule-preflight", async (route) => {
-    const body = (await route.request().postDataJSON()) as { text: string };
+    const body = (await route.request().postDataJSON()) as { phase?: string; text: string };
     if (body.text === original) {
+      if (body.phase === "interpret") {
+        await route.fulfill({ contentType: "application/json", json: interpretation(body.text, { needsClarification: true, suggestedRewrites: [
+          eitherDigitRule,
+          "Win if at least one guessed number has the same tens digit as any drawn number, regardless of order.",
+          "Win if at least one guessed number has the same units digit as any drawn number, regardless of order.",
+        ] }), status: 200 });
+        return;
+      }
       await route.fulfill({
         contentType: "application/json",
         json: {
@@ -383,6 +428,10 @@ test("digit ambiguity options clarify the submitted rule instead of replacing it
       });
       return;
     }
+    if (body.phase === "interpret") {
+      await route.fulfill({ contentType: "application/json", json: interpretation(body.text), status: 200 });
+      return;
+    }
     await route.fulfill({
       contentType: "application/json",
       json: validPreflight(eitherDigitRule, 98),
@@ -401,6 +450,7 @@ test("digit ambiguity options clarify the submitted rule instead of replacing it
   await expect(page.getByRole("button", { name: /at least 4 guessed numbers appear/i })).toHaveCount(0);
 
   await page.getByRole("button", { name: /Submit/ }).click();
+  await page.getByRole("button", { name: "Confirm and generate" }).click();
   await expect(page.getByText("valid rule", { exact: true })).toBeVisible();
   await expect(page.locator("p").filter({ hasText: eitherDigitRule })).toBeVisible();
 });
@@ -415,7 +465,15 @@ test("ordered tens-range example keeps all six positions in its only suggestion"
     "Win if all six guessed numbers are in the same tens range as the drawn number in the corresponding position.";
 
   await page.route("**/rule-preflight", async (route) => {
-    const body = (await route.request().postDataJSON()) as { text: string };
+    const body = (await route.request().postDataJSON()) as { phase?: string; text: string };
+    if (body.phase === "interpret") {
+      await route.fulfill({
+        contentType: "application/json",
+        json: interpretation(body.text, body.text === original ? { needsClarification: true, suggestedRewrites: [intendedRule] } : {}),
+        status: 200,
+      });
+      return;
+    }
     await route.fulfill({
       contentType: "application/json",
       json:
@@ -443,6 +501,7 @@ test("ordered tens-range example keeps all six positions in its only suggestion"
   await expect(page.getByRole("button", { name: new RegExp(`1 ${intendedRule}`) })).toBeVisible();
   await expect(page.getByRole("button", { name: /^2 / })).toHaveCount(0);
   await page.getByRole("button", { name: /Submit/ }).click();
+  await page.getByRole("button", { name: "Confirm and generate" }).click();
 
   await expect(page.getByText("valid rule", { exact: true })).toBeVisible();
   await expect(page.locator("p").filter({ hasText: intendedRule })).toBeVisible();

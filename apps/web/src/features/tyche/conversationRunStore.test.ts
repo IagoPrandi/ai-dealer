@@ -16,6 +16,7 @@ test("conversation run subscribers reattach to pending progress and completion",
   upsertConversationRun({
     draftId,
     error: null,
+    interpretation: null,
     messages: [{ text: "Win if exactly 2 numbers match.", who: "user" }],
     progress: null,
     rule: null,
@@ -46,6 +47,7 @@ test("conversation run can be reattached by wallet and turn", () => {
   upsertConversationRun({
     draftId,
     error: null,
+    interpretation: null,
     messages: [{ text: "Win if the first number matches.", who: "user" }],
     progress: null,
     rule: null,

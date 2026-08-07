@@ -173,6 +173,26 @@ export interface RulePreflightResult {
   tokenCount: number;
 }
 
+/**
+ * The first, non-executable step of rule authoring.  It intentionally contains
+ * no AST, artifact hash, or rule id: the player must approve this explanation
+ * before the compiler creates an executable artifact.
+ */
+export interface RuleInterpretationResult {
+  addedOperationalClauses: string[];
+  clarityNote: string;
+  dealerMessage: string;
+  englishText: string;
+  guardianChecked: boolean;
+  needsClarification: boolean;
+  normalizedText: string;
+  officialInterpretation: string;
+  sanitizedText: string;
+  suggestedRewrites: string[];
+  title: string;
+  tokenCount: number;
+}
+
 export type RulePreflightProgressStage =
   | "checking_input"
   | "loading_models"
@@ -1848,6 +1868,86 @@ export function buildRuleRefinementFeedback(
     refinementQuestions: questions,
     ...(suggestedRewrite ? { suggestedRewrite } : {}),
     suggestedRewrites,
+  };
+}
+
+async function createRuleInterpretation(
+  text: string,
+  reportProgress: RulePreflightProgressReporter = () => undefined,
+): Promise<RuleInterpretationResult> {
+  reportProgress({
+    message: "Checking rule limits and allowed inputs...",
+    stage: "checking_input",
+  });
+  const sanitizedText = sanitizeRuleText(text);
+  const tokenCount = countRuleTokens(sanitizedText);
+  const textByteLength = Buffer.byteLength(sanitizedText, "utf8");
+
+  if (!sanitizedText) throw new Error("RULE_EMPTY");
+  if (hasPreventedRulePattern(sanitizedText)) throw new Error("RULE_PROMPT_INJECTION");
+  if (hasRulePattern(externalDependencyGateText(sanitizedText), RULE_EXTERNAL_BLOCK_PATTERNS)) {
+    throw new Error("RULE_EXTERNAL_DEPENDENCY");
+  }
+  if (hasExternalDependency(sanitizedText)) throw new Error("RULE_EXTERNAL_DEPENDENCY");
+  if (hasInvalidConstraint(sanitizedText)) throw new Error("RULE_INVALID_CONSTRAINT");
+  if (tokenCount > RULE_MAX_TOKENS) throw new Error("RULE_TOKEN_LIMIT_EXCEEDED");
+  if (textByteLength > MAX_RULE_TEXT_BYTES) throw new Error("RULE_TEXT_TOO_LONG");
+
+  const agentConfig = resolveRuleAgentConfig();
+  const guardianConfig = resolveGuardianConfig();
+  reportProgress({
+    message: "Preparing the local rule agents...",
+    model: agentConfig.model,
+    stage: "loading_models",
+  });
+  if (guardianConfig.enabled) await ensureModelLoaded(guardianConfig.model, agentConfig);
+  await ensureModelLoaded(agentConfig.model, agentConfig);
+
+  if (guardianConfig.enabled) {
+    reportProgress({
+      message: "Checking the rule for unsafe instructions...",
+      model: guardianConfig.model,
+      stage: "checking_safety",
+    });
+    if (await detectJailbreak(sanitizedText, guardianConfig)) {
+      throw new Error("RULE_PROMPT_INJECTION");
+    }
+  }
+
+  const knownInterpretation = createKnownRuleInterpretation(sanitizedText);
+  const shouldTranslate = !knownInterpretation && resolveTranslateToEnglish();
+  if (shouldTranslate) {
+    reportProgress({
+      message: "Translating the rule without changing its meaning...",
+      model: agentConfig.model,
+      stage: "translating",
+    });
+  }
+  const englishText = knownInterpretation?.normalizedText ??
+    (shouldTranslate ? await translateRuleToEnglish(sanitizedText, agentConfig) : sanitizedText);
+  reportProgress({
+    message: "Interpreting your winning condition...",
+    model: agentConfig.model,
+    stage: "interpreting",
+  });
+  const interpretation = knownInterpretation ?? enforceKnownRuleInterpretation(
+    `${englishText} ${sanitizedText}`,
+    await interpretRuleWithAgent(englishText, agentConfig),
+  );
+
+  return {
+    addedOperationalClauses: interpretation.addedOperationalClauses,
+    clarityNote: interpretation.clarityNote,
+    dealerMessage: interpretation.dealerMessage,
+    englishText,
+    guardianChecked: guardianConfig.enabled,
+    needsClarification: interpretation.needsClarification,
+    normalizedText: interpretation.normalizedText,
+    officialInterpretation: interpretation.officialInterpretation,
+    sanitizedText,
+    suggestedRewrites: interpretation.suggestedRewrites,
+    title: interpretation.title,
+    tokenCount,
   };
 }
 
@@ -8576,9 +8676,17 @@ if (isMainModule()) {
             body && typeof body === "object" && "text" in body
               ? (body as { text?: unknown }).text
               : null;
+          const phase =
+            body && typeof body === "object" && "phase" in body
+              ? (body as { phase?: unknown }).phase
+              : "compile";
 
           if (typeof text !== "string") {
             sendJson(request, response, 400, { error: "invalid_rule_text" });
+            return;
+          }
+          if (phase !== "compile" && phase !== "interpret") {
+            sendJson(request, response, 400, { error: "invalid_preflight_phase" });
             return;
           }
 
@@ -8588,12 +8696,19 @@ if (isMainModule()) {
           if (streamProgress) {
             startRulePreflightStream(request, response);
             try {
-              const preflight = await createRulePreflight(text, (progress) => {
-                writeRulePreflightStreamEvent(response, {
-                  progress,
-                  type: "progress",
-                });
-              });
+              const result = await (phase === "interpret"
+                ? createRuleInterpretation(text, (progress) => {
+                    writeRulePreflightStreamEvent(response, {
+                      progress,
+                      type: "progress",
+                    });
+                  })
+                : createRulePreflight(text, (progress) => {
+                    writeRulePreflightStreamEvent(response, {
+                      progress,
+                      type: "progress",
+                    });
+                  }));
               if (apiStatePool) {
                 try {
                   await queueApiStatePersistence();
@@ -8609,8 +8724,8 @@ if (isMainModule()) {
                 }
               }
               writeRulePreflightStreamEvent(response, {
-                preflight,
-                type: "result",
+                ...(phase === "interpret" ? { interpretation: result } : { preflight: result }),
+                type: phase === "interpret" ? "interpretation" : "result",
               });
             } catch (error) {
               const failure = describeRulePreflightError(error);
@@ -8627,7 +8742,9 @@ if (isMainModule()) {
 
           try {
             sendJson(request, response, 200, {
-              preflight: await createRulePreflight(text),
+              ...(phase === "interpret"
+                ? { interpretation: await createRuleInterpretation(text) }
+                : { preflight: await createRulePreflight(text) }),
             });
           } catch (error) {
             const failure = describeRulePreflightError(error);
