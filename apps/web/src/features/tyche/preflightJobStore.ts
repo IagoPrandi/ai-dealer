@@ -9,7 +9,21 @@
  * A single slot, not a map: only one rule can be compiling at a time in this
  * UI, and one slot cannot leak unbounded entries.
  */
-import { PREFLIGHT_JOB_TTL_MS } from "@tyche/constants";
+import {
+  PREFLIGHT_JOB_RUNNING_TTL_MS,
+  PREFLIGHT_JOB_TTL_MS,
+} from "@tyche/constants";
+
+/**
+ * The longest a job can still be addressable, counted from the moment it
+ * started: the API fails a run that is still going after
+ * PREFLIGHT_JOB_RUNNING_TTL_MS, then keeps the terminal event for
+ * PREFLIGHT_JOB_TTL_MS. Measuring only the terminal TTL from `startedAt` would
+ * discard the pointer of a long run minutes before the API stops answering for
+ * it — a real preflight can take nine minutes.
+ */
+export const PREFLIGHT_JOB_POINTER_TTL_MS =
+  PREFLIGHT_JOB_RUNNING_TTL_MS + PREFLIGHT_JOB_TTL_MS;
 
 const STORAGE_KEY = "tyche.preflightJob.v1";
 
@@ -119,16 +133,30 @@ export function clearPersistedPreflightJob(
 }
 
 /**
- * Whether the server could still be holding this job. Uses the same TTL the API
- * enforces, so an expired pointer is dropped without a network round-trip.
+ * Whether a job pointer stamped at `stampedAt` could still name something the
+ * API would answer for. The one rule, shared by the local pointer, the draft
+ * record's `preflightJobId` and the conversation list's compiling badge - a
+ * badge that outlives the server's memory of the job is a lie.
+ */
+export function isPreflightJobPointerFresh(
+  stampedAt: number,
+  now: number,
+  ttlMs: number = PREFLIGHT_JOB_POINTER_TTL_MS,
+) {
+  const age = now - stampedAt;
+  return Number.isFinite(age) && age >= 0 && age < ttlMs;
+}
+
+/**
+ * Whether the server could still be holding this job. Uses the same TTLs the
+ * API enforces, so an expired pointer is dropped without a network round-trip.
  */
 export function isPreflightJobFresh(
   job: PersistedPreflightJob,
   now: number,
-  ttlMs: number = PREFLIGHT_JOB_TTL_MS,
+  ttlMs: number = PREFLIGHT_JOB_POINTER_TTL_MS,
 ) {
-  const age = now - job.startedAt;
-  return age >= 0 && age < ttlMs;
+  return isPreflightJobPointerFresh(job.startedAt, now, ttlMs);
 }
 
 export function matchesPreflightJobScope(

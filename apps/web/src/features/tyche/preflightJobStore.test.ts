@@ -5,7 +5,9 @@ import { PREFLIGHT_JOB_TTL_MS } from "@tyche/constants";
 import {
   clearPersistedPreflightJob,
   isPreflightJobFresh,
+  isPreflightJobPointerFresh,
   matchesPreflightJobScope,
+  PREFLIGHT_JOB_POINTER_TTL_MS,
   readPersistedPreflightJob,
   writePersistedPreflightJob,
   type PersistedPreflightJob,
@@ -95,21 +97,49 @@ test("clearing without a draft id removes whatever is there", () => {
   assert.equal(entries.has(STORAGE_KEY), false);
 });
 
-test("freshness uses the same window the API enforces", () => {
+test("freshness covers the whole life the API gives a job", () => {
   const started = 10_000;
   const pointer = job({ startedAt: started });
 
   assert.equal(isPreflightJobFresh(pointer, started), true);
+  // The window is measured from the start of the run, but the API only starts
+  // counting its terminal TTL when the run finishes - and a run may take the
+  // full PREFLIGHT_JOB_RUNNING_TTL_MS to get there. Counting only the terminal
+  // TTL from `startedAt` threw away the pointer of a nine-minute preflight
+  // minutes before the API stopped answering for it.
   assert.equal(
-    isPreflightJobFresh(pointer, started + PREFLIGHT_JOB_TTL_MS - 1),
+    isPreflightJobFresh(pointer, started + PREFLIGHT_JOB_TTL_MS + 1),
     true,
   );
   assert.equal(
-    isPreflightJobFresh(pointer, started + PREFLIGHT_JOB_TTL_MS),
+    isPreflightJobFresh(pointer, started + PREFLIGHT_JOB_POINTER_TTL_MS - 1),
+    true,
+  );
+  assert.equal(
+    isPreflightJobFresh(pointer, started + PREFLIGHT_JOB_POINTER_TTL_MS),
     false,
   );
   // A clock that moved backwards is not a fresh job either.
   assert.equal(isPreflightJobFresh(pointer, started - 1), false);
+});
+
+test("the pointer freshness rule is shared with the draft record's stamp", () => {
+  // The conversation list has no PersistedPreflightJob to hand - only the
+  // draft's `updatedAt` - and must reach the same verdict, or the compiling
+  // badge and the reattach disagree about the same job.
+  const stamped = 10_000;
+
+  assert.equal(isPreflightJobPointerFresh(stamped, stamped), true);
+  assert.equal(
+    isPreflightJobPointerFresh(stamped, stamped + PREFLIGHT_JOB_POINTER_TTL_MS - 1),
+    true,
+  );
+  assert.equal(
+    isPreflightJobPointerFresh(stamped, stamped + PREFLIGHT_JOB_POINTER_TTL_MS),
+    false,
+  );
+  // `Date.parse` of a missing timestamp is NaN, which must not read as fresh.
+  assert.equal(isPreflightJobPointerFresh(Number.NaN, stamped), false);
 });
 
 test("scope matching keeps a job from leaking across turns or wallets", () => {

@@ -393,6 +393,27 @@ async function runConversation(
       draftId,
       wallet: args.wallet ?? null,
     });
+    // The durable half of the same pointer. localStorage only helps the browser
+    // that started the run; the draft record is what lets the conversation list
+    // show this run as still compiling and reattach to it from anywhere.
+    try {
+      await saveConversationDraftSnapshot({
+        deps,
+        draftId,
+        lastMessage: args.lastUserMessage,
+        messages: transcript,
+        preflightJobId: jobId,
+        prompt: args.ruleText,
+        signal,
+        turnId: args.turnId,
+        wallet: args.wallet,
+      });
+    } catch (draftError) {
+      patchConversationRun(args.draftId, {
+        error: `Your rule is compiling, but the draft could not be saved, so reopening it later may not reconnect. ${deps.describeError(draftError)}`,
+        status: "pending",
+      });
+    }
 
     await settlePreflightJob({
       deps,

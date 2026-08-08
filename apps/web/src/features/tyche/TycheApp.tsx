@@ -29,7 +29,9 @@ import {
   getActionCutoffTimestamp,
 } from "../../solana/tycheProgram";
 import {
+  resolveCreateIntent,
   TycheContext,
+  type CreateIntent,
   type TycheContextValue,
   type NavParams,
   type Screen,
@@ -173,6 +175,7 @@ export function TycheApp({
   const [screen, setScreen] = useState<Screen>(initialScreen);
   const [seed, setSeed] = useState("");
   const [chatId, setChatId] = useState<null | string>(null);
+  const [createIntent, setCreateIntent] = useState<CreateIntent>(null);
   const [newConversationKey, setNewConversationKey] = useState(0);
   const [detail, setDetail] = useState<{ canAgainst: boolean; rank: number | null; ruleId: number } | null>(null);
   const [showConnect, setShowConnect] = useState(initialConnect);
@@ -196,6 +199,7 @@ export function TycheApp({
         }
       }
     }
+    setCreateIntent(resolveCreateIntent(params));
     if (params?.newConversation) {
       setSeed("");
       setChatId(null);
@@ -450,6 +454,7 @@ export function TycheApp({
     bet: receipt?.numbers ?? null,
     chatId,
     client,
+    createIntent,
     connect: requestConnect,
     connected,
     connecting,

@@ -550,3 +550,102 @@ test("draft-save failures are eligible for an explicit retry", () => {
   assert.equal(isConversationDraftSaveError("Dealer engine unavailable."), false);
   assert.equal(isConversationDraftSaveError(null), false);
 });
+
+test("accepting a job records it on the draft, not only in localStorage", async () => {
+  // localStorage only helps the browser that started the run. The draft record
+  // is what lets the conversation list say a run is still compiling and lets
+  // any entry point reattach to it - without it a finished preflight has
+  // nothing linking it back to the conversation that asked for it.
+  const draftId = "client:103:durable-pointer";
+  const { storage } = fakeStorage();
+  const pointers: (null | string | undefined)[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  const deps = baseDeps(
+    {
+      consumePreflightJob: async () => {
+        await gate;
+        return { interpretation: INTERPRETATION };
+      },
+      postDraft: async (_wallet, body) => {
+        pointers.push(body.preflightJobId);
+        return { draft: { draftId: body.draftId ?? draftId } };
+      },
+      readStorage: () => storage,
+      startPreflightJob: async () => ({ jobId: "job-103" }),
+    },
+    draftId,
+  );
+
+  const task = startConversationRun(
+    {
+      draftId,
+      initialMessages: [{ text: "Win if exactly 2 numbers match.", who: "user" }],
+      lastUserMessage: "Win if exactly 2 numbers match.",
+      localDealerReply: null,
+      phase: "interpret",
+      refinedDraft: null,
+      ruleText: "Win if exactly 2 numbers match.",
+      turnId: 103,
+      wallet: "wallet-103",
+    },
+    deps,
+  );
+
+  // The pointer must be durable while the job is still running, not only once
+  // it lands: the whole failure being fixed is a page that goes away mid-run.
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(pointers, [undefined, "job-103"]);
+
+  release();
+  await task;
+
+  // ...and cleared on the way out, so the list stops offering a reconnect.
+  assert.equal(pointers.at(-1), null);
+  assert.equal(getConversationRun(draftId)?.status, "done");
+});
+
+test("a resume renders the transcript it was handed, not just the rule text", async () => {
+  // Reopening a saved conversation reattaches with the draft's full transcript.
+  // Replaying only the rule text would silently truncate the chat to one bubble
+  // every time a run outlived its page.
+  const draftId = "client:104:resume-transcript";
+  const transcript = [
+    { text: "how to play?", who: "user" as const },
+    { text: "A valid rule can only use the guess and the draw.", who: "ai" as const },
+    { text: "Win if exactly 2 numbers match.", who: "user" as const },
+  ];
+
+  const deps = baseDeps(
+    {
+      consumePreflightJob: async () => ({ interpretation: INTERPRETATION }),
+      startPreflightJob: async () => ({ jobId: "should-not-happen" }),
+    },
+    draftId,
+  );
+
+  await resumeConversationRun(
+    {
+      cursor: null,
+      draftId,
+      jobId: "job-104",
+      messages: transcript,
+      phase: "interpret",
+      ruleText: "Win if exactly 2 numbers match.",
+      turnId: 104,
+      wallet: null,
+    },
+    deps,
+  );
+
+  assert.deepEqual(getConversationRun(draftId)?.messages, [
+    ...transcript,
+    { text: INTERPRETATION.dealerMessage, who: "ai" },
+  ]);
+});

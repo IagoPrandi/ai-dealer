@@ -542,6 +542,30 @@ test("a conversation draft carries the preflight job it is waiting on", () => {
   );
 });
 
+test("a draft save that says nothing about the job keeps the pointer it was given", () => {
+  resetApiStateForTests();
+  const jobId = "c".repeat(32);
+  const { draftId } = saveConversationDraft(draftBody(jobId));
+
+  // The run writes the pointer once, and every unrelated save that follows -
+  // a retried transcript write, a rule id landing - omits the field. Letting
+  // those blank it would leave the conversation list unable to say a run is
+  // still compiling, which is exactly how a finished preflight went unclaimed.
+  const untouched = saveConversationDraft({ ...draftBody(), draftId });
+  assert.equal(untouched.preflightJobId, jobId);
+  assert.equal(listConversationDrafts(DRAFT_WALLET)[0]?.preflightJobId, jobId);
+
+  // An explicit null is still how a finished run clears it.
+  const cleared = saveConversationDraft({ ...draftBody(null), draftId });
+  assert.equal(cleared.preflightJobId, null);
+
+  // And once cleared, omitting the field must not resurrect the old pointer.
+  assert.equal(
+    saveConversationDraft({ ...draftBody(), draftId }).preflightJobId,
+    null,
+  );
+});
+
 test("a conversation draft rejects a preflight job id it could never have issued", () => {
   assert.equal(isValidConversationDraft(draftBody("not-a-job-id")), false);
   assert.equal(

@@ -31,6 +31,34 @@ export interface NavParams {
   seed?: string;
 }
 
+/**
+ * `"new"` - an explicit blank chat; `"resume"` - reopening a saved
+ * conversation; `"seed"` - a prompt typed on Home, auto-sent on arrival;
+ * `null` - the screen was not reached through `go`, i.e. a direct load of
+ * `/play/propose`.
+ */
+export type CreateIntent = "new" | "resume" | "seed" | null;
+
+/**
+ * Derives the intent of a single navigation. Deliberately a function of the
+ * params alone: the counter it replaces (`newConversationKey`) accumulated
+ * across a whole page session, so one visit to a blank chat made every later
+ * "reopen this conversation" look like a new one and silently disabled the
+ * reattach to a preflight job that was still running.
+ */
+export function resolveCreateIntent(params?: NavParams): CreateIntent {
+  if (params?.newConversation) {
+    return "new";
+  }
+  if (params?.chatId) {
+    return "resume";
+  }
+  if (params && "seed" in params && params.seed !== undefined) {
+    return "seed";
+  }
+  return null;
+}
+
 type SolanaClient = ReturnType<typeof useSolanaClient>;
 type ConnectedWallet = ReturnType<typeof useWalletConnection>["wallet"];
 
@@ -46,6 +74,13 @@ export interface TycheContextValue {
   bet: null | number[];
   chatId: null | string;
   client: SolanaClient;
+  /**
+   * Why the Create screen is being shown right now, as opposed to whether this
+   * page session has ever opened it a given way. `newConversationKey` cannot
+   * answer that — it only ever counts up — so the Create screen keys its
+   * mount-time reattach off this instead.
+   */
+  createIntent: CreateIntent;
   connect: () => void;
   connected: boolean;
   connecting: boolean;

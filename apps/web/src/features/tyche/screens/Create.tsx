@@ -26,6 +26,7 @@ import {
   type RuleInterpretationApiResult,
   type RulePreflightProgress,
 } from "../data/apiClient";
+import type { ConversationDraftApi } from "../data/types";
 import { fmtSol, fmtTurnId } from "../data/format";
 import { describeTxError, sendInstruction } from "../data/tx";
 import {
@@ -55,8 +56,13 @@ import {
   type ConversationRunSnapshot,
 } from "../conversationRunStore";
 import {
+  buildResumeTranscript,
+  resolveReattachableJob,
+  type ReattachableJob,
+} from "../conversationResume";
+import {
   clearPersistedPreflightJob,
-  isPreflightJobFresh,
+  isPreflightJobPointerFresh,
   matchesPreflightJobScope,
   readPersistedPreflightJob,
 } from "../preflightJobStore";
@@ -149,6 +155,37 @@ function getDealerChatReply(
     return "A valid rule can only use the player's guess and the official draw. Write the condition in one sentence, and I will compile it before payment.";
   }
   return "I need a winner condition based on the guess and draw. Try: Win if at least 4 of your numbers appear in the draw.";
+}
+
+/**
+ * Drops the draft's job pointer once we know the API has forgotten the job, so
+ * the conversation list stops offering a reconnect that can only 404.
+ */
+async function forgetDraftPreflightJob(args: {
+  draftId: string;
+  messages: ChatMessage[];
+  prompt: string;
+  turnId: number;
+  wallet: null | string | undefined;
+}) {
+  try {
+    await saveConversationDraftSnapshot({
+      draftId: args.draftId,
+      lastMessage: args.messages.at(-1)?.text ?? args.prompt,
+      messages: args.messages,
+      preflightJobId: null,
+      prompt: args.prompt,
+      turnId: args.turnId,
+      wallet: args.wallet,
+    });
+  } catch (cause) {
+    // The stale pointer only costs one wasted reconnect attempt, which lands on
+    // the same expired card. Never worth failing the screen over.
+    console.error(
+      "Could not clear the expired preflight job pointer",
+      cause instanceof Error ? cause.name : "UnknownError",
+    );
+  }
 }
 
 function createClientDraftId(turnId: number) {
@@ -478,14 +515,17 @@ function RunInterruptedCard({
 }
 
 export function CreateScreen() {
-  const { chatId, client, connected, fees, go, newConversationKey, phase1EndsAt, played, reloadAll, seed, turnId, wallet, walletAddress } = useTyche();
+  const { chatId, client, connected, createIntent, fees, go, newConversationKey, phase1EndsAt, played, reloadAll, seed, turnId, wallet, walletAddress } = useTyche();
 
-  return <CreateChat key={`${newConversationKey}:${chatId || seed || "new"}`} {...{ chatId, client, connected, fees, go, newConversationKey, phase1EndsAt, played, reloadAll, seed, turnId, wallet, walletAddress }} />;
+  // `newConversationKey` stays the remount key and nothing else: it counts how
+  // many blank chats this page session has opened, which says nothing about why
+  // the screen is mounting now. `createIntent` answers that.
+  return <CreateChat key={`${newConversationKey}:${chatId || seed || "new"}`} {...{ chatId, client, connected, createIntent, fees, go, phase1EndsAt, played, reloadAll, seed, turnId, wallet, walletAddress }} />;
 }
 
-type ChatProps = Pick<ReturnType<typeof useTyche>, "chatId" | "client" | "connected" | "fees" | "go" | "newConversationKey" | "phase1EndsAt" | "played" | "reloadAll" | "seed" | "turnId" | "wallet" | "walletAddress">;
+type ChatProps = Pick<ReturnType<typeof useTyche>, "chatId" | "client" | "connected" | "createIntent" | "fees" | "go" | "phase1EndsAt" | "played" | "reloadAll" | "seed" | "turnId" | "wallet" | "walletAddress">;
 
-function CreateChat({ chatId, client, connected, fees, go, newConversationKey, phase1EndsAt, played, reloadAll, seed, turnId, wallet, walletAddress }: ChatProps) {
+function CreateChat({ chatId, client, connected, createIntent, fees, go, phase1EndsAt, played, reloadAll, seed, turnId, wallet, walletAddress }: ChatProps) {
   const [msgs, setMsgs] = useState<ChatMessage[]>([
     { text: "Hey! Tell me in one sentence how your rule decides the round winner. Be creative - I turn it into a valid rule.", who: "ai" },
   ]);
@@ -629,59 +669,136 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
 
   useEffect(() => subscribeConversationRun(activeDraftId, applyRunSnapshot), [activeDraftId, applyRunSnapshot]);
 
+  // Everything that brings a conversation back on mount, in one place and in
+  // one order. Three leads can name the same run - the in-memory snapshot, the
+  // saved draft, and the localStorage job pointer - and as separate effects
+  // they raced each other into three different views of it.
+  //
+  // Skipped only for the two intents that mean "start something new": an
+  // explicit blank chat, and a prompt typed on Home that is about to auto-send.
+  // Deliberately NOT skipped for `newConversationKey > 0`, which only says this
+  // page session once opened a blank chat and stays true forever after.
   useEffect(() => {
-    if (activeDraftId || chatId || seed || newConversationKey > 0) {
-      return;
+    if (activeDraftId || createIntent === "new" || createIntent === "seed") {
+      return undefined;
     }
-    const run = getLatestConversationRun(walletAddress, turnId);
-    if (!run || run.status !== "pending") {
-      return;
-    }
-    autoSentRef.current = true;
-    setActiveDraftId(run.draftId);
-    applyRunSnapshot(run);
-  }, [activeDraftId, applyRunSnapshot, chatId, newConversationKey, seed, turnId, walletAddress]);
 
-  // Reattach to a job that outlived the page. The in-memory run above only
-  // survives a screen change; this pointer survives a reload or a killed tab.
-  useEffect(() => {
-    if (activeDraftId || chatId || seed || newConversationKey > 0) {
-      return;
-    }
     const storage = typeof window === "undefined" ? null : window.localStorage;
-    const persisted = readPersistedPreflightJob(storage);
-    if (!persisted || !matchesPreflightJobScope(persisted, { turnId, wallet: walletAddress ?? null })) {
-      return;
+    const stored = readPersistedPreflightJob(storage);
+    const pointer =
+      stored &&
+      matchesPreflightJobScope(stored, {
+        draftId: chatId,
+        turnId,
+        wallet: walletAddress ?? null,
+      })
+        ? stored
+        : null;
+
+    // A run this tab never stopped following wins outright: its snapshot is
+    // live and already carries the whole transcript.
+    const memoryRun = chatId
+      ? getConversationRun(chatId)
+      : getLatestConversationRun(walletAddress, turnId);
+    if (memoryRun && (chatId !== null || memoryRun.status === "pending")) {
+      autoSentRef.current = true;
+      setActiveDraftId(memoryRun.draftId);
+      applyRunSnapshot(memoryRun);
+      return undefined;
     }
+
+    const draftId = chatId ?? pointer?.draftId ?? null;
+    if (!draftId) {
+      return undefined;
+    }
+    // Whatever happens below, this mount is showing an existing conversation,
+    // so the seed must never auto-send on top of it.
     autoSentRef.current = true;
-    if (!isPreflightJobFresh(persisted, Date.now())) {
+
+    const attach = (messages: ChatMessage[], job: ReattachableJob) => {
+      setActiveDraftId(draftId);
+      if (isPreflightJobPointerFresh(job.stampedAt, Date.now())) {
+        void resumeConversationRun({
+          cursor: job.cursor,
+          draftId,
+          jobId: job.jobId,
+          messages,
+          phase: job.phase,
+          ruleText: job.ruleText,
+          turnId,
+          wallet: walletAddress,
+        });
+        return;
+      }
       // Older than the window the API keeps, so there is nothing to attach to.
-      // Say so without spending a request on a guaranteed 404.
-      clearPersistedPreflightJob(storage, persisted.draftId);
-      setActiveDraftId(persisted.draftId);
+      // Say so without spending a request on a guaranteed 404, and drop both
+      // copies of the pointer so the conversation list stops advertising it.
+      clearPersistedPreflightJob(storage, draftId);
+      void forgetDraftPreflightJob({
+        draftId,
+        messages,
+        prompt: job.ruleText,
+        turnId,
+        wallet: walletAddress,
+      });
+      setMsgs(messages);
       setRunStatus("expired");
       setConnection("closed");
       setRunJob(null);
       setTyping(false);
-      setMsgs((current) =>
-        current.some((message) => message.text === persisted.ruleText)
-          ? current
-          : [...current, { text: persisted.ruleText, who: "user" }],
-      );
-      return;
+    };
+
+    // No wallet means no draft record to read. The pointer alone still gets the
+    // player their result, just without the earlier turns of the conversation.
+    if (!walletAddress) {
+      const job = resolveReattachableJob(undefined, pointer);
+      if (job) {
+        attach(buildResumeTranscript(undefined, pointer), job);
+      }
+      return undefined;
     }
-    setActiveDraftId(persisted.draftId);
-    void resumeConversationRun({
-      cursor: persisted.cursor,
-      draftId: persisted.draftId,
-      jobId: persisted.jobId,
-      messages: [{ text: persisted.ruleText, who: "user" }],
-      phase: persisted.phase,
-      ruleText: persisted.ruleText,
-      turnId,
-      wallet: walletAddress,
-    });
-  }, [activeDraftId, chatId, newConversationKey, seed, turnId, walletAddress]);
+
+    let cancelled = false;
+    void (async () => {
+      let draft: ConversationDraftApi | undefined;
+      try {
+        const body = await getConversationDrafts(walletAddress);
+        draft = body?.drafts.find((entry) => entry.draftId === draftId);
+      } catch (cause) {
+        if (!cancelled) {
+          setError(`Could not load this conversation. ${describeTxError(cause)}`);
+        }
+        return;
+      }
+      if (cancelled) {
+        return;
+      }
+
+      setActiveDraftId(draftId);
+      rememberLatestConversationRun({ draftId, turnId, wallet: walletAddress });
+
+      const transcript = buildResumeTranscript(draft, pointer);
+      const job = resolveReattachableJob(draft, pointer);
+      if (!job) {
+        // Nothing in flight: this is a plain reopen of a saved conversation.
+        if (transcript.length > 0) {
+          setMsgs(transcript);
+        }
+        return;
+      }
+      attach(transcript, job);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeDraftId,
+    applyRunSnapshot,
+    chatId,
+    createIntent,
+    turnId,
+    walletAddress,
+  ]);
 
   function submitGuidance() {
     if (!guidance || typing) {
@@ -796,54 +913,6 @@ function CreateChat({ chatId, client, connected, fees, go, newConversationKey, p
       wallet: walletAddress,
     });
   }
-
-  // Resume an existing conversation: rehydrate the full transcript from the
-  // saved draft instead of restarting the chat. Runs once on mount.
-  useEffect(() => {
-    if (!chatId || !walletAddress) {
-      return undefined;
-    }
-    // Prevent the seed effect from auto-sending when we are resuming.
-    autoSentRef.current = true;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const body = await getConversationDrafts(walletAddress);
-        const draft = body?.drafts.find((d) => d.draftId === chatId);
-        if (cancelled || !draft) {
-          return;
-        }
-        setActiveDraftId(draft.draftId);
-        rememberLatestConversationRun({
-          draftId: draft.draftId,
-          turnId,
-          wallet: walletAddress,
-        });
-        const run = getConversationRun(draft.draftId);
-        if (run) {
-          applyRunSnapshot(run);
-          return;
-        }
-        if (draft.messages && draft.messages.length > 0) {
-          setMsgs(draft.messages);
-        } else {
-          // Older drafts predate transcript persistence - reconstruct from the
-          // stored summary so the conversation still reads coherently.
-          setMsgs([
-            { text: draft.prompt, who: "user" as const },
-            ...(draft.lastMessage ? [{ text: draft.lastMessage, who: "ai" as const }] : []),
-          ]);
-        }
-      } catch (cause) {
-        if (!cancelled) {
-          setError(`Could not load this conversation. ${describeTxError(cause)}`);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [applyRunSnapshot, chatId, turnId, walletAddress]);
 
   // Auto-send the seed coming from the home prompt (once).
   useEffect(() => {

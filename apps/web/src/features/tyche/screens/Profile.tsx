@@ -14,6 +14,7 @@ import { useTyche } from "../context";
 import { postClaimComplete, postClaimRequest } from "../data/apiClient";
 import { lamportsToSol, fmtSol, fmtTurnId, timeAgo, truncateAddress } from "../data/format";
 import { useConversationDrafts, usePlayerClaims, usePlayerHistory } from "../data/hooks";
+import { isPreflightJobPointerFresh } from "../preflightJobStore";
 import { describeTxError, sendInstruction } from "../data/tx";
 import { Dealer, Ico, VoteTally } from "../shared";
 import type { ClaimRecordApi, ConversationDraftApi, PlayerHistoryEventApi } from "../data/types";
@@ -47,9 +48,16 @@ const isReward = (kind: ClaimRecordApi["kind"]) => kind === "creator_reward" || 
 
 function ConversationRow({ draft, onResume }: { draft: ConversationDraftApi; onResume: () => void }) {
   const isDraft = draft.status !== "submitted";
+  // The pointer alone is not enough: it is cleared by whichever client sees the
+  // run end, so a tab that was closed mid-run leaves it set. Bounding it by the
+  // longest life the API gives a job keeps the badge from promising a
+  // reconnect that can only 404.
+  const compiling =
+    Boolean(draft.preflightJobId) &&
+    isPreflightJobPointerFresh(Date.parse(draft.updatedAt), Date.now());
   return (
     <button onClick={onResume} className="ide-listrow" type="button">
-      <span style={{ width: 34, height: 34, borderRadius: 11, display: "grid", placeItems: "center", flexShrink: 0, background: isDraft ? "rgba(255,210,63,0.12)" : "var(--surface-2)", color: isDraft ? "var(--yellow)" : "var(--dim)" }}>
+      <span style={{ width: 34, height: 34, borderRadius: 11, display: "grid", placeItems: "center", flexShrink: 0, background: compiling ? "rgba(94,234,152,0.12)" : isDraft ? "rgba(255,210,63,0.12)" : "var(--surface-2)", color: compiling ? "var(--green)" : isDraft ? "var(--yellow)" : "var(--dim)" }}>
         <Ico.chat style={{ color: "currentColor" }} />
       </span>
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -57,10 +65,12 @@ function ConversationRow({ draft, onResume }: { draft: ConversationDraftApi; onR
           {draft.normalizedText || draft.prompt}
         </div>
         <div style={{ fontSize: 12.5, color: "var(--dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {isDraft ? "draft" : `submitted · ${fmtTurnId(draft.turnId)}`} · <span className="ide-num">{draft.tokenCount}</span> tokens · {timeAgo(draft.updatedAt)}
+          {compiling ? <span style={{ color: "var(--green)", fontWeight: 700 }}>● compiling</span> : isDraft ? "draft" : `submitted · ${fmtTurnId(draft.turnId)}`} · <span className="ide-num">{draft.tokenCount}</span> tokens · {timeAgo(draft.updatedAt)}
         </div>
       </div>
-      {isDraft ? (
+      {compiling ? (
+        <span style={{ flexShrink: 0, color: "var(--green)", fontWeight: 700, fontSize: 13, display: "inline-flex", alignItems: "center", gap: 5 }}><Ico.bolt style={{ color: "currentColor" }} /> Reconnect</span>
+      ) : isDraft ? (
         <span style={{ flexShrink: 0, color: "var(--yellow)", fontWeight: 700, fontSize: 13, display: "inline-flex", alignItems: "center", gap: 5 }}><Ico.edit style={{ color: "currentColor" }} /> continue</span>
       ) : (
         <Ico.chevron style={{ color: "var(--dim)", transform: "rotate(-90deg)", flexShrink: 0 }} />

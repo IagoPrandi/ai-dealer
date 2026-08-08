@@ -14,6 +14,7 @@ import {
   MINIMUM_CLAIM_THRESHOLD_SOL,
   MVP_FEES_SOL,
   REPEATED_ACTION_FEE_MULTIPLIER,
+  PREFLIGHT_JOB_RUNNING_TTL_MS,
   PREFLIGHT_JOB_TTL_MS,
   RULE_MAX_TOKENS,
   RULE_REMOVAL_CONFIG,
@@ -1048,8 +1049,9 @@ const RULE_PREFLIGHT_JOB_MAX_TOTAL = 256;
 const RULE_PREFLIGHT_JOB_MAX_ACTIVE = 32;
 const RULE_PREFLIGHT_JOB_TERMINAL_TTL_MS = PREFLIGHT_JOB_TTL_MS;
 // A hard fuse, not an expected path: a chain of LLM calls each flooring at
-// MIN_TIMEOUT_MS (300s in llm.ts) can plausibly reach ~10 minutes.
-const RULE_PREFLIGHT_JOB_RUNNING_TTL_MS = 15 * 60 * 1000;
+// MIN_TIMEOUT_MS (300s in llm.ts) can plausibly reach ~10 minutes. Shared with
+// the web client so its local staleness check bounds the same lifetime.
+const RULE_PREFLIGHT_JOB_RUNNING_TTL_MS = PREFLIGHT_JOB_RUNNING_TTL_MS;
 const RULE_PREFLIGHT_SSE_MAX_LISTENERS_PER_JOB = 8;
 const RULE_PREFLIGHT_SSE_MAX_BUFFERED_BYTES = 1024 * 1024;
 const RULE_PREFLIGHT_SSE_HEARTBEAT_MS = 15_000;
@@ -5617,6 +5619,16 @@ export function saveConversationDraft(
     ...draft,
     createdAt: existing?.createdAt ?? draft.createdAt ?? updatedAt,
     draftId,
+    // The one field that is merged rather than replaced. Every other write is
+    // last-write-wins, but the job pointer is written by the run that started
+    // the preflight and must survive the unrelated draft saves that follow it
+    // (a retried transcript save, a rule id landing). Absent means "not my
+    // business"; an explicit null is how a finished run clears it.
+    ...("preflightJobId" in draft
+      ? {}
+      : existing?.preflightJobId === undefined
+        ? {}
+        : { preflightJobId: existing.preflightJobId }),
     updatedAt,
   };
   conversationDrafts.set(draftId, record);

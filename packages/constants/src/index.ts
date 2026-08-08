@@ -8,6 +8,12 @@ export const LAMPORTS_PER_SOL = 1_000_000_000;
 // a network round-trip; keeping one source of truth stops the two from drifting.
 export const PREFLIGHT_JOB_TTL_MS = 10 * 60 * 1000;
 
+// The fuse on a job that never finishes. Shared for the same reason as the TTL
+// above: the client's local staleness check must bound the *whole* server-side
+// lifetime (up to this long running, then PREFLIGHT_JOB_TTL_MS retained after
+// finishing), or it discards a pointer the API would still have honoured.
+export const PREFLIGHT_JOB_RUNNING_TTL_MS = 15 * 60 * 1000;
+
 // Production turn timing (PRD §5.4): every turn lasts 24h and is composed of
 // phase 1 (create rules + pick numbers, ~22h) followed by phase 2 (finalist
 // shortlist, elimination voting, active rule, draw at turn end, ~2h). The
