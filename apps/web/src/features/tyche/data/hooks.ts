@@ -58,6 +58,21 @@ export interface ActiveTurnView {
   state: TurnState;
 }
 
+type ActiveTurnViewState = Omit<ActiveTurnView, "refresh">;
+
+export function resolveActiveTurnLoadFailure(
+  previous: ActiveTurnViewState,
+): ActiveTurnViewState {
+  return {
+    ...previous,
+    message: previous.snapshot
+      ? "Live turn refresh is delayed. Showing the last confirmed status."
+      : "The live turn status could not be loaded. Try again shortly.",
+    readinessCode: "TURN_STATUS_UNAVAILABLE",
+    state: "unavailable",
+  };
+}
+
 export function resolveVisibleTurnId(snapshot: ActiveTurnSnapshot) {
   if (
     snapshot.globalConfig.hasActiveTurn &&
@@ -72,7 +87,7 @@ export function resolveVisibleTurnId(snapshot: ActiveTurnSnapshot) {
 
 /** Polls the on-chain GlobalConfig + active TurnState every 10s (and on focus). */
 export function useActiveTurn(): ActiveTurnView {
-  const [view, setView] = useState<Omit<ActiveTurnView, "refresh">>({
+  const [view, setView] = useState<ActiveTurnViewState>({
     activeTurnId: TYCHE_ACTIVE_TURN_ID,
     endTimestamp: null,
     message: "Checking the active turn.",
@@ -89,24 +104,26 @@ export function useActiveTurn(): ActiveTurnView {
         ...(snapshot.openingGate ? { openingGate: snapshot.openingGate } : {}),
         turn: snapshot.turnState,
       });
+      const stale = snapshot.freshness === "stale";
       setView({
         activeTurnId: resolveVisibleTurnId(snapshot),
         endTimestamp: snapshot.turnState?.endTimestamp ?? null,
-        message: readiness.ok ? "The active turn is accepting plays." : readiness.message,
+        message: stale
+          ? "Live turn refresh is delayed. Showing the last confirmed status."
+          : readiness.ok
+            ? "The active turn is accepting plays."
+            : readiness.message,
         snapshot,
-        state: readiness.ok ? "open" : "closed",
-        ...(readiness.ok ? {} : { readinessCode: readiness.code }),
+        state: stale ? "unavailable" : readiness.ok ? "open" : "closed",
+        ...(stale
+          ? { readinessCode: "TURN_STATUS_UNAVAILABLE" }
+          : readiness.ok
+            ? {}
+            : { readinessCode: readiness.code }),
       });
     } catch (error) {
       console.warn("Failed to load the active turn.", error);
-      setView({
-        activeTurnId: TYCHE_ACTIVE_TURN_ID,
-        endTimestamp: null,
-        message: "The live turn status could not be loaded. Try again shortly.",
-        readinessCode: "TURN_STATUS_UNAVAILABLE",
-        snapshot: null,
-        state: "unavailable",
-      });
+      setView(resolveActiveTurnLoadFailure);
     }
   }, []);
 

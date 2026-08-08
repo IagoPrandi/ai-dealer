@@ -118,6 +118,8 @@ export interface TycheContextValue {
   turnId: number;
   turnReadyToPlay: boolean;
   turnStatusMessage: string;
+  /** True when the last confirmed turn is retained while a live refresh fails. */
+  turnStatusUnavailable: boolean;
   /** Current on-chain TurnState used to gate phase-specific actions. */
   turnState: null | TurnStateSnapshot;
   voteApprove: (ruleId: number) => Promise<void>;

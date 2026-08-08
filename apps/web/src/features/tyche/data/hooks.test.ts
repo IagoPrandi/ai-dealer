@@ -4,6 +4,7 @@ import { address } from "@solana/kit";
 
 import {
   buildUiRule,
+  resolveActiveTurnLoadFailure,
   resolvePlayerGuessState,
   resolveVisibleTurnId,
 } from "./hooks.js";
@@ -45,6 +46,28 @@ test("visible turn uses the latest completed turn when no turn is active", () =>
 
 test("visible turn falls back to the bootstrap turn before any turn exists", () => {
   assert.equal(resolveVisibleTurnId(snapshot({ nextTurnId: 0 })), 1);
+});
+
+test("a transient refresh failure preserves the last confirmed turn snapshot", () => {
+  const lastConfirmed = snapshot({
+    activeTurnId: 102,
+    hasActiveTurn: true,
+    nextTurnId: 103,
+  });
+
+  const unavailable = resolveActiveTurnLoadFailure({
+    activeTurnId: 102,
+    endTimestamp: 1_786_125_600,
+    message: "The active turn is accepting plays.",
+    snapshot: lastConfirmed,
+    state: "open",
+  });
+
+  assert.equal(unavailable.activeTurnId, 102);
+  assert.equal(unavailable.snapshot, lastConfirmed);
+  assert.equal(unavailable.state, "unavailable");
+  assert.equal(unavailable.readinessCode, "TURN_STATUS_UNAVAILABLE");
+  assert.match(unavailable.message, /last confirmed status/);
 });
 
 test("on-chain guess confirmation keeps the player in the round while receipt indexing catches up", () => {

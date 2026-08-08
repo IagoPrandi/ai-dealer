@@ -54,8 +54,10 @@ import {
   createDurableIndexerConfig,
   startDurableSolanaReconciliationLoop,
 } from "./durable-indexer.js";
+import { createActiveTurnStatusLoader } from "./active-turn-status-cache.js";
 
 export * from "./active-rule-reward-settlement.js";
+export * from "./active-turn-status-cache.js";
 export * from "./referral-reward-settlement.js";
 export * from "./api-bridge.js";
 export * from "./claims.js";
@@ -267,7 +269,7 @@ function sendNoContent(request: IncomingMessage, response: ServerResponse) {
   response.end();
 }
 
-async function getActiveTurnStatus() {
+async function loadActiveTurnStatusFromRpc() {
   const config = await createTurnAutomationConfig();
   const rpc = createSolanaRpc(config.rpcUrl);
   const globalConfig = await fetchGlobalConfig({
@@ -324,6 +326,19 @@ async function getActiveTurnStatus() {
     turnStateAddress: turnState?.address.toString() ?? null,
   };
 }
+
+const getActiveTurnStatus = createActiveTurnStatusLoader(
+  loadActiveTurnStatusFromRpc,
+  {
+    // The DApp polls every ten seconds. A short cache collapses focus/reload
+    // bursts without making normal polling lag behind a round transition.
+    freshForMs: 5_000,
+    // Read-only screens may retain the last explicitly marked observation for
+    // one minute during RPC throttling. Transaction preflights request a fresh
+    // read and are never served stale state.
+    maxStaleMs: 60_000,
+  },
+);
 
 const MANUAL_CYCLE_TIMEOUT_MS = 300_000;
 
@@ -513,8 +528,18 @@ if (
     }
 
     if (request.method === "GET" && path === "/turn/active") {
-      void getActiveTurnStatus()
-        .then((status) => sendJson(request, response, 200, status))
+      const requireFresh =
+        new URL(request.url ?? "/turn/active", "http://worker.local")
+          .searchParams.get("fresh") === "1";
+      void getActiveTurnStatus({ requireFresh })
+        .then((result) =>
+          sendJson(request, response, 200, {
+            ...result.value,
+            freshness: result.freshness,
+            observedAt: result.observedAt,
+            source: result.source,
+          }),
+        )
         .catch((error: unknown) => {
           console.error("active turn status failed", error);
           sendJson(request, response, 500, {

@@ -496,6 +496,7 @@ export function TycheApp({
     turnId,
     turnReadyToPlay: activeTurn.state === "open",
     turnStatusMessage: activeTurn.message,
+    turnStatusUnavailable: activeTurn.state === "unavailable",
     turnState: activeTurn.snapshot?.turnState ?? null,
     voteApprove: (ruleId) => sendVote(ruleId, "approve"),
     voteBusyRuleId,

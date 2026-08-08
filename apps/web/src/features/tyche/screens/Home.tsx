@@ -57,7 +57,7 @@ function PromptInput() {
 export function HomeScreen() {
   const {
     apiUnavailable, bet, endSeconds, entrySyncing, fees, go, openDetail, phase1EndsAt, played, players, prizeSol, reloadAll, rules, turnId,
-    resultTurnId, round, turnReadyToPlay, turnStatusMessage, turnState, walletAddress,
+    resultTurnId, round, turnReadyToPlay, turnStatusMessage, turnStatusUnavailable, turnState, walletAddress,
   } = useTyche();
 
   const [h, m, s] = useCountdownTo(endSeconds);
@@ -131,7 +131,9 @@ export function HomeScreen() {
           <div style={{ position: "absolute", inset: "-26px 16px auto", height: 210, background: "radial-gradient(circle, rgba(20,241,149,0.2), transparent 68%)", filter: "blur(14px)", animation: "ide-pulse 3.6s ease-in-out infinite", zIndex: 0 }} />
           <div style={{ position: "relative", zIndex: 1 }}>
             <div style={{ display: "flex", justifyContent: "center", gap: 8, marginBottom: 14 }}>
-              {inPhase1 ? (
+              {turnStatusUnavailable ? (
+                <span className="ide-pill" style={{ color: "var(--yellow)", borderColor: "rgba(255,210,63,0.3)" }}><Ico.clock style={{ color: "var(--yellow)" }} /> {turnStatusMessage}</span>
+              ) : inPhase1 ? (
                 <span className="ide-pill" style={{ color: "var(--muted)" }}><Ico.clock style={{ color: "var(--green)" }} /> Create &amp; play · ends in <span className="ide-num" style={{ color: "var(--text)", fontWeight: 700, marginLeft: 2 }}>{p1h}:{p1m}:{p1s}</span></span>
               ) : shortlistDrawPending ? (
                 <span className="ide-pill" style={{ color: "var(--muted)", borderColor: "rgba(199,125,255,0.3)" }}><Ico.dice style={{ color: "var(--purple-soft)", width: 14, height: 14 }} /> Shortlist draw in progress</span>
@@ -260,7 +262,7 @@ export function HomeScreen() {
           </div>
         ) : (
           <button onClick={() => go("play")} disabled={!turnReadyToPlay} className="ide-btn" style={{ width: "100%", padding: "17px", fontSize: 17, marginBottom: 18, opacity: turnReadyToPlay ? 1 : 0.5 }} type="button">
-            <Ico.bolt style={{ color: "#08110C" }} /> {turnReadyToPlay ? `Play now · ${fees.playNext === 0 ? "Free" : `${fmtSol(fees.playNext)} SOL`}` : "Waiting for next turn"}
+            <Ico.bolt style={{ color: "#08110C" }} /> {turnReadyToPlay ? `Play now · ${fees.playNext === 0 ? "Free" : `${fmtSol(fees.playNext)} SOL`}` : turnStatusUnavailable ? "Refreshing turn status" : "Waiting for next turn"}
           </button>
         )}
 

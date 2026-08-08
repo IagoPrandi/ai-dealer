@@ -941,7 +941,7 @@ function CreateChat({ chatId, client, connected, createIntent, fees, go, phase1E
     try {
       const player = address(walletAddress);
       const [freshTurn, accounts] = await Promise.all([
-        fetchActiveTurnSnapshotFromWorker(),
+        fetchActiveTurnSnapshotFromWorker({ requireFresh: true }),
         deriveSubmitGuessAccounts({ player, sequence: 1, turnId }),
       ]);
       if (freshTurn.globalConfig.activeTurnId !== turnId) {

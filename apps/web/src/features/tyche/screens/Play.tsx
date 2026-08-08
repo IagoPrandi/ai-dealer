@@ -172,8 +172,8 @@ function WalletActionStatus({
   );
 }
 
-function PlayDone({ sel }: { sel: number[] }) {
-  const { go, turnId } = useTyche();
+function PlayDone({ sel, turnId }: { sel: number[]; turnId: number }) {
+  const { go } = useTyche();
   return (
     <div className="ide-app ide-screen" style={{ height: "100%", position: "relative", overflow: "hidden" }}>
       <div className="ide-ambient" />
@@ -202,6 +202,7 @@ function PlayFlow() {
   const [step, setStep] = useState<"pick" | "review" | "done">("pick");
   const [sel, setSel] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
+  const [confirmedTurnId, setConfirmedTurnId] = useState<null | number>(null);
   const [error, setError] = useState<null | string>(null);
   const [pendingAction, setPendingAction] = useState<WalletPendingAction | null>(null);
   const complete = sel.length === PICK;
@@ -275,7 +276,10 @@ function PlayFlow() {
       const preflightSignal = AbortSignal.timeout(PREFLIGHT_TIMEOUT_MS);
       const loadPreflight = () =>
         Promise.all([
-          fetchActiveTurnSnapshotFromWorker(preflightSignal),
+          fetchActiveTurnSnapshotFromWorker({
+            requireFresh: true,
+            signal: preflightSignal,
+          }),
           client.runtime.rpc
             .getAccountInfo(accounts.playerGuess, {
               commitment: "confirmed",
@@ -397,45 +401,15 @@ function PlayFlow() {
         turnId,
       };
       await postGuessReceipt(receipt);
-      let latestTurn: Awaited<ReturnType<typeof fetchActiveTurnSnapshotFromWorker>>;
-      try {
-        latestTurn = await fetchActiveTurnSnapshotFromWorker();
-      } catch {
-        saveAction({
-          action: "submit_guess",
-          createdAt: startedAt,
-          errorCode: "TURN_RECOVERY_UNVERIFIED",
-          errorMessage: "The receipt was recorded, but Tyche could not verify the live round after wallet return.",
-          numbers: sel,
-          signature,
-          status: "delayed_confirmation",
-          turnId,
-          walletAddress,
-        });
-        reloadAll();
-        setError("The receipt was recorded, but live round recovery could not be verified. Refresh status before retrying.");
-        return;
-      }
-      if (latestTurn.globalConfig.activeTurnId !== turnId) {
-        saveAction({
-          action: "submit_guess",
-          createdAt: startedAt,
-          errorCode: "TURN_CHANGED_AFTER_SIGNATURE",
-          errorMessage: "The round changed while the wallet signature was being processed.",
-          numbers: sel,
-          signature,
-          status: "turn_changed",
-          turnId,
-          walletAddress,
-        });
-        reloadAll();
-        setError("The round changed while the wallet signature was being processed. The signed receipt was recorded for the previous round.");
-        return;
-      }
-      reloadAll();
+      // The two confirmed PDAs and the accepted receipt already prove that the
+      // guess succeeded for this turn. A separate live-status refresh is useful
+      // for navigation, but it must not turn that success into an error when the
+      // shared RPC is temporarily throttled after the wallet returns.
+      setConfirmedTurnId(turnId);
       clearPendingWalletAction();
       setPendingAction(null);
       setStep("done");
+      reloadAll();
     } catch (cause) {
       const message = describeTxError(cause);
       const code = txErrorCode(cause);
@@ -459,7 +433,7 @@ function PlayFlow() {
   }
 
   if (step === "done") {
-    return <PlayDone sel={sel} />;
+    return <PlayDone sel={sel} turnId={confirmedTurnId ?? turnId} />;
   }
 
   if (step === "review") {
