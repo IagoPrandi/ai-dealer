@@ -1,6 +1,12 @@
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { NextConfig } from "next";
+
+import { loadWorkspaceEnvironment } from "./src/config/workspaceEnv";
+
+const webAppRoot = path.dirname(fileURLToPath(import.meta.url));
+loadWorkspaceEnvironment(path.resolve(webAppRoot, "../.."));
 
 // Modo galeria de UI: ligado ao rodar `pnpm dev:mock` (npm_lifecycle_event) ou
 // definindo NEXT_PUBLIC_UI_MOCK=1 manualmente. Nunca liga em build de produção.

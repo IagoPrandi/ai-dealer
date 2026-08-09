@@ -27,6 +27,11 @@ Create a local `.env` from the checked-in example if needed:
 cp .env.example .env
 ```
 
+The web package loads this root `.env` explicitly. Configure
+`NEXT_PUBLIC_SOLANA_RPC_URL` with the intended devnet provider; the DApp derives
+the matching `wss://` endpoint from that URL so both transports keep the same
+provider host and query credentials.
+
 Start PostgreSQL and Redis:
 
 ```bash

@@ -233,6 +233,7 @@ services:
       TYCHE_WORKER_PROXY_TARGET: http://worker:3003
       NEXT_PUBLIC_TYCHE_API_URL: /__api
       NEXT_PUBLIC_TYCHE_WORKER_URL: /__worker
+      NEXT_PUBLIC_SOLANA_RPC_URL: ${NEXT_PUBLIC_SOLANA_RPC_URL-}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s

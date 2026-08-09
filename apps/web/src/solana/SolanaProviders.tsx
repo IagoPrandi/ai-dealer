@@ -10,12 +10,15 @@ import {
 import { autoDiscover, createClient } from "@solana/client";
 import { SolanaProvider } from "@solana/react-hooks";
 
+import { resolvePublicSolanaConfig } from "./publicRpcConfig";
 import { isSupportedTycheWallet } from "./walletDiscovery";
 
-const DEVNET_RPC_ENDPOINT =
-  process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
-const DEVNET_WEBSOCKET_ENDPOINT =
-  process.env.NEXT_PUBLIC_SOLANA_WS_URL ?? "wss://api.devnet.solana.com";
+const {
+  endpoint: DEVNET_RPC_ENDPOINT,
+  websocketEndpoint: DEVNET_WEBSOCKET_ENDPOINT,
+} = resolvePublicSolanaConfig({
+  rpcEndpoint: process.env.NEXT_PUBLIC_SOLANA_RPC_URL,
+});
 const DEVNET_CHAIN = "solana:devnet";
 const MWA_REGISTRATION_KEY = "__tycheMwaRegistered";
 
