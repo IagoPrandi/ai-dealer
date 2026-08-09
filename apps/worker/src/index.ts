@@ -55,6 +55,10 @@ import {
   startDurableSolanaReconciliationLoop,
 } from "./durable-indexer.js";
 import { createActiveTurnStatusLoader } from "./active-turn-status-cache.js";
+import {
+  createTokenomicsRevenueConfig,
+  startTokenomicsRevenueLoop,
+} from "./tokenomics-revenue-loop.js";
 
 export * from "./active-rule-reward-settlement.js";
 export * from "./active-turn-status-cache.js";
@@ -72,6 +76,7 @@ export * from "./settlement-loop.js";
 export * from "./settlement-scheduler.js";
 export * from "./switchboard.js";
 export * from "./token-reward-settlement.js";
+export * from "./tokenomics-revenue-loop.js";
 export * from "./turn-automation.js";
 
 // Load the repo-root .env for native (non-Docker) dev so DATABASE_URL/REDIS_URL,
@@ -617,6 +622,20 @@ if (
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
   });
+
+  const revenueAutomationFlag =
+    process.env.TYCHE_TOKENOMICS_REVENUE_AUTOMATION_ENABLED?.toLowerCase();
+  if (revenueAutomationFlag === "1" || revenueAutomationFlag === "true") {
+    void createTokenomicsRevenueConfig().then((revenueConfig) => {
+      const timer = startTokenomicsRevenueLoop(revenueConfig);
+      if (!timer) {
+        return;
+      }
+      const stop = () => clearInterval(timer);
+      process.once("SIGINT", stop);
+      process.once("SIGTERM", stop);
+    });
+  }
 
   void createTokenRewardSettlementConfig().then((rewardConfig) => {
     const timer = startTokenRewardSettlementLoop(rewardConfig);

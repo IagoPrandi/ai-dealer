@@ -57,6 +57,8 @@ test("turn automation decodes legacy and current TurnState offsets explicitly", 
       finalistRuleIds: [],
       startTimestamp: 100,
       status: "open",
+      treasuryFeeAmountLamports: 0n,
+      treasuryFeeBridged: false,
       turnDurationSeconds: 800,
       turnId: 42,
     });
@@ -69,6 +71,8 @@ test("turn automation decodes legacy and current TurnState offsets explicitly", 
 
 test("current TurnState exposes finalist voting fields to the live status endpoint", () => {
   const data = turnStateData(789);
+  writeU64Le(data, 41, 300);
+  data[49] = 1;
   data[261] = 2;
   writeU64Le(data, 262, 7);
   writeU64Le(data, 270, 11);
@@ -82,6 +86,8 @@ test("current TurnState exposes finalist voting fields to the live status endpoi
     finalistRuleIds: [7, 11],
     startTimestamp: 100,
     status: "open",
+    treasuryFeeAmountLamports: 300n,
+    treasuryFeeBridged: true,
     turnDurationSeconds: 800,
     turnId: 42,
   });

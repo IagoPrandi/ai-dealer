@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
+import { hashCanonicalLeafFile, hashEpochManifest } from "@tyche/tokenomics";
 
 import {
   authorizeTokenomicsProjection,
   getPublicTokenomicsSnapshot,
+  getTokenomicsEpochArtifact,
   getWalletTokenomicsProjection,
   resetTokenomicsProjectionForTests,
+  restoreTokenomicsEpochArtifacts,
+  restoreTokenomicsProjection,
+  saveTokenomicsEpochArtifact,
   saveTokenomicsProjection,
   type TokenomicsProjection,
 } from "./tokenomics.js";
@@ -128,4 +133,55 @@ test("projection writes fail closed without the configured bearer token", () => 
   process.env.TOKENOMICS_PROJECTION_TOKEN = "secret";
   assert.equal(authorizeTokenomicsProjection("Bearer wrong").statusCode, 403);
   assert.equal(authorizeTokenomicsProjection("Bearer secret").ok, true);
+});
+
+test("projection and content-addressed epoch artifacts survive restoration", () => {
+  saveTokenomicsProjection(projection);
+  const leafFileHash = hashCanonicalLeafFile([]);
+  const manifest = {
+    calculationCodeCommit: "1".repeat(64),
+    epochId: "7",
+    grossDistributableLamports: "0",
+    leafFileHash,
+    lockEventInputHash: "2".repeat(64),
+    lockIntervalOutputHash: "3".repeat(64),
+    network: "devnet",
+    programId: "4".repeat(64),
+    rolloverOutLamports: "0",
+    schemaVersion: "1",
+    slotEnd: "11",
+    slotStart: "10",
+    sumOfMerkleClaimsLamports: "0",
+    totalWeight: "0",
+  };
+  const manifestHash = hashEpochManifest({
+    calculationCodeCommit: manifest.calculationCodeCommit,
+    epochId: 7n,
+    grossDistributableLamports: 0n,
+    leafFileHash,
+    lockEventInputHash: manifest.lockEventInputHash,
+    lockIntervalOutputHash: manifest.lockIntervalOutputHash,
+    network: manifest.network,
+    programId: manifest.programId,
+    rolloverOutLamports: 0n,
+    schemaVersion: "1",
+    slotEnd: 11n,
+    slotStart: 10n,
+    sumOfMerkleClaimsLamports: 0n,
+    totalWeight: 0n,
+  });
+  const artifact = saveTokenomicsEpochArtifact({
+    claims: [],
+    leafFileHash,
+    manifest,
+    manifestHash,
+    merkleRoot: null,
+  });
+
+  resetTokenomicsProjectionForTests();
+  restoreTokenomicsProjection(projection);
+  restoreTokenomicsEpochArtifacts([artifact]);
+
+  assert.equal(getPublicTokenomicsSnapshot().available, true);
+  assert.deepEqual(getTokenomicsEpochArtifact(manifestHash), artifact);
 });

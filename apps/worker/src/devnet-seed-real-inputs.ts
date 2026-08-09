@@ -132,8 +132,14 @@ interface SeededInputSummary {
 }
 
 export function readSeedConfig(env = process.env): SeedConfig {
-  const playerCount = Number(env.TYCHE_M5_INPUTS_PLAYER_COUNT ?? DEFAULT_PLAYER_COUNT);
-  if (!Number.isInteger(playerCount) || playerCount < 1 || playerCount > MAX_PLAYER_COUNT) {
+  const playerCount = Number(
+    env.TYCHE_M5_INPUTS_PLAYER_COUNT ?? DEFAULT_PLAYER_COUNT,
+  );
+  if (
+    !Number.isInteger(playerCount) ||
+    playerCount < 1 ||
+    playerCount > MAX_PLAYER_COUNT
+  ) {
     throw new Error(
       `TYCHE_M5_INPUTS_PLAYER_COUNT must be an integer from 1 to ${MAX_PLAYER_COUNT}.`,
     );
@@ -142,8 +148,13 @@ export function readSeedConfig(env = process.env): SeedConfig {
   const fundLamportsPerPlayer = Number(
     env.TYCHE_M5_INPUTS_FUND_LAMPORTS ?? DEFAULT_FUND_LAMPORTS,
   );
-  if (!Number.isSafeInteger(fundLamportsPerPlayer) || fundLamportsPerPlayer < 0) {
-    throw new Error("TYCHE_M5_INPUTS_FUND_LAMPORTS must be a non-negative safe integer.");
+  if (
+    !Number.isSafeInteger(fundLamportsPerPlayer) ||
+    fundLamportsPerPlayer < 0
+  ) {
+    throw new Error(
+      "TYCHE_M5_INPUTS_FUND_LAMPORTS must be a non-negative safe integer.",
+    );
   }
   const paidGuessPlayerCount = Number(
     env.TYCHE_M5_INPUTS_PAID_GUESS_PLAYER_COUNT ?? "0",
@@ -254,7 +265,11 @@ function playerGuessPda(
 }
 
 function gameTokenPda(programId: PublicKey, turnId: number, player: PublicKey) {
-  return derivePda(programId, [GAME_TOKEN_SEED, u64Le(turnId), player.toBuffer()]);
+  return derivePda(programId, [
+    GAME_TOKEN_SEED,
+    u64Le(turnId),
+    player.toBuffer(),
+  ]);
 }
 
 function treasuryVaultPda(programId: PublicKey) {
@@ -328,12 +343,32 @@ export function createSubmitGuessInstruction({
       ]),
       keys: [
         { isSigner: true, isWritable: true, pubkey: player },
-        { isSigner: false, isWritable: false, pubkey: globalConfigPda(programId) },
-        { isSigner: false, isWritable: true, pubkey: turnStatePda(programId, turnId) },
+        {
+          isSigner: false,
+          isWritable: false,
+          pubkey: globalConfigPda(programId),
+        },
+        {
+          isSigner: false,
+          isWritable: true,
+          pubkey: turnStatePda(programId, turnId),
+        },
         { isSigner: false, isWritable: true, pubkey: playerGuess },
-        { isSigner: false, isWritable: true, pubkey: gameTokenPda(programId, turnId, player) },
-        { isSigner: false, isWritable: true, pubkey: treasuryVaultPda(programId) },
-        { isSigner: false, isWritable: true, pubkey: prizeVaultPda(programId, turnId) },
+        {
+          isSigner: false,
+          isWritable: true,
+          pubkey: gameTokenPda(programId, turnId, player),
+        },
+        {
+          isSigner: false,
+          isWritable: true,
+          pubkey: treasuryVaultPda(programId),
+        },
+        {
+          isSigner: false,
+          isWritable: true,
+          pubkey: prizeVaultPda(programId, turnId),
+        },
         { isSigner: false, isWritable: false, pubkey: SYSTEM_PROGRAM_ID },
       ],
       programId,
@@ -384,12 +419,32 @@ export function createProposeRuleInstruction({
       data,
       keys: [
         { isSigner: true, isWritable: true, pubkey: player },
-        { isSigner: false, isWritable: false, pubkey: globalConfigPda(programId) },
-        { isSigner: false, isWritable: true, pubkey: turnStatePda(programId, turnId) },
-        { isSigner: false, isWritable: true, pubkey: gameTokenPda(programId, turnId, player) },
+        {
+          isSigner: false,
+          isWritable: false,
+          pubkey: globalConfigPda(programId),
+        },
+        {
+          isSigner: false,
+          isWritable: true,
+          pubkey: turnStatePda(programId, turnId),
+        },
+        {
+          isSigner: false,
+          isWritable: true,
+          pubkey: gameTokenPda(programId, turnId, player),
+        },
         { isSigner: false, isWritable: true, pubkey: ruleProposal },
-        { isSigner: false, isWritable: true, pubkey: treasuryVaultPda(programId) },
-        { isSigner: false, isWritable: true, pubkey: prizeVaultPda(programId, turnId) },
+        {
+          isSigner: false,
+          isWritable: true,
+          pubkey: treasuryVaultPda(programId),
+        },
+        {
+          isSigner: false,
+          isWritable: true,
+          pubkey: prizeVaultPda(programId, turnId),
+        },
         { isSigner: false, isWritable: false, pubkey: SYSTEM_PROGRAM_ID },
       ],
       programId,
@@ -419,9 +474,21 @@ export function createPrecompileRuleInstruction({
     ]),
     keys: [
       { isSigner: true, isWritable: false, pubkey: authority },
-      { isSigner: false, isWritable: false, pubkey: globalConfigPda(programId) },
-      { isSigner: false, isWritable: false, pubkey: turnStatePda(programId, turnId) },
-      { isSigner: false, isWritable: true, pubkey: ruleProposalPda(programId, turnId, ruleId) },
+      {
+        isSigner: false,
+        isWritable: false,
+        pubkey: globalConfigPda(programId),
+      },
+      {
+        isSigner: false,
+        isWritable: false,
+        pubkey: turnStatePda(programId, turnId),
+      },
+      {
+        isSigner: false,
+        isWritable: true,
+        pubkey: ruleProposalPda(programId, turnId, ruleId),
+      },
     ],
     programId,
   };
@@ -447,12 +514,33 @@ export function createVoteRuleInstruction({
       data: Buffer.concat([VOTE_RULE_DISCRIMINATOR, u64Le(sequence)]),
       keys: [
         { isSigner: true, isWritable: true, pubkey: player },
-        { isSigner: false, isWritable: false, pubkey: globalConfigPda(programId) },
-        { isSigner: false, isWritable: true, pubkey: turnStatePda(programId, turnId) },
-        { isSigner: false, isWritable: true, pubkey: gameTokenPda(programId, turnId, player) },
+        {
+          isSigner: false,
+          isWritable: false,
+          pubkey: globalConfigPda(programId),
+        },
+        {
+          isSigner: false,
+          isWritable: true,
+          pubkey: turnStatePda(programId, turnId),
+        },
+        {
+          isSigner: false,
+          isWritable: true,
+          pubkey: gameTokenPda(programId, turnId, player),
+        },
         { isSigner: false, isWritable: true, pubkey: ruleProposal },
         { isSigner: false, isWritable: true, pubkey: ruleVote },
-        { isSigner: false, isWritable: true, pubkey: prizeVaultPda(programId, turnId) },
+        {
+          isSigner: false,
+          isWritable: true,
+          pubkey: treasuryVaultPda(programId),
+        },
+        {
+          isSigner: false,
+          isWritable: true,
+          pubkey: prizeVaultPda(programId, turnId),
+        },
         { isSigner: false, isWritable: false, pubkey: SYSTEM_PROGRAM_ID },
       ],
       programId,
@@ -604,18 +692,26 @@ export async function runStoredRuleValidation({
 }
 
 export async function fetchRulePreflight(seedConfig: SeedConfig) {
-  const response = await fetch(new URL("/rule-preflight", seedConfig.apiBaseUrl), {
-    body: JSON.stringify({ text: seedConfig.ruleText }),
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  });
-  const payload = (await response.json()) as { preflight?: RulePreflightResult };
+  const response = await fetch(
+    new URL("/rule-preflight", seedConfig.apiBaseUrl),
+    {
+      body: JSON.stringify({ text: seedConfig.ruleText }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    },
+  );
+  const payload = (await response.json()) as {
+    preflight?: RulePreflightResult;
+  };
   if (!response.ok || !payload.preflight) {
     throw new Error(
       `/rule-preflight failed with ${response.status}: ${JSON.stringify(payload)}`,
     );
   }
-  if (payload.preflight.decision !== "VALID" || payload.preflight.needsClarification) {
+  if (
+    payload.preflight.decision !== "VALID" ||
+    payload.preflight.needsClarification
+  ) {
     throw new Error(
       `Rule preflight did not return a directly proposable rule: ${JSON.stringify(
         payload.preflight,
@@ -641,8 +737,13 @@ async function ensureOpenTurn() {
     }
     const manualConfig = await createManualControlConfig();
     const opened = await openTurnManually(manualConfig);
-    if (opened.action !== "opened_turn" && opened.action !== "active_turn_exists") {
-      throw new Error(`Could not open a turn for seeding: ${JSON.stringify(opened)}`);
+    if (
+      opened.action !== "opened_turn" &&
+      opened.action !== "active_turn_exists"
+    ) {
+      throw new Error(
+        `Could not open a turn for seeding: ${JSON.stringify(opened)}`,
+      );
     }
     globalConfig = await fetchGlobalConfig({
       programId: automation.programId,
@@ -650,7 +751,10 @@ async function ensureOpenTurn() {
     });
   }
 
-  if (!globalConfig.snapshot.hasActiveTurn || globalConfig.snapshot.activeTurnId <= 0) {
+  if (
+    !globalConfig.snapshot.hasActiveTurn ||
+    globalConfig.snapshot.activeTurnId <= 0
+  ) {
     throw new Error(
       "No active devnet turn. Open one first or set TYCHE_M5_INPUTS_OPEN_TURN=1 with manual control enabled.",
     );
@@ -720,9 +824,7 @@ export async function seedRealInputs(): Promise<SeededInputSummary> {
   };
 
   for (const [index, player] of players.entries()) {
-    const guess = [
-      ...(seedConfig.guessNumbers ?? deterministicGuess(index)),
-    ];
+    const guess = [...(seedConfig.guessNumbers ?? deterministicGuess(index))];
     const guessBuilder = createSubmitGuessInstruction({
       numbers: guess,
       player: player.publicKey,
@@ -931,7 +1033,10 @@ export async function seedRealInputs(): Promise<SeededInputSummary> {
       sequence: 1,
       turnId,
     });
-    const voteAlreadyExists = await accountExists(connection, voteBuilder.ruleVote);
+    const voteAlreadyExists = await accountExists(
+      connection,
+      voteBuilder.ruleVote,
+    );
     const voteSignature = voteAlreadyExists
       ? "already-exists"
       : await sendTransaction({

@@ -781,12 +781,15 @@ pub mod tyche {
             ctx.accounts.turn_state.turn_id,
             args.sequence,
         )?;
-        collect_prize_pool_fee(
+        collect_fee(
             &ctx.accounts.voter,
+            &ctx.accounts.treasury_vault,
             &ctx.accounts.prize_vault,
             &ctx.accounts.system_program,
             vote_fee,
+            config.treasury_fee_bps,
         )?;
+        let (treasury_amount, prize_amount) = split_fee(vote_fee, config.treasury_fee_bps)?;
 
         let vote = &mut ctx.accounts.rule_vote;
         vote.turn_id = ctx.accounts.turn_state.turn_id;
@@ -815,17 +818,29 @@ pub mod tyche {
             .used_for_vote_count
             .checked_add(1)
             .ok_or(TycheError::ArithmeticOverflow)?;
+        ctx.accounts.turn_state.treasury_fee_amount_lamports = ctx
+            .accounts
+            .turn_state
+            .treasury_fee_amount_lamports
+            .checked_add(treasury_amount)
+            .ok_or(TycheError::ArithmeticOverflow)?;
+        ctx.accounts.treasury_vault.total_collected_lamports = ctx
+            .accounts
+            .treasury_vault
+            .total_collected_lamports
+            .checked_add(treasury_amount)
+            .ok_or(TycheError::ArithmeticOverflow)?;
         ctx.accounts.prize_vault.total_collected_lamports = ctx
             .accounts
             .prize_vault
             .total_collected_lamports
-            .checked_add(vote_fee)
+            .checked_add(prize_amount)
             .ok_or(TycheError::ArithmeticOverflow)?;
         ctx.accounts.turn_state.prize_pool_amount_lamports = ctx
             .accounts
             .turn_state
             .prize_pool_amount_lamports
-            .checked_add(vote_fee)
+            .checked_add(prize_amount)
             .ok_or(TycheError::ArithmeticOverflow)?;
 
         emit!(RuleVoteCast {
@@ -1156,12 +1171,15 @@ pub mod tyche {
             ctx.accounts.turn_state.turn_id,
             args.sequence,
         )?;
-        collect_prize_pool_fee(
+        collect_fee(
             &ctx.accounts.voter,
+            &ctx.accounts.treasury_vault,
             &ctx.accounts.prize_vault,
             &ctx.accounts.system_program,
             fee,
+            config.treasury_fee_bps,
         )?;
+        let (treasury_amount, prize_amount) = split_fee(fee, config.treasury_fee_bps)?;
 
         let vote = &mut ctx.accounts.rule_elimination_vote;
         vote.turn_id = ctx.accounts.turn_state.turn_id;
@@ -1176,15 +1194,25 @@ pub mod tyche {
         turn.finalist_elimination_vote_counts[index] = turn.finalist_elimination_vote_counts[index]
             .checked_add(1)
             .ok_or(TycheError::ArithmeticOverflow)?;
+        turn.treasury_fee_amount_lamports = turn
+            .treasury_fee_amount_lamports
+            .checked_add(treasury_amount)
+            .ok_or(TycheError::ArithmeticOverflow)?;
+        ctx.accounts.treasury_vault.total_collected_lamports = ctx
+            .accounts
+            .treasury_vault
+            .total_collected_lamports
+            .checked_add(treasury_amount)
+            .ok_or(TycheError::ArithmeticOverflow)?;
         turn.prize_pool_amount_lamports = turn
             .prize_pool_amount_lamports
-            .checked_add(fee)
+            .checked_add(prize_amount)
             .ok_or(TycheError::ArithmeticOverflow)?;
         ctx.accounts.prize_vault.total_collected_lamports = ctx
             .accounts
             .prize_vault
             .total_collected_lamports
-            .checked_add(fee)
+            .checked_add(prize_amount)
             .ok_or(TycheError::ArithmeticOverflow)?;
 
         emit!(RuleEliminationVoteCast {
@@ -1505,10 +1533,7 @@ pub mod tyche {
     /// flag prevents replay; zero-fee turns are still marked reconciled.
     pub fn bridge_turn_treasury_fee(ctx: Context<BridgeTurnTreasuryFee>) -> Result<()> {
         let turn = &mut ctx.accounts.turn_state;
-        require!(
-            turn.status == TurnStatus::Closed,
-            TycheError::TurnNotClosed
-        );
+        require!(turn.status == TurnStatus::Closed, TycheError::TurnNotClosed);
         require!(
             !turn.treasury_fee_bridged,
             TycheError::TreasuryFeeAlreadyBridged
@@ -1569,6 +1594,46 @@ pub mod tyche {
             turn_id: turn.turn_id,
             epoch_id: ctx.accounts.epoch.epoch_id,
             amount_lamports,
+        });
+        Ok(())
+    }
+
+    /// Moves a fully reconciled seven-turn epoch from collecting to calculating.
+    /// Tokenomics Core recognizes the Tyche GlobalConfig PDA as the game
+    /// authority, so the external worker authorizes this wrapper while the CPI
+    /// is signed only by the canonical PDA.
+    pub fn close_tokenomics_epoch_collection(
+        ctx: Context<CloseTokenomicsEpochCollection>,
+        last_completed_turn_id: u64,
+    ) -> Result<()> {
+        require_keys_eq!(
+            ctx.accounts.token_config.game_authority,
+            ctx.accounts.global_config.key(),
+            TycheError::InvalidTokenomicsConfiguration
+        );
+        require!(
+            ctx.accounts.epoch.status == tokenomics_core::EpochStatus::Collecting,
+            TycheError::InvalidTokenomicsEpoch
+        );
+
+        let bump = ctx.accounts.global_config.bump;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"global_config", &[bump]]];
+        tokenomics_core::cpi::close_epoch_collection(
+            CpiContext::new_with_signer(
+                ctx.accounts.tokenomics_program.to_account_info(),
+                tokenomics_core::cpi::accounts::CloseEpochCollection {
+                    game_authority: ctx.accounts.global_config.to_account_info(),
+                    token_config: ctx.accounts.token_config.to_account_info(),
+                    epoch: ctx.accounts.epoch.to_account_info(),
+                },
+                signer_seeds,
+            ),
+            last_completed_turn_id,
+        )?;
+
+        emit!(TokenomicsEpochCollectionClosed {
+            epoch_id: ctx.accounts.epoch.epoch_id,
+            last_completed_turn_id,
         });
         Ok(())
     }
@@ -2388,29 +2453,6 @@ fn repeated_action_fee_lamports(
     Ok(fee)
 }
 
-fn collect_prize_pool_fee<'info>(
-    payer: &Signer<'info>,
-    prize_vault: &Account<'info, PrizeVault>,
-    system_program: &Program<'info, System>,
-    fee_lamports: u64,
-) -> Result<()> {
-    if fee_lamports == 0 {
-        return Ok(());
-    }
-
-    system_program::transfer(
-        CpiContext::new(
-            system_program.to_account_info(),
-            Transfer {
-                from: payer.to_account_info(),
-                to: prize_vault.to_account_info(),
-            },
-        ),
-        fee_lamports,
-    )?;
-    Ok(())
-}
-
 fn finalist_index(turn: &TurnState, rule_id: u64) -> Option<usize> {
     turn.finalist_rule_ids[..usize::from(turn.finalist_count)]
         .iter()
@@ -2978,6 +3020,8 @@ pub struct VoteRule<'info> {
         bump
     )]
     pub rule_vote: Account<'info, RuleVote>,
+    #[account(mut, seeds = [b"treasury_vault"], bump = treasury_vault.bump)]
+    pub treasury_vault: Account<'info, TreasuryVault>,
     #[account(
         mut,
         seeds = [b"prize_vault".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
@@ -3097,6 +3141,8 @@ pub struct EliminateVoteRule<'info> {
         bump
     )]
     pub rule_elimination_vote: Account<'info, RuleEliminationVote>,
+    #[account(mut, seeds = [b"treasury_vault"], bump = treasury_vault.bump)]
+    pub treasury_vault: Account<'info, TreasuryVault>,
     #[account(
         mut,
         seeds = [
@@ -3339,6 +3385,33 @@ pub struct BridgeTurnTreasuryFee<'info> {
         seeds::program = tokenomics_program.key()
     )]
     pub distribution_vault: Account<'info, tokenomics_core::DistributionVaultRecord>,
+}
+
+#[derive(Accounts)]
+pub struct CloseTokenomicsEpochCollection<'info> {
+    pub authority: Signer<'info>,
+    #[account(
+        seeds = [b"global_config"],
+        bump = global_config.bump,
+        has_one = authority @ TycheError::Unauthorized
+    )]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    pub tokenomics_program: Program<'info, tokenomics_core::program::TokenomicsCore>,
+    #[account(
+        seeds = [b"token_config"],
+        bump = token_config.bump,
+        seeds::program = tokenomics_program.key(),
+        constraint = token_config.game_authority == global_config.key()
+            @ TycheError::InvalidTokenomicsConfiguration
+    )]
+    pub token_config: Account<'info, tokenomics_core::TokenConfig>,
+    #[account(
+        mut,
+        seeds = [b"epoch", epoch.epoch_id.to_le_bytes().as_ref()],
+        bump = epoch.bump,
+        seeds::program = tokenomics_program.key()
+    )]
+    pub epoch: Account<'info, tokenomics_core::DistributionEpoch>,
 }
 
 #[derive(Accounts)]
@@ -4274,6 +4347,12 @@ pub struct TurnTreasuryFeeBridged {
     pub turn_id: u64,
     pub epoch_id: u64,
     pub amount_lamports: u64,
+}
+
+#[event]
+pub struct TokenomicsEpochCollectionClosed {
+    pub epoch_id: u64,
+    pub last_completed_turn_id: u64,
 }
 
 #[event]

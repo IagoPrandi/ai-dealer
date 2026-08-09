@@ -8,9 +8,9 @@ use anchor_spl::{
 };
 use tyche::{
     accounts, instruction, DrawStatus, GlobalConfig, TycheError, InitializeGlobalConfigArgs,
-    PlayerGuess, PrecompilationStatus, PrecompileRuleArgs, ProposeRuleArgs,
+    PlayerGuess, PrecompilationStatus, PrecompileRuleArgs, PrizeVault, ProposeRuleArgs,
     ResetStaleVrfRequestArgs, RuleProposal, RuleState, RuleVote, SetVrfConfigArgs, SubmitGuessArgs,
-    TurnState, TurnStatus, VoteRuleArgs, VrfStage,
+    TreasuryVault, TurnState, TurnStatus, VoteRuleArgs, VrfStage,
 };
 use orao_solana_vrf::state::{
     FulfilledRequest as OraoFulfilledRequest, PendingRequest as OraoPendingRequest,
@@ -647,6 +647,7 @@ async fn core_instructions_execute_and_persist_state() {
             ]),
             rule_proposal: rule_address,
             rule_vote: vote_address,
+            treasury_vault: pda(&[b"treasury_vault"]),
             prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
             system_program: system_program::ID,
         }
@@ -686,6 +687,7 @@ async fn core_instructions_execute_and_persist_state() {
             ]),
             rule_proposal: rule_address,
             rule_vote: second_vote_address,
+            treasury_vault: pda(&[b"treasury_vault"]),
             prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
             system_program: system_program::ID,
         }
@@ -703,6 +705,16 @@ async fn core_instructions_execute_and_persist_state() {
     assert_eq!(second_vote.fee_lamports, 10_000_000);
     let proposal: RuleProposal = read_anchor_account(&mut context, rule_address).await;
     assert_eq!(proposal.vote_count, 2);
+    let turn: TurnState =
+        read_anchor_account(&mut context, pda(&[b"turn", &turn_id.to_le_bytes()])).await;
+    let treasury: TreasuryVault =
+        read_anchor_account(&mut context, pda(&[b"treasury_vault"])).await;
+    let prize: PrizeVault =
+        read_anchor_account(&mut context, pda(&[b"prize_vault", &turn_id.to_le_bytes()])).await;
+    assert_eq!(turn.treasury_fee_amount_lamports, 500_000);
+    assert_eq!(treasury.total_collected_lamports, 500_000);
+    assert_eq!(turn.prize_pool_amount_lamports, 9_500_000);
+    assert_eq!(prize.total_collected_lamports, 9_500_000);
 
     // Reusing the same sequence is idempotently rejected because that PDA is
     // already initialized; the next repeat must use sequence 3.
@@ -1159,6 +1171,7 @@ async fn rule_election_locks_requests_and_settles_active_rule() {
                 ]),
                 rule_proposal: rule_address,
                 rule_vote: shortlist_vote_address,
+                treasury_vault: pda(&[b"treasury_vault"]),
                 prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
                 system_program: system_program::ID,
             }

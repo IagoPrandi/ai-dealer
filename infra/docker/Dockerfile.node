@@ -1,3 +1,11 @@
+FROM rust:1.91-bookworm AS tokenomics-calculator-builder
+
+WORKDIR /build/contracts/solana
+
+COPY contracts/solana ./
+
+RUN cargo build --locked --release -p tokenomics-calculator
+
 FROM node:24.12.0-slim
 
 WORKDIR /app
@@ -20,6 +28,10 @@ COPY packages ./packages
 COPY contracts ./contracts
 COPY docs ./docs
 COPY infra ./infra
+
+COPY --from=tokenomics-calculator-builder \
+  /build/contracts/solana/target/release/tokenomics-calculator \
+  /usr/local/bin/tokenomics-calculator
 
 RUN pnpm install --frozen-lockfile
 

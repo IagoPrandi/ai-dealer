@@ -1,4 +1,12 @@
 import { timingSafeEqual } from "node:crypto";
+import {
+  buildMerkleTree,
+  hashCanonicalLeafFile,
+  hashEpochManifest,
+  hashTreasuryDistributionLeaf,
+  verifyMerkleProof,
+  type TreasuryDistributionLeaf,
+} from "@tyche/tokenomics";
 
 const DECIMAL = /^\d+$/;
 
@@ -95,6 +103,70 @@ export interface PublicTokenomicsSnapshot {
 }
 
 let projection: TokenomicsProjection | null = null;
+const epochArtifacts = new Map<string, TokenomicsEpochArtifact>();
+
+export interface TokenomicsEpochArtifact {
+  claims: Array<{
+    amountLamports: string;
+    beneficiary: string;
+    leafHash: string;
+    position: string;
+    proof: string[];
+  }>;
+  leafFileHash: string;
+  manifest: {
+    calculationCodeCommit: string;
+    epochId: string;
+    grossDistributableLamports: string;
+    leafFileHash: string;
+    lockEventInputHash: string;
+    lockIntervalOutputHash: string;
+    network: string;
+    programId: string;
+    rolloverOutLamports: string;
+    schemaVersion: string;
+    slotEnd: string;
+    slotStart: string;
+    sumOfMerkleClaimsLamports: string;
+    totalWeight: string;
+  };
+  manifestHash: string;
+  merkleRoot: string | null;
+}
+
+export function saveTokenomicsEpochArtifact(
+  artifact: TokenomicsEpochArtifact,
+): TokenomicsEpochArtifact {
+  validateEpochArtifact(artifact);
+  const existing = epochArtifacts.get(artifact.manifestHash);
+  if (existing && JSON.stringify(existing) !== JSON.stringify(artifact)) {
+    throw new Error("tokenomics_artifact_hash_collision");
+  }
+  epochArtifacts.set(artifact.manifestHash, structuredClone(artifact));
+  return structuredClone(artifact);
+}
+
+export function getTokenomicsEpochArtifact(
+  manifestHash: string,
+): TokenomicsEpochArtifact | null {
+  const artifact = epochArtifacts.get(manifestHash);
+  return artifact ? structuredClone(artifact) : null;
+}
+
+export function exportTokenomicsEpochArtifacts(): TokenomicsEpochArtifact[] {
+  return [...epochArtifacts.values()].map((artifact) =>
+    structuredClone(artifact),
+  );
+}
+
+export function restoreTokenomicsEpochArtifacts(
+  artifacts: readonly TokenomicsEpochArtifact[] | undefined,
+): void {
+  epochArtifacts.clear();
+  for (const artifact of artifacts ?? []) {
+    saveTokenomicsEpochArtifact(artifact);
+  }
+}
 
 export function saveTokenomicsProjection(
   next: TokenomicsProjection,
@@ -102,6 +174,21 @@ export function saveTokenomicsProjection(
   validateProjection(next);
   projection = structuredClone(next);
   return structuredClone(next);
+}
+
+export function getTokenomicsProjection(): TokenomicsProjection | null {
+  return projection ? structuredClone(projection) : null;
+}
+
+export function restoreTokenomicsProjection(
+  restored: TokenomicsProjection | null | undefined,
+): void {
+  if (!restored) {
+    projection = null;
+    return;
+  }
+  validateProjection(restored);
+  projection = structuredClone(restored);
 }
 
 export function getPublicTokenomicsSnapshot(): PublicTokenomicsSnapshot {
@@ -128,6 +215,96 @@ export function getWalletTokenomicsProjection(
 
 export function resetTokenomicsProjectionForTests(): void {
   projection = null;
+  epochArtifacts.clear();
+}
+
+export function isTokenomicsEpochArtifact(
+  value: unknown,
+): value is TokenomicsEpochArtifact {
+  try {
+    validateEpochArtifact(value as TokenomicsEpochArtifact);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function validateEpochArtifact(artifact: TokenomicsEpochArtifact): void {
+  if (
+    !artifact ||
+    !artifact.manifest ||
+    !Array.isArray(artifact.claims) ||
+    !/^[0-9a-f]{64}$/i.test(artifact.manifestHash) ||
+    !/^[0-9a-f]{64}$/i.test(artifact.leafFileHash)
+  ) {
+    throw new Error("invalid_tokenomics_epoch_artifact");
+  }
+  const manifestHash = hashEpochManifest({
+    calculationCodeCommit: artifact.manifest.calculationCodeCommit,
+    epochId: BigInt(artifact.manifest.epochId),
+    grossDistributableLamports: BigInt(
+      artifact.manifest.grossDistributableLamports,
+    ),
+    leafFileHash: artifact.manifest.leafFileHash,
+    lockEventInputHash: artifact.manifest.lockEventInputHash,
+    lockIntervalOutputHash: artifact.manifest.lockIntervalOutputHash,
+    network: artifact.manifest.network,
+    programId: artifact.manifest.programId,
+    rolloverOutLamports: BigInt(artifact.manifest.rolloverOutLamports),
+    schemaVersion: artifact.manifest.schemaVersion,
+    slotEnd: BigInt(artifact.manifest.slotEnd),
+    slotStart: BigInt(artifact.manifest.slotStart),
+    sumOfMerkleClaimsLamports: BigInt(
+      artifact.manifest.sumOfMerkleClaimsLamports,
+    ),
+    totalWeight: BigInt(artifact.manifest.totalWeight),
+  });
+  if (
+    manifestHash !== artifact.manifestHash ||
+    artifact.manifest.leafFileHash !== artifact.leafFileHash
+  ) {
+    throw new Error("tokenomics_epoch_manifest_hash_mismatch");
+  }
+  const leaves: TreasuryDistributionLeaf[] = artifact.claims.map((claim) => ({
+    amountLamports: BigInt(claim.amountLamports),
+    asset: "SOL",
+    beneficiary: Uint8Array.from(Buffer.from(claim.beneficiary, "hex")),
+    epochId: BigInt(artifact.manifest.epochId),
+    network: artifact.manifest.network,
+    positionId: Uint8Array.from(Buffer.from(claim.position, "hex")),
+    programId: Uint8Array.from(Buffer.from(artifact.manifest.programId, "hex")),
+  }));
+  if (hashCanonicalLeafFile(leaves) !== artifact.leafFileHash) {
+    throw new Error("tokenomics_epoch_leaf_file_hash_mismatch");
+  }
+  if (leaves.length === 0) {
+    if (artifact.merkleRoot !== null || artifact.claims.length !== 0) {
+      throw new Error("tokenomics_epoch_empty_tree_mismatch");
+    }
+    return;
+  }
+  const tree = buildMerkleTree(leaves);
+  if (Buffer.from(tree.root).toString("hex") !== artifact.merkleRoot) {
+    throw new Error("tokenomics_epoch_merkle_root_mismatch");
+  }
+  for (let index = 0; index < leaves.length; index += 1) {
+    const leaf = leaves[index];
+    const claim = artifact.claims[index];
+    if (!leaf || !claim) {
+      throw new Error("tokenomics_epoch_claim_missing");
+    }
+    const leafHash = hashTreasuryDistributionLeaf(leaf);
+    if (
+      Buffer.from(leafHash).toString("hex") !== claim.leafHash ||
+      !verifyMerkleProof(
+        tree.root,
+        leafHash,
+        claim.proof.map((node) => Uint8Array.from(Buffer.from(node, "hex"))),
+      )
+    ) {
+      throw new Error("tokenomics_epoch_merkle_proof_mismatch");
+    }
+  }
 }
 
 export function authorizeTokenomicsProjection(
@@ -266,7 +443,15 @@ function validateProjection(value: TokenomicsProjection): void {
       "remainingClaimLiabilityLamports",
     );
     decimal(value.currentEpoch.totalWeight, "totalWeight");
-    if (claims + rollover !== gross || remaining > claims) {
+    const reconciledStatus =
+      value.currentEpoch.status === "challenged" ||
+      value.currentEpoch.status === "provisional" ||
+      value.currentEpoch.status === "rolled_over_no_weight" ||
+      value.currentEpoch.status === "sealed";
+    if (
+      (reconciledStatus && claims + rollover !== gross) ||
+      remaining > claims
+    ) {
       throw new Error("tokenomics_epoch_reconciliation_mismatch");
     }
   }

@@ -67,7 +67,8 @@ const COMMITMENT: Commitment = "confirmed";
 const ELIMINATION_VOTE_DISCRIMINATOR = createAnchorDiscriminator(
   "global:eliminate_vote_rule",
 );
-const CLAIM_PRIZE_DISCRIMINATOR = createAnchorDiscriminator("global:claim_prize");
+const CLAIM_PRIZE_DISCRIMINATOR =
+  createAnchorDiscriminator("global:claim_prize");
 const CLAIM_KIND_WINNER_PAYOUT = 0;
 
 const execFileAsync = promisify(execFile);
@@ -99,8 +100,7 @@ export function readTenPlayerSimulationConfig(
       env.TYCHE_10P_SIM_FUNDER_SOL_PER_PLAYER ?? "2",
     ),
     promptFile:
-      env.TYCHE_10P_SIM_PROMPT_FILE ??
-      "docs/rule-proposal-prompt-test-set.md",
+      env.TYCHE_10P_SIM_PROMPT_FILE ?? "docs/rule-proposal-prompt-test-set.md",
     promptMarkdown: env.TYCHE_10P_SIM_PROMPT_MARKDOWN ?? null,
     skipAirdrop: env.TYCHE_10P_SIM_SKIP_AIRDROP === "1",
   };
@@ -270,6 +270,11 @@ function createEliminationVoteInstruction({
         {
           isSigner: false,
           isWritable: true,
+          pubkey: derivePda(programId, [Buffer.from("treasury_vault")]),
+        },
+        {
+          isSigner: false,
+          isWritable: true,
           pubkey: derivePda(programId, [
             Buffer.from("prize_vault"),
             u64Le(turnId),
@@ -356,11 +361,11 @@ function loadKeypairFromFile(path: string) {
   if (
     !Array.isArray(parsed) ||
     parsed.length !== 64 ||
-    !parsed.every(
-      (byte) => Number.isInteger(byte) && byte >= 0 && byte <= 255,
-    )
+    !parsed.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 255)
   ) {
-    throw new Error(`${path} must contain a 64-byte Solana keypair JSON array.`);
+    throw new Error(
+      `${path} must contain a 64-byte Solana keypair JSON array.`,
+    );
   }
   return Keypair.fromSecretKey(Uint8Array.from(parsed));
 }
@@ -486,7 +491,10 @@ async function runSettlementUntil({
   programId: PublicKey;
   turnId: number;
 }) {
-  const config = { ...(await createSettlementSchedulerConfig()), enabled: true };
+  const config = {
+    ...(await createSettlementSchedulerConfig()),
+    enabled: true,
+  };
   const deps = createSettlementCycleDeps(config);
 
   for (let attempt = 0; attempt < 60; attempt += 1) {
@@ -495,7 +503,9 @@ async function runSettlementUntil({
       return state;
     }
     const result = await runSettlementSchedulerOnce(config, deps);
-    console.log(`${label} settlement step ${attempt}: ${JSON.stringify(result)}`);
+    console.log(
+      `${label} settlement step ${attempt}: ${JSON.stringify(result)}`,
+    );
     await new Promise((resolve) => setTimeout(resolve, 8_000));
   }
 
@@ -503,10 +513,16 @@ async function runSettlementUntil({
 }
 
 async function fetchClaims(apiBaseUrl: string, turnId: number) {
-  const response = await fetch(new URL(`/claim-records?turnId=${turnId}`, apiBaseUrl));
-  const payload = (await response.json()) as { claims?: { records?: ClaimRecord[] } };
+  const response = await fetch(
+    new URL(`/claim-records?turnId=${turnId}`, apiBaseUrl),
+  );
+  const payload = (await response.json()) as {
+    claims?: { records?: ClaimRecord[] };
+  };
   if (!response.ok) {
-    throw new Error(`/claim-records returned HTTP ${response.status}: ${JSON.stringify(payload)}`);
+    throw new Error(
+      `/claim-records returned HTTP ${response.status}: ${JSON.stringify(payload)}`,
+    );
   }
   return payload.claims?.records ?? [];
 }
@@ -580,15 +596,20 @@ async function claimFirstAvailablePrize({
 }
 
 async function expireUnclaimedClaims(apiBaseUrl: string, turnId: number) {
-  const response = await fetch(new URL("/claim-records/expire-unclaimed", apiBaseUrl), {
-    body: JSON.stringify({
-      currentTurnId: turnId + 12,
-      settledAt: new Date(Date.now() + 8 * 24 * 60 * 60 * 1_000).toISOString(),
-      sourceTurnId: turnId,
-    }),
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  });
+  const response = await fetch(
+    new URL("/claim-records/expire-unclaimed", apiBaseUrl),
+    {
+      body: JSON.stringify({
+        currentTurnId: turnId + 12,
+        settledAt: new Date(
+          Date.now() + 8 * 24 * 60 * 60 * 1_000,
+        ).toISOString(),
+        sourceTurnId: turnId,
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    },
+  );
   const payload = await response.json().catch(() => null);
   return { httpStatus: response.status, payload };
 }
@@ -618,7 +639,11 @@ export async function runTenPlayerSimulation() {
       funderWallet: config.funderKeypairPath
         ? loadKeypairFromFile(config.funderKeypairPath).publicKey.toBase58()
         : null,
-      openedRequiredMarkdown: ["PRD.md", "docs/rule-proposal-prompt-test-set.md", ".claude/skills"],
+      openedRequiredMarkdown: [
+        "PRD.md",
+        "docs/rule-proposal-prompt-test-set.md",
+        ".claude/skills",
+      ],
       plannedActions: [
         "manual_open_turn",
         config.funderKeypairPath
@@ -753,7 +778,11 @@ export async function runTenPlayerSimulation() {
         ruleText: requiredPrompt(prompts, index),
       },
     });
-    summary.guesses.push({ guess, signature, wallet: player.publicKey.toBase58() });
+    summary.guesses.push({
+      guess,
+      signature,
+      wallet: player.publicKey.toBase58(),
+    });
   }
 
   for (const [index, player] of players.entries()) {
@@ -801,7 +830,9 @@ export async function runTenPlayerSimulation() {
         turnId,
       })) ?? preflight.compiledArtifactHash;
     if (!artifactHash) {
-      throw new Error(`Rule ${preflight.ruleId} did not produce an artifact hash.`);
+      throw new Error(
+        `Rule ${preflight.ruleId} did not produce an artifact hash.`,
+      );
     }
     const precompileSignature = await sendTransaction({
       connection,
@@ -877,7 +908,11 @@ export async function runTenPlayerSimulation() {
         ruleText: rule.prompt,
       },
     });
-    summary.approvals.push({ ruleId: rule.ruleId, signature, voter: player.publicKey.toBase58() });
+    summary.approvals.push({
+      ruleId: rule.ruleId,
+      signature,
+      voter: player.publicKey.toBase58(),
+    });
   }
 
   summary.approvals.push({
@@ -902,7 +937,9 @@ export async function runTenPlayerSimulation() {
 
   for (const [index, player] of players.entries()) {
     const targetRuleId =
-      eliminationOpen.finalistRuleIds[index % eliminationOpen.finalistRuleIds.length];
+      eliminationOpen.finalistRuleIds[
+        index % eliminationOpen.finalistRuleIds.length
+      ];
     if (!targetRuleId) {
       throw new Error("No finalist rule available for elimination vote.");
     }
@@ -950,7 +987,8 @@ export async function runTenPlayerSimulation() {
   await runSettlementUntil({
     connection,
     label: "draw_fulfilled",
-    predicate: (state) => state.drawStatus === "fulfilled" && state.status === "open",
+    predicate: (state) =>
+      state.drawStatus === "fulfilled" && state.status === "open",
     programId,
     turnId,
   });
@@ -973,10 +1011,11 @@ export async function runTenPlayerSimulation() {
   });
   const claimsAfterClaim = await fetchClaims(config.apiBaseUrl, turnId);
   const available = claims.filter((claim) => claim.status === "available");
-  const expiredProbe =
-    claimsAfterClaim.some((claim) => claim.status === "available")
-      ? await expireUnclaimedClaims(config.apiBaseUrl, turnId)
-      : { status: "skipped", reason: "not_enough_available_claims" };
+  const expiredProbe = claimsAfterClaim.some(
+    (claim) => claim.status === "available",
+  )
+    ? await expireUnclaimedClaims(config.apiBaseUrl, turnId)
+    : { status: "skipped", reason: "not_enough_available_claims" };
   summary.claims = {
     availableBeforeClaim: available.length,
     expiredProbe,

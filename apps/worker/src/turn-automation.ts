@@ -88,6 +88,8 @@ export interface TurnStateSnapshot {
   finalistRuleIds: number[];
   startTimestamp: number;
   status: "open" | "closed";
+  treasuryFeeAmountLamports: bigint;
+  treasuryFeeBridged: boolean;
   turnDurationSeconds: number;
   turnId: number;
 }
@@ -570,7 +572,11 @@ export function decodeTurnStateAccount(data: Uint8Array): TurnStateSnapshot {
 
   // Both layouts contain prize_pool_amount_lamports. The current layout then
   // adds treasury_fee_amount_lamports and treasury_fee_bridged before duration.
-  reader.skip(isCurrentLayout ? 17 : 8);
+  reader.skip(8);
+  const treasuryFeeAmountLamports = isCurrentLayout
+    ? reader.readU64BigInt()
+    : 0n;
+  const treasuryFeeBridged = isCurrentLayout ? reader.readU8() !== 0 : false;
   const turnDurationSeconds = reader.readU32();
   const cycleIndex = reader.readU8();
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
@@ -592,6 +598,8 @@ export function decodeTurnStateAccount(data: Uint8Array): TurnStateSnapshot {
     finalistRuleIds,
     startTimestamp,
     status: statusIndex === 0 ? "open" : "closed",
+    treasuryFeeAmountLamports,
+    treasuryFeeBridged,
     turnDurationSeconds,
     turnId,
   };

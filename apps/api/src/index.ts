@@ -1,4 +1,10 @@
-import { createHash, createPublicKey, randomBytes, randomInt, verify } from "node:crypto";
+import {
+  createHash,
+  createPublicKey,
+  randomBytes,
+  randomInt,
+  verify,
+} from "node:crypto";
 import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import { resolve } from "node:path";
@@ -53,10 +59,7 @@ import {
   translateRuleToEnglish,
   type RuleAgentInterpretation,
 } from "./llm.js";
-import {
-  checkGroundedness,
-  detectJailbreak,
-} from "./guardian.js";
+import { checkGroundedness, detectJailbreak } from "./guardian.js";
 import {
   checkPostgresHealth,
   checkRedisHealth,
@@ -77,13 +80,23 @@ import {
 import {
   authorizeTokenomicsProjection,
   getPublicTokenomicsSnapshot,
+  getTokenomicsEpochArtifact,
+  getTokenomicsProjection,
   getWalletTokenomicsProjection,
   isTokenomicsProjection,
+  isTokenomicsEpochArtifact,
   resetTokenomicsProjectionForTests,
+  restoreTokenomicsProjection,
+  restoreTokenomicsEpochArtifacts,
+  exportTokenomicsEpochArtifacts,
+  saveTokenomicsEpochArtifact,
   saveTokenomicsProjection,
 } from "./tokenomics.js";
 
-const ROOT_ENV_PATH = resolve(fileURLToPath(new URL("../../..", import.meta.url)), ".env");
+const ROOT_ENV_PATH = resolve(
+  fileURLToPath(new URL("../../..", import.meta.url)),
+  ".env",
+);
 if (existsSync(ROOT_ENV_PATH)) {
   process.loadEnvFile(ROOT_ENV_PATH);
 }
@@ -1007,9 +1020,7 @@ export interface SettlementTransitionRecord {
   turnId: number;
 }
 
-const TYCHE_ACTIVE_TURN_ID = Number(
-  process.env.TYCHE_ACTIVE_TURN_ID ?? "1",
-);
+const TYCHE_ACTIVE_TURN_ID = Number(process.env.TYCHE_ACTIVE_TURN_ID ?? "1");
 const guessReceipts = new Map<string, GuessReceiptRecord>();
 const ruleProposals = new Map<string, RuleProposalRecord>();
 const ruleVotes = new Map<string, RuleVoteRecord>();
@@ -1090,6 +1101,8 @@ export interface ApiStateSnapshotV1 {
   ruleVotes: [string, RuleVoteRecord][];
   settlementTransitionOrder: string[];
   settlementTransitions: [string, SettlementTransitionRecord][];
+  tokenomicsProjection?: import("./tokenomics.js").TokenomicsProjection | null;
+  tokenomicsEpochArtifacts?: import("./tokenomics.js").TokenomicsEpochArtifact[];
   turnRolloverSettlements: [number, TurnRolloverSettlement][];
   turnRollovers: [number, TurnRolloverRecord][];
   verificationJobs: [string, GuessVerificationJobRecord][];
@@ -1156,6 +1169,8 @@ export function exportApiStateSnapshot(): ApiStateSnapshotV1 {
     ruleVotes: [...ruleVotes.entries()],
     settlementTransitionOrder: [...settlementTransitionOrder],
     settlementTransitions: [...settlementTransitions.entries()],
+    tokenomicsProjection: getTokenomicsProjection(),
+    tokenomicsEpochArtifacts: exportTokenomicsEpochArtifacts(),
     turnRolloverSettlements: [...turnRolloverSettlements.entries()],
     turnRollovers: [...turnRollovers.entries()],
     verificationJobs: [...verificationJobs.entries()],
@@ -1201,6 +1216,8 @@ export function restoreApiStateSnapshot(snapshot: ApiStateSnapshotV1) {
   replaceMap(ruleValidations, snapshot.ruleValidations);
   replaceMap(ruleVotes, snapshot.ruleVotes);
   replaceMap(settlementTransitions, snapshot.settlementTransitions);
+  restoreTokenomicsProjection(snapshot.tokenomicsProjection);
+  restoreTokenomicsEpochArtifacts(snapshot.tokenomicsEpochArtifacts);
   replaceMap(turnRolloverSettlements, snapshot.turnRolloverSettlements);
   replaceMap(turnRollovers, snapshot.turnRollovers);
   replaceMap(verificationJobs, snapshot.verificationJobs);
@@ -1476,7 +1493,10 @@ export function reserveRulePreflightJobSlot() {
   if (stats.total >= RULE_PREFLIGHT_JOB_MAX_TOTAL) {
     const terminal = [...rulePreflightJobs.values()]
       .filter((job) => job.status !== "running")
-      .sort((left, right) => Date.parse(left.updatedAt) - Date.parse(right.updatedAt));
+      .sort(
+        (left, right) =>
+          Date.parse(left.updatedAt) - Date.parse(right.updatedAt),
+      );
     for (const job of terminal) {
       rulePreflightJobs.delete(job.id);
       rulePreflightJobIdsByFingerprint.delete(job.fingerprint);
@@ -2014,7 +2034,9 @@ interface IntentSpecificRefinement {
 function looksLikeUnorderedSameSetRule(text: string) {
   return (
     /\b(same set|same numbers?|contain the same set)\b/i.test(text) &&
-    /\b(regardless of order|any order|unordered|order does not matter)\b/i.test(text)
+    /\b(regardless of order|any order|unordered|order does not matter)\b/i.test(
+      text,
+    )
   );
 }
 
@@ -2027,8 +2049,12 @@ function looksLikeAmbiguousDigitExample(text: string) {
     /\b(digit|digits|algarismo|algarismos)\b/.test(normalized) &&
     !/\b(units?|tens?|dezena|dezenas|unidade|unidades)\b/.test(normalized);
   const splitsAPlayedNumberIntoDigits =
-    /\b(?:play|played|playing|pick|picked|guess|guessed|jogar|joguei|jogando|apostar|aposto)\s+([1-9])\d\b[\s\S]{0,180}\b(?:number|numbers|numero|numeros)\s+\1\b/.test(normalized) ||
-    /\b(?:play|played|playing|pick|picked|guess|guessed|jogar|joguei|jogando|apostar|aposto)\s+\d([0-9])\b[\s\S]{0,180}\b(?:number|numbers|numero|numeros)\s+\1\b/.test(normalized);
+    /\b(?:play|played|playing|pick|picked|guess|guessed|jogar|joguei|jogando|apostar|aposto)\s+([1-9])\d\b[\s\S]{0,180}\b(?:number|numbers|numero|numeros)\s+\1\b/.test(
+      normalized,
+    ) ||
+    /\b(?:play|played|playing|pick|picked|guess|guessed|jogar|joguei|jogando|apostar|aposto)\s+\d([0-9])\b[\s\S]{0,180}\b(?:number|numbers|numero|numeros)\s+\1\b/.test(
+      normalized,
+    );
   return mentionsUnqualifiedDigits || splitsAPlayedNumberIntoDigits;
 }
 
@@ -2089,7 +2115,9 @@ function isIntentPreservingRewrite(source: string, rewrite: string): boolean {
   const normalizedSource = source.toLowerCase();
   const normalizedRewrite = rewrite.toLowerCase();
   if (
-    !/\b(guess|guessed|pick|picked|ticket|my numbers?|your numbers?)\b/.test(normalizedRewrite) ||
+    !/\b(guess|guessed|pick|picked|ticket|my numbers?|your numbers?)\b/.test(
+      normalizedRewrite,
+    ) ||
     !/\b(draw|drawn)\b/.test(normalizedRewrite)
   ) {
     return false;
@@ -2103,18 +2131,28 @@ function isIntentPreservingRewrite(source: string, rewrite: string): boolean {
   }
 
   const requiredCues: Array<[RegExp, RegExp]> = [
-    [/\b(regardless of order|any order|unordered|order does not matter)\b/, /\b(regardless of order|any order|unordered|order is ignored)\b/],
-    [/\b(same|corresponding) (order|position|positions|slot|slots)\b/, /\b(same|corresponding) (order|position|positions|slot|slots)\b/],
+    [
+      /\b(regardless of order|any order|unordered|order does not matter)\b/,
+      /\b(regardless of order|any order|unordered|order is ignored)\b/,
+    ],
+    [
+      /\b(same|corresponding) (order|position|positions|slot|slots)\b/,
+      /\b(same|corresponding) (order|position|positions|slot|slots)\b/,
+    ],
     [/\b(sum|total)\b/, /\b(sum|total)\b/],
     [/\b(units?|last) digit\b/, /\b(units?|last) digit\b/],
     [/\btens? digit\b/, /\btens? digit\b/],
     [/\b(even|odd)\b/, /\b(even|odd)\b/],
-    [/\b(miss|misses|missed|wrong|incorrect)\b/, /\b(miss|misses|missed|not appear|outside the draw)\b/],
+    [
+      /\b(miss|misses|missed|wrong|incorrect)\b/,
+      /\b(miss|misses|missed|not appear|outside the draw)\b/,
+    ],
   ];
   if (
     requiredCues.some(
       ([sourcePattern, rewritePattern]) =>
-        sourcePattern.test(normalizedSource) && !rewritePattern.test(normalizedRewrite),
+        sourcePattern.test(normalizedSource) &&
+        !rewritePattern.test(normalizedRewrite),
     )
   ) {
     return false;
@@ -2122,9 +2160,14 @@ function isIntentPreservingRewrite(source: string, rewrite: string): boolean {
 
   for (const comparator of ["at least", "at most", "exactly"] as const) {
     const match = normalizedSource.match(
-      new RegExp(`\\b${comparator}\\s+(zero|one|two|three|four|five|six|[0-6])\\b`),
+      new RegExp(
+        `\\b${comparator}\\s+(zero|one|two|three|four|five|six|[0-6])\\b`,
+      ),
     );
-    if (match?.[1] && !normalizedRewrite.includes(`${comparator} ${match[1]}`)) {
+    if (
+      match?.[1] &&
+      !normalizedRewrite.includes(`${comparator} ${match[1]}`)
+    ) {
       return false;
     }
   }
@@ -2202,7 +2245,9 @@ export function buildRuleRefinementFeedback(
   }
 
   if (questions.length === 0) {
-    questions.push("Which exact comparison in this rule still needs to be defined?");
+    questions.push(
+      "Which exact comparison in this rule still needs to be defined?",
+    );
   }
 
   if (deterministicCheck.decision === "VALID" && deterministicCheck.artifact) {
@@ -2219,15 +2264,18 @@ export function buildRuleRefinementFeedback(
 
   const reasonSummary =
     "Rule needs refinement before payment: the compiler could not turn it into a safe executable rule from this wording.";
-  const rewriteLine = suggestedRewrites.length > 0
-    ? ` Choose one of the ${suggestedRewrites.length} intent-preserving rewrites or write your own.`
-    : "";
+  const rewriteLine =
+    suggestedRewrites.length > 0
+      ? ` Choose one of the ${suggestedRewrites.length} intent-preserving rewrites or write your own.`
+      : "";
   const dealerMessage = `${reasonSummary}${rewriteLine} Answer the clarification questions by sending a revised rule.`;
   const clarityNote = [
     input.clarityNote || input.reasonSummary,
     `Refine: ${[...focus].join(" ")}`,
     `Questions: ${questions.join(" ")}`,
-    suggestedRewrites.length > 0 ? `Rewrites: ${suggestedRewrites.join(" | ")}` : "",
+    suggestedRewrites.length > 0
+      ? `Rewrites: ${suggestedRewrites.join(" | ")}`
+      : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -2257,14 +2305,24 @@ async function createRuleInterpretation(
   const textByteLength = Buffer.byteLength(sanitizedText, "utf8");
 
   if (!sanitizedText) throw new Error("RULE_EMPTY");
-  if (hasPreventedRulePattern(sanitizedText)) throw new Error("RULE_PROMPT_INJECTION");
-  if (hasRulePattern(externalDependencyGateText(sanitizedText), RULE_EXTERNAL_BLOCK_PATTERNS)) {
+  if (hasPreventedRulePattern(sanitizedText))
+    throw new Error("RULE_PROMPT_INJECTION");
+  if (
+    hasRulePattern(
+      externalDependencyGateText(sanitizedText),
+      RULE_EXTERNAL_BLOCK_PATTERNS,
+    )
+  ) {
     throw new Error("RULE_EXTERNAL_DEPENDENCY");
   }
-  if (hasExternalDependency(sanitizedText)) throw new Error("RULE_EXTERNAL_DEPENDENCY");
-  if (hasInvalidConstraint(sanitizedText)) throw new Error("RULE_INVALID_CONSTRAINT");
-  if (tokenCount > RULE_MAX_TOKENS) throw new Error("RULE_TOKEN_LIMIT_EXCEEDED");
-  if (textByteLength > MAX_RULE_TEXT_BYTES) throw new Error("RULE_TEXT_TOO_LONG");
+  if (hasExternalDependency(sanitizedText))
+    throw new Error("RULE_EXTERNAL_DEPENDENCY");
+  if (hasInvalidConstraint(sanitizedText))
+    throw new Error("RULE_INVALID_CONSTRAINT");
+  if (tokenCount > RULE_MAX_TOKENS)
+    throw new Error("RULE_TOKEN_LIMIT_EXCEEDED");
+  if (textByteLength > MAX_RULE_TEXT_BYTES)
+    throw new Error("RULE_TEXT_TOO_LONG");
 
   const runtime = getDealerRuntime();
   const { agent: agentConfig, guardian: guardianConfig } = runtime;
@@ -2298,7 +2356,8 @@ async function createRuleInterpretation(
       stage: "translating",
     });
   }
-  const englishText = knownInterpretation?.normalizedText ??
+  const englishText =
+    knownInterpretation?.normalizedText ??
     (shouldTranslate
       ? await translateRuleToEnglish(sanitizedText, agentConfig, signal)
       : sanitizedText);
@@ -2307,10 +2366,12 @@ async function createRuleInterpretation(
     model: agentConfig.model,
     stage: "interpreting",
   });
-  const interpretation = knownInterpretation ?? enforceKnownRuleInterpretation(
-    `${englishText} ${sanitizedText}`,
-    await interpretRuleWithAgent(englishText, agentConfig, signal),
-  );
+  const interpretation =
+    knownInterpretation ??
+    enforceKnownRuleInterpretation(
+      `${englishText} ${sanitizedText}`,
+      await interpretRuleWithAgent(englishText, agentConfig, signal),
+    );
 
   return {
     addedOperationalClauses: interpretation.addedOperationalClauses,
@@ -2578,7 +2639,8 @@ async function createRulePreflight(
     // A translation or model normalization must never manufacture consent.
     sourceText: sanitizedText,
   });
-  const decision: RuleValidationDecision = semanticReview.impact.triviallyAlwaysTrue
+  const decision: RuleValidationDecision = semanticReview.impact
+    .triviallyAlwaysTrue
     ? "INVALID"
     : validation.decision;
 
@@ -2602,15 +2664,15 @@ async function createRulePreflight(
     reproposalBlocked ||
     semanticReview.confirmationRequired;
   const reasonSummary = semanticReview.impact.triviallyAlwaysTrue
-    ? (semanticReview.reasonSummary ?? "This rule is always true and cannot distinguish winners from losers.")
+    ? (semanticReview.reasonSummary ??
+      "This rule is always true and cannot distinguish winners from losers.")
     : reproposalBlocked
       ? "This rule was already the Rule of the Hour in a previous turn. To reuse it, add a condition that differentiates it (e.g. combine it with another criterion over the numbers)."
       : guardianBlocked
         ? "The dealer's interpretation may not match your rule. Please rephrase it."
-        : semanticReview.reasonSummary ?? validation.log.reasonSummary;
+        : (semanticReview.reasonSummary ?? validation.log.reasonSummary);
   const semanticRejectionFeedback =
-    semanticReview.impact.triviallyAlwaysTrue &&
-    validation.decision === "VALID"
+    semanticReview.impact.triviallyAlwaysTrue && validation.decision === "VALID"
       ? {
           clarityNote: semanticReview.clarityNote,
           dealerMessage:
@@ -2636,8 +2698,7 @@ async function createRulePreflight(
             semanticReview.dealerMessage ??
             "Review the rule's material effects before submission.",
           reasonSummary:
-            semanticReview.reasonSummary ??
-            "Review required before payment.",
+            semanticReview.reasonSummary ?? "Review required before payment.",
           refinementFocus: [semanticReview.officialInterpretation],
           refinementQuestions: semanticReview.refinementQuestions,
           suggestedRewrite: semanticReview.suggestedRewrites[0],
@@ -2751,7 +2812,8 @@ function isValidGuessReceipt(value: unknown): value is GuessReceiptRecord {
     (receipt.sequence === undefined ||
       (Number.isInteger(receipt.sequence) && Number(receipt.sequence) > 0)) &&
     (receipt.feeLamports === undefined ||
-      (Number.isInteger(receipt.feeLamports) && Number(receipt.feeLamports) >= 0)) &&
+      (Number.isInteger(receipt.feeLamports) &&
+        Number(receipt.feeLamports) >= 0)) &&
     isBase58Like(receipt.player) &&
     isBase58Like(receipt.playerGuess) &&
     isBase58Like(receipt.gameToken) &&
@@ -2851,7 +2913,8 @@ function isValidRuleProposal(value: unknown): value is RuleProposalRecord {
     (proposal.sequence === undefined ||
       (Number.isInteger(proposal.sequence) && Number(proposal.sequence) > 0)) &&
     (proposal.feeLamports === undefined ||
-      (Number.isInteger(proposal.feeLamports) && Number(proposal.feeLamports) >= 0)) &&
+      (Number.isInteger(proposal.feeLamports) &&
+        Number(proposal.feeLamports) >= 0)) &&
     typeof proposal.sanitizedText === "string" &&
     sanitizeRuleText(proposal.sanitizedText) === proposal.sanitizedText &&
     Number.isInteger(proposal.tokenCount) &&
@@ -3320,7 +3383,9 @@ function isValidClaimCompleteRequest(value: unknown): value is {
   );
 }
 
-function isValidConversationMessages(value: unknown): value is ConversationMessage[] {
+function isValidConversationMessages(
+  value: unknown,
+): value is ConversationMessage[] {
   if (!Array.isArray(value)) {
     return false;
   }
@@ -3385,7 +3450,8 @@ export function isValidConversationDraft(value: unknown): value is Omit<
         isRulePreflightJobId(draft.preflightJobId))) &&
     typeof draft.lastMessage === "string" &&
     Buffer.byteLength(draft.lastMessage, "utf8") <= MAX_RULE_TEXT_BYTES &&
-    (draft.messages === undefined || isValidConversationMessages(draft.messages)) &&
+    (draft.messages === undefined ||
+      isValidConversationMessages(draft.messages)) &&
     (draft.createdAt === undefined ||
       (typeof draft.createdAt === "string" &&
         !Number.isNaN(Date.parse(draft.createdAt)))) &&
@@ -3454,9 +3520,7 @@ function isValidGuessVerificationResult(
   );
 }
 
-function isValidRuleValidationRunRequest(
-  value: unknown,
-): value is {
+function isValidRuleValidationRunRequest(value: unknown): value is {
   model?: string;
   provider?: string;
   ruleId: number;
@@ -3660,7 +3724,8 @@ function sendJson(
         console.error("API state persistence failed", error);
         writeResponse(503, {
           error: "api_state_persistence_failed",
-          message: "The operation was not acknowledged because durable state persistence failed.",
+          message:
+            "The operation was not acknowledged because durable state persistence failed.",
         });
       });
     return;
@@ -3730,9 +3795,7 @@ function writeRulePreflightStreamEvent(
   }
 }
 
-function endRulePreflightStream(
-  response: import("node:http").ServerResponse,
-) {
+function endRulePreflightStream(response: import("node:http").ServerResponse) {
   if (!response.destroyed && !response.writableEnded) {
     response.end();
   }
@@ -3763,11 +3826,7 @@ async function runRulePreflightJob(
         type: "interpretation",
       });
     } else {
-      const preflight = await createRulePreflight(
-        text,
-        reportProgress,
-        signal,
-      );
+      const preflight = await createRulePreflight(text, reportProgress, signal);
       appendRulePreflightJobEvent(job.id, { preflight, type: "result" });
     }
   } catch (error) {
@@ -3848,7 +3907,9 @@ export function cancelRulePreflightJob(jobId: string) {
   if (!controller) {
     return false;
   }
-  controller.abort(new DOMException("The rule preflight was cancelled.", "AbortError"));
+  controller.abort(
+    new DOMException("The rule preflight was cancelled.", "AbortError"),
+  );
   return true;
 }
 
@@ -3950,8 +4011,7 @@ export function formatRulePreflightSseFrame(
   // `event: error` would collide with the transport-level error of an SSE
   // client, making a job failure indistinguishable from a dropped socket. The
   // payload keeps "type":"error" so the wire shape stays identical to NDJSON.
-  const name =
-    envelope.event.type === "error" ? "failed" : envelope.event.type;
+  const name = envelope.event.type === "error" ? "failed" : envelope.event.type;
   return `id: ${envelope.seq}\nevent: ${name}\ndata: ${JSON.stringify(envelope.event)}\n\n`;
 }
 
@@ -4034,7 +4094,8 @@ export function saveGuessReceipt(receipt: GuessReceiptRecord) {
     receipt.sequence ??
     [...guessReceipts.values()].filter(
       (candidate) =>
-        candidate.turnId === receipt.turnId && candidate.player === receipt.player,
+        candidate.turnId === receipt.turnId &&
+        candidate.player === receipt.player,
     ).length + 1;
   const saved = {
     ...receipt,
@@ -4057,7 +4118,9 @@ export function saveGuessReceipt(receipt: GuessReceiptRecord) {
 export function getGuessReceipt(turnId: number, player: string) {
   return (
     [...guessReceipts.values()]
-      .filter((receipt) => receipt.turnId === turnId && receipt.player === player)
+      .filter(
+        (receipt) => receipt.turnId === turnId && receipt.player === player,
+      )
       .sort((left, right) => (right.sequence ?? 0) - (left.sequence ?? 0))[0] ??
     null
   );
@@ -4068,7 +4131,9 @@ function getGuessReceiptBySequence(
   player: string,
   sequence: number,
 ) {
-  return guessReceipts.get(getGuessReceiptKey(turnId, player, sequence)) ?? null;
+  return (
+    guessReceipts.get(getGuessReceiptKey(turnId, player, sequence)) ?? null
+  );
 }
 
 export function saveRuleProposal(proposal: RuleProposalRecord) {
@@ -4600,7 +4665,11 @@ export function getMandatedRuleSignatures(): Set<string> {
   return signatures;
 }
 
-function getVerificationResultKey(turnId: number, player: string, sequence = 1) {
+function getVerificationResultKey(
+  turnId: number,
+  player: string,
+  sequence = 1,
+) {
   return `${turnId}:${player}:${sequence}`;
 }
 
@@ -5261,7 +5330,9 @@ export function createClaimRecordsForTurn(
     current.category =
       current.category === winner.category ? current.category : null;
     current.activeRuleId =
-      current.activeRuleId === winner.activeRuleId ? current.activeRuleId : null;
+      current.activeRuleId === winner.activeRuleId
+        ? current.activeRuleId
+        : null;
   }
   const claimableRecords = [
     ...[...winnerClaimsByWallet.values()].map((winner) =>
@@ -6726,7 +6797,9 @@ export interface OperatorAiOperationsSnapshot {
     p95Ms: number;
     provider: string;
     role: AiOperationRole;
-    source: "end_to_end_rule_validation_projection" | "guess_verification_queue_projection";
+    source:
+      | "end_to_end_rule_validation_projection"
+      | "guess_verification_queue_projection";
   }>;
   localModelHealth: Array<{
     configuredModel: string;
@@ -6783,7 +6856,11 @@ export interface OperatorAiOperationsSnapshot {
   sourceReferences: Array<{
     endpoint: string;
     label: string;
-    source: "audit_log" | "internal_projection" | "operator_config" | "queue_projection";
+    source:
+      | "audit_log"
+      | "internal_projection"
+      | "operator_config"
+      | "queue_projection";
     status: "available" | "not_recorded";
   }>;
   tokenUsageByProviderModelRole: Array<{
@@ -6847,9 +6924,7 @@ export function resolveEffectiveTurnDurationCycleSeconds(
   );
 }
 
-function effectiveTurnDurationCycleHours(
-  env: NodeJS.ProcessEnv = process.env,
-) {
+function effectiveTurnDurationCycleHours(env: NodeJS.ProcessEnv = process.env) {
   return resolveEffectiveTurnDurationCycleSeconds(env).map(
     (duration) => duration / 3_600,
   );
@@ -7744,7 +7819,9 @@ function getTransparencyTurnSummary(turnId: number): TransparencyTurnSummary {
     0,
   );
   const topRules = [...round.rules]
-    .sort((left, right) => right.votes - left.votes || left.ruleId - right.ruleId)
+    .sort(
+      (left, right) => right.votes - left.votes || left.ruleId - right.ruleId,
+    )
     .slice(0, 5)
     .map((rule) => ({
       creator: rule.proposer,
@@ -7830,8 +7907,9 @@ function getTransparencyTurnSummary(turnId: number): TransparencyTurnSummary {
       activeRuleId: round.election?.activeRuleId ?? null,
       clarityLabelCount: round.rules.filter((rule) => rule.validation !== null)
         .length,
-      difficultyLabelCount: round.rules.filter((rule) => rule.validation !== null)
-        .length,
+      difficultyLabelCount: round.rules.filter(
+        (rule) => rule.validation !== null,
+      ).length,
       eliminated: ruleElimination.eliminatedRuleIds.length,
       finalistRuleIds: round.election?.finalistRuleIds ?? [],
       invalidated: ruleStatusCounts.invalidated,
@@ -7842,7 +7920,9 @@ function getTransparencyTurnSummary(turnId: number): TransparencyTurnSummary {
       randomFinalistRuleIds: round.election?.randomRuleIds ?? [],
       removed: ruleStatusCounts.removed_paid,
       ruleTokenCountAverage:
-        round.rules.length === 0 ? 0 : Math.round(tokenTotal / round.rules.length),
+        round.rules.length === 0
+          ? 0
+          : Math.round(tokenTotal / round.rules.length),
       survived: ruleElimination.survivorRuleIds.length,
       topRules,
       topVotedFinalistRuleIds: round.election?.topVotedRuleIds ?? [],
@@ -7859,7 +7939,8 @@ function getTransparencyTurnSummary(turnId: number): TransparencyTurnSummary {
       ).length,
       totalApprovalVotes: approvalVotes.length,
       totalEliminationVotes: eliminationVotes.length,
-      uniqueApprovalVoters: new Set(approvalVotes.map((vote) => vote.voter)).size,
+      uniqueApprovalVoters: new Set(approvalVotes.map((vote) => vote.voter))
+        .size,
       uniqueEliminationVoters: new Set(
         eliminationVotes.map((vote) => vote.voter),
       ).size,
@@ -7916,16 +7997,14 @@ function getTopCreators(turns: TransparencyTurnSummary[]) {
 
   for (const turn of turns) {
     for (const proposal of listRuleProposals(turn.turnId)) {
-      const record =
-        creators.get(proposal.proposer) ??
-        {
-          creator: proposal.proposer,
-          electedRules: new Set<string>(),
-          proposedRules: 0,
-          rewardLamports: 0,
-          votesReceived: 0,
-          winnerProducingRules: new Set<string>(),
-        };
+      const record = creators.get(proposal.proposer) ?? {
+        creator: proposal.proposer,
+        electedRules: new Set<string>(),
+        proposedRules: 0,
+        rewardLamports: 0,
+        votesReceived: 0,
+        winnerProducingRules: new Set<string>(),
+      };
       record.proposedRules += 1;
       record.votesReceived += listRuleVotes(turn.turnId).votes.filter(
         (vote) => vote.ruleId === proposal.ruleId,
@@ -7944,16 +8023,14 @@ function getTopCreators(turns: TransparencyTurnSummary[]) {
   }
 
   for (const reward of creatorRewardRecords.values()) {
-    const record =
-      creators.get(reward.creatorWallet) ??
-      {
-        creator: reward.creatorWallet,
-        electedRules: new Set<string>(),
-        proposedRules: 0,
-        rewardLamports: 0,
-        votesReceived: 0,
-        winnerProducingRules: new Set<string>(),
-      };
+    const record = creators.get(reward.creatorWallet) ?? {
+      creator: reward.creatorWallet,
+      electedRules: new Set<string>(),
+      proposedRules: 0,
+      rewardLamports: 0,
+      votesReceived: 0,
+      winnerProducingRules: new Set<string>(),
+    };
     record.rewardLamports += reward.finalRewardLamports;
     creators.set(reward.creatorWallet, record);
   }
@@ -8044,9 +8121,7 @@ function incrementCount<T extends string>(
   counts[key] = (counts[key] ?? 0) + amount;
 }
 
-function getConfidenceBucket(
-  confidence: number,
-): ConfidenceBucket {
+function getConfidenceBucket(confidence: number): ConfidenceBucket {
   if (confidence < 0.5) {
     return "0_50";
   }
@@ -8160,8 +8235,14 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
       values: number[];
     }
   >();
-  const failureMap = new Map<string, OperatorAiOperationsSnapshot["failureCounts"][number]>();
-  const localModelMap = new Map<string, OperatorAiOperationsSnapshot["localModelHealth"][number]>();
+  const failureMap = new Map<
+    string,
+    OperatorAiOperationsSnapshot["failureCounts"][number]
+  >();
+  const localModelMap = new Map<
+    string,
+    OperatorAiOperationsSnapshot["localModelHealth"][number]
+  >();
   const queueStatusCounts: Record<GuessVerificationJobStatus, number> = {
     completed: 0,
     dead_letter: 0,
@@ -8175,7 +8256,8 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
   const compilerConfidenceBuckets = emptyConfidenceBuckets();
   const finalConfidenceBuckets = emptyConfidenceBuckets();
   const modelConfidenceBuckets = emptyConfidenceBuckets();
-  const redactedIncidents: OperatorAiOperationsSnapshot["redactedIncidents"] = [];
+  const redactedIncidents: OperatorAiOperationsSnapshot["redactedIncidents"] =
+    [];
 
   function addLatency(args: {
     model: string;
@@ -8188,15 +8270,13 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
       return;
     }
     const key = `${args.source}:${args.role}:${args.provider}:${args.model}`;
-    const row =
-      latencyMap.get(key) ??
-      {
-        model: args.model,
-        provider: args.provider,
-        role: args.role,
-        source: args.source,
-        values: [],
-      };
+    const row = latencyMap.get(key) ?? {
+      model: args.model,
+      provider: args.provider,
+      role: args.role,
+      source: args.source,
+      values: [],
+    };
     row.values.push(args.valueMs);
     latencyMap.set(key, row);
   }
@@ -8208,15 +8288,13 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
     status: OperatorAiOperationsSnapshot["failureCounts"][number]["status"];
   }) {
     const key = `${args.role}:${args.provider}:${args.model}:${args.status}`;
-    const row =
-      failureMap.get(key) ??
-      {
-        count: 0,
-        model: args.model,
-        provider: args.provider,
-        role: args.role,
-        status: args.status,
-      };
+    const row = failureMap.get(key) ?? {
+      count: 0,
+      model: args.model,
+      provider: args.provider,
+      role: args.role,
+      status: args.status,
+    };
     row.count += 1;
     failureMap.set(key, row);
   }
@@ -8229,20 +8307,19 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
     tokenCount: number;
   }) {
     const key = `${args.role}:${args.provider}:${args.model}`;
-    const row =
-      tokenUsageMap.get(key) ??
-      {
-        estimatedUsd: 0,
-        model: args.model,
-        provider: args.provider,
-        role: args.role,
-        source: "rule_proposal_token_projection" as const,
-        totalTokens: 0,
-        validationCalls: 0,
-      };
+    const row = tokenUsageMap.get(key) ?? {
+      estimatedUsd: 0,
+      model: args.model,
+      provider: args.provider,
+      role: args.role,
+      source: "rule_proposal_token_projection" as const,
+      totalTokens: 0,
+      validationCalls: 0,
+    };
     row.totalTokens += args.tokenCount;
     row.validationCalls += 1;
-    row.estimatedUsd = (row.totalTokens / 1_000) * args.costPerThousandTokensUsd;
+    row.estimatedUsd =
+      (row.totalTokens / 1_000) * args.costPerThousandTokensUsd;
     tokenUsageMap.set(key, row);
   }
 
@@ -8268,8 +8345,9 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
       ? `/audit/${validation.auditLogHash}`
       : null;
     const proposalTokenCount =
-      ruleProposals.get(getRuleProposalKey(validation.turnId, validation.ruleId))
-        ?.tokenCount ?? 0;
+      ruleProposals.get(
+        getRuleProposalKey(validation.turnId, validation.ruleId),
+      )?.tokenCount ?? 0;
 
     for (const role of ["compilation", "review", "final_validation"] as const) {
       addLatency({
@@ -8292,21 +8370,22 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
 
     for (const attempt of validation.providerPath) {
       const model = getModelName(attempt.model_identity);
-      const provider = getProviderName(attempt.model_identity, attempt.provider);
+      const provider = getProviderName(
+        attempt.model_identity,
+        attempt.provider,
+      );
       const role: AiOperationRole = "compilation";
       const routingKey = `${role}:${provider}:${model}`;
-      const routing =
-        modelRoutingMap.get(routingKey) ??
-        {
-          escalationCount: 0,
-          fallbackTriggered: 0,
-          local: attempt.capability_flags.local,
-          model,
-          provider,
-          role,
-          statuses: {},
-          validationCalls: 0,
-        };
+      const routing = modelRoutingMap.get(routingKey) ?? {
+        escalationCount: 0,
+        fallbackTriggered: 0,
+        local: attempt.capability_flags.local,
+        model,
+        provider,
+        role,
+        statuses: {},
+        validationCalls: 0,
+      };
       routing.validationCalls += 1;
       routing.fallbackTriggered += validation.providerPath.length > 1 ? 1 : 0;
       routing.escalationCount += attempt.status === "escalated" ? 1 : 0;
@@ -8336,7 +8415,12 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
       } else if (attempt.status === "malformed_response") {
         addFailure({ model, provider, role, status: "malformed_response" });
       } else if (attempt.status === "schema_validation_failed") {
-        addFailure({ model, provider, role, status: "schema_validation_failed" });
+        addFailure({
+          model,
+          provider,
+          role,
+          status: "schema_validation_failed",
+        });
       } else if (attempt.status === "provider_disagreement") {
         addFailure({ model, provider, role, status: "provider_error" });
       }
@@ -8368,7 +8452,10 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
       compilerConfidenceBuckets,
       getConfidenceBucket(validation.confidence.compiler_confidence),
     );
-    incrementCount(finalConfidenceBuckets, getConfidenceBucket(validation.finalConfidence));
+    incrementCount(
+      finalConfidenceBuckets,
+      getConfidenceBucket(validation.finalConfidence),
+    );
     incrementCount(
       modelConfidenceBuckets,
       getConfidenceBucket(validation.confidence.model_confidence),
@@ -8469,7 +8556,8 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
     estimatedCost: {
       costPerThousandTokensUsd,
       estimatedUsd: (totalTokens / 1_000) * costPerThousandTokensUsd,
-      source: costPerThousandTokensUsd > 0 ? "configured_rate" : "not_configured",
+      source:
+        costPerThousandTokensUsd > 0 ? "configured_rate" : "not_configured",
       totalTokens,
     },
     failureCounts: [...failureMap.values()].sort(
@@ -8556,7 +8644,8 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
     ruleCompiler: {
       confidenceActionCounts,
       decisionCounts,
-      fallbackRate: validations.length === 0 ? 0 : fallbackCount / validations.length,
+      fallbackRate:
+        validations.length === 0 ? 0 : fallbackCount / validations.length,
       providerDisagreementAverage:
         validations.length === 0 ? 0 : disagreementTotal / validations.length,
       reasonCodeCounts,
@@ -8678,7 +8767,9 @@ export function exportOperatorAiOperationsCsv(
           const routing = routingByKey.get(key);
           const tokenUsage = tokenUsageByKey.get(key);
           const latency = latencyByKey.get(key);
-          const [role = "", provider = "", model = ""] = JSON.parse(key) as string[];
+          const [role = "", provider = "", model = ""] = JSON.parse(
+            key,
+          ) as string[];
 
           return [
             routing?.role ?? tokenUsage?.role ?? role,
@@ -8709,7 +8800,8 @@ export function exportOperatorAiOperationsCsv(
 const OPERATOR_AI_ACCESS_TTL_MS = 5 * 60 * 1000;
 const SOLANA_BASE58_PUBLIC_KEY_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
-const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const BASE58_ALPHABET =
+  "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const BASE58_INDEX = new Map(
   [...BASE58_ALPHABET].map((character, index) => [character, index]),
 );
@@ -8798,7 +8890,9 @@ function getOperatorAiChallengeKey(wallet: string, nonce: string) {
 
 export function createOperatorAiAccessChallenge(
   walletInput: unknown,
-  env: Partial<Pick<NodeJS.ProcessEnv, "OPERATOR_AI_CONSOLE_AUTHORIZED_WALLETS">> = process.env,
+  env: Partial<
+    Pick<NodeJS.ProcessEnv, "OPERATOR_AI_CONSOLE_AUTHORIZED_WALLETS">
+  > = process.env,
   now = new Date(),
 ) {
   const authorizedWallets = parseAuthorizedOperatorWallets(
@@ -8830,7 +8924,9 @@ export function createOperatorAiAccessChallenge(
   }
 
   const issuedAt = now.toISOString();
-  const expiresAt = new Date(now.getTime() + OPERATOR_AI_ACCESS_TTL_MS).toISOString();
+  const expiresAt = new Date(
+    now.getTime() + OPERATOR_AI_ACCESS_TTL_MS,
+  ).toISOString();
   const nonce = randomBytes(18).toString("base64url");
   const challenge = {
     expiresAt,
@@ -8890,7 +8986,9 @@ function verifyOperatorWalletSignature(args: {
 
 export function authorizeOperatorAiRequest(
   headers: NodeJS.Dict<string | string[] | undefined>,
-  env: Partial<Pick<NodeJS.ProcessEnv, "OPERATOR_AI_CONSOLE_AUTHORIZED_WALLETS">> = process.env,
+  env: Partial<
+    Pick<NodeJS.ProcessEnv, "OPERATOR_AI_CONSOLE_AUTHORIZED_WALLETS">
+  > = process.env,
   now = new Date(),
 ) {
   const authorizedWallets = parseAuthorizedOperatorWallets(
@@ -8969,7 +9067,8 @@ export function getTransparencySnapshot(
   const totals = turns.reduce(
     (summary, turn) => ({
       alternativePrizeLamports:
-        summary.alternativePrizeLamports + turn.economy.alternativeBucketLamports,
+        summary.alternativePrizeLamports +
+        turn.economy.alternativeBucketLamports,
       approvalVotes: summary.approvalVotes + turn.voting.totalApprovalVotes,
       claims: summary.claims + turn.activity.claims,
       creatorRewardLamports:
@@ -8981,11 +9080,13 @@ export function getTransparencySnapshot(
         summary.drawProofs + (turn.proofs.drawRandomnessAccount ? 1 : 0),
       eliminationVotes:
         summary.eliminationVotes + turn.voting.totalEliminationVotes,
-      grossFeesLamports: summary.grossFeesLamports + turn.economy.grossFeesLamports,
+      grossFeesLamports:
+        summary.grossFeesLamports + turn.economy.grossFeesLamports,
       guesses: summary.guesses + turn.activity.guesses,
       paidRemovals: summary.paidRemovals + turn.activity.paidRemovals,
       platformTreasuryLamports:
-        summary.platformTreasuryLamports + turn.economy.platformTreasuryLamports,
+        summary.platformTreasuryLamports +
+        turn.economy.platformTreasuryLamports,
       proposals: summary.proposals + turn.activity.proposals,
       rewardReserveRemainingLamports:
         summary.rewardReserveRemainingLamports +
@@ -9031,21 +9132,19 @@ export function getTransparencySnapshot(
     TransparencySnapshot["trends"]["byTurnDuration"][number]
   >();
   for (const turn of turns) {
-    const current =
-      durationMap.get(turn.durationHours) ??
-      {
-        approvalVotes: 0,
-        creatorRewardLamports: 0,
-        durationHours: turn.durationHours,
-        eliminationVotes: 0,
-        grossFeesLamports: 0,
-        guesses: 0,
-        prizePoolLamports: 0,
-        proposals: 0,
-        rolloverLamports: 0,
-        turns: 0,
-        voterRewardLamports: 0,
-      };
+    const current = durationMap.get(turn.durationHours) ?? {
+      approvalVotes: 0,
+      creatorRewardLamports: 0,
+      durationHours: turn.durationHours,
+      eliminationVotes: 0,
+      grossFeesLamports: 0,
+      guesses: 0,
+      prizePoolLamports: 0,
+      proposals: 0,
+      rolloverLamports: 0,
+      turns: 0,
+      voterRewardLamports: 0,
+    };
     current.approvalVotes += turn.voting.totalApprovalVotes;
     current.creatorRewardLamports += turn.rewards.creatorRewardLamports;
     current.eliminationVotes += turn.voting.totalEliminationVotes;
@@ -9063,10 +9162,7 @@ export function getTransparencySnapshot(
     activeTurnId: TYCHE_ACTIVE_TURN_ID,
     dataBoundary: {
       consoleSafetyBoundary: getConsoleSafetyBoundary(),
-      deniedPrivateFields: [
-        ...PRIVATE_TELEMETRY_DENYLIST,
-        "retention_cohort",
-      ],
+      deniedPrivateFields: [...PRIVATE_TELEMETRY_DENYLIST, "retention_cohort"],
       publicExportFieldsOnly: true,
       publicMetricsOnly: true,
       restrictedAiOperations: {
@@ -9103,7 +9199,10 @@ export function getTransparencySnapshot(
       repeatedPaidActions: getRepeatedPaidActionTrends(turnIds),
       ruleLifecycle: {
         active: turns.filter((turn) => turn.rules.activeRuleId !== null).length,
-        eliminated: turns.reduce((total, turn) => total + turn.rules.eliminated, 0),
+        eliminated: turns.reduce(
+          (total, turn) => total + turn.rules.eliminated,
+          0,
+        ),
         finalist: turns.reduce(
           (total, turn) => total + turn.rules.finalistRuleIds.length,
           0,
@@ -9194,8 +9293,7 @@ function parseTransparencyFilters(
   const rawToTurnId = url.searchParams.get("toTurnId");
   const fromDate = url.searchParams.get("fromDate") ?? undefined;
   const toDate = url.searchParams.get("toDate") ?? undefined;
-  const fromTurnId =
-    rawFromTurnId === null ? undefined : Number(rawFromTurnId);
+  const fromTurnId = rawFromTurnId === null ? undefined : Number(rawFromTurnId);
   const toTurnId = rawToTurnId === null ? undefined : Number(rawToTurnId);
 
   if (
@@ -9341,7 +9439,9 @@ export function handleApiRequest(
           return;
         }
         if (phase !== "compile" && phase !== "interpret") {
-          sendJson(request, response, 400, { error: "invalid_preflight_phase" });
+          sendJson(request, response, 400, {
+            error: "invalid_preflight_phase",
+          });
           return;
         }
 
@@ -9372,8 +9472,8 @@ export function handleApiRequest(
           // exactly what this route used to write.
           startRulePreflightStream(request, response);
           let lastWrittenSeq = 0;
-          for (const envelope of
-            readRulePreflightJobEventsAfter(job.id, 0)?.events ?? []) {
+          for (const envelope of readRulePreflightJobEventsAfter(job.id, 0)
+            ?.events ?? []) {
             writeRulePreflightStreamEvent(response, envelope.event);
             lastWrittenSeq = envelope.seq;
           }
@@ -9585,7 +9685,11 @@ export function handleApiRequest(
         const existing =
           body.sequence === undefined
             ? null
-            : getGuessReceiptBySequence(body.turnId, body.player, body.sequence);
+            : getGuessReceiptBySequence(
+                body.turnId,
+                body.player,
+                body.sequence,
+              );
         if (existing && existing.signature !== body.signature) {
           sendJson(request, response, 409, {
             error: "duplicate_guess_receipt",
@@ -9825,10 +9929,7 @@ export function handleApiRequest(
     return;
   }
 
-  if (
-    request.method === "POST" &&
-    url.pathname === "/rule-elimination-votes"
-  ) {
+  if (request.method === "POST" && url.pathname === "/rule-elimination-votes") {
     void readJsonBody(request)
       .then((body) => {
         if (!isValidRuleEliminationVote(body)) {
@@ -9867,10 +9968,7 @@ export function handleApiRequest(
     return;
   }
 
-  if (
-    request.method === "GET" &&
-    url.pathname === "/rule-elimination-votes"
-  ) {
+  if (request.method === "GET" && url.pathname === "/rule-elimination-votes") {
     const turnId = Number(url.searchParams.get("turnId"));
 
     if (!Number.isInteger(turnId) || turnId <= 0) {
@@ -10027,10 +10125,7 @@ export function handleApiRequest(
     return;
   }
 
-  if (
-    request.method === "POST" &&
-    url.pathname === "/turn-rollovers/settle"
-  ) {
+  if (request.method === "POST" && url.pathname === "/turn-rollovers/settle") {
     void readJsonBody(request)
       .then((body) => {
         if (!isValidGuessVerificationCreateRequest(body)) {
@@ -10094,9 +10189,7 @@ export function handleApiRequest(
     request.method === "GET" &&
     url.pathname.startsWith("/prize-pool-accounting/")
   ) {
-    const turnId = Number(
-      url.pathname.slice("/prize-pool-accounting/".length),
-    );
+    const turnId = Number(url.pathname.slice("/prize-pool-accounting/".length));
 
     if (!Number.isInteger(turnId) || turnId <= 0) {
       sendJson(request, response, 400, { error: "invalid_turn_id" });
@@ -10205,9 +10298,7 @@ export function handleApiRequest(
           sendJson(request, response, 201, result);
         } catch (error) {
           const code =
-            error instanceof Error
-              ? error.message
-              : "VERIFICATION_JOB_FAILED";
+            error instanceof Error ? error.message : "VERIFICATION_JOB_FAILED";
           sendJson(request, response, 409, {
             error: code,
             message: "Verification jobs could not be created for this turn.",
@@ -10568,10 +10659,7 @@ export function handleApiRequest(
     return;
   }
 
-  if (
-    request.method === "POST" &&
-    url.pathname === "/claim-records/request"
-  ) {
+  if (request.method === "POST" && url.pathname === "/claim-records/request") {
     void readJsonBody(request)
       .then((body) => {
         if (!isValidClaimRequest(body)) {
@@ -10586,8 +10674,7 @@ export function handleApiRequest(
             claim: requestClaimApproval(body),
           });
         } catch (error) {
-          const code =
-            error instanceof Error ? error.message : "CLAIM_FAILED";
+          const code = error instanceof Error ? error.message : "CLAIM_FAILED";
           sendJson(request, response, 409, { error: code });
         }
       })
@@ -10600,10 +10687,7 @@ export function handleApiRequest(
     return;
   }
 
-  if (
-    request.method === "POST" &&
-    url.pathname === "/claim-records/complete"
-  ) {
+  if (request.method === "POST" && url.pathname === "/claim-records/complete") {
     void readJsonBody(request)
       .then((body) => {
         if (!isValidClaimCompleteRequest(body)) {
@@ -10618,8 +10702,7 @@ export function handleApiRequest(
             claim: completeClaimApproval(body),
           });
         } catch (error) {
-          const code =
-            error instanceof Error ? error.message : "CLAIM_FAILED";
+          const code = error instanceof Error ? error.message : "CLAIM_FAILED";
           sendJson(request, response, 409, { error: code });
         }
       })
@@ -10632,10 +10715,7 @@ export function handleApiRequest(
     return;
   }
 
-  if (
-    request.method === "POST" &&
-    url.pathname === "/settlement-transitions"
-  ) {
+  if (request.method === "POST" && url.pathname === "/settlement-transitions") {
     void readJsonBody(request)
       .then((body) => {
         if (!isValidSettlementTransitionRequest(body)) {
@@ -10658,10 +10738,7 @@ export function handleApiRequest(
     return;
   }
 
-  if (
-    request.method === "GET" &&
-    url.pathname === "/settlement-transitions"
-  ) {
+  if (request.method === "GET" && url.pathname === "/settlement-transitions") {
     const turnId = Number(url.searchParams.get("turnId"));
 
     if (!Number.isInteger(turnId) || turnId <= 0) {
@@ -10768,20 +10845,70 @@ export function handleApiRequest(
       return;
     }
     void readJsonBody(request)
-      .then((body) => {
+      .then(async (body) => {
         if (!isTokenomicsProjection(body)) {
           sendJson(request, response, 400, {
             error: "invalid_tokenomics_projection",
           });
           return;
         }
-        sendJson(request, response, 201, {
-          projection: saveTokenomicsProjection(body),
-        });
+        const saved = saveTokenomicsProjection(body);
+        await queueApiStatePersistence();
+        sendJson(request, response, 201, { projection: saved });
       })
       .catch((error: unknown) => {
         sendJson(request, response, 400, {
           error: "invalid_json",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return;
+  }
+
+  if (
+    request.method === "GET" &&
+    url.pathname.startsWith("/tokenomics/artifacts/")
+  ) {
+    const manifestHash = url.pathname.slice("/tokenomics/artifacts/".length);
+    if (!/^[0-9a-f]{64}$/i.test(manifestHash)) {
+      sendJson(request, response, 400, { error: "invalid_manifest_hash" });
+      return;
+    }
+    const artifact = getTokenomicsEpochArtifact(manifestHash.toLowerCase());
+    sendJson(
+      request,
+      response,
+      artifact ? 200 : 404,
+      artifact ? { artifact } : { error: "tokenomics_artifact_not_found" },
+    );
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/tokenomics/artifacts") {
+    const authorization = authorizeTokenomicsProjection(
+      request.headers.authorization,
+    );
+    if (!authorization.ok) {
+      sendJson(request, response, authorization.statusCode, {
+        error: authorization.error,
+      });
+      return;
+    }
+    void readJsonBody(request)
+      .then(async (body) => {
+        if (!isTokenomicsEpochArtifact(body)) {
+          sendJson(request, response, 400, {
+            error: "invalid_tokenomics_epoch_artifact",
+          });
+          return;
+        }
+        const artifact = saveTokenomicsEpochArtifact(body);
+        await queueApiStatePersistence();
+        sendJson(request, response, 201, { artifact });
+      })
+      .catch((error: unknown) => {
+        sendJson(request, response, 400, {
+          error: "invalid_tokenomics_epoch_artifact",
           message: error instanceof Error ? error.message : String(error),
         });
       });
@@ -10840,10 +10967,7 @@ export function handleApiRequest(
     return;
   }
 
-  if (
-    request.method === "GET" &&
-    url.pathname === "/transparency/export"
-  ) {
+  if (request.method === "GET" && url.pathname === "/transparency/export") {
     const parsed = parseTransparencyFilters(url);
     if ("error" in parsed) {
       sendJson(request, response, 400, { error: parsed.error });
@@ -11051,8 +11175,11 @@ async function warmDealerModels() {
     return;
   }
 
-  const { agent: agentConfig, escalationModel, guardian: guardianConfig } =
-    runtime;
+  const {
+    agent: agentConfig,
+    escalationModel,
+    guardian: guardianConfig,
+  } = runtime;
   const targets = [
     agentConfig.model,
     escalationModel,

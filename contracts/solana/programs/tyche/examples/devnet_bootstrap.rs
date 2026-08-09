@@ -315,6 +315,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 game_token,
                 rule_proposal,
                 rule_vote,
+                treasury_vault,
                 prize_vault,
                 system_program: system_program::ID,
             }
