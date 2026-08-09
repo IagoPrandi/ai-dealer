@@ -4,6 +4,28 @@ This tracker records milestone status, work logs, and required document confirma
 
 ## Work Log
 
+### 2026-08-08 (Dedicated Helius devnet RPC configuration)
+
+- Opened the required `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, and the relevant test, Solana devnet, investigation, and browser-verification guidance before applying the provided RPC configuration. No milestone checkbox or status was changed because milestone marking still requires explicit user confirmation.
+- Configured the worker RPC and public DApp RPC variables to use the user-provided Helius devnet endpoint. The endpoint credential is treated as a secret and is not recorded in this work log or command output.
+- A regular Compose restart retained the worker's old environment, so the worker was recreated with `docker compose up -d --force-recreate worker`, as required for environment changes. Read-only verification from inside the running container confirms the configured host is `devnet.helius-rpc.com`, an API key is present, and JSON-RPC `getHealth` returns HTTP `200` with a healthy result.
+- The worker's `GET /turn/active?fresh=1` now returns HTTP `200` with `freshness: "fresh"` and `source: "rpc"`; it currently reports no active turn. The local web development server was restarted to load the public RPC variable. Browser verification of `/play` loaded meaningful UI with no browser errors and correctly showed the waiting state for the absent active turn.
+- No `POST /manual/cycle`, manual settlement, opening, closing, seed, claim, or configuration transaction was invoked after migrating RPC providers. Final consistency review found the earlier stale public-RPC configuration is no longer active in the recreated worker, and no fallback was added to conceal failures.
+
+### 2026-08-08 (Manual cycle HTTP 500 follow-up)
+
+- Opened the required `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `tyche-test-and-verify` instructions, devnet-verification runbook, and investigation guidance before diagnosing the reported manual-cycle failure. No milestone checkbox or status was changed because milestone marking still requires explicit user confirmation.
+- Runtime evidence for the reported `POST /manual/cycle` is `manual turn control /manual/cycle failed SolanaError: HTTP error (429): Too Many Requests`. The worker is healthy, manual control is enabled, and its status endpoint reports no active turn. The last inspected audited predecessor, turn `38`, is already `CLOSED`; no partial transition was created by this failed request.
+- The effective worker RPC is the unauthenticated public `https://api.devnet.solana.com`. Worker logs show its endpoint quota deeply exhausted while the settlement scheduler and rule-precompile loop make concurrent reads. No alternative RPC provider URL or credential is configured in the repository or worker environment. The current rate limit is an upstream operational blocker, not a manual-control authorization or local API failure.
+- No second manual-cycle request, manual settlement, opening, closing, seed, claim, or configuration mutation was made during diagnosis. Final consistency review found the failure remains explicit and no fallback was introduced to mask it. A dedicated, project-authorized devnet RPC URL is required before retrying the cycle.
+
+### 2026-08-08 (Worker restart to load live-turn status fix)
+
+- Opened the required `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, and the `tyche-test-and-verify` devnet-verification reference before the requested restart. No milestone checkbox or status was changed because milestone marking still requires explicit user confirmation.
+- Restarted only the existing `tyche-worker` Docker Compose service after explicit user authorization. The service is healthy; its previous configuration remains intact: turn automation disabled, settlement automation enabled, and manual control enabled. No manual open, close, cycle, settle, seed, claim, or other operator endpoint was called.
+- The restarted worker initially encountered the existing upstream Solana devnet RPC HTTP `429 Too Many Requests` condition while its in-memory cache was empty. A subsequent `GET /turn/active` returned HTTP `200` with `freshness: "stale"`, `source: "cache"`, `activeTurnId: 0`, and `hasActiveTurn: false`, confirming the corrected worker code is live and retains an explicitly labelled last observation instead of fabricating a contradictory turn state. The current known on-chain state has no active turn.
+- Final consistency review: the restart did not modify environment files, on-chain configuration, or milestone state. The persistent RPC rate limit remains visible in worker logs and still requires a reliable RPC provider/configuration to eliminate initial-cache-empty availability errors.
+
 ### 2026-08-08 (Confirmed guess UI and live turn status consistency)
 
 - Opened the required `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, and `.claude/skills` folder before changing code. Followed the investigation-mode, `tyche-test-and-verify`, `tyche-ui-coherence`, `tyche-design-system`, `solana-dev`, agent-browser, and local Playwright guidance; also opened the required Solana frontend, devnet-verification, and screen/state references. No milestone checkbox or status was changed because milestone marking still requires explicit user confirmation.
