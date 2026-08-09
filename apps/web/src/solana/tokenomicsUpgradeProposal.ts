@@ -184,14 +184,14 @@ async function assertDevnetConnection(connection: Connection) {
 
 function decodeProgramDataAuthority(data: Buffer) {
   if (data.length < 13 || data.readUInt32LE(0) !== 3) {
-    throw new Error("Tokenomics Core has an invalid ProgramData account.");
+    throw new Error("Tyche has an invalid ProgramData account.");
   }
   const authorityOption = data.readUInt8(12);
   if (authorityOption === 0) {
     return null;
   }
   if (authorityOption !== 1 || data.length < 45) {
-    throw new Error("Tokenomics Core has an invalid upgrade authority option.");
+    throw new Error("Tyche has an invalid upgrade authority option.");
   }
   return new PublicKey(data.subarray(13, 45)).toBase58();
 }
@@ -273,27 +273,23 @@ async function assertReviewedProgramAndBuffer(connection: Connection) {
     programInfo.data.length < 36 ||
     programInfo.data.readUInt32LE(0) !== 2
   ) {
-    throw new Error("Tokenomics Core is not the reviewed upgradeable program.");
+    throw new Error("Tyche is not the reviewed upgradeable program.");
   }
   const linkedProgramData = new PublicKey(programInfo.data.subarray(4, 36));
   if (!linkedProgramData.equals(programData)) {
-    throw new Error(
-      "Tokenomics Core links to a different ProgramData account.",
-    );
+    throw new Error("Tyche links to a different ProgramData account.");
   }
   if (!programDataInfo || !programDataInfo.owner.equals(loader)) {
-    throw new Error("Tokenomics Core ProgramData could not be verified.");
+    throw new Error("Tyche ProgramData could not be verified.");
   }
   if (
     decodeProgramDataAuthority(programDataInfo.data) !== config.vaultAddress
   ) {
-    throw new Error("Tokenomics Core upgrade authority is not Squads vault 0.");
+    throw new Error("Tyche upgrade authority is not Squads vault 0.");
   }
   const deployedBytes = programDataInfo.data.subarray(45);
   if (deployedBytes.length !== config.programDataCapacity) {
-    throw new Error(
-      "Tokenomics Core ProgramData capacity does not match the review.",
-    );
+    throw new Error("Tyche ProgramData capacity does not match the review.");
   }
   const deployedPrefix = deployedBytes.subarray(
     0,
@@ -305,7 +301,7 @@ async function assertReviewedProgramAndBuffer(connection: Connection) {
     zeroPadding.some((byte) => byte !== 0)
   ) {
     throw new Error(
-      "Tokenomics Core deployed bytes or pre-upgrade zero padding differ from the review.",
+      "Tyche deployed bytes or pre-upgrade zero padding differ from the review.",
     );
   }
   if (!bufferInfo || !bufferInfo.owner.equals(loader)) {

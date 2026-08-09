@@ -49,6 +49,7 @@ TYCHE_TURN_AUTOMATION_ENABLED=false
 TYCHE_TURN_MANUAL_OPEN_DURATION_SECONDS=1200
 TYCHE_DEVNET_TURN_DURATION_SCALE_BPS=139
 TYCHE_SETTLEMENT_AUTOMATION_ENABLED=false
+TYCHE_TOKENOMICS_REVENUE_AUTOMATION_ENABLED=false
 TYCHE_TOKEN_REWARD_SETTLEMENT_ENABLED=false
 TYCHE_ACTIVE_RULE_REWARD_SETTLEMENT_ENABLED=false
 TYCHE_REFERRAL_REWARD_SETTLEMENT_ENABLED=false
@@ -71,6 +72,24 @@ docker run --rm -v tyche-solana-home:/solana-home:ro rust:1.91-bookworm bash -lc
 
 Do not open a turn if this public address is not the approved technical payer,
 or if it has insufficient devnet SOL for account rent and network fees.
+
+### 2.1 Current Tyche binary and activation boundary
+
+The finalized devnet Tyche programme is
+`ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd`, with ProgramData
+`AWGUseV1DEsoSvdW7CDMxxBDUPQXAKqTXyxHVzeTnL8g`. Squads proposal `11`
+executed at slot `482429972`; the deployed `1,018,304`-byte prefix must hash to
+`fc54899f218c5c178639b426f994e06c451a858cf004d4ece5aabf216a56fb53`,
+the remaining `37,288` capacity bytes must be zero, and upgrade authority must
+remain vault `0` `DB5nz633YioWzEUnLb97ypUra5RUE11SJDFW9ar23KTp`.
+
+The upgrade added the reviewed treasury-fee split and revenue-epoch bridge,
+but it did not activate the worker loop. Keep
+`TYCHE_TOKENOMICS_REVENUE_AUTOMATION_ENABLED=false` until its exact first-turn,
+publisher, artifact, projection, calculator, authority, SOL-cost, and service
+restart scope has been reviewed and separately authorized. Do not infer
+permission to bridge the existing game treasury balance from the binary
+upgrade.
 
 ## 3. Select how to run the application services
 

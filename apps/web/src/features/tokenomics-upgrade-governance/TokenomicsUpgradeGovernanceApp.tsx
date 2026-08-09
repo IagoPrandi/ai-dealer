@@ -192,11 +192,11 @@ export function TokenomicsUpgradeGovernanceApp() {
           </div>
           <span className="tm-network">Devnet only</span>
           <p className="tm-eyebrow">Squads governance - M10</p>
-          <h1>Approve and execute the Tokenomics Core upgrade</h1>
+          <h1>Approve and execute the Tyche upgrade</h1>
           <p className="tm-lead">
             {state?.status === "Executed"
-              ? `Tokenomics Core upgrade proposal ${TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex.toString()} was approved and executed. The deployed program matches the reviewed buffer and remains controlled by Squads vault 0.`
-              : `Two different members approve Tokenomics Core upgrade proposal ${TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex.toString()}. After the 2-of-3 threshold, any authorized devnet member can execute the exact stored upgrade.`}
+              ? `Tyche upgrade proposal ${TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex.toString()} was approved and executed. The deployed program matches the reviewed buffer and remains controlled by Squads vault 0.`
+              : `Two different members approve Tyche upgrade proposal ${TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex.toString()}. After the 2-of-3 threshold, any authorized devnet member can execute the exact stored upgrade.`}
           </p>
         </header>
 
@@ -365,7 +365,7 @@ export function TokenomicsUpgradeGovernanceApp() {
             <p className="tm-muted">
               Approval records one vote only. Once two different approvals are
               finalized, one member can execute the stored Squads transaction.
-              Execution deploys only the reviewed 1,092,904-byte artifact,
+              Execution deploys only the reviewed 1,018,304-byte artifact,
               closes the consumed buffer, and returns its rent to vault 0.
             </p>
             <div className="tug-actions">
@@ -416,7 +416,7 @@ export function TokenomicsUpgradeGovernanceApp() {
                 type="checkbox"
               />
               <span>
-                I reviewed devnet, Tokenomics Core upgrade proposal{" "}
+                I reviewed devnet, Tyche upgrade proposal{" "}
                 {TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex.toString()}
                 , the exact stored loader upgrade, reviewed buffer address,
                 artifact length and SHA-256, current deployed hash, ProgramData
@@ -448,7 +448,7 @@ export function TokenomicsUpgradeGovernanceApp() {
             <p className="tm-eyebrow">Strict verification passed</p>
             <h2 id="result-title">
               {result.action === "execute"
-                ? "Tokenomics Core program upgraded"
+                ? "Tyche program upgraded"
                 : "Approval finalized"}
             </h2>
             <p>

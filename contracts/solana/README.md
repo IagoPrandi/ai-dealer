@@ -59,6 +59,16 @@ bind active-rule settlement to the elected rule and fulfilled draw, require a
 first-guess `GameToken` for referral qualification, and use idempotent
 contribution PDAs for the first-round referral bonus.
 
+The current devnet Tyche binary was deployed through Squads proposal `11` at
+finalized slot `482429972` by transaction
+`42acqwZpEHWXghTyT4TAURWrKasS23t3FCdqPwjv5ER5TErZHDjyWE9EYc4aMoioBLbExaNRDyCcWRKG9BBGFmJa`.
+Its `1,018,304`-byte programme prefix has SHA-256
+`fc54899f218c5c178639b426f994e06c451a858cf004d4ece5aabf216a56fb53`;
+the remaining `37,288` bytes of ProgramData capacity are zero. Upgrade
+authority remains Squads vault `0`, and the consumed buffer is closed. This
+binary deployment does not by itself enable worker revenue automation or
+authorize any mainnet action.
+
 ## Implemented Core
 
 - `GlobalConfig`, `TurnState`, `GameToken`, `PlayerGuess`, `RuleProposal`, sequenced `RuleVote`, `TreasuryVault`, and `PrizeVault`.
@@ -180,13 +190,13 @@ The SBF suite executes 8 Tyche scenarios covering initialization, turn opening, 
 
 Devnet deployment requires Solana CLI, Anchor CLI `0.32.1`, a separately managed deployment key, and funded devnet authority. Never commit or print the deployment key.
 
-Current M2.2 devnet program id:
+Historical M2.2 devnet program id:
 
 ```text
 6TQo79fA3agZYz7mTiCTnBVfDR9HvVR5KjdHgX3cRaA4
 ```
 
-Current M2.2 devnet deployer address to fund:
+Historical M2.2 devnet deployer address to fund:
 
 ```text
 4bY5krt2VnnSNB1R4c1bhiWdQYkTc1FvFTN1LaV5JxCH

@@ -39,9 +39,9 @@ const FINALIZATION_TIMEOUT_MS = 120_000;
 const FINALIZATION_POLL_INTERVAL_MS = 1_000;
 
 export const TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG = Object.freeze({
-  proposalAddress: "CC5PXs7X68jynmxeFvcxg7BxhVCcu1W5Tukur3Xv18LH",
-  transactionAddress: "5JAZrf9fzxA33h2DKcKY3V2cPkPLRWLpUc6TbM5vpTdy",
-  transactionIndex: 9n,
+  proposalAddress: "CAZpmWqTDJdi7wPWds8gfXNGjFKeFNh9qw4hcgPJXA89",
+  transactionAddress: "2wnXfMfDPbVhn5cvpfk56LWBJsotiASq81djyZ2o5NjR",
+  transactionIndex: 11n,
 });
 
 export type TokenomicsUpgradeGovernanceAction = "approve" | "execute";
@@ -307,9 +307,7 @@ export async function readTokenomicsUpgradeGovernanceState(
     programInfo.data.readUInt32LE(0) !== 2 ||
     !new PublicKey(programInfo.data.subarray(4, 36)).equals(programDataAddress)
   ) {
-    throw new Error(
-      "Tokenomics Core does not link to the reviewed ProgramData.",
-    );
+    throw new Error("Tyche does not link to the reviewed ProgramData.");
   }
   if (
     !programDataInfo ||
@@ -319,21 +317,17 @@ export async function readTokenomicsUpgradeGovernanceState(
       3,
       12,
       13,
-      "Tokenomics Core ProgramData",
+      "Tyche ProgramData",
     ).toBase58() !== config.vaultAddress
   ) {
-    throw new Error(
-      "Tokenomics Core ProgramData authority is not Squads vault 0.",
-    );
+    throw new Error("Tyche ProgramData authority is not Squads vault 0.");
   }
 
   const programBytes = programDataInfo.data.subarray(
     PROGRAM_DATA_METADATA_LENGTH,
   );
   if (programBytes.length !== config.programDataCapacity) {
-    throw new Error(
-      "Tokenomics Core ProgramData capacity differs from the review.",
-    );
+    throw new Error("Tyche ProgramData capacity differs from the review.");
   }
 
   let programSha256: string;
@@ -347,9 +341,7 @@ export async function readTokenomicsUpgradeGovernanceState(
       !allZero(programBytes.subarray(config.bufferProgramLength)) ||
       bufferInfo
     ) {
-      throw new Error(
-        "The finalized Tokenomics Core upgrade failed strict read-back.",
-      );
+      throw new Error("The finalized Tyche upgrade failed strict read-back.");
     }
     bufferState = "Closed after execution";
   } else {
@@ -360,9 +352,7 @@ export async function readTokenomicsUpgradeGovernanceState(
       programSha256 !== config.currentProgramPrefixSha256 ||
       !allZero(programBytes.subarray(config.currentProgramPrefixLength))
     ) {
-      throw new Error(
-        "The pre-upgrade Tokenomics Core bytes differ from the review.",
-      );
+      throw new Error("The pre-upgrade Tyche bytes differ from the review.");
     }
     if (
       !bufferInfo ||
@@ -372,7 +362,7 @@ export async function readTokenomicsUpgradeGovernanceState(
         1,
         4,
         5,
-        "Tokenomics Core upgrade buffer",
+        "Tyche upgrade buffer",
       ).toBase58() !== config.vaultAddress
     ) {
       throw new Error(
@@ -446,7 +436,7 @@ export async function prepareTokenomicsUpgradeGovernanceAction({
     instructions = [
       multisigSdk.instructions.proposalApprove({
         member,
-        memo: "Approve reviewed JUSDEALER devnet Tokenomics Core reward v2 upgrade",
+        memo: "Approve reviewed JUSDEALER devnet Tyche revenue-fee upgrade",
         multisigPda,
         programId,
         transactionIndex: TOKENOMICS_UPGRADE_GOVERNANCE_CONFIG.transactionIndex,

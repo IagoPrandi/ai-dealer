@@ -63,7 +63,7 @@ function UpgradeReview({
       <div className="tm-section-heading">
         <div>
           <p className="tm-eyebrow">Required review</p>
-          <h2 id="upgrade-review">Governed Tokenomics Core upgrade proposal</h2>
+          <h2 id="upgrade-review">Governed Tyche upgrade proposal</h2>
         </div>
         <span className="tm-status tm-status-ready">Prepared</span>
       </div>
@@ -241,12 +241,12 @@ export function TokenomicsUpgradeApp() {
           </div>
           <span className="tm-network">Devnet only</span>
           <p className="tm-eyebrow">Program governance - M10</p>
-          <h1>Propose the reviewed Tokenomics Core upgrade</h1>
+          <h1>Propose the reviewed Tyche upgrade</h1>
           <p className="tm-lead">
             Wallet A creates a zero-approval Squads proposal to install the
-            reviewed JDR reward-v2 artifact. Proposal creation does not upgrade
-            the program; two different devnet members must approve before a
-            separate execution.
+            reviewed revenue-fee and epoch-bridge artifact. Proposal creation
+            does not upgrade the program; two different devnet members must
+            approve before a separate execution.
           </p>
         </header>
 
@@ -380,7 +380,7 @@ export function TokenomicsUpgradeApp() {
             <h2 id="success-title">Upgrade proposal created</h2>
             <p>
               The finalized Squads proposal is active with zero approvals. The
-              Tokenomics Core program code has not been upgraded.
+              Tyche program code has not been upgraded.
             </p>
             <div className="tm-success-links">
               <ExplorerLink path={`address/${result.proposalAddress}`}>
