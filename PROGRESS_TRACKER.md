@@ -5251,3 +5251,10 @@ Passed:
 - Reopened the required `PRD.md`, `AGENTS.md`, the local skills directory, and the release/configuration guidance before restarting the local worker.
 - Restarted the native `@tyche/worker` process so it loaded the updated repository-root `.env`. The replacement process is listening on port `3003` (PID `24908`), and `GET /health` returned HTTP `200` with PostgreSQL and Redis both `ok`, manual control `enabled`, settlement automation `enabled`, and turn automation `disabled`.
 - No configuration or source was changed, no transaction was signed or broadcast, no SOL/JDR moved, and no milestone checkbox was changed. Final consistency review confirms the worker runtime is healthy and has loaded the intended runtime mode.
+
+### 2026-08-10 (Home repeated-play CTA aligned)
+
+- Opened `PRD.md`, `AGENTS.md`, the local skills directory, Tyche design-system and UI-coherence guidance, implementation files, and this tracker before editing the home screen.
+- Replaced the narrow approved-vote treatment on the played-round `Play again` action with the established full-width primary `Play now` CTA treatment: gradient, bolt icon, 17 px type, and matching 17 px padding. Fee behavior and navigation remain unchanged.
+- Verification passed: `@tyche/web` TypeScript typecheck, all `234/234` web tests, ESLint with zero warnings, and the webpack production build. A 390 px Playwright review confirms the shared primary CTA treatment renders without clipping; screenshot: `output/playwright/home-primary-cta-390.png`.
+- No milestone checkbox was changed. Final consistency review confirms the action retains its existing accessible button semantics, tap feedback, responsive full width, and English UI copy.

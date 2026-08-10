@@ -227,21 +227,22 @@ test("historical round and live round keep canonical URLs across navigation and 
 
   await page.getByRole("button", { name: "Back to the current round" }).click();
   await expect(page).toHaveURL(/\/play$/);
-  await page.getByRole("button", { name: "Close result" }).click();
-  await expect(page.getByText("Result of round #0030", { exact: true })).toBeVisible();
+  // Back on the live round the app resolves the latest settled turn (#0030),
+  // which is what the result pop-up announces.
+  await expect(page.getByText("Round #0030 settled")).toBeVisible();
 
   await page.reload();
   await expect(page).toHaveURL(/\/play$/);
-  await expect(page.getByText("Result of round #0030", { exact: true })).toBeVisible();
+  await expect(page.getByText("Round #0030 settled")).toBeVisible();
   await expect(page.getByText("#0024", { exact: true })).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Result of round #0030" }).click();
+  await page.getByRole("button", { name: "See the full result" }).click();
   await expect(page).toHaveURL(/\/round\/30$/);
   await expect(page.getByText("#0030", { exact: true })).toBeVisible();
 
   await page.goBack();
   await expect(page).toHaveURL(/\/play$/);
-  await expect(page.getByText("Result of round #0030", { exact: true })).toBeVisible();
+  await expect(page.getByText("Accumulated prize")).toBeVisible();
 
   await page.goForward();
   await expect(page).toHaveURL(/\/round\/30$/);

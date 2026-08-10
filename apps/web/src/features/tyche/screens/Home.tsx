@@ -8,7 +8,6 @@ import {
   fmtClaimSol,
   fmtInt,
   fmtSol,
-  fmtTurnId,
   lamportsToSol,
   truncateAddress,
 } from "../data/format";
@@ -130,8 +129,6 @@ export function HomeScreen() {
     prizeSol,
     reloadAll,
     rules,
-    turnId,
-    resultTurnId,
     round,
     turnReadyToPlay,
     turnStatusMessage,
@@ -174,13 +171,6 @@ export function HomeScreen() {
     !drawFulfilled &&
     !electedRule &&
     round?.election?.status !== "original_only";
-  const showResultLink =
-    !apiUnavailable &&
-    resultTurnId > 0 &&
-    (resultTurnId < turnId ||
-      round?.status === "completed" ||
-      round?.draw?.status === "fulfilled" ||
-      Boolean(round?.winners?.records.length));
   const prize = useLivePrize(prizeSol);
   const top = rules.rules.slice(0, 3);
   const intStr = Math.floor(prize).toString();
@@ -666,7 +656,7 @@ export function HomeScreen() {
               borderRadius: 16,
               cursor: "pointer",
               color: "var(--text)",
-              border: "1px solid rgba(20,241,149,0.4)",
+              border: "none",
               background:
                 "linear-gradient(110deg, rgba(20,241,149,0.13), var(--surface))",
               display: "flex",
@@ -754,16 +744,16 @@ export function HomeScreen() {
               </div>
               <Ico.arrow style={{ color: "var(--green)", flexShrink: 0 }} />
             </button>
-            <div style={{ display: "flex", justifyContent: "center" }}>
-              <button
-                onClick={() => go("play")}
-                className="ide-votebtn for on"
-                type="button"
-              >
-                play again ·{" "}
-                {fees.playNext === 0 ? "free" : `${fmtSol(fees.playNext)} SOL`}
-              </button>
-            </div>
+            <button
+              onClick={() => go("play")}
+              className="ide-btn"
+              style={{ width: "100%", padding: 17, fontSize: 17 }}
+              type="button"
+            >
+              <Ico.bolt style={{ color: "#08110C" }} />
+              Play again ·{" "}
+              {fees.playNext === 0 ? "Free" : `${fmtSol(fees.playNext)} SOL`}
+            </button>
           </div>
         ) : (
           <button
@@ -913,42 +903,6 @@ export function HomeScreen() {
           />{" "}
           View and vote on {rules.rules.length} rules
         </button>
-
-        {/* PREVIOUS ROUND RESULT — follows the voting action */}
-        {showResultLink ? (
-          <button
-            onClick={() => go("result", { resultTurnId })}
-            className="ide-listrow"
-            style={{
-              marginTop: 14,
-              padding: "15px 2px",
-              borderTop: "1px solid var(--line)",
-              borderBottom: "1px solid var(--line)",
-            }}
-            type="button"
-          >
-            <span
-              style={{
-                width: 36,
-                height: 36,
-                borderRadius: 11,
-                background: "var(--gold)",
-                color: "#0B0910",
-                display: "grid",
-                placeItems: "center",
-                flexShrink: 0,
-              }}
-            >
-              <Ico.trophy style={{ color: "#0B0910" }} />
-            </span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 14.5, fontWeight: 700 }}>
-                Result of round {fmtTurnId(resultTurnId)}
-              </div>
-            </div>
-            <Ico.arrow style={{ color: "var(--gold)", flexShrink: 0 }} />
-          </button>
-        ) : null}
       </div>
     </div>
   );

@@ -1,7 +1,8 @@
 "use client";
 
 /**
- * CONTA — wallet, claims/withdraw (prize + reward), my rules. Ported from
+ * CONTA — wallet, claims/withdraw (prize + reward), my rules, and the entry
+ * point to the last settled round's result. Ported from
  * app-profile.jsx. Earnings/claims come from the wallet's claim ledger
  * (GET /players/{wallet}/claims). Conversations and History now read the
  * player projection endpoints instead of deferred empty states.
@@ -109,7 +110,19 @@ function HistoryRow({ event }: { event: PlayerHistoryEventApi }) {
 }
 
 export function ProfileScreen() {
-  const { client, connect, connected, go, rules, walletAddress, wallet } = useTyche();
+  const {
+    apiUnavailable,
+    client,
+    connect,
+    connected,
+    go,
+    resultTurnId,
+    round,
+    rules,
+    turnId,
+    walletAddress,
+    wallet,
+  } = useTyche();
   const { claims, error, loading, reload } = usePlayerClaims(walletAddress);
   const history = usePlayerHistory(walletAddress);
   const conversations = useConversationDrafts(walletAddress);
@@ -141,6 +154,15 @@ export function ProfileScreen() {
   const lifetimePrize = lamportsToSol(claimTotals.lifetimePrizeLamports);
   const claimedReward = lamportsToSol(claimTotals.claimedRewardLamports);
   const myRules = rules.rules.filter((r) => r.mine);
+  // Only point at a round the API has actually settled: either an earlier turn
+  // than the live one, or the live turn once its draw/winners are published.
+  const showResultLink =
+    !apiUnavailable &&
+    resultTurnId > 0 &&
+    (resultTurnId < turnId ||
+      round?.status === "completed" ||
+      round?.draw?.status === "fulfilled" ||
+      Boolean(round?.winners?.records.length));
 
   async function withdrawAll() {
     if (!wallet || !walletAddress || available.length === 0) {
@@ -208,6 +230,19 @@ export function ProfileScreen() {
         <button onClick={() => go("invite")} className="ide-btn-ghost ide-btn" style={{ width: "100%", padding: 13, marginBottom: 6 }} type="button">
           <Ico.users style={{ color: "var(--purple-soft)" }} /> Invite friends
         </button>
+
+        {/* PREVIOUS ROUND RESULT — follows the invite action */}
+        {showResultLink ? (
+          <button onClick={() => go("result", { resultTurnId })} className="ide-listrow" style={{ marginTop: 14, padding: "15px 2px", borderTop: "1px solid var(--line)", borderBottom: "1px solid var(--line)" }} type="button">
+            <span style={{ width: 36, height: 36, borderRadius: 11, background: "var(--gold)", color: "#0B0910", display: "grid", placeItems: "center", flexShrink: 0 }}>
+              <Ico.trophy style={{ color: "#0B0910" }} />
+            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14.5, fontWeight: 700 }}>Result of round {fmtTurnId(resultTurnId)}</div>
+            </div>
+            <Ico.arrow style={{ color: "var(--gold)", flexShrink: 0 }} />
+          </button>
+        ) : null}
 
         {/* accumulated metrics — 2x2 grid divided by hairlines (no boxes) */}
         <div className="ide-metrics rows2" style={{ margin: "18px 0 26px" }}>
