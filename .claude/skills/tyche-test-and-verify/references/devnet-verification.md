@@ -75,6 +75,18 @@ These are environmental, not code bugs, but each one can make you misread the re
 - **Git-bash mangles `docker run -v` Windows paths.** Run any `docker`/`docker run`
   with `-v <C:\path>:...` mounts from the **PowerShell** tool, not the Bash tool.
   (The SBF build/deploy already do this.)
+- **PowerShell mangles `docker run ... bash -c '<script>'`.** It strips the inner
+  quotes, so bash receives a different command than you wrote — either a `syntax
+  error near unexpected token` or, worse, a silently wrong value (a parsed URL that
+  becomes a DNS failure, a `cut` that returns the wrong field). Git Bash mangles the
+  `-v` paths instead, so neither shell can carry a non-trivial inline script. Put it
+  in a committed script and run `bash /workspace/<path>.sh`, the way `sbf.sh` is
+  invoked. A single bare word (`sbf.sh test-sbf`) is safe either way.
+- **`pnpm install --filter <pkg>` can transiently break a sibling app's
+  `node_modules`.** After adding a dependency to one workspace package, another
+  package's `typecheck` may fail with `Cannot find module` for a dependency it
+  still declares and still has on disk. Re-run a full `pnpm install` and re-check
+  before treating it as a code defect.
 - **Backgrounded `cmd | grep | tail` buffers until EOF.** A long-running
   `docker exec`/`docker compose run` piped through `grep`/`tail`/`Select-String` and
   backgrounded shows an **empty output file until the command finishes** — empty does
@@ -137,5 +149,18 @@ For a full trustless-settlement run (M5.x) with real inputs:
 5. Re-run the broadcast → must be `already_closed` (idempotent).
 6. Claims: `record_claim` recorded the available claims; a claimant-signed `claim_prize`
    transfers real SOL (balance delta = recorded amount minus fee), the claim flips to
-   `Claimed`, a re-claim is rejected on-chain (`ClaimNotAvailable`, custom 6058), and a
+   `Claimed`, a re-claim is rejected on-chain (`ClaimNotAvailable`, custom 6066), and a
    below-threshold reward stays `unavailable` (never recorded).
+7. Prize-vault solvency: `record_claim` reserves each payout against the turn's
+   `prize_vault`, so `PrizeVault.total_collected_lamports` is the vault's *unreserved*
+   balance and must drop by exactly the recorded amount. A turn whose visible pool
+   includes rollover is only payable because `sweep_prize_rollover` moved those
+   lamports in when the turn opened — if a claim ever fails with
+   `InsufficientVaultBalance` (6068) or `ClaimExceedsPrizeVault` (6077), the sweep did
+   not run for that turn. See the Prize-Vault Solvency section of
+   `contracts/solana/README.md`.
+
+Verify an on-chain error number by reading it, not by counting enum variants: a
+read-only `simulateTransaction` with `sigVerify: false` and
+`replaceRecentBlockhash: true` reproduces the failure as any wallet and prints
+`Error Code`/`Error Number` in the logs, without a signature or a broadcast.

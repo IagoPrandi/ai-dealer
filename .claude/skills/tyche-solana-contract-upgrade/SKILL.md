@@ -99,6 +99,27 @@ unchanged.
 
 ### 5. Govern the write
 
+Each stage already has an operator; do not hand-roll the ceremony. One command
+per authorized stage, and nothing bundles an approval with anything else:
+
+```text
+publish buffer      contracts/solana/scripts/publish-upgrade-buffer.sh publish
+hand buffer over    BUFFER=<pubkey> NEW_BUFFER_AUTHORITY=<vault> \
+                      contracts/solana/scripts/publish-upgrade-buffer.sh handoff
+read governance     apps/worker/src/devnet-squads-upgrade.ts inspect
+verify buffer       ... verify-buffer      (TYCHE_UPGRADE_BUFFER, TYCHE_ARTIFACT_SHA256,
+                                            TYCHE_ARTIFACT_BYTES)
+propose             ... propose            (+ TYCHE_UPGRADE_SPILL)
+approve             ... approve            (TYCHE_TRANSACTION_INDEX, TYCHE_APPROVER_ENV)
+status / execute    ... status | execute   (TYCHE_TRANSACTION_INDEX)
+```
+
+Both `.sh` commands run inside the toolchain container with the sbf.sh mounts;
+the Squads operator runs on the host with `node --import tsx --env-file=.env`.
+`propose` re-verifies the buffer's bytes and authority before it will create
+anything, so a buffer that does not match the reviewed artifact cannot reach a
+vote. `execute` refuses below threshold.
+
 After the user gives explicit authorization, perform only the authorized stage:
 
 1. Extend ProgramData first if necessary; verify its final capacity.
@@ -106,7 +127,9 @@ After the user gives explicit authorization, perform only the authorized stage:
 3. Move buffer authority to the canonical Squads vault if authorized.
 4. Create one proposal with zero approvals. Creation is not approval or
    execution.
-5. Each independent member approves through its own wallet.
+5. Each independent member approves through its own wallet. If the user directs
+   one operator to hold several member keys, the threshold is met without
+   independent review — say so plainly and record it in the Work Log.
 6. Execute only after the threshold is on-chain and the final transaction still
    matches the reviewed artifact and accounts.
 
