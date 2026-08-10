@@ -4,8 +4,9 @@
 import { useState } from "react";
 
 import { useTyche } from "../context";
-import { fmtInt, fmtSol, fmtTurnId, lamportsToSol, truncateAddress } from "../data/format";
+import { fmtClaimSol, fmtInt, fmtSol, fmtTurnId, lamportsToSol, truncateAddress } from "../data/format";
 import { usePlayerClaims } from "../data/hooks";
+import { summarizePlayerClaims } from "../data/claimState";
 import { getRoundPhase } from "../roundPhase";
 import { Dealer, Ico, Medal, VoteTally, useCountdownTo, useLivePrize } from "../shared";
 
@@ -63,7 +64,10 @@ export function HomeScreen() {
   const [h, m, s] = useCountdownTo(endSeconds);
   const [p1h, p1m, p1s] = useCountdownTo(phase1EndsAt);
   const { claims } = usePlayerClaims(walletAddress);
-  const claimableSol = lamportsToSol(claims?.availableLamports ?? 0);
+  const claimTotals = summarizePlayerClaims(claims?.records ?? []);
+  const claimableSol = lamportsToSol(
+    claimTotals.claimablePrizeLamports + claimTotals.claimableRewardLamports,
+  );
   const nowSec = Math.floor(Date.now() / 1000);
   const phase = getRoundPhase({ nowSeconds: nowSec, phase1EndsAt, turn: turnState });
   const inPhase1 = phase === "create_play";
@@ -228,7 +232,7 @@ export function HomeScreen() {
             <span style={{ width: 38, height: 38, borderRadius: 12, background: "var(--green)", color: "#08110C", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.gift style={{ color: "#08110C" }} /></span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 14.5, fontWeight: 700 }}>Prize ready to claim</div>
-              <div style={{ fontSize: 12.5, color: "var(--muted)" }}><span className="ide-num" style={{ color: "var(--green)", fontWeight: 700 }}>{fmtSol(claimableSol)} SOL</span> available - claim before it expires</div>
+              <div style={{ fontSize: 12.5, color: "var(--muted)" }}><span className="ide-num" style={{ color: "var(--green)", fontWeight: 700 }}>{fmtClaimSol(claimableSol)} SOL</span> available - claim before it expires</div>
             </div>
             <Ico.arrow style={{ color: "var(--green)", flexShrink: 0 }} />
           </button>

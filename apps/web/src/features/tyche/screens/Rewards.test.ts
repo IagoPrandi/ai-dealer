@@ -5,6 +5,7 @@ import { formatTokenAtoms } from "../data/format";
 import type { ClaimRecordApi } from "../data/types";
 import {
   formatLamportString,
+  getTreasuryClaimMinimumMessage,
   parseTokenAmountToAtoms,
   summarizeRewardClaims,
   type JdrStateSnapshot,
@@ -58,6 +59,15 @@ test("token and SOL formatting stays exact above Number safe integer range", () 
     "9007199254.740993",
   );
   assert.throws(() => parseTokenAmountToAtoms("1.0000000001"), /up to 9/);
+});
+
+test("the minimum treasury claim notice appears only for an attempted amount below the threshold", () => {
+  assert.equal(getTreasuryClaimMinimumMessage(null), null);
+  assert.match(
+    getTreasuryClaimMinimumMessage("4999999") ?? "",
+    /At least 0\.005 SOL/,
+  );
+  assert.equal(getTreasuryClaimMinimumMessage("5000000"), null);
 });
 
 function jdrSnapshot(

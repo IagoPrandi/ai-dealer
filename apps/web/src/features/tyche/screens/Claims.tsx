@@ -1,14 +1,17 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { address } from "@solana/kit";
 
-import { createClaimInstruction } from "../../../solana/tycheProgram";
 import { useTyche } from "../context";
-import { postClaimComplete, postClaimRequest } from "../data/apiClient";
-import { fmtSol, fmtTurnId, lamportsToSol, truncateAddress } from "../data/format";
+import { claimRecordToWallet } from "../data/claimFlow";
+import {
+  isClaimActionable,
+  isClaimExpired,
+  summarizePlayerClaims,
+} from "../data/claimState";
+import { fmtClaimSol, fmtTurnId, lamportsToSol, truncateAddress } from "../data/format";
 import { usePlayerClaims } from "../data/hooks";
-import { describeTxError, sendInstruction } from "../data/tx";
+import { describeTxError } from "../data/tx";
 import type { ClaimKind, ClaimRecordApi, ClaimStatus } from "../data/types";
 import { Dealer, Ico, ScreenHead, SectionLabel } from "../shared";
 
@@ -64,7 +67,14 @@ function ClaimRow({
   onClaim: (record: ClaimRecordApi) => void;
   record: ClaimRecordApi;
 }) {
-  const claimable = record.status === "available";
+  const expired = isClaimExpired(record);
+  const claimable = isClaimActionable(record);
+  const actionLabel =
+    record.status === "pending_wallet_approval"
+      ? "Resume claim"
+      : record.status === "failed"
+        ? "Retry claim"
+        : "Claim to wallet";
   return (
     <div className="ide-card" style={{ padding: "14px 15px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
@@ -74,7 +84,7 @@ function ClaimRow({
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div style={{ fontWeight: 800, fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{KIND_LABELS[record.kind]}</div>
-            <span className="ide-pill" style={{ color: claimTone(record.status), padding: "4px 8px" }}>{STATUS_LABELS[record.status]}</span>
+            <span className="ide-pill" style={{ color: expired ? "var(--dim)" : claimTone(record.status), padding: "4px 8px" }}>{expired ? "Expired" : STATUS_LABELS[record.status]}</span>
           </div>
           <div style={{ color: "var(--muted)", fontSize: 12.5, marginTop: 4 }}>
             <span className="ide-num">{fmtTurnId(record.turnId)}</span>
@@ -83,7 +93,7 @@ function ClaimRow({
           </div>
         </div>
         <div style={{ textAlign: "right", flexShrink: 0 }}>
-          <div className="ide-num" style={{ fontWeight: 800, fontSize: 15.5 }}>{fmtSol(lamportsToSol(record.amountLamports))} SOL</div>
+          <div className="ide-num" style={{ fontWeight: 800, fontSize: 15.5 }}>{fmtClaimSol(lamportsToSol(record.amountLamports))} SOL</div>
           <a href={`/round/${record.turnId}`} style={{ color: "var(--purple-soft)", fontSize: 12.5, textDecoration: "none" }}>Round detail</a>
         </div>
       </div>
@@ -95,11 +105,11 @@ function ClaimRow({
           style={{ width: "100%", justifyContent: "center", marginTop: 12, padding: 12, opacity: busy ? 0.6 : 1 }}
           type="button"
         >
-          <Ico.withdraw style={{ color: "#08110C" }} /> {busy ? "Claiming..." : "Claim to wallet"}
+          <Ico.withdraw style={{ color: "#08110C" }} /> {busy ? "Claiming..." : actionLabel}
         </button>
       ) : (
         <div style={{ color: "var(--dim)", fontSize: 12.5, lineHeight: 1.45, marginTop: 10 }}>
-          {record.statusReason}
+          {expired ? "Claim window expired" : record.statusReason}
         </div>
       )}
     </div>
@@ -121,8 +131,12 @@ export function ClaimsScreen() {
     [claims?.records],
   );
 
-  const claimableCount = records.filter((record) => record.status === "available").length;
-  const pendingCount = records.filter((record) => record.status === "pending_wallet_approval").length;
+  const claimTotals = summarizePlayerClaims(records);
+  const actionable = claimTotals.actionable;
+  const actionableLamports =
+    claimTotals.claimablePrizeLamports + claimTotals.claimableRewardLamports;
+  const claimableCount = actionable.length;
+  const pendingCount = actionable.filter((record) => record.status === "pending_wallet_approval").length;
   const claimedCount = records.filter((record) => record.status === "claimed").length;
 
   async function claim(record: ClaimRecordApi) {
@@ -132,23 +146,16 @@ export function ClaimsScreen() {
     setBusyClaimId(record.claimId);
     setTxError(null);
     try {
-      await postClaimRequest(record.claimId, walletAddress);
-      const instruction = await createClaimInstruction({
-        kind: record.kind,
-        player: address(walletAddress),
-        turnId: record.turnId,
+      await claimRecordToWallet({
+        client,
+        record,
+        wallet,
+        walletAddress,
       });
-      const signature = await sendInstruction(client, wallet, instruction);
-      await postClaimComplete({
-        claimId: record.claimId,
-        signature,
-        status: "claimed",
-        wallet: walletAddress,
-      });
-      reload();
     } catch (cause) {
       setTxError(describeTxError(cause));
     } finally {
+      reload();
       setBusyClaimId(null);
     }
   }
@@ -179,8 +186,7 @@ export function ClaimsScreen() {
 
         <div className="ide-card" style={{ padding: 18, marginBottom: 14, borderColor: "var(--line-2)", background: "linear-gradient(150deg, var(--surface-2), var(--surface))" }}>
           <SectionLabel>Available to claim</SectionLabel>
-          <div className="ide-num" style={{ fontSize: 36, fontWeight: 800, marginTop: 6 }}>{fmtSol(lamportsToSol(claims?.availableLamports ?? 0))} <span style={{ color: "var(--purple-soft)", fontSize: 16 }}>SOL</span></div>
-          <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 6 }}>{truncateAddress(walletAddress)}</div>
+          <div className="ide-num" style={{ fontSize: 36, fontWeight: 800, marginTop: 6 }}>{fmtClaimSol(lamportsToSol(actionableLamports))} <span style={{ color: "var(--purple-soft)", fontSize: 16 }}>SOL</span></div>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 9, marginBottom: 14 }}>

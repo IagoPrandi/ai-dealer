@@ -39,6 +39,7 @@ export interface RuleVotesApi {
 }
 
 export interface TokenomicsPublicApi {
+  accruedTreasuryFeesLamports: string;
   available: boolean;
   projection: {
     allocation: {

@@ -138,6 +138,7 @@ function resolveMock(url: string): unknown | undefined {
   if (url.includes("/tokenomics/public")) {
     return {
       tokenomics: {
+        accruedTreasuryFeesLamports: "0",
         available: false,
         projection: null,
         reason: "not_indexed",

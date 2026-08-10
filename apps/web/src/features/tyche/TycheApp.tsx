@@ -184,6 +184,13 @@ export function TycheApp({
   const [actionError, setActionError] = useState<null | string>(null);
   const [connectError, setConnectError] = useState<null | string>(null);
 
+  const reloadAll = useCallback(() => {
+    activeTurn.refresh();
+    reloadRound();
+    rules.reload();
+    reloadPlayer();
+  }, [activeTurn, reloadRound, rules, reloadPlayer]);
+
   const go = useCallback((next: Screen, params?: NavParams) => {
     if (next === "home" && pathname !== "/play" && !pathname.startsWith("/dev/gallery")) {
       router.push("/play");
@@ -210,9 +217,12 @@ export function TycheApp({
     } else {
       setChatId(params?.chatId ?? null);
     }
+    if (next !== screen) {
+      reloadAll();
+    }
     setDetail(null);
     setScreen(next);
-  }, [pathname, resultTurnId, router]);
+  }, [pathname, reloadAll, resultTurnId, router, screen]);
 
   const openDetail = useCallback(
     (ruleId: number, opts?: { canAgainst?: boolean; rank?: number | null }) => {
@@ -220,13 +230,6 @@ export function TycheApp({
     },
     [],
   );
-
-  const reloadAll = useCallback(() => {
-    activeTurn.refresh();
-    reloadRound();
-    rules.reload();
-    reloadPlayer();
-  }, [activeTurn, reloadRound, rules, reloadPlayer]);
 
   const requestConnect = useCallback(() => {
     setConnectError(null);

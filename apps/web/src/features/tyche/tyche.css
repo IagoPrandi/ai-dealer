@@ -503,12 +503,6 @@
   letter-spacing: .06em;
   text-transform: uppercase;
 }
-.ide-rewards-token-balance {
-  margin-top: 8px;
-  font-size: 38px;
-  font-weight: 800;
-}
-.ide-rewards-token-balance span { color: var(--purple-soft); font-size: 17px; }
 .ide-rewards-balance-strip {
   display: flex;
   margin-top: 16px;
@@ -629,6 +623,19 @@
   line-height: 1.45;
 }
 .ide-rewards-tabs { margin-bottom: 16px; }
+.ide-rewards-pull-refresh {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  overflow: hidden;
+  color: var(--dim);
+  font-size: 12px;
+  font-weight: 700;
+  transition: height .18s ease;
+}
+.ide-rewards-pull-refresh svg { flex-shrink: 0; }
+.ide-rewards-pull-refresh.is-refreshing { color: var(--purple-soft); }
 .ide-rewards-panel-stack { display: grid; gap: 12px; animation: ide-rise .25s ease both; }
 .ide-rewards-overview-card { padding: 16px; }
 .ide-rewards-inline-state {
@@ -652,21 +659,23 @@
 .ide-rewards-epoch-metrics > div { min-width: 0; padding: 0 12px; border-left: 1px solid var(--line); }
 .ide-rewards-epoch-metrics > div:first-child { padding-left: 0; border-left: none; }
 .ide-rewards-epoch-metrics > div:last-child { padding-right: 0; }
-.ide-rewards-epoch-metrics span { display: block; min-height: 28px; color: var(--dim); font-size: 11px; line-height: 1.25; }
-.ide-rewards-epoch-metrics strong { display: block; margin-top: 5px; font-size: 16px; font-weight: 700; }
-.ide-rewards-epoch-metrics small { color: var(--muted); font-size: 11px; }
-.ide-rewards-epoch-state {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid var(--line);
-  color: var(--dim);
+.ide-rewards-epoch-metrics span { display: block; color: var(--dim); font-size: 11px; line-height: 1.25; }
+.ide-rewards-epoch-metrics strong {
+  display: block;
+  margin-top: 2px;
+  font-size: clamp(18px, 5.2vw, 22px);
+  font-weight: 700;
+  line-height: 1.08;
+  white-space: nowrap;
+}
+.ide-rewards-epoch-metrics small { color: var(--muted); font-size: 12px; }
+.ide-rewards-treasury-claim-button { width: 100%; margin-top: 16px; }
+.ide-rewards-treasury-claim-message {
+  margin: 10px 2px 0;
+  color: var(--muted);
   font-size: 12.5px;
   line-height: 1.45;
 }
-.ide-rewards-epoch-state svg { flex-shrink: 0; margin-top: 2px; }
 .ide-rewards-lock-panel {
   margin-top: 14px;
   padding-top: 14px;
@@ -678,12 +687,6 @@
   font-size: 12.5px;
   line-height: 1.45;
 }
-.ide-rewards-claim-summary { display: flex; align-items: center; gap: 12px; }
-.ide-rewards-claim-summary > div { flex: 1; min-width: 0; }
-.ide-rewards-claim-summary span { display: block; color: var(--dim); font-size: 12px; }
-.ide-rewards-claim-summary strong { display: block; margin-top: 4px; font-size: 21px; font-weight: 800; }
-.ide-rewards-claim-summary .ide-btn { min-height: 44px; padding: 11px 13px; font-size: 14px; }
-.ide-rewards-claim-summary .ide-btn:disabled { opacity: .42; cursor: not-allowed; box-shadow: none; }
 .ide-rewards-text-button {
   min-height: 44px;
   padding: 8px;
@@ -812,8 +815,6 @@
   .ide-rewards-overview-card { padding: 14px; }
   .ide-rewards-token-form-actions { grid-template-columns: 1fr; }
   .ide-rewards-token-form-actions .ide-btn { width: 100%; }
-  .ide-rewards-claim-summary { align-items: stretch; flex-direction: column; }
-  .ide-rewards-claim-summary .ide-btn { width: 100%; }
   .ide-rewards-activity-row { align-items: flex-start; }
   .ide-rewards-activity-icon { display: none; }
 }

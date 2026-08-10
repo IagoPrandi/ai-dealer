@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { address } from "@solana/kit";
+import { MINIMUM_CLAIM_THRESHOLD_SOL } from "@tyche/constants";
 
 import { useTyche } from "../context";
 import {
@@ -24,8 +25,6 @@ import {
   fetchManualTokenRewards,
   fetchOnChainTokenBalance,
   fetchOnChainTokenomicsPosition,
-  TYCHE_TOKEN_MINT,
-  TOKENOMICS_CORE_PROGRAM_ID,
   type ManualTokenReward,
   type OnChainTokenBalance,
   type OnChainTokenomicsPosition,
@@ -34,6 +33,10 @@ import { Dealer, Ico, ScreenHead } from "../shared";
 import { describeTxError, sendInstruction, sendInstructions } from "../data/tx";
 
 const TOKEN_SYMBOL = process.env.NEXT_PUBLIC_TYCHE_TOKEN_SYMBOL || "JDR";
+const PULL_REFRESH_THRESHOLD_PX = 56;
+const MINIMUM_CLAIM_THRESHOLD_LAMPORTS = BigInt(
+  Math.round(MINIMUM_CLAIM_THRESHOLD_SOL * 1_000_000_000),
+);
 
 const KIND_LABELS: Record<ClaimKind, string> = {
   creator_reward: "Creator reward",
@@ -126,6 +129,18 @@ export function formatLamportString(value: string): string {
     .padStart(9, "0")
     .replace(/0+$/, "");
   return fraction ? `${whole}.${fraction}` : whole.toString();
+}
+
+export function getTreasuryClaimMinimumMessage(
+  claimableLamports: string | null,
+): string | null {
+  if (
+    claimableLamports === null ||
+    BigInt(claimableLamports) >= MINIMUM_CLAIM_THRESHOLD_LAMPORTS
+  ) {
+    return null;
+  }
+  return `At least ${formatLamportString(MINIMUM_CLAIM_THRESHOLD_LAMPORTS.toString())} SOL must be claimable before a treasury-fee claim can be submitted.`;
 }
 
 export interface JdrStateSnapshot {
@@ -306,6 +321,11 @@ export function RewardsScreen() {
   const [tokenBusy, setTokenBusy] = useState(false);
   const [claimMessage, setClaimMessage] = useState<string | null>(null);
   const [epochMessage, setEpochMessage] = useState<string | null>(null);
+  const [treasuryClaimMessage, setTreasuryClaimMessage] = useState<
+    string | null
+  >(null);
+  const [pullDistance, setPullDistance] = useState(0);
+  const [manualRefreshing, setManualRefreshing] = useState(false);
   const [onChainBalance, setOnChainBalance] = useState<{
     atoms: string | null;
     error: boolean;
@@ -326,6 +346,8 @@ export function RewardsScreen() {
   const [balanceReload, setBalanceReload] = useState(0);
   const balanceRequestRef = useRef(0);
   const positionRequestRef = useRef(0);
+  const pullDistanceRef = useRef(0);
+  const pullStartYRef = useRef<number | null>(null);
   const summary = useMemo(
     () => summarizeRewardClaims(claims?.records ?? []),
     [claims?.records],
@@ -341,12 +363,14 @@ export function RewardsScreen() {
   const unreadCount = notificationsRead ? 0 : summary.notificationCount;
   const publicProjection = tokenomics.publicState?.projection ?? null;
   const walletProjection = tokenomics.walletState;
-  const indexedTokenomicsReady =
-    tokenomics.publicState?.available === true &&
-    Boolean(publicProjection) &&
-    Boolean(walletProjection) &&
-    publicProjection?.programId === TOKENOMICS_CORE_PROGRAM_ID &&
-    publicProjection?.mint === TYCHE_TOKEN_MINT;
+  const accruedTreasuryFeesLamports =
+    tokenomics.publicState?.accruedTreasuryFeesLamports ?? null;
+  const revenuePoolLamports =
+    publicProjection?.currentEpoch?.grossDistributableLamports ??
+    accruedTreasuryFeesLamports;
+  const sealedClaimableLamports =
+    walletProjection?.claimableLamports ??
+    (!tokenomics.loading && !tokenomics.error ? "0" : null);
   const claimableTokenomics = walletProjection?.claimRecords.find(
     (claim) => claim.status === "claimable",
   );
@@ -406,21 +430,6 @@ export function RewardsScreen() {
   }, [balanceReload, client, walletAddress]);
 
   useEffect(() => {
-    if (!walletAddress || tokenBusy) return;
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") {
-        setBalanceReload((value) => value + 1);
-      }
-    };
-    window.addEventListener("focus", refreshWhenVisible);
-    document.addEventListener("visibilitychange", refreshWhenVisible);
-    return () => {
-      window.removeEventListener("focus", refreshWhenVisible);
-      document.removeEventListener("visibilitychange", refreshWhenVisible);
-    };
-  }, [tokenBusy, walletAddress]);
-
-  useEffect(() => {
     let active = true;
     const requestId = ++positionRequestRef.current;
     if (!walletAddress) {
@@ -459,6 +468,56 @@ export function RewardsScreen() {
       active = false;
     };
   }, [balanceReload, client, walletAddress]);
+
+  useEffect(() => {
+    if (
+      !manualRefreshing ||
+      loading ||
+      tokenomics.loading ||
+      onChainBalance.loading ||
+      onChainPosition.loading ||
+      manualRewards.loading
+    ) {
+      return;
+    }
+    const id = window.setTimeout(() => {
+      pullDistanceRef.current = 0;
+      setPullDistance(0);
+      setManualRefreshing(false);
+    }, 180);
+    return () => window.clearTimeout(id);
+  }, [
+    loading,
+    manualRefreshing,
+    manualRewards.loading,
+    onChainBalance.loading,
+    onChainPosition.loading,
+    tokenomics.loading,
+  ]);
+
+  function refreshRewards() {
+    if (manualRefreshing || tokenBusy) {
+      return;
+    }
+    pullDistanceRef.current = 44;
+    setPullDistance(44);
+    setManualRefreshing(true);
+    setTreasuryClaimMessage(null);
+    setOnChainBalance((current) => ({ ...current, loading: true }));
+    setOnChainPosition((current) => ({ ...current, loading: true }));
+    setManualRewards((current) => ({ ...current, loading: true }));
+    reload();
+    tokenomics.reload();
+    setBalanceReload((value) => value + 1);
+  }
+
+  function resetPullGesture() {
+    pullStartYRef.current = null;
+    if (!manualRefreshing) {
+      pullDistanceRef.current = 0;
+      setPullDistance(0);
+    }
+  }
 
   async function submitTokenAction() {
     if (
@@ -580,7 +639,7 @@ export function RewardsScreen() {
         setOnChainBalance((current) => ({ ...current, loading: false }));
         setOnChainPosition((current) => ({ ...current, loading: false }));
         setEpochMessage(
-          `${action === "lock" ? "Lock" : "Unlock"} confirmed: ${truncateAddress(signature)}. Live balances will refresh when this page regains focus.`,
+          `${action === "lock" ? "Lock" : "Unlock"} confirmed: ${truncateAddress(signature)}. Pull down to refresh live balances.`,
         );
       }
     } catch (cause) {
@@ -640,16 +699,26 @@ export function RewardsScreen() {
   }
 
   async function claimTokenomicsSol() {
+    setTreasuryClaimMessage(null);
+    const minimumMessage = getTreasuryClaimMinimumMessage(
+      sealedClaimableLamports,
+    );
+    if (minimumMessage) {
+      setTreasuryClaimMessage(minimumMessage);
+      return;
+    }
     if (
       !wallet ||
       !walletAddress ||
       !claimableTokenomics ||
       !publicProjection
     ) {
+      setTreasuryClaimMessage(
+        "A sealed treasury-fee claim is not ready for this wallet yet.",
+      );
       return;
     }
     setTokenBusy(true);
-    setEpochMessage(null);
     try {
       const instruction = await createTokenomicsClaimInstruction({
         amountLamports: BigInt(claimableTokenomics.amountLamports),
@@ -664,12 +733,12 @@ export function RewardsScreen() {
         treasurySolVault: publicProjection.vaults.treasurySol,
       });
       const signature = await sendInstruction(client, wallet, instruction);
-      setEpochMessage(
+      setTreasuryClaimMessage(
         `Treasury-fee claim confirmed: ${truncateAddress(signature)}.`,
       );
       tokenomics.reload();
     } catch (cause) {
-      setEpochMessage(describeTxError(cause));
+      setTreasuryClaimMessage(describeTxError(cause));
     } finally {
       setTokenBusy(false);
     }
@@ -703,7 +772,53 @@ export function RewardsScreen() {
       style={{ height: "100%", position: "relative", overflow: "hidden" }}
     >
       <div className="ide-ambient" />
-      <div className="ide-scroll ide-rewards-scroll">
+      <div
+        className="ide-scroll ide-rewards-scroll"
+        onTouchCancel={resetPullGesture}
+        onTouchEnd={() => {
+          const shouldRefresh =
+            pullDistanceRef.current >= PULL_REFRESH_THRESHOLD_PX;
+          pullStartYRef.current = null;
+          if (shouldRefresh) {
+            refreshRewards();
+          } else {
+            resetPullGesture();
+          }
+        }}
+        onTouchMove={(event) => {
+          if (pullStartYRef.current === null || manualRefreshing) {
+            return;
+          }
+          const delta = event.touches[0]!.clientY - pullStartYRef.current;
+          const nextDistance = Math.min(76, Math.max(0, delta * 0.5));
+          pullDistanceRef.current = nextDistance;
+          setPullDistance(nextDistance);
+        }}
+        onTouchStart={(event) => {
+          if (
+            event.currentTarget.scrollTop <= 0 &&
+            event.touches.length === 1 &&
+            !manualRefreshing
+          ) {
+            pullStartYRef.current = event.touches[0]!.clientY;
+          }
+        }}
+      >
+        <div
+          aria-hidden={!manualRefreshing && pullDistance === 0}
+          aria-live="polite"
+          className={`ide-rewards-pull-refresh${manualRefreshing ? " is-refreshing" : ""}`}
+          style={{ height: manualRefreshing ? 44 : pullDistance }}
+        >
+          <Ico.down className={manualRefreshing ? "ide-spin" : undefined} />
+          <span>
+            {manualRefreshing
+              ? "Refreshing…"
+              : pullDistance >= PULL_REFRESH_THRESHOLD_PX
+                ? "Release to refresh"
+                : "Pull to refresh"}
+          </span>
+        </div>
         <ScreenHead
           onBack={() => go("profile")}
           right={
@@ -733,34 +848,28 @@ export function RewardsScreen() {
           <div className="ide-rewards-hero-glow" />
           <div className="ide-rewards-hero-content">
             <span className="ide-rewards-status" id="staking-balance-title">
-              {onChainBalance.loading
-                ? "Checking JDR on devnet"
-                : onChainBalance.error
-                  ? "JDR balance unavailable"
-                  : "Live JDR wallet balance"}
+              Live JDR rewards on devnet
             </span>
-            <div className="ide-rewards-token-balance ide-num">
-              {onChainBalance.atoms !== null
-                ? formatTokenAtoms(onChainBalance.atoms)
-                : "—"}{" "}
-              <span>{TOKEN_SYMBOL} available</span>
-            </div>
             <div className="ide-rewards-balance-strip">
               <div>
-                <span>Claimable</span>
+                <span>{TOKEN_SYMBOL} available</span>
+                <strong className="ide-num">
+                  {onChainBalance.loading
+                    ? "Loading…"
+                    : onChainBalance.error
+                      ? "Unavailable"
+                      : `${formatTokenAtoms(onChainBalance.atoms ?? "0")} ${TOKEN_SYMBOL}`}
+                </strong>
+              </div>
+              <i aria-hidden="true" />
+              <div>
+                <span>{TOKEN_SYMBOL} claimable</span>
                 <strong className="ide-num">
                   {manualRewards.loading
                     ? "Loading…"
                     : manualRewards.error
                       ? "Unavailable"
                       : `${formatTokenAtoms(manualClaimableAtoms.toString())} ${TOKEN_SYMBOL}`}
-                </strong>
-              </div>
-              <i aria-hidden="true" />
-              <div>
-                <span>Wallet</span>
-                <strong className="ide-num">
-                  {truncateAddress(walletAddress)}
                 </strong>
               </div>
             </div>
@@ -830,70 +939,67 @@ export function RewardsScreen() {
           <div className="ide-rewards-panel-stack" role="tabpanel">
             <section className="ide-card ide-rewards-overview-card">
               <div className="ide-rewards-epoch-heading">
-                <span>Revenue epoch</span>
+                <span>Treasury revenue</span>
                 <strong className="ide-num">
-                  #{publicProjection?.currentEpoch?.epochId ?? "—"}
+                  {publicProjection?.currentEpoch
+                    ? `#${publicProjection.currentEpoch.epochId}`
+                    : "Accrued"}
                 </strong>
               </div>
               <div className="ide-rewards-epoch-metrics">
                 <div>
-                  <span>Your weight</span>
+                  <span>Locked {TOKEN_SYMBOL}</span>
                   <strong className="ide-num">
-                    {walletProjection?.currentEpochWeight ?? "—"}
+                    {onChainPosition.loading
+                      ? "Loading…"
+                      : onChainPosition.error
+                        ? "Unavailable"
+                        : formatTokenAtoms(
+                            onChainPosition.data?.lockedAtoms ?? "0",
+                          )}
                   </strong>
                 </div>
                 <div>
-                  <span>Pool this epoch</span>
+                  <span>Treasury pool</span>
                   <strong className="ide-num">
-                    {publicProjection?.currentEpoch
-                      ? formatLamportString(
-                          publicProjection.currentEpoch
-                            .grossDistributableLamports,
-                        )
-                      : "—"}{" "}
+                    {tokenomics.loading
+                      ? "Loading…"
+                      : tokenomics.error || revenuePoolLamports === null
+                        ? "Unavailable"
+                        : formatLamportString(revenuePoolLamports)}{" "}
                     <small>SOL</small>
                   </strong>
                 </div>
                 <div>
-                  <span>Claimable</span>
+                  <span>Claimable now</span>
                   <strong className="ide-num">
-                    {walletProjection
-                      ? formatLamportString(walletProjection.claimableLamports)
-                      : "—"}{" "}
+                    {tokenomics.loading
+                      ? "Loading…"
+                      : tokenomics.error || sealedClaimableLamports === null
+                        ? "Unavailable"
+                        : formatLamportString(sealedClaimableLamports)}{" "}
                     <small>SOL</small>
                   </strong>
                 </div>
-              </div>
-              <div className="ide-rewards-epoch-state">
-                <Ico.info />
-                <span>
-                  {publicProjection?.currentEpoch
-                    ? `Epoch is ${publicProjection.currentEpoch.status.replaceAll("_", " ")}. Claims activate only after sealing.`
-                    : "Epoch accounting is not indexed."}
-                </span>
               </div>
               <button
-                className="ide-btn"
-                disabled={
-                  !claimableTokenomics || tokenBusy || !indexedTokenomicsReady
-                }
+                className="ide-btn ide-rewards-treasury-claim-button"
+                disabled={tokenBusy || tokenomics.loading || Boolean(tokenomics.error)}
                 onClick={() => void claimTokenomicsSol()}
                 type="button"
               >
                 <Ico.withdraw /> Claim sealed SOL
               </button>
+              {treasuryClaimMessage ? (
+                <p
+                  className="ide-rewards-treasury-claim-message"
+                  role="status"
+                >
+                  {treasuryClaimMessage}
+                </p>
+              ) : null}
 
               <div className="ide-rewards-lock-panel">
-                <div className="ide-rewards-claim-summary">
-                  <div>
-                    <span>Locked {TOKEN_SYMBOL}</span>
-                    <strong className="ide-num">
-                      {onChainPosition.data
-                        ? formatTokenAtoms(onChainPosition.data.lockedAtoms)
-                        : "—"}
-                    </strong>
-                  </div>
-                </div>
                 <div
                   className="ide-rewards-actions"
                   aria-describedby="staking-lock-note"

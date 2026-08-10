@@ -445,7 +445,7 @@ export function postRuleRemoval(body: unknown) {
 }
 
 export function postClaimRequest(claimId: string, wallet: string) {
-  return postJson<{ claim: unknown }>("/claim-records/request", {
+  return postStrictJson<{ claim: unknown }>("/claim-records/request", {
     claimId,
     wallet,
   });
@@ -453,11 +453,12 @@ export function postClaimRequest(claimId: string, wallet: string) {
 
 export function postClaimComplete(body: {
   claimId: string;
+  failureReason?: string;
   signature?: string;
   status: "claimed" | "failed";
   wallet: string;
 }) {
-  return postJson<{ claim: unknown }>("/claim-records/complete", body);
+  return postStrictJson<{ claim: unknown }>("/claim-records/complete", body);
 }
 
 export function postConversationDraft(

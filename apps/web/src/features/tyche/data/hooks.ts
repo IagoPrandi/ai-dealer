@@ -85,7 +85,7 @@ export function resolveVisibleTurnId(snapshot: ActiveTurnSnapshot) {
   return latestKnownTurnId > 0 ? latestKnownTurnId : TYCHE_ACTIVE_TURN_ID;
 }
 
-/** Polls the on-chain GlobalConfig + active TurnState every 10s (and on focus). */
+/** Loads the on-chain GlobalConfig + active TurnState and exposes manual refresh. */
 export function useActiveTurn(): ActiveTurnView {
   const [view, setView] = useState<ActiveTurnViewState>({
     activeTurnId: TYCHE_ACTIVE_TURN_ID,
@@ -135,12 +135,8 @@ export function useActiveTurn(): ActiveTurnView {
       }
     };
     run();
-    const id = window.setInterval(run, 10_000);
-    window.addEventListener("focus", run);
     return () => {
       mounted = false;
-      window.clearInterval(id);
-      window.removeEventListener("focus", run);
     };
   }, [load]);
 
@@ -181,19 +177,13 @@ export function useRound(turnId: null | number, activeTurnId?: number) {
     [activeTurnId, turnId],
   );
 
-  // Poll so post-window phases (finalist shortlist, decision window, draw,
-  // claims) surface live without a manual reload — same cadence as
-  // `useActiveTurn`.
+  // Load when this round becomes active. Later updates are explicit so the UI
+  // does not repeatedly return to a loading state while the user is reading.
   useEffect(() => {
     const controller = new AbortController();
-    const run = () => reload(controller.signal);
-    run();
-    const id = window.setInterval(run, 10_000);
-    window.addEventListener("focus", run);
+    reload(controller.signal);
     return () => {
       controller.abort();
-      window.clearInterval(id);
-      window.removeEventListener("focus", run);
     };
   }, [reload]);
 
@@ -534,18 +524,13 @@ export function usePlayerClaims(walletAddress: string | undefined) {
     [walletAddress],
   );
 
-  // Poll so newly recorded claims (post-settlement) appear without a manual
-  // reload — e.g. the Home claim banner right after a turn settles.
+  // Load on screen entry or wallet change. Screens expose explicit retry or
+  // pull-to-refresh controls for later updates.
   useEffect(() => {
     const controller = new AbortController();
-    const run = () => reload(controller.signal);
-    run();
-    const id = window.setInterval(run, 10_000);
-    window.addEventListener("focus", run);
+    reload(controller.signal);
     return () => {
       controller.abort();
-      window.clearInterval(id);
-      window.removeEventListener("focus", run);
     };
   }, [reload]);
 
@@ -586,14 +571,9 @@ export function useTokenomics(walletAddress: string | undefined) {
 
   useEffect(() => {
     const controller = new AbortController();
-    const run = () => reload(controller.signal);
-    run();
-    const id = window.setInterval(run, 15_000);
-    window.addEventListener("focus", run);
+    reload(controller.signal);
     return () => {
       controller.abort();
-      window.clearInterval(id);
-      window.removeEventListener("focus", run);
     };
   }, [reload]);
 

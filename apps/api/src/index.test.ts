@@ -28,6 +28,7 @@ import {
   getRepeatedVoteFeeReconciliation,
   getRewardSummary,
   getActivityEvents,
+  getAccruedTreasuryFeesLamports,
   getDefaultActiveTurnId,
   getGuessReceipt,
   getRolloverActivityEvents,
@@ -944,6 +945,10 @@ test("public transparency snapshot aggregates M5 turn, economy, rule, proof, tre
   });
 
   const snapshot = getTransparencySnapshot({ fromTurnId: turnId, toTurnId: turnId });
+  assert.equal(
+    getAccruedTreasuryFeesLamports(),
+    getTransparencySnapshot().totals.platformTreasuryLamports,
+  );
   const csv = exportTransparencySnapshotCsv(snapshot);
   const serialized = JSON.stringify(snapshot).toLowerCase();
 

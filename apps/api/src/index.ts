@@ -7689,6 +7689,14 @@ function getPublicTurnIds() {
   return [...turnIds].sort((left, right) => left - right);
 }
 
+export function getAccruedTreasuryFeesLamports() {
+  return getPublicTurnIds().reduce(
+    (total, turnId) =>
+      addNumber(total, getPrizePoolAccounting(turnId).treasuryLamports),
+    0,
+  );
+}
+
 export function getDefaultActiveTurnId() {
   return getPublicTurnIds().at(-1) ?? TYCHE_ACTIVE_TURN_ID;
 }
@@ -10808,7 +10816,11 @@ export function handleApiRequest(
 
   if (request.method === "GET" && url.pathname === "/tokenomics/public") {
     sendJson(request, response, 200, {
-      tokenomics: getPublicTokenomicsSnapshot(),
+      tokenomics: {
+        ...getPublicTokenomicsSnapshot(),
+        accruedTreasuryFeesLamports:
+          getAccruedTreasuryFeesLamports().toString(),
+      },
     });
     return;
   }

@@ -1,9 +1,9 @@
 # Tyche — Channels, Cadence and Content Calendar (Weeks 1–8)
 
-> **Version:** 1.0.0
-> **Status:** Adopted — operational plan derived from the confirmed narrative
+> **Version:** 1.1.0
+> **Status:** Adopted — operational plan derived from the confirmed narrative. Revised on 2026-08-09 to carry the mythic register.
 > **Last updated:** 2026-08-09
-> **Narrative source:** [narrative-a-messaging.md](narrative-a-messaging.md) — every piece below inherits its guardrails
+> **Narrative source:** [narrative-a-messaging.md](narrative-a-messaging.md) — every piece below inherits its guardrails, including the mythic register (§3.1) and its limits (§4.7)
 > **Stage assumption:** weeks 1–4 pre-launch (product closed); weeks 5–8 launch and live rounds
 > **Language:** English only, all channels
 > **Budget:** zero paid media, zero paid creators, zero compensated posts — by requirement and by platform policy
@@ -49,14 +49,27 @@ Every channel has one job and one KPI. A channel without a distinct job is not o
 
 | Pillar | Share | Purpose | Example (production copy) |
 |---|---:|---|---|
-| **The Pen** | 25% | Sharing and conflict | "You didn't lose. You never got to read the rule." |
-| **Rule of the Round** | 25% | Ritual and return | Card: elected rule + author + verdict |
+| **The Pen** | 25% | Sharing and conflict | "The house had a god too. It just never took requests." |
+| **Rule of the Round** | 25% | Ritual and return | Card: the wish that became law + author + verdict |
 | **Build in public** | 20% | Dwell and trust | "Day 9: the draw stalled on an RPC rate limit. Here's the log and the fix." |
 | **Proof** | 15% | Saves and credibility | Frozen artifact hash, VRF proof, explained verdict |
 | **Rulewriters (UGC)** | 10% | Recognition and follows | Creator spotlight, Rule Hall |
-| **Invitation / action** | 5% | Conversion | A poll whose outcome actually changes something; a Space; a challenge |
+| **Invitation / action** | 5% | Conversion | "Make a wish. Out loud. Before the draw." — a poll whose outcome actually changes something; a Space; a challenge |
 
 Every post belongs to exactly one pillar and is logged as such. Pillar performance is compared by median, not by best case.
+
+### Where the mythic register is used
+
+The register of [narrative-a-messaging.md](narrative-a-messaging.md) §3.1 — *a god that answers one wish per round* — is the acquisition vocabulary of this plan. `Wish` is the public synonym of a rule proposal, and it is the word used in the invitation and the daily ritual, because it removes the onboarding cost of the phrase "propose a rule".
+
+| Surface | Register |
+|---|---|
+| The Pen, Invitation, Rule of the Round, UGC, vertical video | Mythic register permitted and preferred |
+| Proof posts, Build in public | Plain language; the register may frame, never carry the factual claim |
+| Site metadata, page titles, bio, docs headers, app manifests, partner briefs | Prohibited — classification surfaces, §4.3 and §4.7.6 |
+| Incidents, corrections, treasury, policy | Prohibited — the Rule Keeper speaks, §4.7.8 |
+
+What is granted is always the **rule**, never the win, and the election stays visible in the copy: the community elects, the god grants what was elected. No piece claims equal odds of winning; equality is stated about standing and the draw.
 
 ---
 
@@ -94,10 +107,10 @@ Product is closed. The goal is to have a narrative, a demonstrated tool, and a c
 | Day | Originals | Content |
 |---|---|---|
 | 1 | 3 | Manifesto post ("The house never needed loaded dice. It only needed the pen.") + a 5-post thread explaining the game in plain language. Founder visible and named. |
-| 2 | 3 | **Fine Print** #1 — a rule written by someone else that you only discover after you lose. Generic, never naming a company. |
+| 2 | 3 | **Fine Print** #1 — a rule written by someone else that you only discover after you lose. Generic, never naming a company. Closing line: "The house had a god too. It just never took requests." |
 | 3 | 3 | How a round works, in three screens. Site v1 goes live. |
-| 4 | 3 | Fine Print #2 + the first "write a rule anyone can read in one breath" invitation. |
-| 5 | 3 | What "frozen before the draw" actually means, with the artifact concept shown. |
+| 4 | 3 | Fine Print #2 + the first invitation in the mythic register: **"Make a wish. Out loud. Before the draw."** — a wish is a winning condition anyone can read in one breath. |
+| 5 | 3 | What "frozen before the draw" actually means, with the artifact concept shown: every wish is heard, one is granted, and it is granted in writing before anyone knows the numbers. |
 | 6–7 | 3/day | Rulewriters call: Telegram opens, hand-invited. |
 
 Also this week:
@@ -111,15 +124,18 @@ Also this week:
 
 *Goal: the public uses the tool before a product exists. Highest-return week in the plan.*
 
-**Open Rule Call (daily).** Post a theme; anyone replies with a rule in natural language; **we run it through the real AI Rule Compiler** and reply with the compiled artifact, the clarity verdict, and the difficulty classification.
+**Open Wish Call (daily).** Post a theme; anyone replies with a wish in natural language — a way of winning they would want to exist; **we run it through the real AI Rule Compiler** and reply with the compiled artifact, the clarity verdict, and the difficulty classification. (Product-layer name: rule proposal. `Wish` is the acquisition-layer word, per §3.1.)
 
 Why this is the centrepiece:
 
 - it demonstrates the pen and proves it at the same time;
+- it makes the premise literal before the product exists: every wish is heard, and it is answered in public with a compiled artifact;
 - it returns instant, personalised output — the strongest reason to reply that a pre-launch account can offer;
 - it produces UGC where the *user* is the author, which is what actually decentralises production;
 - it generates one shareable card per participant at zero marginal cost;
 - it is not compensated content, so it stays clear of §4.4 of the messaging doc.
+
+**Register discipline in this format:** every wish gets a reply — being heard is the promise, and it is one this week can keep in full. What the compiler returns is a validated condition, never an opinion about the author's chances, and the reply never suggests a wish would make its author likelier to win.
 
 Also this week:
 
@@ -133,9 +149,9 @@ Also this week:
 
 *Goal: one announced event with a verifiable delivery.*
 
-- **The First Round** — run a complete devnet round as a spectator event: open call for rules, community election, VRF draw, published verdict. This is a demonstration, not a beta opening.
-- **Two Spaces:** one before (how a rule gets frozen) and one after (the verdict).
-- **Creator kit released:** templates, the blindfolded-bust mark, remix licence terms, and an explicit do/don't sheet carrying the §4 guardrails.
+- **The First Round** — run a complete devnet round as a spectator event: open call for wishes, community election, VRF draw, published verdict. This is a demonstration, not a beta opening. The narrative beat of the week is the moment of granting: **one wish becomes law**, on screen, before the numbers exist.
+- **Two Spaces:** one before (how a wish gets frozen into law) and one after (the verdict).
+- **Creator kit released:** templates, the blindfolded-bust mark, remix licence terms, the mythic-register line set, and an explicit do/don't sheet carrying the §4 guardrails and the §4.7 register limits — the granted-rule boundary, no personal favour, no equal-odds claim.
 - **Publish the post-mortem** of anything that breaks. Under this narrative, an exposed failure is proof; a hidden one is the house.
 - **Cadence:** 4–6 posts/day on event days, each with a distinct function; back to 3 otherwise.
 
@@ -156,9 +172,9 @@ Also this week:
 
 | Week | Focus | Deliverables |
 |---|---|---|
-| **5** | Launch | Eligibility gate live, verification guide published, first real round. **Rule of the Round** becomes the permanent daily ritual. Open Discord if week-4 criteria were met. |
-| **6** | JDR campaign | The reserve enters the story: `0.6` per proposal, `0.09` per backing vote, referral rewards. **Publish the anti-Sybil policy alongside it** — referral qualifies only when the invitee completes a paid action; no emphasis on invite volume; no leaderboard by invite count. |
-| **7** | Creator economy | Active-rule creator reward (`22.5%`); Rule Hall of Fame; authorship stories. Vertical video opens as the translation layer. |
+| **5** | Launch | Eligibility gate live, verification guide published, first real round. **Rule of the Round** becomes the permanent daily ritual, published as *the wish that became law* with its author and verdict. Open Discord if week-4 criteria were met. |
+| **6** | JDR campaign | The reserve enters the story: `0.6` per proposal, `0.09` per backing vote, referral rewards. **Publish the anti-Sybil policy alongside it** — referral qualifies only when the invitee completes a paid action; no emphasis on invite volume; no leaderboard by invite count. Register limit: the reserve pays for wishes written and backed, never for wishes granted — no copy may tie a reward to winning. |
+| **7** | Creator economy | Active-rule creator reward (`22.5%`); Rule Hall of Fame — the archive of granted wishes and who wrote them; authorship stories. Vertical video opens as the translation layer, carrying the register and never the prize. |
 | **8** | Proof at scale | Publish the first `EpochCalculationManifest` and Merkle root with an explicit invitation to reproduce the calculation independently. The proof pillar at its strongest. |
 
 **Referral caution (week 6).** Referral rewards are the highest Sybil-risk surface in the reserve, and the project already carries a per-wallet election-capture risk. Referrals are promoted as a way to bring in someone who will actually play, never as a volume game. No campaign copy may frame invites as a yield.
@@ -205,7 +221,7 @@ How to know this is working rather than merely looking busy:
 2. **Frequency A/B/C blocks** (2/3/4 originals per day, two weeks each, mix and timing constant). Compare impressions per post, net followers per day, follows per 1k impressions, and unfollow/mute rate.
 3. **Median review by format and pillar** at the end of weeks 2 and 4.
 4. **Publication checklist** ([guia-identidade-publica-tyche.md](../../guia-identidade-publica-tyche.md) §11) on every piece.
-5. **Weekly guardrail audit** ([narrative-a-messaging.md](narrative-a-messaging.md) §6): no probability-advantage claim, no named operator, no casino self-description, no compensated post, no price promise, no unproven round claim.
+5. **Weekly guardrail audit** ([narrative-a-messaging.md](narrative-a-messaging.md) §6): no probability-advantage claim, no named operator, no casino self-description, no compensated post, no price promise, no unproven round claim — plus the §4.7 register pass: what was granted was the rule, the election stayed visible, no personal favour, no equal-odds claim, and the register never reached a classification surface or an incident post.
 6. **The organicity test:** if the official account goes silent for seven days, does the community keep writing rules, debating, and welcoming newcomers? Run it for real in week 8. That answer — not follower count — is the actual measure of "built for and by the community".
 
 ---

@@ -17,6 +17,14 @@ export function fmtSol(value: number): string {
   });
 }
 
+/** Claim amounts keep meaningful sub-cent precision without trailing zero noise. */
+export function fmtClaimSol(value: number): string {
+  return value.toLocaleString("en-US", {
+    maximumFractionDigits: 4,
+    minimumFractionDigits: 2,
+  });
+}
+
 /** Integer with locale grouping (e.g. "1,284"). */
 export function fmtInt(value: number): string {
   return Math.round(value).toLocaleString("en-US");

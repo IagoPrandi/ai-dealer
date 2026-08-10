@@ -7,24 +7,23 @@
  * player projection endpoints instead of deferred empty states.
  */
 import { useState } from "react";
-import { address } from "@solana/kit";
 
-import { createClaimInstruction } from "../../../solana/tycheProgram";
 import { useTyche } from "../context";
-import { postClaimComplete, postClaimRequest } from "../data/apiClient";
-import { lamportsToSol, fmtSol, fmtTurnId, timeAgo, truncateAddress } from "../data/format";
+import { lamportsToSol, fmtClaimSol, fmtTurnId, timeAgo } from "../data/format";
 import { useConversationDrafts, usePlayerClaims, usePlayerHistory } from "../data/hooks";
 import { isPreflightJobPointerFresh } from "../preflightJobStore";
-import { describeTxError, sendInstruction } from "../data/tx";
+import { claimRecordToWallet } from "../data/claimFlow";
+import { summarizePlayerClaims } from "../data/claimState";
+import { describeTxError } from "../data/tx";
 import { Dealer, Ico, VoteTally } from "../shared";
-import type { ClaimRecordApi, ConversationDraftApi, PlayerHistoryEventApi } from "../data/types";
+import type { ConversationDraftApi, PlayerHistoryEventApi } from "../data/types";
 
 /* withdraw-breakdown tile */
 function BreakdownItem({ icon, label, value }: { icon: React.ReactNode; label: string; value: number }) {
   return (
     <div style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: "10px 12px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--muted)", fontSize: 12, marginBottom: 5 }}>{icon} {label}</div>
-      <div className="ide-num" style={{ fontSize: 18, fontWeight: 800 }}>{fmtSol(value)} <span style={{ fontSize: 11, color: "var(--purple-soft)", fontWeight: 700 }}>SOL</span></div>
+      <div className="ide-num" style={{ fontSize: 18, fontWeight: 800 }}>{fmtClaimSol(value)} <span style={{ fontSize: 11, color: "var(--purple-soft)", fontWeight: 700 }}>SOL</span></div>
     </div>
   );
 }
@@ -39,12 +38,6 @@ function MetricCell({ icon, l, n, unit }: { icon: React.ReactNode; l: string; n:
     </div>
   );
 }
-
-function sumLamports(records: ClaimRecordApi[], predicate: (r: ClaimRecordApi) => boolean) {
-  return records.filter(predicate).reduce((total, r) => total + r.amountLamports, 0);
-}
-
-const isReward = (kind: ClaimRecordApi["kind"]) => kind === "creator_reward" || kind === "voter_reward";
 
 function ConversationRow({ draft, onResume }: { draft: ConversationDraftApi; onResume: () => void }) {
   const isDraft = draft.status !== "submitted";
@@ -109,7 +102,7 @@ function HistoryRow({ event }: { event: PlayerHistoryEventApi }) {
         <div style={{ fontSize: 12.5, color: "var(--dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{event.summary} · {timeAgo(event.createdAt)}</div>
       </div>
       <span className="ide-num" style={{ fontWeight: 700, fontSize: 14.5, flexShrink: 0, color: amount !== null ? "var(--green)" : "var(--dim)" }}>
-        {amount !== null ? `+${fmtSol(amount)}` : "—"}
+        {amount !== null ? `+${fmtClaimSol(amount)}` : "—"}
       </span>
     </div>
   );
@@ -140,12 +133,13 @@ export function ProfileScreen() {
   }
 
   const records = claims?.records ?? [];
-  const available = records.filter((r) => r.status === "available");
-  const wdPrize = lamportsToSol(sumLamports(available, (r) => r.kind === "winner_payout"));
-  const wdReward = lamportsToSol(sumLamports(available, (r) => isReward(r.kind)));
+  const claimTotals = summarizePlayerClaims(records);
+  const available = claimTotals.actionable;
+  const wdPrize = lamportsToSol(claimTotals.claimablePrizeLamports);
+  const wdReward = lamportsToSol(claimTotals.claimableRewardLamports);
   const wd = wdPrize + wdReward;
-  const earnedPrize = lamportsToSol(sumLamports(records, (r) => r.kind === "winner_payout" && r.status === "claimed"));
-  const earnedReward = lamportsToSol(sumLamports(records, (r) => isReward(r.kind) && r.status === "claimed"));
+  const lifetimePrize = lamportsToSol(claimTotals.lifetimePrizeLamports);
+  const claimedReward = lamportsToSol(claimTotals.claimedRewardLamports);
   const myRules = rules.rules.filter((r) => r.mine);
 
   async function withdrawAll() {
@@ -155,18 +149,19 @@ export function ProfileScreen() {
     setBusy(true);
     setTxError(null);
     try {
-      const player = address(walletAddress);
       for (const record of available) {
-        await postClaimRequest(record.claimId, walletAddress);
-        const instruction = await createClaimInstruction({ kind: record.kind, player, turnId: record.turnId });
-        const signature = await sendInstruction(client, wallet, instruction);
-        await postClaimComplete({ claimId: record.claimId, signature, status: "claimed", wallet: walletAddress });
+        await claimRecordToWallet({
+          client,
+          record,
+          wallet,
+          walletAddress,
+        });
       }
       setDone(true);
-      reload();
     } catch (cause) {
       setTxError(describeTxError(cause));
     } finally {
+      reload();
       setBusy(false);
     }
   }
@@ -178,10 +173,7 @@ export function ProfileScreen() {
 
         {/* identity — no box */}
         <div style={{ marginBottom: 30 }}>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 800, fontSize: 18 }}>{walletAddress ? truncateAddress(walletAddress) : "Wallet"}</div>
-            <div style={{ color: "var(--muted)", fontSize: 13.5 }} className="ide-num">Solana devnet</div>
-          </div>
+          <div style={{ color: "var(--muted)", fontSize: 13.5 }} className="ide-num">Solana devnet</div>
         </div>
 
         {/* CLAIM HERO */}
@@ -190,7 +182,7 @@ export function ProfileScreen() {
           <div style={{ position: "relative" }}>
             <div style={{ fontSize: 12.5, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--dim)", fontWeight: 700 }}>Available to claim</div>
             <div className="ide-num" style={{ display: "flex", alignItems: "flex-end", gap: 6, margin: "6px 0 14px" }}>
-              <span className="ide-grad-text" style={{ fontSize: 40, fontWeight: 700, lineHeight: 1 }}>{fmtSol(wd)}</span>
+              <span className="ide-grad-text" style={{ fontSize: 40, fontWeight: 700, lineHeight: 1 }}>{fmtClaimSol(wd)}</span>
               <span style={{ fontSize: 16, fontWeight: 700, color: "var(--purple-soft)", marginBottom: 4 }}>SOL</span>
             </div>
 
@@ -203,7 +195,7 @@ export function ProfileScreen() {
             <button onClick={withdrawAll} disabled={wd <= 0 || busy} className="ide-btn" style={{ width: "100%", padding: 14, opacity: wd > 0 && !busy ? 1 : 0.45, pointerEvents: wd > 0 && !busy ? "auto" : "none" }} type="button">
               <Ico.withdraw style={{ color: "#08110C" }} /> {busy ? "Claiming…" : wd > 0 ? "Claim to wallet" : "Nothing to claim"}
             </button>
-            {done && walletAddress ? <div style={{ marginTop: 10, fontSize: 13, color: "var(--green)", display: "flex", alignItems: "center", gap: 6, justifyContent: "center" }}><Ico.check style={{ color: "var(--green)" }} /> Claim sent to {truncateAddress(walletAddress)}</div> : null}
+            {done ? <div style={{ marginTop: 10, fontSize: 13, color: "var(--green)", display: "flex", alignItems: "center", gap: 6, justifyContent: "center" }}><Ico.check style={{ color: "var(--green)" }} /> Claim sent to your wallet</div> : null}
             {txError ? <div style={{ marginTop: 10, fontSize: 13, color: "var(--red)", textAlign: "center" }}>{txError}</div> : null}
             {error ? <div style={{ marginTop: 10, fontSize: 12.5, color: "var(--dim)", textAlign: "center" }}>Could not load your claim ledger. Pull to retry.</div> : null}
           </div>
@@ -219,8 +211,8 @@ export function ProfileScreen() {
 
         {/* accumulated metrics — 2x2 grid divided by hairlines (no boxes) */}
         <div className="ide-metrics rows2" style={{ margin: "18px 0 26px" }}>
-          <MetricCell icon={<Ico.trophy style={{ color: "var(--gold)" }} />} n={fmtSol(earnedPrize)} unit="SOL" l="prize claimed" />
-          <MetricCell icon={<Ico.gift style={{ color: "var(--green)" }} />} n={fmtSol(earnedReward)} unit="SOL" l="reward claimed" />
+          <MetricCell icon={<Ico.trophy style={{ color: "var(--gold)" }} />} n={fmtClaimSol(lifetimePrize)} unit="SOL" l="total prize won" />
+          <MetricCell icon={<Ico.gift style={{ color: "var(--green)" }} />} n={fmtClaimSol(claimedReward)} unit="SOL" l="reward claimed" />
           <MetricCell icon={<Ico.spark style={{ color: "var(--purple-soft)" }} />} n={myRules.length} l="rules this round" />
           <MetricCell icon={<Ico.dice style={{ color: "var(--yellow)" }} />} n={loading ? "—" : records.length} l="claim records" />
         </div>
