@@ -24,7 +24,10 @@ if (typeof window !== "undefined") {
 
 const MOCK_ENABLED = process.env.NEXT_PUBLIC_UI_MOCK === "1";
 
-class CardBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+class CardBoundary extends Component<
+  { children: ReactNode },
+  { error: Error | null }
+> {
   state: { error: Error | null } = { error: null };
 
   static getDerivedStateFromError(error: Error) {
@@ -46,6 +49,7 @@ class CardBoundary extends Component<{ children: ReactNode }, { error: Error | n
 
 const CARDS: Array<{ label: string; screen: Screen }> = [
   { label: "Round (home)", screen: "home" },
+  { label: "My guesses", screen: "guesses" },
   { label: "Play (number picker)", screen: "play" },
   { label: "Rules (voting)", screen: "vote" },
   { label: "Create rule (dealer chat)", screen: "create" },

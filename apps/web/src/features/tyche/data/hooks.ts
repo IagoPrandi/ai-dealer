@@ -24,6 +24,7 @@ import { fetchActiveTurnSnapshotFromWorker } from "../../../solana/activeTurnApi
 import {
   getConversationDrafts,
   getGuessReceipt,
+  getGuessReceipts,
   getPlayerClaims,
   getPlayerHistory,
   getPublicTokenomics,
@@ -229,7 +230,11 @@ export function buildUiRule(
   };
 }
 
-function repeatedActionFeeSol(turnId: number, sequence: number, baseFeeSol: number) {
+function repeatedActionFeeSol(
+  turnId: number,
+  sequence: number,
+  baseFeeSol: number,
+) {
   if (turnId < VOTE_FEE_START_TURN && sequence === 1) {
     return 0;
   }
@@ -264,10 +269,18 @@ export function useRules(
   const { wallet } = useWalletConnection();
   const walletAddress = wallet?.account.address.toString();
   const [proposals, setProposals] = useState<RuleProposalApi[]>([]);
-  const [approveCounts, setApproveCounts] = useState<Record<string, number>>({});
-  const [againstCounts, setAgainstCounts] = useState<Record<string, number>>({});
-  const [myApproveCounts, setMyApproveCounts] = useState<Record<string, number>>({});
-  const [myAgainstCounts, setMyAgainstCounts] = useState<Record<string, number>>({});
+  const [approveCounts, setApproveCounts] = useState<Record<string, number>>(
+    {},
+  );
+  const [againstCounts, setAgainstCounts] = useState<Record<string, number>>(
+    {},
+  );
+  const [myApproveCounts, setMyApproveCounts] = useState<
+    Record<string, number>
+  >({});
+  const [myAgainstCounts, setMyAgainstCounts] = useState<
+    Record<string, number>
+  >({});
   const [approvedIds, setApprovedIds] = useState<number[]>([]);
   const [eliminatedIds, setEliminatedIds] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
@@ -296,24 +309,26 @@ export function useRules(
             const eliminationVotes = (elimBody?.votes ?? []).filter(
               (v) => v.voter === walletAddress,
             );
-            const approvalCountsByRule = approvalVotes.reduce<Record<string, number>>(
-              (current, vote) => {
-                current[String(vote.ruleId)] = (current[String(vote.ruleId)] ?? 0) + 1;
-                return current;
-              },
-              {},
-            );
-            const eliminationCountsByRule = eliminationVotes.reduce<Record<string, number>>(
-              (current, vote) => {
-                current[String(vote.ruleId)] = (current[String(vote.ruleId)] ?? 0) + 1;
-                return current;
-              },
-              {},
-            );
+            const approvalCountsByRule = approvalVotes.reduce<
+              Record<string, number>
+            >((current, vote) => {
+              current[String(vote.ruleId)] =
+                (current[String(vote.ruleId)] ?? 0) + 1;
+              return current;
+            }, {});
+            const eliminationCountsByRule = eliminationVotes.reduce<
+              Record<string, number>
+            >((current, vote) => {
+              current[String(vote.ruleId)] =
+                (current[String(vote.ruleId)] ?? 0) + 1;
+              return current;
+            }, {});
             setMyApproveCounts(approvalCountsByRule);
             setMyAgainstCounts(eliminationCountsByRule);
             setApprovedIds([...new Set(approvalVotes.map((v) => v.ruleId))]);
-            setEliminatedIds([...new Set(eliminationVotes.map((v) => v.ruleId))]);
+            setEliminatedIds([
+              ...new Set(eliminationVotes.map((v) => v.ruleId)),
+            ]);
           } else {
             setMyApproveCounts({});
             setMyAgainstCounts({});
@@ -361,7 +376,8 @@ export function useRules(
       .map((proposal) => {
         const id = proposal.ruleId;
         const finalState = finalistStates.get(id);
-        const approve = approveCounts[String(id)] ?? finalState?.approvalVotes ?? 0;
+        const approve =
+          approveCounts[String(id)] ?? finalState?.approvalVotes ?? 0;
         const against =
           againstCounts[String(id)] ?? finalState?.eliminationVotes ?? 0;
         const myApproveCount = myApproveCounts[String(id)] ?? 0;
@@ -382,11 +398,7 @@ export function useRules(
           myApproveCount,
           myAgainstCount,
           repeatedActionFeeSol(turnId, nextApproveSequence, MVP_FEES_SOL.vote),
-          repeatedActionFeeSol(
-            turnId,
-            nextAgainstSequence,
-            MVP_FEES_SOL.vote,
-          ),
+          repeatedActionFeeSol(turnId, nextAgainstSequence, MVP_FEES_SOL.vote),
           src,
           walletAddress,
         );
@@ -430,7 +442,10 @@ export function resolvePlayerGuessState(
 }
 
 /** Whether the connected wallet already submitted a guess for `turnId`. */
-export function usePlayerGuess(turnId: number, walletAddress: string | undefined) {
+export function usePlayerGuess(
+  turnId: number,
+  walletAddress: string | undefined,
+) {
   const client = useSolanaClient();
   const [receipt, setReceipt] = useState<GuessReceiptApi | null>(null);
   const [onChainFirstGuess, setOnChainFirstGuess] = useState(false);
@@ -448,7 +463,11 @@ export function usePlayerGuess(turnId: number, walletAddress: string | undefined
 
       try {
         const player = address(walletAddress);
-        const accounts = await deriveSubmitGuessAccounts({ player, sequence: 1, turnId });
+        const accounts = await deriveSubmitGuessAccounts({
+          player,
+          sequence: 1,
+          turnId,
+        });
         const [receiptResult, onChainResult] = await Promise.allSettled([
           getGuessReceipt(turnId, walletAddress, signal),
           confirmedProgramAccountExists({
@@ -464,7 +483,12 @@ export function usePlayerGuess(turnId: number, walletAddress: string | undefined
 
         if (receiptResult.status === "fulfilled") {
           setReceipt(receiptResult.value);
-        } else if (!(receiptResult.reason instanceof DOMException && receiptResult.reason.name === "AbortError")) {
+        } else if (
+          !(
+            receiptResult.reason instanceof DOMException &&
+            receiptResult.reason.name === "AbortError"
+          )
+        ) {
           console.warn("Failed to load guess receipt.", receiptResult.reason);
           setReceipt(null);
         }
@@ -472,7 +496,10 @@ export function usePlayerGuess(turnId: number, walletAddress: string | undefined
         if (onChainResult.status === "fulfilled") {
           setOnChainFirstGuess(onChainResult.value);
         } else {
-          console.warn("Failed to verify the on-chain first guess.", onChainResult.reason);
+          console.warn(
+            "Failed to verify the on-chain first guess.",
+            onChainResult.reason,
+          );
           setOnChainFirstGuess(false);
         }
       } finally {
@@ -490,7 +517,62 @@ export function usePlayerGuess(turnId: number, walletAddress: string | undefined
     return () => controller.abort();
   }, [reload]);
 
-  return { ...resolvePlayerGuessState(receipt, onChainFirstGuess), loading, receipt, reload: () => reload() };
+  return {
+    ...resolvePlayerGuessState(receipt, onChainFirstGuess),
+    loading,
+    receipt,
+    reload: () => reload(),
+  };
+}
+
+/** Every indexed guess submitted by the connected wallet for one turn. */
+export function usePlayerGuesses(
+  turnId: number,
+  walletAddress: string | undefined,
+) {
+  const [receipts, setReceipts] = useState<GuessReceiptApi[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<null | string>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    if (!walletAddress || !turnId || turnId <= 0) {
+      setReceipts([]);
+      setError(null);
+      setLoading(false);
+      return () => controller.abort();
+    }
+
+    setLoading(true);
+    setError(null);
+    void getGuessReceipts(turnId, walletAddress, controller.signal)
+      .then((next) => {
+        setReceipts(next);
+      })
+      .catch((cause: unknown) => {
+        if (cause instanceof DOMException && cause.name === "AbortError") {
+          return;
+        }
+        console.warn("Failed to load guess receipts.", cause);
+        setReceipts([]);
+        setError("Tyche could not load your guesses for this round.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      });
+
+    return () => controller.abort();
+  }, [reloadKey, turnId, walletAddress]);
+
+  return {
+    error,
+    loading,
+    receipts,
+    reload: () => setReloadKey((key) => key + 1),
+  };
 }
 
 /** Cross-turn claim ledger for the connected wallet (Profile screen). */
@@ -538,8 +620,12 @@ export function usePlayerClaims(walletAddress: string | undefined) {
 }
 
 export function useTokenomics(walletAddress: string | undefined) {
-  const [publicState, setPublicState] = useState<TokenomicsPublicApi | null>(null);
-  const [walletState, setWalletState] = useState<TokenomicsWalletApi | null>(null);
+  const [publicState, setPublicState] = useState<TokenomicsPublicApi | null>(
+    null,
+  );
+  const [walletState, setWalletState] = useState<TokenomicsWalletApi | null>(
+    null,
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<null | string>(null);
 

@@ -4,11 +4,25 @@
 import { useState } from "react";
 
 import { useTyche } from "../context";
-import { fmtClaimSol, fmtInt, fmtSol, fmtTurnId, lamportsToSol, truncateAddress } from "../data/format";
+import {
+  fmtClaimSol,
+  fmtInt,
+  fmtSol,
+  fmtTurnId,
+  lamportsToSol,
+  truncateAddress,
+} from "../data/format";
 import { usePlayerClaims } from "../data/hooks";
 import { summarizePlayerClaims } from "../data/claimState";
 import { getRoundPhase } from "../roundPhase";
-import { Dealer, Ico, Medal, VoteTally, useCountdownTo, useLivePrize } from "../shared";
+import {
+  Dealer,
+  Ico,
+  Medal,
+  VoteTally,
+  useCountdownTo,
+  useLivePrize,
+} from "../shared";
 
 function WalletBtn() {
   const { connect, connected, go, walletAddress } = useTyche();
@@ -33,21 +47,69 @@ function PromptInput() {
     go("create", seed ? { seed } : { newConversation: true });
   };
   return (
-    <div className="ide-card" style={{ padding: 12, borderColor: "var(--line-2)", background: "linear-gradient(180deg, var(--surface-2), var(--surface))" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 13.5, fontWeight: 700, whiteSpace: "nowrap" }}>Create your rule</span>
-        <span className="ide-pill" style={{ padding: "3px 8px", fontSize: 11 }}><Ico.spark style={{ width: 12, height: 12, color: "var(--purple-soft)" }} /> with AI</span>
-        <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--dim)" }}>cost <span className="ide-num" style={{ color: "var(--muted)" }}>{fees.ruleNext === 0 ? "Free" : `${fmtSol(fees.ruleNext)} SOL`}</span></span>
+    <div
+      className="ide-card"
+      style={{
+        padding: 12,
+        borderColor: "var(--line-2)",
+        background: "linear-gradient(180deg, var(--surface-2), var(--surface))",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          marginBottom: 10,
+          flexWrap: "wrap",
+        }}
+      >
+        <span style={{ fontSize: 13.5, fontWeight: 700, whiteSpace: "nowrap" }}>
+          Create your rule
+        </span>
+        <span className="ide-pill" style={{ padding: "3px 8px", fontSize: 11 }}>
+          <Ico.spark
+            style={{ width: 12, height: 12, color: "var(--purple-soft)" }}
+          />{" "}
+          with AI
+        </span>
+        <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--dim)" }}>
+          cost{" "}
+          <span className="ide-num" style={{ color: "var(--muted)" }}>
+            {fees.ruleNext === 0 ? "Free" : `${fmtSol(fees.ruleNext)} SOL`}
+          </span>
+        </span>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <input
           value={val}
           onChange={(e) => setVal(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") { openComposer(); } }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              openComposer();
+            }
+          }}
           placeholder="e.g. the sum closest to 100 wins…"
-          style={{ flex: 1, minWidth: 0, background: "var(--bg)", border: "1px solid var(--line-2)", borderRadius: 13, padding: "13px 14px", color: "var(--text)", fontSize: 14.5, fontFamily: "Outfit", outline: "none" }}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            background: "var(--bg)",
+            border: "1px solid var(--line-2)",
+            borderRadius: 13,
+            padding: "13px 14px",
+            color: "var(--text)",
+            fontSize: 14.5,
+            fontFamily: "Outfit",
+            outline: "none",
+          }}
         />
-        <button onClick={openComposer} className="ide-btn" style={{ padding: 13, borderRadius: 13, flexShrink: 0 }} title="Create rule" type="button">
+        <button
+          onClick={openComposer}
+          className="ide-btn"
+          style={{ padding: 13, borderRadius: 13, flexShrink: 0 }}
+          title="Create rule"
+          type="button"
+        >
           <Ico.send style={{ color: "#08110C" }} />
         </button>
       </div>
@@ -57,8 +119,25 @@ function PromptInput() {
 
 export function HomeScreen() {
   const {
-    apiUnavailable, bet, endSeconds, entrySyncing, fees, go, openDetail, phase1EndsAt, played, players, prizeSol, reloadAll, rules, turnId,
-    resultTurnId, round, turnReadyToPlay, turnStatusMessage, turnStatusUnavailable, turnState, walletAddress,
+    apiUnavailable,
+    endSeconds,
+    fees,
+    go,
+    openDetail,
+    phase1EndsAt,
+    played,
+    players,
+    prizeSol,
+    reloadAll,
+    rules,
+    turnId,
+    resultTurnId,
+    round,
+    turnReadyToPlay,
+    turnStatusMessage,
+    turnStatusUnavailable,
+    turnState,
+    walletAddress,
   } = useTyche();
 
   const [h, m, s] = useCountdownTo(endSeconds);
@@ -69,7 +148,11 @@ export function HomeScreen() {
     claimTotals.claimablePrizeLamports + claimTotals.claimableRewardLamports,
   );
   const nowSec = Math.floor(Date.now() / 1000);
-  const phase = getRoundPhase({ nowSeconds: nowSec, phase1EndsAt, turn: turnState });
+  const phase = getRoundPhase({
+    nowSeconds: nowSec,
+    phase1EndsAt,
+    turn: turnState,
+  });
   const inPhase1 = phase === "create_play";
   const shortlistDrawPending = phase === "shortlist_selection";
   const inPhase2 = phase === "shortlist_vote";
@@ -80,11 +163,17 @@ export function HomeScreen() {
   const drawFulfilled = round?.draw?.status === "fulfilled";
   const activeRuleId = round?.election?.activeRuleId ?? null;
   const electedRule =
-    drawingNow && !drawFulfilled && round?.election?.status === "settled" && activeRuleId !== null
-      ? round.rules.find((r) => r.ruleId === activeRuleId) ?? null
+    drawingNow &&
+    !drawFulfilled &&
+    round?.election?.status === "settled" &&
+    activeRuleId !== null
+      ? (round.rules.find((r) => r.ruleId === activeRuleId) ?? null)
       : null;
   const electingRuleNow =
-    drawingNow && !drawFulfilled && !electedRule && round?.election?.status !== "original_only";
+    drawingNow &&
+    !drawFulfilled &&
+    !electedRule &&
+    round?.election?.status !== "original_only";
   const showResultLink =
     !apiUnavailable &&
     resultTurnId > 0 &&
@@ -98,14 +187,40 @@ export function HomeScreen() {
   const decStr = (prize % 1).toFixed(2).slice(1);
 
   return (
-    <div className="ide-app ide-screen" style={{ height: "100%", position: "relative", overflow: "hidden" }}>
+    <div
+      className="ide-app ide-screen"
+      style={{ height: "100%", position: "relative", overflow: "hidden" }}
+    >
       <div className="ide-ambient" />
-      <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", padding: "var(--ide-shell-content-top) 18px 96px" }}>
-
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 22 }}>
+      <div
+        className="ide-scroll"
+        style={{
+          position: "relative",
+          zIndex: 1,
+          height: "100%",
+          overflowY: "auto",
+          padding: "var(--ide-shell-content-top) 18px 96px",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 22,
+          }}
+        >
           <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
             <Dealer size={34} />
-            <span style={{ fontWeight: 800, fontSize: 19, letterSpacing: "-0.02em" }}>Tyche</span>
+            <span
+              style={{
+                fontWeight: 800,
+                fontSize: 19,
+                letterSpacing: "-0.02em",
+              }}
+            >
+              Tyche
+            </span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <WalletBtn />
@@ -116,51 +231,253 @@ export function HomeScreen() {
             Surface it plainly instead of rendering zero-value fallbacks that
             contradict the live turn status. */}
         {apiUnavailable ? (
-          <button onClick={() => reloadAll()} className="ide-tap" style={{
-            width: "100%", textAlign: "left", marginBottom: 16, padding: "13px 16px", borderRadius: 16, cursor: "pointer", color: "var(--text)",
-            border: "1px solid rgba(255,107,107,0.45)", background: "linear-gradient(110deg, rgba(255,107,107,0.14), var(--surface))",
-            display: "flex", alignItems: "center", gap: 12,
-          }} type="button">
-            <span style={{ width: 38, height: 38, borderRadius: 12, background: "#ff6b6b", color: "#0B0910", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.clock style={{ color: "#0B0910" }} /></span>
+          <button
+            onClick={() => reloadAll()}
+            className="ide-tap"
+            style={{
+              width: "100%",
+              textAlign: "left",
+              marginBottom: 16,
+              padding: "13px 16px",
+              borderRadius: 16,
+              cursor: "pointer",
+              color: "var(--text)",
+              border: "1px solid rgba(255,107,107,0.45)",
+              background:
+                "linear-gradient(110deg, rgba(255,107,107,0.14), var(--surface))",
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+            }}
+            type="button"
+          >
+            <span
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: 12,
+                background: "#ff6b6b",
+                color: "#0B0910",
+                display: "grid",
+                placeItems: "center",
+                flexShrink: 0,
+              }}
+            >
+              <Ico.clock style={{ color: "#0B0910" }} />
+            </span>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 14.5, fontWeight: 700 }}>Round data unavailable</div>
-              <div style={{ fontSize: 12.5, color: "var(--muted)" }}>Cannot reach the backend right now - tap to retry.</div>
+              <div style={{ fontSize: 14.5, fontWeight: 700 }}>
+                Round data unavailable
+              </div>
+              <div style={{ fontSize: 12.5, color: "var(--muted)" }}>
+                Cannot reach the backend right now - tap to retry.
+              </div>
             </div>
             <Ico.arrow style={{ color: "#ff6b6b", flexShrink: 0 }} />
           </button>
         ) : null}
 
         {/* HERO */}
-        <div style={{ textAlign: "center", position: "relative", marginBottom: 24 }}>
-          <div style={{ position: "absolute", inset: "-26px 16px auto", height: 210, background: "radial-gradient(circle, rgba(20,241,149,0.2), transparent 68%)", filter: "blur(14px)", animation: "ide-pulse 3.6s ease-in-out infinite", zIndex: 0 }} />
+        <div
+          style={{
+            textAlign: "center",
+            position: "relative",
+            marginBottom: 24,
+          }}
+        >
+          <div
+            style={{
+              position: "absolute",
+              inset: "-26px 16px auto",
+              height: 210,
+              background:
+                "radial-gradient(circle, rgba(20,241,149,0.2), transparent 68%)",
+              filter: "blur(14px)",
+              animation: "ide-pulse 3.6s ease-in-out infinite",
+              zIndex: 0,
+            }}
+          />
           <div style={{ position: "relative", zIndex: 1 }}>
-            <div style={{ display: "flex", justifyContent: "center", gap: 8, marginBottom: 14 }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                gap: 8,
+                marginBottom: 14,
+              }}
+            >
               {turnStatusUnavailable ? (
-                <span className="ide-pill" style={{ color: "var(--yellow)", borderColor: "rgba(255,210,63,0.3)" }}><Ico.clock style={{ color: "var(--yellow)" }} /> {turnStatusMessage}</span>
+                <span
+                  className="ide-pill"
+                  style={{
+                    color: "var(--yellow)",
+                    borderColor: "rgba(255,210,63,0.3)",
+                  }}
+                >
+                  <Ico.clock style={{ color: "var(--yellow)" }} />{" "}
+                  {turnStatusMessage}
+                </span>
               ) : inPhase1 ? (
-                <span className="ide-pill" style={{ color: "var(--muted)" }}><Ico.clock style={{ color: "var(--green)" }} /> Create &amp; play · ends in <span className="ide-num" style={{ color: "var(--text)", fontWeight: 700, marginLeft: 2 }}>{p1h}:{p1m}:{p1s}</span></span>
+                <span className="ide-pill" style={{ color: "var(--muted)" }}>
+                  <Ico.clock style={{ color: "var(--green)" }} /> Create &amp;
+                  play · ends in{" "}
+                  <span
+                    className="ide-num"
+                    style={{
+                      color: "var(--text)",
+                      fontWeight: 700,
+                      marginLeft: 2,
+                    }}
+                  >
+                    {p1h}:{p1m}:{p1s}
+                  </span>
+                </span>
               ) : shortlistDrawPending ? (
-                <span className="ide-pill" style={{ color: "var(--muted)", borderColor: "rgba(199,125,255,0.3)" }}><Ico.dice style={{ color: "var(--purple-soft)", width: 14, height: 14 }} /> Shortlist draw in progress</span>
+                <span
+                  className="ide-pill"
+                  style={{
+                    color: "var(--muted)",
+                    borderColor: "rgba(199,125,255,0.3)",
+                  }}
+                >
+                  <Ico.dice
+                    style={{
+                      color: "var(--purple-soft)",
+                      width: 14,
+                      height: 14,
+                    }}
+                  />{" "}
+                  Shortlist draw in progress
+                </span>
               ) : inPhase2 ? (
-                <span className="ide-pill" style={{ color: "var(--muted)", borderColor: "rgba(255,210,63,0.3)" }}><Ico.vote style={{ color: "var(--yellow)", width: 14, height: 14 }} /> Shortlist &amp; draw · ends in <span className="ide-num" style={{ color: "var(--text)", fontWeight: 700, marginLeft: 2 }}>{h}:{m}:{s}</span></span>
+                <span
+                  className="ide-pill"
+                  style={{
+                    color: "var(--muted)",
+                    borderColor: "rgba(255,210,63,0.3)",
+                  }}
+                >
+                  <Ico.vote
+                    style={{ color: "var(--yellow)", width: 14, height: 14 }}
+                  />{" "}
+                  Shortlist &amp; draw · ends in{" "}
+                  <span
+                    className="ide-num"
+                    style={{
+                      color: "var(--text)",
+                      fontWeight: 700,
+                      marginLeft: 2,
+                    }}
+                  >
+                    {h}:{m}:{s}
+                  </span>
+                </span>
               ) : electingRuleNow ? (
-                <span className="ide-pill" style={{ color: "var(--muted)", borderColor: "rgba(255,210,63,0.3)" }}><Ico.spark style={{ color: "var(--yellow)", width: 14, height: 14 }} /> Electing the rule</span>
+                <span
+                  className="ide-pill"
+                  style={{
+                    color: "var(--muted)",
+                    borderColor: "rgba(255,210,63,0.3)",
+                  }}
+                >
+                  <Ico.spark
+                    style={{ color: "var(--yellow)", width: 14, height: 14 }}
+                  />{" "}
+                  Electing the rule
+                </span>
               ) : drawingNow && drawFulfilled ? (
-                <span className="ide-pill" style={{ color: "var(--muted)", borderColor: "rgba(20,241,149,0.3)" }}><Ico.check style={{ color: "var(--green)", width: 14, height: 14 }} /> Numbers drawn · settling the turn</span>
+                <span
+                  className="ide-pill"
+                  style={{
+                    color: "var(--muted)",
+                    borderColor: "rgba(20,241,149,0.3)",
+                  }}
+                >
+                  <Ico.check
+                    style={{ color: "var(--green)", width: 14, height: 14 }}
+                  />{" "}
+                  Numbers drawn · settling the turn
+                </span>
               ) : drawingNow ? (
-                <span className="ide-pill" style={{ color: "var(--muted)", borderColor: "rgba(199,125,255,0.3)" }}><Ico.dice style={{ color: "var(--purple-soft)", width: 14, height: 14 }} /> Drawing the numbers</span>
+                <span
+                  className="ide-pill"
+                  style={{
+                    color: "var(--muted)",
+                    borderColor: "rgba(199,125,255,0.3)",
+                  }}
+                >
+                  <Ico.dice
+                    style={{
+                      color: "var(--purple-soft)",
+                      width: 14,
+                      height: 14,
+                    }}
+                  />{" "}
+                  Drawing the numbers
+                </span>
               ) : (
-                <span className="ide-pill" style={{ color: "var(--yellow)", borderColor: "rgba(255,210,63,0.3)" }}><Ico.clock style={{ color: "var(--yellow)" }} /> {turnStatusMessage}</span>
+                <span
+                  className="ide-pill"
+                  style={{
+                    color: "var(--yellow)",
+                    borderColor: "rgba(255,210,63,0.3)",
+                  }}
+                >
+                  <Ico.clock style={{ color: "var(--yellow)" }} />{" "}
+                  {turnStatusMessage}
+                </span>
               )}
             </div>
-            <div style={{ fontSize: 13, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--dim)", fontWeight: 700, marginBottom: 2 }}>Accumulated prize</div>
-            <div className="ide-num" style={{ display: "flex", alignItems: "flex-start", justifyContent: "center", gap: 3 }}>
-              <span className="ide-grad-text" style={{ fontSize: 72, fontWeight: 700, lineHeight: 0.9 }}>{intStr}</span>
-              <span className="ide-grad-text" style={{ fontSize: 34, fontWeight: 700, marginTop: 6 }}>{decStr}</span>
-              <span style={{ fontSize: 21, fontWeight: 700, color: "var(--purple-soft)", marginTop: 11, marginLeft: 4 }}>SOL</span>
+            <div
+              style={{
+                fontSize: 13,
+                letterSpacing: "0.14em",
+                textTransform: "uppercase",
+                color: "var(--dim)",
+                fontWeight: 700,
+                marginBottom: 2,
+              }}
+            >
+              Accumulated prize
+            </div>
+            <div
+              className="ide-num"
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                justifyContent: "center",
+                gap: 3,
+              }}
+            >
+              <span
+                className="ide-grad-text"
+                style={{ fontSize: 72, fontWeight: 700, lineHeight: 0.9 }}
+              >
+                {intStr}
+              </span>
+              <span
+                className="ide-grad-text"
+                style={{ fontSize: 34, fontWeight: 700, marginTop: 6 }}
+              >
+                {decStr}
+              </span>
+              <span
+                style={{
+                  fontSize: 21,
+                  fontWeight: 700,
+                  color: "var(--purple-soft)",
+                  marginTop: 11,
+                  marginLeft: 4,
+                }}
+              >
+                SOL
+              </span>
             </div>
             {apiUnavailable ? null : (
-              <div className="ide-hero-stats" aria-label={`${fmtInt(players)} playing, ${rules.rules.length} rules`}>
+              <div
+                className="ide-hero-stats"
+                aria-label={`${fmtInt(players)} playing, ${rules.rules.length} rules`}
+              >
                 <span className="ide-hero-stat">
                   <Ico.users style={{ color: "var(--purple-soft)" }} />
                   <span className="ide-num">{fmtInt(players)}</span>
@@ -179,26 +496,110 @@ export function HomeScreen() {
 
         {/* ELECTED RULE — shown on the main screen while the numbers are drawn */}
         {drawingNow && electedRule ? (
-          <div className="ide-card" style={{ padding: 15, marginBottom: 14, borderColor: "rgba(255,210,63,0.35)", background: "linear-gradient(120deg, rgba(255,210,63,0.1), var(--surface))" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
-              <span style={{ width: 28, height: 28, borderRadius: 9, background: "var(--gold)", color: "#0B0910", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.spark style={{ color: "#0B0910", width: 16, height: 16 }} /></span>
+          <div
+            className="ide-card"
+            style={{
+              padding: 15,
+              marginBottom: 14,
+              borderColor: "rgba(255,210,63,0.35)",
+              background:
+                "linear-gradient(120deg, rgba(255,210,63,0.1), var(--surface))",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 9,
+                marginBottom: 8,
+              }}
+            >
+              <span
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: 9,
+                  background: "var(--gold)",
+                  color: "#0B0910",
+                  display: "grid",
+                  placeItems: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <Ico.spark
+                  style={{ color: "#0B0910", width: 16, height: 16 }}
+                />
+              </span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 11.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--dim)" }}>Elected rule</div>
-                <div style={{ fontWeight: 800, fontSize: 16 }}>{electedRule.title}</div>
+                <div
+                  style={{
+                    fontSize: 11.5,
+                    fontWeight: 700,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                    color: "var(--dim)",
+                  }}
+                >
+                  Elected rule
+                </div>
+                <div style={{ fontWeight: 800, fontSize: 16 }}>
+                  {electedRule.title}
+                </div>
               </div>
             </div>
-            <p style={{ margin: "0 0 10px", fontSize: 13.5, color: "var(--muted)", lineHeight: 1.5 }}>{electedRule.sanitizedText}</p>
-            <div style={{ fontSize: 12.5, color: "var(--muted)", display: "flex", alignItems: "center", gap: 6 }}>
-              <Ico.dice style={{ color: "var(--purple-soft)", width: 14, height: 14 }} /> The numbers are being drawn — the result lands here.
+            <p
+              style={{
+                margin: "0 0 10px",
+                fontSize: 13.5,
+                color: "var(--muted)",
+                lineHeight: 1.5,
+              }}
+            >
+              {electedRule.sanitizedText}
+            </p>
+            <div
+              style={{
+                fontSize: 12.5,
+                color: "var(--muted)",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <Ico.dice
+                style={{ color: "var(--purple-soft)", width: 14, height: 14 }}
+              />{" "}
+              The numbers are being drawn — the result lands here.
             </div>
           </div>
-        ) : drawingNow && !drawFulfilled && round?.election?.status === "original_only" ? (
+        ) : drawingNow &&
+          !drawFulfilled &&
+          round?.election?.status === "original_only" ? (
           <div className="ide-card" style={{ padding: 15, marginBottom: 14 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-              <span style={{ width: 28, height: 28, borderRadius: 9, background: "var(--surface-2)", color: "var(--muted)", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.dice style={{ color: "var(--muted)", width: 16, height: 16 }} /></span>
+              <span
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: 9,
+                  background: "var(--surface-2)",
+                  color: "var(--muted)",
+                  display: "grid",
+                  placeItems: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <Ico.dice
+                  style={{ color: "var(--muted)", width: 16, height: 16 }}
+                />
+              </span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 700, fontSize: 14.5 }}>Original rule only this round</div>
-                <div style={{ fontSize: 12.5, color: "var(--muted)" }}>No alternative rule was elected — the numbers are being drawn.</div>
+                <div style={{ fontWeight: 700, fontSize: 14.5 }}>
+                  Original rule only this round
+                </div>
+                <div style={{ fontSize: 12.5, color: "var(--muted)" }}>
+                  No alternative rule was elected — the numbers are being drawn.
+                </div>
               </div>
             </div>
           </div>
@@ -206,14 +607,44 @@ export function HomeScreen() {
 
         {/* ELIMINATION VOTING (open for all of phase 2) */}
         {inPhase2 ? (
-          <button onClick={() => go("vote")} className="ide-tap" style={{
-            width: "100%", textAlign: "left", marginBottom: 14, padding: "13px 16px", borderRadius: 16, cursor: "pointer", color: "var(--text)",
-            border: "1px solid rgba(255,210,63,0.4)", background: "linear-gradient(110deg, rgba(255,210,63,0.13), var(--surface))",
-            display: "flex", alignItems: "center", gap: 12,
-          }} type="button">
-            <span style={{ width: 38, height: 38, borderRadius: 12, background: "var(--yellow)", color: "#0B0910", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.vote style={{ color: "#0B0910" }} /></span>
+          <button
+            onClick={() => go("vote")}
+            className="ide-tap"
+            style={{
+              width: "100%",
+              textAlign: "left",
+              marginBottom: 14,
+              padding: "13px 16px",
+              borderRadius: 16,
+              cursor: "pointer",
+              color: "var(--text)",
+              border: "1px solid rgba(255,210,63,0.4)",
+              background:
+                "linear-gradient(110deg, rgba(255,210,63,0.13), var(--surface))",
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+            }}
+            type="button"
+          >
+            <span
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: 12,
+                background: "var(--yellow)",
+                color: "#0B0910",
+                display: "grid",
+                placeItems: "center",
+                flexShrink: 0,
+              }}
+            >
+              <Ico.vote style={{ color: "#0B0910" }} />
+            </span>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 14.5, fontWeight: 700 }}>Vote finalists out</div>
+              <div style={{ fontSize: 14.5, fontWeight: 700 }}>
+                Vote finalists out
+              </div>
               <div style={{ fontSize: 12.5, color: "var(--muted)" }}>
                 Open all phase 2 - eliminate up to 5 of the 10 finalists
               </div>
@@ -224,15 +655,51 @@ export function HomeScreen() {
 
         {/* PRIZE READY TO CLAIM */}
         {claimableSol > 0 ? (
-          <button onClick={() => go("claims")} className="ide-tap" style={{
-            width: "100%", textAlign: "left", marginBottom: 14, padding: "13px 16px", borderRadius: 16, cursor: "pointer", color: "var(--text)",
-            border: "1px solid rgba(20,241,149,0.4)", background: "linear-gradient(110deg, rgba(20,241,149,0.13), var(--surface))",
-            display: "flex", alignItems: "center", gap: 12,
-          }} type="button">
-            <span style={{ width: 38, height: 38, borderRadius: 12, background: "var(--green)", color: "#08110C", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.gift style={{ color: "#08110C" }} /></span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 14.5, fontWeight: 700 }}>Prize ready to claim</div>
-              <div style={{ fontSize: 12.5, color: "var(--muted)" }}><span className="ide-num" style={{ color: "var(--green)", fontWeight: 700 }}>{fmtClaimSol(claimableSol)} SOL</span> available - claim before it expires</div>
+          <button
+            onClick={() => go("claims")}
+            className="ide-tap"
+            style={{
+              width: "100%",
+              textAlign: "left",
+              marginBottom: 14,
+              padding: "13px 16px",
+              borderRadius: 16,
+              cursor: "pointer",
+              color: "var(--text)",
+              border: "1px solid rgba(20,241,149,0.4)",
+              background:
+                "linear-gradient(110deg, rgba(20,241,149,0.13), var(--surface))",
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+            }}
+            type="button"
+          >
+            <span
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: 12,
+                background: "var(--green)",
+                color: "#08110C",
+                display: "grid",
+                placeItems: "center",
+                flexShrink: 0,
+              }}
+            >
+              <Ico.gift style={{ color: "#08110C" }} />
+            </span>
+            <div
+              style={{ flex: 1, minWidth: 0, fontSize: 15.5, fontWeight: 700 }}
+            >
+              You win{" "}
+              <span
+                className="ide-num"
+                style={{ color: "var(--green)", fontSize: 22, fontWeight: 800 }}
+              >
+                {fmtClaimSol(claimableSol)} SOL
+              </span>
+              !!
             </div>
             <Ico.arrow style={{ color: "var(--green)", flexShrink: 0 }} />
           </button>
@@ -243,44 +710,83 @@ export function HomeScreen() {
             true (the receipt never arrives), producing a false "still syncing"
             state. The error banner above already explains the situation. */}
         {apiUnavailable ? null : played ? (
-          <div className="ide-notice" style={{ display: "grid", gap: 12, marginBottom: 22 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
-              <span style={{ width: 30, height: 30, borderRadius: 10, background: "var(--green)", color: "#08110C", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.check /></span>
+          <div
+            className="ide-notice"
+            style={{ display: "grid", gap: 12, marginBottom: 22 }}
+          >
+            <button
+              onClick={() => go("guesses")}
+              className="ide-tap"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 11,
+                width: "100%",
+                padding: 0,
+                border: 0,
+                background: "none",
+                color: "var(--text)",
+                textAlign: "left",
+                fontFamily: "Outfit",
+                cursor: "pointer",
+                minHeight: 44,
+              }}
+              type="button"
+            >
+              <span
+                style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: 10,
+                  background: "var(--green)",
+                  color: "#08110C",
+                  display: "grid",
+                  placeItems: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <Ico.check />
+              </span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 700, fontSize: 14.5 }}>You&apos;re in this round</div>
-                <div style={{ fontSize: 12.5, color: "var(--muted)" }}>
-                  {entrySyncing
-                    ? "Your guess is confirmed on-chain. Entry details are still syncing."
-                    : "Good luck! You can now vote and create rules."}
+                <div style={{ fontWeight: 700, fontSize: 14.5 }}>
+                  You&apos;re in this round
                 </div>
               </div>
-              <button onClick={() => go("play")} className="ide-votebtn for on" style={{ flexShrink: 0 }} type="button">
-                play again · {fees.playNext === 0 ? "free" : `${fmtSol(fees.playNext)} SOL`}
+              <Ico.arrow style={{ color: "var(--green)", flexShrink: 0 }} />
+            </button>
+            <div style={{ display: "flex", justifyContent: "center" }}>
+              <button
+                onClick={() => go("play")}
+                className="ide-votebtn for on"
+                type="button"
+              >
+                play again ·{" "}
+                {fees.playNext === 0 ? "free" : `${fmtSol(fees.playNext)} SOL`}
               </button>
             </div>
-            {bet && bet.length > 0 ? (
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
-                {bet.map((n) => <span key={n} className="ide-chip" style={{ width: 40, height: 40, fontSize: 15 }}>{n}</span>)}
-              </div>
-            ) : null}
           </div>
         ) : (
-          <button onClick={() => go("play")} disabled={!turnReadyToPlay} className="ide-btn" style={{ width: "100%", padding: "17px", fontSize: 17, marginBottom: 18, opacity: turnReadyToPlay ? 1 : 0.5 }} type="button">
-            <Ico.bolt style={{ color: "#08110C" }} /> {turnReadyToPlay ? `Play now · ${fees.playNext === 0 ? "Free" : `${fmtSol(fees.playNext)} SOL`}` : turnStatusUnavailable ? "Refreshing turn status" : "Waiting for next turn"}
+          <button
+            onClick={() => go("play")}
+            disabled={!turnReadyToPlay}
+            className="ide-btn"
+            style={{
+              width: "100%",
+              padding: "17px",
+              fontSize: 17,
+              marginBottom: 18,
+              opacity: turnReadyToPlay ? 1 : 0.5,
+            }}
+            type="button"
+          >
+            <Ico.bolt style={{ color: "#08110C" }} />{" "}
+            {turnReadyToPlay
+              ? `Play now · ${fees.playNext === 0 ? "Free" : `${fmtSol(fees.playNext)} SOL`}`
+              : turnStatusUnavailable
+                ? "Refreshing turn status"
+                : "Waiting for next turn"}
           </button>
         )}
-
-        {/* PREVIOUS ROUND RESULT — hairline row, not a balloon */}
-        {showResultLink ? (
-          <button onClick={() => go("result", { resultTurnId })} className="ide-listrow" style={{ marginBottom: 26, padding: "15px 2px", borderTop: "1px solid var(--line)", borderBottom: "1px solid var(--line)" }} type="button">
-            <span style={{ width: 36, height: 36, borderRadius: 11, background: "var(--gold)", color: "#0B0910", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.trophy style={{ color: "#0B0910" }} /></span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 14.5, fontWeight: 700 }}>Result of round {fmtTurnId(resultTurnId)}</div>
-              <div style={{ fontSize: 12.5, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>See the drawn numbers and the elected rule</div>
-            </div>
-            <Ico.arrow style={{ color: "var(--gold)", flexShrink: 0 }} />
-          </button>
-        ) : null}
 
         {/* CREATE RULE — prompt entry, no box (only the input has a border) */}
         <div style={{ marginBottom: 28 }}>
@@ -288,39 +794,161 @@ export function HomeScreen() {
         </div>
 
         {/* RULE PREVIEW → voting */}
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", margin: "0 2px 12px" }}>
-          <span style={{ fontWeight: 800, fontSize: 22, letterSpacing: "-0.025em", whiteSpace: "nowrap" }}>The rules</span>
-          <button onClick={() => go("vote")} style={{ background: "none", border: "none", color: "var(--purple-soft)", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "Outfit", display: "inline-flex", alignItems: "center", gap: 4 }} type="button">
-            vote <Ico.arrow style={{ color: "var(--purple-soft)", width: 15, height: 15 }} />
+        <div
+          style={{
+            display: "flex",
+            alignItems: "baseline",
+            justifyContent: "space-between",
+            margin: "0 2px 12px",
+          }}
+        >
+          <span
+            style={{
+              fontWeight: 800,
+              fontSize: 22,
+              letterSpacing: "-0.025em",
+              whiteSpace: "nowrap",
+            }}
+          >
+            The rules
+          </span>
+          <button
+            onClick={() => go("vote")}
+            style={{
+              background: "none",
+              border: "none",
+              color: "var(--purple-soft)",
+              fontSize: 13.5,
+              fontWeight: 700,
+              cursor: "pointer",
+              fontFamily: "Outfit",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+            }}
+            type="button"
+          >
+            vote{" "}
+            <Ico.arrow
+              style={{ color: "var(--purple-soft)", width: 15, height: 15 }}
+            />
           </button>
         </div>
 
         {rules.loading && top.length === 0 ? (
           <div className="ide-rule-stack" style={{ margin: "0 -18px 14px" }}>
-            {[0, 1, 2].map((i) => <div key={i} className="ide-card" style={{ height: 64 }} />)}
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="ide-card" style={{ height: 64 }} />
+            ))}
           </div>
         ) : top.length === 0 ? (
-          <div className="ide-card" style={{ padding: 18, margin: "0 -18px 14px", textAlign: "center", color: "var(--muted)", fontSize: 14, borderRadius: 0 }}>
+          <div
+            className="ide-card"
+            style={{
+              padding: 18,
+              margin: "0 -18px 14px",
+              textAlign: "center",
+              color: "var(--muted)",
+              fontSize: 14,
+              borderRadius: 0,
+            }}
+          >
             No rules proposed yet - be the first to create one.
           </div>
         ) : (
           <div className="ide-rule-stack" style={{ margin: "0 -18px 14px" }}>
             {top.map((r, i) => (
-              <button key={r.id} onClick={() => openDetail(r.ruleId, { rank: i + 1 })} className="ide-rulerow ide-tap" style={{ borderColor: i === 0 ? "var(--line-2)" : "var(--line)", boxShadow: i === 0 ? "0 0 24px -14px rgba(255,210,63,0.6)" : "none" }} type="button">
+              <button
+                key={r.id}
+                onClick={() => openDetail(r.ruleId, { rank: i + 1 })}
+                className="ide-rulerow ide-tap"
+                style={{
+                  borderColor: i === 0 ? "var(--line-2)" : "var(--line)",
+                  boxShadow:
+                    i === 0 ? "0 0 24px -14px rgba(255,210,63,0.6)" : "none",
+                }}
+                type="button"
+              >
                 <Medal pos={i + 1} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 15.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title}</div>
-                  <div style={{ marginTop: 4 }}><VoteTally approve={r.approve} against={r.against} size="sm" /></div>
+                  <div
+                    style={{
+                      fontWeight: 700,
+                      fontSize: 15.5,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {r.title}
+                  </div>
+                  <div style={{ marginTop: 4 }}>
+                    <VoteTally
+                      approve={r.approve}
+                      against={r.against}
+                      size="sm"
+                    />
+                  </div>
                 </div>
-                <Ico.chevron style={{ color: "var(--dim)", transform: "rotate(-90deg)", flexShrink: 0 }} />
+                <Ico.chevron
+                  style={{
+                    color: "var(--dim)",
+                    transform: "rotate(-90deg)",
+                    flexShrink: 0,
+                  }}
+                />
               </button>
             ))}
           </div>
         )}
 
-        <button onClick={() => go("vote")} className="ide-btn-ghost ide-btn" style={{ width: "100%", padding: 13, marginBottom: 4 }} type="button">
-          <Ico.vote style={{ color: "var(--purple-soft)", width: 19, height: 19 }} /> View and vote on {rules.rules.length} rules
+        <button
+          onClick={() => go("vote")}
+          className="ide-btn-ghost ide-btn"
+          style={{ width: "100%", padding: 13, marginBottom: 4 }}
+          type="button"
+        >
+          <Ico.vote
+            style={{ color: "var(--purple-soft)", width: 19, height: 19 }}
+          />{" "}
+          View and vote on {rules.rules.length} rules
         </button>
+
+        {/* PREVIOUS ROUND RESULT — follows the voting action */}
+        {showResultLink ? (
+          <button
+            onClick={() => go("result", { resultTurnId })}
+            className="ide-listrow"
+            style={{
+              marginTop: 14,
+              padding: "15px 2px",
+              borderTop: "1px solid var(--line)",
+              borderBottom: "1px solid var(--line)",
+            }}
+            type="button"
+          >
+            <span
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 11,
+                background: "var(--gold)",
+                color: "#0B0910",
+                display: "grid",
+                placeItems: "center",
+                flexShrink: 0,
+              }}
+            >
+              <Ico.trophy style={{ color: "#0B0910" }} />
+            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14.5, fontWeight: 700 }}>
+                Result of round {fmtTurnId(resultTurnId)}
+              </div>
+            </div>
+            <Ico.arrow style={{ color: "var(--gold)", flexShrink: 0 }} />
+          </button>
+        ) : null}
       </div>
     </div>
   );

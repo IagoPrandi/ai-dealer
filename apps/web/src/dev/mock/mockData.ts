@@ -7,7 +7,8 @@
  */
 
 // Endereço base58 plausível usado como carteira/proposer de exemplo.
-export const MOCK_WALLET_ADDRESS = "GZRY3NG9xUxkzF9Z9z4N5Q7A9k7X8vB2c5E9F3Q7tHe";
+export const MOCK_WALLET_ADDRESS =
+  "GZRY3NG9xUxkzF9Z9z4N5Q7A9k7X8vB2c5E9F3Q7tHe";
 
 // Turn ativo que o snapshot on-chain "falso" descreve.
 export const MOCK_ACTIVE_TURN_ID = 7;
@@ -74,13 +75,23 @@ export const MOCK_RULE_VOTES = {
     "2": 98,
     "3": 64,
   } as Record<string, number>,
-  votes: [] as Array<{ ruleId: number; signature: string; turnId: number; voter: string }>,
+  votes: [] as Array<{
+    ruleId: number;
+    signature: string;
+    turnId: number;
+    voter: string;
+  }>,
 };
 
 // Resposta de GET /rule-elimination-votes?turnId=... (sem eliminações no mock).
 export const MOCK_RULE_ELIMINATION_VOTES = {
   counts: { "2": 22 } as Record<string, number>,
-  votes: [] as Array<{ ruleId: number; signature: string; turnId: number; voter: string }>,
+  votes: [] as Array<{
+    ruleId: number;
+    signature: string;
+    turnId: number;
+    voter: string;
+  }>,
 };
 
 // Resposta de GET /players/{wallet}/claims — ledger de exemplo (1 prêmio disponível).
@@ -130,7 +141,10 @@ export const MOCK_RULE_PREFLIGHT = {
       "Win if at least 4 of your guess numbers appear in the drawn numbers.",
     normalizedTextHash: Array.from({ length: 32 }, (_, i) => (i * 7) % 256),
     officialInterpretation: "Win when count(guess ∩ draw) >= 4.",
-    officialInterpretationHash: Array.from({ length: 32 }, (_, i) => (i * 5) % 256),
+    officialInterpretationHash: Array.from(
+      { length: 32 },
+      (_, i) => (i * 5) % 256,
+    ),
     preflightResultHash: Array.from({ length: 32 }, (_, i) => (i * 3) % 256),
     reasonSummary: "Rule is measurable and unambiguous.",
     reproposalBlocked: false,
@@ -145,11 +159,31 @@ export const MOCK_RULE_PREFLIGHT = {
 // Resposta de GET /guess-receipts?turnId=...&player=...
 export const MOCK_GUESS_RECEIPT = {
   receipt: {
+    feeLamports: 20_000_000,
     numbers: [5, 17, 22, 35, 64, 89],
+    sequence: 2,
     signature:
       "5Zx9k2QmA7bC3dE4fG6hJ8kL1mN2oP3qR4sT5uV6wX7yZ8aB9cD0eF1gH2iJ3kL4mN5",
     submittedAt: "2026-06-21T10:30:00.000Z",
   },
+  receipts: [
+    {
+      feeLamports: 20_000_000,
+      numbers: [5, 17, 22, 35, 64, 89],
+      sequence: 2,
+      signature:
+        "5Zx9k2QmA7bC3dE4fG6hJ8kL1mN2oP3qR4sT5uV6wX7yZ8aB9cD0eF1gH2iJ3kL4mN5",
+      submittedAt: "2026-06-21T10:30:00.000Z",
+    },
+    {
+      feeLamports: 0,
+      numbers: [6, 12, 27, 45, 46, 85],
+      sequence: 1,
+      signature:
+        "4Yw8j1PkB6aC2dE3fG5hJ7kL9mN1oP2qR3sT4uV5wX6yZ7aB8cD9eF0gH1iJ2kL3mN4",
+      submittedAt: "2026-06-21T10:20:00.000Z",
+    },
+  ],
 };
 
 // Resposta de GET /players/{wallet}/conversation-drafts — rascunho salvo com a
@@ -171,7 +205,10 @@ export const MOCK_CONVERSATION_DRAFTS = {
           text: "Try one of these:\nWin if at least 4 of your numbers appear in the draw.\nWin if the sum of your numbers equals the sum of the drawn numbers.",
           who: "ai" as const,
         },
-        { text: "Win if at least 4 of your numbers appear in the draw.", who: "user" as const },
+        {
+          text: "Win if at least 4 of your numbers appear in the draw.",
+          who: "user" as const,
+        },
         {
           text: "Clear and verifiable. Players win when at least four guessed numbers are drawn.",
           who: "ai" as const,
@@ -276,6 +313,7 @@ export const MOCK_ROUND = {
       indicativeSol: 20.5,
       proposalSol: 2,
       proposals: 40,
+      totalVisiblePrizePoolSol: 20.5,
     },
     activity: [
       {
@@ -315,7 +353,8 @@ export const MOCK_ROUND = {
         proposer: "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0Uvw",
         ruleId: 2,
         ruleProposal: "C2LIRicFAbYCUUNYTOWDXN7HiTBkGUFxesZ2O8EwCoaV",
-        sanitizedText: "The guess with the closest sum to the drawn total wins.",
+        sanitizedText:
+          "The guess with the closest sum to the drawn total wins.",
         state: "invalidated" as const,
         title: "Closest Sum",
         tokenCount: 11,

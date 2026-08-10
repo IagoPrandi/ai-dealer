@@ -16,6 +16,7 @@ export type Screen =
   | "claims"
   | "create"
   | "home"
+  | "guesses"
   | "invite"
   | "play"
   | "profile"
@@ -89,7 +90,14 @@ export interface TycheContextValue {
   endSeconds: null | number;
   /** The first guess is confirmed on-chain but its API receipt is still indexing. */
   entrySyncing: boolean;
-  fees: { play: number; playNext: number; remove: number; rule: number; ruleNext: number; vote: number };
+  fees: {
+    play: number;
+    playNext: number;
+    remove: number;
+    rule: number;
+    ruleNext: number;
+    vote: number;
+  };
   guessCutoffEndsAt: null | number;
   /**
    * When phase 1 (create rules + pick numbers) ends. The shortlist draw starts
@@ -101,7 +109,10 @@ export interface TycheContextValue {
   turnOpen: boolean;
   go: (screen: Screen, params?: NavParams) => void;
   newConversationKey: number;
-  openDetail: (ruleId: number, opts?: { canAgainst?: boolean; rank?: number | null }) => void;
+  openDetail: (
+    ruleId: number,
+    opts?: { canAgainst?: boolean; rank?: number | null },
+  ) => void;
   players: number;
   playCount: number;
   played: boolean;

@@ -4115,15 +4115,14 @@ export function saveGuessReceipt(receipt: GuessReceiptRecord) {
   return saved;
 }
 
+export function listPlayerGuessReceipts(turnId: number, player: string) {
+  return [...guessReceipts.values()]
+    .filter((receipt) => receipt.turnId === turnId && receipt.player === player)
+    .sort((left, right) => (right.sequence ?? 0) - (left.sequence ?? 0));
+}
+
 export function getGuessReceipt(turnId: number, player: string) {
-  return (
-    [...guessReceipts.values()]
-      .filter(
-        (receipt) => receipt.turnId === turnId && receipt.player === player,
-      )
-      .sort((left, right) => (right.sequence ?? 0) - (left.sequence ?? 0))[0] ??
-    null
-  );
+  return listPlayerGuessReceipts(turnId, player)[0] ?? null;
 }
 
 function getGuessReceiptBySequence(
@@ -11091,12 +11090,13 @@ export function handleApiRequest(
       return;
     }
 
-    const receipt = getGuessReceipt(turnId, player);
+    const receipts = listPlayerGuessReceipts(turnId, player);
+    const receipt = receipts[0] ?? null;
     sendJson(
       request,
       response,
       receipt ? 200 : 404,
-      receipt ? { receipt } : { error: "not_found" },
+      receipt ? { receipt, receipts } : { error: "not_found" },
     );
     return;
   }

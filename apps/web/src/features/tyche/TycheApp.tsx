@@ -48,7 +48,11 @@ import {
   postRuleRemoval,
   postRuleVote,
 } from "./data/apiClient";
-import { describeTxError, describeWalletConnectError, sendInstruction } from "./data/tx";
+import {
+  describeTxError,
+  describeWalletConnectError,
+  sendInstruction,
+} from "./data/tx";
 import {
   canShowRuleRemovalAction,
   Ico,
@@ -62,6 +66,7 @@ import {
   getTurnEndTimestamp,
 } from "./roundPhase";
 import { HomeScreen } from "./screens/Home";
+import { GuessesScreen } from "./screens/Guesses";
 import { PlayScreen } from "./screens/Play";
 import { VoteScreen } from "./screens/Vote";
 import { CreateScreen } from "./screens/Create";
@@ -81,9 +86,41 @@ function PhoneChrome() {
       <div className="ide-statusbar">
         <span className="ide-time">9:41</span>
         <span className="ide-status-icons">
-          <svg width="18" height="11" viewBox="0 0 18 11"><rect x="0" y="7" width="3" height="4" rx=".6" fill="#fff"/><rect x="4.6" y="4.8" width="3" height="6.2" rx=".6" fill="#fff"/><rect x="9.2" y="2.5" width="3" height="8.5" rx=".6" fill="#fff"/><rect x="13.8" y="0" width="3" height="11" rx=".6" fill="#fff"/></svg>
-          <svg width="16" height="11" viewBox="0 0 17 12"><path d="M8.5 3.2C10.8 3.2 12.9 4.1 14.4 5.6L15.5 4.5C13.7 2.7 11.2 1.5 8.5 1.5C5.8 1.5 3.3 2.7 1.5 4.5L2.6 5.6C4.1 4.1 6.2 3.2 8.5 3.2Z" fill="#fff"/><path d="M8.5 6.8C9.9 6.8 11.1 7.3 12 8.2L13.1 7.1C11.8 5.9 10.2 5.1 8.5 5.1C6.8 5.1 5.2 5.9 3.9 7.1L5 8.2C5.9 7.3 7.1 6.8 8.5 6.8Z" fill="#fff"/><circle cx="8.5" cy="10.5" r="1.5" fill="#fff"/></svg>
-          <svg width="25" height="12" viewBox="0 0 27 13"><rect x=".5" y=".5" width="23" height="12" rx="3.5" stroke="#fff" strokeOpacity=".4" fill="none"/><rect x="2" y="2" width="18" height="9" rx="2" fill="#fff"/><path d="M25 4.5V8.5C25.8 8.2 26.5 7.2 26.5 6.5C26.5 5.8 25.8 4.8 25 4.5Z" fill="#fff" fillOpacity=".5"/></svg>
+          <svg width="18" height="11" viewBox="0 0 18 11">
+            <rect x="0" y="7" width="3" height="4" rx=".6" fill="#fff" />
+            <rect x="4.6" y="4.8" width="3" height="6.2" rx=".6" fill="#fff" />
+            <rect x="9.2" y="2.5" width="3" height="8.5" rx=".6" fill="#fff" />
+            <rect x="13.8" y="0" width="3" height="11" rx=".6" fill="#fff" />
+          </svg>
+          <svg width="16" height="11" viewBox="0 0 17 12">
+            <path
+              d="M8.5 3.2C10.8 3.2 12.9 4.1 14.4 5.6L15.5 4.5C13.7 2.7 11.2 1.5 8.5 1.5C5.8 1.5 3.3 2.7 1.5 4.5L2.6 5.6C4.1 4.1 6.2 3.2 8.5 3.2Z"
+              fill="#fff"
+            />
+            <path
+              d="M8.5 6.8C9.9 6.8 11.1 7.3 12 8.2L13.1 7.1C11.8 5.9 10.2 5.1 8.5 5.1C6.8 5.1 5.2 5.9 3.9 7.1L5 8.2C5.9 7.3 7.1 6.8 8.5 6.8Z"
+              fill="#fff"
+            />
+            <circle cx="8.5" cy="10.5" r="1.5" fill="#fff" />
+          </svg>
+          <svg width="25" height="12" viewBox="0 0 27 13">
+            <rect
+              x=".5"
+              y=".5"
+              width="23"
+              height="12"
+              rx="3.5"
+              stroke="#fff"
+              strokeOpacity=".4"
+              fill="none"
+            />
+            <rect x="2" y="2" width="18" height="9" rx="2" fill="#fff" />
+            <path
+              d="M25 4.5V8.5C25.8 8.2 26.5 7.2 26.5 6.5C26.5 5.8 25.8 4.8 25 4.5Z"
+              fill="#fff"
+              fillOpacity=".5"
+            />
+          </svg>
         </span>
       </div>
       <div className="ide-homebar" />
@@ -111,7 +148,11 @@ function useStandaloneDisplayMode() {
   return standalone;
 }
 
-function repeatedActionFeeSol(turnId: number, sequence: number, baseFeeSol: number) {
+function repeatedActionFeeSol(
+  turnId: number,
+  sequence: number,
+  baseFeeSol: number,
+) {
   if (turnId < VOTE_FEE_START_TURN && sequence === 1) {
     return 0;
   }
@@ -126,23 +167,39 @@ export function TycheApp({
   initialConnect = false,
   initialResultTurnId,
   initialScreen = "home",
-}: { initialConnect?: boolean; initialResultTurnId?: number; initialScreen?: Screen } = {}) {
+}: {
+  initialConnect?: boolean;
+  initialResultTurnId?: number;
+  initialScreen?: Screen;
+} = {}) {
   const client = useSolanaClient();
   const standalone = useStandaloneDisplayMode();
-  const { connect, connecting, connected, connectors, wallet } = useWalletConnection();
+  const { connect, connecting, connected, connectors, wallet } =
+    useWalletConnection();
   const walletAddress = wallet?.account.address.toString();
   const pathname = usePathname();
   const router = useRouter();
 
   const activeTurn = useActiveTurn();
   const turnId = activeTurn.activeTurnId;
-  const { reload: reloadRound, round, loading: roundLoading, error: roundError } = useRound(turnId, turnId);
+  const {
+    reload: reloadRound,
+    round,
+    loading: roundLoading,
+    error: roundError,
+  } = useRound(turnId, turnId);
   const rules = useRules(
     turnId,
     round,
     activeTurn.snapshot?.turnState?.finalistRuleIds,
   );
-  const { entrySyncing, playCount, played, receipt, reload: reloadPlayer } = usePlayerGuess(turnId, walletAddress);
+  const {
+    entrySyncing,
+    playCount,
+    played,
+    receipt,
+    reload: reloadPlayer,
+  } = usePlayerGuess(turnId, walletAddress);
   // Phase 1 → phase 2 boundary, calculated from the same on-chain snapshot
   // used by the action guard below.
   const phase1EndsAt = useMemo(() => {
@@ -177,7 +234,11 @@ export function TycheApp({
   const [chatId, setChatId] = useState<null | string>(null);
   const [createIntent, setCreateIntent] = useState<CreateIntent>(null);
   const [newConversationKey, setNewConversationKey] = useState(0);
-  const [detail, setDetail] = useState<{ canAgainst: boolean; rank: number | null; ruleId: number } | null>(null);
+  const [detail, setDetail] = useState<{
+    canAgainst: boolean;
+    rank: number | null;
+    ruleId: number;
+  } | null>(null);
   const [showConnect, setShowConnect] = useState(initialConnect);
   const [voteBusyRuleId, setVoteBusyRuleId] = useState<null | number>(null);
   const [removeBusyRuleId, setRemoveBusyRuleId] = useState<null | number>(null);
@@ -191,42 +252,56 @@ export function TycheApp({
     reloadPlayer();
   }, [activeTurn, reloadRound, rules, reloadPlayer]);
 
-  const go = useCallback((next: Screen, params?: NavParams) => {
-    if (next === "home" && pathname !== "/play" && !pathname.startsWith("/dev/gallery")) {
-      router.push("/play");
-      return;
-    }
-    if (next === "result" && !pathname.startsWith("/dev/gallery")) {
-      const requestedResultTurnId = params?.resultTurnId ?? resultTurnId;
-      if (Number.isInteger(requestedResultTurnId) && requestedResultTurnId > 0) {
-        const resultPath = `/round/${requestedResultTurnId}`;
-        if (pathname !== resultPath) {
-          router.push(resultPath);
-          return;
+  const go = useCallback(
+    (next: Screen, params?: NavParams) => {
+      if (
+        next === "home" &&
+        pathname !== "/play" &&
+        !pathname.startsWith("/dev/gallery")
+      ) {
+        router.push("/play");
+        return;
+      }
+      if (next === "result" && !pathname.startsWith("/dev/gallery")) {
+        const requestedResultTurnId = params?.resultTurnId ?? resultTurnId;
+        if (
+          Number.isInteger(requestedResultTurnId) &&
+          requestedResultTurnId > 0
+        ) {
+          const resultPath = `/round/${requestedResultTurnId}`;
+          if (pathname !== resultPath) {
+            router.push(resultPath);
+            return;
+          }
         }
       }
-    }
-    setCreateIntent(resolveCreateIntent(params));
-    if (params?.newConversation) {
-      setSeed("");
-      setChatId(null);
-      setNewConversationKey((key) => key + 1);
-    } else if (params && "seed" in params && params.seed !== undefined) {
-      setSeed(params.seed);
-      setChatId(params?.chatId ?? null);
-    } else {
-      setChatId(params?.chatId ?? null);
-    }
-    if (next !== screen) {
-      reloadAll();
-    }
-    setDetail(null);
-    setScreen(next);
-  }, [pathname, reloadAll, resultTurnId, router, screen]);
+      setCreateIntent(resolveCreateIntent(params));
+      if (params?.newConversation) {
+        setSeed("");
+        setChatId(null);
+        setNewConversationKey((key) => key + 1);
+      } else if (params && "seed" in params && params.seed !== undefined) {
+        setSeed(params.seed);
+        setChatId(params?.chatId ?? null);
+      } else {
+        setChatId(params?.chatId ?? null);
+      }
+      if (next !== screen) {
+        reloadAll();
+      }
+      setDetail(null);
+      setScreen(next);
+    },
+    [pathname, reloadAll, resultTurnId, router, screen],
+  );
 
   const openDetail = useCallback(
     (ruleId: number, opts?: { canAgainst?: boolean; rank?: number | null }) => {
-      setDetail({ canAgainst: Boolean(opts?.canAgainst), rank: opts?.rank ?? null, ruleId });
+      setDetail({
+        canAgainst: Boolean(opts?.canAgainst),
+        rank: opts?.rank ?? null,
+        ruleId,
+      });
     },
     [],
   );
@@ -289,19 +364,32 @@ export function TycheApp({
       setVoteBusyRuleId(ruleId);
       try {
         const player = address(walletAddress);
-        const ruleProposal = (await deriveRuleProposalAddress({ ruleId, turnId })).toString();
-        const rule = rules.rules.find((candidate) => candidate.ruleId === ruleId);
+        const ruleProposal = (
+          await deriveRuleProposalAddress({ ruleId, turnId })
+        ).toString();
+        const rule = rules.rules.find(
+          (candidate) => candidate.ruleId === ruleId,
+        );
         const sequence =
           kind === "approve"
             ? (rule?.myApproveCount ?? 0) + 1
             : (rule?.myAgainstCount ?? 0) + 1;
         const submittedAt = new Date().toISOString();
         if (kind === "approve") {
-          const instruction = await createVoteRuleInstruction({ player, ruleId, sequence, turnId });
+          const instruction = await createVoteRuleInstruction({
+            player,
+            ruleId,
+            sequence,
+            turnId,
+          });
           const signature = await sendInstruction(client, wallet, instruction);
-          const ruleVote = (await deriveRuleVoteAddress({ player, ruleId, sequence, turnId })).toString();
+          const ruleVote = (
+            await deriveRuleVoteAddress({ player, ruleId, sequence, turnId })
+          ).toString();
           await postRuleVote({
-            feeLamports: Math.round((rule?.nextApproveFeeSol ?? 0) * 1_000_000_000),
+            feeLamports: Math.round(
+              (rule?.nextApproveFeeSol ?? 0) * 1_000_000_000,
+            ),
             ruleId,
             ruleProposal,
             ruleVote,
@@ -312,17 +400,26 @@ export function TycheApp({
             voter: walletAddress,
           });
         } else {
-          const instruction = await createEliminateVoteRuleInstruction({ player, ruleId, sequence, turnId });
-          const signature = await sendInstruction(client, wallet, instruction);
-          const eliminationVote = (await deriveRuleEliminationVoteAddress({
+          const instruction = await createEliminateVoteRuleInstruction({
             player,
             ruleId,
             sequence,
             turnId,
-          })).toString();
+          });
+          const signature = await sendInstruction(client, wallet, instruction);
+          const eliminationVote = (
+            await deriveRuleEliminationVoteAddress({
+              player,
+              ruleId,
+              sequence,
+              turnId,
+            })
+          ).toString();
           await postRuleEliminationVote({
             eliminationVote,
-            feeLamports: Math.round((rule?.nextAgainstFeeSol ?? 0) * 1_000_000_000),
+            feeLamports: Math.round(
+              (rule?.nextAgainstFeeSol ?? 0) * 1_000_000_000,
+            ),
             ruleId,
             ruleProposal,
             sequence,
@@ -389,7 +486,11 @@ export function TycheApp({
           deriveRuleProposalAddress({ ruleId, turnId }),
           deriveRuleRemovalAddress({ player, ruleId, turnId }),
         ]);
-        const instruction = await createRemoveRuleInstruction({ player, ruleId, turnId });
+        const instruction = await createRemoveRuleInstruction({
+          player,
+          ruleId,
+          turnId,
+        });
         const signature = await sendInstruction(client, wallet, instruction);
         await postRuleRemoval({
           removalKind: "creator_self",
@@ -408,7 +509,18 @@ export function TycheApp({
         setRemoveBusyRuleId(null);
       }
     },
-    [client, connected, go, played, reloadAll, requestConnect, rules.rules, turnId, wallet, walletAddress],
+    [
+      client,
+      connected,
+      go,
+      played,
+      reloadAll,
+      requestConnect,
+      rules.rules,
+      turnId,
+      wallet,
+      walletAddress,
+    ],
   );
 
   const fees = useMemo(() => {
@@ -425,7 +537,11 @@ export function TycheApp({
         ? lamportsToSol(gc.ruleRemovalFeeLamports)
         : MVP_FEES_SOL.paidRuleRemoval,
       rule: baseRuleFee,
-      ruleNext: repeatedActionFeeSol(turnId, ruleProposalCount + 1, baseRuleFee),
+      ruleNext: repeatedActionFeeSol(
+        turnId,
+        ruleProposalCount + 1,
+        baseRuleFee,
+      ),
       vote: gc ? lamportsToSol(gc.voteFeeLamports) : MVP_FEES_SOL.vote,
     };
   }, [activeTurn.snapshot, playCount, rules.rules, turnId]);
@@ -508,33 +624,41 @@ export function TycheApp({
     walletAddress,
   };
 
-  const showNav = screen === "home" || screen === "vote" || screen === "rewards" || screen === "profile";
-  const detailRule = detail ? rules.rules.find((r) => r.ruleId === detail.ruleId) ?? null : null;
-  const detailVote: RuleDetailVote | null =
-    detailRule
-      ? {
-          approved: rules.approvedIds.includes(detailRule.ruleId),
-          busy: voteBusyRuleId === detailRule.ruleId,
-          canAgainst: Boolean(detail?.canAgainst) && detailRule.finalist,
-          canRemove: canShowRuleRemovalAction(detailRule),
-          eliminated: rules.eliminatedIds.includes(detailRule.ruleId),
-          onApprove: () => void sendVote(detailRule.ruleId, "approve"),
-          onEliminate: () => void sendVote(detailRule.ruleId, "eliminate"),
-          onPlayToRemove: () => go("play"),
-          onRemove: () => void sendRemoveRule(detailRule.ruleId),
-          played,
-          removeBusy: removeBusyRuleId === detailRule.ruleId,
-          removeFeeSol: fees.remove,
-        }
-      : null;
+  const showNav =
+    screen === "home" ||
+    screen === "vote" ||
+    screen === "rewards" ||
+    screen === "profile";
+  const detailRule = detail
+    ? (rules.rules.find((r) => r.ruleId === detail.ruleId) ?? null)
+    : null;
+  const detailVote: RuleDetailVote | null = detailRule
+    ? {
+        approved: rules.approvedIds.includes(detailRule.ruleId),
+        busy: voteBusyRuleId === detailRule.ruleId,
+        canAgainst: Boolean(detail?.canAgainst) && detailRule.finalist,
+        canRemove: canShowRuleRemovalAction(detailRule),
+        eliminated: rules.eliminatedIds.includes(detailRule.ruleId),
+        onApprove: () => void sendVote(detailRule.ruleId, "approve"),
+        onEliminate: () => void sendVote(detailRule.ruleId, "eliminate"),
+        onPlayToRemove: () => go("play"),
+        onRemove: () => void sendRemoveRule(detailRule.ruleId),
+        played,
+        removeBusy: removeBusyRuleId === detailRule.ruleId,
+        removeFeeSol: fees.remove,
+      }
+    : null;
 
   return (
     <TycheContext.Provider value={value}>
       <main className={`ide-stage${standalone ? " ide-standalone" : ""}`}>
-        <div className={`ide-phone-shell ide-app${standalone ? " ide-standalone" : ""}`}>
+        <div
+          className={`ide-phone-shell ide-app${standalone ? " ide-standalone" : ""}`}
+        >
           <PhoneChrome />
           <div className="ide-root">
             {screen === "home" ? <HomeScreen /> : null}
+            {screen === "guesses" ? <GuessesScreen /> : null}
             {screen === "play" ? <PlayScreen /> : null}
             {screen === "vote" ? <VoteScreen /> : null}
             {screen === "create" ? <CreateScreen /> : null}
@@ -547,24 +671,56 @@ export function TycheApp({
 
             {showNav ? (
               <div className="ide-nav">
-                <button className={"ide-nav-btn" + (screen === "home" ? " on" : "")} onClick={() => go("home")} type="button">
+                <button
+                  className={"ide-nav-btn" + (screen === "home" ? " on" : "")}
+                  onClick={() => go("home")}
+                  type="button"
+                >
                   <Ico.home style={{ color: "currentColor" }} /> Round
                 </button>
-                <button className={"ide-nav-btn" + (screen === "vote" ? " on" : "")} onClick={() => go("vote")} type="button">
+                <button
+                  className={"ide-nav-btn" + (screen === "vote" ? " on" : "")}
+                  onClick={() => go("vote")}
+                  type="button"
+                >
                   <Ico.vote style={{ color: "currentColor" }} /> Rules
                 </button>
-                <button className="ide-nav-fab" onClick={() => go("create", { newConversation: true })} title="Create rule" type="button"><Ico.plus style={{ color: "#08110C" }} /></button>
-                <button className={"ide-nav-btn" + (screen === "rewards" ? " on" : "")} onClick={() => go("rewards")} type="button">
+                <button
+                  className="ide-nav-fab"
+                  onClick={() => go("create", { newConversation: true })}
+                  title="Create rule"
+                  type="button"
+                >
+                  <Ico.plus style={{ color: "#08110C" }} />
+                </button>
+                <button
+                  className={
+                    "ide-nav-btn" + (screen === "rewards" ? " on" : "")
+                  }
+                  onClick={() => go("rewards")}
+                  type="button"
+                >
                   <Ico.coin style={{ color: "currentColor" }} /> Rewards
                 </button>
-                <button className={"ide-nav-btn" + (screen === "profile" ? " on" : "")} onClick={() => go("profile")} type="button">
+                <button
+                  className={
+                    "ide-nav-btn" + (screen === "profile" ? " on" : "")
+                  }
+                  onClick={() => go("profile")}
+                  type="button"
+                >
                   <Ico.user style={{ color: "currentColor" }} /> Account
                 </button>
               </div>
             ) : null}
 
             {detail && detailRule ? (
-              <RuleDetail rule={detailRule} rank={detail.rank} vote={detailVote} onClose={() => setDetail(null)} />
+              <RuleDetail
+                rule={detailRule}
+                rank={detail.rank}
+                vote={detailVote}
+                onClose={() => setDetail(null)}
+              />
             ) : null}
 
             {screen === "home" ? <DrawResultPopup /> : null}

@@ -31,6 +31,7 @@ import {
   getAccruedTreasuryFeesLamports,
   getDefaultActiveTurnId,
   getGuessReceipt,
+  listPlayerGuessReceipts,
   getRolloverActivityEvents,
   getRoundSummary,
   getRuleRemovalActivityEvents,
@@ -92,12 +93,10 @@ const walletThree = "6bYqf3rJ7m2nQh9sV1xCH8kLpWtD6eZaUg5oNbMcXyTK";
 const base58 = "ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd";
 
 test("effective turn duration follows the isolated dev-cycle configuration", () => {
-  assert.deepEqual(resolveEffectiveTurnDurationCycleSeconds({}), [
-    86_400,
-    86_400,
-    86_400,
-    86_400,
-  ]);
+  assert.deepEqual(
+    resolveEffectiveTurnDurationCycleSeconds({}),
+    [86_400, 86_400, 86_400, 86_400],
+  );
   assert.deepEqual(
     resolveEffectiveTurnDurationCycleSeconds({
       TYCHE_DEVNET_TURN_DURATION_SCALE_BPS: "139",
@@ -126,7 +125,8 @@ function hashArray(byte: number) {
   return Array.from({ length: 32 }, () => byte);
 }
 
-const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const BASE58_ALPHABET =
+  "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
 function encodeBase58(bytes: Uint8Array) {
   let leadingZeroes = 0;
@@ -307,7 +307,10 @@ test("known ordered tens-range evidence aligns the public interpretation with th
   assert.equal(interpretation.title, "Ordered Tens Ranges");
   assert.equal(interpretation.needsClarification, false);
   assert.match(interpretation.normalizedText, /all six.*same tens range/i);
-  assert.match(interpretation.officialInterpretation, /divide.*by 10.*integer division/i);
+  assert.match(
+    interpretation.officialInterpretation,
+    /divide.*by 10.*integer division/i,
+  );
   assert.deepEqual(interpretation.suggestedRewrites, []);
 });
 
@@ -507,7 +510,8 @@ test("M9.3 backend accounting matches the contract domain vector", () => {
   // `contracts/solana/programs/tyche/tests/core.rs`.
   assert.deepEqual(
     {
-      alternativeBucketCurrent: accounting.buckets.alternative.currentTurnLamports,
+      alternativeBucketCurrent:
+        accounting.buckets.alternative.currentTurnLamports,
       alternativeBucketTotal: accounting.buckets.alternative.totalLamports,
       currentTurnPool: accounting.currentTurnPoolLamports,
       grossFees: accounting.grossFeesLamports,
@@ -782,7 +786,10 @@ test("repeated vote retries are idempotent and conflicting retries are rejected"
   assert.deepEqual(eliminationRetry, firstElimination);
   assert.equal(listRuleVotes(turnId).votes.length, 1);
   assert.equal(listRuleEliminationVotes(turnId).votes.length, 1);
-  assert.equal(getPrizePoolAccounting(turnId).sources.votes.grossLamports, 10_000_000);
+  assert.equal(
+    getPrizePoolAccounting(turnId).sources.votes.grossLamports,
+    10_000_000,
+  );
   assert.equal(
     getPrizePoolAccounting(turnId).sources.eliminationVotes.grossLamports,
     10_000_000,
@@ -944,7 +951,10 @@ test("public transparency snapshot aggregates M5 turn, economy, rule, proof, tre
     turnId,
   });
 
-  const snapshot = getTransparencySnapshot({ fromTurnId: turnId, toTurnId: turnId });
+  const snapshot = getTransparencySnapshot({
+    fromTurnId: turnId,
+    toTurnId: turnId,
+  });
   assert.equal(
     getAccruedTreasuryFeesLamports(),
     getTransparencySnapshot().totals.platformTreasuryLamports,
@@ -959,7 +969,10 @@ test("public transparency snapshot aggregates M5 turn, economy, rule, proof, tre
   assert.equal(snapshot.totals.eliminationVotes, 1);
   assert.equal(snapshot.turns[0]?.rules.activeRuleId, 7);
   assert.equal(snapshot.turns[0]?.rules.finalistRuleIds.includes(7), true);
-  assert.match(snapshot.turns[0]?.proofs.drawResultHash ?? "", /^[0-9a-f]{64}$/);
+  assert.match(
+    snapshot.turns[0]?.proofs.drawResultHash ?? "",
+    /^[0-9a-f]{64}$/,
+  );
   assert.match(
     snapshot.turns[0]?.proofs.winnerCalculationHash ?? "",
     /^[0-9a-f]{64}$/,
@@ -992,7 +1005,8 @@ test("console safety boundary keeps transparency and operator dashboards read-on
   const operatorSnapshot = getOperatorAiOperationsSnapshot();
   const boundary = getConsoleSafetyBoundary();
   const publicCsv = exportTransparencySnapshotCsv(snapshot).toLowerCase();
-  const operatorCsv = exportOperatorAiOperationsCsv(operatorSnapshot).toLowerCase();
+  const operatorCsv =
+    exportOperatorAiOperationsCsv(operatorSnapshot).toLowerCase();
   const serialized = `${JSON.stringify(snapshot)}\n${JSON.stringify(
     operatorSnapshot,
   )}\n${publicCsv}\n${operatorCsv}`.toLowerCase();
@@ -1000,16 +1014,16 @@ test("console safety boundary keeps transparency and operator dashboards read-on
   assert.deepEqual(boundary.allowedHttpMethods, ["GET", "OPTIONS"]);
   assert.equal(getAllowedMethodsForPath("/transparency"), "GET,OPTIONS");
   assert.equal(getAllowedMethodsForPath("/transparency/export"), "GET,OPTIONS");
-  assert.equal(getAllowedMethodsForPath("/operator/ai-operations"), "GET,OPTIONS");
+  assert.equal(
+    getAllowedMethodsForPath("/operator/ai-operations"),
+    "GET,OPTIONS",
+  );
   assert.equal(
     getAllowedMethodsForPath("/operator/ai-operations/export"),
     "GET,OPTIONS",
   );
   assert.equal(getAllowedMethodsForPath("/guess-receipts"), "GET,POST,OPTIONS");
-  assert.equal(
-    getConsoleReadOnlyMethodRejection("/transparency", "GET"),
-    null,
-  );
+  assert.equal(getConsoleReadOnlyMethodRejection("/transparency", "GET"), null);
   assert.equal(
     getConsoleReadOnlyMethodRejection("/operator/ai-operations", "OPTIONS"),
     null,
@@ -1056,7 +1070,10 @@ test("console safety boundary keeps transparency and operator dashboards read-on
     "prize_accounting",
     "creator_reward_records",
   ] as const) {
-    assert.equal(boundary.protectedGameStateMutationDenylist.includes(field), true);
+    assert.equal(
+      boundary.protectedGameStateMutationDenylist.includes(field),
+      true,
+    );
   }
   for (const field of [
     "ip_address",
@@ -1197,7 +1214,10 @@ test("restricted AI operations snapshot is role-gated and redacted", () => {
     ),
     true,
   );
-  assert.equal(snapshot.confidenceDistributions.finalConfidenceBuckets["90_100"], 1);
+  assert.equal(
+    snapshot.confidenceDistributions.finalConfidenceBuckets["90_100"],
+    1,
+  );
   assert.equal(snapshot.localModelHealth.length > 0, true);
   assert.equal(snapshot.auditLinks.length, 1);
   assert.equal(snapshot.queue.backlogJobs, 1);
@@ -1445,15 +1465,39 @@ test("operational API state survives snapshot export and restore", () => {
   assert.equal(getGuessReceipt(turnId, wallet), null);
 
   restoreApiStateSnapshot(snapshot);
-  assert.deepEqual(getGuessReceipt(turnId, wallet)?.numbers, [1, 2, 3, 4, 5, 6]);
-  assert.deepEqual(getRoundSummary(turnId, turnId).draw?.drawResult, [
-    1, 2, 3, 4, 5, 6,
-  ]);
+  assert.deepEqual(
+    getGuessReceipt(turnId, wallet)?.numbers,
+    [1, 2, 3, 4, 5, 6],
+  );
+  assert.deepEqual(
+    getRoundSummary(turnId, turnId).draw?.drawResult,
+    [1, 2, 3, 4, 5, 6],
+  );
   assert.match(
     API_STATE_POSTGRES_SCHEMA,
     /CREATE TABLE IF NOT EXISTS api_state_snapshots/,
   );
   assert.match(API_STATE_POSTGRES_SCHEMA, /snapshot_json text NOT NULL/);
+});
+
+test("guess receipt list returns every wallet entry newest first", () => {
+  resetApiStateForTests();
+  const turnId = 4_202;
+  saveReceiptForWallet(turnId, wallet, [1, 2, 3, 4, 5, 6]);
+  saveReceiptForWallet(turnId, wallet, [10, 20, 30, 40, 50, 60]);
+  saveReceiptForWallet(turnId, walletTwo, [7, 8, 9, 10, 11, 12]);
+
+  const receipts = listPlayerGuessReceipts(turnId, wallet);
+
+  assert.deepEqual(
+    receipts.map((receipt) => receipt.sequence),
+    [2, 1],
+  );
+  assert.deepEqual(receipts[0]?.numbers, [10, 20, 30, 40, 50, 60]);
+  assert.deepEqual(
+    getGuessReceipt(turnId, wallet)?.numbers,
+    receipts[0]?.numbers,
+  );
 });
 
 test("round summary uses the caller-provided active turn id for current status", () => {
@@ -1514,10 +1558,10 @@ test("multiple guesses from the same wallet are projected as separate verificati
   const { jobs } = createGuessVerificationJobsForTurn(221);
 
   assert.equal(jobs.length, 2);
-  assert.deepEqual(
-    jobs.map((job) => job.payload.guess_sequence).sort(),
-    ["1", "2"],
-  );
+  assert.deepEqual(jobs.map((job) => job.payload.guess_sequence).sort(), [
+    "1",
+    "2",
+  ]);
   assert.notEqual(jobs[0]?.id, jobs[1]?.id);
 });
 
@@ -1888,8 +1932,7 @@ test("rollover settlement reconciles late verification without dropping unrelate
   const first = settleTurnRollover(332, "2026-06-12T12:18:00.000Z");
 
   saveTurnRollover({
-    alternativeRolloverLamports:
-      first.alternative.rolloverLamports + 1_000_000,
+    alternativeRolloverLamports: first.alternative.rolloverLamports + 1_000_000,
     originalRolloverLamports: first.original.rolloverLamports + 2_000_000,
     recordedAt: "2026-06-12T12:19:00.000Z",
     sourceTurnId: 305,
@@ -2279,10 +2322,7 @@ test("M9.3 minimum payout and expired unclaimed winner claims roll over safely",
     }),
   );
 
-  let created = createClaimRecordsForTurn(
-    620,
-    "2026-06-12T12:20:00.000Z",
-  );
+  let created = createClaimRecordsForTurn(620, "2026-06-12T12:20:00.000Z");
   const belowMinimumWinner = created.claims.find(
     (claim) => claim.kind === "winner_payout" && claim.wallet === wallet,
   );
@@ -2330,7 +2370,10 @@ test("M9.3 minimum payout and expired unclaimed winner claims roll over safely",
   );
 
   assert.equal(expired.expiredClaims.length, 1);
-  assert.equal(expired.originalRolloverLamports, unclaimedWinner.amountLamports);
+  assert.equal(
+    expired.originalRolloverLamports,
+    unclaimedWinner.amountLamports,
+  );
   assert.equal(expired.alternativeRolloverLamports, 0);
   assert.equal(retry.totalRolloverLamports, 0);
   assert.equal(expiredClaim?.status, "unavailable");
@@ -2629,7 +2672,8 @@ test("conversation draft persists the full message transcript", () => {
 test("conversation draft validation accepts a pending user-only transcript", () => {
   assert.equal(
     isValidConversationDraft({
-      lastMessage: "Win if exactly 2 guessed numbers match in the same position.",
+      lastMessage:
+        "Win if exactly 2 guessed numbers match in the same position.",
       messages: [
         {
           text: "Win if exactly 2 guessed numbers match in the same position.",
@@ -2677,14 +2721,20 @@ test("conversation draft validation accepts, tolerates, and rejects transcripts"
   assert.equal(isValidConversationDraft(base), true);
   // Invalid author.
   assert.equal(
-    isValidConversationDraft({ ...base, messages: [{ text: "x", who: "bot" }] }),
+    isValidConversationDraft({
+      ...base,
+      messages: [{ text: "x", who: "bot" }],
+    }),
     false,
   );
   // Too many messages.
   assert.equal(
     isValidConversationDraft({
       ...base,
-      messages: Array.from({ length: 101 }, () => ({ text: "x", who: "user" as const })),
+      messages: Array.from({ length: 101 }, () => ({
+        text: "x",
+        who: "user" as const,
+      })),
     }),
     false,
   );

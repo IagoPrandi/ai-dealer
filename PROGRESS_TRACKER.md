@@ -407,6 +407,16 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-08-10 (Home round cards and wallet-scoped guess history)
+
+- Opened the required `PRD.md`, `AGENTS.md`, `.claude/skills`, the Tyche design-system skill and all four relevant token/component/screen/new-flow references, the UI-coherence checklist, the test-and-verify guidance, and the current Next.js/React/browser guidance before editing. Inspected the real `Home`, `Play`, `Claims`, app shell, context, data hooks/API client, mock gallery, API receipt store, and neighboring screen patterns.
+- Replaced the claim banner copy with the single-line `You win XX SOL!!` treatment and highlighted the numeric SOL amount. Removed the home guess chips and the “Good luck” caption; the `You're in this round` row now opens the internal `My guesses` screen, while the repeated-play button sits centered beneath it.
+- Added the wallet-scoped `My guesses` screen with loading, syncing, empty, error/retry, disconnected-wallet, and confirmed-entry states. It lists every indexed guess for the current round newest-first, including sequence, six numbers, and the real entry fee. The six-number row scales from 36 px to 40 px so it remains a single row at 320 px without horizontal overflow.
+- Extended `GET /guess-receipts` compatibly: the existing latest `receipt` remains, and the response now also includes the full `receipts` list. Added a regression test proving that multiple entries from one wallet are returned newest-first without leaking another wallet's entry. Updated the UI mock with two guesses and the required visible-pool field used by the result popup.
+- Removed the previous-round subtitle and moved the `Result of round #XXXX` row directly after `View and vote on N rules`.
+- Validation passed: API typecheck, full API tests (including the new multi-guess regression), ESLint with zero warnings, and build; web typecheck, `234/234` tests, ESLint with zero warnings, and the webpack production build. Isolated real-browser verification confirmed the home copy/order, centered replay CTA, click-through to both guesses, a working result popup after the mock-contract correction, no Next error overlay, and no horizontal overflow at 320 px or 430 px. Screenshots: `output/playwright/home-round-updates.png`, `output/playwright/home-result-after-vote.png`, `output/playwright/my-guesses-430.png`, and `output/playwright/gallery-320-viewport.png`.
+- No transaction was signed or broadcast, no SOL/JDR moved, and no milestone checkbox or milestone status was changed. Final inconsistency review confirmed English-only copy, numeric font treatment, existing tokens/components, explicit failure states, backwards-compatible receipt consumers, and the requested content order.
+
 ### 2026-07-19 (Devnet-only empty JDR metadata URI implemented and verified)
 
 - Reopened the required `PRD.md`, inspected `.claude/skills`, and followed the repository Solana, Metaplex, browser, testing, and deployment guidance. Updated `PRD-TOKENOMICS-v2.8.md` to record the owner's superseding decision without marking any milestone.

@@ -20,10 +20,7 @@ import type {
 import { readSseStream } from "./sseStream";
 import { getApiBaseUrl } from "../../../lib/apiBase";
 
-export {
-  SseStreamDisconnectedError,
-  SseStreamExpiredError,
-} from "./sseStream";
+export { SseStreamDisconnectedError, SseStreamExpiredError } from "./sseStream";
 
 export const API_BASE_URL = getApiBaseUrl;
 
@@ -242,6 +239,24 @@ export async function getGuessReceipt(
   return body?.receipt ?? null;
 }
 
+export async function getGuessReceipts(
+  turnId: number,
+  player: string,
+  signal?: AbortSignal,
+): Promise<GuessReceiptApi[]> {
+  const body = await getJson<{ receipts: GuessReceiptApi[] }>(
+    `/guess-receipts?turnId=${turnId}&player=${player}`,
+    { allow404: true, ...(signal ? { signal } : {}) },
+  );
+  if (!body) {
+    return [];
+  }
+  if (!Array.isArray(body.receipts)) {
+    throw new Error("Guess receipt response is missing the receipts list.");
+  }
+  return body.receipts;
+}
+
 /* --------------------------- preflight / writes --------------------------- */
 
 export interface RulePreflightApiResult {
@@ -295,7 +310,9 @@ type RulePreflightStreamEvent =
   | { interpretation: RuleInterpretationApiResult; type: "interpretation" }
   | { error?: string; message?: string; status?: number; type: "error" };
 
-function throwRulePreflightStreamError(event: Extract<RulePreflightStreamEvent, { type: "error" }>) {
+function throwRulePreflightStreamError(
+  event: Extract<RulePreflightStreamEvent, { type: "error" }>,
+) {
   throw new ApiRequestError({
     code: event.error ?? null,
     detail: event,
@@ -417,9 +434,7 @@ export async function consumeRulePreflightJob(
     throw streamError;
   }
   if (!outcome) {
-    throw new Error(
-      "The rule preflight job ended before returning a result.",
-    );
+    throw new Error("The rule preflight job ended before returning a result.");
   }
   return outcome;
 }
