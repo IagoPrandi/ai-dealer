@@ -271,6 +271,8 @@ updated_at timestamptz not null
 
 Claims below the configured minimum threshold are created with `unavailable` status and `PAYOUT_BELOW_MINIMUM`. A claim must transition through `pending_wallet_approval` before it can become `claimed` or `failed`; a claimed record cannot be requested again. Expired unclaimed winner-payout claims are marked `unavailable` with `CLAIM_WINDOW_EXPIRED` and their amount is added to the same-category rollover bucket for the current settlement turn.
 
+This row is a projection, not the custody record. On chain the same payout lives in a `Claim` PDA whose lamports are reserved against its turn's `prize_vault`; `expire_claim` is what actually returns an out-of-window payout to that vault's unreserved balance, and `sweep_prize_rollover` is what moves it into the next turn. The programme re-checks both window bounds itself, so this table's status can never release funds on its own — see `contracts/solana/README.md`.
+
 ## pgvector HNSW Migration
 
 ```sql

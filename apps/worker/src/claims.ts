@@ -86,7 +86,7 @@ export async function createRecordClaimInstruction({
   turnId: number;
 }): Promise<AuthorityInstruction> {
   const claimantBytes = addressEncoder.encode(claimant);
-  const [globalConfig, turnState, claim] = await Promise.all([
+  const [globalConfig, turnState, claim, prizeVault] = await Promise.all([
     derivePda({ programId, seeds: ["global_config"] }),
     derivePda({ programId, seeds: ["turn", u64Le(turnId)] }),
     derivePda({
@@ -98,6 +98,7 @@ export async function createRecordClaimInstruction({
         Uint8Array.of(CLAIM_KIND_BYTE[kind]),
       ],
     }),
+    derivePda({ programId, seeds: ["prize_vault", u64Le(turnId)] }),
   ]);
 
   const data = new Uint8Array([
@@ -114,6 +115,9 @@ export async function createRecordClaimInstruction({
       { address: globalConfig, role: AccountRole.READONLY },
       { address: turnState, role: AccountRole.READONLY },
       { address: claim, role: AccountRole.WRITABLE },
+      // The payout is reserved against the turn's vault at record time, so the
+      // program can reject a claim the vault could never pay.
+      { address: prizeVault, role: AccountRole.WRITABLE },
       { address: SYSTEM_PROGRAM_ID, role: AccountRole.READONLY },
     ],
     data,

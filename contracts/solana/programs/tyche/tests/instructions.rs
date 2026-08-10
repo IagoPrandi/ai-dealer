@@ -1843,6 +1843,7 @@ fn record_claim_instruction(
                 claimant.as_ref(),
                 &[kind as u8],
             ]),
+            prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
             system_program: system_program::ID,
         }
         .to_account_metas(None),
@@ -1853,6 +1854,28 @@ fn record_claim_instruction(
                 kind,
                 amount_lamports,
             },
+        }
+        .data(),
+    }
+}
+
+fn expire_claim_instruction(turn_id: u64, authority: Pubkey, claimant: Pubkey) -> Instruction {
+    Instruction {
+        program_id: tyche::ID,
+        accounts: accounts::ExpireClaim {
+            authority,
+            global_config: pda(&[b"global_config"]),
+            claim: pda(&[
+                b"claim",
+                &turn_id.to_le_bytes(),
+                claimant.as_ref(),
+                &[tyche::ClaimKind::WinnerPayout as u8],
+            ]),
+            prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
+        }
+        .to_account_metas(None),
+        data: instruction::ExpireClaim {
+            args: tyche::ExpireClaimArgs { turn_id, claimant },
         }
         .data(),
     }
@@ -1948,6 +1971,29 @@ async fn claim_flow_pays_winner_and_rejects_legacy_sol_rewards() {
     .await
     .is_err());
 
+    // A payout larger than the vault can back is rejected at record time
+    // instead of stranding the winner behind a failing `claim_prize`.
+    let prize_vault_address = pda(&[b"prize_vault", &turn_id.to_le_bytes()]);
+    let unreserved = read_anchor_account::<tyche::PrizeVault>(&mut context, prize_vault_address)
+        .await
+        .total_collected_lamports;
+    assert!(unreserved > 0);
+    assert_custom_error(
+        process(
+            &mut context,
+            record_claim_instruction(
+                turn_id,
+                authority,
+                player.pubkey(),
+                tyche::ClaimKind::WinnerPayout,
+                unreserved + 1,
+            ),
+            &[],
+        )
+        .await,
+        u32::from(TycheError::ClaimExceedsPrizeVault),
+    );
+
     // The authority records a valid winner payout.
     let payout = 6_000_000_u64;
     process(
@@ -1972,6 +2018,31 @@ async fn claim_flow_pays_winner_and_rejects_legacy_sol_rewards() {
     let claim: tyche::Claim = read_anchor_account(&mut context, claim_address).await;
     assert_eq!(claim.status, tyche::ClaimState::Available);
     assert_eq!(claim.amount_lamports, payout);
+
+    // Recording reserves the payout, so a second winner can only be recorded
+    // against what is left: the vault cannot be over-committed by summing two
+    // individually affordable claims.
+    let remaining = unreserved - payout;
+    let reserved_vault: tyche::PrizeVault =
+        read_anchor_account(&mut context, prize_vault_address).await;
+    assert_eq!(reserved_vault.total_collected_lamports, remaining);
+    let second_winner = Keypair::new();
+    fund(&mut context, &second_winner.pubkey()).await;
+    assert_custom_error(
+        process(
+            &mut context,
+            record_claim_instruction(
+                turn_id,
+                authority,
+                second_winner.pubkey(),
+                tyche::ClaimKind::WinnerPayout,
+                remaining + 1,
+            ),
+            &[],
+        )
+        .await,
+        u32::from(TycheError::ClaimExceedsPrizeVault),
+    );
 
     // Re-recording the same (turn, wallet, kind) tuple fails (idempotent init).
     let clock: Clock = context.banks_client.get_sysvar().await.unwrap();
@@ -2043,6 +2114,375 @@ async fn claim_flow_pays_winner_and_rejects_legacy_sol_rewards() {
     )
     .await;
     assert_custom_error(creator_reward, u32::from(TycheError::ClaimKindMismatch));
+
+    // An abandoned payout must be releasable, otherwise its reservation pins the
+    // lamports in a closed turn's vault forever and blocks every later rollover.
+    let abandoned = read_anchor_account::<tyche::PrizeVault>(&mut context, prize_vault_address)
+        .await
+        .total_collected_lamports;
+    assert!(abandoned > 0);
+    process(
+        &mut context,
+        record_claim_instruction(
+            turn_id,
+            authority,
+            second_winner.pubkey(),
+            tyche::ClaimKind::WinnerPayout,
+            abandoned,
+        ),
+        &[],
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        read_anchor_account::<tyche::PrizeVault>(&mut context, prize_vault_address)
+            .await
+            .total_collected_lamports,
+        0
+    );
+
+    // Inside the window the payout still belongs to its winner.
+    assert_custom_error(
+        process(
+            &mut context,
+            expire_claim_instruction(turn_id, authority, second_winner.pubkey()),
+            &[],
+        )
+        .await,
+        u32::from(TycheError::ClaimWindowStillOpen),
+    );
+
+    // Past the seven-day bound the reservation is released back to the vault.
+    let mut clock: Clock = context.banks_client.get_sysvar().await.unwrap();
+    clock.unix_timestamp += tyche::CLAIM_WINDOW_SECONDS;
+    context.set_sysvar(&clock);
+    context.warp_to_slot(clock.slot + 1).unwrap();
+    process(
+        &mut context,
+        expire_claim_instruction(turn_id, authority, second_winner.pubkey()),
+        &[],
+    )
+    .await
+    .unwrap();
+    let expired_claim_address = pda(&[
+        b"claim",
+        &turn_id.to_le_bytes(),
+        second_winner.pubkey().as_ref(),
+        &[tyche::ClaimKind::WinnerPayout as u8],
+    ]);
+    let expired: tyche::Claim = read_anchor_account(&mut context, expired_claim_address).await;
+    assert_eq!(expired.status, tyche::ClaimState::Expired);
+    let released = read_anchor_account::<tyche::PrizeVault>(&mut context, prize_vault_address)
+        .await
+        .total_collected_lamports;
+    assert_eq!(released, abandoned);
+    // The vault now owes nothing, so its whole balance can roll forward.
+    assert_eq!(
+        lamports_of(&mut context, prize_vault_address).await - released,
+        context.banks_client.get_rent().await.unwrap().minimum_balance(
+            context
+                .banks_client
+                .get_account(prize_vault_address)
+                .await
+                .unwrap()
+                .unwrap()
+                .data
+                .len()
+        )
+    );
+
+    // Expiry is terminal: the payout cannot be pulled and cannot be released twice.
+    let clock: Clock = context.banks_client.get_sysvar().await.unwrap();
+    context.warp_to_slot(clock.slot + 1).unwrap();
+    assert_custom_error(
+        process(
+            &mut context,
+            claim_prize_instruction(turn_id, second_winner.pubkey()),
+            &[&second_winner],
+        )
+        .await,
+        u32::from(TycheError::ClaimNotAvailable),
+    );
+    let clock: Clock = context.banks_client.get_sysvar().await.unwrap();
+    context.warp_to_slot(clock.slot + 1).unwrap();
+    assert_custom_error(
+        process(
+            &mut context,
+            expire_claim_instruction(turn_id, authority, second_winner.pubkey()),
+            &[],
+        )
+        .await,
+        u32::from(TycheError::ClaimNotAvailable),
+    );
+
+    // Only the authority may release an abandoned payout.
+    let clock: Clock = context.banks_client.get_sysvar().await.unwrap();
+    context.warp_to_slot(clock.slot + 1).unwrap();
+    assert!(process(
+        &mut context,
+        expire_claim_instruction(turn_id, stranger.pubkey(), player.pubkey()),
+        &[&stranger],
+    )
+    .await
+    .is_err());
+}
+
+fn close_turn_instruction(turn_id: u64, authority: Pubkey) -> Instruction {
+    Instruction {
+        program_id: tyche::ID,
+        accounts: accounts::CloseTurn {
+            authority,
+            global_config: pda(&[b"global_config"]),
+            turn_state: pda(&[b"turn", &turn_id.to_le_bytes()]),
+        }
+        .to_account_metas(None),
+        data: instruction::CloseTurn {}.data(),
+    }
+}
+
+fn sweep_prize_rollover_instruction(
+    authority: Pubkey,
+    source_turn_id: u64,
+    destination_turn_id: u64,
+    original_lamports: u64,
+    alternative_lamports: u64,
+) -> Instruction {
+    Instruction {
+        program_id: tyche::ID,
+        accounts: accounts::SweepPrizeRollover {
+            authority,
+            global_config: pda(&[b"global_config"]),
+            source_turn_state: pda(&[b"turn", &source_turn_id.to_le_bytes()]),
+            source_prize_vault: pda(&[b"prize_vault", &source_turn_id.to_le_bytes()]),
+            destination_turn_state: pda(&[b"turn", &destination_turn_id.to_le_bytes()]),
+            destination_prize_vault: pda(&[b"prize_vault", &destination_turn_id.to_le_bytes()]),
+        }
+        .to_account_metas(None),
+        data: instruction::SweepPrizeRollover {
+            args: tyche::SweepPrizeRolloverArgs {
+                source_turn_id,
+                destination_turn_id,
+                original_lamports,
+                alternative_lamports,
+            },
+        }
+        .data(),
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires an SBF build and SBF_OUT_DIR; run the explicit SBF integration suite"]
+async fn sweep_prize_rollover_moves_lamports_into_the_open_turn_vault() {
+    let mut context = tyche_program_test().start_with_context().await;
+    let authority = context.payer.pubkey();
+    let source_turn_id = 1_u64;
+    let destination_turn_id = 2_u64;
+    initialize_and_open_turn(&mut context, source_turn_id).await;
+
+    // Fund the source vault: guess fees route their post-treasury share into
+    // the turn-1 prize vault.
+    let player = Keypair::new();
+    fund(&mut context, &player.pubkey()).await;
+    submit_guess(&mut context, &player, source_turn_id, [1, 2, 3, 4, 5, 6])
+        .await
+        .unwrap();
+    submit_guess_with_sequence(
+        &mut context,
+        &player,
+        source_turn_id,
+        [7, 8, 9, 10, 11, 12],
+        2,
+    )
+    .await
+    .unwrap();
+
+    let source_vault_address = pda(&[b"prize_vault", &source_turn_id.to_le_bytes()]);
+    let destination_vault_address = pda(&[b"prize_vault", &destination_turn_id.to_le_bytes()]);
+    let carried = read_anchor_account::<tyche::PrizeVault>(&mut context, source_vault_address)
+        .await
+        .total_collected_lamports;
+    assert!(carried > 0);
+
+    // The source-still-open and destination-not-open guards stay in the program
+    // as defence in depth, but they are not exercised here: only one turn exists
+    // at a time, so the destination's accounts do not exist until the source has
+    // closed, and the account constraints reject the call first.
+    advance_clock_to_turn_end(&mut context, source_turn_id).await;
+    process(
+        &mut context,
+        close_turn_instruction(source_turn_id, authority),
+        &[],
+    )
+    .await
+    .unwrap();
+    open_turn(&mut context, destination_turn_id).await;
+
+    // The declared split must equal the whole unreserved source balance, so
+    // off-chain accounting that disagrees with the chain fails loudly rather
+    // than half-funding the destination pool.
+    assert_custom_error(
+        process(
+            &mut context,
+            sweep_prize_rollover_instruction(
+                authority,
+                source_turn_id,
+                destination_turn_id,
+                carried - 1,
+                0,
+            ),
+            &[],
+        )
+        .await,
+        u32::from(TycheError::RolloverAmountMismatch),
+    );
+
+    // Rollover only ever moves forward.
+    assert_custom_error(
+        process(
+            &mut context,
+            sweep_prize_rollover_instruction(
+                authority,
+                destination_turn_id,
+                source_turn_id,
+                0,
+                0,
+            ),
+            &[],
+        )
+        .await,
+        u32::from(TycheError::InvalidRolloverDirection),
+    );
+
+    // A vault that still owes a recorded payout cannot be swept: the reserved
+    // lamports are physically present but are not the next turn's money, and
+    // moving them would strand the winner behind an unpayable `claim_prize`.
+    // (`record_claim` needs a fulfilled draw, so simulate the same condition by
+    // adding bare lamports the vault's unreserved counter does not account for.)
+    let stray_lamports = 1_234_567_u64;
+    let mut stray_vault = context
+        .banks_client
+        .get_account(source_vault_address)
+        .await
+        .unwrap()
+        .unwrap();
+    stray_vault.lamports += stray_lamports;
+    context.set_account(&source_vault_address, &stray_vault.into());
+    assert_custom_error(
+        process(
+            &mut context,
+            sweep_prize_rollover_instruction(
+                authority,
+                source_turn_id,
+                destination_turn_id,
+                carried,
+                0,
+            ),
+            &[],
+        )
+        .await,
+        u32::from(TycheError::PrizeVaultHasOutstandingClaims),
+    );
+    let mut healed_vault = context
+        .banks_client
+        .get_account(source_vault_address)
+        .await
+        .unwrap()
+        .unwrap();
+    healed_vault.lamports -= stray_lamports;
+    context.set_account(&source_vault_address, &healed_vault.into());
+
+    let source_lamports_before = lamports_of(&mut context, source_vault_address).await;
+    let destination_lamports_before = lamports_of(&mut context, destination_vault_address).await;
+    let original = carried / 2;
+    let alternative = carried - original;
+    process(
+        &mut context,
+        sweep_prize_rollover_instruction(
+            authority,
+            source_turn_id,
+            destination_turn_id,
+            original,
+            alternative,
+        ),
+        &[],
+    )
+    .await
+    .unwrap();
+
+    // Lamports really moved, and the source keeps exactly its rent exemption.
+    assert_eq!(
+        source_lamports_before - lamports_of(&mut context, source_vault_address).await,
+        carried
+    );
+    assert_eq!(
+        lamports_of(&mut context, destination_vault_address).await - destination_lamports_before,
+        carried
+    );
+    let source_vault: tyche::PrizeVault =
+        read_anchor_account(&mut context, source_vault_address).await;
+    assert_eq!(source_vault.total_collected_lamports, 0);
+    let destination_vault: tyche::PrizeVault =
+        read_anchor_account(&mut context, destination_vault_address).await;
+    assert_eq!(destination_vault.total_collected_lamports, carried);
+    let destination_turn: TurnState = read_anchor_account(
+        &mut context,
+        pda(&[b"turn", &destination_turn_id.to_le_bytes()]),
+    )
+    .await;
+    assert_eq!(destination_turn.original_pool_rollover_lamports, original);
+    assert_eq!(
+        destination_turn.alternative_pool_rollover_lamports,
+        alternative
+    );
+
+    // Replay: the drained source only accepts a 0/0 no-op, and that no-op moves
+    // nothing, so a retrying operator cannot double-fund the destination.
+    let clock: Clock = context.banks_client.get_sysvar().await.unwrap();
+    context.warp_to_slot(clock.slot + 1).unwrap();
+    assert_custom_error(
+        process(
+            &mut context,
+            sweep_prize_rollover_instruction(
+                authority,
+                source_turn_id,
+                destination_turn_id,
+                original,
+                alternative,
+            ),
+            &[],
+        )
+        .await,
+        u32::from(TycheError::RolloverAmountMismatch),
+    );
+    let clock: Clock = context.banks_client.get_sysvar().await.unwrap();
+    context.warp_to_slot(clock.slot + 1).unwrap();
+    process(
+        &mut context,
+        sweep_prize_rollover_instruction(authority, source_turn_id, destination_turn_id, 0, 0),
+        &[],
+    )
+    .await
+    .unwrap();
+    let destination_vault: tyche::PrizeVault =
+        read_anchor_account(&mut context, destination_vault_address).await;
+    assert_eq!(destination_vault.total_collected_lamports, carried);
+
+    // A non-authority signer cannot move prize lamports between vaults.
+    let stranger = Keypair::new();
+    fund(&mut context, &stranger.pubkey()).await;
+    assert!(process(
+        &mut context,
+        sweep_prize_rollover_instruction(
+            stranger.pubkey(),
+            source_turn_id,
+            destination_turn_id,
+            0,
+            0,
+        ),
+        &[&stranger],
+    )
+    .await
+    .is_err());
 }
 
 #[tokio::test]

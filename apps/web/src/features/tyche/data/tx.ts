@@ -8,6 +8,7 @@
  */
 import { createWalletTransactionSigner } from "@solana/client";
 import type { useSolanaClient, useWalletConnection } from "@solana/react-hooks";
+import { describeTycheProgramError } from "./programErrors";
 
 type SolanaClient = ReturnType<typeof useSolanaClient>;
 type WalletConnection = ReturnType<typeof useWalletConnection>;
@@ -466,6 +467,13 @@ export function describeTxError(error: unknown): string {
   }
   if (code === "INSUFFICIENT_FUNDS") {
     return "This wallet needs more devnet SOL for the fee, account rent, and network fee.";
+  }
+  // A named program error says exactly what went wrong; the raw simulation
+  // dump does not. Unknown codes deliberately fall through to the diagnostic
+  // so a real defect stays visible instead of becoming friendly noise.
+  const programError = describeTycheProgramError(getTxDiagnosticText(error));
+  if (programError) {
+    return programError;
   }
   if (planDiagnostic) {
     // A plan can fail before the wallet (blockhash/simulation), at the wallet,

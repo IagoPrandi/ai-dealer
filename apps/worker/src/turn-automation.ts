@@ -44,6 +44,23 @@ const SET_TURN_DURATION_CYCLE_DISCRIMINATOR = new Uint8Array([
 const TURN_STATE_DISCRIMINATOR = new Uint8Array([
   184, 240, 193, 137, 151, 216, 79, 187,
 ]);
+const SWEEP_PRIZE_ROLLOVER_DISCRIMINATOR = new Uint8Array([
+  149, 162, 64, 17, 170, 54, 213, 248,
+]);
+const EXPIRE_CLAIM_DISCRIMINATOR = new Uint8Array([
+  176, 78, 241, 29, 159, 81, 26, 6,
+]);
+// `PrizeVault` = 8-byte discriminator + turn_id + total_collected_lamports + bump.
+const PRIZE_VAULT_DATA_LENGTH = 25;
+// `Claim` = 8 discriminator + turn_id(8) + claimant(32) + kind(1) + amount(8)
+// + status(1) + recorded_at(8) + claimed_at(8) + bump(1).
+const CLAIM_DATA_LENGTH = 75;
+const CLAIM_KIND_WINNER_PAYOUT = 0;
+const CLAIM_STATE_AVAILABLE = 0;
+// Mirrors CLAIM_WINDOW_TURNS / CLAIM_WINDOW_SECONDS in the programme; the
+// programme re-checks both, so this only avoids sending a doomed transaction.
+const CLAIM_WINDOW_TURNS = 12;
+const CLAIM_WINDOW_SECONDS = 7 * 24 * 60 * 60;
 const BASIS_POINTS_DENOMINATOR = 10_000;
 // Production turn = 24h: ~22h phase 1 (create rules + pick numbers, up to the
 // rule-election/guess cutoff) + ~2h phase 2 (finalist shortlist, elimination
@@ -78,6 +95,12 @@ export interface GlobalConfigSnapshot {
   ruleRemovalFeeLamports: bigint | null;
   turnDurationCycle: readonly [number, number, number, number];
   voteFeeLamports: bigint;
+}
+
+export interface PrizeVaultSnapshot {
+  /** Lamports collected for this turn that no recorded claim has reserved. */
+  totalCollectedLamports: bigint;
+  turnId: number;
 }
 
 export interface TurnStateSnapshot {
@@ -126,6 +149,14 @@ export type TurnAutomationResult =
       turnId: number;
     }
   | {
+      action: "swept_prize_rollover";
+      /** Abandoned payouts released back into the pool before the sweep. */
+      expiredClaims: string[];
+      /** Null when releases happened but the vault still owes a live claim. */
+      signature: string | null;
+      turnId: number;
+    }
+  | {
       action: "awaiting_previous_settlement";
       turnId: number;
     }
@@ -156,6 +187,14 @@ export function isLegacyTurnDeserializationError(error: unknown) {
 type AccountInfoResult = {
   value: null | {
     data: readonly [string, string] | string;
+    owner: string;
+  };
+};
+
+type PrizeVaultAccountInfoResult = {
+  value: null | {
+    data: readonly [string, string] | string;
+    lamports: bigint | number;
     owner: string;
   };
 };
@@ -223,6 +262,12 @@ export function u64LeArray(value: number) {
   return Array.from(u64Le(value));
 }
 
+function u64LeArrayFromBigInt(value: bigint) {
+  const bytes = new Uint8Array(8);
+  new DataView(bytes.buffer).setBigUint64(0, value, true);
+  return Array.from(bytes);
+}
+
 function u32LeArray(value: number) {
   const bytes = new Uint8Array(4);
   new DataView(bytes.buffer).setUint32(0, value, true);
@@ -287,6 +332,40 @@ export async function createTurnAutomationConfig(
 type SettlementTransitionResponse = {
   transitions?: unknown;
 };
+
+/**
+ * The API's recorded rollover attribution for a turn, used only to split an
+ * on-chain sweep between the two prize buckets. A missing record is not an
+ * error: the sweep still has to move the lamports, it just falls back to an
+ * even split.
+ */
+export async function fetchRolloverAttribution(
+  turnId: number,
+  apiBaseUrl: string = DEFAULT_API_BASE_URL,
+  fetchImpl: typeof fetch = fetch,
+) {
+  const url = new URL("/prize-pool-rollovers", apiBaseUrl);
+  url.searchParams.set("turnId", String(turnId));
+
+  const response = await fetchImpl(url);
+  if (!response.ok) {
+    throw new Error(
+      `Rollover attribution could not be read for turn ${turnId} (HTTP ${response.status}).`,
+    );
+  }
+  const body = (await response.json()) as {
+    rollover?: {
+      alternativeRolloverLamports?: unknown;
+      originalRolloverLamports?: unknown;
+    } | null;
+  };
+  const original = body.rollover?.originalRolloverLamports;
+  const alternative = body.rollover?.alternativeRolloverLamports;
+  return {
+    alternativeShare: typeof alternative === "number" ? alternative : 0,
+    originalShare: typeof original === "number" ? original : 0,
+  };
+}
 
 /**
  * A turn may open only after the previous turn's off-chain settlement has
@@ -692,6 +771,289 @@ function createOpenTurnData(turnId: number) {
   return new Uint8Array([...OPEN_TURN_DISCRIMINATOR, ...u64LeArray(turnId)]);
 }
 
+export function decodePrizeVaultAccount(data: Uint8Array): PrizeVaultSnapshot {
+  if (data.length !== PRIZE_VAULT_DATA_LENGTH) {
+    throw new Error(
+      `PrizeVault account has an unexpected length ${data.length}.`,
+    );
+  }
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  return {
+    totalCollectedLamports: view.getBigUint64(16, true),
+    turnId: Number(view.getBigUint64(8, true)),
+  };
+}
+
+export async function fetchPrizeVault({
+  programId,
+  rpc,
+  turnId,
+}: {
+  programId: SolanaAddress;
+  rpc: RpcClient;
+  turnId: number;
+}) {
+  const prizeVault = await getPrizeVaultPda({ programId, turnId });
+  const result = (await rpc
+    .getAccountInfo(prizeVault, { commitment: "confirmed", encoding: "base64" })
+    .send()) as PrizeVaultAccountInfoResult;
+  const data = Uint8Array.from(
+    Buffer.from(getAccountDataBase64(result.value, programId), "base64"),
+  );
+  const rentExemptLamports = Number(
+    await rpc.getMinimumBalanceForRentExemption(BigInt(data.length)).send(),
+  );
+  const lamports = Number(result.value?.lamports ?? 0);
+  return {
+    address: prizeVault,
+    /** Lamports the vault could pay out today, ignoring any reservation. */
+    freeLamports: BigInt(Math.max(lamports - rentExemptLamports, 0)),
+    snapshot: decodePrizeVaultAccount(data),
+  };
+}
+
+/**
+ * A vault is sweepable only when its unreserved counter accounts for every
+ * lamport it can pay: anything above that is a recorded claim's money. The
+ * program enforces this too, so this check exists to keep a turn that still owes
+ * a payout from failing the automation loop on every pass.
+ */
+export function isPrizeVaultSweepable({
+  freeLamports,
+  totalCollectedLamports,
+}: {
+  freeLamports: bigint;
+  totalCollectedLamports: bigint;
+}) {
+  return freeLamports === totalCollectedLamports;
+}
+
+/**
+ * Split a source turn's whole unreserved balance across the two prize buckets.
+ *
+ * The chain is authoritative for how much money exists; the API's rollover
+ * record only says how that leftover was attributed. Scaling the API split to
+ * the on-chain total keeps the declared halves summing to exactly what the
+ * vault holds, which is what `sweep_prize_rollover` requires.
+ */
+export function splitRolloverLamports({
+  alternativeShare,
+  originalShare,
+  totalLamports,
+}: {
+  alternativeShare: number;
+  originalShare: number;
+  totalLamports: bigint;
+}) {
+  if (totalLamports === 0n) {
+    return { alternativeLamports: 0n, originalLamports: 0n };
+  }
+  const shareTotal = originalShare + alternativeShare;
+  // With no usable attribution, fall back to the same even split `close_turn`
+  // uses for a turn's own pool rather than guessing a bucket.
+  const originalLamports =
+    shareTotal > 0
+      ? (totalLamports * BigInt(originalShare)) / BigInt(shareTotal)
+      : totalLamports / 2n;
+  return {
+    alternativeLamports: totalLamports - originalLamports,
+    originalLamports,
+  };
+}
+
+export interface ExpirableClaim {
+  amountLamports: bigint;
+  claimant: SolanaAddress;
+}
+
+/**
+ * Select the turn's still-unpulled winner payouts whose claim window has
+ * closed. A window closes when EITHER bound is reached, whichever comes first
+ * (PRD §8.7.7), so this mirrors the programme's own test rather than trusting
+ * an off-chain deadline.
+ */
+export function selectExpirableClaims({
+  accounts,
+  currentTurnId,
+  nowSeconds,
+  turnId,
+}: {
+  accounts: readonly { data: Uint8Array }[];
+  currentTurnId: number;
+  nowSeconds: number;
+  turnId: number;
+}): ExpirableClaim[] {
+  const expirable: ExpirableClaim[] = [];
+  for (const account of accounts) {
+    const { data } = account;
+    if (data.length !== CLAIM_DATA_LENGTH) {
+      continue;
+    }
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+    if (Number(view.getBigUint64(8, true)) !== turnId) {
+      continue;
+    }
+    if (data[48] !== CLAIM_KIND_WINNER_PAYOUT) {
+      continue;
+    }
+    if (data[57] !== CLAIM_STATE_AVAILABLE) {
+      continue;
+    }
+    const recordedAt = Number(view.getBigInt64(58, true));
+    const windowClosed =
+      currentTurnId - turnId >= CLAIM_WINDOW_TURNS ||
+      nowSeconds - recordedAt >= CLAIM_WINDOW_SECONDS;
+    if (!windowClosed) {
+      continue;
+    }
+    expirable.push({
+      amountLamports: view.getBigUint64(49, true),
+      claimant: addressDecoder.decode(data.subarray(16, 48)),
+    });
+  }
+  return expirable;
+}
+
+export async function fetchExpirableClaims({
+  currentTurnId,
+  nowSeconds,
+  programId,
+  rpc,
+  turnId,
+}: {
+  currentTurnId: number;
+  nowSeconds: number;
+  programId: SolanaAddress;
+  rpc: RpcClient;
+  turnId: number;
+}) {
+  const result = (await rpc
+    .getProgramAccounts(programId, {
+      commitment: "confirmed",
+      encoding: "base64",
+      filters: [{ dataSize: BigInt(CLAIM_DATA_LENGTH) }],
+    })
+    .send()) as readonly { account: { data: readonly [string, string] } }[];
+  return selectExpirableClaims({
+    accounts: result.map((entry) => ({
+      data: Uint8Array.from(Buffer.from(entry.account.data[0], "base64")),
+    })),
+    currentTurnId,
+    nowSeconds,
+    turnId,
+  });
+}
+
+export async function createExpireClaimInstruction({
+  authority,
+  claimant,
+  programId,
+  turnId,
+}: {
+  authority: SolanaAddress;
+  claimant: SolanaAddress;
+  programId: SolanaAddress;
+  turnId: number;
+}) {
+  const claimantBytes = addressEncoder.encode(claimant);
+  const [globalConfig, claim, prizeVault] = await Promise.all([
+    getGlobalConfigPda(programId),
+    derivePda({
+      programId,
+      seeds: [
+        "claim",
+        u64Le(turnId),
+        claimantBytes,
+        Uint8Array.of(CLAIM_KIND_WINNER_PAYOUT),
+      ],
+    }),
+    getPrizeVaultPda({ programId, turnId }),
+  ]);
+
+  return {
+    accounts: [
+      { address: authority, role: AccountRole.WRITABLE_SIGNER },
+      { address: globalConfig, role: AccountRole.READONLY },
+      { address: claim, role: AccountRole.WRITABLE },
+      { address: prizeVault, role: AccountRole.WRITABLE },
+    ],
+    data: new Uint8Array([
+      ...EXPIRE_CLAIM_DISCRIMINATOR,
+      ...u64LeArray(turnId),
+      ...claimantBytes,
+    ]),
+    programAddress: programId,
+  };
+}
+
+function createSweepPrizeRolloverData({
+  alternativeLamports,
+  destinationTurnId,
+  originalLamports,
+  sourceTurnId,
+}: {
+  alternativeLamports: bigint;
+  destinationTurnId: number;
+  originalLamports: bigint;
+  sourceTurnId: number;
+}) {
+  return new Uint8Array([
+    ...SWEEP_PRIZE_ROLLOVER_DISCRIMINATOR,
+    ...u64LeArray(sourceTurnId),
+    ...u64LeArray(destinationTurnId),
+    ...u64LeArrayFromBigInt(originalLamports),
+    ...u64LeArrayFromBigInt(alternativeLamports),
+  ]);
+}
+
+export async function createSweepPrizeRolloverInstruction({
+  alternativeLamports,
+  authority,
+  destinationTurnId,
+  originalLamports,
+  programId,
+  sourceTurnId,
+}: {
+  alternativeLamports: bigint;
+  authority: SolanaAddress;
+  destinationTurnId: number;
+  originalLamports: bigint;
+  programId: SolanaAddress;
+  sourceTurnId: number;
+}) {
+  const [
+    globalConfig,
+    sourceTurnState,
+    sourcePrizeVault,
+    destinationTurnState,
+    destinationPrizeVault,
+  ] = await Promise.all([
+    getGlobalConfigPda(programId),
+    getTurnStatePda({ programId, turnId: sourceTurnId }),
+    getPrizeVaultPda({ programId, turnId: sourceTurnId }),
+    getTurnStatePda({ programId, turnId: destinationTurnId }),
+    getPrizeVaultPda({ programId, turnId: destinationTurnId }),
+  ]);
+
+  return {
+    accounts: [
+      { address: authority, role: AccountRole.WRITABLE_SIGNER },
+      { address: globalConfig, role: AccountRole.READONLY },
+      { address: sourceTurnState, role: AccountRole.READONLY },
+      { address: sourcePrizeVault, role: AccountRole.WRITABLE },
+      { address: destinationTurnState, role: AccountRole.WRITABLE },
+      { address: destinationPrizeVault, role: AccountRole.WRITABLE },
+    ],
+    data: createSweepPrizeRolloverData({
+      alternativeLamports,
+      destinationTurnId,
+      originalLamports,
+      sourceTurnId,
+    }),
+    programAddress: programId,
+  };
+}
+
 function createSetTurnDurationCycleData(
   turnDurationCycle: readonly [number, number, number, number],
 ) {
@@ -1060,6 +1422,130 @@ async function waitForSignatureConfirmation(
   );
 }
 
+export interface PrizeRolloverSweepResult {
+  /** One signature per abandoned payout released back into the pool. */
+  expiredClaims: string[];
+  sweepSignature: string | null;
+}
+
+/**
+ * Carry the previous turn's leftover pool into the open turn's vault before
+ * anything can be paid out of it.
+ *
+ * Rollover is only accounting until the lamports actually move: a turn whose
+ * visible pool includes rollover would otherwise record winner claims its own
+ * vault cannot cover. A source turn that still owes a payout may not be swept,
+ * so this first releases any payout whose claim window has closed — otherwise
+ * one abandoned claim would block that turn's rollover forever.
+ *
+ * Both the automation loop and manual turn control call this immediately after
+ * a turn is open, and it is safe to call repeatedly: a drained source vault
+ * reports a zero balance and no transaction is sent.
+ */
+export async function sweepPreviousTurnRollover({
+  apiBaseUrl,
+  authorityKeypairBytes,
+  destinationTurnId,
+  nowMs = Date.now,
+  programId,
+  rpc,
+}: {
+  apiBaseUrl?: string | undefined;
+  authorityKeypairBytes: null | Uint8Array;
+  destinationTurnId: number;
+  nowMs?: () => number;
+  programId: SolanaAddress;
+  rpc: RpcClient;
+}): Promise<PrizeRolloverSweepResult> {
+  if (!authorityKeypairBytes) {
+    throw new Error(
+      "Sweeping prize rollover requires the turn authority keypair.",
+    );
+  }
+  const expiredClaims: string[] = [];
+  const sourceTurnId = destinationTurnId - 1;
+  if (sourceTurnId <= 0) {
+    return { expiredClaims, sweepSignature: null };
+  }
+
+  const authority = deriveAuthorityAddress(authorityKeypairBytes);
+  let sourceVault = await fetchPrizeVault({
+    programId,
+    rpc,
+    turnId: sourceTurnId,
+  });
+  let sweepable = isPrizeVaultSweepable({
+    freeLamports: sourceVault.freeLamports,
+    totalCollectedLamports: sourceVault.snapshot.totalCollectedLamports,
+  });
+
+  if (!sweepable) {
+    // The source turn still owes a recorded payout. Release only those whose
+    // claim window has closed; anything still inside its window stays where its
+    // winner can reach it (PRD §8.7.7).
+    const expirable = await fetchExpirableClaims({
+      currentTurnId: destinationTurnId,
+      nowSeconds: Math.floor(nowMs() / 1000),
+      programId,
+      rpc,
+      turnId: sourceTurnId,
+    });
+    for (const claim of expirable) {
+      const instruction = await createExpireClaimInstruction({
+        authority,
+        claimant: claim.claimant,
+        programId,
+        turnId: sourceTurnId,
+      });
+      const signature = await simulateAndSend({
+        authorityKeypairBytes,
+        instruction,
+        rpc,
+      });
+      expiredClaims.push(signature.toString());
+    }
+    if (expiredClaims.length === 0) {
+      return { expiredClaims, sweepSignature: null };
+    }
+    sourceVault = await fetchPrizeVault({
+      programId,
+      rpc,
+      turnId: sourceTurnId,
+    });
+    sweepable = isPrizeVaultSweepable({
+      freeLamports: sourceVault.freeLamports,
+      totalCollectedLamports: sourceVault.snapshot.totalCollectedLamports,
+    });
+  }
+
+  if (!sweepable || sourceVault.snapshot.totalCollectedLamports === 0n) {
+    return { expiredClaims, sweepSignature: null };
+  }
+
+  const attribution = await fetchRolloverAttribution(
+    destinationTurnId,
+    apiBaseUrl,
+  );
+  const split = splitRolloverLamports({
+    ...attribution,
+    totalLamports: sourceVault.snapshot.totalCollectedLamports,
+  });
+  const instruction = await createSweepPrizeRolloverInstruction({
+    alternativeLamports: split.alternativeLamports,
+    authority,
+    destinationTurnId,
+    originalLamports: split.originalLamports,
+    programId,
+    sourceTurnId,
+  });
+  const signature = await simulateAndSend({
+    authorityKeypairBytes,
+    instruction,
+    rpc,
+  });
+  return { expiredClaims, sweepSignature: signature.toString() };
+}
+
 export async function runTurnAutomationOnce(
   config: TurnAutomationConfig,
 ): Promise<TurnAutomationResult> {
@@ -1135,6 +1621,24 @@ export async function runTurnAutomationOnce(
       signature: recoverySignature.toString(),
       turnId: activeTurn.snapshot.turnId,
     };
+  }
+
+  if (activeTurn.snapshot.status === "open") {
+    const rollover = await sweepPreviousTurnRollover({
+      apiBaseUrl: config.apiBaseUrl,
+      authorityKeypairBytes: config.authorityKeypairBytes,
+      destinationTurnId: activeTurn.snapshot.turnId,
+      programId: config.programId,
+      rpc,
+    });
+    if (rollover.sweepSignature || rollover.expiredClaims.length > 0) {
+      return {
+        action: "swept_prize_rollover",
+        expiredClaims: rollover.expiredClaims,
+        signature: rollover.sweepSignature,
+        turnId: activeTurn.snapshot.turnId,
+      };
+    }
   }
 
   if (

@@ -36,6 +36,12 @@ pub const REPEATED_ACTION_FEE_MULTIPLIER: u64 = 2;
 // on `TurnState.elimination_window_end_timestamp` (= the turn end), so there is
 // no standalone window-duration constant. The active-rule election and draw run
 // as an untimed settlement stage once the window closes.
+// A recorded winner payout expires when EITHER bound is reached, whichever
+// comes first (PRD §8.7.7). These mirror `CLAIM_WINDOW_TURNS` and
+// `CLAIM_WINDOW_DAYS` in `packages/constants`; the programme is the authority
+// for releasing the lamports, so it must not take the deadline on trust.
+pub const CLAIM_WINDOW_TURNS: u64 = 12;
+pub const CLAIM_WINDOW_SECONDS: i64 = 7 * 24 * 60 * 60;
 pub const MAX_RULE_TEXT_BYTES: usize = 6000;
 pub const BASIS_POINTS_DENOMINATOR: u16 = 10_000;
 pub const ORAO_COMMIT_MARKER: u64 = u64::MAX;
@@ -1528,6 +1534,100 @@ pub mod tyche {
         Ok(())
     }
 
+    /// Moves a closed turn's unallocated prize lamports into the open turn's
+    /// prize vault, so a rolled-over pool is backed by real lamports in the
+    /// vault that will pay it out.
+    ///
+    /// Each turn owns its own `prize_vault` PDA and only ever receives that
+    /// turn's fee share. Rollover used to be pure off-chain accounting: the
+    /// visible pool of the destination turn included the source turn's leftover
+    /// while those lamports stayed in the source vault, so a winner of a turn
+    /// with rollover held a claim its vault could not pay.
+    ///
+    /// The caller must declare the split it is carrying forward, and the
+    /// declared total must equal the source vault's whole unreserved balance.
+    /// That makes the instruction self-reconciling (off-chain accounting that
+    /// disagrees with the chain fails loudly instead of half-funding a pool) and
+    /// replay-safe (a drained source vault only accepts a 0/0 no-op sweep).
+    pub fn sweep_prize_rollover(
+        ctx: Context<SweepPrizeRollover>,
+        args: SweepPrizeRolloverArgs,
+    ) -> Result<()> {
+        require!(
+            !ctx.accounts.global_config.paused,
+            TycheError::ProtocolPaused
+        );
+        require!(
+            args.source_turn_id < args.destination_turn_id,
+            TycheError::InvalidRolloverDirection
+        );
+        require!(
+            ctx.accounts.source_turn_state.status == TurnStatus::Closed,
+            TycheError::TurnNotClosed
+        );
+        require!(
+            ctx.accounts.destination_turn_state.status == TurnStatus::Open,
+            TycheError::TurnNotOpen
+        );
+
+        let total_lamports = args
+            .original_lamports
+            .checked_add(args.alternative_lamports)
+            .ok_or(TycheError::ArithmeticOverflow)?;
+        require!(
+            total_lamports == ctx.accounts.source_prize_vault.total_collected_lamports,
+            TycheError::RolloverAmountMismatch
+        );
+
+        // Only a vault that owes nothing may be swept. Every lamport above rent
+        // exemption must be unreserved: any excess is a recorded claim's money,
+        // whether reserved by `record_claim` or left over from a claim recorded
+        // before that reservation existed. Carrying it into the next turn would
+        // strand a winner behind a `claim_prize` their own vault can no longer
+        // pay -- the very failure this instruction exists to prevent.
+        let source_vault_info = ctx.accounts.source_prize_vault.to_account_info();
+        let source_free_lamports = source_vault_info.lamports().saturating_sub(
+            Rent::get()?.minimum_balance(source_vault_info.data_len()),
+        );
+        require!(
+            source_free_lamports == ctx.accounts.source_prize_vault.total_collected_lamports,
+            TycheError::PrizeVaultHasOutstandingClaims
+        );
+
+        if total_lamports > 0 {
+            pay_from_vault(
+                &ctx.accounts.source_prize_vault.to_account_info(),
+                &ctx.accounts.destination_prize_vault.to_account_info(),
+                total_lamports,
+            )?;
+        }
+
+        ctx.accounts.source_prize_vault.total_collected_lamports = 0;
+        let destination_vault = &mut ctx.accounts.destination_prize_vault;
+        destination_vault.total_collected_lamports = destination_vault
+            .total_collected_lamports
+            .checked_add(total_lamports)
+            .ok_or(TycheError::ArithmeticOverflow)?;
+
+        let destination_turn = &mut ctx.accounts.destination_turn_state;
+        destination_turn.original_pool_rollover_lamports = destination_turn
+            .original_pool_rollover_lamports
+            .checked_add(args.original_lamports)
+            .ok_or(TycheError::ArithmeticOverflow)?;
+        destination_turn.alternative_pool_rollover_lamports = destination_turn
+            .alternative_pool_rollover_lamports
+            .checked_add(args.alternative_lamports)
+            .ok_or(TycheError::ArithmeticOverflow)?;
+
+        emit!(PrizeRolloverSwept {
+            source_turn_id: args.source_turn_id,
+            destination_turn_id: args.destination_turn_id,
+            original_lamports: args.original_lamports,
+            alternative_lamports: args.alternative_lamports,
+        });
+        Ok(())
+    }
+
     /// Moves the closed turn's exact treasury share into Tokenomics Core and
     /// atomically records it in the collecting seven-turn epoch. A per-turn
     /// flag prevents replay; zero-fee turns are still marked reconciled.
@@ -2022,6 +2122,24 @@ pub mod tyche {
             TycheError::ClaimBelowMinimum
         );
 
+        // Reserve the payout against the turn's prize vault at record time.
+        // `total_collected_lamports` is the vault's *unreserved* balance: every
+        // recorded claim subtracts from it here and `claim_prize` only moves
+        // lamports. Without this the authority could record a liability the
+        // vault cannot pay -- which is exactly what happens when the visible
+        // pool includes rollover whose lamports still sit in an earlier turn's
+        // vault -- and the winner would only discover it when their own
+        // `claim_prize` failed.
+        let prize_vault = &mut ctx.accounts.prize_vault;
+        require!(
+            args.amount_lamports <= prize_vault.total_collected_lamports,
+            TycheError::ClaimExceedsPrizeVault
+        );
+        prize_vault.total_collected_lamports = prize_vault
+            .total_collected_lamports
+            .checked_sub(args.amount_lamports)
+            .ok_or(TycheError::ArithmeticOverflow)?;
+
         let clock = Clock::get()?;
         let claim = &mut ctx.accounts.claim;
         claim.turn_id = args.turn_id;
@@ -2068,22 +2186,93 @@ pub mod tyche {
         claim.status = ClaimState::Claimed;
         claim.claimed_at = clock.unix_timestamp;
 
+        let prize_vault_info = ctx.accounts.prize_vault.to_account_info();
         pay_from_vault(
-            &ctx.accounts.prize_vault.to_account_info(),
+            &prize_vault_info,
             &ctx.accounts.claimant.to_account_info(),
             amount,
         )?;
+        // `record_claim` already reserved this payout, so the unreserved balance
+        // does not move here. Vaults whose claims were recorded before that
+        // reservation existed still over-report; clamp to what the account can
+        // actually back so a legacy vault cannot reserve lamports twice.
+        let unreserved_ceiling = prize_vault_info
+            .lamports()
+            .saturating_sub(Rent::get()?.minimum_balance(prize_vault_info.data_len()));
         ctx.accounts.prize_vault.total_collected_lamports = ctx
             .accounts
             .prize_vault
             .total_collected_lamports
-            .saturating_sub(amount);
+            .min(unreserved_ceiling);
 
         emit!(ClaimSettled {
             turn_id,
             claimant: claimant_key,
             kind: ClaimKind::WinnerPayout,
             amount_lamports: amount,
+        });
+        Ok(())
+    }
+
+    /// Release an unclaimed winner payout whose claim window has closed, so its
+    /// lamports rejoin the vault's unreserved balance and roll forward with the
+    /// next `sweep_prize_rollover` (PRD §8.7.7).
+    ///
+    /// Without this the reservation is permanent: an abandoned payout would pin
+    /// its lamports in a closed turn's vault forever, and — because a vault that
+    /// still owes a claim may not be swept — it would also block every later
+    /// rollover out of that turn.
+    ///
+    /// The window closes when EITHER bound is reached, whichever comes first:
+    /// `CLAIM_WINDOW_TURNS` turns have started since the claim's turn, or
+    /// `CLAIM_WINDOW_SECONDS` have elapsed since it was recorded. Expiry is
+    /// terminal and blocks `claim_prize`, so the deadline is checked here rather
+    /// than trusted from the caller.
+    pub fn expire_claim(ctx: Context<ExpireClaim>, args: ExpireClaimArgs) -> Result<()> {
+        let config = &ctx.accounts.global_config;
+        require!(!config.paused, TycheError::ProtocolPaused);
+        require!(
+            ctx.accounts.claim.kind == ClaimKind::WinnerPayout,
+            TycheError::ClaimKindMismatch
+        );
+        require!(
+            ctx.accounts.claim.status == ClaimState::Available,
+            TycheError::ClaimNotAvailable
+        );
+
+        let clock = Clock::get()?;
+        let turns_elapsed = config.next_turn_id.saturating_sub(args.turn_id);
+        let seconds_elapsed = clock
+            .unix_timestamp
+            .saturating_sub(ctx.accounts.claim.recorded_at);
+        require!(
+            turns_elapsed >= CLAIM_WINDOW_TURNS || seconds_elapsed >= CLAIM_WINDOW_SECONDS,
+            TycheError::ClaimWindowStillOpen
+        );
+
+        let amount = ctx.accounts.claim.amount_lamports;
+        let claim = &mut ctx.accounts.claim;
+        claim.status = ClaimState::Expired;
+
+        // Give the reservation back. Clamp to what the account actually holds:
+        // a claim recorded before `record_claim` reserved anything never took
+        // lamports out of the counter, so adding them would invent balance the
+        // vault does not have.
+        let prize_vault_info = ctx.accounts.prize_vault.to_account_info();
+        let free_lamports = prize_vault_info
+            .lamports()
+            .saturating_sub(Rent::get()?.minimum_balance(prize_vault_info.data_len()));
+        let prize_vault = &mut ctx.accounts.prize_vault;
+        prize_vault.total_collected_lamports = prize_vault
+            .total_collected_lamports
+            .saturating_add(amount)
+            .min(free_lamports);
+
+        emit!(ClaimExpired {
+            turn_id: args.turn_id,
+            claimant: args.claimant,
+            amount_lamports: amount,
+            released_at: clock.unix_timestamp,
         });
         Ok(())
     }
@@ -2683,6 +2872,26 @@ pub struct RecordClaimArgs {
     pub kind: ClaimKind,
     /// The off-chain-computed claimable amount, in lamports.
     pub amount_lamports: u64,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct ExpireClaimArgs {
+    /// The turn the abandoned claim belongs to.
+    pub turn_id: u64,
+    /// The wallet that did not pull its payout in time.
+    pub claimant: Pubkey,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct SweepPrizeRolloverArgs {
+    /// The closed turn whose leftover pool is being carried forward.
+    pub source_turn_id: u64,
+    /// The open turn that will pay the rolled-over pool out.
+    pub destination_turn_id: u64,
+    /// Share of the sweep attributed to the original-rule bucket.
+    pub original_lamports: u64,
+    /// Share of the sweep attributed to the alternative-rule bucket.
+    pub alternative_lamports: u64,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
@@ -3815,6 +4024,79 @@ pub struct FailDraw<'info> {
 }
 
 #[derive(Accounts)]
+#[instruction(args: ExpireClaimArgs)]
+pub struct ExpireClaim<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(
+        seeds = [b"global_config"],
+        bump = global_config.bump,
+        has_one = authority @ TycheError::Unauthorized
+    )]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        mut,
+        seeds = [
+            b"claim".as_ref(),
+            args.turn_id.to_le_bytes().as_ref(),
+            args.claimant.as_ref(),
+            &[ClaimKind::WinnerPayout as u8],
+        ],
+        bump = claim.bump,
+        constraint = claim.turn_id == args.turn_id @ TycheError::InvalidTurnId,
+        constraint = claim.claimant == args.claimant @ TycheError::InvalidClaimant
+    )]
+    pub claim: Box<Account<'info, Claim>>,
+    #[account(
+        mut,
+        seeds = [b"prize_vault".as_ref(), args.turn_id.to_le_bytes().as_ref()],
+        bump = prize_vault.bump,
+        constraint = prize_vault.turn_id == args.turn_id @ TycheError::InvalidTurnId
+    )]
+    pub prize_vault: Account<'info, PrizeVault>,
+}
+
+#[derive(Accounts)]
+#[instruction(args: SweepPrizeRolloverArgs)]
+pub struct SweepPrizeRollover<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(
+        seeds = [b"global_config"],
+        bump = global_config.bump,
+        has_one = authority @ TycheError::Unauthorized
+    )]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        seeds = [b"turn".as_ref(), args.source_turn_id.to_le_bytes().as_ref()],
+        bump = source_turn_state.bump,
+        constraint = source_turn_state.turn_id == args.source_turn_id @ TycheError::InvalidTurnId
+    )]
+    pub source_turn_state: Box<Account<'info, TurnState>>,
+    #[account(
+        mut,
+        seeds = [b"prize_vault".as_ref(), args.source_turn_id.to_le_bytes().as_ref()],
+        bump = source_prize_vault.bump,
+        constraint = source_prize_vault.turn_id == args.source_turn_id @ TycheError::InvalidTurnId
+    )]
+    pub source_prize_vault: Account<'info, PrizeVault>,
+    #[account(
+        mut,
+        seeds = [b"turn".as_ref(), args.destination_turn_id.to_le_bytes().as_ref()],
+        bump = destination_turn_state.bump,
+        constraint = destination_turn_state.turn_id == args.destination_turn_id @ TycheError::InvalidTurnId
+    )]
+    pub destination_turn_state: Box<Account<'info, TurnState>>,
+    #[account(
+        mut,
+        seeds = [b"prize_vault".as_ref(), args.destination_turn_id.to_le_bytes().as_ref()],
+        bump = destination_prize_vault.bump,
+        constraint = destination_prize_vault.turn_id == args.destination_turn_id @ TycheError::InvalidTurnId
+    )]
+    pub destination_prize_vault: Account<'info, PrizeVault>,
+}
+
+#[derive(Accounts)]
 #[instruction(args: RecordClaimArgs)]
 pub struct RecordClaim<'info> {
     #[account(mut)]
@@ -3844,6 +4126,13 @@ pub struct RecordClaim<'info> {
         bump
     )]
     pub claim: Box<Account<'info, Claim>>,
+    #[account(
+        mut,
+        seeds = [b"prize_vault".as_ref(), args.turn_id.to_le_bytes().as_ref()],
+        bump = prize_vault.bump,
+        constraint = prize_vault.turn_id == args.turn_id @ TycheError::InvalidTurnId
+    )]
+    pub prize_vault: Account<'info, PrizeVault>,
     pub system_program: Program<'info, System>,
 }
 
@@ -4138,6 +4427,10 @@ pub enum ClaimKind {
 pub enum ClaimState {
     Available,
     Claimed,
+    /// The claim window closed unused and the reservation was released back to
+    /// the turn's prize vault. Terminal: `claim_prize` requires `Available`.
+    /// Appended last so previously written accounts keep their encoding.
+    Expired,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, InitSpace, PartialEq, Eq)]
@@ -4385,6 +4678,22 @@ pub struct DrawFailed {
 }
 
 #[event]
+pub struct ClaimExpired {
+    pub turn_id: u64,
+    pub claimant: Pubkey,
+    pub amount_lamports: u64,
+    pub released_at: i64,
+}
+
+#[event]
+pub struct PrizeRolloverSwept {
+    pub source_turn_id: u64,
+    pub destination_turn_id: u64,
+    pub original_lamports: u64,
+    pub alternative_lamports: u64,
+}
+
+#[event]
 pub struct ClaimRecorded {
     pub turn_id: u64,
     pub claimant: Pubkey,
@@ -4556,4 +4865,14 @@ pub enum TycheError {
     InvalidProgramData,
     #[msg("The signer is not the current Tyche program upgrade authority.")]
     InvalidGovernanceAuthority,
+    #[msg("The recorded claim exceeds the turn prize vault's unreserved balance.")]
+    ClaimExceedsPrizeVault,
+    #[msg("Prize rollover must move forward from an earlier turn to a later one.")]
+    InvalidRolloverDirection,
+    #[msg("The declared rollover split does not equal the source vault's unreserved balance.")]
+    RolloverAmountMismatch,
+    #[msg("The source prize vault still holds lamports owed to a recorded claim.")]
+    PrizeVaultHasOutstandingClaims,
+    #[msg("The claim window has not closed, so the payout still belongs to its winner.")]
+    ClaimWindowStillOpen,
 }

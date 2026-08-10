@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { address, getAddressEncoder } from "@solana/kit";
+import {
+  AccountRole,
+  address,
+  getAddressEncoder,
+  getProgramDerivedAddress,
+} from "@solana/kit";
 import {
   type ClaimRecordLike,
   createRecordClaimInstruction,
@@ -15,6 +20,12 @@ const AUTHORITY = address("4bY5krt2VnnSNB1R4c1bhiWdQYkTc1FvFTN1LaV5JxCH");
 const CLAIMANT = address("BUo2vYwYvj2UWYFgryrMF7bBTrLQQFYVU6xHuoTJbJBD");
 const RECORD_CLAIM_DISCRIMINATOR = [111, 123, 69, 192, 195, 228, 137, 30];
 const addressEncoder = getAddressEncoder();
+
+function u64Le(value: number) {
+  const bytes = new Uint8Array(8);
+  new DataView(bytes.buffer).setBigUint64(0, BigInt(value), true);
+  return bytes;
+}
 
 function fakeConfig(): TurnAutomationConfig {
   return {
@@ -68,9 +79,22 @@ test("record_claim instruction encodes discriminator and borsh args", async () =
   ).getBigUint64(0, true);
   assert.equal(amountBytes, BigInt(amountLamports));
 
-  // Authority is the writable signer; the claim PDA is writable; system program present.
-  assert.equal(instruction.accounts.length, 5);
+  // Authority is the writable signer; the claim PDA and the turn's prize vault
+  // are writable (the payout is reserved against the vault at record time);
+  // system program present.
+  assert.equal(instruction.accounts.length, 6);
   assert.equal(instruction.accounts[0]?.address, AUTHORITY);
+  assert.equal(instruction.accounts[3]?.role, AccountRole.WRITABLE);
+  assert.equal(instruction.accounts[4]?.role, AccountRole.WRITABLE);
+  assert.equal(
+    instruction.accounts[4]?.address,
+    (
+      await getProgramDerivedAddress({
+        programAddress: PROGRAM_ID,
+        seeds: ["prize_vault", u64Le(turnId)],
+      })
+    )[0],
+  );
 });
 
 test("creator and voter reward kinds use distinct kind bytes", async () => {

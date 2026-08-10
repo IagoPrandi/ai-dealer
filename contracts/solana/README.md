@@ -59,15 +59,58 @@ bind active-rule settlement to the elected rule and fulfilled draw, require a
 first-guess `GameToken` for referral qualification, and use idempotent
 contribution PDAs for the first-round referral bonus.
 
-The current devnet Tyche binary was deployed through Squads proposal `11` at
-finalized slot `482429972` by transaction
-`42acqwZpEHWXghTyT4TAURWrKasS23t3FCdqPwjv5ER5TErZHDjyWE9EYc4aMoioBLbExaNRDyCcWRKG9BBGFmJa`.
-Its `1,018,304`-byte programme prefix has SHA-256
-`fc54899f218c5c178639b426f994e06c451a858cf004d4ece5aabf216a56fb53`;
-the remaining `37,288` bytes of ProgramData capacity are zero. Upgrade
-authority remains Squads vault `0`, and the consumed buffer is closed. This
+The current devnet Tyche binary was deployed through Squads proposal `13` at
+finalized slot `482717873` by transaction
+`Xq64Rk66MYpAR2gNky82kQSsjbe9FukcCZShoTDPEyAk5HXZS6Qy5F9aY4vrwHWvLs32FuNSnxWpbvUEXAApxyF`.
+Its `1,050,944`-byte programme prefix has SHA-256
+`2e1ea292f31d618c90f7959c7614a76c44fbc3967b950df19b07073dd510fe89`;
+the remaining `4,648` bytes of ProgramData capacity are zero. Upgrade
+authority remains Squads vault `0`, and the consumed buffer
+`6y7SSzgjXmLYNagJJKGBsuRB721twDGgfNUUPQz1mc1s` is closed. This
 binary deployment does not by itself enable worker revenue automation or
 authorize any mainnet action.
+
+That `4,648`-byte headroom is the binding constraint on the next Tyche upgrade:
+a larger artifact needs a separate governed ProgramData extension executed and
+re-read **before** the upgrade buffer is proposed. `scripts/extend-tyche-programdata.cjs`
+prepares that extension, and note that the loader enforces a minimum growth of
+`10,240` bytes per extension.
+
+## Prize-Vault Solvency
+
+Each turn owns its own `prize_vault` PDA and receives only that turn's fee
+share, so a rolled-over pool used to be accounting-only: the destination turn
+advertised the source turn's leftover while those lamports stayed in the source
+vault, and a winner of a turn with rollover held a `Claim` its vault could not
+pay (`claim_prize` failed with `InsufficientVaultBalance`). Two program rules now
+keep a recorded claim payable:
+
+- `record_claim` reserves the payout. `PrizeVault::total_collected_lamports` is
+  the vault's *unreserved* balance: recording subtracts from it and rejects a
+  payout larger than what is left (`ClaimExceedsPrizeVault`), so an
+  over-computed off-chain amount fails at settlement instead of in a winner's
+  wallet. `claim_prize` only moves lamports, clamping the counter to what the
+  account can still back so vaults written before this rule self-heal.
+- `sweep_prize_rollover` moves a closed turn's whole unreserved balance into the
+  open turn's vault and accumulates the declared split into the destination
+  `TurnState`. The declared halves must sum to exactly the source vault's
+  unreserved balance (`RolloverAmountMismatch`), which makes the instruction
+  self-reconciling and replay-safe, and the source vault's free lamports must
+  equal that same balance (`PrizeVaultHasOutstandingClaims`), so a turn that
+  still owes a payout cannot have that money carried away from its winner.
+- `expire_claim` releases a payout whose claim window has closed, moving its
+  reservation back into the vault's unreserved balance and marking the claim
+  `ClaimState::Expired` (terminal — `claim_prize` requires `Available`). The
+  window closes when EITHER `CLAIM_WINDOW_TURNS` turns have started since the
+  claim's turn or `CLAIM_WINDOW_SECONDS` have passed since it was recorded,
+  whichever comes first (PRD §8.7.7); inside the window the programme refuses
+  with `ClaimWindowStillOpen`. Without this an abandoned payout would pin its
+  lamports forever and — because a vault that owes a claim may not be swept —
+  block every later rollover out of that turn.
+
+The worker runs both immediately after a turn opens, from the automation loop
+and from manual turn control: it releases the previous turn's expired payouts
+first, then sweeps, so an abandoned claim cannot stall the rollover chain.
 
 ## Implemented Core
 

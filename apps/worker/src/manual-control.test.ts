@@ -133,9 +133,11 @@ test("manual cycle resumes an incomplete predecessor after on-chain close", asyn
       nowMs: () => 0,
       openNextTurn: async () => ({
         action: "opened_turn",
+        expiredClaims: [],
         openDurationSeconds: 1_200,
         setCycleSignature: "set-cycle",
         signature: "open",
+        sweepSignature: null,
         turnId: 25,
       }),
       readState: async () => ({
@@ -176,9 +178,11 @@ test("manual cycle drives settlement through CLOSED before opening the next turn
         openCalls += 1;
         return {
           action: "opened_turn",
+          expiredClaims: [],
           openDurationSeconds: 1_200,
           setCycleSignature: "set-cycle",
           signature: "open",
+          sweepSignature: null,
           turnId: 21,
         };
       },
@@ -281,9 +285,11 @@ test("manual cycle retries a transient RPC 429 and still opens after CLOSED", as
       nowMs: () => nowMs,
       openNextTurn: async () => ({
         action: "opened_turn",
+        expiredClaims: [],
         openDurationSeconds: 1_200,
         setCycleSignature: "set-cycle",
         signature: "open",
+        sweepSignature: null,
         turnId: 23,
       }),
       readState: async () => ({

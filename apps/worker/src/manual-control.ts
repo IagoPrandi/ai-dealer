@@ -49,6 +49,7 @@ import {
   isTurnSettlementClosed,
   isLegacyTurnDeserializationError,
   simulateAndSend,
+  sweepPreviousTurnRollover,
   SYSTEM_PROGRAM_ID,
   u64LeArray,
   type RpcClient,
@@ -75,9 +76,13 @@ export interface ManualControlConfig {
 export type ManualControlResult =
   | {
       action: "opened_turn";
+      /** Abandoned payouts released back into the pool before the sweep. */
+      expiredClaims: string[];
       openDurationSeconds: number;
       setCycleSignature: string;
       signature: string;
+      /** Rollover carried into the new turn's vault; null when there was none. */
+      sweepSignature: string | null;
       turnId: number;
     }
   | {
@@ -316,11 +321,23 @@ export async function openTurnManually(
     rpc,
   });
 
+  // The turn is playable now, so its vault must already hold anything the
+  // previous turn rolled over before a fee, a winner, or a claim touches it.
+  const rollover = await sweepPreviousTurnRollover({
+    apiBaseUrl: config.apiBaseUrl,
+    authorityKeypairBytes: config.authorityKeypairBytes,
+    destinationTurnId: turnId,
+    programId: config.programId,
+    rpc,
+  });
+
   return {
     action: "opened_turn",
+    expiredClaims: rollover.expiredClaims,
     openDurationSeconds: config.openDurationSeconds,
     setCycleSignature: setCycleSignature.toString(),
     signature: signature.toString(),
+    sweepSignature: rollover.sweepSignature,
     turnId,
   };
 }

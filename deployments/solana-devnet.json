@@ -11,6 +11,21 @@
     "drawVrfConfig": "EYiAmGSdsQTuCw413V5BzaruWuCCSDgTPtBGvLkXHbe7",
     "electionVrfConfig": "EYiAmGSdsQTuCw413V5BzaruWuCCSDgTPtBGvLkXHbe7"
   },
+  "tyche": {
+    "programDataAddress": "AWGUseV1DEsoSvdW7CDMxxBDUPQXAKqTXyxHVzeTnL8g",
+    "upgradeAuthority": "DB5nz633YioWzEUnLb97ypUra5RUE11SJDFW9ar23KTp",
+    "lastDeployedSlot": 482717873,
+    "programDataCapacity": 1055592,
+    "artifactProgramLength": 1050944,
+    "artifactSha256": "2e1ea292f31d618c90f7959c7614a76c44fbc3967b950df19b07073dd510fe89",
+    "trailingZeroBytes": 4648,
+    "upgradeProposalIndex": 13,
+    "upgradeProposalAddress": "CMojWQn46rA54tEvZ8vT7vW5yhwNz87vvypdN8CW3cGK",
+    "upgradeExecutionSignature": "Xq64Rk66MYpAR2gNky82kQSsjbe9FukcCZShoTDPEyAk5HXZS6Qy5F9aY4vrwHWvLs32FuNSnxWpbvUEXAApxyF",
+    "closedBufferAddress": "6y7SSzgjXmLYNagJJKGBsuRB721twDGgfNUUPQz1mc1s",
+    "previousUpgradeProposalIndex": 12,
+    "previousUpgradeExecutionSignature": "4uH5wDKjNPeKEEvaJSrvtWcL1dijyJjYBtcDpoqdMF4nciEeF1dCsS3dJpokVj6oCByz2L7BTpRn6SEY1ZzCwCWr"
+  },
   "tokenomicsCore": {
     "programId": "BRK6G8Sep66LFREp2nGMLiganfw2nbWe1f8zeAdoP1Fm",
     "programDataAddress": "DBM5tfyUMcThsXyvMuYMEU1Xgfar4KZpXtSAh9LXusaS",
@@ -44,6 +59,8 @@
     "The queue PDA is documented for SDK/on-chain verification context; GlobalConfig stores the queue address for both VRF config fields.",
     "Tokenomics Core proposal 9 and campaign migration proposal 10 were executed through the existing 2-of-3 Squads governance on devnet.",
     "JDR campaign 0 is active under the v2 economic hash. The migration changed only the economic configuration hash and moved no tokens.",
+    "Tyche proposal 12 shipped the prize-vault solvency fix: `record_claim` reserves each payout against the turn vault, and `sweep_prize_rollover` moves a closed turn's leftover lamports into the open turn's vault so a rolled-over pool is actually payable.",
+    "Tyche proposal 13 added `expire_claim`, which releases a payout past its claim window back into its vault's unreserved balance so an abandoned claim cannot pin a turn's pool forever. ProgramData headroom is down to 4,648 bytes; the next Tyche upgrade will likely need a governed ProgramData extension first.",
     "No private keys or secret material belong in this file."
   ]
 }
