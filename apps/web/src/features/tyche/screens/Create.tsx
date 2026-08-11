@@ -196,6 +196,19 @@ function createClientDraftId(turnId: number) {
   return `client:${turnId}:${suffix}`;
 }
 
+// Difficulty is a compiler verdict (PRD §6.8), so it reads as a label on the
+// card rather than as prose. Colour tracks how the class affects the game:
+// green is playable, yellow warns the rule barely filters, red is a class the
+// compiler rejects outright.
+const DIFFICULTY_TAG: Record<string, { color: string; label: string }> = {
+  ALWAYS_TRUE: { color: "var(--red)", label: "Always true" },
+  BALANCED: { color: "var(--green)", label: "Balanced" },
+  EXTREME: { color: "var(--gold)", label: "Extreme" },
+  HARD: { color: "var(--purple-soft)", label: "Hard" },
+  IMPOSSIBLE: { color: "var(--red)", label: "Impossible" },
+  TOO_EASY: { color: "var(--yellow)", label: "Too easy" },
+};
+
 function RulePreview({ rule }: { rule: RulePreflightResult }) {
   const valid = rule.decision === "VALID" && !rule.needsClarification;
   const terminalRejection = rule.semanticImpact?.triviallyAlwaysTrue ?? false;
@@ -211,6 +224,9 @@ function RulePreview({ rule }: { rule: RulePreflightResult }) {
     : terminalRejection
       ? "var(--red)"
       : "var(--yellow)";
+  const difficulty = rule.difficultyClass
+    ? DIFFICULTY_TAG[rule.difficultyClass]
+    : undefined;
   const pct = Math.round((rule.tokenCount / RULE_MAX_TOKENS) * 100);
   return (
     <div style={{ padding: 16, border: "1px solid var(--line)", borderRadius: 16, background: "var(--surface)", animation: "ide-rise .3s ease both" }}>
@@ -220,7 +236,16 @@ function RulePreview({ rule }: { rule: RulePreflightResult }) {
             <Ico.info style={{ width: 13, height: 13, color: statusColor }} /> {statusLabel}
           </span>
         )}
-        <span style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--dim)" }} className="ide-num">{rule.tokenCount}/{RULE_MAX_TOKENS} tokens</span>
+        {difficulty ? (
+          <span
+            className="ide-pill"
+            style={{ marginLeft: "auto", color: difficulty.color, padding: "3px 9px", fontSize: 11 }}
+            title="How hard this rule is to win"
+          >
+            {difficulty.label}
+          </span>
+        ) : null}
+        <span style={{ marginLeft: difficulty ? undefined : "auto", fontSize: 11.5, color: "var(--dim)" }} className="ide-num">{rule.tokenCount}/{RULE_MAX_TOKENS} tokens</span>
       </div>
       <h2 style={{ margin: "0 0 6px", fontSize: 19, lineHeight: 1.25 }}>{rule.title}</h2>
       {rule.normalizedText ? <p style={{ margin: "0 0 14px", fontSize: 15, color: "var(--text)", lineHeight: 1.45, fontWeight: 600 }}>{rule.normalizedText}</p> : null}

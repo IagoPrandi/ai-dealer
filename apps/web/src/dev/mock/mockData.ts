@@ -133,14 +133,17 @@ export const MOCK_RULE_PREFLIGHT = {
     decision: "VALID" as const,
     dealerMessage:
       "Clear and verifiable. Players win when at least four guessed numbers are drawn.",
-    difficultyClass: "Medium",
+    // Must be a real compiler class (PRD §6.8) — "Medium" is not one, and a
+    // fixture the compiler can never produce makes the gallery lie about the UI.
+    difficultyClass: "EXTREME",
     finalConfidence: 0.92,
     maxTokens: 1024,
     needsClarification: false,
     normalizedText:
       "Win if at least 4 of your guess numbers appear in the drawn numbers.",
     normalizedTextHash: Array.from({ length: 32 }, (_, i) => (i * 7) % 256),
-    officialInterpretation: "Win when count(guess ∩ draw) >= 4.",
+    officialInterpretation:
+      "A guess wins if at least 4 of its numbers appear in the official draw, regardless of order.",
     officialInterpretationHash: Array.from(
       { length: 32 },
       (_, i) => (i * 5) % 256,
@@ -216,7 +219,8 @@ export const MOCK_CONVERSATION_DRAFTS = {
       ],
       normalizedText:
         "Win if at least 4 of your guess numbers appear in the drawn numbers.",
-      officialInterpretation: "Win when count(guess ∩ draw) >= 4.",
+      officialInterpretation:
+      "A guess wins if at least 4 of its numbers appear in the official draw, regardless of order.",
       prompt: "Win if at least 4 of your numbers appear in the draw.",
       ruleId: 4,
       status: "draft" as const,
