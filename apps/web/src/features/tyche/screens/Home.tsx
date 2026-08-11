@@ -545,7 +545,7 @@ export function HomeScreen() {
                 lineHeight: 1.5,
               }}
             >
-              {electedRule.sanitizedText}
+              {electedRule.officialInterpretation ?? electedRule.sanitizedText}
             </p>
             <div
               style={{

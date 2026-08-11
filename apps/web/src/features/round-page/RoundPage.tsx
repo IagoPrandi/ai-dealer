@@ -14,6 +14,8 @@ import {
 
 interface RoundRuleSummary {
   compiledArtifactHash: string | null;
+  /** Rendered from the compiled AST — what the rule actually does. */
+  officialInterpretation?: string | null;
   precompilationStatus: "failed" | "passed" | "pending";
   proposer: string;
   ruleId: number;
@@ -925,7 +927,17 @@ export function RoundPage({ turnId: rawTurnId }: { turnId: string }) {
                       </div>
                       <strong className="vote-total">{rule.votes} votes</strong>
                     </div>
-                    <p className="rule-original-text">"{rule.sanitizedText}"</p>
+                    {/* The compiled meaning leads; the author's wording follows
+                        only when the two differ. */}
+                    <p className="rule-original-text">
+                      {rule.officialInterpretation ?? `"${rule.sanitizedText}"`}
+                    </p>
+                    {rule.officialInterpretation &&
+                    rule.officialInterpretation !== rule.sanitizedText ? (
+                      <p className="rule-original-text">
+                        Proposed as: "{rule.sanitizedText}"
+                      </p>
+                    ) : null}
                     <dl className="rule-metadata">
                       <div>
                         <dt>Status</dt>

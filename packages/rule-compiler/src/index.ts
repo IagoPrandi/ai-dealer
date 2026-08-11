@@ -23,16 +23,22 @@ import {
   type ArrayExpr,
   type CompareOp,
   type PredicateNode,
+  type PredicateNodeV3,
   type RuleAst,
   type ScalarExpr,
 } from "@tyche/rule-schema";
 import { evaluatePredicate, scoreGuess } from "@tyche/rule-runtime";
 import {
+  collectWorkedExamples,
   generateAndRunTests,
   RULE_TEST_HARNESS_VERSION,
+  structuredInputPairs,
   type RuleDifficultyClass,
   type RuleTestCaseResult,
+  type RuleWorkedExample,
 } from "@tyche/rule-test-harness";
+import { describeRuleAstTotal } from "./describeAst.js";
+import { analyzeInterpretationCoverage } from "./interpretationCoverage.js";
 import { RULE_COMPILER_SKILL_VERSION } from "./skill.js";
 
 export type {
@@ -61,7 +67,16 @@ export {
   scoreGuess,
   type RankingEntry,
 } from "@tyche/rule-runtime";
-export { type RuleDifficultyClass } from "@tyche/rule-test-harness";
+export {
+  collectWorkedExamples,
+  type RuleDifficultyClass,
+  type RuleWorkedExample,
+} from "@tyche/rule-test-harness";
+export { describeRuleAstTotal } from "./describeAst.js";
+export {
+  analyzeInterpretationCoverage,
+  type InterpretationCoverage,
+} from "./interpretationCoverage.js";
 export {
   buildRuleCompilerSkillPrompt,
   RULE_COMPILER_SKILL,
@@ -73,7 +88,10 @@ export type RuleValidationDecision = "INVALID" | "VALID";
 export type RuleValidationReasonCode =
   | "AMBIGUOUS_RULE"
   | "COMPLEXITY_EXCEEDED"
+  | "DIFFICULTY_ALWAYS_TRUE"
+  | "DIFFICULTY_IMPOSSIBLE"
   | "EXTERNAL_DEPENDENCY"
+  | "INTERPRETATION_MISMATCH"
   | "PROVIDER_DISAGREEMENT"
   | "PROVIDER_MALFORMED_RESPONSE"
   | "PROVIDER_SCHEMA_UNCONSTRAINED"
@@ -81,6 +99,7 @@ export type RuleValidationReasonCode =
   | "PROVIDER_TIMEOUT"
   | "RUNTIME_TEST_FAILED"
   | "SCHEMA_INVALID"
+  | "SECOND_OPINION_UNAVAILABLE"
   | "SUPPORTED_RULE"
   | "UNSUPPORTED_RULE"
   | "UNSAFE_RUNTIME_BOUNDS";
@@ -188,6 +207,8 @@ export interface RuleCompiledArtifact {
   skillVersion: string;
   testCoverageScore: number;
   testHarnessVersion: string;
+  /** Concrete inputs showing the frozen rule winning and losing (PRD §6.5). */
+  workedExamples: readonly RuleWorkedExample[];
 }
 
 export type ProviderFailureMode =
@@ -389,7 +410,17 @@ export function createCompilerPlaceholder(
   };
 }
 
-function shouldContinueAfterAttempt(attempts: ProviderEvaluation[]): boolean {
+function shouldContinueAfterAttempt(
+  attempts: ProviderEvaluation[],
+  requireSecondOpinion = false,
+): boolean {
+  // With no deterministic reference reading, a single provider's AST is the only
+  // account of what the rule means and nothing can contradict it. Buy a second
+  // opinion in exactly that case — when the reviewer HAS a reference it already
+  // serves as the independent check, so the extra call is not spent.
+  if (attempts.length === 1 && requireSecondOpinion) {
+    return true;
+  }
   // Re-ask another provider when the current one disagrees with the first
   // completed opinion (PRD §7.4 escalation), up to the tertiary tiebreaker.
   return (
@@ -397,6 +428,15 @@ function shouldContinueAfterAttempt(attempts: ProviderEvaluation[]): boolean {
     hasProviderDisagreement(attempts) &&
     attempts.length < 3
   );
+}
+
+/**
+ * True when no deterministic reading of this text exists, so the provider's
+ * answer would otherwise go unchecked. Measured over the project's own prompt
+ * test sets, this is roughly one rule in five.
+ */
+function lacksDeterministicReference(request: RuleCompilationRequest): boolean {
+  return compileSupportedRule(normalizeRuleText(request.prompt)) === null;
 }
 
 // Turns the collected per-provider attempts into the final validation result
@@ -407,9 +447,13 @@ function finalizeValidation(
   timestamp: string,
   attempts: ProviderEvaluation[],
   fallbackAttempt: ProviderEvaluation,
+  options: { requireSecondOpinion?: boolean } = {},
 ): RuleValidationResult {
   let finalEvaluation: ProviderEvaluation | null = null;
-  for (const evaluation of attempts) {
+  // Only attempts that actually produced an opinion may decide the outcome. A
+  // provider that timed out or returned garbage scores as low-confidence and
+  // would otherwise override an accepted answer purely by failing.
+  for (const evaluation of attempts.filter(isCompletedProviderOpinion)) {
     if (evaluation.status === "accepted") {
       finalEvaluation = evaluation;
     }
@@ -446,6 +490,17 @@ function finalizeValidation(
   const reasonCodes = new Set(selectedAttempt.reasonCodes);
   if (providerDisagreementRateSample === 1) {
     reasonCodes.add("PROVIDER_DISAGREEMENT");
+  }
+  // A second opinion was required and could not be obtained (no second provider
+  // reachable, or every extra attempt failed). The rule still stands on one
+  // unchecked reading — record that in the audit log instead of letting it pass
+  // silently as if it had been corroborated.
+  if (
+    options.requireSecondOpinion &&
+    selectedAttempt.decision === "VALID" &&
+    countCompletedOpinions(attempts) < 2
+  ) {
+    reasonCodes.add("SECOND_OPINION_UNAVAILABLE");
   }
 
   const reasonSummary = summarizeReasons(
@@ -559,6 +614,8 @@ export async function compileRuleArtifact(
   const providerRouting = normalizeProviderRouting(request);
   const attempts: ProviderEvaluation[] = [];
 
+  const requireSecondOpinion = lacksDeterministicReference(request);
+
   for (const providerConfig of providerRouting.providers) {
     const evaluation = await evaluateProviderAttemptAsync(
       request,
@@ -569,7 +626,7 @@ export async function compileRuleArtifact(
     attempts.push(evaluation);
     if (
       evaluation.status === "accepted" &&
-      !shouldContinueAfterAttempt(attempts)
+      !shouldContinueAfterAttempt(attempts, requireSecondOpinion)
     ) {
       break;
     }
@@ -588,7 +645,9 @@ export async function compileRuleArtifact(
       timestamp,
       createDefaultProviderRoutingPolicy().providers[0] as AgentProviderConfig,
     );
-  return finalizeValidation(request, timestamp, attempts, fallback);
+  return finalizeValidation(request, timestamp, attempts, fallback, {
+    requireSecondOpinion,
+  });
 }
 
 interface ProviderEvaluation {
@@ -721,11 +780,14 @@ function validateResolvedAst(
   if (rawAst != null && !forcedFailure && !parsed?.success) {
     reasonCodes.add("SCHEMA_INVALID");
   }
-  if (ast && !forcedFailure) {
-    const reviewerAst = compileSupportedRule(normalizedText);
-    if (reviewerAst && !knownAstSemanticsMatch(reviewerAst, ast)) {
-      reasonCodes.add("REVIEWER_MISMATCH");
-    }
+  // An independent deterministic reading of the same text. When it exists it is
+  // the strongest available check: the two ASTs are compared by BEHAVIOR over
+  // the structured battery, so an equivalent-but-differently-shaped compile
+  // passes and a rule that merely looks similar does not.
+  const reviewerAst =
+    ast && !forcedFailure ? compileSupportedRule(normalizedText) : null;
+  if (ast && reviewerAst && !knownAstSemanticsMatch(reviewerAst, ast)) {
+    reasonCodes.add("REVIEWER_MISMATCH");
   }
 
   const bounds = ast && !forcedFailure ? validateRuntimeBounds(ast) : null;
@@ -737,16 +799,43 @@ function validateResolvedAst(
     reasonCodes.add("COMPLEXITY_EXCEEDED");
   }
 
+  // The frozen AST is what pays the prize; the player only reads prose. Reject
+  // when a numeric constraint the player wrote did not survive compilation, so a
+  // rule can never be elected under a promise its artifact does not keep.
+  // Last line of defence, and only where no reference AST exists: semantics beat
+  // literals, so a rule the reviewer already certified is never second-guessed
+  // by literal matching (which cannot tell an equivalent rewrite from a drop).
+  if (ast && !forcedFailure && !reviewerAst) {
+    const coverage = analyzeInterpretationCoverage({
+      ast,
+      officialInterpretation: describeRuleAstForPlayers(ast),
+      text: request.originalText?.trim() || normalizedText,
+    });
+    if (!coverage.covered) {
+      reasonCodes.add("INTERPRETATION_MISMATCH");
+    }
+  }
+
   // Deterministic test harness + bounded Monte-Carlo difficulty (PRD §6.8, §7.8).
   const harness = ast && hasSafeRuntimeBounds ? generateAndRunTests(ast) : null;
   const difficultyClass: RuleDifficultyClass =
     harness?.difficulty.difficultyClass ?? "IMPOSSIBLE";
   const estimatedWinRate = harness?.difficulty.estimatedWinRate ?? 0;
 
-  // Policy: ANY verifiable rule is allowed; the only hard limits are external
-  // dependencies and unverifiability. Difficulty (ALWAYS_TRUE / IMPOSSIBLE /
-  // TOO_EASY) is a label, never a gate. The harness only blocks when a runtime
-  // safety/determinism/serialization check actually fails.
+  // Policy: any verifiable rule is allowed, EXCEPT the two classes PRD §6.8
+  // rejects outright — a rule that no input can win and a rule every input wins
+  // both fail to distinguish winners from losers, so electing one only burns a
+  // turn. TOO_EASY stays a label (PRD §6.8 leaves it to game configuration).
+  // Only gate on a real measurement: with no harness the rule is already
+  // blocked by UNSUPPORTED_RULE / UNSAFE_RUNTIME_BOUNDS.
+  if (harness && difficultyClass === "IMPOSSIBLE") {
+    reasonCodes.add("DIFFICULTY_IMPOSSIBLE");
+  }
+  if (harness && difficultyClass === "ALWAYS_TRUE") {
+    reasonCodes.add("DIFFICULTY_ALWAYS_TRUE");
+  }
+  // The harness only blocks otherwise when a runtime safety/determinism/
+  // serialization check actually fails.
   if (harness && harness.coverageScore < 1) {
     reasonCodes.add("RUNTIME_TEST_FAILED");
   }
@@ -772,7 +861,11 @@ function validateResolvedAst(
     evaluatedTestCases,
     hasAmbiguity: reasonCodes.has("AMBIGUOUS_RULE"),
     hasExternalDependency: reasonCodes.has("EXTERNAL_DEPENDENCY"),
-    hasReviewerMismatch: reasonCodes.has("REVIEWER_MISMATCH"),
+    // Both codes mean the same thing to the score: an independent reading of the
+    // rule disagrees with the AST the provider emitted.
+    hasReviewerMismatch:
+      reasonCodes.has("REVIEWER_MISMATCH") ||
+      reasonCodes.has("INTERPRETATION_MISMATCH"),
     hasSafeRuntimeBounds,
     hasSupportedRule: ast !== null,
     schemaValid: parsed?.success === true,
@@ -809,8 +902,10 @@ function validateResolvedAst(
           harnessCases: harness?.cases ?? [],
           modelIdentity,
           normalizedText,
-          officialInterpretation:
-            request.officialInterpretation?.trim() || normalizedText,
+          // Derived from the frozen AST, never from model prose about the
+          // player's text. Those are two independent readings that can (and did,
+          // turn 55) disagree with nobody noticing.
+          officialInterpretation: describeRuleAstForPlayers(ast),
           originalText: request.originalText?.trim() || request.prompt,
           promptContractVersion: PROMPT_CONTRACT.version,
           providerPath: [],
@@ -819,6 +914,7 @@ function validateResolvedAst(
           skillVersion: RULE_COMPILER_SKILL_VERSION,
           testCoverageScore: harness?.coverageScore ?? 0,
           testHarnessVersion: RULE_TEST_HARNESS_VERSION,
+          workedExamples: collectWorkedExamples(ast),
         }
       : null;
   const artifactHash = artifact ? hashJson(artifact) : null;
@@ -976,6 +1072,27 @@ function resolveProviderPath(
   }));
 }
 
+// Two providers agree when they reach the same verdict AND their ASTs behave
+// identically. Comparing serialized ASTs instead (the previous rule) called every
+// equivalent-but-differently-shaped compile a disagreement, and — worse — said
+// nothing about behaviour, which is the only thing that decides who gets paid.
+function providerOpinionsAgree(
+  left: ProviderEvaluation,
+  right: ProviderEvaluation,
+) {
+  if (
+    left.decision !== right.decision ||
+    left.confidenceAction !== right.confidenceAction ||
+    left.normalizedText !== right.normalizedText
+  ) {
+    return false;
+  }
+  if (left.ast === null || right.ast === null) {
+    return left.ast === right.ast;
+  }
+  return knownAstSemanticsMatch(left.ast, right.ast);
+}
+
 function hasProviderDisagreement(attempts: ProviderEvaluation[]) {
   const completedAttempts = attempts.filter(isCompletedProviderOpinion);
   if (completedAttempts.length < 2) {
@@ -986,11 +1103,13 @@ function hasProviderDisagreement(attempts: ProviderEvaluation[]) {
   if (!first) {
     return false;
   }
-  const rest = completedAttempts.slice(1);
-  const firstSignature = providerDecisionSignature(first);
-  return rest.some(
-    (attempt) => providerDecisionSignature(attempt) !== firstSignature,
-  );
+  return completedAttempts
+    .slice(1)
+    .some((attempt) => !providerOpinionsAgree(first, attempt));
+}
+
+function countCompletedOpinions(attempts: ProviderEvaluation[]) {
+  return attempts.filter(isCompletedProviderOpinion).length;
 }
 
 function resolveProviderDisagreement(attempts: ProviderEvaluation[]) {
@@ -1018,11 +1137,16 @@ function resolveProviderDisagreement(attempts: ProviderEvaluation[]) {
   return tertiary;
 }
 
+// A provider that never answered holds no opinion, so it can neither corroborate
+// nor contradict. Counting a transport failure as dissent would let an
+// unreachable secondary provider reject every rule that needs a second opinion.
 function isCompletedProviderOpinion(attempt: ProviderEvaluation) {
   return (
     attempt.status !== "timeout" &&
     attempt.status !== "malformed_response" &&
-    attempt.status !== "schema_validation_failed"
+    attempt.status !== "schema_validation_failed" &&
+    !attempt.reasonCodes.includes("PROVIDER_TIMEOUT") &&
+    !attempt.reasonCodes.includes("PROVIDER_MALFORMED_RESPONSE")
   );
 }
 
@@ -1126,6 +1250,78 @@ function parseOrderedTensRangeRule(text: string): RuleAst | null {
   };
 }
 
+// "the guess is exactly the set {a, b, c, d, e, f}" — optionally conjoined with
+// "at least one drawn number is between X and Y".
+//
+// A guess always holds six DISTINCT numbers, so requiring it to contain each of
+// six distinct values is exactly "the guess is that set, in any order" — no
+// array-literal node is needed. Compiling this family deterministically matters
+// for two reasons: the family is now electable with a correct artifact, and the
+// reviewer gains a reference AST it can hold an LLM answer against (turn 55's
+// artifact fails that comparison on the very first structured probe).
+const EXACT_SET_CUE =
+  /\b(?:are exactly|is exactly|exactly the set|exatamente (?:o conjunto|os numeros)|sao exatamente)\b/u;
+const ORDER_IGNORED_CUE =
+  /\b(?:ignoring order|order ignored|in any order|regardless of order|any order|ignorando a ordem|em qualquer ordem|qualquer ordem)\b/u;
+const ANY_DRAWN_IN_RANGE =
+  /\bat least one\b[^.]{0,60}\bdrawn\b[^.]{0,40}\b(?:between|entre)\s+(\d{1,3})\s+(?:and|e)\s+(\d{1,3})\b|\bpelo menos um\b[^.]{0,60}\bsortead\w*\b[^.]{0,40}\b(?:entre)\s+(\d{1,3})\s+e\s+(\d{1,3})\b/u;
+
+function parseExactGuessSetRule(text: string): RuleAst | null {
+  if (!EXACT_SET_CUE.test(text) || !ORDER_IGNORED_CUE.test(text)) {
+    return null;
+  }
+  // Take the longest run of numbers: the enumerated set, not a stray bound.
+  const runs = extractNumberRuns(text).filter((run) => run.length === 6);
+  const values = runs[0];
+  if (!values || new Set(values).size !== 6) {
+    return null;
+  }
+  if (!values.every((value) => value >= 1 && value <= 100)) {
+    return null;
+  }
+
+  const clauses: PredicateNodeV3[] = [...values]
+    .sort((a, b) => a - b)
+    .map((value) => ({
+      kind: "contains",
+      array: { kind: "source", source: "guess" },
+      value: { kind: "lit", value },
+    }));
+
+  const range = ANY_DRAWN_IN_RANGE.exec(text);
+  if (range) {
+    const low = Number(range[1] ?? range[3]);
+    const high = Number(range[2] ?? range[4]);
+    if (
+      Number.isInteger(low) &&
+      Number.isInteger(high) &&
+      low >= 1 &&
+      high <= 100 &&
+      low < high
+    ) {
+      clauses.push({
+        kind: "exists",
+        of: { kind: "source", source: "draw" },
+        where: {
+          kind: "and",
+          clauses: [
+            { kind: "compare", left: { kind: "elem" }, op: "gte", right: { kind: "lit", value: low } },
+            { kind: "compare", left: { kind: "elem" }, op: "lte", right: { kind: "lit", value: high } },
+          ],
+        },
+      });
+    }
+  }
+
+  return {
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: { kind: "and", clauses },
+    },
+  };
+}
+
 function hasPattern(value: string, patterns: readonly RegExp[]) {
   return patterns.some((pattern) => pattern.test(value));
 }
@@ -1142,6 +1338,13 @@ function compileSupportedRule(text: string): RuleAst | null {
   const orderedTensRange = parseOrderedTensRangeRule(text);
   if (orderedTensRange) {
     return orderedTensRange;
+  }
+
+  // Before the generic match-count fallbacks: an enumerated exact set must never
+  // be mistaken for "match N of the draw" (the turn-55 failure).
+  const exactGuessSet = parseExactGuessSetRule(text);
+  if (exactGuessSet) {
+    return exactGuessSet;
   }
 
   // Newly-supported deterministic shapes (prompt-set 24/25/26/27/82/84). Placed
@@ -1958,6 +2161,17 @@ function looksLikeObjectiveEvenCountComparison(text: string) {
   );
 }
 
+/**
+ * The authoritative, player-facing statement of what a frozen artifact does.
+ * Pure function of the AST, and TOTAL: the hand-tuned phrasings below win when
+ * they match (they read better for the common shapes), and everything else
+ * falls through to the total renderer. It never returns null, so no rule can
+ * ever be shown to a player as anything but what the runtime will execute.
+ */
+export function describeRuleAstForPlayers(ast: RuleAst): string {
+  return describeRuleAst(ast) ?? describeRuleAstTotal(ast);
+}
+
 function describeRuleAst(ast: RuleAst): string | null {
   if (ast.schemaVersion === 1) {
     if (ast.node.kind === "match_count_at_least") {
@@ -2746,7 +2960,23 @@ function parseMinMaxComparisonRule(text: string): PredicateNode | null {
   return compare(left, op, right);
 }
 
+// Qualifiers this parser does not model. "At least four numbers are within 3 of
+// the drawn number in the same position" is NOT "at least four numbers appear in
+// the draw" — dropping the qualifier silently produces a reference AST that says
+// something the player did not, which then either mis-compiles the rule or (as
+// the reviewer) rejects a correct one. Returning null is the honest answer: no
+// deterministic reading exists for this shape.
+const UNMODELLED_MATCH_QUALIFIERS = [
+  /\b(?:within|no maximo a|a ate)\s+\d+\b/iu,
+  /\b(?:same|matching)\s+(?:position|slot|place)\b/iu,
+  /\bmesma\s+posicao\b/iu,
+  /\bposition\s+by\s+position\b/iu,
+];
+
 function parseMatchCountRule(text: string) {
+  if (hasPattern(text, UNMODELLED_MATCH_QUALIFIERS)) {
+    return null;
+  }
   const numericMatch = text.match(
     new RegExp(
       `\\b${THRESHOLD_COUNT_CUE}\\s+(${MATCH_COUNT_NUMBER_1_TO_6})\\b.{0,80}\\b(?:${MATCH_COUNT_NOUN}|${MATCH_COUNT_ACTION})\\b`,
@@ -2968,9 +3198,23 @@ function sampledSemanticsMatch(expected: RuleAst, actual: RuleAst): boolean {
     }
     return [...pool];
   };
+  // Uniform samples alone cannot separate two jackpot rules: both lose on every
+  // sample, so the check certifies them equal. Turn 55's mis-compiled artifact
+  // and a faithful compile of the same text disagree on ZERO of 240 uniform
+  // samples and on the very first structured pair, so the structured battery is
+  // what gives this check its discriminating power.
+  const inputs = [
+    ...structuredInputPairs().map((pair) => ({
+      draw: [...pair.draw],
+      guess: [...pair.guess],
+    })),
+    ...Array.from({ length: SEMANTIC_MATCH_SAMPLES }, () => ({
+      guess: sixUnique(),
+      draw: sixUnique(),
+    })),
+  ];
   try {
-    for (let i = 0; i < SEMANTIC_MATCH_SAMPLES; i += 1) {
-      const input = { guess: sixUnique(), draw: sixUnique() };
+    for (const input of inputs) {
       if (expectedRanking) {
         if (scoreGuess(expected, input) !== scoreGuess(actual, input)) {
           return false;
@@ -3117,6 +3361,17 @@ function summarizeReasons(
   }
   if (blockingReasons.length === 0) {
     return `Rule rejected because final confidence ${finalConfidence.toFixed(4)} is below escalation threshold ${COMPILER_CONFIDENCE_THRESHOLDS.escalate_min}.`;
+  }
+  // These three carry a concrete, player-actionable cause, so state it instead
+  // of printing the raw code.
+  if (blockingReasons.includes("INTERPRETATION_MISMATCH")) {
+    return "Rule rejected: the compiled rule dropped a numeric condition from the wording, so it would not pay what the rule promises. Restate the condition explicitly.";
+  }
+  if (blockingReasons.includes("DIFFICULTY_IMPOSSIBLE")) {
+    return "Rule rejected: no guess can win under this rule, so it cannot distinguish winners from losers.";
+  }
+  if (blockingReasons.includes("DIFFICULTY_ALWAYS_TRUE")) {
+    return "Rule rejected: every guess wins under this rule, so it cannot distinguish winners from losers.";
   }
   return `Rule rejected: ${blockingReasons.join(", ")}.`;
 }

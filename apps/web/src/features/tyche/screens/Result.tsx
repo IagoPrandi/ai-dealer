@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { useTyche } from "../context";
 import { getRuleVotes } from "../data/apiClient";
+import type { RuleWorkedExampleApi } from "../data/types";
 import { lamportsToSol, fmtInt, fmtSol, fmtTurnId } from "../data/format";
 import { usePlayerGuess, useRound } from "../data/hooks";
 import { Confetti, Ico, ScreenHead, SectionLabel, VoteTally } from "../shared";
@@ -21,6 +22,43 @@ function EligItem({ label, ok }: { label: string; ok: boolean }) {
         {ok ? <Ico.check style={{ color: "var(--green)", width: 15, height: 15 }} /> : <Ico.close style={{ color: "var(--dim)", width: 14, height: 14 }} />}
       </span>
       <span style={{ fontSize: 13, color: ok ? "var(--text)" : "var(--dim)", fontWeight: 600 }}>{label}</span>
+    </div>
+  );
+}
+
+/**
+ * Concrete inputs the frozen rule wins and loses on. Generated from the compiled
+ * AST, so they cannot describe behavior the settlement runtime will not produce.
+ */
+function RuleWorkedExamples({
+  examples,
+}: {
+  examples: readonly RuleWorkedExampleApi[];
+}) {
+  if (examples.length === 0) {
+    return null;
+  }
+  return (
+    <div className="ide-rule-examples" style={{ margin: "0 0 12px" }}>
+      {examples.map((example, index) => (
+        <div className="ide-rule-example" key={`${example.outcome}-${index}`}>
+          <span
+            className={`ide-rule-example-outcome ${example.outcome === "WIN" ? "is-win" : "is-lose"}`}
+          >
+            {example.outcome}
+          </span>
+          <span>
+            guess{" "}
+            <span className="ide-num ide-rule-example-values">
+              {example.guess.join(" ")}
+            </span>{" "}
+            · draw{" "}
+            <span className="ide-num ide-rule-example-values">
+              {example.draw.join(" ")}
+            </span>
+          </span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -186,7 +224,22 @@ export function ResultScreen() {
               <span style={{ width: 26, height: 26, borderRadius: 8, background: "var(--gold)", color: "#0B0910", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.trophy style={{ color: "#0B0910", width: 15, height: 15 }} /></span>
               <div style={{ fontWeight: 800, fontSize: 16, color: "var(--gold)" }}>{electedRule?.title ?? "No alternative rule elected"}</div>
             </div>
-            {electedRule ? <p style={{ margin: "0 0 11px", fontSize: 13.5, color: "var(--muted)", lineHeight: 1.5 }}>{electedRule.sanitizedText}</p> : null}
+            {electedRule ? (
+              <>
+                {/* The compiled rule leads, because that is what settled the
+                    turn. The author's wording follows as context. */}
+                <p style={{ margin: "0 0 11px", fontSize: 13.5, color: "var(--muted)", lineHeight: 1.5 }}>
+                  {electedRule.officialInterpretation ?? electedRule.sanitizedText}
+                </p>
+                {electedRule.officialInterpretation &&
+                electedRule.officialInterpretation !== electedRule.sanitizedText ? (
+                  <p style={{ margin: "0 0 11px", fontSize: 12.5, color: "var(--dim)", lineHeight: 1.45 }}>
+                    Proposed as: “{electedRule.sanitizedText}”
+                  </p>
+                ) : null}
+                <RuleWorkedExamples examples={electedRule.workedExamples ?? []} />
+              </>
+            ) : null}
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <span className="ide-num" style={{ fontSize: 13, color: "var(--purple-soft)", fontWeight: 700 }}>{fmtSol(alternativePoolSol)} SOL pool</span>
               <span style={{ marginLeft: "auto", fontSize: 12.5, color: "var(--muted)" }}><span className="ide-num" style={{ color: "var(--green)" }}>{alternative?.winnerCount ?? 0}</span> won</span>

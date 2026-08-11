@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
+  analyzeInterpretationCoverage,
   buildRuleCompilerSkillPrompt,
   compileRuleArtifact,
   createLocalOnlyProviderRoutingPolicy,
@@ -149,16 +150,20 @@ test("validates and precompiles a clear match-count rule", () => {
     result.artifact?.originalText,
     "Win if at least 4 of your numbers appear in the draw.",
   );
+  // The interpretation is a pure function of the frozen AST, never the request
+  // text — that is what makes it impossible to show a rule the runtime will not
+  // execute.
   assert.equal(
     result.artifact?.officialInterpretation,
-    result.artifact?.normalizedText,
+    "A guess wins if at least 4 of its numbers appear in the official draw, regardless of order.",
   );
+  assert.ok((result.artifact?.workedExamples.length ?? 0) > 0);
   assert.equal(result.artifact?.createdAt, "2026-06-11T00:00:00.000Z");
   assert.ok((result.artifact?.generatedTestCases.length ?? 0) > 0);
   assert.ok((result.artifact?.evaluatedTestCases.length ?? 0) > 0);
   assert.ok((result.artifact?.harnessCases.length ?? 0) > 0);
   assert.equal(result.artifact?.skillVersion, RULE_COMPILER_SKILL_VERSION);
-  assert.equal(result.artifact?.testHarnessVersion, "2.0.0");
+  assert.equal(result.artifact?.testHarnessVersion, "2.1.0");
 });
 
 test("validates supported sum and exact-order rules", () => {
@@ -1274,9 +1279,11 @@ test("accepts a semantically equivalent LLM v2 AST for a known threshold rule", 
 
   assert.equal(result.decision, "VALID");
   assert.equal(result.artifact?.schemaVersion, 2);
+  // Model prose supplied on the request is ignored: the interpretation must
+  // describe the AST that was actually frozen.
   assert.equal(
     result.artifact?.officialInterpretation,
-    "Win when at least four guessed numbers appear in the draw.",
+    "A guess wins if at least 4 of its numbers appear in the official draw, regardless of order.",
   );
   assert.equal(
     result.artifact?.originalText,
@@ -1504,8 +1511,9 @@ test("rejects an LLM response that is not a valid AST and escalates", async () =
   assert.ok(result.log.reasonCodes.includes("SCHEMA_INVALID"));
 });
 
-test("allows an LLM-emitted ALWAYS_TRUE rule but labels its difficulty", async () => {
-  // Policy: difficulty never gates. A verifiable, external-free rule is allowed.
+test("rejects an LLM-emitted ALWAYS_TRUE rule (PRD 6.8)", async () => {
+  // A rule every guess wins cannot distinguish winners from losers, so electing
+  // it only burns a turn — PRD §6.8 rejects it.
   const alwaysTrue = {
     schemaVersion: 2,
     result: {
@@ -1522,8 +1530,10 @@ test("allows an LLM-emitted ALWAYS_TRUE rule but labels its difficulty", async (
     { astProvider: async () => alwaysTrue },
   );
 
-  assert.equal(result.decision, "VALID");
+  assert.equal(result.decision, "INVALID");
+  assert.equal(result.artifact, null);
   assert.equal(result.log.difficultyClass, "ALWAYS_TRUE");
+  assert.ok(result.log.reasonCodes.includes("DIFFICULTY_ALWAYS_TRUE"));
 });
 
 test("exposes the prompt contract for audit", () => {
@@ -1657,4 +1667,426 @@ test("uses tertiary path and fails closed when providers disagree", () => {
     result.log.providerPath.map((attempt) => attempt.priority),
     ["primary", "secondary", "tertiary"],
   );
+});
+
+// --- Regression: turn 55 shipped an artifact that did not match its own card ---
+// The elected rule read "guess is exactly {1,2,3,4,5,6} and a drawn number is in
+// [1,99]" but compiled to `count(guess ∩ draw) == 6`, so the only player who
+// followed the card to the letter lost, and the alternative pool paid nobody.
+
+const TURN_55_TEXT =
+  "a guess wins if its six numbers are exactly the set {1, 2, 3, 4, 5, 6}, ignoring order, and at least one of the six drawn numbers is between 1 and 99 inclusive on both endpoints.";
+
+const TURN_55_COMPILED_AST = {
+  schemaVersion: 2,
+  result: {
+    type: "predicate",
+    predicate: {
+      kind: "compare",
+      left: {
+        kind: "reduce",
+        of: {
+          kind: "intersection",
+          left: { kind: "source", source: "guess" },
+          right: { kind: "source", source: "draw" },
+        },
+        op: "count",
+      },
+      op: "eq",
+      right: { kind: "lit", value: 6 },
+    },
+  },
+} as const;
+
+test("rejects an artifact that dropped numeric conditions stated in the rule", async () => {
+  const result = await compileRuleArtifact(
+    {
+      officialInterpretation:
+        "A guess wins if the count of guessed numbers that appear in the official draw is equal to 6.",
+      originalText: TURN_55_TEXT,
+      prompt: TURN_55_TEXT,
+      tokenCount: 47,
+    },
+    { astProvider: async () => TURN_55_COMPILED_AST },
+  );
+
+  assert.equal(result.decision, "INVALID");
+  assert.equal(result.artifact, null);
+  assert.equal(result.artifactHash, null);
+  // The deterministic reviewer now has a reference reading for this family, so
+  // the rejection comes from behavioural disagreement rather than from literal
+  // matching — a strictly stronger signal.
+  assert.ok(result.log.reasonCodes.includes("REVIEWER_MISMATCH"));
+});
+
+test("elects the same rule when the provider compiles it faithfully", async () => {
+  // The turn-55 wording must be usable, not merely blocked: both faithful
+  // encodings of "exactly {1..6}" have to survive, including the terse one whose
+  // AST never mentions 2, 3, 4 or 5.
+  const drawInRange = {
+    kind: "exists",
+    of: { kind: "source", source: "draw" },
+    where: {
+      kind: "and",
+      clauses: [
+        { kind: "compare", left: { kind: "elem" }, op: "gte", right: { kind: "lit", value: 1 } },
+        { kind: "compare", left: { kind: "elem" }, op: "lte", right: { kind: "lit", value: 99 } },
+      ],
+    },
+  };
+  const encodings = {
+    terse: {
+      kind: "and",
+      clauses: [
+        {
+          kind: "forall",
+          of: { kind: "source", source: "guess" },
+          where: { kind: "compare", left: { kind: "elem" }, op: "lte", right: { kind: "lit", value: 6 } },
+        },
+        drawInRange,
+      ],
+    },
+    explicit: {
+      kind: "and",
+      clauses: [
+        ...[1, 2, 3, 4, 5, 6].map((value) => ({
+          kind: "contains",
+          array: { kind: "source", source: "guess" },
+          value: { kind: "lit", value },
+        })),
+        drawInRange,
+      ],
+    },
+  };
+
+  for (const predicate of Object.values(encodings)) {
+    const result = await compileRuleArtifact(
+      { originalText: TURN_55_TEXT, prompt: TURN_55_TEXT, tokenCount: 47 },
+      {
+        astProvider: async () => ({
+          schemaVersion: 3,
+          result: { type: "predicate", predicate },
+        }),
+      },
+    );
+    assert.equal(result.decision, "VALID");
+    assert.equal(result.log.difficultyClass, "EXTREME");
+    assert.match(result.artifactHash ?? "", /^[0-9a-f]{64}$/);
+  }
+});
+
+test("states the frozen rule in the player's own terms, with worked examples", () => {
+  const result = validateAndPrecompileRule({
+    originalText: TURN_55_TEXT,
+    prompt: TURN_55_TEXT,
+    tokenCount: 47,
+  });
+
+  assert.equal(result.decision, "VALID");
+  assert.equal(
+    result.artifact?.officialInterpretation,
+    "A guess wins if your six numbers are exactly 1, 2, 3, 4, 5 and 6, in any order and at least one of the drawn numbers is between 1 and 99 (both included).",
+  );
+
+  const examples = result.artifact?.workedExamples ?? [];
+  assert.ok(examples.some((example) => example.outcome === "WIN"));
+  assert.ok(examples.some((example) => example.outcome === "LOSE"));
+  // Every example must be reproducible against the frozen AST itself.
+  for (const example of examples) {
+    assert.equal(
+      evaluatePredicate(result.artifact!.ast, {
+        draw: [...example.draw],
+        guess: [...example.guess],
+      }).result,
+      example.outcome,
+    );
+  }
+});
+
+test("reports every dropped value and keeps a faithful artifact covered", () => {
+  const dropped = analyzeInterpretationCoverage({
+    ast: TURN_55_COMPILED_AST,
+    officialInterpretation:
+      "A guess wins if the count of guessed numbers that appear in the official draw is equal to 6.",
+    text: TURN_55_TEXT,
+  });
+  assert.equal(dropped.covered, false);
+  assert.deepEqual(dropped.missingFromAst, [1, 2, 3, 4, 5, 99]);
+  assert.deepEqual(dropped.missingFromInterpretation, [1, 2, 3, 4, 5, 99]);
+
+  const faithful = analyzeInterpretationCoverage({
+    ast: {
+      schemaVersion: 2,
+      result: {
+        type: "predicate",
+        predicate: {
+          kind: "compare",
+          left: {
+            kind: "reduce",
+            of: {
+              kind: "intersection",
+              left: { kind: "source", source: "guess" },
+              right: { kind: "source", source: "draw" },
+            },
+            op: "count",
+          },
+          op: "gte",
+          right: { kind: "lit", value: 4 },
+        },
+      },
+    },
+    officialInterpretation:
+      "A guess wins if at least 4 guessed numbers appear in the official draw.",
+    text: "Win if at least 4 of your numbers appear in the draw.",
+  });
+  assert.equal(faithful.covered, true);
+});
+
+test("coverage ignores illustrative examples and full-domain ranges", () => {
+  // Numbers used to illustrate a rule are not conditions the AST must carry.
+  const withExample = analyzeInterpretationCoverage({
+    ast: {
+      schemaVersion: 1,
+      node: { kind: "ordered_exact" },
+    },
+    officialInterpretation:
+      "A guess wins if every guessed number equals the official drawn number in the same position.",
+    text: "Win if your numbers match the draw in the same order. For example, if 12 31 24 is drawn you must play 12 31 24.",
+  });
+  assert.deepEqual(withExample.requiredValues, []);
+  assert.equal(withExample.covered, true);
+
+  // "between 1 and 100" spans the whole number domain, so dropping it in
+  // compilation loses no meaning and must not be reported as a mismatch.
+  const vacuousRange = analyzeInterpretationCoverage({
+    ast: {
+      schemaVersion: 1,
+      node: { kind: "match_count_at_least", value: 6 },
+    },
+    officialInterpretation:
+      "A guess wins if all six guessed numbers appear in the official draw.",
+    text: "Win if all your numbers are drawn and the first drawn number is between 1 and 100.",
+  });
+  assert.deepEqual(vacuousRange.requiredValues, []);
+  assert.equal(vacuousRange.covered, true);
+});
+
+test("rejects rules that no guess can win and rules every guess wins (PRD 6.8)", async () => {
+  // Self-contradictory: the same count cannot be both 0 and 6.
+  const impossible = await compileRuleArtifact(
+    {
+      originalText: "Win only if you match none and all of the drawn numbers.",
+      prompt: "Win only if you match none and all of the drawn numbers.",
+      tokenCount: 20,
+    },
+    {
+      astProvider: async () => ({
+        schemaVersion: 2,
+        result: {
+          type: "predicate",
+          predicate: {
+            kind: "and",
+            clauses: [0, 6].map((value) => ({
+              kind: "compare",
+              left: {
+                kind: "reduce",
+                of: {
+                  kind: "intersection",
+                  left: { kind: "source", source: "guess" },
+                  right: { kind: "source", source: "draw" },
+                },
+                op: "count",
+              },
+              op: "eq",
+              right: { kind: "lit", value },
+            })),
+          },
+        },
+      }),
+    },
+  );
+  assert.equal(impossible.log.difficultyClass, "IMPOSSIBLE");
+  assert.equal(impossible.decision, "INVALID");
+  assert.equal(impossible.artifact, null);
+  assert.ok(impossible.log.reasonCodes.includes("DIFFICULTY_IMPOSSIBLE"));
+
+  const alwaysTrue = await compileRuleArtifact(
+    {
+      originalText: "Win if your numbers count is at least zero.",
+      prompt: "Win if your numbers count is at least zero.",
+      tokenCount: 12,
+    },
+    {
+      astProvider: async () => ({
+        schemaVersion: 2,
+        result: {
+          type: "predicate",
+          predicate: {
+            kind: "compare",
+            left: {
+              kind: "reduce",
+              of: { kind: "source", source: "guess" },
+              op: "count",
+            },
+            op: "gte",
+            right: { kind: "lit", value: 0 },
+          },
+        },
+      }),
+    },
+  );
+  assert.equal(alwaysTrue.log.difficultyClass, "ALWAYS_TRUE");
+  assert.equal(alwaysTrue.decision, "INVALID");
+  assert.equal(alwaysTrue.artifact, null);
+  assert.ok(alwaysTrue.log.reasonCodes.includes("DIFFICULTY_ALWAYS_TRUE"));
+});
+
+test("keeps a legitimately rare rule winnable instead of impossible", () => {
+  // "At least 4 of 6 from 100" wins ~1.4e-5 of the time: zero wins in any
+  // feasible uniform sample, but a constructible winner exists.
+  const rare = validateAndPrecompileRule({
+    originalText: "Win if at least 4 of your numbers appear in the draw.",
+    prompt: "Win if at least 4 of your numbers appear in the draw.",
+    tokenCount: 12,
+  });
+  assert.equal(rare.log.estimatedWinRate, 0);
+  assert.equal(rare.log.difficultyClass, "EXTREME");
+  assert.equal(rare.decision, "VALID");
+  assert.ok(!rare.log.reasonCodes.includes("DIFFICULTY_IMPOSSIBLE"));
+});
+
+// --- Layer 2: a second opinion where no deterministic reading exists ----------
+
+const NO_REFERENCE_PROMPT =
+  "My ticket total should be at least ten lower than the draw total.";
+
+function sumCompareAst(op: "gt" | "lt", offset: number) {
+  return {
+    schemaVersion: 2,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "compare",
+        op,
+        left: {
+          kind: "reduce",
+          op: "sum",
+          of: { kind: "source", source: "guess" },
+        },
+        right: {
+          kind: "arith",
+          op: "sub",
+          left: {
+            kind: "reduce",
+            op: "sum",
+            of: { kind: "source", source: "draw" },
+          },
+          right: { kind: "lit", value: offset },
+        },
+      },
+    },
+  };
+}
+
+test("buys a second opinion only when no deterministic reading exists", async () => {
+  let calls = 0;
+  const withReference = await compileRuleArtifact(
+    {
+      originalText: "Win if at least 4 of your numbers appear in the draw.",
+      prompt: "Win if at least 4 of your numbers appear in the draw.",
+      tokenCount: 12,
+    },
+    {
+      astProvider: async () => {
+        calls += 1;
+        return { schemaVersion: 1, node: { kind: "match_count_at_least", value: 4 } };
+      },
+    },
+  );
+  assert.equal(withReference.decision, "VALID");
+  // The deterministic reviewer already corroborates it — no extra call spent.
+  assert.equal(calls, 1);
+  assert.ok(
+    !withReference.log.reasonCodes.includes("SECOND_OPINION_UNAVAILABLE"),
+  );
+
+  calls = 0;
+  const withoutReference = await compileRuleArtifact(
+    { originalText: NO_REFERENCE_PROMPT, prompt: NO_REFERENCE_PROMPT, tokenCount: 14 },
+    {
+      astProvider: async () => {
+        calls += 1;
+        return sumCompareAst("lt", 10);
+      },
+    },
+  );
+  assert.equal(withoutReference.decision, "VALID");
+  assert.ok(calls >= 2, `expected a second opinion, got ${calls} call(s)`);
+  assert.equal(withoutReference.log.providerDisagreementRateSample, 0);
+});
+
+test("fails closed when two providers compile the same text differently", async () => {
+  const answers = [sumCompareAst("lt", 10), sumCompareAst("gt", 10)];
+  let index = 0;
+  const result = await compileRuleArtifact(
+    { originalText: NO_REFERENCE_PROMPT, prompt: NO_REFERENCE_PROMPT, tokenCount: 14 },
+    {
+      astProvider: async () => answers[index++] ?? answers[0],
+    },
+  );
+
+  assert.equal(result.decision, "INVALID");
+  assert.equal(result.artifact, null);
+  assert.equal(result.log.providerDisagreementRateSample, 1);
+  assert.ok(result.log.reasonCodes.includes("PROVIDER_DISAGREEMENT"));
+});
+
+test("treats an equivalent rewrite as agreement, not disagreement", async () => {
+  // Same rule, two shapes: `sum(guess) < sum(draw) - 10` and the algebraically
+  // identical `sum(guess) + 10 < sum(draw)`. Serialized ASTs differ; behaviour
+  // does not, and only behaviour decides who gets paid.
+  const shifted = {
+    schemaVersion: 2,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "compare",
+        op: "lt",
+        left: {
+          kind: "arith",
+          op: "add",
+          left: { kind: "reduce", op: "sum", of: { kind: "source", source: "guess" } },
+          right: { kind: "lit", value: 10 },
+        },
+        right: { kind: "reduce", op: "sum", of: { kind: "source", source: "draw" } },
+      },
+    },
+  };
+  const answers = [sumCompareAst("lt", 10), shifted];
+  let index = 0;
+  const result = await compileRuleArtifact(
+    { originalText: NO_REFERENCE_PROMPT, prompt: NO_REFERENCE_PROMPT, tokenCount: 14 },
+    { astProvider: async () => answers[index++] ?? answers[0] },
+  );
+
+  assert.equal(result.log.providerDisagreementRateSample, 0);
+  assert.equal(result.decision, "VALID");
+});
+
+test("records that a required second opinion could not be obtained", async () => {
+  let calls = 0;
+  const result = await compileRuleArtifact(
+    { originalText: NO_REFERENCE_PROMPT, prompt: NO_REFERENCE_PROMPT, tokenCount: 14 },
+    {
+      astProvider: async () => {
+        calls += 1;
+        // Only the first provider answers; every later attempt fails.
+        if (calls > 1) throw new Error("provider unreachable");
+        return sumCompareAst("lt", 10);
+      },
+    },
+  );
+
+  assert.equal(result.decision, "VALID");
+  assert.ok(result.log.reasonCodes.includes("SECOND_OPINION_UNAVAILABLE"));
 });

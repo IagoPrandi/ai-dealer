@@ -2876,7 +2876,14 @@ test("rule validation creates a traceable compiler audit log", () => {
     validation.compiledArtifact?.originalText,
     proposal(3607, 11).sanitizedText,
   );
+  // The artifact states what IT does, not what the proposal's model prose
+  // claimed — the two are independent readings and turn 55 proved they can
+  // disagree with nothing noticing.
   assert.equal(
+    validation.compiledArtifact?.officialInterpretation,
+    "A guess wins if at least 4 of its numbers appear in the official draw, regardless of order.",
+  );
+  assert.notEqual(
     validation.compiledArtifact?.officialInterpretation,
     proposal(3607, 11).officialInterpretation,
   );

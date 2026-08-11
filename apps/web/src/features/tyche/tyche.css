@@ -260,6 +260,45 @@
   border-color: transparent;
   color: #08110C;
 }
+/* Worked examples: concrete inputs evaluated against the frozen rule, so a card
+   states what the rule does instead of only what its author wrote. Reuses the
+   result-number vocabulary at a smaller scale; no new colors or radii. */
+.ide-rule-examples {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.ide-rule-example {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.ide-rule-example-outcome {
+  flex-shrink: 0;
+  min-width: 46px;
+  padding: 2px 7px;
+  border-radius: 7px;
+  border: 1px solid var(--line-2);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-align: center;
+}
+.ide-rule-example-outcome.is-win {
+  color: var(--green);
+  border-color: rgba(20, 241, 149, 0.35);
+}
+.ide-rule-example-outcome.is-lose {
+  color: var(--dim);
+}
+.ide-rule-example-values {
+  color: var(--text);
+  font-weight: 700;
+}
+
 .ide-result-legend {
   display: flex;
   flex-wrap: wrap;

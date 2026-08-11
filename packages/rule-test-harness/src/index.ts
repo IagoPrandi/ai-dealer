@@ -13,7 +13,9 @@ import {
 // composite confidence calculation. The harness lives OUTSIDE the runtime
 // sandbox, so it may use a deterministic PRNG; the runtime itself never sees one.
 
-export const RULE_TEST_HARNESS_VERSION = "2.0.0";
+// 2.1.0 — IMPOSSIBLE now requires a failed directed witness search, so a
+// legitimately rare rule is classified EXTREME instead (PRD §6.8).
+export const RULE_TEST_HARNESS_VERSION = "2.1.0";
 
 export type RuleDifficultyClass =
   | "IMPOSSIBLE"
@@ -95,8 +97,161 @@ function stableStringify(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function classify(winRate: number, ranking: boolean): RuleDifficultyClass {
-  if (!ranking && winRate <= 0) return "IMPOSSIBLE";
+// Structured inputs that hit the winning shape of the rule families the DSL can
+// express: exact/partial overlap with the draw, order-sensitive arrangements,
+// and the extremes of the number domain. Uniform sampling alone cannot separate
+// "unwinnable" from "rarer than 1 in `predicateSamples`" — a jackpot rule like
+// "at least 4 of 6 from 100" (~1.4e-5) shows zero wins in every feasible uniform
+// sample, and rejecting it would be wrong (PRD §6.8 rejects IMPOSSIBLE rules).
+const WITNESS_SETS: readonly (readonly number[])[] = [
+  [1, 2, 3, 4, 5, 6],
+  [95, 96, 97, 98, 99, 100],
+  [2, 4, 6, 8, 10, 12],
+  [1, 3, 5, 7, 9, 11],
+  [1, 20, 40, 60, 80, 100],
+  [10, 20, 30, 40, 50, 60],
+  [1, 2, 3, 98, 99, 100],
+  [45, 46, 47, 54, 55, 56],
+  [7, 14, 21, 28, 35, 42],
+  [11, 22, 33, 44, 55, 66],
+];
+
+// A guess sharing exactly `overlap` values with `draw`; the rest are filled from
+// the domain in ascending order, skipping anything already used.
+function guessWithOverlap(draw: readonly number[], overlap: number): number[] {
+  const guess = draw.slice(0, overlap);
+  const used = new Set(draw);
+  for (let value = 1; guess.length < draw.length && value <= 100; value += 1) {
+    if (!used.has(value)) {
+      guess.push(value);
+      used.add(value);
+    }
+  }
+  return guess;
+}
+
+export interface StructuredInputPair {
+  draw: readonly number[];
+  guess: readonly number[];
+}
+
+let structuredPairsCache: readonly StructuredInputPair[] | null = null;
+
+/**
+ * The deterministic structured battery, as (guess, draw) pairs.
+ *
+ * Uniform random sampling is BLIND to rules that essentially never win: two
+ * different jackpot rules both lose on every uniform sample, so a sampled
+ * equivalence check calls them identical. Turn 55's mis-compiled artifact and a
+ * faithful compile of the same text disagree on zero of 240 uniform samples and
+ * on the very first structured pair. Any equivalence or witness check must run
+ * this battery to have discriminating power where it matters.
+ */
+export function structuredInputPairs(): readonly StructuredInputPair[] {
+  if (structuredPairsCache) {
+    return structuredPairsCache;
+  }
+  const pairs: StructuredInputPair[] = [];
+  for (const draw of WITNESS_SETS) {
+    const guesses: number[][] = [
+      [...draw],
+      [...draw].reverse(),
+      [...draw].sort((a, b) => a - b),
+      [...draw].sort((a, b) => b - a),
+      ...Array.from({ length: draw.length + 1 }, (_value, overlap) =>
+        guessWithOverlap(draw, overlap),
+      ),
+      ...WITNESS_SETS.map((set) => [...set]),
+    ];
+    for (const guess of guesses) {
+      pairs.push({ draw, guess });
+    }
+  }
+  structuredPairsCache = pairs;
+  return pairs;
+}
+
+export interface RuleWorkedExample {
+  draw: readonly number[];
+  guess: readonly number[];
+  outcome: "WIN" | "LOSE";
+}
+
+/**
+ * Concrete (guess, draw) pairs showing the rule winning and losing, taken from
+ * the structured battery. Prose can be misread; a worked example cannot — and
+ * because both come from the frozen AST, neither can promise what the runtime
+ * will not do. Ranking rules have no per-guess boolean, so they yield none.
+ */
+export function collectWorkedExamples(
+  ast: RuleAst,
+  perOutcome = 2,
+): readonly RuleWorkedExample[] {
+  if (isRankingRule(ast)) {
+    return [];
+  }
+  const wins: RuleWorkedExample[] = [];
+  const losses: RuleWorkedExample[] = [];
+  for (const { draw, guess } of structuredInputPairs()) {
+    if (wins.length >= perOutcome && losses.length >= perOutcome) {
+      break;
+    }
+    let outcome: "WIN" | "LOSE";
+    try {
+      outcome = evaluatePredicate(ast, { guess: [...guess], draw: [...draw] })
+        .result;
+    } catch {
+      continue;
+    }
+    const bucket = outcome === "WIN" ? wins : losses;
+    if (bucket.length >= perOutcome) {
+      continue;
+    }
+    // Distinct shapes read better than near-duplicates of the same pair.
+    const duplicate = bucket.some(
+      (example) =>
+        example.guess.join() === guess.join() &&
+        example.draw.join() === draw.join(),
+    );
+    if (!duplicate) {
+      bucket.push({ draw: [...draw], guess: [...guess], outcome });
+    }
+  }
+  return [...wins, ...losses];
+}
+
+/**
+ * Directed search for a single winning input. Bounded and deterministic: no RNG,
+ * a fixed battery, and it stops at the first witness.
+ */
+export function hasWinningWitness(ast: RuleAst): boolean {
+  if (isRankingRule(ast)) {
+    // A ranking rule always has a winner (the argmax over the field).
+    return true;
+  }
+  for (const { draw, guess } of structuredInputPairs()) {
+    try {
+      if (
+        evaluatePredicate(ast, { guess: [...guess], draw: [...draw] }).result ===
+        "WIN"
+      ) {
+        return true;
+      }
+    } catch {
+      // An input this AST cannot evaluate is not a witness; keep searching.
+    }
+  }
+  return false;
+}
+
+function classify(
+  winRate: number,
+  ranking: boolean,
+  winnable: boolean,
+): RuleDifficultyClass {
+  // IMPOSSIBLE means no input can win, not "too rare for this sample size".
+  // A rule with zero observed wins but a constructible winner is EXTREME.
+  if (!ranking && winRate <= 0 && !winnable) return "IMPOSSIBLE";
   if (winRate >= 0.999) return "ALWAYS_TRUE";
   if (winRate >= MONTE_CARLO.tooEasyThreshold) return "TOO_EASY";
   if (winRate >= MONTE_CARLO.balancedThreshold) return "BALANCED";
@@ -122,7 +277,7 @@ export function classifyDifficulty(ast: RuleAst): RuleDifficultyResult {
     }
     const estimatedWinRate = fractionSum / MONTE_CARLO.rankingDraws;
     return {
-      difficultyClass: classify(estimatedWinRate, true),
+      difficultyClass: classify(estimatedWinRate, true, true),
       estimatedWinRate,
       samplesRun: MONTE_CARLO.rankingDraws * MONTE_CARLO.rankingFieldSize,
     };
@@ -138,7 +293,12 @@ export function classifyDifficulty(ast: RuleAst): RuleDifficultyResult {
   }
   const estimatedWinRate = wins / MONTE_CARLO.predicateSamples;
   return {
-    difficultyClass: classify(estimatedWinRate, false),
+    // Only pay for the directed search when uniform sampling found nothing.
+    difficultyClass: classify(
+      estimatedWinRate,
+      false,
+      wins > 0 || hasWinningWitness(ast),
+    ),
     estimatedWinRate,
     samplesRun: MONTE_CARLO.predicateSamples,
   };
@@ -220,12 +380,15 @@ export function generateAndRunTests(ast: RuleAst): RuleTestSummary {
   // (e.g. "match 4+ of 6 from 100", a jackpot) may show no observed win in any
   // feasible sample, and we must not reject such a valid rule. We surface it as
   // a difficulty signal instead of failing coverage.
+  const winnable = foundWin || hasWinningWitness(ast);
   cases.push({
     name: "has_winning_case",
-    passed: foundWin,
+    passed: winnable,
     detail: foundWin
       ? "found at least one winning input"
-      : "no win observed in sample (rule may be extremely rare)",
+      : winnable
+        ? "no win in the uniform sample; a constructed input wins (extremely rare rule)"
+        : "no winning input found by sampling or by directed search",
     counted: false,
   });
   cases.push({
@@ -237,10 +400,9 @@ export function generateAndRunTests(ast: RuleAst): RuleTestSummary {
     counted: false,
   });
 
-  // 6. Difficulty is informational only. Per product policy, ANY verifiable rule
-  // is allowed (the only hard limits are external dependencies and
-  // unverifiability); difficulty — including ALWAYS_TRUE / IMPOSSIBLE / TOO_EASY
-  // — never blocks, it is surfaced as a label for the UX.
+  // 6. Difficulty is a label here; the compiler decides what blocks. Per PRD
+  // §6.8 it rejects IMPOSSIBLE and ALWAYS_TRUE (neither can distinguish winners
+  // from losers) and leaves TOO_EASY to game configuration.
   const difficulty = classifyDifficulty(ast);
   cases.push({
     name: "difficulty",

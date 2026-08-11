@@ -110,7 +110,9 @@ export function DrawResultPopup() {
             </div>
           </div>
           {electedRule ? (
-            <p style={{ margin: 0, fontSize: 13.5, color: "var(--muted)", lineHeight: 1.5 }}>{electedRule.sanitizedText}</p>
+            <p style={{ margin: 0, fontSize: 13.5, color: "var(--muted)", lineHeight: 1.5 }}>
+              {electedRule.officialInterpretation ?? electedRule.sanitizedText}
+            </p>
           ) : null}
         </div>
 

@@ -2244,6 +2244,21 @@ export function buildRuleRefinementFeedback(
     );
   }
 
+  if (reasonCodes.has("INTERPRETATION_MISMATCH")) {
+    focus.add(
+      "Restate every number the rule depends on in a single condition, so the compiled rule keeps all of them.",
+    );
+  }
+
+  if (
+    reasonCodes.has("DIFFICULTY_IMPOSSIBLE") ||
+    reasonCodes.has("DIFFICULTY_ALWAYS_TRUE")
+  ) {
+    focus.add(
+      "Adjust the condition so some guesses win and some lose — as written, the outcome is the same for everyone.",
+    );
+  }
+
   if (questions.length === 0) {
     questions.push(
       "Which exact comparison in this rule still needs to be defined?",
@@ -6041,6 +6056,16 @@ export function getVerificationSummary(turnId: number) {
   };
 }
 
+/**
+ * Worked examples for a rule, read from the compiled artifact when one exists.
+ * Derived from the frozen AST at compile time, so they always agree with what
+ * settlement will do.
+ */
+function getRuleWorkedExamples(turnId: number, ruleId: number) {
+  const validation = ruleValidations.get(getRuleValidationKey(turnId, ruleId));
+  return validation?.compiledArtifact?.workedExamples ?? [];
+}
+
 export function runRuleValidationForProposal(args: {
   model?: string;
   provider?: string;
@@ -7600,6 +7625,11 @@ export function getRoundSummary(
     rolloverSettlement: getTurnRolloverSettlement(turnId),
     rules: proposals.map((proposal) => ({
       compiledArtifactHash: proposal.compiledArtifactHash ?? null,
+      // What the frozen artifact actually does, plus concrete inputs proving it.
+      // Both are pure functions of the compiled AST, so a card can never promise
+      // an outcome the runtime will not produce (PRD §6.5).
+      officialInterpretation: proposal.officialInterpretation ?? null,
+      workedExamples: getRuleWorkedExamples(turnId, proposal.ruleId),
       precompilationStatus: proposal.precompilationStatus ?? "pending",
       proposer: proposal.proposer,
       ruleId: proposal.ruleId,
@@ -8192,9 +8222,13 @@ function isGuardrailReason(reason: string) {
   return [
     "AMBIGUOUS_RULE",
     "COMPLEXITY_EXCEEDED",
+    "DIFFICULTY_ALWAYS_TRUE",
+    "DIFFICULTY_IMPOSSIBLE",
     "EXTERNAL_DEPENDENCY",
+    "INTERPRETATION_MISMATCH",
     "REVIEWER_MISMATCH",
     "RUNTIME_TEST_FAILED",
+    "SECOND_OPINION_UNAVAILABLE",
     "SCHEMA_INVALID",
     "UNSAFE_RUNTIME_BOUNDS",
     "UNSUPPORTED_RULE",

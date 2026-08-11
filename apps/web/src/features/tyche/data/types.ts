@@ -171,7 +171,19 @@ export interface RoundSummaryApi {
   winners?: WinnerSummaryApi;
 }
 
+export interface RuleWorkedExampleApi {
+  draw: number[];
+  guess: number[];
+  outcome: "LOSE" | "WIN";
+}
+
 export interface RoundSummaryRuleApi {
+  /**
+   * What the frozen artifact actually does, rendered from the compiled AST.
+   * Prefer this over `sanitizedText` (the player's own wording) wherever the
+   * rule's effect is being communicated — they are not always the same claim.
+   */
+  officialInterpretation?: string | null;
   proposer: string;
   ruleId: number;
   sanitizedText: string;
@@ -179,6 +191,8 @@ export interface RoundSummaryRuleApi {
   title: string;
   tokenCount: number;
   votes: number;
+  /** Concrete inputs, evaluated against the frozen AST. */
+  workedExamples?: RuleWorkedExampleApi[];
 }
 
 export interface WinnerRecordApi {
