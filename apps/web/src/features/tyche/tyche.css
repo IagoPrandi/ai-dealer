@@ -921,3 +921,44 @@
 .ide-rulerow {
   border: none !important;
 }
+
+/* ---------------- RULE GROUP CARD ----------------
+   The rules list reads as one grouped surface, using the same card treatment
+   as the claim hero on Profile: soft gradient, 20px radius, corner glow.
+   Declared after the border policy above so the row hairlines survive it. */
+.ide-app .ide-rule-group {
+  position: relative;
+  overflow: hidden;
+  border-radius: 20px;
+  background: linear-gradient(150deg, var(--surface-2), var(--surface));
+}
+
+.ide-app .ide-rule-group::before {
+  content: "";
+  position: absolute;
+  top: -30px;
+  right: -20px;
+  width: 130px;
+  height: 130px;
+  background: radial-gradient(circle, rgba(20, 241, 149, 0.28), transparent 65%);
+  filter: blur(8px);
+  pointer-events: none;
+}
+
+.ide-app .ide-rule-group .ide-rule-stack {
+  position: relative;
+}
+
+/* Rows sit on the group surface; only hairlines separate them. */
+.ide-app .ide-rule-group .ide-rule-stack > * {
+  background: transparent !important;
+}
+
+.ide-app .ide-rule-group .ide-rule-stack > * + * {
+  border-top: 1px solid var(--line) !important;
+}
+
+/* Loading placeholder rows still need a surface to be visible. */
+.ide-app .ide-rule-group .ide-rule-stack > .ide-rule-skeleton {
+  background: var(--surface-3) !important;
+}

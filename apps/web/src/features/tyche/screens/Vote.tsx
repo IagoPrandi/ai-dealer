@@ -1,8 +1,6 @@
 "use client";
 
 /** Rules: two-phase voting hub. Ported from app-vote.jsx, wired to live data. */
-import { VOTE_FEE_START_TURN } from "@tyche/constants";
-
 import { useTyche } from "../context";
 import { fmtSol, fmtTurnId } from "../data/format";
 import type { UiRule } from "../data/types";
@@ -196,7 +194,6 @@ export function VoteScreen() {
   const {
     actionError,
     endSeconds,
-    fees,
     phase1EndsAt,
     played,
     reloadAll,
@@ -207,7 +204,7 @@ export function VoteScreen() {
     turnState,
   } = useTyche();
   // Elimination voting spans all of phase 2 and closes at the turn end, so the
-  // decision-window countdown is the single visible turn timer.
+  // turn countdown in the header is the single visible timer of this screen.
   const [h, m, s] = useCountdownTo(endSeconds);
   const nowSec = Math.floor(Date.now() / 1000);
   const phase = getRoundPhase({ nowSeconds: nowSec, phase1EndsAt, turn: turnState });
@@ -224,7 +221,6 @@ export function VoteScreen() {
     finalists.length === 0 &&
     round?.election?.status !== "original_only";
 
-  const eliminatedCount = finalists.filter((r) => finalistStatus(r) === "eliminada").length;
   const finalistPhase = getFinalistPhaseView({
     decisionPhase: finalistVotingOpen,
     electionStatus: round?.election?.status ?? null,
@@ -233,21 +229,22 @@ export function VoteScreen() {
     shortlistPending,
   });
   const gated = !played;
-  // Before turn 100, only the first same-wallet/same-rule vote is free.
-  const firstVoteFree = turnId < VOTE_FEE_START_TURN;
-  const voteFeeLabel = firstVoteFree ? "First vote free" : `${fmtSol(fees.vote)} SOL`;
-  const displayedShortlistFeeLabel = firstVoteFree
-    ? "First vote per side free"
-    : `${fmtSol(fees.vote)} SOL`;
 
   return (
     <div className="ide-app ide-screen" style={{ height: "100%", position: "relative", overflow: "hidden" }}>
       <div className="ide-ambient" />
       <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", padding: "var(--ide-shell-content-top) 20px 96px" }}>
 
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 18 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 18 }}>
           <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0, letterSpacing: "-0.025em" }}>Rules</h1>
-          <span className="ide-num" style={{ fontSize: 12.5, color: "var(--purple-soft)", fontWeight: 700, letterSpacing: "0.06em" }}>{fmtTurnId(turnId)}</span>
+          <div style={{ display: "grid", gap: 3, justifyItems: "end" }}>
+            <span className="ide-num" style={{ fontSize: 12.5, color: "var(--purple-soft)", fontWeight: 700, letterSpacing: "0.06em" }}>{fmtTurnId(turnId)}</span>
+            {endSeconds !== null ? (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12.5, color: "var(--muted)", whiteSpace: "nowrap" }}>
+                <Ico.clock style={{ color: "var(--yellow)", width: 13, height: 13 }} /> <span className="ide-num" style={{ color: "var(--text)", fontWeight: 700 }}>{h}:{m}:{s}</span>
+              </span>
+            ) : null}
+          </div>
         </div>
 
         <div className={`ide-tabs ${phase1Open ? "ide-phase-create" : "ide-phase-finalists"}`} style={{ marginBottom: 18 }}>
@@ -267,41 +264,22 @@ export function VoteScreen() {
 
         {tab === "abertas" ? (
           <>
-            <p style={{ margin: "0 0 6px", fontSize: 13.5, color: "var(--muted)", lineHeight: 1.5 }}>
-              Vote <b style={{ color: "var(--green)" }}>in favor</b> of the rules you want in this round. The most voted become finalists.
-            </p>
-            <div style={{ margin: "0 0 6px", fontSize: 12.5, color: firstVoteFree ? "var(--green)" : "var(--dim)", display: "flex", alignItems: "center", gap: 5 }}>
-              <Ico.up style={{ color: "currentColor", width: 12, height: 12 }} /> Vote · <span className="ide-num">{voteFeeLabel}</span> — each paid repeat doubles
-            </div>
             {all.length === 0 ? (
               <div className="ide-notice" style={{ textAlign: "center", color: "var(--muted)", fontSize: 14 }}>No rules to vote on yet.</div>
             ) : (
-              <div className="ide-rule-stack" style={{ margin: "0 -20px" }}>
-                {all.map((r, i) => <RuleVoteRow key={r.id} rule={r} rank={i + 1} votingOpen />)}
+              <div className="ide-rule-group">
+                <div className="ide-rule-stack">
+                  {all.map((r, i) => <RuleVoteRow key={r.id} rule={r} rank={i + 1} votingOpen />)}
+                </div>
               </div>
             )}
           </>
         ) : (
           <>
-            {/* decision window — section block bounded by hairlines, no balloon */}
-            <div style={{ borderTop: "1px solid rgba(255,210,63,0.28)", borderBottom: "1px solid var(--line)", padding: "14px 0 16px", marginBottom: 6 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
-                {finalistPhase.kind === "decision" ? (
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 13, color: "var(--muted)" }}>
-                    <Ico.clock style={{ color: "var(--yellow)" }} /> <span className="ide-num" style={{ fontWeight: 700, color: "var(--text)" }}>{h}:{m}:{s}</span>
-                  </span>
-                ) : null}
-              </div>
-              <p style={{ margin: "10px 0 0", fontSize: 13.5, color: "var(--muted)", lineHeight: 1.5 }}>
-                {finalistPhase.body}
-              </p>
-              <div style={{ marginTop: 12, display: "flex", gap: 18, fontSize: 12.5, flexWrap: "wrap" }}>
-                <span style={{ color: "var(--muted)" }}><span className="ide-num" style={{ color: "var(--red)", fontWeight: 700 }}>{eliminatedCount}</span> eliminated · {Math.max(0, 5 - eliminatedCount)} left</span>
-                <span style={{ color: "var(--muted)" }}><span className="ide-num" style={{ color: "var(--green)", fontWeight: 700 }}>{finalists.length - eliminatedCount}</span> survivors</span>
-                <span style={{ color: firstVoteFree ? "var(--green)" : "var(--muted)" }}>vote · <span className="ide-num">{displayedShortlistFeeLabel}</span></span>
-              </div>
-            </div>
-
+            {/* No standing annotation above the finalists: the rows carry the
+                state (risk, eliminated, tallies, fees) and the header carries
+                the turn countdown. The phase copy below still speaks when there
+                is nothing to show. */}
             {finalists.length === 0 ? (
               <div className="ide-notice" style={{ borderTop: "none", color: "var(--muted)", fontSize: 14 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: finalistPhase.kind === "pending" ? 12 : 0 }}>
@@ -323,8 +301,10 @@ export function VoteScreen() {
                 ) : null}
               </div>
             ) : (
-              <div className="ide-rule-stack" style={{ margin: "0 -20px" }}>
-                {finalists.map((r) => <FinalistRow key={r.id} rule={r} votingOpen={finalistVotingOpen} />)}
+              <div className="ide-rule-group">
+                <div className="ide-rule-stack">
+                  {finalists.map((r) => <FinalistRow key={r.id} rule={r} votingOpen={finalistVotingOpen} />)}
+                </div>
               </div>
             )}
           </>

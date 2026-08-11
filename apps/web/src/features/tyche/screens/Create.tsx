@@ -66,7 +66,7 @@ import {
   matchesPreflightJobScope,
   readPersistedPreflightJob,
 } from "../preflightJobStore";
-import { Dealer, Ico, SectionLabel } from "../shared";
+import { Dealer, Ico, SectionLabel, useCountdownTo } from "../shared";
 
 interface ChatMessage {
   text: string;
@@ -199,10 +199,10 @@ function createClientDraftId(turnId: number) {
 function RulePreview({ rule }: { rule: RulePreflightResult }) {
   const valid = rule.decision === "VALID" && !rule.needsClarification;
   const terminalRejection = rule.semanticImpact?.triviallyAlwaysTrue ?? false;
-  const statusLabel = valid
-    ? "valid rule"
-    : terminalRejection
-      ? "invalid rule"
+  // A valid rule states itself: no badge. Anything short of valid keeps its
+  // status visible so a rejection is never silently dressed up as accepted.
+  const statusLabel = terminalRejection
+    ? "invalid rule"
     : rule.confirmationRequired
       ? "review required"
       : "needs adjustment";
@@ -212,21 +212,14 @@ function RulePreview({ rule }: { rule: RulePreflightResult }) {
       ? "var(--red)"
       : "var(--yellow)";
   const pct = Math.round((rule.tokenCount / RULE_MAX_TOKENS) * 100);
-  const confidencePct =
-    typeof rule.finalConfidence === "number"
-      ? Math.round(rule.finalConfidence * 100)
-      : null;
   return (
     <div style={{ padding: 16, border: "1px solid var(--line)", borderRadius: 16, background: "var(--surface)", animation: "ide-rise .3s ease both" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-        <span className="ide-pill" style={{ color: statusColor, padding: "4px 10px" }}>
-          {valid ? <Ico.check style={{ width: 13, height: 13, color: statusColor }} /> : <Ico.info style={{ width: 13, height: 13, color: statusColor }} />} {statusLabel}
-        </span>
-        {confidencePct !== null ? (
-          <span className="ide-pill" style={{ padding: "4px 10px", color: "var(--purple-soft)" }}>
-            <Ico.shield style={{ width: 12, height: 12, color: "var(--purple-soft)" }} /> <span className="ide-num">{confidencePct}%</span> interpretation confidence
+        {valid ? null : (
+          <span className="ide-pill" style={{ color: statusColor, padding: "4px 10px" }}>
+            <Ico.info style={{ width: 13, height: 13, color: statusColor }} /> {statusLabel}
           </span>
-        ) : null}
+        )}
         <span style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--dim)" }} className="ide-num">{rule.tokenCount}/{RULE_MAX_TOKENS} tokens</span>
       </div>
       <h2 style={{ margin: "0 0 6px", fontSize: 19, lineHeight: 1.25 }}>{rule.title}</h2>
@@ -515,17 +508,17 @@ function RunInterruptedCard({
 }
 
 export function CreateScreen() {
-  const { chatId, client, connected, createIntent, fees, go, newConversationKey, phase1EndsAt, played, reloadAll, seed, turnId, wallet, walletAddress } = useTyche();
+  const { chatId, client, connected, createIntent, endSeconds, fees, go, newConversationKey, phase1EndsAt, played, reloadAll, seed, turnId, wallet, walletAddress } = useTyche();
 
   // `newConversationKey` stays the remount key and nothing else: it counts how
   // many blank chats this page session has opened, which says nothing about why
   // the screen is mounting now. `createIntent` answers that.
-  return <CreateChat key={`${newConversationKey}:${chatId || seed || "new"}`} {...{ chatId, client, connected, createIntent, fees, go, phase1EndsAt, played, reloadAll, seed, turnId, wallet, walletAddress }} />;
+  return <CreateChat key={`${newConversationKey}:${chatId || seed || "new"}`} {...{ chatId, client, connected, createIntent, endSeconds, fees, go, phase1EndsAt, played, reloadAll, seed, turnId, wallet, walletAddress }} />;
 }
 
-type ChatProps = Pick<ReturnType<typeof useTyche>, "chatId" | "client" | "connected" | "createIntent" | "fees" | "go" | "phase1EndsAt" | "played" | "reloadAll" | "seed" | "turnId" | "wallet" | "walletAddress">;
+type ChatProps = Pick<ReturnType<typeof useTyche>, "chatId" | "client" | "connected" | "createIntent" | "endSeconds" | "fees" | "go" | "phase1EndsAt" | "played" | "reloadAll" | "seed" | "turnId" | "wallet" | "walletAddress">;
 
-function CreateChat({ chatId, client, connected, createIntent, fees, go, phase1EndsAt, played, reloadAll, seed, turnId, wallet, walletAddress }: ChatProps) {
+function CreateChat({ chatId, client, connected, createIntent, endSeconds, fees, go, phase1EndsAt, played, reloadAll, seed, turnId, wallet, walletAddress }: ChatProps) {
   const [msgs, setMsgs] = useState<ChatMessage[]>([
     { text: "Hey! Tell me in one sentence how your rule decides the round winner. Be creative - I turn it into a valid rule.", who: "ai" },
   ]);
@@ -545,6 +538,9 @@ function CreateChat({ chatId, client, connected, createIntent, fees, go, phase1E
   const [connection, setConnection] = useState<ConversationRunSnapshot["connection"]>("closed");
   const [runJob, setRunJob] = useState<ConversationRunJob | null>(null);
   const [resuming, setResuming] = useState(false);
+  // The turn countdown the rest of the app shows: the chat is a game surface
+  // too, and the player needs to know how long this round still runs.
+  const [turnH, turnM, turnS] = useCountdownTo(endSeconds);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const autoSentRef = useRef(false);
@@ -1149,7 +1145,14 @@ function CreateChat({ chatId, client, connected, createIntent, fees, go, phase1E
               <div style={{ fontSize: 12, color: connection === "reconnecting" ? "var(--yellow)" : "var(--green)", marginTop: 1, whiteSpace: "nowrap" }}>{submitted ? "● rule submitted" : connection === "reconnecting" ? "● reconnecting" : connected ? "● crafting your rule" : "● preflight is free"}</div>
             </div>
           </div>
-          <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--dim)" }}>submit <span className="ide-num" style={{ color: "var(--muted)" }}>{fees.ruleNext === 0 ? "Free" : fmtSol(fees.ruleNext)}</span></span>
+          <div style={{ marginLeft: "auto", display: "grid", gap: 2, justifyItems: "end" }}>
+            {endSeconds !== null ? (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>
+                <Ico.clock style={{ color: "var(--yellow)", width: 13, height: 13 }} /> <span className="ide-num" style={{ color: "var(--text)", fontWeight: 700 }}>{turnH}:{turnM}:{turnS}</span>
+              </span>
+            ) : null}
+            <span style={{ fontSize: 12, color: "var(--dim)", whiteSpace: "nowrap" }}>submit <span className="ide-num" style={{ color: "var(--muted)" }}>{fees.ruleNext === 0 ? "Free" : fmtSol(fees.ruleNext)}</span></span>
+          </div>
         </div>
       </div>
 

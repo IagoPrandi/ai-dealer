@@ -826,27 +826,29 @@ export function HomeScreen() {
         </div>
 
         {rules.loading && top.length === 0 ? (
-          <div className="ide-rule-stack" style={{ margin: "0 -18px 14px" }}>
-            {[0, 1, 2].map((i) => (
-              <div key={i} className="ide-card" style={{ height: 64 }} />
-            ))}
+          <div className="ide-rule-group" style={{ marginBottom: 14 }}>
+            <div className="ide-rule-stack">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="ide-rule-skeleton" style={{ height: 64 }} />
+              ))}
+            </div>
           </div>
         ) : top.length === 0 ? (
           <div
             className="ide-card"
             style={{
               padding: 18,
-              margin: "0 -18px 14px",
+              margin: "0 0 14px",
               textAlign: "center",
               color: "var(--muted)",
               fontSize: 14,
-              borderRadius: 0,
             }}
           >
             No rules proposed yet - be the first to create one.
           </div>
         ) : (
-          <div className="ide-rule-stack" style={{ margin: "0 -18px 14px" }}>
+          <div className="ide-rule-group" style={{ marginBottom: 14 }}>
+            <div className="ide-rule-stack">
             {top.map((r, i) => (
               <button
                 key={r.id}
@@ -889,6 +891,7 @@ export function HomeScreen() {
                 />
               </button>
             ))}
+            </div>
           </div>
         )}
 
