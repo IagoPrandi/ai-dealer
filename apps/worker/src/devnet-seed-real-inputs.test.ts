@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   createSubmitGuessInstruction,
   deterministicGuess,
+  feePoolPda,
   readSeedConfig,
 } from "./devnet-seed-real-inputs.js";
 import { Keypair, PublicKey } from "@solana/web3.js";
@@ -79,7 +80,9 @@ test("M5 input seeding accepts only a canonical explicit guess", () => {
 
 test("M5 paid guesses use the additional-guess instruction and a distinct PDA", () => {
   const player = Keypair.fromSeed(Uint8Array.from({ length: 32 }, () => 7));
-  const programId = new PublicKey("ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd");
+  const programId = new PublicKey(
+    "ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd",
+  );
   const first = createSubmitGuessInstruction({
     numbers: [1, 2, 3, 4, 5, 6],
     player: player.publicKey,
@@ -99,6 +102,17 @@ test("M5 paid guesses use the additional-guess instruction and a distinct PDA", 
     first.accounts.playerGuess.toBase58(),
     second.accounts.playerGuess.toBase58(),
   );
-  assert.deepEqual([...first.instruction.data.subarray(0, 8)], [61, 124, 32, 227, 64, 198, 252, 3]);
-  assert.deepEqual([...second.instruction.data.subarray(0, 8)], [141, 186, 105, 183, 228, 255, 164, 47]);
+  assert.equal(
+    first.instruction.keys[6]?.pubkey.toBase58(),
+    feePoolPda().toBase58(),
+  );
+  assert.equal(first.instruction.keys[6]?.isWritable, true);
+  assert.deepEqual(
+    [...first.instruction.data.subarray(0, 8)],
+    [61, 124, 32, 227, 64, 198, 252, 3],
+  );
+  assert.deepEqual(
+    [...second.instruction.data.subarray(0, 8)],
+    [141, 186, 105, 183, 228, 255, 164, 47],
+  );
 });

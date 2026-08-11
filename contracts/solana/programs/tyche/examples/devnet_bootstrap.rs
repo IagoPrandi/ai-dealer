@@ -6,10 +6,6 @@ use std::{
 };
 
 use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
-use tyche::{
-    accounts, instruction, GlobalConfig, InitializeGlobalConfigArgs, PlayerGuess, ProposeRuleArgs,
-    RuleProposal, RuleVote, SubmitGuessArgs, TurnState, TurnStatus, VoteRuleArgs,
-};
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
@@ -19,6 +15,10 @@ use solana_sdk::{
 };
 use solana_sha256_hasher::hash;
 use solana_system_interface::program as system_program;
+use tyche::{
+    accounts, instruction, GlobalConfig, InitializeGlobalConfigArgs, PlayerGuess, ProposeRuleArgs,
+    RuleProposal, RuleVote, SubmitGuessArgs, TurnState, TurnStatus, VoteRuleArgs,
+};
 
 const PLAYER_BALANCE_LAMPORTS: u64 = 1_000_000_000;
 const BASIS_POINTS_DENOMINATOR: u32 = 10_000;
@@ -30,6 +30,10 @@ const PRODUCTION_TURN_DURATION_CYCLE_SECONDS: [u32; 4] = [86_400, 86_400, 86_400
 
 fn pda(seeds: &[&[u8]]) -> solana_sdk::pubkey::Pubkey {
     solana_sdk::pubkey::Pubkey::find_program_address(seeds, &tyche::ID).0
+}
+
+fn tokenomics_pda(seeds: &[&[u8]]) -> solana_sdk::pubkey::Pubkey {
+    solana_sdk::pubkey::Pubkey::find_program_address(seeds, &tokenomics_core::ID).0
 }
 
 fn read_account<T: AccountDeserialize>(
@@ -102,15 +106,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or(true);
     let keypair_path = env::var_os("TYCHE_DEVNET_KEYPAIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from("/root/.config/tyche/devnet/tyche-deployer-keypair.json")
-        });
+        .unwrap_or_else(|| PathBuf::from("/root/.config/tyche/devnet/tyche-deployer-keypair.json"));
     let payer = read_keypair_file(&keypair_path)
         .map_err(|error| format!("failed to read deployer keypair: {error}"))?;
     let rpc = RpcClient::new_with_commitment(rpc_url, CommitmentConfig::confirmed());
 
     let global_config = pda(&[b"global_config"]);
     let treasury_vault = pda(&[b"treasury_vault"]);
+    let fee_pool = tokenomics_pda(&[b"distribution_vault"]);
     let turn_duration_cycle = devnet_turn_duration_cycle()?;
 
     if read_account::<GlobalConfig>(&rpc, &global_config)?.is_none() {
@@ -124,7 +127,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .to_account_metas(None),
             data: instruction::InitializeGlobalConfig {
                 args: InitializeGlobalConfigArgs {
-                    treasury_address: payer.pubkey(),
+                    treasury_address: fee_pool,
                     draw_vrf_config: solana_sdk::pubkey::Pubkey::new_unique(),
                     election_vrf_config: solana_sdk::pubkey::Pubkey::new_unique(),
                     guess_submission_fee_lamports: 10_000_000,
@@ -246,6 +249,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 player_guess,
                 game_token,
                 treasury_vault,
+                fee_pool,
                 prize_vault,
                 system_program: system_program::ID,
             }
@@ -276,6 +280,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 game_token,
                 rule_proposal,
                 treasury_vault,
+                fee_pool,
                 prize_vault,
                 system_program: system_program::ID,
             }
@@ -316,6 +321,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 rule_proposal,
                 rule_vote,
                 treasury_vault,
+                fee_pool,
                 prize_vault,
                 system_program: system_program::ID,
             }

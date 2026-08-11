@@ -20,16 +20,13 @@ test("pins the exact rent-funded devnet ProgramData extension", () => {
   );
   assert.equal(
     TYCHE_PROGRAM_EXTENSION_PROPOSAL_CONFIG.currentSha256,
-    "29825f38ff3d92214a4842e3ed00f983202b61ed7e82140df12f6af066948a35",
+    "b44896d44b6e6ac0c2bce7c7e672c58f245c0a60d8a073ab92cea892a862b79a",
   );
   assert.equal(
     TYCHE_PROGRAM_EXTENSION_PROPOSAL_CONFIG.requiredProgramDataLamports,
-    7_348_124_400,
+    7_804_254_960,
   );
-  assert.equal(
-    TYCHE_PROGRAM_EXTENSION_PROPOSAL_CONFIG.extensionBytes,
-    10_240,
-  );
+  assert.equal(TYCHE_PROGRAM_EXTENSION_PROPOSAL_CONFIG.extensionBytes, 65_536);
 });
 
 test("builds the devnet legacy extension with system funding from Wallet A", () => {
@@ -37,7 +34,7 @@ test("builds the devnet legacy extension with system funding from Wallet A", () 
   const instruction = createTycheProgramExtensionInstruction();
 
   assert.equal(instruction.programId.toBase58(), config.loaderProgramId);
-  assert.deepEqual(Array.from(instruction.data), [6, 0, 0, 0, 0, 40, 0, 0]);
+  assert.deepEqual(Array.from(instruction.data), [6, 0, 0, 0, 0, 0, 1, 0]);
   assert.deepEqual(
     instruction.keys.map((key) => ({
       address: key.pubkey.toBase58(),
@@ -106,8 +103,7 @@ test("builds the Wallet A extension and immediate authority return", () => {
   const extension = createTycheProgramExtensionInstruction(
     config.temporaryAuthorityAddress,
   );
-  const authorityReturn =
-    createTycheProgramDataAuthorityReturnInstruction();
+  const authorityReturn = createTycheProgramDataAuthorityReturnInstruction();
 
   assert.equal(
     extension.keys[3]?.pubkey.toBase58(),

@@ -1,16 +1,10 @@
 use anchor_lang::{
     prelude::{Clock, Pubkey},
-    AccountDeserialize, AccountSerialize, InstructionData, ToAccountMetas,
+    AccountDeserialize, AccountSerialize, InstructionData, Space, ToAccountMetas,
 };
 use anchor_spl::{
     metadata::mpl_token_metadata,
     token::{spl_token, TokenAccount},
-};
-use tyche::{
-    accounts, instruction, DrawStatus, GlobalConfig, TycheError, InitializeGlobalConfigArgs,
-    PlayerGuess, PrecompilationStatus, PrecompileRuleArgs, PrizeVault, ProposeRuleArgs,
-    ResetStaleVrfRequestArgs, RuleProposal, RuleState, RuleVote, SetVrfConfigArgs, SubmitGuessArgs,
-    TreasuryVault, TurnState, TurnStatus, VoteRuleArgs, VrfStage,
 };
 use orao_solana_vrf::state::{
     FulfilledRequest as OraoFulfilledRequest, PendingRequest as OraoPendingRequest,
@@ -30,7 +24,13 @@ use solana_system_interface::{instruction as system_instruction, program as syst
 use tokenomics_core::{
     accounts as tokenomics_accounts, domain as tokenomics_domain,
     instruction as tokenomics_instruction, CampaignReserve, CampaignRewardReceipt,
-    InitializeGenesisArgs,
+    DistributionVaultRecord, InitializeGenesisArgs,
+};
+use tyche::{
+    accounts, instruction, DrawStatus, GlobalConfig, InitializeGlobalConfigArgs,
+    MigrateFeePoolCustodyArgs, PlayerGuess, PrecompilationStatus, PrecompileRuleArgs, PrizeVault,
+    ProposeRuleArgs, ResetStaleVrfRequestArgs, RuleProposal, RuleState, RuleVote, SetVrfConfigArgs,
+    SubmitGuessArgs, TreasuryVault, TurnState, TurnStatus, TycheError, VoteRuleArgs, VrfStage,
 };
 
 const PLAYER_BALANCE: u64 = 2_000_000_000;
@@ -49,6 +49,28 @@ fn pda(seeds: &[&[u8]]) -> Pubkey {
 
 fn tokenomics_pda(seeds: &[&[u8]]) -> Pubkey {
     Pubkey::find_program_address(seeds, &tokenomics_core::ID).0
+}
+
+fn fee_pool() -> Pubkey {
+    tokenomics_pda(&[b"distribution_vault"])
+}
+
+fn fee_pool_account() -> Account {
+    let (_, bump) = Pubkey::find_program_address(&[b"distribution_vault"], &tokenomics_core::ID);
+    let record = DistributionVaultRecord {
+        total_deposited_lamports: 0,
+        total_claimed_lamports: 0,
+        bump,
+    };
+    let mut data = Vec::new();
+    record.try_serialize(&mut data).unwrap();
+    Account {
+        lamports: 10_000_000,
+        data,
+        owner: tokenomics_core::ID,
+        executable: false,
+        rent_epoch: 0,
+    }
 }
 
 fn tyche_program_data() -> Pubkey {
@@ -98,11 +120,9 @@ fn election_queue() -> Pubkey {
 }
 
 fn tyche_program_test() -> ProgramTest {
-    ProgramTest::new(
-        "tyche",
-        tyche::ID,
-        processor!(process_tyche_instruction),
-    )
+    let mut test = ProgramTest::new("tyche", tyche::ID, processor!(process_tyche_instruction));
+    test.add_account(fee_pool(), fee_pool_account());
+    test
 }
 
 /// Pre-register a Switchboard randomness account at genesis (counted in the bank
@@ -196,7 +216,7 @@ fn process_metadata_stub(
 
 fn test_config_args() -> InitializeGlobalConfigArgs {
     InitializeGlobalConfigArgs {
-        treasury_address: Pubkey::new_unique(),
+        treasury_address: fee_pool(),
         draw_vrf_config: draw_queue(),
         election_vrf_config: election_queue(),
         guess_submission_fee_lamports: 10_000_000,
@@ -321,11 +341,7 @@ async fn set_vrf_config_is_authority_gated_and_updates_global_config() {
     let governance_authority = Keypair::new();
     let unauthorized = Keypair::new();
     let wrong_program_data = Pubkey::new_unique();
-    let mut test = ProgramTest::new(
-        "tyche",
-        tyche::ID,
-        processor!(process_tyche_instruction),
-    );
+    let mut test = ProgramTest::new("tyche", tyche::ID, processor!(process_tyche_instruction));
     test.add_account(
         tyche_program_data(),
         program_data_account(governance_authority.pubkey()),
@@ -504,6 +520,7 @@ async fn submit_guess_with_sequence(
                         player.pubkey().as_ref(),
                     ]),
                     treasury_vault: pda(&[b"treasury_vault"]),
+                    fee_pool: tokenomics_pda(&[b"distribution_vault"]),
                     prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
                     system_program: system_program::ID,
                 }
@@ -538,6 +555,7 @@ async fn submit_guess_with_sequence(
                     player.pubkey().as_ref(),
                 ]),
                 treasury_vault: pda(&[b"treasury_vault"]),
+                fee_pool: tokenomics_pda(&[b"distribution_vault"]),
                 prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
                 system_program: system_program::ID,
             }
@@ -555,13 +573,7 @@ async fn submit_guess_with_sequence(
 #[tokio::test]
 #[ignore = "requires an SBF build and SBF_OUT_DIR; run the explicit SBF integration suite"]
 async fn core_instructions_execute_and_persist_state() {
-    let mut context = ProgramTest::new(
-        "tyche",
-        tyche::ID,
-        processor!(process_tyche_instruction),
-    )
-    .start_with_context()
-    .await;
+    let mut context = tyche_program_test().start_with_context().await;
     let turn_id = 1_u64;
     initialize_and_open_turn(&mut context, turn_id).await;
 
@@ -601,6 +613,7 @@ async fn core_instructions_execute_and_persist_state() {
                 ]),
                 rule_proposal: rule_address,
                 treasury_vault: pda(&[b"treasury_vault"]),
+                fee_pool: tokenomics_pda(&[b"distribution_vault"]),
                 prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
                 system_program: system_program::ID,
             }
@@ -648,6 +661,7 @@ async fn core_instructions_execute_and_persist_state() {
             rule_proposal: rule_address,
             rule_vote: vote_address,
             treasury_vault: pda(&[b"treasury_vault"]),
+            fee_pool: tokenomics_pda(&[b"distribution_vault"]),
             prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
             system_program: system_program::ID,
         }
@@ -688,6 +702,7 @@ async fn core_instructions_execute_and_persist_state() {
             rule_proposal: rule_address,
             rule_vote: second_vote_address,
             treasury_vault: pda(&[b"treasury_vault"]),
+            fee_pool: tokenomics_pda(&[b"distribution_vault"]),
             prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
             system_program: system_program::ID,
         }
@@ -777,6 +792,7 @@ async fn propose_rule(
                 ]),
                 rule_proposal: rule_address,
                 treasury_vault: pda(&[b"treasury_vault"]),
+                fee_pool: tokenomics_pda(&[b"distribution_vault"]),
                 prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
                 system_program: system_program::ID,
             }
@@ -815,6 +831,7 @@ fn remove_rule_instruction(turn_id: u64, rule_id: u64, remover: Pubkey) -> Instr
                 remover.as_ref(),
             ]),
             treasury_vault: pda(&[b"treasury_vault"]),
+            fee_pool: tokenomics_pda(&[b"distribution_vault"]),
             prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
             system_program: system_program::ID,
         }
@@ -826,13 +843,7 @@ fn remove_rule_instruction(turn_id: u64, rule_id: u64, remover: Pubkey) -> Instr
 #[tokio::test]
 #[ignore = "requires an SBF build and SBF_OUT_DIR; run the explicit SBF integration suite"]
 async fn remove_rule_enforces_protection_and_routes_fee_to_prize_pool() {
-    let mut context = ProgramTest::new(
-        "tyche",
-        tyche::ID,
-        processor!(process_tyche_instruction),
-    )
-    .start_with_context()
-    .await;
+    let mut context = tyche_program_test().start_with_context().await;
     let turn_id = 1_u64;
     initialize_and_open_turn(&mut context, turn_id).await;
 
@@ -998,6 +1009,7 @@ async fn rule_election_locks_requests_and_settles_active_rule() {
                 ]),
                 rule_proposal: rule_address,
                 treasury_vault: pda(&[b"treasury_vault"]),
+                fee_pool: tokenomics_pda(&[b"distribution_vault"]),
                 prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
                 system_program: system_program::ID,
             }
@@ -1172,6 +1184,7 @@ async fn rule_election_locks_requests_and_settles_active_rule() {
                 rule_proposal: rule_address,
                 rule_vote: shortlist_vote_address,
                 treasury_vault: pda(&[b"treasury_vault"]),
+                fee_pool: tokenomics_pda(&[b"distribution_vault"]),
                 prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
                 system_program: system_program::ID,
             }
@@ -1313,6 +1326,7 @@ async fn reset_stale_vrf_request_refuses_a_live_or_mismatched_account() {
                 ]),
                 rule_proposal: rule_address,
                 treasury_vault: pda(&[b"treasury_vault"]),
+                fee_pool: tokenomics_pda(&[b"distribution_vault"]),
                 prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
                 system_program: system_program::ID,
             }
@@ -1430,10 +1444,7 @@ async fn reset_stale_vrf_request_refuses_a_live_or_mismatched_account() {
         &[],
     )
     .await;
-    assert_custom_error(
-        mismatched,
-        u32::from(TycheError::RandomnessSourceMismatch),
-    );
+    assert_custom_error(mismatched, u32::from(TycheError::RandomnessSourceMismatch));
 
     // Passing the recorded account, which STILL EXISTS on-chain, is rejected:
     // the reset must never discard a live randomness request.
@@ -1766,13 +1777,7 @@ async fn orao_draw_request_is_persistent_and_settles_fulfilled_v2_randomness() {
 #[tokio::test]
 #[ignore = "requires an SBF build and SBF_OUT_DIR; run the explicit SBF integration suite"]
 async fn invalid_guess_and_rule_proposal_are_rejected() {
-    let mut context = ProgramTest::new(
-        "tyche",
-        tyche::ID,
-        processor!(process_tyche_instruction),
-    )
-    .start_with_context()
-    .await;
+    let mut context = tyche_program_test().start_with_context().await;
     let turn_id = 1_u64;
     initialize_and_open_turn(&mut context, turn_id).await;
 
@@ -1802,6 +1807,7 @@ async fn invalid_guess_and_rule_proposal_are_rejected() {
             ]),
             rule_proposal: pda(&[b"rule", &turn_id.to_le_bytes(), &rule_id.to_le_bytes()]),
             treasury_vault: pda(&[b"treasury_vault"]),
+            fee_pool: tokenomics_pda(&[b"distribution_vault"]),
             prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
             system_program: system_program::ID,
         }
@@ -2179,16 +2185,21 @@ async fn claim_flow_pays_winner_and_rejects_legacy_sol_rewards() {
     // The vault now owes nothing, so its whole balance can roll forward.
     assert_eq!(
         lamports_of(&mut context, prize_vault_address).await - released,
-        context.banks_client.get_rent().await.unwrap().minimum_balance(
-            context
-                .banks_client
-                .get_account(prize_vault_address)
-                .await
-                .unwrap()
-                .unwrap()
-                .data
-                .len()
-        )
+        context
+            .banks_client
+            .get_rent()
+            .await
+            .unwrap()
+            .minimum_balance(
+                context
+                    .banks_client
+                    .get_account(prize_vault_address)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .data
+                    .len()
+            )
     );
 
     // Expiry is terminal: the payout cannot be pulled and cannot be released twice.
@@ -2340,13 +2351,7 @@ async fn sweep_prize_rollover_moves_lamports_into_the_open_turn_vault() {
     assert_custom_error(
         process(
             &mut context,
-            sweep_prize_rollover_instruction(
-                authority,
-                destination_turn_id,
-                source_turn_id,
-                0,
-                0,
-            ),
+            sweep_prize_rollover_instruction(authority, destination_turn_id, source_turn_id, 0, 0),
             &[],
         )
         .await,
@@ -2488,11 +2493,7 @@ async fn sweep_prize_rollover_moves_lamports_into_the_open_turn_vault() {
 #[tokio::test]
 #[ignore = "requires an SBF build and SBF_OUT_DIR; run the explicit SBF integration suite"]
 async fn proposal_reward_cpi_debits_campaign_and_creates_one_receipt() {
-    let mut test = ProgramTest::new(
-        "tyche",
-        tyche::ID,
-        processor!(process_tyche_instruction),
-    );
+    let mut test = ProgramTest::new("tyche", tyche::ID, processor!(process_tyche_instruction));
     test.add_program("tokenomics_core", tokenomics_core::ID, None);
     test.prefer_bpf(false);
     test.add_program(
@@ -2677,5 +2678,188 @@ async fn proposal_reward_cpi_debits_campaign_and_creates_one_receipt() {
     assert_eq!(
         campaign_after_replay.cumulative_distributed_atoms,
         tokenomics_domain::PROPOSAL_REWARD_ATOMS
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires an SBF build and SBF_OUT_DIR; run the explicit SBF integration suite"]
+async fn fee_pool_custody_migration_balances_cross_program_cpi_and_is_replay_safe() {
+    let governance = Keypair::new();
+    let mut test = ProgramTest::new("tyche", tyche::ID, processor!(process_tyche_instruction));
+    test.add_program("tokenomics_core", tokenomics_core::ID, None);
+    test.add_account(
+        tyche_program_data(),
+        program_data_account(governance.pubkey()),
+    );
+    test.prefer_bpf(false);
+    test.add_program(
+        "spl_token",
+        spl_token::ID,
+        processor!(spl_token::processor::Processor::process),
+    );
+    test.add_program(
+        "mpl_token_metadata",
+        mpl_token_metadata::ID,
+        processor!(process_metadata_stub),
+    );
+    let mut context = test.start_with_context().await;
+    fund(&mut context, &governance.pubkey()).await;
+    initialize_global_config(&mut context).await;
+
+    let global_config = pda(&[b"global_config"]);
+    let treasury_vault = pda(&[b"treasury_vault"]);
+    let legacy_custody = Pubkey::new_unique();
+    let migration_total = 23_000_000_u64;
+    let attributed_unbridged = 18_000_000_u64;
+    let legacy_rollover = 5_000_000_u64;
+
+    let mut global_account = context
+        .banks_client
+        .get_account(global_config)
+        .await
+        .unwrap()
+        .unwrap();
+    let mut global_state =
+        GlobalConfig::try_deserialize(&mut global_account.data.as_slice()).unwrap();
+    global_state.treasury_address = legacy_custody;
+    global_state
+        .try_serialize(&mut global_account.data.as_mut_slice())
+        .unwrap();
+    context.set_account(&global_config, &global_account.into());
+
+    let mut treasury_account = context
+        .banks_client
+        .get_account(treasury_vault)
+        .await
+        .unwrap()
+        .unwrap();
+    let mut treasury_state =
+        TreasuryVault::try_deserialize(&mut treasury_account.data.as_slice()).unwrap();
+    treasury_state.authority = legacy_custody;
+    treasury_state.total_collected_lamports = migration_total;
+    treasury_state
+        .try_serialize(&mut treasury_account.data.as_mut_slice())
+        .unwrap();
+    treasury_account.lamports += migration_total;
+    context.set_account(&treasury_vault, &treasury_account.into());
+
+    let mint = Keypair::new();
+    let token_config = tokenomics_pda(&[b"token_config"]);
+    let executor = tokenomics_pda(&[b"treasury_policy_executor"]);
+    let treasury_reserve = tokenomics_pda(&[b"creator_treasury_reserve_vault"]);
+    let treasury_escrow = tokenomics_pda(&[b"treasury_lock_escrow"]);
+    let campaign_vault = tokenomics_pda(&[b"campaign_vault", &0u64.to_le_bytes()]);
+    let campaign = tokenomics_pda(&[b"campaign", &0u64.to_le_bytes()]);
+    let treasury_position = tokenomics_pda(&[b"lock_position", governance.pubkey().as_ref()]);
+    let distribution_vault = tokenomics_pda(&[b"distribution_vault"]);
+    let treasury_sol_vault = tokenomics_pda(&[b"treasury_sol_vault"]);
+    let correction_reserve = tokenomics_pda(&[b"correction_reserve_vault"]);
+    let metadata = mpl_token_metadata::accounts::Metadata::find_pda(&mint.pubkey()).0;
+    let payer = context.payer.pubkey();
+
+    process(
+        &mut context,
+        Instruction {
+            program_id: tokenomics_core::ID,
+            accounts: tokenomics_accounts::InitializeGenesis {
+                payer,
+                token_config,
+                treasury_policy_executor: executor,
+                mint: mint.pubkey(),
+                metadata,
+                governance: governance.pubkey(),
+                creator_treasury_reserve_vault: treasury_reserve,
+                treasury_lock_escrow: treasury_escrow,
+                initial_campaign_vault: campaign_vault,
+                initial_campaign: campaign,
+                treasury_lock_position: treasury_position,
+                distribution_vault,
+                treasury_sol_vault,
+                correction_reserve_vault: correction_reserve,
+                metadata_program: mpl_token_metadata::ID,
+                token_program: spl_token::ID,
+                system_program: system_program::ID,
+                rent: solana_sdk::sysvar::rent::ID,
+            }
+            .to_account_metas(None),
+            data: tokenomics_instruction::InitializeGenesis {
+                args: InitializeGenesisArgs {
+                    governance: governance.pubkey(),
+                    guardian: governance.pubkey(),
+                    game_authority: global_config,
+                    epoch_root_publisher: governance.pubkey(),
+                    network: "devnet".to_owned(),
+                    metadata_uri: "https://tyche.example/metadata/jdr.json".to_owned(),
+                    initial_campaign_config_hash:
+                        tokenomics_domain::CAMPAIGN_V2_ECONOMIC_CONFIG_HASH,
+                    initial_unused_balance_policy_hash:
+                        tokenomics_domain::CAMPAIGN_UNUSED_BALANCE_POLICY_HASH,
+                },
+            }
+            .data(),
+        },
+        &[&mint],
+    )
+    .await
+    .unwrap();
+
+    let distribution_before = lamports_of(&mut context, distribution_vault).await;
+    let migration = Instruction {
+        program_id: tyche::ID,
+        accounts: accounts::MigrateFeePoolCustody {
+            governance_authority: governance.pubkey(),
+            global_config,
+            treasury_vault,
+            program_data: tyche_program_data(),
+            tokenomics_program: tokenomics_core::ID,
+            token_config,
+            distribution_vault,
+        }
+        .to_account_metas(None),
+        data: instruction::MigrateFeePoolCustody {
+            args: MigrateFeePoolCustodyArgs {
+                attributed_unbridged_lamports: attributed_unbridged,
+                legacy_rollover_lamports: legacy_rollover,
+            },
+        }
+        .data(),
+    };
+    process(&mut context, migration.clone(), &[&governance])
+        .await
+        .unwrap();
+
+    let global_after: GlobalConfig = read_anchor_account(&mut context, global_config).await;
+    let treasury_after: TreasuryVault = read_anchor_account(&mut context, treasury_vault).await;
+    let token_after: tokenomics_core::TokenConfig =
+        read_anchor_account(&mut context, token_config).await;
+    let distribution_after: DistributionVaultRecord =
+        read_anchor_account(&mut context, distribution_vault).await;
+    assert_eq!(global_after.treasury_address, distribution_vault);
+    assert_eq!(
+        treasury_after.total_collected_lamports,
+        attributed_unbridged
+    );
+    assert_eq!(token_after.pending_rollover_lamports, legacy_rollover);
+    assert_eq!(distribution_after.total_deposited_lamports, legacy_rollover);
+    assert_eq!(
+        lamports_of(&mut context, distribution_vault).await - distribution_before,
+        migration_total
+    );
+    assert_eq!(
+        lamports_of(&mut context, treasury_vault).await,
+        context
+            .banks_client
+            .get_rent()
+            .await
+            .unwrap()
+            .minimum_balance(8 + TreasuryVault::INIT_SPACE)
+    );
+
+    assert!(process(&mut context, migration, &[&governance])
+        .await
+        .is_err());
+    assert_eq!(
+        lamports_of(&mut context, distribution_vault).await - distribution_before,
+        migration_total
     );
 }

@@ -11,6 +11,10 @@ export const TYCHE_PROGRAM_ID = address(
   process.env.NEXT_PUBLIC_TYCHE_PROGRAM_ID ??
     "ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd",
 );
+const TOKENOMICS_CORE_PROGRAM_ID = address(
+  process.env.NEXT_PUBLIC_TOKENOMICS_CORE_PROGRAM_ID ??
+    "BRK6G8Sep66LFREp2nGMLiganfw2nbWe1f8zeAdoP1Fm",
+);
 export const TYCHE_ACTIVE_TURN_ID = Number(
   process.env.NEXT_PUBLIC_TYCHE_ACTIVE_TURN_ID ?? "1",
 );
@@ -54,6 +58,7 @@ const addressEncoder = getAddressEncoder();
 const textEncoder = new TextEncoder();
 
 export interface SubmitGuessAccounts {
+  feePool: ReturnType<typeof address>;
   gameToken: ReturnType<typeof address>;
   globalConfig: ReturnType<typeof address>;
   playerGuess: ReturnType<typeof address>;
@@ -210,6 +215,14 @@ async function derivePda(
   return pda;
 }
 
+async function deriveFeePool() {
+  const [feePool] = await getProgramDerivedAddress({
+    programAddress: TOKENOMICS_CORE_PROGRAM_ID,
+    seeds: ["distribution_vault"],
+  });
+  return feePool;
+}
+
 type AccountInfoResult = {
   value: null | {
     data: readonly [string, string] | string;
@@ -282,7 +295,9 @@ export async function waitForConfirmedProgramAccount({
     }
   }
 
-  throw new Error(`${label} is not confirmed on devnet yet. Wait for confirmation, then try again.`);
+  throw new Error(
+    `${label} is not confirmed on devnet yet. Wait for confirmation, then try again.`,
+  );
 }
 
 function pushU16Le(bytes: number[], value: number) {
@@ -460,7 +475,9 @@ function decodeGlobalConfigAccountWithLayout(
   };
 }
 
-export function decodeGlobalConfigAccount(data: Uint8Array): GlobalConfigSnapshot {
+export function decodeGlobalConfigAccount(
+  data: Uint8Array,
+): GlobalConfigSnapshot {
   const withRuleRemovalFee = decodeGlobalConfigAccountWithLayout(data, true);
   if (isPlausibleGlobalConfig(withRuleRemovalFee)) {
     return withRuleRemovalFee;
@@ -596,8 +613,7 @@ export function getTurnActionReadiness({
   if (nowSeconds >= turn.endTimestamp) {
     return {
       code: "TURN_ENDED",
-      message:
-        "This devnet turn has ended. The next turn opens automatically.",
+      message: "This devnet turn has ended. The next turn opens automatically.",
       ok: false,
     } as const;
   }
@@ -665,6 +681,7 @@ export async function deriveSubmitGuessAccounts({
     playerGuess,
     gameToken,
     treasuryVault,
+    feePool,
     prizeVault,
   ] = await Promise.all([
     derivePda(["global_config"]),
@@ -672,11 +689,13 @@ export async function deriveSubmitGuessAccounts({
     derivePda(["guess", turnSeed, playerSeed, sequenceSeed]),
     derivePda(["game_token", turnSeed, playerSeed]),
     derivePda(["treasury_vault"]),
+    deriveFeePool(),
     derivePda(["prize_vault", turnSeed]),
   ]);
 
   return {
     gameToken,
+    feePool,
     globalConfig,
     playerGuess,
     prizeVault,
@@ -773,7 +792,11 @@ export async function createSubmitGuessInstruction({
   sequence: number;
   turnId: number;
 }) {
-  const accounts = await deriveSubmitGuessAccounts({ player, sequence, turnId });
+  const accounts = await deriveSubmitGuessAccounts({
+    player,
+    sequence,
+    turnId,
+  });
   const discriminator =
     sequence === 1
       ? SUBMIT_GUESS_DISCRIMINATOR
@@ -791,6 +814,7 @@ export async function createSubmitGuessInstruction({
       { address: accounts.playerGuess, role: AccountRole.WRITABLE },
       { address: accounts.gameToken, role: AccountRole.WRITABLE },
       { address: accounts.treasuryVault, role: AccountRole.WRITABLE },
+      { address: accounts.feePool, role: AccountRole.WRITABLE },
       { address: accounts.prizeVault, role: AccountRole.WRITABLE },
       { address: SYSTEM_PROGRAM_ID, role: AccountRole.READONLY },
     ],
@@ -816,7 +840,11 @@ export async function createProposeRuleInstruction({
   );
   assertHashBytes("preflightResultHash", preflight.preflightResultHash);
 
-  const accounts = await deriveSubmitGuessAccounts({ player, sequence: 1, turnId });
+  const accounts = await deriveSubmitGuessAccounts({
+    player,
+    sequence: 1,
+    turnId,
+  });
   const ruleProposal = await deriveRuleProposalAddress({
     ruleId: preflight.ruleId,
     turnId,
@@ -841,6 +869,7 @@ export async function createProposeRuleInstruction({
       { address: accounts.gameToken, role: AccountRole.WRITABLE },
       { address: ruleProposal, role: AccountRole.WRITABLE },
       { address: accounts.treasuryVault, role: AccountRole.WRITABLE },
+      { address: accounts.feePool, role: AccountRole.WRITABLE },
       { address: accounts.prizeVault, role: AccountRole.WRITABLE },
       { address: SYSTEM_PROGRAM_ID, role: AccountRole.READONLY },
     ],
@@ -860,9 +889,18 @@ export async function createVoteRuleInstruction({
   sequence: number;
   turnId: number;
 }) {
-  const accounts = await deriveSubmitGuessAccounts({ player, sequence: 1, turnId });
+  const accounts = await deriveSubmitGuessAccounts({
+    player,
+    sequence: 1,
+    turnId,
+  });
   const ruleProposal = await deriveRuleProposalAddress({ ruleId, turnId });
-  const ruleVote = await deriveRuleVoteAddress({ player, ruleId, sequence, turnId });
+  const ruleVote = await deriveRuleVoteAddress({
+    player,
+    ruleId,
+    sequence,
+    turnId,
+  });
   const data = new Uint8Array(VOTE_RULE_DISCRIMINATOR.length + 8);
   data.set(VOTE_RULE_DISCRIMINATOR);
   data.set(u64Le(sequence), VOTE_RULE_DISCRIMINATOR.length);
@@ -876,6 +914,7 @@ export async function createVoteRuleInstruction({
       { address: ruleProposal, role: AccountRole.WRITABLE },
       { address: ruleVote, role: AccountRole.WRITABLE },
       { address: accounts.treasuryVault, role: AccountRole.WRITABLE },
+      { address: accounts.feePool, role: AccountRole.WRITABLE },
       { address: accounts.prizeVault, role: AccountRole.WRITABLE },
       { address: SYSTEM_PROGRAM_ID, role: AccountRole.READONLY },
     ],
@@ -895,7 +934,11 @@ export async function createEliminateVoteRuleInstruction({
   sequence: number;
   turnId: number;
 }) {
-  const accounts = await deriveSubmitGuessAccounts({ player, sequence: 1, turnId });
+  const accounts = await deriveSubmitGuessAccounts({
+    player,
+    sequence: 1,
+    turnId,
+  });
   const ruleProposal = await deriveRuleProposalAddress({ ruleId, turnId });
   const ruleEliminationVote = await deriveRuleEliminationVoteAddress({
     player,
@@ -916,6 +959,7 @@ export async function createEliminateVoteRuleInstruction({
       { address: ruleProposal, role: AccountRole.READONLY },
       { address: ruleEliminationVote, role: AccountRole.WRITABLE },
       { address: accounts.treasuryVault, role: AccountRole.WRITABLE },
+      { address: accounts.feePool, role: AccountRole.WRITABLE },
       { address: accounts.prizeVault, role: AccountRole.WRITABLE },
       { address: SYSTEM_PROGRAM_ID, role: AccountRole.READONLY },
     ],
@@ -933,9 +977,17 @@ export async function createRemoveRuleInstruction({
   ruleId: number;
   turnId: number;
 }) {
-  const accounts = await deriveSubmitGuessAccounts({ player, sequence: 1, turnId });
+  const accounts = await deriveSubmitGuessAccounts({
+    player,
+    sequence: 1,
+    turnId,
+  });
   const ruleProposal = await deriveRuleProposalAddress({ ruleId, turnId });
-  const ruleRemoval = await deriveRuleRemovalAddress({ player, ruleId, turnId });
+  const ruleRemoval = await deriveRuleRemovalAddress({
+    player,
+    ruleId,
+    turnId,
+  });
 
   return {
     accounts: [
@@ -946,6 +998,7 @@ export async function createRemoveRuleInstruction({
       { address: ruleProposal, role: AccountRole.WRITABLE },
       { address: ruleRemoval, role: AccountRole.WRITABLE },
       { address: accounts.treasuryVault, role: AccountRole.WRITABLE },
+      { address: accounts.feePool, role: AccountRole.WRITABLE },
       { address: accounts.prizeVault, role: AccountRole.WRITABLE },
       { address: SYSTEM_PROGRAM_ID, role: AccountRole.READONLY },
     ],

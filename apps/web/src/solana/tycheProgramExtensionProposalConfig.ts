@@ -3,21 +3,21 @@ import { SQUADS_DEVNET_CONFIG } from "./squadsDevnetConfig";
 import { BPF_UPGRADEABLE_LOADER_ID } from "./tokenomicsGenesisConfig";
 
 export const TYCHE_PROGRAM_EXTENSION_PROPOSAL_CONFIG = Object.freeze({
-  currentCapacity: 1_045_352,
-  currentProgramDataLamports: 7_304_359_920,
+  currentCapacity: 1_055_592,
+  currentProgramDataLamports: 7_348_124_400,
   currentSha256:
-    "29825f38ff3d92214a4842e3ed00f983202b61ed7e82140df12f6af066948a35",
+    "b44896d44b6e6ac0c2bce7c7e672c58f245c0a60d8a073ab92cea892a862b79a",
   extendProgramCheckedFeatureAddress:
     "2oMRZEDWT2tqtYMofhmmfQ8SsjqUFzT6sYXppQDavxwz",
-  extensionBytes: 10_240,
+  extensionBytes: 65_536,
   loaderProgramId: BPF_UPGRADEABLE_LOADER_ID,
   memo: "DEVNET ATOMIC-ONLY: ProgramData authority bridge; do not execute in generic Squads UI",
   multisigAddress: SQUADS_DEVNET_CONFIG.multisigAddress,
   network: "devnet",
   programDataAddress: "AWGUseV1DEsoSvdW7CDMxxBDUPQXAKqTXyxHVzeTnL8g",
   programId: TYCHE_PROGRAM_ID.toString(),
-  requiredProgramDataLamports: 7_348_124_400,
-  targetCapacity: 1_055_592,
+  requiredProgramDataLamports: 7_804_254_960,
+  targetCapacity: 1_121_128,
   temporaryAuthorityAddress: SQUADS_DEVNET_CONFIG.members[0]!.address,
   vaultAddress: SQUADS_DEVNET_CONFIG.vaultAddress,
   vaultIndex: SQUADS_DEVNET_CONFIG.vaultIndex,
@@ -34,7 +34,9 @@ export function validateTycheProgramExtensionProposalConfig(): string[] {
     errors.push("The extension target does not match the Tyche program.");
   }
   if (config.multisigAddress !== SQUADS_DEVNET_CONFIG.multisigAddress) {
-    errors.push("The extension proposal does not target the configured multisig.");
+    errors.push(
+      "The extension proposal does not target the configured multisig.",
+    );
   }
   if (
     config.vaultAddress !== SQUADS_DEVNET_CONFIG.vaultAddress ||

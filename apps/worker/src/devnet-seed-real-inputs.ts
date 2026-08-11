@@ -38,6 +38,10 @@ const MAX_PLAYER_COUNT = 17;
 const DEFAULT_FUND_LAMPORTS = 120_000_000;
 const COMMITMENT: Commitment = "finalized";
 const SYSTEM_PROGRAM_ID = new PublicKey("11111111111111111111111111111111");
+const TOKENOMICS_CORE_PROGRAM_ID = new PublicKey(
+  process.env.TOKENOMICS_CORE_PROGRAM_ID ??
+    "BRK6G8Sep66LFREp2nGMLiganfw2nbWe1f8zeAdoP1Fm",
+);
 const GLOBAL_CONFIG_SEED = Buffer.from("global_config");
 const TURN_SEED = Buffer.from("turn");
 const GUESS_SEED = Buffer.from("guess");
@@ -276,6 +280,12 @@ function treasuryVaultPda(programId: PublicKey) {
   return derivePda(programId, [TREASURY_VAULT_SEED]);
 }
 
+export function feePoolPda() {
+  return derivePda(TOKENOMICS_CORE_PROGRAM_ID, [
+    Buffer.from("distribution_vault"),
+  ]);
+}
+
 function prizeVaultPda(programId: PublicKey, turnId: number) {
   return derivePda(programId, [PRIZE_VAULT_SEED, u64Le(turnId)]);
 }
@@ -364,6 +374,7 @@ export function createSubmitGuessInstruction({
           isWritable: true,
           pubkey: treasuryVaultPda(programId),
         },
+        { isSigner: false, isWritable: true, pubkey: feePoolPda() },
         {
           isSigner: false,
           isWritable: true,
@@ -440,6 +451,7 @@ export function createProposeRuleInstruction({
           isWritable: true,
           pubkey: treasuryVaultPda(programId),
         },
+        { isSigner: false, isWritable: true, pubkey: feePoolPda() },
         {
           isSigner: false,
           isWritable: true,
@@ -536,6 +548,7 @@ export function createVoteRuleInstruction({
           isWritable: true,
           pubkey: treasuryVaultPda(programId),
         },
+        { isSigner: false, isWritable: true, pubkey: feePoolPda() },
         {
           isSigner: false,
           isWritable: true,

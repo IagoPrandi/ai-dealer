@@ -282,6 +282,10 @@ changes that can redirect treasury property**, including:
 A spending limit is itself established or changed only after the multisig
 threshold. Once active, transfers that satisfy its amount, period, asset, and
 destination constraints do not require a new approval for every routine payment.
+The active multisig may cancel an approved spending limit at any time through a
+separate threshold-approved proposal. Executed cancellation immediately blocks
+future payments under that limit, records a non-zero public reason hash, and
+does not reverse or claw back transfers that were already finalised.
 
 The same treasury multisig governs the `TreasuryPolicyExecutor`, which is
 the technical authority of the `Creator Treasury Reserve Vault` and the
@@ -1189,8 +1193,9 @@ Required instructions include:
   instruction, without an execution delay or additional unbonding period;
 - schedule and execute discretionary outbound treasury movements through the
   on-chain multisig-governed treasury executor;
-- create or amend bounded spending limits only through the same multisig
-  governance path;
+- create, amend, or cancel bounded spending limits only through the same
+  multisig governance path; cancellation remains available after activation
+  and stops future use without reversing finalised transfers;
 - deposit the configured treasury-fee share;
 - publish a provisional epoch root and calculation-manifest hash;
 - challenge a provisional root with the configured bond, reject duplicate evidence, resolve within the deadline, expire unresolved roots, cancel, and replace roots during the review lifecycle;

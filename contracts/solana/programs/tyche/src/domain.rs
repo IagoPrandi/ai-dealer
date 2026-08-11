@@ -118,10 +118,7 @@ pub fn validate_config(config: &ConfigValidation<'_>) -> Result<()> {
             && config.guess_cutoff_bps <= 10_000,
         TycheError::InvalidCutoff
     );
-    require!(
-        config.max_rule_tokens > 0,
-        TycheError::InvalidMaxRuleTokens
-    );
+    require!(config.max_rule_tokens > 0, TycheError::InvalidMaxRuleTokens);
     require!(
         config
             .top_voted_finalist_count
@@ -574,8 +571,7 @@ fn derive_index_with_counter(
     mut counter: u64,
 ) -> Result<usize> {
     require!(upper_bound > 0, TycheError::InvalidFinalistCounts);
-    let upper_bound_u64 =
-        u64::try_from(upper_bound).map_err(|_| TycheError::ArithmeticOverflow)?;
+    let upper_bound_u64 = u64::try_from(upper_bound).map_err(|_| TycheError::ArithmeticOverflow)?;
     let rejection_limit = u64::MAX - (u64::MAX % upper_bound_u64);
 
     loop {

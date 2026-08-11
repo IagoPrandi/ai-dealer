@@ -613,6 +613,52 @@ pub mod tokenomics_core {
         Ok(())
     }
 
+    /// One-time genesis reconciliation for SOL fees collected by the game
+    /// before direct fee-pool routing existed. The Tyche migration transfers
+    /// the backing lamports immediately before this CPI and signs as the
+    /// canonical game-authority PDA.
+    pub fn record_legacy_fee_rollover(
+        ctx: Context<RecordLegacyFeeRollover>,
+        amount_lamports: u64,
+    ) -> Result<()> {
+        require_not_paused(&ctx.accounts.token_config)?;
+        require!(amount_lamports > 0, TokenomicsError::InvalidAmount);
+        require!(
+            ctx.accounts.game_authority.key() == ctx.accounts.token_config.game_authority,
+            TokenomicsError::UnauthorizedGame
+        );
+
+        let config = &mut ctx.accounts.token_config;
+        require!(
+            config.next_epoch_id == 0
+                && config.pending_rollover_lamports == 0
+                && config.total_sealed_liability_remaining == 0
+                && config.total_correction_liability_remaining == 0,
+            TokenomicsError::LegacyFeeMigrationUnavailable
+        );
+
+        let vault = &mut ctx.accounts.distribution_vault;
+        let new_total_deposited = vault
+            .total_deposited_lamports
+            .checked_add(amount_lamports)
+            .ok_or(TokenomicsError::ArithmeticOverflow)?;
+        let expected_unspent = new_total_deposited
+            .checked_sub(vault.total_claimed_lamports)
+            .ok_or(TokenomicsError::ArithmeticOverflow)?;
+        require!(
+            available_lamports(&vault.to_account_info())? >= expected_unspent,
+            TokenomicsError::DistributionVaultInsolvent
+        );
+
+        config.pending_rollover_lamports = amount_lamports;
+        vault.total_deposited_lamports = new_total_deposited;
+        emit!(LegacyFeeRolloverRecorded {
+            amount_lamports,
+            game_authority: ctx.accounts.game_authority.key(),
+        });
+        Ok(())
+    }
+
     pub fn close_epoch_collection(
         ctx: Context<CloseEpochCollection>,
         last_completed_turn_id: u64,
@@ -1844,6 +1890,27 @@ pub mod tokenomics_core {
         Ok(())
     }
 
+    pub fn cancel_spending_limit(
+        ctx: Context<CancelSpendingLimit>,
+        reason_hash: [u8; 32],
+    ) -> Result<()> {
+        require!(
+            ctx.accounts.governance.key() == ctx.accounts.token_config.governance,
+            TokenomicsError::Unauthorized
+        );
+        require!(reason_hash != [0; 32], TokenomicsError::InvalidReasonHash);
+        let limit = &mut ctx.accounts.spending_limit;
+        require!(limit.active, TokenomicsError::SpendingLimitInactive);
+        limit.active = false;
+        emit!(SpendingLimitCancelled {
+            limit_id: limit.limit_id,
+            governance: ctx.accounts.governance.key(),
+            reason_hash,
+            cancelled_at: Clock::get()?.unix_timestamp,
+        });
+        Ok(())
+    }
+
     pub fn pause(ctx: Context<Pause>) -> Result<()> {
         require!(
             ctx.accounts.guardian.key() == ctx.accounts.token_config.guardian,
@@ -2531,6 +2598,20 @@ pub struct RecordExternalTreasuryFee<'info> {
 }
 
 #[derive(Accounts)]
+pub struct RecordLegacyFeeRollover<'info> {
+    pub game_authority: Signer<'info>,
+    #[account(mut, seeds = [b"token_config"], bump = token_config.bump)]
+    pub token_config: Account<'info, TokenConfig>,
+    #[account(
+        mut,
+        address = token_config.distribution_vault,
+        seeds = [b"distribution_vault"],
+        bump = distribution_vault.bump
+    )]
+    pub distribution_vault: Account<'info, DistributionVaultRecord>,
+}
+
+#[derive(Accounts)]
 pub struct CloseEpochCollection<'info> {
     pub game_authority: Signer<'info>,
     #[account(seeds = [b"token_config"], bump = token_config.bump)]
@@ -3169,6 +3250,19 @@ pub struct SpendWithinLimit<'info> {
 }
 
 #[derive(Accounts)]
+pub struct CancelSpendingLimit<'info> {
+    pub governance: Signer<'info>,
+    #[account(seeds = [b"token_config"], bump = token_config.bump)]
+    pub token_config: Account<'info, TokenConfig>,
+    #[account(
+        mut,
+        seeds = [b"spending_limit", spending_limit.limit_id.to_le_bytes().as_ref()],
+        bump = spending_limit.bump
+    )]
+    pub spending_limit: Account<'info, TreasurySpendingLimit>,
+}
+
+#[derive(Accounts)]
 pub struct Pause<'info> {
     pub guardian: Signer<'info>,
     #[account(mut, seeds = [b"token_config"], bump = token_config.bump)]
@@ -3553,6 +3647,12 @@ pub struct ExternalTreasuryFeeRecorded {
 }
 
 #[event]
+pub struct LegacyFeeRolloverRecorded {
+    pub amount_lamports: u64,
+    pub game_authority: Pubkey,
+}
+
+#[event]
 pub struct EpochCollectionClosed {
     pub epoch_id: u64,
     pub finalised_fees_lamports: u64,
@@ -3746,6 +3846,14 @@ pub struct SpendingLimitUsed {
 }
 
 #[event]
+pub struct SpendingLimitCancelled {
+    pub limit_id: u64,
+    pub governance: Pubkey,
+    pub reason_hash: [u8; 32],
+    pub cancelled_at: i64,
+}
+
+#[event]
 pub struct EmergencyPauseActivated {
     pub guardian: Pubkey,
     pub timestamp: i64,
@@ -3903,8 +4011,12 @@ pub enum TokenomicsError {
     SpendingLimitInactive,
     #[msg("The requested spend exceeds the active period limit.")]
     SpendingLimitExceeded,
+    #[msg("The public reason hash is invalid.")]
+    InvalidReasonHash,
     #[msg("The public incident record hash is invalid.")]
     InvalidIncidentRecord,
+    #[msg("The one-time legacy fee migration is no longer available.")]
+    LegacyFeeMigrationUnavailable,
 }
 
 #[cfg(test)]

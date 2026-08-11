@@ -28,7 +28,8 @@ import bs58 from "bs58";
  * Reads member secrets from the environment and never writes them to disk.
  */
 
-const COMMITMENT: Commitment = "confirmed";
+const COMMITMENT: Commitment = "finalized";
+const DEVNET_GENESIS_HASH = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
 const LOADER_ID = new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111");
 const SQUADS_PROGRAM_ID = new PublicKey(
   "SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf",
@@ -37,14 +38,24 @@ const MULTISIG_PDA = new PublicKey(
   "DQmcXBdLsQUVsk8UmgnTdnjruRHnAquuFP9wPa87T5RD",
 );
 const VAULT_INDEX = 0;
-const VAULT_PDA = new PublicKey(
-  "DB5nz633YioWzEUnLb97ypUra5RUE11SJDFW9ar23KTp",
-);
+const VAULT_PDA = new PublicKey("DB5nz633YioWzEUnLb97ypUra5RUE11SJDFW9ar23KTp");
+const EXECUTOR_PUBLIC_KEYS = new Map<string, PublicKey>([
+  [
+    "PRIVATE_KEY_WALLET_A",
+    new PublicKey("EHHVmFK3FM9qb2eyc8wnEwpHtVH3yW1FGZzrEGn4iSea"),
+  ],
+  [
+    "PRIVATE_KEY_WALLET_B",
+    new PublicKey("EAoZrh8TtZCYtUdKpkuMaNSrConsQoUQvzjZ7cuQGqdW"),
+  ],
+]);
 const PROGRAM_ID = new PublicKey(
-  "ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd",
+  process.env.TYCHE_UPGRADE_PROGRAM_ID?.trim() ||
+    "ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd",
 );
 const PROGRAM_DATA_ID = new PublicKey(
-  "AWGUseV1DEsoSvdW7CDMxxBDUPQXAKqTXyxHVzeTnL8g",
+  process.env.TYCHE_UPGRADE_PROGRAM_DATA_ID?.trim() ||
+    "AWGUseV1DEsoSvdW7CDMxxBDUPQXAKqTXyxHVzeTnL8g",
 );
 /** The loader's `Upgrade` instruction discriminant. */
 const LOADER_UPGRADE_INSTRUCTION = 3;
@@ -70,11 +81,74 @@ function loadMember(name: string) {
   return parseSecretKey(requiredEnvironment(name));
 }
 
+function loadExecutor() {
+  const name = requiredEnvironment("TYCHE_EXECUTOR_ENV");
+  const expected = EXECUTOR_PUBLIC_KEYS.get(name);
+  if (!expected) {
+    throw new Error(
+      "TYCHE_EXECUTOR_ENV must be PRIVATE_KEY_WALLET_A or PRIVATE_KEY_WALLET_B.",
+    );
+  }
+  const executor = loadMember(name);
+  if (!executor.publicKey.equals(expected)) {
+    throw new Error(`${name} does not match the reviewed Squads member.`);
+  }
+  return executor;
+}
+
 function connection() {
   return new Connection(
     requiredEnvironment("TYCHE_SOLANA_RPC_URL"),
     COMMITMENT,
   );
+}
+
+async function assertDevnet(rpc: Connection) {
+  const genesisHash = await rpc.getGenesisHash();
+  if (genesisHash !== DEVNET_GENESIS_HASH) {
+    throw new Error(`Expected Solana devnet, received genesis ${genesisHash}.`);
+  }
+}
+
+async function readProgramDeployment(rpc: Connection) {
+  await assertDevnet(rpc);
+  const [program, programData] = await rpc.getMultipleAccountsInfo(
+    [PROGRAM_ID, PROGRAM_DATA_ID],
+    COMMITMENT,
+  );
+  if (
+    !program ||
+    !program.executable ||
+    !program.owner.equals(LOADER_ID) ||
+    program.data.length !== 36 ||
+    program.data.readUInt32LE(0) !== 2 ||
+    !new PublicKey(program.data.subarray(4, 36)).equals(PROGRAM_DATA_ID)
+  ) {
+    throw new Error(
+      "The upgrade target is not the expected executable loader program.",
+    );
+  }
+  if (
+    !programData ||
+    !programData.owner.equals(LOADER_ID) ||
+    programData.data.length < 45 ||
+    programData.data.readUInt32LE(0) !== 3 ||
+    programData.data.readUInt8(12) !== 1
+  ) {
+    throw new Error("The canonical ProgramData account is missing or invalid.");
+  }
+  const authority = new PublicKey(programData.data.subarray(13, 45));
+  if (!authority.equals(VAULT_PDA)) {
+    throw new Error(
+      `ProgramData authority is ${authority.toBase58()}, not Squads vault 0.`,
+    );
+  }
+  return {
+    authority,
+    capacity: programData.data.length - 45,
+    deployedBytes: programData.data.subarray(45),
+    deploymentSlot: programData.data.readBigUInt64LE(4),
+  };
 }
 
 /**
@@ -163,7 +237,9 @@ export async function readBuffer(rpc: Connection, buffer: PublicKey) {
   }
   const tag = account.data.readUInt32LE(0);
   if (tag !== 1) {
-    throw new Error(`Account ${buffer.toBase58()} is not a buffer (tag ${tag}).`);
+    throw new Error(
+      `Account ${buffer.toBase58()} is not a buffer (tag ${tag}).`,
+    );
   }
   const hasAuthority = account.data[4] === 1;
   const payload = account.data.subarray(37);
@@ -198,14 +274,11 @@ export async function readBuffer(rpc: Connection, buffer: PublicKey) {
 
 async function commandInspect() {
   const rpc = connection();
+  const deployment = await readProgramDeployment(rpc);
   const account = await multisig.accounts.Multisig.fromAccountAddress(
     rpc,
     MULTISIG_PDA,
   );
-  const programData = await rpc.getAccountInfo(PROGRAM_DATA_ID, COMMITMENT);
-  if (!programData) {
-    throw new Error("ProgramData account is missing.");
-  }
   console.log(
     JSON.stringify(
       {
@@ -215,11 +288,12 @@ async function commandInspect() {
           permissions: member.permissions.mask,
         })),
         multisig: MULTISIG_PDA.toBase58(),
-        programDataCapacity: programData.data.length - 45,
+        program: PROGRAM_ID.toBase58(),
+        programData: PROGRAM_DATA_ID.toBase58(),
+        programDataCapacity: deployment.capacity,
+        deploymentSlot: deployment.deploymentSlot.toString(),
         threshold: account.threshold,
-        upgradeAuthority: new PublicKey(
-          programData.data.subarray(13, 45),
-        ).toBase58(),
+        upgradeAuthority: deployment.authority.toBase58(),
         vault: VAULT_PDA.toBase58(),
         vaultIndex: VAULT_INDEX,
       },
@@ -230,7 +304,11 @@ async function commandInspect() {
 }
 
 /** Compare the published buffer against the reviewed artifact's exact bytes. */
-async function assertBufferMatchesArtifact(rpc: Connection, buffer: PublicKey) {
+async function assertBufferMatchesArtifact(
+  rpc: Connection,
+  buffer: PublicKey,
+  expectedAuthority = VAULT_PDA,
+) {
   const expectedSha256 = requiredEnvironment("TYCHE_ARTIFACT_SHA256");
   const expectedBytes = Number(requiredEnvironment("TYCHE_ARTIFACT_BYTES"));
   if (!Number.isSafeInteger(expectedBytes) || expectedBytes <= 0) {
@@ -239,9 +317,12 @@ async function assertBufferMatchesArtifact(rpc: Connection, buffer: PublicKey) {
   const state = await readBuffer(rpc, buffer);
   const sha256 = state.sha256OfPrefix(expectedBytes);
   const report = {
+    authorityMatchesExpected:
+      state.authority?.equals(expectedAuthority) ?? false,
     authorityIsSquadsVault: state.authority?.equals(VAULT_PDA) ?? false,
     buffer: buffer.toBase58(),
     bufferAuthority: state.authority?.toBase58() ?? null,
+    expectedBufferAuthority: expectedAuthority.toBase58(),
     expectedBytes,
     expectedSha256,
     payloadBytes: state.payloadBytes,
@@ -255,19 +336,103 @@ async function assertBufferMatchesArtifact(rpc: Connection, buffer: PublicKey) {
       `Buffer bytes do not match the reviewed artifact: ${JSON.stringify(report)}`,
     );
   }
-  if (!report.authorityIsSquadsVault) {
+  if (!report.authorityMatchesExpected) {
     throw new Error(
-      `Buffer authority is not the Squads vault: ${JSON.stringify(report)}`,
+      `Buffer authority does not match the expected authority: ${JSON.stringify(report)}`,
     );
   }
   return report;
 }
 
+async function assertStoredUpgradeMatches({
+  buffer,
+  rpc,
+  spill,
+  transactionIndex,
+}: {
+  buffer: PublicKey;
+  rpc: Connection;
+  spill: PublicKey;
+  transactionIndex: bigint;
+}) {
+  const [transactionPda] = multisig.getTransactionPda({
+    index: transactionIndex,
+    multisigPda: MULTISIG_PDA,
+    programId: SQUADS_PROGRAM_ID,
+  });
+  const stored = await multisig.accounts.VaultTransaction.fromAccountAddress(
+    rpc,
+    transactionPda,
+    COMMITMENT,
+  );
+  if (
+    !stored.multisig.equals(MULTISIG_PDA) ||
+    BigInt(stored.index.toString()) !== transactionIndex ||
+    stored.vaultIndex !== VAULT_INDEX ||
+    stored.message.addressTableLookups.length !== 0 ||
+    stored.message.instructions.length !== 1
+  ) {
+    throw new Error("The stored Squads vault transaction identity is invalid.");
+  }
+  const inner = stored.message.instructions[0]!;
+  const loader = stored.message.accountKeys[inner.programIdIndex];
+  const expectedAccounts = [
+    PROGRAM_DATA_ID,
+    PROGRAM_ID,
+    buffer,
+    spill,
+    SYSVAR_RENT_PUBKEY,
+    SYSVAR_CLOCK_PUBKEY,
+    VAULT_PDA,
+  ];
+  const accountIndexes = Array.from(inner.accountIndexes);
+  const actualAccounts = accountIndexes.map(
+    (index) => stored.message.accountKeys[index],
+  );
+  const expectedRoles = [
+    [false, true],
+    [false, true],
+    [false, true],
+    [false, true],
+    [false, false],
+    [false, false],
+    [true, true],
+  ] as const;
+  if (
+    !loader?.equals(LOADER_ID) ||
+    !Buffer.from(inner.data).equals(Buffer.from([3, 0, 0, 0])) ||
+    actualAccounts.length !== expectedAccounts.length ||
+    actualAccounts.some(
+      (account, index) => !account?.equals(expectedAccounts[index]!),
+    ) ||
+    accountIndexes.some((accountIndex, index) => {
+      const [signer, writable] = expectedRoles[index]!;
+      return (
+        multisig.utils.isSignerIndex(stored.message, accountIndex) !== signer ||
+        multisig.utils.isStaticWritableIndex(stored.message, accountIndex) !==
+          writable
+      );
+    })
+  ) {
+    throw new Error(
+      "The stored Squads transaction is not the exact reviewed loader upgrade.",
+    );
+  }
+  return transactionPda;
+}
+
 async function commandVerifyBuffer() {
   const rpc = connection();
   const buffer = new PublicKey(requiredEnvironment("TYCHE_UPGRADE_BUFFER"));
+  const expectedAuthority = process.env.TYCHE_EXPECTED_BUFFER_AUTHORITY?.trim()
+    ? new PublicKey(process.env.TYCHE_EXPECTED_BUFFER_AUTHORITY.trim())
+    : VAULT_PDA;
   console.log(
-    JSON.stringify(await assertBufferMatchesArtifact(rpc, buffer), null, 2),
+    JSON.stringify(
+      await assertBufferMatchesArtifact(rpc, buffer, expectedAuthority),
+      null,
+      2,
+    ),
   );
 }
 
@@ -279,9 +444,19 @@ async function commandPropose() {
   const rpc = connection();
   const proposer = loadMember("PRIVATE_KEY_WALLET_A");
   const buffer = new PublicKey(requiredEnvironment("TYCHE_UPGRADE_BUFFER"));
+  const spill = new PublicKey(requiredEnvironment("TYCHE_UPGRADE_SPILL"));
   // Never propose bytes that were not reviewed, and never propose a buffer the
   // vault cannot consume.
-  await assertBufferMatchesArtifact(rpc, buffer);
+  const [deployment] = await Promise.all([
+    readProgramDeployment(rpc),
+    assertBufferMatchesArtifact(rpc, buffer),
+  ]);
+  const expectedBytes = Number(requiredEnvironment("TYCHE_ARTIFACT_BYTES"));
+  if (expectedBytes > deployment.capacity) {
+    throw new Error(
+      `Artifact has ${expectedBytes} bytes but ProgramData capacity is ${deployment.capacity}.`,
+    );
+  }
 
   const account = await multisig.accounts.Multisig.fromAccountAddress(
     rpc,
@@ -294,7 +469,7 @@ async function commandPropose() {
         buffer,
         // The buffer's rent is released on upgrade; refund it to whoever funded
         // the publication rather than to whoever happens to propose.
-        spill: new PublicKey(requiredEnvironment("TYCHE_UPGRADE_SPILL")),
+        spill,
         upgradeAuthority: VAULT_PDA,
       }),
     ],
@@ -327,6 +502,7 @@ async function commandPropose() {
     programId: SQUADS_PROGRAM_ID,
     transactionIndex,
   });
+  await assertStoredUpgradeMatches({ buffer, rpc, spill, transactionIndex });
   console.log(
     JSON.stringify(
       {
@@ -348,6 +524,13 @@ async function commandApprove() {
   const transactionIndex = BigInt(
     requiredEnvironment("TYCHE_TRANSACTION_INDEX"),
   );
+  const buffer = new PublicKey(requiredEnvironment("TYCHE_UPGRADE_BUFFER"));
+  const spill = new PublicKey(requiredEnvironment("TYCHE_UPGRADE_SPILL"));
+  await Promise.all([
+    readProgramDeployment(rpc),
+    assertBufferMatchesArtifact(rpc, buffer),
+    assertStoredUpgradeMatches({ buffer, rpc, spill, transactionIndex }),
+  ]);
   const signature = await sendAndConfirm(rpc, member, [
     multisig.instructions.proposalApprove({
       member: member.publicKey,
@@ -416,10 +599,17 @@ async function commandStatus() {
 
 async function commandExecute() {
   const rpc = connection();
-  const executor = loadMember("PRIVATE_KEY_WALLET_A");
+  const executor = loadExecutor();
   const transactionIndex = BigInt(
     requiredEnvironment("TYCHE_TRANSACTION_INDEX"),
   );
+  const buffer = new PublicKey(requiredEnvironment("TYCHE_UPGRADE_BUFFER"));
+  const spill = new PublicKey(requiredEnvironment("TYCHE_UPGRADE_SPILL"));
+  await Promise.all([
+    readProgramDeployment(rpc),
+    assertBufferMatchesArtifact(rpc, buffer),
+    assertStoredUpgradeMatches({ buffer, rpc, spill, transactionIndex }),
+  ]);
   const [proposalPda] = multisig.getProposalPda({
     multisigPda: MULTISIG_PDA,
     programId: SQUADS_PROGRAM_ID,
@@ -481,9 +671,44 @@ async function commandExecute() {
       `execute ${signature} failed after send: ${JSON.stringify(confirmation.value.err)}`,
     );
   }
+  const expectedBytes = Number(requiredEnvironment("TYCHE_ARTIFACT_BYTES"));
+  const expectedSha256 = requiredEnvironment("TYCHE_ARTIFACT_SHA256");
+  const [after, proposalAfter, bufferAfter] = await Promise.all([
+    readProgramDeployment(rpc),
+    multisig.accounts.Proposal.fromAccountAddress(rpc, proposalPda, COMMITMENT),
+    rpc.getAccountInfo(buffer, COMMITMENT),
+  ]);
+  const deployedSha256 = createHash("sha256")
+    .update(after.deployedBytes.subarray(0, expectedBytes))
+    .digest("hex");
+  const trailingZeroBytes = after.capacity - expectedBytes;
+  if (
+    proposalAfter.status.__kind !== "Executed" ||
+    expectedBytes > after.capacity ||
+    deployedSha256 !== expectedSha256 ||
+    !after.deployedBytes.subarray(expectedBytes).every((byte) => byte === 0) ||
+    bufferAfter !== null
+  ) {
+    throw new Error(
+      "The finalized upgrade failed deployed-byte, proposal, padding, authority, or buffer-closure verification.",
+    );
+  }
   console.log(
     JSON.stringify(
-      { executor: executor.publicKey.toBase58(), signature, transactionIndex: Number(transactionIndex) },
+      {
+        bufferClosed: true,
+        deployedSha256,
+        deploymentSlot: after.deploymentSlot.toString(),
+        executor: executor.publicKey.toBase58(),
+        program: PROGRAM_ID.toBase58(),
+        programData: PROGRAM_DATA_ID.toBase58(),
+        programDataCapacity: after.capacity,
+        proposalStatus: proposalAfter.status.__kind,
+        signature,
+        trailingZeroBytes,
+        transactionIndex: Number(transactionIndex),
+        upgradeAuthority: after.authority.toBase58(),
+      },
       null,
       2,
     ),

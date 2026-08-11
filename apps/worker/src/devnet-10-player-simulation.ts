@@ -26,6 +26,7 @@ import {
   createVoteRuleInstruction,
   deterministicGuess,
   deterministicPlayer,
+  feePoolPda,
   fetchRulePreflight,
   postJson,
   runStoredRuleValidation,
@@ -272,6 +273,7 @@ function createEliminationVoteInstruction({
           isWritable: true,
           pubkey: derivePda(programId, [Buffer.from("treasury_vault")]),
         },
+        { isSigner: false, isWritable: true, pubkey: feePoolPda() },
         {
           isSigner: false,
           isWritable: true,

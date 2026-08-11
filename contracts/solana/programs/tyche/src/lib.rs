@@ -111,6 +111,15 @@ fn require_program_upgrade_authority(
     Ok(())
 }
 
+fn require_direct_fee_routing(config: &GlobalConfig, treasury_vault: &TreasuryVault) -> Result<()> {
+    require!(
+        config.treasury_address != Pubkey::default()
+            && config.treasury_address != treasury_vault.authority,
+        TycheError::DirectFeeRoutingInactive
+    );
+    Ok(())
+}
+
 fn read_orao_randomness(randomness_ai: &AccountInfo) -> Result<OraoRandomnessAccountData> {
     require_keys_eq!(
         *randomness_ai.owner,
@@ -383,7 +392,10 @@ pub mod tyche {
         config.bump = ctx.bumps.global_config;
 
         let treasury_vault = &mut ctx.accounts.treasury_vault;
-        treasury_vault.authority = args.treasury_address;
+        // A zero legacy authority marks new deployments as direct-routing
+        // native. Existing deployments retain the old custody address here
+        // until `migrate_fee_pool_custody` atomically sweeps and activates.
+        treasury_vault.authority = Pubkey::default();
         treasury_vault.total_collected_lamports = 0;
         treasury_vault.bump = ctx.bumps.treasury_vault;
 
@@ -418,6 +430,93 @@ pub mod tyche {
             new_draw_vrf_config: config.draw_vrf_config,
             old_election_vrf_config,
             new_election_vrf_config: config.election_vrf_config,
+        });
+        Ok(())
+    }
+
+    /// Atomically consolidates every accounted lamport from the legacy Tyche
+    /// vault into Tokenomics Core's canonical distribution pool. The portion
+    /// attributable to closed, unbridged turns remains in the Tyche counter as
+    /// outstanding accounting; the older unattributed portion becomes epoch-0
+    /// rollover through a game-authority-signed CPI.
+    pub fn migrate_fee_pool_custody(
+        ctx: Context<MigrateFeePoolCustody>,
+        args: MigrateFeePoolCustodyArgs,
+    ) -> Result<()> {
+        require_program_upgrade_authority(
+            &ctx.accounts.program_data,
+            ctx.accounts.governance_authority.key(),
+        )?;
+        require_keys_eq!(
+            ctx.accounts.token_config.game_authority,
+            ctx.accounts.global_config.key(),
+            TycheError::InvalidTokenomicsConfiguration
+        );
+        require_keys_eq!(
+            ctx.accounts.global_config.treasury_address,
+            ctx.accounts.treasury_vault.authority,
+            TycheError::FeePoolMigrationAlreadyApplied
+        );
+        require_keys_neq!(
+            ctx.accounts.distribution_vault.key(),
+            ctx.accounts.treasury_vault.key(),
+            TycheError::InvalidFeePool
+        );
+        require!(
+            args.attributed_unbridged_lamports > 0 && args.legacy_rollover_lamports > 0,
+            TycheError::InvalidFeePoolMigrationAmounts
+        );
+
+        let migration_total = args
+            .attributed_unbridged_lamports
+            .checked_add(args.legacy_rollover_lamports)
+            .ok_or(TycheError::ArithmeticOverflow)?;
+        require_eq!(
+            migration_total,
+            ctx.accounts.treasury_vault.total_collected_lamports,
+            TycheError::InvalidFeePoolMigrationAmounts
+        );
+        require_eq!(
+            available_lamports(&ctx.accounts.treasury_vault.to_account_info())?,
+            migration_total,
+            TycheError::InvalidFeePoolMigrationAmounts
+        );
+
+        pay_from_vault(
+            &ctx.accounts.treasury_vault.to_account_info(),
+            &ctx.accounts.distribution_vault.to_account_info(),
+            migration_total,
+        )?;
+
+        let bump = ctx.accounts.global_config.bump;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"global_config", &[bump]]];
+        tokenomics_core::cpi::record_legacy_fee_rollover(
+            CpiContext::new_with_signer(
+                ctx.accounts.tokenomics_program.to_account_info(),
+                tokenomics_core::cpi::accounts::RecordLegacyFeeRollover {
+                    game_authority: ctx.accounts.global_config.to_account_info(),
+                    token_config: ctx.accounts.token_config.to_account_info(),
+                    distribution_vault: ctx.accounts.distribution_vault.to_account_info(),
+                },
+                signer_seeds,
+            )
+            // The caller has already debited the Tyche-owned vault and credited
+            // the distribution vault. Include both sides in the CPI account set
+            // so the runtime can reconcile the child invocation's lamport sum.
+            .with_remaining_accounts(vec![ctx.accounts.treasury_vault.to_account_info()]),
+            args.legacy_rollover_lamports,
+        )?;
+
+        let old_custody = ctx.accounts.global_config.treasury_address;
+        ctx.accounts.global_config.treasury_address = ctx.accounts.distribution_vault.key();
+        ctx.accounts.treasury_vault.total_collected_lamports = args.attributed_unbridged_lamports;
+        emit!(FeePoolCustodyMigrated {
+            governance_authority: ctx.accounts.governance_authority.key(),
+            old_custody,
+            fee_pool: ctx.accounts.distribution_vault.key(),
+            transferred_lamports: migration_total,
+            attributed_unbridged_lamports: args.attributed_unbridged_lamports,
+            legacy_rollover_lamports: args.legacy_rollover_lamports,
         });
         Ok(())
     }
@@ -596,11 +695,12 @@ pub mod tyche {
 
         collect_fee(
             &ctx.accounts.player,
+            config,
             &ctx.accounts.treasury_vault,
+            &ctx.accounts.fee_pool,
             &ctx.accounts.prize_vault,
             &ctx.accounts.system_program,
             fee_lamports,
-            config.treasury_fee_bps,
         )?;
         let (treasury_amount, prize_amount) = split_fee(fee_lamports, config.treasury_fee_bps)?;
 
@@ -692,11 +792,12 @@ pub mod tyche {
 
         collect_fee(
             &ctx.accounts.proposer,
+            config,
             &ctx.accounts.treasury_vault,
+            &ctx.accounts.fee_pool,
             &ctx.accounts.prize_vault,
             &ctx.accounts.system_program,
             proposal_fee,
-            config.treasury_fee_bps,
         )?;
         let (treasury_amount, prize_amount) = split_fee(proposal_fee, config.treasury_fee_bps)?;
 
@@ -789,11 +890,12 @@ pub mod tyche {
         )?;
         collect_fee(
             &ctx.accounts.voter,
+            config,
             &ctx.accounts.treasury_vault,
+            &ctx.accounts.fee_pool,
             &ctx.accounts.prize_vault,
             &ctx.accounts.system_program,
             vote_fee,
-            config.treasury_fee_bps,
         )?;
         let (treasury_amount, prize_amount) = split_fee(vote_fee, config.treasury_fee_bps)?;
 
@@ -902,11 +1004,12 @@ pub mod tyche {
         let fee = config.rule_removal_fee_lamports;
         collect_fee(
             &ctx.accounts.remover,
+            config,
             &ctx.accounts.treasury_vault,
+            &ctx.accounts.fee_pool,
             &ctx.accounts.prize_vault,
             &ctx.accounts.system_program,
             fee,
-            config.treasury_fee_bps,
         )?;
         let (treasury_amount, prize_amount) = split_fee(fee, config.treasury_fee_bps)?;
 
@@ -1179,11 +1282,12 @@ pub mod tyche {
         )?;
         collect_fee(
             &ctx.accounts.voter,
+            config,
             &ctx.accounts.treasury_vault,
+            &ctx.accounts.fee_pool,
             &ctx.accounts.prize_vault,
             &ctx.accounts.system_program,
             fee,
-            config.treasury_fee_bps,
         )?;
         let (treasury_amount, prize_amount) = split_fee(fee, config.treasury_fee_bps)?;
 
@@ -1586,9 +1690,9 @@ pub mod tyche {
         // strand a winner behind a `claim_prize` their own vault can no longer
         // pay -- the very failure this instruction exists to prevent.
         let source_vault_info = ctx.accounts.source_prize_vault.to_account_info();
-        let source_free_lamports = source_vault_info.lamports().saturating_sub(
-            Rent::get()?.minimum_balance(source_vault_info.data_len()),
-        );
+        let source_free_lamports = source_vault_info
+            .lamports()
+            .saturating_sub(Rent::get()?.minimum_balance(source_vault_info.data_len()));
         require!(
             source_free_lamports == ctx.accounts.source_prize_vault.total_collected_lamports,
             TycheError::PrizeVaultHasOutstandingClaims
@@ -1628,9 +1732,10 @@ pub mod tyche {
         Ok(())
     }
 
-    /// Moves the closed turn's exact treasury share into Tokenomics Core and
-    /// atomically records it in the collecting seven-turn epoch. A per-turn
-    /// flag prevents replay; zero-fee turns are still marked reconciled.
+    /// Assigns a closed turn's already-prefunded treasury share to the
+    /// collecting seven-turn epoch. Paid actions deposited the SOL directly in
+    /// the canonical fee pool; this instruction only reconciles accounting.
+    /// A per-turn flag prevents replay; zero-fee turns are still reconciled.
     pub fn bridge_turn_treasury_fee(ctx: Context<BridgeTurnTreasuryFee>) -> Result<()> {
         let turn = &mut ctx.accounts.turn_state;
         require!(turn.status == TurnStatus::Closed, TycheError::TurnNotClosed);
@@ -1642,6 +1747,12 @@ pub mod tyche {
             ctx.accounts.token_config.game_authority,
             ctx.accounts.global_config.key(),
             TycheError::InvalidTokenomicsConfiguration
+        );
+        require_direct_fee_routing(&ctx.accounts.global_config, &ctx.accounts.treasury_vault)?;
+        require_keys_eq!(
+            ctx.accounts.global_config.treasury_address,
+            ctx.accounts.distribution_vault.key(),
+            TycheError::InvalidFeePool
         );
         require!(
             ctx.accounts.epoch.status == tokenomics_core::EpochStatus::Collecting,
@@ -1659,12 +1770,6 @@ pub mod tyche {
                 ctx.accounts.treasury_vault.total_collected_lamports >= amount_lamports,
                 TycheError::InsufficientVaultBalance
             );
-            pay_from_vault(
-                &ctx.accounts.treasury_vault.to_account_info(),
-                &ctx.accounts.distribution_vault.to_account_info(),
-                amount_lamports,
-            )?;
-
             let bump = ctx.accounts.global_config.bump;
             let signer_seeds: &[&[&[u8]]] = &[&[b"global_config", &[bump]]];
             tokenomics_core::cpi::record_external_treasury_fee(
@@ -2539,11 +2644,12 @@ fn submit_guess_with_game_token_init(
 
     collect_fee(
         &ctx.accounts.player,
+        config,
         &ctx.accounts.treasury_vault,
+        &ctx.accounts.fee_pool,
         &ctx.accounts.prize_vault,
         &ctx.accounts.system_program,
         fee_lamports,
-        config.treasury_fee_bps,
     )?;
     let (treasury_amount, prize_amount) = split_fee(fee_lamports, config.treasury_fee_bps)?;
 
@@ -2731,20 +2837,27 @@ fn read_election_candidates<'accounts, 'info>(
 
 fn collect_fee<'info>(
     payer: &Signer<'info>,
+    config: &GlobalConfig,
     treasury_vault: &Account<'info, TreasuryVault>,
+    fee_pool: &Account<'info, tokenomics_core::DistributionVaultRecord>,
     prize_vault: &Account<'info, PrizeVault>,
     system_program: &Program<'info, System>,
     fee_lamports: u64,
-    treasury_fee_bps: u16,
 ) -> Result<()> {
-    let (treasury_amount, prize_amount) = split_fee(fee_lamports, treasury_fee_bps)?;
+    require_direct_fee_routing(config, treasury_vault)?;
+    require_keys_eq!(
+        fee_pool.key(),
+        config.treasury_address,
+        TycheError::InvalidFeePool
+    );
+    let (treasury_amount, prize_amount) = split_fee(fee_lamports, config.treasury_fee_bps)?;
     if treasury_amount > 0 {
         system_program::transfer(
             CpiContext::new(
                 system_program.to_account_info(),
                 Transfer {
                     from: payer.to_account_info(),
-                    to: treasury_vault.to_account_info(),
+                    to: fee_pool.to_account_info(),
                 },
             ),
             treasury_amount,
@@ -2763,6 +2876,13 @@ fn collect_fee<'info>(
         )?;
     }
     Ok(())
+}
+
+fn available_lamports(account: &AccountInfo) -> Result<u64> {
+    account
+        .lamports()
+        .checked_sub(Rent::get()?.minimum_balance(account.data_len()))
+        .ok_or(error!(TycheError::InsufficientVaultBalance))
 }
 
 /// Move lamports out of a program-owned vault PDA to a recipient by directly
@@ -2825,6 +2945,12 @@ pub struct InitializeGlobalConfigArgs {
 pub struct SetVrfConfigArgs {
     pub draw_vrf_config: Pubkey,
     pub election_vrf_config: Pubkey,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct MigrateFeePoolCustodyArgs {
+    pub attributed_unbridged_lamports: u64,
+    pub legacy_rollover_lamports: u64,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
@@ -2949,6 +3075,43 @@ pub struct SetVrfConfig<'info> {
 }
 
 #[derive(Accounts)]
+pub struct MigrateFeePoolCustody<'info> {
+    pub governance_authority: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [b"global_config"],
+        bump = global_config.bump
+    )]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        mut,
+        seeds = [b"treasury_vault"],
+        bump = treasury_vault.bump
+    )]
+    pub treasury_vault: Account<'info, TreasuryVault>,
+    /// CHECK: Canonical loader-v3 ProgramData and upgrade authority are checked
+    /// in the handler before any state or lamports are changed.
+    #[account(owner = UPGRADEABLE_LOADER_ID)]
+    pub program_data: UncheckedAccount<'info>,
+    pub tokenomics_program: Program<'info, tokenomics_core::program::TokenomicsCore>,
+    #[account(
+        mut,
+        seeds = [b"token_config"],
+        bump = token_config.bump,
+        seeds::program = tokenomics_program.key()
+    )]
+    pub token_config: Account<'info, tokenomics_core::TokenConfig>,
+    #[account(
+        mut,
+        address = token_config.distribution_vault @ TycheError::InvalidFeePool,
+        seeds = [b"distribution_vault"],
+        bump = distribution_vault.bump,
+        seeds::program = tokenomics_program.key()
+    )]
+    pub distribution_vault: Account<'info, tokenomics_core::DistributionVaultRecord>,
+}
+
+#[derive(Accounts)]
 #[instruction(turn_id: u64)]
 pub struct OpenTurn<'info> {
     #[account(mut)]
@@ -3049,6 +3212,14 @@ pub struct SubmitGuess<'info> {
     pub treasury_vault: Account<'info, TreasuryVault>,
     #[account(
         mut,
+        address = global_config.treasury_address @ TycheError::InvalidFeePool,
+        seeds = [b"distribution_vault"],
+        bump = fee_pool.bump,
+        seeds::program = tokenomics_core::ID
+    )]
+    pub fee_pool: Account<'info, tokenomics_core::DistributionVaultRecord>,
+    #[account(
+        mut,
         seeds = [
             b"prize_vault".as_ref(),
             turn_state.turn_id.to_le_bytes().as_ref()
@@ -3106,6 +3277,14 @@ pub struct SubmitAdditionalGuess<'info> {
     pub treasury_vault: Account<'info, TreasuryVault>,
     #[account(
         mut,
+        address = global_config.treasury_address @ TycheError::InvalidFeePool,
+        seeds = [b"distribution_vault"],
+        bump = fee_pool.bump,
+        seeds::program = tokenomics_core::ID
+    )]
+    pub fee_pool: Account<'info, tokenomics_core::DistributionVaultRecord>,
+    #[account(
+        mut,
         seeds = [
             b"prize_vault".as_ref(),
             turn_state.turn_id.to_le_bytes().as_ref()
@@ -3156,6 +3335,14 @@ pub struct ProposeRule<'info> {
     pub rule_proposal: Box<Account<'info, RuleProposal>>,
     #[account(mut, seeds = [b"treasury_vault"], bump = treasury_vault.bump)]
     pub treasury_vault: Account<'info, TreasuryVault>,
+    #[account(
+        mut,
+        address = global_config.treasury_address @ TycheError::InvalidFeePool,
+        seeds = [b"distribution_vault"],
+        bump = fee_pool.bump,
+        seeds::program = tokenomics_core::ID
+    )]
+    pub fee_pool: Account<'info, tokenomics_core::DistributionVaultRecord>,
     #[account(
         mut,
         seeds = [
@@ -3233,6 +3420,14 @@ pub struct VoteRule<'info> {
     pub treasury_vault: Account<'info, TreasuryVault>,
     #[account(
         mut,
+        address = global_config.treasury_address @ TycheError::InvalidFeePool,
+        seeds = [b"distribution_vault"],
+        bump = fee_pool.bump,
+        seeds::program = tokenomics_core::ID
+    )]
+    pub fee_pool: Account<'info, tokenomics_core::DistributionVaultRecord>,
+    #[account(
+        mut,
         seeds = [b"prize_vault".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
         bump = prize_vault.bump
     )]
@@ -3289,6 +3484,14 @@ pub struct RemoveRule<'info> {
     pub rule_removal: Account<'info, RuleRemoval>,
     #[account(mut, seeds = [b"treasury_vault"], bump = treasury_vault.bump)]
     pub treasury_vault: Account<'info, TreasuryVault>,
+    #[account(
+        mut,
+        address = global_config.treasury_address @ TycheError::InvalidFeePool,
+        seeds = [b"distribution_vault"],
+        bump = fee_pool.bump,
+        seeds::program = tokenomics_core::ID
+    )]
+    pub fee_pool: Account<'info, tokenomics_core::DistributionVaultRecord>,
     #[account(
         mut,
         seeds = [
@@ -3352,6 +3555,14 @@ pub struct EliminateVoteRule<'info> {
     pub rule_elimination_vote: Account<'info, RuleEliminationVote>,
     #[account(mut, seeds = [b"treasury_vault"], bump = treasury_vault.bump)]
     pub treasury_vault: Account<'info, TreasuryVault>,
+    #[account(
+        mut,
+        address = global_config.treasury_address @ TycheError::InvalidFeePool,
+        seeds = [b"distribution_vault"],
+        bump = fee_pool.bump,
+        seeds::program = tokenomics_core::ID
+    )]
+    pub fee_pool: Account<'info, tokenomics_core::DistributionVaultRecord>,
     #[account(
         mut,
         seeds = [
@@ -4643,6 +4854,16 @@ pub struct TurnTreasuryFeeBridged {
 }
 
 #[event]
+pub struct FeePoolCustodyMigrated {
+    pub governance_authority: Pubkey,
+    pub old_custody: Pubkey,
+    pub fee_pool: Pubkey,
+    pub transferred_lamports: u64,
+    pub attributed_unbridged_lamports: u64,
+    pub legacy_rollover_lamports: u64,
+}
+
+#[event]
 pub struct TokenomicsEpochCollectionClosed {
     pub epoch_id: u64,
     pub last_completed_turn_id: u64,
@@ -4875,4 +5096,12 @@ pub enum TycheError {
     PrizeVaultHasOutstandingClaims,
     #[msg("The claim window has not closed, so the payout still belongs to its winner.")]
     ClaimWindowStillOpen,
+    #[msg("Direct fee routing has not been activated.")]
+    DirectFeeRoutingInactive,
+    #[msg("The supplied fee pool is not the canonical Tokenomics distribution vault.")]
+    InvalidFeePool,
+    #[msg("The fee-pool custody migration was already applied or is not in its legacy state.")]
+    FeePoolMigrationAlreadyApplied,
+    #[msg("The fee-pool migration amounts do not reconcile with legacy custody.")]
+    InvalidFeePoolMigrationAmounts,
 }

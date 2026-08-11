@@ -7,8 +7,9 @@ use anchor_spl::token::{spl_token, Mint, TokenAccount};
 use solana_account_info::AccountInfo;
 use solana_program_error::ProgramResult;
 use solana_program_test::{processor, BanksClientError, ProgramTest, ProgramTestContext};
+#[cfg(feature = "devnet-campaign-v2-migration")]
+use solana_sdk::account::AccountSharedData;
 use solana_sdk::{
-    account::AccountSharedData,
     instruction::Instruction,
     signature::{Keypair, Signer},
     sysvar,
@@ -16,9 +17,10 @@ use solana_sdk::{
 };
 use solana_system_interface::program as system_program;
 use tokenomics_core::{
-    accounts, domain, instruction, CampaignReserve, DistributionEpoch, EpochStatus,
-    InitializeGenesisArgs, LockPosition, PublishProvisionalRootArgs, TokenConfig,
-    TreasurySolVaultRecord,
+    accounts, domain, instruction, ActivateSpendingLimitArgs, CampaignReserve, DistributionEpoch,
+    DistributionVaultRecord, EpochStatus, InitializeGenesisArgs, LockPosition,
+    PublishProvisionalRootArgs, ScheduleTreasuryOperationArgs, TokenConfig, TreasuryAsset,
+    TreasurySolVaultRecord, TreasurySpendingLimit,
 };
 
 fn pda(seeds: &[&[u8]]) -> Pubkey {
@@ -263,6 +265,52 @@ async fn initialize_genesis(
 
 #[tokio::test]
 #[ignore = "requires an SBF build and SBF_OUT_DIR; run the explicit SBF integration suite"]
+async fn legacy_fee_rollover_is_backed_and_genesis_only() {
+    let mut context = tokenomics_program_test().start_with_context().await;
+    let authority = context.payer.pubkey();
+    let fixture = GenesisFixture::new(authority);
+    initialize_genesis(&mut context, &fixture, Pubkey::new_unique()).await;
+
+    let legacy_rollover = 5_000_000u64;
+    process(
+        &mut context,
+        solana_system_interface::instruction::transfer(
+            &authority,
+            &fixture.distribution_vault,
+            legacy_rollover,
+        ),
+        &[],
+    )
+    .await
+    .unwrap();
+    let record = Instruction {
+        program_id: tokenomics_core::ID,
+        accounts: accounts::RecordLegacyFeeRollover {
+            game_authority: authority,
+            token_config: fixture.token_config,
+            distribution_vault: fixture.distribution_vault,
+        }
+        .to_account_metas(None),
+        data: instruction::RecordLegacyFeeRollover {
+            amount_lamports: legacy_rollover,
+        }
+        .data(),
+    };
+    process(&mut context, record.clone(), &[]).await.unwrap();
+
+    let config: TokenConfig = read_anchor_account(&mut context, fixture.token_config).await;
+    let vault: DistributionVaultRecord =
+        read_anchor_account(&mut context, fixture.distribution_vault).await;
+    assert_eq!(config.pending_rollover_lamports, legacy_rollover);
+    assert_eq!(vault.total_deposited_lamports, legacy_rollover);
+
+    let clock: Clock = context.banks_client.get_sysvar().await.unwrap();
+    context.warp_to_slot(clock.slot + 1).unwrap();
+    assert!(process(&mut context, record, &[]).await.is_err());
+}
+
+#[tokio::test]
+#[ignore = "requires an SBF build and SBF_OUT_DIR; run the explicit SBF integration suite"]
 async fn genesis_revokes_authorities_and_pause_keeps_treasury_unlock_open() {
     let guardian = Keypair::new();
     let mut context = tokenomics_program_test().start_with_context().await;
@@ -440,6 +488,173 @@ async fn genesis_revokes_authorities_and_pause_keeps_treasury_unlock_open() {
     )
     .await
     .is_err());
+}
+
+#[tokio::test]
+#[ignore = "requires an SBF build and SBF_OUT_DIR; run the explicit SBF integration suite"]
+async fn governed_spending_limit_can_be_cancelled_after_activation() {
+    let mut context = tokenomics_program_test().start_with_context().await;
+    let authority = context.payer.pubkey();
+    let fixture = GenesisFixture::new(authority);
+    initialize_genesis(&mut context, &fixture, Pubkey::new_unique()).await;
+
+    let destination = Keypair::new();
+    let attacker = Keypair::new();
+    for recipient in [destination.pubkey(), attacker.pubkey()] {
+        process(
+            &mut context,
+            solana_system_interface::instruction::transfer(&authority, &recipient, 1_000_000),
+            &[],
+        )
+        .await
+        .unwrap();
+    }
+    process(
+        &mut context,
+        solana_system_interface::instruction::transfer(
+            &authority,
+            &fixture.treasury_sol_vault,
+            1_000_000_000,
+        ),
+        &[],
+    )
+    .await
+    .unwrap();
+
+    let operation_id = 0u64;
+    let limit_id = 0u64;
+    let max_lamports = 500_000_000u64;
+    let period_seconds = 86_400i64;
+    let operation = pda(&[b"treasury_operation", &operation_id.to_le_bytes()]);
+    let spending_limit = pda(&[b"spending_limit", &limit_id.to_le_bytes()]);
+    let purpose_hash = solana_sha256_hasher::hashv(&[
+        b"idealer:treasury-spending-limit:v1",
+        &limit_id.to_le_bytes(),
+        authority.as_ref(),
+        destination.pubkey().as_ref(),
+        &max_lamports.to_le_bytes(),
+        &period_seconds.to_le_bytes(),
+    ])
+    .to_bytes();
+
+    process(
+        &mut context,
+        Instruction {
+            program_id: tokenomics_core::ID,
+            accounts: accounts::ScheduleTreasuryOperation {
+                governance: authority,
+                token_config: fixture.token_config,
+                treasury_policy_executor: fixture.executor,
+                operation,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(None),
+            data: instruction::ScheduleTreasuryOperation {
+                args: ScheduleTreasuryOperationArgs {
+                    operation_id,
+                    asset: TreasuryAsset::Sol,
+                    destination: destination.pubkey(),
+                    amount: max_lamports,
+                    purpose_hash,
+                },
+            }
+            .data(),
+        },
+        &[],
+    )
+    .await
+    .unwrap();
+    process(
+        &mut context,
+        Instruction {
+            program_id: tokenomics_core::ID,
+            accounts: accounts::ActivateSpendingLimit {
+                payer: authority,
+                token_config: fixture.token_config,
+                operation,
+                spending_limit,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(None),
+            data: instruction::ActivateSpendingLimit {
+                args: ActivateSpendingLimitArgs {
+                    limit_id,
+                    operator: authority,
+                    destination: destination.pubkey(),
+                    max_lamports,
+                    period_seconds,
+                },
+            }
+            .data(),
+        },
+        &[],
+    )
+    .await
+    .unwrap();
+
+    let spend_instruction = Instruction {
+        program_id: tokenomics_core::ID,
+        accounts: accounts::SpendWithinLimit {
+            operator: authority,
+            token_config: fixture.token_config,
+            spending_limit,
+            treasury_sol_vault: fixture.treasury_sol_vault,
+            destination: destination.pubkey(),
+        }
+        .to_account_metas(None),
+        data: instruction::SpendWithinLimit {
+            amount_lamports: 100_000_000,
+        }
+        .data(),
+    };
+    let destination_before = context
+        .banks_client
+        .get_balance(destination.pubkey())
+        .await
+        .unwrap();
+    process(&mut context, spend_instruction.clone(), &[])
+        .await
+        .unwrap();
+    assert_eq!(
+        context
+            .banks_client
+            .get_balance(destination.pubkey())
+            .await
+            .unwrap(),
+        destination_before + 100_000_000
+    );
+
+    let cancel_instruction = |governance| Instruction {
+        program_id: tokenomics_core::ID,
+        accounts: accounts::CancelSpendingLimit {
+            governance,
+            token_config: fixture.token_config,
+            spending_limit,
+        }
+        .to_account_metas(None),
+        data: instruction::CancelSpendingLimit {
+            reason_hash: [9; 32],
+        }
+        .data(),
+    };
+    assert!(process(
+        &mut context,
+        cancel_instruction(attacker.pubkey()),
+        &[&attacker]
+    )
+    .await
+    .is_err());
+    process(&mut context, cancel_instruction(authority), &[])
+        .await
+        .unwrap();
+
+    let cancelled: TreasurySpendingLimit = read_anchor_account(&mut context, spending_limit).await;
+    assert!(!cancelled.active);
+    assert_eq!(cancelled.spent_in_period_lamports, 100_000_000);
+    assert!(process(&mut context, spend_instruction, &[]).await.is_err());
+    assert!(process(&mut context, cancel_instruction(authority), &[])
+        .await
+        .is_err());
 }
 
 #[tokio::test]

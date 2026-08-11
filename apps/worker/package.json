@@ -22,6 +22,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test --import tsx \"src/**/*.test.ts\"",
     "devnet:squads-upgrade": "tsx src/devnet-squads-upgrade.ts",
+    "devnet:tyche-extension-governance": "tsx src/devnet-tyche-extension-governance.ts",
+    "devnet:fee-pool-migration": "tsx src/devnet-fee-pool-migration.ts",
     "devnet:expire-claims": "tsx src/devnet-expire-claims.ts"
   },
   "dependencies": {

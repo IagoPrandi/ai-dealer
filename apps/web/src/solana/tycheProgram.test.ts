@@ -5,6 +5,7 @@ import { address } from "@solana/kit";
 
 import {
   confirmedProgramAccountExists,
+  createSubmitGuessInstruction,
   getActionCutoffTimestamp,
   getTurnActionReadiness,
   TYCHE_PROGRAM_ID,
@@ -47,6 +48,21 @@ const PROGRAM_ACCOUNT: AccountInfoResult = {
     owner: TYCHE_PROGRAM_ID.toString(),
   },
 };
+
+test("paid actions route their treasury share to the canonical fee pool", async () => {
+  const instruction = await createSubmitGuessInstruction({
+    numbers: [1, 2, 3, 4, 5, 6],
+    player: address("4bY5krt2VnnSNB1R4c1bhiWdQYkTc1FvFTN1LaV5JxCH"),
+    sequence: 1,
+    turnId: 55,
+  });
+
+  assert.equal(instruction.accounts.length, 9);
+  assert.equal(
+    instruction.accounts[6]?.address.toString(),
+    "FbJ6EnyvRE6ro5sGnpGdc4qfVCa7ibDgYpjwchaGxiCj",
+  );
+});
 
 test("confirmedProgramAccountExists returns false for missing accounts", async () => {
   const reader = createAccountReader([{ value: null }]);

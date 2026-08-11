@@ -39,8 +39,31 @@ implements:
 - isolated future campaign vaults whose economic configuration freezes at
   funding;
 - immediate on-chain treasury operations after the configured 2-of-3 multisig
-  approval, bounded spending limits, a
+  approval, destination-bound periodic spending limits, multisig cancellation
+  of an active limit with a public reason hash, a
   guardian-only pause, and multisig plus 24-hour-notice unpause.
+
+The devnet operator surfaces are `/dev/tokenomics/treasury/request` and
+`/dev/tokenomics/treasury/approve`. A request stores the exact destination,
+operator, maximum lamports, period, and configuration hash in one zero-approval
+Squads proposal. After two member approvals, execution activates the on-chain
+limit; the operator may then transfer only to its fixed destination and within
+the current period allowance. Cancellation is a separate Squads proposal and
+remains available after activation. The approval surface also reads the
+available Treasury SOL Vault balance, treasury locked JDR, and distribution fee
+pool directly from canonical Tokenomics Core accounts. Creation and execution
+fail closed unless the deployed Tokenomics Core prefix is the reviewed
+`1,073,632`-byte direct-fee artifact with SHA-256
+`6dda1d95164486684957e8dddf7209a07aa31f4712ec9a9257a29fe6b9544173`,
+the remaining `19,528` ProgramData bytes are zero, and upgrade authority is
+Squads vault `0`. This artifact was built with
+`devnet-empty-metadata-uri,devnet-campaign-v2-migration` and deployed through
+Squads proposal `16` at finalized slot `482984308` by Wallet-B transaction
+`FNn5K6stbJ63kqK3RU86QeP2NRwyTvH43cE57hKD3nU76hc9JdeXzPBKp7WSU8XFrtUqyhNFchLYazeaqKNPe2M`.
+Both Wallet A and Wallet B approved the exact stored upgrade. The consumed
+buffer `wxZTULrkLpkz43CVfW4rojrrM5Ax9ENQ2qCXT2kFidU` is closed, its
+`7,473,682,800` rent lamports returned to Wallet B, and upgrade authority
+remains vault `0`.
 
 `tools/tokenomics-calculator` is the independent Rust epoch calculator.
 `packages/tokenomics` is the TypeScript implementation. Production root
@@ -52,29 +75,162 @@ rehearsal. Its upgrade authority must be revoked before any real-value mainnet
 lock, fee deposit, campaign reward, or treasury funding.
 
 The updateable Tyche game program is configured as the Core's
-`game_authority` through its `global_config` PDA. It tracks each turn's exact
-treasury share and can bridge a closed turn once into a collecting epoch. Its
+`game_authority` through its `global_config` PDA. In the direct-custody build,
+every paid game action sends its treasury share immediately to Tokenomics
+Core's canonical `distribution_vault`; Tyche tracks the exact per-turn amount
+until `bridge_turn_treasury_fee` assigns that already-funded amount once to a
+collecting epoch. Its
 CPI entry points bind proposal/supporter recipients to immutable game records,
 bind active-rule settlement to the elected rule and fulfilled draw, require a
 first-guess `GameToken` for referral qualification, and use idempotent
 contribution PDAs for the first-round referral bonus.
 
-The current devnet Tyche binary was deployed through Squads proposal `13` at
-finalized slot `482717873` by transaction
-`Xq64Rk66MYpAR2gNky82kQSsjbe9FukcCZShoTDPEyAk5HXZS6Qy5F9aY4vrwHWvLs32FuNSnxWpbvUEXAApxyF`.
-Its `1,050,944`-byte programme prefix has SHA-256
-`2e1ea292f31d618c90f7959c7614a76c44fbc3967b950df19b07073dd510fe89`;
-the remaining `4,648` bytes of ProgramData capacity are zero. Upgrade
-authority remains Squads vault `0`, and the consumed buffer
-`6y7SSzgjXmLYNagJJKGBsuRB721twDGgfNUUPQz1mc1s` is closed. This
-binary deployment does not by itself enable worker revenue automation or
-authorize any mainnet action.
+The current devnet Tyche binary was deployed through Squads proposal `17` at
+finalized slot `482987312` by Wallet-B transaction
+`47Q4KYvGPmFcNKARe799v8UTKp2D3dopKKCrZfgKfku74wDxhnSLFqE7TGHcm57h29Ke4ZMiXxLKVWbWkLR13FGX`.
+Its `1,111,616`-byte programme prefix has SHA-256
+`a1087ef9cb66c24c76aa07b078128b6144ca20134ba9ed0af464b330b9bc1620`;
+the remaining `9,512` bytes of the `1,121,128`-byte ProgramData capacity are
+zero. Full-capacity SHA-256 is
+`534f5877d276b3e85626287096b6627654347ccbcb24ae28ca755d57f1b3ada8`.
+Upgrade authority remains Squads vault `0`. This binary deployment does not by
+itself run the separate legacy-fee migration, enable worker revenue automation,
+or authorize any mainnet action.
 
-That `4,648`-byte headroom is the binding constraint on the next Tyche upgrade:
-a larger artifact needs a separate governed ProgramData extension executed and
-re-read **before** the upgrade buffer is proposed. `scripts/extend-tyche-programdata.cjs`
-prepares that extension, and note that the loader enforces a minimum growth of
-`10,240` bytes per extension.
+The reviewed direct-custody artifact is `1,111,616` bytes with SHA-256
+`a1087ef9cb66c24c76aa07b078128b6144ca20134ba9ed0af464b330b9bc1620` and
+fits the extended ProgramData with `9,512` bytes remaining. Proposal `15`
+executed the reviewed authority bridge, and finalized transaction
+`21VYTSd5LKPm4wbxx1qpyjoSmR81Udp2wQcs73np37Mam99jqjSQtWZy3f5ygZw9FDN88xDnz6SwCeS1f2MHPt44`
+atomically extended ProgramData by `65,536` bytes, funded exactly `456,130,560`
+rent lamports (`0.45613056 SOL`), and returned authority to Squads vault `0`.
+Wallet B subsequently published the exact artifact as buffer
+`AcREERShsxdH8zzYCk15GM6TEpqLdFiFmGPiRjWUVh7S`. Its publication history has
+`1,101` successful
+transactions and zero failures: creation
+`5NDeneM2fecSGNhkjZKkAG3w9LDmHpwBUNU9QAjAFJmq1ZrfgRHSv6hP54JpBMrjZ1LPrxGoJfQuVuoiLDBBJo3U`,
+final write
+`4rDQqWKmK4N9BrzZTpoGFb7DsqViosJKzdM78DnsLpgjznqZfi7hAMmGGidnp5T6oANe2wqFY5yu3sEwxBxxRgzF`,
+and authority handoff
+`3vMe7VFnuHkH6aZL6ZPzMJidRfF2MkHaeLT8LgFDVGSVU1J9MaTw5kfv9Gt6UPVVPGioXDPcVRAteTcjxCzyf5Er`.
+Squads proposal `17`, PDA
+`4LzUFYrzw11f2SCzE5AM5z5AC4ic6PDiENUiZuc7mgNZ`, stored exactly one loader
+upgrade with Wallet B as spill recipient. Wallet A approved in
+`VSAmd56AUA5z8aHtcbdh1uZHcqGZ1WncKLmoTSmjCLhPeENgxB42HLDU2QTyg5h5zBvFw3zHvKwMd5di1dqBLpj`;
+Wallet B approved in
+`2UuEg4QKYZbV6FzEZYBu5swC6nrFmUyUUHS9mJV1VRrW8uLtzm3qspwdQVAqvU6NtAozvtfcTamBftsov1tzRT45`
+and executed the upgrade. The consumed buffer is closed and its exact
+`7,738,051,440` rent lamports returned to Wallet B. Finalized byte-for-byte
+readback matches the reviewed length and SHA-256. The custody migration remains
+a separate governed stage and must be re-read before it is proposed.
+`apps/web/src/solana/tycheProgramExtensionProposal.ts` prepares the exact
+Squads authority bridge and the atomic Wallet-A extension plus authority return.
+The `.env`-backed governance operator pins every stage of proposal `15`:
+
+```powershell
+pnpm --filter @tyche/worker devnet:tyche-extension-governance -- inspect
+pnpm --filter @tyche/worker devnet:tyche-extension-governance -- propose
+pnpm --filter @tyche/worker devnet:tyche-extension-governance -- approve-a
+pnpm --filter @tyche/worker devnet:tyche-extension-governance -- approve-b
+pnpm --filter @tyche/worker devnet:tyche-extension-governance -- status
+pnpm --filter @tyche/worker devnet:tyche-extension-governance -- execute-bridge
+pnpm --filter @tyche/worker devnet:tyche-extension-governance -- extend-return
+```
+
+Execution of the authority bridge and the atomic extension/authority return are
+separate broadcast gates because the interval between them temporarily places
+the ProgramData under Wallet A. The second transaction always includes both the
+extension and authority return, so those two changes succeed or roll back
+together.
+
+## Direct Fee-Pool Custody
+
+The reviewed rollout consolidates all holder-fee SOL in Tokenomics Core's
+canonical distribution vault
+`FbJ6EnyvRE6ro5sGnpGdc4qfVCa7ibDgYpjwchaGxiCj`. Paid guesses, rule proposals,
+votes, elimination votes, and rule removals transfer their treasury share
+directly to that account; no worker is required for custody. The revenue worker
+still opens seven-turn epochs and reconciles each closed turn exactly once, but
+that bridge is accounting-only and moves no SOL.
+
+The devnet migration is intentionally one-shot and governed by Tyche's actual
+ProgramData upgrade authority. It transfers the entire legacy spendable Tyche
+TreasuryVault balance of `23,000,000` lamports to the distribution vault,
+retains `18,000,000` lamports as the outstanding total of closed current-layout
+turns `32-55`, and records the remaining `5,000,000` lamports as genesis
+rollover in Tokenomics Core. It refuses partial, zero, replayed, noncanonical,
+or under-backed migrations. The operator is:
+
+```powershell
+pnpm --filter @tyche/worker devnet:fee-pool-migration -- inspect
+pnpm --filter @tyche/worker devnet:fee-pool-migration -- propose
+$env:TYCHE_APPROVER_ENV='PRIVATE_KEY_WALLET_A'; pnpm --filter @tyche/worker devnet:fee-pool-migration -- approve
+$env:TYCHE_APPROVER_ENV='PRIVATE_KEY_WALLET_B'; pnpm --filter @tyche/worker devnet:fee-pool-migration -- approve
+pnpm --filter @tyche/worker devnet:fee-pool-migration -- status
+pnpm --filter @tyche/worker devnet:fee-pool-migration -- execute
+```
+
+`propose` creates a zero-approval Squads proposal. `approve` loads only the
+named ignored `.env` member key, while `execute` is pinned to Wallet A. Neither
+prints secret material; both verify the exact stored instruction and live
+devnet identities, and execution refuses to proceed below the 2-of-3 threshold.
+The migration does not create or move JDR. The Tokenomics
+Core artifact required by this rollout is `1,073,632` bytes with SHA-256
+`6dda1d95164486684957e8dddf7209a07aa31f4712ec9a9257a29fe6b9544173`.
+
+Devnet proposal `18`, proposal PDA
+`HoJtVX5ShxZ43fjmyJfcbWtGbCSQ3iSj1SJCCyS4w2Jm` and vault-transaction PDA
+`5UN3M4V3bD8gzewVd8bmqjY881GJK4wNg51zvxHVUoD7`, was created with zero
+approvals in finalized transaction
+`yLJgmPQYdenNPWuNMzEFu2vvpMTJxiu1Piyio8wRMSfcJ4f9pRQQUj84o1aLv1KGtm4nMkYGLthhnf4MM3V7EFJ`.
+Strict readback confirms its sole instruction is the reviewed migration with
+the exact `18,000,000` / `5,000,000` split. Wallet A approved in finalized
+transaction
+`2ZMgcCS8j2SUQGZ83KDokPFhNPkKX6jSU5qBDrNG2Bj2qsWqAXZXPxF3p2Zr3teimxHAZYe6TwJbeV81ypU8g713`,
+and Wallet B approved in
+`w4ULtcxfdSaWznH7RvAXmSTNzTHQmwLspAguGD3JL562V4z7dHfjFYb3KYi2b3QD1w2VLbxhyfi1Hx8xAaQhyEi`.
+The initial execution attempt against the then-deployed Tyche artifact was not
+broadcast: signed simulation failed with `UnbalancedInstruction` before send,
+so no legacy SOL moved during that attempt.
+
+The failure occurred because Tyche debited its programme-owned legacy vault and
+credited the Tokenomics distribution vault before invoking
+`record_legacy_fee_rollover`, but the child CPI did not include the debited
+vault in its account set. The runtime therefore saw an unbalanced lamport sum at
+the CPI boundary. The source fix supplies that vault as a remaining CPI account,
+allowing the runtime to reconcile both sides without granting Tokenomics debit
+authority. A new serial SBF scenario executes the complete `23,000,000`-lamport
+migration, verifies the `18,000,000` / `5,000,000` accounting, and rejects
+replay. The corrective Tyche artifact is `1,112,264` bytes, SHA-256
+`247d2e582c21285b14633a77e1a0cf199055c94c5bc57a1ea6b61a7613283b12`,
+built with `devnet-test,sb-devnet`; it fits current ProgramData with `8,864`
+bytes remaining. Wallet B published it to devnet buffer
+`3uDPkjbohqDncQY6yEVn1N8bXs5XnGaP4YbGcc531QvE`, locking
+`7,742,561,520` rent lamports, and transferred buffer authority to Squads vault
+`DB5nz633YioWzEUnLb97ypUra5RUE11SJDFW9ar23KTp`. Finalized readback matched the
+reviewed hash and all `1,112,264` bytes; the buffer history contains `1,102`
+successful transactions and no failures.
+
+Corrective Squads proposal `19`, proposal PDA
+`B6ikxFUbUCne1RNFpqxe1h1Cu3hpDoL24yb2LAt8g1RV` and vault-transaction PDA
+`F1EJHzouHNhYEEFAESdAde9wmg9hqCEeMFochh3H4FxD`, stored only the canonical
+loader upgrade with Wallet B as the buffer-rent spill recipient. Wallet A and
+Wallet B approved, and Wallet B executed in finalized transaction
+`3dcabx2tW9xLDAD6CvdLxt6XeKqAPrUKZPWwqR3kfmbSNyC3YV5kMaTLodwqcrUG4GTmjJGwwJawwVGZq3kh7TGb`
+at slot `482998701`. Finalized ProgramData readback matches SHA-256
+`247d2e582c21285b14633a77e1a0cf199055c94c5bc57a1ea6b61a7613283b12`
+across all `1,112,264` reviewed bytes, with `8,864` zero-padding bytes, Squads
+vault-0 authority, and the buffer closed. Proposal `18` now has the corrected
+binary prerequisite. Wallet A re-simulated it successfully and executed it in
+finalized transaction
+`2tNXmw9MdJ9y42Y19rY2euAJLpUXjPWZvUtA9TNWw1PAE9DPasdgsnvqPLg3vCMevuSnyzJiowYDA8f8jd13WV7Q`
+at slot `482999695`. Final readback reports proposal `18` as `Executed`, zero
+spendable lamports left in the Tyche TreasuryVault, and `23,000,000` available
+lamports in the Tokenomics distribution vault. Its accounting preserves
+`18,000,000` attributed-unbridged lamports and records `5,000,000` as pending
+rollover/deposited. The physical distribution account holds `24,064,880`
+lamports: `23,000,000` available plus `1,064,880` rent. The transaction had no
+SPL-token balance entries, so no JDR moved.
 
 ## Prize-Vault Solvency
 
@@ -86,7 +242,7 @@ pay (`claim_prize` failed with `InsufficientVaultBalance`). Two program rules no
 keep a recorded claim payable:
 
 - `record_claim` reserves the payout. `PrizeVault::total_collected_lamports` is
-  the vault's *unreserved* balance: recording subtracts from it and rejects a
+  the vault's _unreserved_ balance: recording subtracts from it and rejects a
   payout larger than what is left (`ClaimExceedsPrizeVault`), so an
   over-computed off-chain amount fails at settlement instead of in a winner's
   wallet. `claim_prize` only moves lamports, clamping the counter to what the
@@ -227,7 +383,7 @@ docker run --rm -e CARGO_TARGET_DIR=/sbf-target \
   rust:1.91-bookworm bash /workspace/contracts/solana/scripts/sbf.sh test-sbf
 ```
 
-The SBF suite executes 8 Tyche scenarios covering initialization, turn opening, guess/Game Token creation, rule proposal, sequenced vote idempotency, VRF request/settlement, invalid-input rejection, turn closing, winner claims, and rejection of legacy creator/voter SOL claims. It also executes 2 Tokenomics Core scenarios covering one-time fixed-supply genesis and authority revocation, pause-safe canonical treasury unlock, epoch review and sealing, fixed-destination treasury claims, replay rejection, exact liability/dust accounting, and correction-epoch binding to an original sealed epoch. The build helper treats any compiler `Error:` diagnostic as fatal even if `cargo-build-sbf` exits successfully and removes disposable keypair files that `cargo-build-sbf` may generate beside the artifacts.
+The SBF suite executes 11 Tyche scenarios covering initialization, direct fee-pool transfers for every paid action, turn opening, guess/Game Token creation, rule proposal, sequenced vote idempotency, VRF request/settlement, invalid-input rejection, turn closing, winner claims, and rejection of legacy creator/voter SOL claims. It also executes 5 Tokenomics Core scenarios covering one-time fixed-supply genesis and authority revocation, one-shot backed legacy-fee rollover, pause-safe canonical treasury unlock, epoch review and sealing, fixed-destination treasury claims, replay rejection, exact liability/dust accounting, and correction-epoch binding to an original sealed epoch. The build helper treats any compiler `Error:` diagnostic as fatal even if `cargo-build-sbf` exits successfully and removes disposable keypair files that `cargo-build-sbf` may generate beside the artifacts.
 
 ## Devnet Deployment Gate
 
