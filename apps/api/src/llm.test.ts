@@ -7,12 +7,14 @@ import {
   resolveEscalationModel,
   resolveRuleAgentConfig,
   resolveTranslateToEnglish,
+  translateRuleToEnglish,
   type RuleAgentConfig,
 } from "./llm.js";
 
 const CONFIG: RuleAgentConfig = {
   apiKey: "",
   baseUrl: "http://localhost:11434/v1",
+  maxOutputTokens: 16_384,
   model: "gemma4:latest",
   seed: 7,
   timeoutMs: 30_000,
@@ -152,6 +154,68 @@ test("rule agent config enforces a five-minute minimum timeout", () => {
   assert.equal(config.timeoutMs, 300_000);
 });
 
+test("rule agent config keeps an output budget a reasoning trace cannot exhaust", () => {
+  const defaults = resolveRuleAgentConfig({
+    LLM_BASE_URL: "http://localhost:11434/v1",
+    LLM_MODEL: "minimax-m3:cloud",
+  });
+  assert.equal(defaults.maxOutputTokens, 16_384);
+
+  const raised = resolveRuleAgentConfig({
+    LLM_BASE_URL: "http://localhost:11434/v1",
+    LLM_MAX_OUTPUT_TOKENS: "32768 # long traces",
+    LLM_MODEL: "minimax-m3:cloud",
+  });
+  assert.equal(raised.maxOutputTokens, 32_768);
+
+  // A stale/too-small override must not reintroduce the truncation window.
+  const clamped = resolveRuleAgentConfig({
+    LLM_BASE_URL: "http://localhost:11434/v1",
+    LLM_MAX_OUTPUT_TOKENS: "2048",
+    LLM_MODEL: "minimax-m3:cloud",
+  });
+  assert.equal(clamped.maxOutputTokens, 4_096);
+});
+
+test("a response cut off at the output limit fails as a budget error", async () => {
+  // What a reasoning model returns when the hidden trace eats the whole budget:
+  // finish_reason "length", empty content, and a truncated trace. Parsing that
+  // trace is what used to surface as "malformed JSON" / an unusable response.
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        choices: [
+          {
+            finish_reason: "length",
+            message: {
+              content: "",
+              reasoning:
+                "Units digits: guess {2,4,5,7} versus draw {1,3,1,1} - do they overlap",
+            },
+          },
+        ],
+      }),
+      { status: 200 },
+    )) as typeof fetch;
+
+  await assert.rejects(
+    interpretRuleWithAgent("Win if any unit digit matches.", CONFIG),
+    (error: unknown) =>
+      error instanceof Error &&
+      /cut off at the 16384-token output limit/i.test(error.message),
+  );
+
+  await assert.rejects(
+    compileRuleToAst("A guess wins if any unit digit matches.", CONFIG),
+    /cut off at the 16384-token output limit/i,
+  );
+
+  await assert.rejects(
+    translateRuleToEnglish("eu ganho se acertar qualquer unidade", CONFIG),
+    /translator response was cut off/i,
+  );
+});
+
 test("interpret harness teaches predicate min/max and casual threshold cases", async () => {
   let systemPrompt = "";
   let requestBody: Record<string, unknown> = {};
@@ -212,7 +276,7 @@ test("interpret harness teaches predicate min/max and casual threshold cases", a
   assert.match(systemPrompt, /never offer stock examples, generic match-count rules/i);
   assert.match(systemPrompt, /draw 12 31 24 versus guess 11 30 29/i);
   assert.equal(requestBody.reasoning_effort, "none");
-  assert.equal(requestBody.max_tokens, 2_048);
+  assert.equal(requestBody.max_tokens, 16_384);
 
   await interpretRuleWithAgent(
     "Win if the smallest number matches.",

@@ -22,6 +22,7 @@ export interface RuleAgentInterpretation {
 export interface RuleAgentConfig {
   apiKey: string;
   baseUrl: string;
+  maxOutputTokens: number;
   model: string;
   seed: number;
   timeoutMs: number;
@@ -47,6 +48,15 @@ export class RuleAgentError extends Error {
 // Never let a stale environment value reduce the user-visible response window.
 const MIN_TIMEOUT_MS = 300_000;
 const DEFAULT_TIMEOUT_MS = MIN_TIMEOUT_MS;
+// Reasoning models (minimax-m3, qwen3-thinking, ...) emit a hidden trace before
+// the JSON answer and spend the output budget on it — and Ollama's cloud models
+// ignore `reasoning_effort: "none"`, so the trace cannot be turned off. A long or
+// ambiguous rule can reason for thousands of tokens, so a small ceiling cuts the
+// response off before the JSON even starts. The budget must comfortably cover the
+// trace plus the answer; it is an upper bound, so a non-reasoning model that stops
+// at the closing brace never pays for it.
+const MIN_MAX_OUTPUT_TOKENS = 4_096;
+const DEFAULT_MAX_OUTPUT_TOKENS = 16_384;
 // Fixed seed + temperature 0 make the dealer deterministic: the same rule text
 // always compiles to the same normalized rule, which the on-chain hashes depend
 // on. Override with LLM_SEED only if you intentionally want a different anchor.
@@ -287,9 +297,19 @@ export function resolveRuleAgentConfig(
   const seedRaw = Number(cleanEnvValue(env.LLM_SEED) || DEFAULT_SEED);
   const seed = Number.isInteger(seedRaw) ? seedRaw : DEFAULT_SEED;
 
+  const maxOutputTokensRaw = Number(
+    cleanEnvValue(env.LLM_MAX_OUTPUT_TOKENS) || DEFAULT_MAX_OUTPUT_TOKENS,
+  );
+  const maxOutputTokens =
+    Number.isInteger(maxOutputTokensRaw) &&
+    maxOutputTokensRaw >= MIN_MAX_OUTPUT_TOKENS
+      ? maxOutputTokensRaw
+      : MIN_MAX_OUTPUT_TOKENS;
+
   return {
     apiKey: cleanEnvValue(env.LLM_API_KEY),
     baseUrl: baseUrl.replace(/\/+$/, ""),
+    maxOutputTokens,
     model,
     seed,
     timeoutMs,
@@ -568,7 +588,7 @@ async function requestAgentJson(
           { content: userText, role: "user" },
         ],
         model: config.model,
-        max_tokens: 2_048,
+        max_tokens: config.maxOutputTokens,
         // Rule preflight needs the constrained JSON result, not a hidden
         // reasoning trace. Ollama otherwise enables thinking by default for
         // thinking-capable models.
@@ -621,13 +641,27 @@ async function requestAgentJson(
     );
   }
 
-  const message = (
+  const choice = (
     payload as {
       choices?: Array<{
+        finish_reason?: unknown;
         message?: { content?: unknown; reasoning?: unknown };
       }>;
     }
-  )?.choices?.[0]?.message;
+  )?.choices?.[0];
+  const message = choice?.message;
+
+  // A cut-off response can never be trusted as the full answer: either the JSON
+  // ends mid-object, or — for a reasoning model — it never started because the
+  // hidden trace consumed the whole budget and `content` came back empty. Report
+  // it as the budget failure it is instead of parsing a fragment, and never let
+  // the `reasoning` fallback below hand a truncated trace to the JSON extractor.
+  if (choice?.finish_reason === "length") {
+    throw new RuleAgentError(
+      "RULE_AGENT_BAD_RESPONSE",
+      `The rule agent response was cut off at the ${config.maxOutputTokens}-token output limit. Raise LLM_MAX_OUTPUT_TOKENS or use a model that does not spend the budget on a hidden reasoning trace.`,
+    );
+  }
 
   const rawContent =
     typeof message?.content === "string" ? message.content : "";
@@ -702,7 +736,10 @@ export async function translateRuleToEnglish(
           { content: text, role: "user" },
         ],
         model: config.model,
-        max_tokens: 256,
+        // The translated sentence is short, but a reasoning model's hidden trace
+        // is not: a tight ceiling here truncated the response before the sentence
+        // was emitted and surfaced as "the translator returned no text".
+        max_tokens: config.maxOutputTokens,
         ...ollamaThinkingControl(config),
         seed: config.seed,
         stream: false,
@@ -729,9 +766,19 @@ export async function translateRuleToEnglish(
     throw new RuleAgentError("RULE_AGENT_UNAVAILABLE", `The translator returned HTTP ${response.status}.`);
   }
   const payload = (await response.json().catch(() => null)) as {
-    choices?: Array<{ message?: { content?: unknown; reasoning?: unknown } }>;
+    choices?: Array<{
+      finish_reason?: unknown;
+      message?: { content?: unknown; reasoning?: unknown };
+    }>;
   } | null;
-  const message = payload?.choices?.[0]?.message;
+  const choice = payload?.choices?.[0];
+  if (choice?.finish_reason === "length") {
+    throw new RuleAgentError(
+      "RULE_AGENT_BAD_RESPONSE",
+      `The translator response was cut off at the ${config.maxOutputTokens}-token output limit. Raise LLM_MAX_OUTPUT_TOKENS.`,
+    );
+  }
+  const message = choice?.message;
   const raw = typeof message?.content === "string" ? message.content : "";
   const reasoning = typeof message?.reasoning === "string" ? message.reasoning : "";
   const cleaned = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim() || reasoning.trim();

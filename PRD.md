@@ -4203,6 +4203,7 @@ LLM_MODEL
 LLM_API_KEY             # optional; dummy/none for local endpoints
 LLM_MODEL_COMPILE       # optional per-role override
 LLM_MODEL_INTERPRET     # optional per-role override
+LLM_MAX_OUTPUT_TOKENS   # output budget per agent call; must cover a reasoning trace
 LLM_PROVIDER_KEYS       # cloud provider keys for fallback/escalation
 EMBEDDINGS_MODEL        # semantic dedup (Section 6.15)
 EMBEDDINGS_BASE_URL
