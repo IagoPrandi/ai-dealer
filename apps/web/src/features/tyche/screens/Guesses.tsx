@@ -20,7 +20,7 @@ function GuessCard({
   return (
     <div
       className="ide-card"
-      style={{ display: "grid", gap: 14, padding: "15px 16px" }}
+      style={{ display: "grid", gap: 10, padding: "11px 12px" }}
     >
       <div
         style={{
@@ -30,12 +30,12 @@ function GuessCard({
           gap: 10,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span
             style={{
-              width: 32,
-              height: 32,
-              borderRadius: 10,
+              width: 26,
+              height: 26,
+              borderRadius: 9,
               background: "var(--surface-2)",
               color: "var(--purple-soft)",
               display: "grid",
@@ -44,18 +44,41 @@ function GuessCard({
             }}
           >
             <Ico.dice
-              style={{ color: "currentColor", width: 17, height: 17 }}
+              style={{ color: "currentColor", width: 14, height: 14 }}
             />
           </span>
-          <div style={{ fontSize: 15, fontWeight: 800 }}>
-            Guess <span className="ide-num">#{sequence}</span>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 800, lineHeight: 1.2 }}>
+              Guess <span className="ide-num">#{sequence}</span>
+            </div>
+            {feeSol == null ? null : (
+              <div
+                style={{
+                  color: "var(--dim)",
+                  fontSize: 11.5,
+                  lineHeight: 1.3,
+                  marginTop: 1,
+                }}
+              >
+                Entry fee{" "}
+                <span className="ide-num" style={{ color: "var(--muted)" }}>
+                  {feeSol === 0 ? "Free" : `${fmtSol(feeSol)} SOL`}
+                </span>
+              </div>
+            )}
           </div>
         </div>
         <span
           className="ide-pill"
-          style={{ color: "var(--green)", padding: "4px 8px" }}
+          style={{
+            color: "var(--green)",
+            padding: "3px 8px",
+            fontSize: 11.5,
+            gap: 5,
+            flexShrink: 0,
+          }}
         >
-          <Ico.check style={{ color: "currentColor", width: 13, height: 13 }} />{" "}
+          <Ico.check style={{ color: "currentColor", width: 12, height: 12 }} />{" "}
           Confirmed
         </span>
       </div>
@@ -65,7 +88,7 @@ function GuessCard({
           display: "flex",
           flexWrap: "wrap",
           justifyContent: "center",
-          gap: 6,
+          gap: 5,
         }}
       >
         {receipt.numbers.map((number, numberIndex) => (
@@ -73,38 +96,16 @@ function GuessCard({
             className="ide-chip"
             key={`${sequence}-${number}-${numberIndex}`}
             style={{
-              width: "clamp(36px, 10vw, 40px)",
-              height: "clamp(36px, 10vw, 40px)",
-              fontSize: 15,
+              width: "clamp(30px, 8.4vw, 34px)",
+              height: "clamp(30px, 8.4vw, 34px)",
+              borderRadius: 11,
+              fontSize: 13.5,
             }}
           >
             {number}
           </span>
         ))}
       </div>
-
-      {feeSol == null ? null : (
-        <div
-          style={{
-            borderTop: "1px solid var(--line)",
-            paddingTop: 11,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 10,
-            color: "var(--dim)",
-            fontSize: 12.5,
-          }}
-        >
-          <span>Entry fee</span>
-          <span
-            className="ide-num"
-            style={{ color: "var(--muted)", fontWeight: 700 }}
-          >
-            {feeSol === 0 ? "Free" : `${fmtSol(feeSol)} SOL`}
-          </span>
-        </div>
-      )}
     </div>
   );
 }
@@ -223,7 +224,7 @@ export function GuessesScreen() {
             aria-label="Loading guesses"
           >
             {[0, 1].map((item) => (
-              <div className="ide-card" key={item} style={{ height: 130 }} />
+              <div className="ide-card" key={item} style={{ height: 88 }} />
             ))}
           </div>
         ) : error ? (
