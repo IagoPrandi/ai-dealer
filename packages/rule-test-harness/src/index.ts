@@ -15,7 +15,7 @@ import {
 
 // 2.1.0 — IMPOSSIBLE now requires a failed directed witness search, so a
 // legitimately rare rule is classified EXTREME instead (PRD §6.8).
-export const RULE_TEST_HARNESS_VERSION = "2.1.0";
+export const RULE_TEST_HARNESS_VERSION = "2.2.0";
 
 export type RuleDifficultyClass =
   | "IMPOSSIBLE"
@@ -171,6 +171,62 @@ export function structuredInputPairs(): readonly StructuredInputPair[] {
   return pairs;
 }
 
+function pinnedGuessValues(ast: RuleAst): number[] {
+  const values = new Set<number>();
+  const visit = (node: unknown) => {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+    const record = node as Record<string, unknown>;
+    if (
+      record.kind === "contains" &&
+      record.array &&
+      typeof record.array === "object" &&
+      (record.array as Record<string, unknown>).kind === "source" &&
+      (record.array as Record<string, unknown>).source === "guess" &&
+      record.value &&
+      typeof record.value === "object" &&
+      (record.value as Record<string, unknown>).kind === "lit"
+    ) {
+      const value = (record.value as Record<string, unknown>).value;
+      if (
+        typeof value === "number" &&
+        Number.isInteger(value) &&
+        value >= 1 &&
+        value <= 100
+      ) {
+        values.add(value);
+      }
+    }
+    for (const child of Object.values(record)) {
+      if (Array.isArray(child)) {
+        child.forEach(visit);
+      } else if (child && typeof child === "object") {
+        visit(child);
+      }
+    }
+  };
+  visit(ast);
+  return [...values].sort((a, b) => a - b);
+}
+
+function directedInputPairs(ast: RuleAst): readonly StructuredInputPair[] {
+  const pinned = pinnedGuessValues(ast);
+  if (pinned.length === 0 || pinned.length > 6) {
+    return structuredInputPairs();
+  }
+  const guess = [...pinned];
+  for (let value = 1; guess.length < 6 && value <= 100; value += 1) {
+    if (!guess.includes(value)) {
+      guess.push(value);
+    }
+  }
+  return [
+    ...WITNESS_SETS.map((draw) => ({ draw, guess: [...guess] })),
+    ...structuredInputPairs(),
+  ];
+}
+
 export interface RuleWorkedExample {
   draw: readonly number[];
   guess: readonly number[];
@@ -192,7 +248,7 @@ export function collectWorkedExamples(
   }
   const wins: RuleWorkedExample[] = [];
   const losses: RuleWorkedExample[] = [];
-  for (const { draw, guess } of structuredInputPairs()) {
+  for (const { draw, guess } of directedInputPairs(ast)) {
     if (wins.length >= perOutcome && losses.length >= perOutcome) {
       break;
     }
@@ -229,7 +285,7 @@ export function hasWinningWitness(ast: RuleAst): boolean {
     // A ranking rule always has a winner (the argmax over the field).
     return true;
   }
-  for (const { draw, guess } of structuredInputPairs()) {
+  for (const { draw, guess } of directedInputPairs(ast)) {
     try {
       if (
         evaluatePredicate(ast, { guess: [...guess], draw: [...draw] }).result ===

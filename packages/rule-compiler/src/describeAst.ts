@@ -343,10 +343,45 @@ function describeSamePositionPredicate(node: PredicateNodeV3): string | null {
   return null;
 }
 
+function describeExactPositionCountPredicate(node: PredicateNodeV3): string | null {
+  if (
+    node.kind !== "compare" ||
+    (node.op !== "gte" && node.op !== "eq" && node.op !== "lte") ||
+    node.right.kind !== "lit" ||
+    node.left.kind !== "reduce" ||
+    node.left.op !== "sum" ||
+    node.left.of.kind !== "pairs_map" ||
+    node.left.of.left.kind !== "source" ||
+    node.left.of.left.source !== "guess" ||
+    node.left.of.right.kind !== "source" ||
+    node.left.of.right.source !== "draw" ||
+    node.left.of.expr.kind !== "ite" ||
+    node.left.of.expr.then.kind !== "lit" ||
+    node.left.of.expr.then.value !== 1 ||
+    node.left.of.expr.else.kind !== "lit" ||
+    node.left.of.expr.else.value !== 0 ||
+    node.left.of.expr.if.kind !== "compare" ||
+    node.left.of.expr.if.op !== "eq" ||
+    node.left.of.expr.if.left.kind !== "pair" ||
+    node.left.of.expr.if.left.side !== "left" ||
+    node.left.of.expr.if.right.kind !== "pair" ||
+    node.left.of.expr.if.right.side !== "right"
+  ) {
+    return null;
+  }
+  const quantity =
+    node.op === "gte" ? "at least" : node.op === "lte" ? "at most" : "exactly";
+  const plural = node.right.value === 1 ? "position" : "positions";
+  return `${quantity} ${node.right.value} guessed ${plural} exactly match the draw`;
+}
+
 function describePredicateV3(node: PredicateNodeV3): string {
   switch (node.kind) {
     case "compare":
-      return `${describeScalarV3(node.left)} ${COMPARE_PHRASE[node.op]} ${describeScalarV3(node.right)}`;
+      return (
+        describeExactPositionCountPredicate(node) ??
+        `${describeScalarV3(node.left)} ${COMPARE_PHRASE[node.op]} ${describeScalarV3(node.right)}`
+      );
     case "contains":
       return `${describeArrayV3(node.array)} include ${describeScalarV3(node.value)}`;
     case "forall":

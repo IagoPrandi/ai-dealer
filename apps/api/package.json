@@ -7,6 +7,7 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/index.ts",
     "lint": "eslint src --max-warnings=0",
+    "stress:rules:set4": "node scripts/rule-preflight-stress-set-4.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test --import tsx \"src/**/*.test.ts\""
   },

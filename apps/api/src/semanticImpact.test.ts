@@ -255,3 +255,34 @@ test("English stress prompt 3: emphatic compound rule using guess and draw needs
   assert.equal(review.impact.drawIndependent, false);
   assert.equal(review.impact.rangeBoundsAmbiguous, false);
 });
+
+test("subject-first wording explicitly confirms that an input is irrelevant", () => {
+  const drawOnly = analyzeRuleSemanticImpact({
+    ast: drawOnlyRangeAst,
+    normalizedText: "A guess wins if all six drawn numbers are below 40.",
+    officialInterpretation: "Every drawn number must be below 40.",
+    sourceText:
+      "A guess wins if all six drawn numbers are below 40. The player's guessed numbers do not affect the result.",
+  });
+  assert.equal(drawOnly.confirmationRequired, false);
+
+  const guessOnlyAst = {
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "contains",
+        array: { kind: "source", source: "guess" },
+        value: { kind: "lit", value: 77 },
+      },
+    },
+  } satisfies RuleAst;
+  const guessOnly = analyzeRuleSemanticImpact({
+    ast: guessOnlyAst,
+    normalizedText: "A guess wins if it contains 77.",
+    officialInterpretation: "The guess must contain 77.",
+    sourceText:
+      "A guess wins if it contains 77. The official draw does not affect the result.",
+  });
+  assert.equal(guessOnly.confirmationRequired, false);
+});

@@ -226,6 +226,7 @@ function explicitlyConfirmsDrawOnly(value: string) {
     /\b(?:only|solely|just)\b[^.]{0,70}\b(?:draw|drawn|official numbers?)\b/u.test(normalized) ||
     /\b(?:somente|apenas|so)\b[^.]{0,70}\b(?:sorteio|sorteados?|numeros oficiais)\b/u.test(normalized) ||
     /\b(?:ignore|ignores|ignored|without using|does not use|does not affect|independent of|regardless of)\b[^.]{0,70}\b(?:guess|ticket|pick|chosen numbers?)\b/u.test(normalized) ||
+    /\b(?:guess|ticket|pick|chosen|guessed numbers?)\b[^.]{0,45}\b(?:is|are|does|do)\s+not\s+(?:used|affect|matter|change|influence)\b/u.test(normalized) ||
     /\b(?:ignora|ignorar|sem usar|nao usa|nao depende|independente)\b[^.]{0,70}\b(?:palpite|aposta|jogo|numeros escolhidos)\b/u.test(normalized) ||
     /\bnem\b[^.]{0,20}\b(?:olha|usa|use)\b[^.]{0,40}\b(?:palpite|aposta|jogo)\b/u.test(normalized)
   );
@@ -237,6 +238,7 @@ function explicitlyConfirmsGuessOnly(value: string) {
     /\b(?:only|solely|just)\b[^.]{0,70}\b(?:guess|ticket|pick|chosen numbers?)\b/u.test(normalized) ||
     /\b(?:somente|apenas|so)\b[^.]{0,70}\b(?:palpite|aposta|jogo|numeros escolhidos)\b/u.test(normalized) ||
     /\b(?:ignore|ignores|ignored|without using|does not use|does not affect|independent of|regardless of)\b[^.]{0,70}\b(?:draw|drawn|official numbers?)\b/u.test(normalized) ||
+    /\b(?:official\s+)?(?:draw|drawn|drawn numbers?|official numbers?)\b[^.]{0,45}\b(?:is|are|does|do)\s+not\s+(?:used|affect|matter|change|influence)\b/u.test(normalized) ||
     /\b(?:ignora|ignorar|sem usar|nao usa|nao depende|independente)\b[^.]{0,70}\b(?:sorteio|sorteados?|numeros oficiais)\b/u.test(normalized)
   );
 }

@@ -82,6 +82,9 @@ import {
   getOperatorAiOperationsSnapshot,
   buildRuleRefinementFeedback,
   enforceKnownRuleInterpretation,
+  enforceSourceAmbiguity,
+  enforceSourceClarity,
+  selectCompilationText,
   type AuditLogRecord,
   type GuessVerificationResultRecord,
   type RuleProposalRecord,
@@ -312,6 +315,68 @@ test("known ordered tens-range evidence aligns the public interpretation with th
     /divide.*by 10.*integer division/i,
   );
   assert.deepEqual(interpretation.suggestedRewrites, []);
+});
+
+test("source vagueness cannot be silently made objective by the model", () => {
+  const concreteModelAnswer = {
+    addedOperationalClauses: [],
+    clarificationQuestions: [],
+    clarityNote: "",
+    dealerMessage: "I interpreted this as one exact position.",
+    needsClarification: false,
+    normalizedText:
+      "A guess wins if at least one number matches the draw in the same position.",
+    officialInterpretation:
+      "At least one guessed number must equal the drawn number in the same position.",
+    suggestedRewrites: [],
+    title: "One Position Match",
+  };
+
+  const result = enforceSourceAmbiguity(
+    "A guess wins if some of its positions match the draw exactly.",
+    concreteModelAnswer,
+  );
+
+  assert.equal(result.needsClarification, true);
+  assert.deepEqual(result.clarificationQuestions, [
+    "How many positions must match the draw exactly?",
+  ]);
+  assert.deepEqual(result.suggestedRewrites, []);
+});
+
+test("the player's compilable text takes precedence over a lossy model paraphrase", () => {
+  const source =
+    "Every guessed number is within 6 of the drawn number in the same position, and at least one guessed number exactly equals the drawn number in that position.";
+  const lossy =
+    "A guess wins if exactly one guessed number appears anywhere in the official draw.";
+  assert.equal(selectCompilationText(source, lossy), source);
+
+  const unsupportedSource = "Make the rule numerically beautiful.";
+  assert.equal(
+    selectCompilationText(unsupportedSource, lossy),
+    lossy,
+  );
+});
+
+test("a deterministic objective rule cannot inherit an invented model question", () => {
+  const source =
+    "A guess wins if it contains 42 and the sum of the six drawn numbers is below 150.";
+  const result = enforceSourceClarity(source, {
+    addedOperationalClauses: [],
+    clarificationQuestions: ["Did you mean a shared outcome?"],
+    clarityNote: "Maybe the scope is unclear.",
+    dealerMessage: "Please clarify.",
+    needsClarification: true,
+    normalizedText: source,
+    officialInterpretation:
+      "A guess wins if it contains 42 and the draw sum is below 150.",
+    suggestedRewrites: [],
+    title: "Forty Two And Low Draw",
+  });
+
+  assert.equal(result.needsClarification, false);
+  assert.deepEqual(result.clarificationQuestions, []);
+  assert.equal(result.clarityNote, "");
 });
 
 test("rule proposal preserves the dealer-generated title", () => {

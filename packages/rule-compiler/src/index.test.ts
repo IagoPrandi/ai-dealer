@@ -166,7 +166,7 @@ test("validates and precompiles a clear match-count rule", () => {
   assert.ok((result.artifact?.evaluatedTestCases.length ?? 0) > 0);
   assert.ok((result.artifact?.harnessCases.length ?? 0) > 0);
   assert.equal(result.artifact?.skillVersion, RULE_COMPILER_SKILL_VERSION);
-  assert.equal(result.artifact?.testHarnessVersion, "2.1.0");
+  assert.equal(result.artifact?.testHarnessVersion, "2.2.0");
 });
 
 test("validates supported sum and exact-order rules", () => {
@@ -2285,7 +2285,7 @@ test("a cardinality phrase is not a match threshold", () => {
   );
 });
 
-test("interpretation coverage runs when no independent reviewer exists", () => {
+test("an explicit six-number set compiles without losing enumerated values", () => {
   // The reviewer used to be the same compileSupportedRule call on the same text
   // as the AST under review, so it always agreed with itself and the coverage
   // gate behind it never ran on the deterministic path — leaving the turn-55
@@ -2293,8 +2293,21 @@ test("interpretation coverage runs when no independent reviewer exists", () => {
   const exactSet = compile(
     "A guess wins if its six numbers are exactly 1, 2, 3, 4, 5 and 6 in any order.",
   );
-  assert.equal(exactSet.decision, "INVALID");
-  assert.ok(exactSet.log.reasonCodes.includes("INTERPRETATION_MISMATCH"));
+  assert.equal(exactSet.decision, "VALID");
+  assert.equal(
+    evaluatePredicate(exactSet.artifact!.ast, {
+      draw: [10, 20, 30, 40, 50, 60],
+      guess: [1, 2, 3, 4, 5, 6],
+    }).result,
+    "WIN",
+  );
+  assert.equal(
+    evaluatePredicate(exactSet.artifact!.ast, {
+      draw: [10, 20, 30, 40, 50, 60],
+      guess: [1, 2, 3, 4, 5, 7],
+    }).result,
+    "LOSE",
+  );
 });
 
 test("an operation the player named must survive compilation", () => {
@@ -2414,5 +2427,111 @@ test("G04 preserves the negative bound for a sum that is at least N lower", () =
     assert.equal(evaluate([5, 15, 25, 35, 55, 65]), "WIN", "exactly 10 lower");
     assert.equal(evaluate([5, 15, 25, 35, 56, 65]), "LOSE", "only 9 lower");
     assert.equal(evaluate([10, 20, 30, 40, 50, 70]), "LOSE", "10 higher");
+  }
+});
+
+test("stress set 4 objective rules compile to their stated boundary behaviour", () => {
+  const cases: Array<{
+    text: string;
+    fixtures: Array<{ draw: number[]; guess: number[]; expected: "WIN" | "LOSE" }>;
+  }> = [
+    {
+      text: "Every guessed number must be within 4 of the drawn number in the same position, and at least two guessed numbers must exactly equal their drawn numbers in those positions.",
+      fixtures: [
+        { guess: [10, 20, 34, 44, 54, 64], draw: [10, 20, 30, 40, 50, 60], expected: "WIN" },
+        { guess: [14, 24, 34, 44, 54, 64], draw: [10, 20, 30, 40, 50, 60], expected: "LOSE" },
+      ],
+    },
+    {
+      text: "A guess wins if the sum of its numbers is at least 12 higher than the sum of the drawn numbers.",
+      fixtures: [
+        { guess: [10, 20, 30, 40, 50, 72], draw: [10, 20, 30, 40, 50, 60], expected: "WIN" },
+        { guess: [10, 20, 30, 40, 50, 71], draw: [10, 20, 30, 40, 50, 60], expected: "LOSE" },
+      ],
+    },
+    {
+      text: "A guess wins if the sum of its three smallest numbers is greater than the sum of the three smallest drawn numbers.",
+      fixtures: [
+        { guess: [11, 21, 31, 70, 80, 90], draw: [10, 20, 30, 80, 90, 100], expected: "WIN" },
+        { guess: [9, 20, 30, 70, 80, 90], draw: [10, 20, 30, 80, 90, 100], expected: "LOSE" },
+      ],
+    },
+    {
+      text: "A guess wins if none of its even guessed numbers appear anywhere in the official draw.",
+      fixtures: [
+        { guess: [4, 6, 13, 15, 17, 19], draw: [2, 3, 5, 7, 9, 11], expected: "WIN" },
+        { guess: [2, 4, 13, 15, 17, 19], draw: [2, 3, 5, 7, 9, 11], expected: "LOSE" },
+      ],
+    },
+    {
+      text: "A guess wins if its number sum modulo 7 equals the official draw's number sum modulo 7.",
+      fixtures: [
+        { guess: [5, 15, 25, 35, 55, 75], draw: [10, 20, 30, 40, 50, 60], expected: "WIN" },
+        { guess: [5, 15, 25, 35, 55, 76], draw: [10, 20, 30, 40, 50, 60], expected: "LOSE" },
+      ],
+    },
+    {
+      text: "A guess wins if it contains 42 and the sum of the six drawn numbers is below 150.",
+      fixtures: [
+        { guess: [1, 2, 3, 4, 5, 42], draw: [1, 2, 3, 4, 5, 100], expected: "WIN" },
+        { guess: [1, 2, 3, 4, 5, 41], draw: [1, 2, 3, 4, 5, 100], expected: "LOSE" },
+        { guess: [1, 2, 3, 4, 5, 42], draw: [10, 20, 30, 40, 50, 60], expected: "LOSE" },
+      ],
+    },
+    {
+      text: "A guess wins if all six guessed numbers are strictly greater than 10 and strictly less than 90.",
+      fixtures: [
+        { guess: [11, 20, 30, 40, 50, 89], draw: [10, 20, 30, 40, 50, 60], expected: "WIN" },
+        { guess: [10, 20, 30, 40, 50, 89], draw: [10, 20, 30, 40, 50, 60], expected: "LOSE" },
+        { guess: [11, 20, 30, 40, 50, 90], draw: [10, 20, 30, 40, 50, 60], expected: "LOSE" },
+      ],
+    },
+    {
+      text: "A guess wins if its total is at least ten lower than the official draw total.",
+      fixtures: [
+        { guess: [5, 15, 25, 35, 55, 65], draw: [10, 20, 30, 40, 50, 60], expected: "WIN" },
+        { guess: [5, 15, 25, 35, 56, 65], draw: [10, 20, 30, 40, 50, 60], expected: "LOSE" },
+      ],
+    },
+    {
+      text: "A guess wins if its six numbers are exactly 1, 2, 3, 4, 5 and 6 in any order and at least one drawn number is between 40 and 60, inclusive.",
+      fixtures: [
+        { guess: [1, 2, 3, 4, 5, 6], draw: [10, 20, 30, 40, 70, 80], expected: "WIN" },
+        { guess: [1, 2, 3, 4, 5, 7], draw: [10, 20, 30, 40, 70, 80], expected: "LOSE" },
+        { guess: [1, 2, 3, 4, 5, 6], draw: [1, 2, 3, 98, 99, 100], expected: "LOSE" },
+      ],
+    },
+    {
+      text: "A guess wins if all six drawn numbers are below 40. The player's guessed numbers do not affect the result.",
+      fixtures: [
+        { guess: [50, 60, 70, 80, 90, 100], draw: [1, 2, 3, 4, 5, 39], expected: "WIN" },
+        { guess: [1, 2, 3, 4, 5, 6], draw: [1, 2, 3, 4, 5, 40], expected: "LOSE" },
+      ],
+    },
+    {
+      text: "A guess wins if it contains the number 77. The official draw does not affect the result.",
+      fixtures: [
+        { guess: [1, 2, 3, 4, 5, 77], draw: [10, 20, 30, 40, 50, 60], expected: "WIN" },
+        { guess: [1, 2, 3, 4, 5, 76], draw: [10, 20, 30, 40, 50, 60], expected: "LOSE" },
+      ],
+    },
+  ];
+
+  for (const testCase of cases) {
+    const result = compile(testCase.text);
+    assert.equal(result.decision, "VALID", testCase.text);
+    if (testCase.text.includes("at least two guessed numbers")) {
+      assert.equal(
+        result.artifact?.officialInterpretation,
+        "A guess wins if every guessed number is within 4 of the drawn number in the same position and at least 2 guessed positions exactly match the draw.",
+      );
+    }
+    for (const fixture of testCase.fixtures) {
+      assert.equal(
+        evaluatePredicate(result.artifact!.ast, fixture).result,
+        fixture.expected,
+        testCase.text,
+      );
+    }
   }
 });

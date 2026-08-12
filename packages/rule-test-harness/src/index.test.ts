@@ -3,7 +3,12 @@ import { test } from "node:test";
 
 import type { RuleAst } from "@tyche/rule-schema";
 
-import { classifyDifficulty, generateAndRunTests } from "./index.js";
+import {
+  classifyDifficulty,
+  collectWorkedExamples,
+  generateAndRunTests,
+  hasWinningWitness,
+} from "./index.js";
 
 const matchAtLeast = (value: number): RuleAst => ({
   schemaVersion: 2,
@@ -110,6 +115,28 @@ test("a ranking rule is never IMPOSSIBLE and surfaces non-winners", () => {
   assert.equal(summary.cases.find((c) => c.name === "has_winning_case")?.passed, true);
   assert.equal(summary.cases.find((c) => c.name === "has_losing_case")?.passed, true);
   assert.equal(summary.cases.find((c) => c.name === "deterministic")?.passed, true);
+});
+
+test("an AST-pinned exact guess set is rare but constructibly winnable", () => {
+  const values = [8, 16, 24, 32, 40, 48];
+  const ast: RuleAst = {
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "and",
+        clauses: values.map((value) => ({
+          kind: "contains" as const,
+          array: { kind: "source" as const, source: "guess" as const },
+          value: { kind: "lit" as const, value },
+        })),
+      },
+    },
+  };
+
+  assert.equal(hasWinningWitness(ast), true);
+  assert.equal(classifyDifficulty(ast).difficultyClass, "EXTREME");
+  assert.ok(collectWorkedExamples(ast).some((example) => example.outcome === "WIN"));
 });
 
 test("difficulty estimate is reproducible for the same AST", () => {

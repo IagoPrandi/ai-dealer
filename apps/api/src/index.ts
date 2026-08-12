@@ -34,6 +34,7 @@ import {
 import {
   compileRuleArtifact,
   externalDependencyGateText,
+  hasAmbiguousWording,
   hasExternalDependency,
   hasInvalidConstraint,
   looksLikeOrderedTensRangeRule,
@@ -2023,6 +2024,80 @@ export function enforceKnownRuleInterpretation(
   return createKnownRuleInterpretation(sourceText) ?? interpretation;
 }
 
+export function enforceSourceAmbiguity(
+  sourceText: string,
+  interpretation: RuleAgentInterpretation,
+): RuleAgentInterpretation {
+  if (!hasAmbiguousWording(sourceText) || interpretation.needsClarification) {
+    return interpretation;
+  }
+  const normalized = sourceText.toLowerCase();
+  const question = /\bsome\b[^.]{0,50}\bpositions?\b/u.test(normalized)
+    ? "How many positions must match the draw exactly?"
+    : /\b(?:near|almost|close)\b/u.test(normalized)
+      ? "What exact match count or numeric distance defines this near match?"
+      : "Which measurable numeric property and threshold should define this condition?";
+  const clarityNote =
+    "The player's wording is subjective or leaves a required threshold undefined.";
+  return {
+    ...interpretation,
+    clarificationQuestions: [question],
+    clarityNote,
+    dealerMessage: `${clarityNote} Please define it before the rule is submitted.`,
+    needsClarification: true,
+    suggestedRewrites: [],
+  };
+}
+
+export function enforceSourceClarity(
+  sourceText: string,
+  interpretation: RuleAgentInterpretation,
+): RuleAgentInterpretation {
+  if (hasAmbiguousWording(sourceText) || !interpretation.needsClarification) {
+    return interpretation;
+  }
+  const sourceValidation = validateAndPrecompileRule({
+    originalText: sourceText,
+    prompt: sourceText,
+    tokenCount: countRuleTokens(sourceText),
+  });
+  if (sourceValidation.decision !== "VALID") {
+    return interpretation;
+  }
+  return {
+    ...interpretation,
+    clarificationQuestions: [],
+    clarityNote: "",
+    dealerMessage: sourceValidation.artifact?.officialInterpretation ?? interpretation.dealerMessage,
+    needsClarification: false,
+    suggestedRewrites: [],
+  };
+}
+
+function reconcileSourceClarity(
+  sourceText: string,
+  interpretation: RuleAgentInterpretation,
+) {
+  return enforceSourceClarity(
+    sourceText,
+    enforceSourceAmbiguity(sourceText, interpretation),
+  );
+}
+
+export function selectCompilationText(
+  sourceText: string,
+  normalizedInterpretation: string,
+): string {
+  const sourceValidation = validateAndPrecompileRule({
+    originalText: sourceText,
+    prompt: sourceText,
+    tokenCount: countRuleTokens(sourceText),
+  });
+  return sourceValidation.decision === "VALID"
+    ? sourceText
+    : normalizedInterpretation;
+}
+
 interface RuleRefinementFeedbackInput {
   agentClarificationQuestions?: readonly string[];
   agentSuggestedRewrites?: readonly string[];
@@ -2400,12 +2475,14 @@ async function createRuleInterpretation(
     model: agentConfig.model,
     stage: "interpreting",
   });
-  const interpretation =
+  const interpretation = reconcileSourceClarity(
+    sanitizedText,
     knownInterpretation ??
-    enforceKnownRuleInterpretation(
-      `${englishText} ${sanitizedText}`,
-      await interpretRuleWithAgent(englishText, agentConfig, signal),
-    );
+      enforceKnownRuleInterpretation(
+        `${englishText} ${sanitizedText}`,
+        await interpretRuleWithAgent(englishText, agentConfig, signal),
+      ),
+  );
 
   return {
     addedOperationalClauses: interpretation.addedOperationalClauses,
@@ -2558,12 +2635,14 @@ async function createRulePreflight(
       model,
       stage: model === agentConfig.model ? "interpreting" : "escalating",
     });
-    const interpretation =
+    const interpretation = reconcileSourceClarity(
+      sanitizedText,
       knownInterpretation ??
-      enforceKnownRuleInterpretation(
-        `${compileText} ${sanitizedText}`,
-        await interpretRuleWithAgent(compileText, passConfig, signal),
-      );
+        enforceKnownRuleInterpretation(
+          `${compileText} ${sanitizedText}`,
+          await interpretRuleWithAgent(compileText, passConfig, signal),
+        ),
+    );
     reportProgress({
       message: "Building and testing the executable rule...",
       model,
@@ -2571,6 +2650,10 @@ async function createRulePreflight(
     });
     const astProvider: RuleAstProvider = async ({ normalizedText }) =>
       compileRuleToAst(normalizedText, passConfig, signal);
+    const compilationText = selectCompilationText(
+      sanitizedText,
+      interpretation.normalizedText,
+    );
     const validation = await compileRuleArtifact(
       {
         model,
@@ -2580,7 +2663,7 @@ async function createRulePreflight(
         // call whenever the deterministic compiler already supports the
         // normalized rule, while groundedness below still compares it with the
         // player's source meaning.
-        prompt: interpretation.normalizedText,
+        prompt: compilationText,
         ruleId,
         tokenCount,
       },
