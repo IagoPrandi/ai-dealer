@@ -119,8 +119,13 @@ export interface ActiveTurnSnapshot {
 
 export interface RulePreflightResult {
   addedOperationalClauses: string[];
+  ast?: unknown | null;
   clarityNote: string;
   confirmationRequired: boolean;
+  coverage: {
+    missingFromAst: number[];
+    missingOperations: Array<"digit" | "mod" | "parity" | "sum">;
+  } | null;
   // Compile-gate verdict: the rule is only proposable when decision === "VALID".
   compiledArtifactHash?: string | null;
   decision?: "VALID" | "INVALID";
@@ -135,6 +140,7 @@ export interface RulePreflightResult {
   officialInterpretationHash: readonly number[];
   preflightResultHash: readonly number[];
   reasonSummary?: string;
+  reasonCodes: string[];
   refinementFocus?: readonly string[];
   refinementQuestions?: readonly string[];
   reproposalBlocked?: boolean;

@@ -17,6 +17,8 @@ export interface RuleGuidanceContext extends RuleRefinementContext {
   apiCode?: string | null;
   clarityNote?: string | null;
   confirmationRequired?: boolean;
+  /** A conversational suggestion that still must go through normal preflight. */
+  dealerSuggestion?: boolean;
   needsClarification?: boolean;
   reasonSummary?: string | null;
   /** The rule's canonical meaning already held a mandate (was Rule of the Hour)
@@ -29,6 +31,16 @@ export interface RuleGuidanceContext extends RuleRefinementContext {
 export interface RuleGuidanceOption {
   label: string;
   text: string;
+}
+
+export function getVisibleRuleDifficultyClass(input: {
+  ast?: unknown | null;
+  decision?: "INVALID" | "VALID";
+  difficultyClass?: string;
+}) {
+  return input.decision === "VALID" || Boolean(input.ast)
+    ? input.difficultyClass
+    : undefined;
 }
 
 const CHAT_TOPIC_PATTERN =
@@ -102,12 +114,18 @@ export function getRuleRefinementBase(context: RuleRefinementContext) {
 
 export function isExplicitRuleRefinementPatch(message: string) {
   const trimmed = message.trim();
-  return Boolean(trimmed) && !NEW_RULE_PATTERN.test(trimmed) && EXPLICIT_PATCH_PATTERN.test(trimmed);
+  return (
+    Boolean(trimmed) &&
+    !NEW_RULE_PATTERN.test(trimmed) &&
+    EXPLICIT_PATCH_PATTERN.test(trimmed)
+  );
 }
 
 export function isRuleCreationHelpRequest(message: string) {
   const normalized = normalizeIntentText(message);
-  return RULE_CREATION_HELP_REQUEST_PATTERNS.some((pattern) => pattern.test(normalized));
+  return RULE_CREATION_HELP_REQUEST_PATTERNS.some((pattern) =>
+    pattern.test(normalized),
+  );
 }
 
 export function isRuleRefinementPatch(
@@ -150,19 +168,29 @@ export function composeRefinedRuleDraft(
     if (orderQuestion) {
       return `${cleanSentence(base)}. Order is ignored.`;
     }
-    const confirmsSharedOutcome = context.refinementQuestions?.some((question) =>
-      /ignore the player's guess|every eligible guess wins or loses together/i.test(question),
+    const confirmsSharedOutcome = context.refinementQuestions?.some(
+      (question) =>
+        /ignore the player's guess|every eligible guess wins or loses together/i.test(
+          question,
+        ),
     );
-    const confirmsDrawIndependent = context.refinementQuestions?.some((question) =>
-      /ignore the official draw|fixed before the draw/i.test(question),
+    const confirmsDrawIndependent = context.refinementQuestions?.some(
+      (question) =>
+        /ignore the official draw|fixed before the draw/i.test(question),
     );
-    const confirmsInclusiveRange = context.refinementQuestions?.some((question) =>
-      /range include both endpoints/i.test(question),
+    const confirmsInclusiveRange = context.refinementQuestions?.some(
+      (question) => /range include both endpoints/i.test(question),
     );
     const confirmations = [
-      confirmsSharedOutcome ? "The player's guess does not affect the result." : "",
-      confirmsDrawIndependent ? "The official draw does not affect the result." : "",
-      confirmsInclusiveRange ? "The numeric range includes both endpoints." : "",
+      confirmsSharedOutcome
+        ? "The player's guess does not affect the result."
+        : "",
+      confirmsDrawIndependent
+        ? "The official draw does not affect the result."
+        : "",
+      confirmsInclusiveRange
+        ? "The numeric range includes both endpoints."
+        : "",
     ].filter(Boolean);
     if (confirmations.length > 0) {
       return `${cleanSentence(base)}. ${confirmations.join(" ")}`;
@@ -178,7 +206,11 @@ export function composeRefinedRuleDraft(
     }
   }
 
-  if (/\b(ignore|regardless|any order|unordered|order does not matter)\b/i.test(correction)) {
+  if (
+    /\b(ignore|regardless|any order|unordered|order does not matter)\b/i.test(
+      correction,
+    )
+  ) {
     return `${cleanSentence(base)}. Order is ignored.`;
   }
 
@@ -186,7 +218,11 @@ export function composeRefinedRuleDraft(
     return `${cleanSentence(base)}. Order matters exactly as submitted.`;
   }
 
-  if (/\bat least\s+([1-6]|one|two|three|four|five|six)\b.{0,80}\breversed?\s+positions?\b.{0,30}\bmatch/i.test(correction)) {
+  if (
+    /\bat least\s+([1-6]|one|two|three|four|five|six)\b.{0,80}\breversed?\s+positions?\b.{0,30}\bmatch/i.test(
+      correction,
+    )
+  ) {
     return `${cleanSentence(base)}. ${correction}.`;
   }
 
@@ -194,6 +230,9 @@ export function composeRefinedRuleDraft(
 }
 
 export function getRuleGuidanceTitle(context: RuleGuidanceContext) {
+  if (context.dealerSuggestion) {
+    return "Try this rule?";
+  }
   if (context.triviallyAlwaysTrue) {
     return "Choose a valid variation";
   }
@@ -203,7 +242,10 @@ export function getRuleGuidanceTitle(context: RuleGuidanceContext) {
   if (context.reproposalBlocked) {
     return "Differentiate this rule?";
   }
-  if (context.apiCode || context.reasonSummary?.toLowerCase().includes("external")) {
+  if (
+    context.apiCode ||
+    context.reasonSummary?.toLowerCase().includes("external")
+  ) {
     return "Fix this blocked rule?";
   }
   return "Clarify this rule?";
@@ -219,7 +261,9 @@ export function buildRuleGuidanceOptions(
   const rewrites = context.suggestedRewrites ?? [];
   return dedupeOptions(
     rewrites.map((text) => ({
-      label: "Use intent-preserving rewrite",
+      label: context.dealerSuggestion
+        ? "Try dealer suggestion"
+        : "Use intent-preserving rewrite",
       text,
     })),
   ).slice(0, 4);

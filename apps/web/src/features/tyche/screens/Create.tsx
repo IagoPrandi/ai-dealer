@@ -33,8 +33,8 @@ import {
   buildRuleGuidanceOptions,
   composeRefinedRuleDraft,
   getRuleGuidanceTitle,
+  getVisibleRuleDifficultyClass,
   isExplicitRuleRefinementPatch,
-  isRuleCreationHelpRequest,
   isRuleRefinementPatch,
   type RuleGuidanceOption,
 } from "../ruleRefinement";
@@ -75,6 +75,7 @@ interface ChatMessage {
 
 interface RuleGuidanceState {
   options: RuleGuidanceOption[];
+  questions: readonly string[];
   terminalRejection: boolean;
   title: string;
 }
@@ -117,6 +118,16 @@ function isLikelyRuleDraft(text: string) {
   if (!trimmed || GREETING_PATTERN.test(trimmed)) {
     return false;
   }
+  if (
+    QUESTION_PATTERN.test(trimmed) ||
+    COST_TOPIC_PATTERN.test(trimmed) ||
+    EXAMPLE_TOPIC_PATTERN.test(trimmed) ||
+    HOW_IT_WORKS_TOPIC_PATTERN.test(trimmed) ||
+    ALLOWED_TOPIC_PATTERN.test(trimmed) ||
+    RULE_TIPS_TOPIC_PATTERN.test(trimmed)
+  ) {
+    return false;
+  }
 
   return (
     SECURITY_RULE_DRAFT_PATTERN.test(trimmed) ||
@@ -125,36 +136,12 @@ function isLikelyRuleDraft(text: string) {
   );
 }
 
-function getDealerChatReply(
-  text: string,
-  fees: { play: number; playNext: number; remove: number; rule: number; ruleNext: number; vote: number },
-) {
+function getLocalGreetingReply(text: string) {
   const trimmed = text.trim();
   if (GREETING_PATTERN.test(trimmed)) {
     return "Hey. Send me one winner condition based on the guess and the official draw.";
   }
-  if (isRuleCreationHelpRequest(trimmed)) {
-    return "To create a different rule, send a complete winner condition in one sentence, starting with something like: Win if... I will treat questions as chat, not as edits, unless you send a clear correction or a complete rule.";
-  }
-  if (COST_TOPIC_PATTERN.test(trimmed)) {
-    return `Submitting this rule costs ${fees.ruleNext === 0 ? "Free" : `${fmtSol(fees.ruleNext)} SOL`}. Chat and preflight are free; payment only happens after the compiler returns a valid rule and you confirm submission.`;
-  }
-  if (EXAMPLE_TOPIC_PATTERN.test(trimmed)) {
-    return "Try one of these:\nWin if at least 4 of your numbers appear in the draw.\nWin if the sum of your numbers equals the sum of the drawn numbers.\nWin if the player matches more numbers than anyone else.";
-  }
-  if (HOW_IT_WORKS_TOPIC_PATTERN.test(trimmed)) {
-    return "Write one winner condition. I check that it only uses the player's guess and the official draw, compile it into a deterministic rule, then you review it before paying.";
-  }
-  if (ALLOWED_TOPIC_PATTERN.test(trimmed)) {
-    return "A valid rule can compare the player's guess with the official draw: matches, misses, sums, order, positions, parity, ranges, digits, or closest/highest/lowest scores. It cannot use wallet history, time, randomness outside the draw, or off-chain events.";
-  }
-  if (RULE_TIPS_TOPIC_PATTERN.test(trimmed)) {
-    return "Strong rules are clear, measurable, and easy for voters to understand. Use only the guess and official draw, define exact thresholds, avoid off-chain facts, and say whether order or positions matter.";
-  }
-  if (QUESTION_PATTERN.test(trimmed) || trimmed.endsWith("?")) {
-    return "A valid rule can only use the player's guess and the official draw. Write the condition in one sentence, and I will compile it before payment.";
-  }
-  return "I need a winner condition based on the guess and draw. Try: Win if at least 4 of your numbers appear in the draw.";
+  return null;
 }
 
 /**
@@ -224,49 +211,166 @@ function RulePreview({ rule }: { rule: RulePreflightResult }) {
     : terminalRejection
       ? "var(--red)"
       : "var(--yellow)";
-  const difficulty = rule.difficultyClass
-    ? DIFFICULTY_TAG[rule.difficultyClass]
+  const difficultyClass = getVisibleRuleDifficultyClass(rule);
+  const difficulty = difficultyClass
+    ? DIFFICULTY_TAG[difficultyClass]
     : undefined;
   const pct = Math.round((rule.tokenCount / RULE_MAX_TOKENS) * 100);
   return (
-    <div style={{ padding: 16, border: "1px solid var(--line)", borderRadius: 16, background: "var(--surface)", animation: "ide-rise .3s ease both" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+    <div
+      style={{
+        padding: 16,
+        border: "1px solid var(--line)",
+        borderRadius: 16,
+        background: "var(--surface)",
+        animation: "ide-rise .3s ease both",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          marginBottom: 10,
+          flexWrap: "wrap",
+        }}
+      >
         {valid ? null : (
-          <span className="ide-pill" style={{ color: statusColor, padding: "4px 10px" }}>
-            <Ico.info style={{ width: 13, height: 13, color: statusColor }} /> {statusLabel}
+          <span
+            className="ide-pill"
+            style={{ color: statusColor, padding: "4px 10px" }}
+          >
+            <Ico.info style={{ width: 13, height: 13, color: statusColor }} />{" "}
+            {statusLabel}
           </span>
         )}
         {difficulty ? (
           <span
             className="ide-pill"
-            style={{ marginLeft: "auto", color: difficulty.color, padding: "3px 9px", fontSize: 11 }}
+            style={{
+              marginLeft: "auto",
+              color: difficulty.color,
+              padding: "3px 9px",
+              fontSize: 11,
+            }}
             title="How hard this rule is to win"
           >
             {difficulty.label}
           </span>
         ) : null}
-        <span style={{ marginLeft: difficulty ? undefined : "auto", fontSize: 11.5, color: "var(--dim)" }} className="ide-num">{rule.tokenCount}/{RULE_MAX_TOKENS} tokens</span>
+        <span
+          style={{
+            marginLeft: difficulty ? undefined : "auto",
+            fontSize: 11.5,
+            color: "var(--dim)",
+          }}
+          className="ide-num"
+        >
+          {rule.tokenCount}/{RULE_MAX_TOKENS} tokens
+        </span>
       </div>
-      <h2 style={{ margin: "0 0 6px", fontSize: 19, lineHeight: 1.25 }}>{rule.title}</h2>
-      {rule.normalizedText ? <p style={{ margin: "0 0 14px", fontSize: 15, color: "var(--text)", lineHeight: 1.45, fontWeight: 600 }}>{rule.normalizedText}</p> : null}
+      <h2 style={{ margin: "0 0 6px", fontSize: 19, lineHeight: 1.25 }}>
+        {rule.title}
+      </h2>
+      {rule.normalizedText ? (
+        <p
+          style={{
+            margin: "0 0 14px",
+            fontSize: 15,
+            color: "var(--text)",
+            lineHeight: 1.45,
+            fontWeight: 600,
+          }}
+        >
+          {rule.normalizedText}
+        </p>
+      ) : null}
       {rule.officialInterpretation ? (
         <>
           <SectionLabel>How it works</SectionLabel>
-          <p style={{ margin: "7px 0 0", fontSize: 14, lineHeight: 1.55, color: "var(--muted)" }}>{rule.officialInterpretation}</p>
+          <p
+            style={{
+              margin: "7px 0 0",
+              fontSize: 14,
+              lineHeight: 1.55,
+              color: "var(--muted)",
+            }}
+          >
+            {rule.officialInterpretation}
+          </p>
         </>
       ) : null}
       {!valid && rule.reasonSummary ? (
-        <p style={{ margin: "12px 0 0", fontSize: 13, lineHeight: 1.5, color: statusColor, display: "flex", gap: 7 }}>
-          <Ico.info style={{ color: statusColor, flexShrink: 0, marginTop: 1 }} /> {rule.reasonSummary}
+        <p
+          style={{
+            margin: "12px 0 0",
+            fontSize: 13,
+            lineHeight: 1.5,
+            color: statusColor,
+            display: "flex",
+            gap: 7,
+          }}
+        >
+          <Ico.info
+            style={{ color: statusColor, flexShrink: 0, marginTop: 1 }}
+          />{" "}
+          {rule.reasonSummary}
         </p>
+      ) : null}
+      {!valid && rule.refinementFocus?.length ? (
+        <div style={{ display: "grid", gap: 6, marginTop: 12 }}>
+          <SectionLabel>What to adjust</SectionLabel>
+          {rule.refinementFocus.map((item) => (
+            <p
+              key={item}
+              style={{
+                color: "var(--muted)",
+                fontSize: 13,
+                lineHeight: 1.5,
+                margin: 0,
+              }}
+            >
+              {item}
+            </p>
+          ))}
+        </div>
       ) : null}
       {rule.reproposalBlocked ? (
-        <p style={{ margin: "12px 0 0", fontSize: 13, lineHeight: 1.5, color: "var(--red)", display: "flex", gap: 7 }}>
-          <Ico.lock style={{ color: "var(--red)", flexShrink: 0, marginTop: 1 }} /> This rule was already rejected this turn and can&apos;t be re-proposed.
+        <p
+          style={{
+            margin: "12px 0 0",
+            fontSize: 13,
+            lineHeight: 1.5,
+            color: "var(--red)",
+            display: "flex",
+            gap: 7,
+          }}
+        >
+          <Ico.lock
+            style={{ color: "var(--red)", flexShrink: 0, marginTop: 1 }}
+          />{" "}
+          This rule was already rejected this turn and can&apos;t be
+          re-proposed.
         </p>
       ) : null}
-      <div style={{ marginTop: 14, height: 6, borderRadius: 4, background: "var(--surface-3)", overflow: "hidden" }}>
-        <div style={{ width: `${Math.min(100, pct)}%`, height: "100%", background: valid ? "var(--grad-btn)" : statusColor, borderRadius: 4, transition: "width .4s" }} />
+      <div
+        style={{
+          marginTop: 14,
+          height: 6,
+          borderRadius: 4,
+          background: "var(--surface-3)",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            width: `${Math.min(100, pct)}%`,
+            height: "100%",
+            background: valid ? "var(--grad-btn)" : statusColor,
+            borderRadius: 4,
+            transition: "width .4s",
+          }}
+        />
       </div>
     </div>
   );
@@ -280,6 +384,7 @@ function ClarificationPrompt({
   onSelect,
   onSubmit,
   options,
+  questions,
   selectedIndex,
   terminalRejection,
   title,
@@ -291,6 +396,7 @@ function ClarificationPrompt({
   onSelect: (index: number) => void;
   onSubmit: () => void;
   options: readonly RuleGuidanceOption[];
+  questions: readonly string[];
   selectedIndex: number | null;
   terminalRejection: boolean;
   title: string;
@@ -313,9 +419,55 @@ function ClarificationPrompt({
         padding: 12,
       }}
     >
-      <h2 style={{ color: "var(--text)", fontSize: 17, fontWeight: 800, letterSpacing: "-0.01em", lineHeight: 1.2, margin: "0 2px 2px" }}>
+      <h2
+        style={{
+          color: "var(--text)",
+          fontSize: 17,
+          fontWeight: 800,
+          letterSpacing: "-0.01em",
+          lineHeight: 1.2,
+          margin: "0 2px 2px",
+        }}
+      >
         {title}
       </h2>
+      {questions.length > 0 ? (
+        <div
+          aria-label="Clarification questions"
+          style={{
+            background: "var(--surface-2)",
+            border: "1px solid var(--line)",
+            borderRadius: 16,
+            display: "grid",
+            gap: 8,
+            padding: "11px 12px",
+          }}
+        >
+          <SectionLabel>Questions to answer</SectionLabel>
+          {questions.map((question, index) => (
+            <div
+              key={question}
+              style={{
+                alignItems: "start",
+                color: "var(--muted)",
+                display: "grid",
+                fontSize: 13.5,
+                gap: 8,
+                gridTemplateColumns: "22px minmax(0, 1fr)",
+                lineHeight: 1.45,
+              }}
+            >
+              <span
+                className="ide-num"
+                style={{ color: "var(--purple-soft)", fontWeight: 800 }}
+              >
+                {index + 1}.
+              </span>
+              <span>{question}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
       <div style={{ display: "grid", gap: 7 }}>
         {options.map((option, index) => {
           const selected = selectedIndex === index;
@@ -326,9 +478,13 @@ function ClarificationPrompt({
               onClick={() => onSelect(index)}
               style={{
                 alignItems: "center",
-                background: selected ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.035)",
+                background: selected
+                  ? "rgba(255,255,255,0.08)"
+                  : "rgba(255,255,255,0.035)",
                 border: "1px solid transparent",
-                borderColor: selected ? "rgba(255,255,255,0.08)" : "transparent",
+                borderColor: selected
+                  ? "rgba(255,255,255,0.08)"
+                  : "transparent",
                 borderRadius: 18,
                 color: "var(--text)",
                 cursor: "pointer",
@@ -342,10 +498,35 @@ function ClarificationPrompt({
               }}
               type="button"
             >
-              <span className="ide-num" style={{ alignItems: "center", background: selected ? "rgba(244,241,250,0.9)" : "rgba(255,255,255,0.12)", borderRadius: 999, color: selected ? "#17121F" : "var(--muted)", display: "inline-flex", fontSize: 17, fontWeight: 800, height: 40, justifyContent: "center", width: 40 }}>
+              <span
+                className="ide-num"
+                style={{
+                  alignItems: "center",
+                  background: selected
+                    ? "rgba(244,241,250,0.9)"
+                    : "rgba(255,255,255,0.12)",
+                  borderRadius: 999,
+                  color: selected ? "#17121F" : "var(--muted)",
+                  display: "inline-flex",
+                  fontSize: 17,
+                  fontWeight: 800,
+                  height: 40,
+                  justifyContent: "center",
+                  width: 40,
+                }}
+              >
                 {index + 1}
               </span>
-              <span style={{ color: selected ? "var(--text)" : "var(--muted)", fontSize: 15, fontWeight: 400, lineHeight: 1.45, minWidth: 0, overflowWrap: "anywhere" }}>
+              <span
+                style={{
+                  color: selected ? "var(--text)" : "var(--muted)",
+                  fontSize: 15,
+                  fontWeight: 400,
+                  lineHeight: 1.45,
+                  minWidth: 0,
+                  overflowWrap: "anywhere",
+                }}
+              >
                 {option.text}
               </span>
             </button>
@@ -356,7 +537,8 @@ function ClarificationPrompt({
           onClick={onManualSelect}
           style={{
             alignItems: "center",
-            background: selectedIndex === null ? "rgba(255,255,255,0.06)" : "transparent",
+            background:
+              selectedIndex === null ? "rgba(255,255,255,0.06)" : "transparent",
             border: "1px solid transparent",
             borderRadius: 16,
             color: "var(--muted)",
@@ -371,18 +553,60 @@ function ClarificationPrompt({
           }}
           type="button"
         >
-          <span style={{ alignItems: "center", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 999, display: "inline-flex", height: 34, justifyContent: "center", width: 34 }}>
-            <Ico.edit style={{ color: "var(--muted)", height: 17, width: 17 }} />
+          <span
+            style={{
+              alignItems: "center",
+              border: "1px solid rgba(255,255,255,0.14)",
+              borderRadius: 999,
+              display: "inline-flex",
+              height: 34,
+              justifyContent: "center",
+              width: 34,
+            }}
+          >
+            <Ico.edit
+              style={{ color: "var(--muted)", height: 17, width: 17 }}
+            />
           </span>
-          <span style={{ fontSize: 15, fontWeight: 400, lineHeight: 1.45, minWidth: 0, overflowWrap: "anywhere" }}>
-            {manualText.trim() ? manualText : terminalRejection ? "Write a different valid rule..." : "Write your own clarification..."}
+          <span
+            style={{
+              fontSize: 15,
+              fontWeight: 400,
+              lineHeight: 1.45,
+              minWidth: 0,
+              overflowWrap: "anywhere",
+            }}
+          >
+            {manualText.trim()
+              ? manualText
+              : terminalRejection
+                ? "Write a different valid rule..."
+                : "Write your own clarification..."}
           </span>
         </button>
       </div>
-      <div style={{ alignItems: "center", display: "flex", gap: 10, justifyContent: "space-between", paddingTop: 2 }}>
+      <div
+        style={{
+          alignItems: "center",
+          display: "flex",
+          gap: 10,
+          justifyContent: "space-between",
+          paddingTop: 2,
+        }}
+      >
         <button
           onClick={onDismiss}
-          style={{ background: "transparent", border: "none", color: "var(--muted)", cursor: "pointer", fontFamily: "Outfit", fontSize: 14.5, fontWeight: 650, minHeight: 44, padding: "9px 2px" }}
+          style={{
+            background: "transparent",
+            border: "none",
+            color: "var(--muted)",
+            cursor: "pointer",
+            fontFamily: "Outfit",
+            fontSize: 14.5,
+            fontWeight: 650,
+            minHeight: 44,
+            padding: "9px 2px",
+          }}
           type="button"
         >
           Dismiss
@@ -391,10 +615,26 @@ function ClarificationPrompt({
           className="ide-btn"
           disabled={disabled || !canSubmit}
           onClick={onSubmit}
-          style={{ background: "#78b7df", borderRadius: 20, boxShadow: "none", color: "#09131A", minWidth: 112, opacity: disabled || !canSubmit ? 0.5 : 1, padding: "13px 18px" }}
+          style={{
+            background: "#78b7df",
+            borderRadius: 20,
+            boxShadow: "none",
+            color: "#09131A",
+            minWidth: 112,
+            opacity: disabled || !canSubmit ? 0.5 : 1,
+            padding: "13px 18px",
+          }}
           type="button"
         >
-          {terminalRejection ? "Use rule" : "Submit"} <Ico.back style={{ color: "#09131A", height: 18, transform: "rotate(180deg)", width: 18 }} />
+          {terminalRejection ? "Use rule" : "Submit"}{" "}
+          <Ico.back
+            style={{
+              color: "#09131A",
+              height: 18,
+              transform: "rotate(180deg)",
+              width: 18,
+            }}
+          />
         </button>
       </div>
     </div>
@@ -411,17 +651,81 @@ function InterpretationConfirmation({
   onEdit: () => void;
 }) {
   return (
-    <div className="ide-card" style={{ animation: "ide-rise .3s ease both", display: "grid", gap: 12, padding: 16 }}>
+    <div
+      className="ide-card"
+      style={{
+        animation: "ide-rise .3s ease both",
+        display: "grid",
+        gap: 12,
+        padding: 16,
+      }}
+    >
       <div>
         <SectionLabel>My interpretation</SectionLabel>
-        <h2 style={{ fontSize: 19, lineHeight: 1.25, margin: "5px 0 7px" }}>{interpretation.title}</h2>
-        <p style={{ color: "var(--text)", fontSize: 15, fontWeight: 600, lineHeight: 1.48, margin: 0 }}>{interpretation.normalizedText}</p>
+        <h2 style={{ fontSize: 19, lineHeight: 1.25, margin: "5px 0 7px" }}>
+          {interpretation.title}
+        </h2>
+        <p
+          style={{
+            color: "var(--text)",
+            fontSize: 15,
+            fontWeight: 600,
+            lineHeight: 1.48,
+            margin: 0,
+          }}
+        >
+          {interpretation.normalizedText}
+        </p>
       </div>
-      <p style={{ color: "var(--muted)", fontSize: 14, lineHeight: 1.55, margin: 0 }}>{interpretation.officialInterpretation}</p>
-      <p style={{ color: "var(--dim)", fontSize: 13, lineHeight: 1.45, margin: 0 }}>Confirm this interpretation and I will generate the executable rule.</p>
+      <p
+        style={{
+          color: "var(--muted)",
+          fontSize: 14,
+          lineHeight: 1.55,
+          margin: 0,
+        }}
+      >
+        {interpretation.officialInterpretation}
+      </p>
+      <p
+        style={{
+          color: "var(--dim)",
+          fontSize: 13,
+          lineHeight: 1.45,
+          margin: 0,
+        }}
+      >
+        Confirm this interpretation and I will generate the executable rule.
+      </p>
       <div style={{ display: "flex", gap: 8 }}>
-        <button className="ide-btn-ghost ide-btn" onClick={onEdit} style={{ flex: 1, fontSize: 14, lineHeight: 1.2, minHeight: 44, padding: "9px 10px" }} type="button">Edit wording</button>
-        <button className="ide-btn" onClick={onConfirm} style={{ flex: 1, fontSize: 14, lineHeight: 1.2, minHeight: 44, padding: "9px 10px" }} type="button">Confirm and generate</button>
+        <button
+          className="ide-btn-ghost ide-btn"
+          onClick={onEdit}
+          style={{
+            flex: 1,
+            fontSize: 14,
+            lineHeight: 1.2,
+            minHeight: 44,
+            padding: "9px 10px",
+          }}
+          type="button"
+        >
+          Edit wording
+        </button>
+        <button
+          className="ide-btn"
+          onClick={onConfirm}
+          style={{
+            flex: 1,
+            fontSize: 14,
+            lineHeight: 1.2,
+            minHeight: 44,
+            padding: "9px 10px",
+          }}
+          type="button"
+        >
+          Confirm and generate
+        </button>
       </div>
     </div>
   );
@@ -462,16 +766,26 @@ function AgentProgress({
         }}
       />
       <span style={{ display: "grid", gap: 2, minWidth: 0 }}>
-        <span style={{ color: "var(--purple-soft)", fontSize: 11.5, fontWeight: 750, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+        <span
+          style={{
+            color: "var(--purple-soft)",
+            fontSize: 11.5,
+            fontWeight: 750,
+            letterSpacing: "0.06em",
+            textTransform: "uppercase",
+          }}
+        >
           Tyche
         </span>
         <span style={{ color: "var(--text)", fontSize: 14, lineHeight: 1.4 }}>
           {reconnecting
             ? "Reconnecting to the dealer..."
-            : progress?.message ?? "Preparing your rule..."}
+            : (progress?.message ?? "Preparing your rule...")}
         </span>
         {reconnecting && progress?.message ? (
-          <span style={{ color: "var(--dim)", fontSize: 12.5, lineHeight: 1.35 }}>
+          <span
+            style={{ color: "var(--dim)", fontSize: 12.5, lineHeight: 1.35 }}
+          >
             {progress.message}
           </span>
         ) : null}
@@ -503,11 +817,27 @@ function RunInterruptedCard({
         padding: "16px 2px",
       }}
     >
-      <div style={{ alignItems: "center", display: "flex", gap: 9, marginBottom: 7 }}>
+      <div
+        style={{
+          alignItems: "center",
+          display: "flex",
+          gap: 9,
+          marginBottom: 7,
+        }}
+      >
         <Ico.info style={{ color: "var(--yellow)", height: 16, width: 16 }} />
-        <b style={{ fontSize: 15 }}>{expired ? "This run expired" : "Connection lost"}</b>
+        <b style={{ fontSize: 15 }}>
+          {expired ? "This run expired" : "Connection lost"}
+        </b>
       </div>
-      <p style={{ color: "var(--muted)", fontSize: 13.5, lineHeight: 1.5, margin: "0 0 13px" }}>
+      <p
+        style={{
+          color: "var(--muted)",
+          fontSize: 13.5,
+          lineHeight: 1.5,
+          margin: "0 0 13px",
+        }}
+      >
         {expired
           ? "The dealer stopped holding this run. Run it again and I will compile your last message from scratch."
           : "I lost the live connection, but your rule may still be compiling. Reconnect to pick it back up."}
@@ -533,34 +863,109 @@ function RunInterruptedCard({
 }
 
 export function CreateScreen() {
-  const { chatId, client, connected, createIntent, endSeconds, fees, go, newConversationKey, phase1EndsAt, played, reloadAll, seed, turnId, wallet, walletAddress } = useTyche();
+  const {
+    chatId,
+    client,
+    connected,
+    createIntent,
+    endSeconds,
+    fees,
+    go,
+    newConversationKey,
+    phase1EndsAt,
+    played,
+    reloadAll,
+    seed,
+    turnId,
+    wallet,
+    walletAddress,
+  } = useTyche();
 
   // `newConversationKey` stays the remount key and nothing else: it counts how
   // many blank chats this page session has opened, which says nothing about why
   // the screen is mounting now. `createIntent` answers that.
-  return <CreateChat key={`${newConversationKey}:${chatId || seed || "new"}`} {...{ chatId, client, connected, createIntent, endSeconds, fees, go, phase1EndsAt, played, reloadAll, seed, turnId, wallet, walletAddress }} />;
+  return (
+    <CreateChat
+      key={`${newConversationKey}:${chatId || seed || "new"}`}
+      {...{
+        chatId,
+        client,
+        connected,
+        createIntent,
+        endSeconds,
+        fees,
+        go,
+        phase1EndsAt,
+        played,
+        reloadAll,
+        seed,
+        turnId,
+        wallet,
+        walletAddress,
+      }}
+    />
+  );
 }
 
-type ChatProps = Pick<ReturnType<typeof useTyche>, "chatId" | "client" | "connected" | "createIntent" | "endSeconds" | "fees" | "go" | "phase1EndsAt" | "played" | "reloadAll" | "seed" | "turnId" | "wallet" | "walletAddress">;
+type ChatProps = Pick<
+  ReturnType<typeof useTyche>,
+  | "chatId"
+  | "client"
+  | "connected"
+  | "createIntent"
+  | "endSeconds"
+  | "fees"
+  | "go"
+  | "phase1EndsAt"
+  | "played"
+  | "reloadAll"
+  | "seed"
+  | "turnId"
+  | "wallet"
+  | "walletAddress"
+>;
 
-function CreateChat({ chatId, client, connected, createIntent, endSeconds, fees, go, phase1EndsAt, played, reloadAll, seed, turnId, wallet, walletAddress }: ChatProps) {
+function CreateChat({
+  chatId,
+  client,
+  connected,
+  createIntent,
+  endSeconds,
+  fees,
+  go,
+  phase1EndsAt,
+  played,
+  reloadAll,
+  seed,
+  turnId,
+  wallet,
+  walletAddress,
+}: ChatProps) {
   const [msgs, setMsgs] = useState<ChatMessage[]>([
-    { text: "Hey! Tell me in one sentence how your rule decides the round winner. Be creative - I turn it into a valid rule.", who: "ai" },
+    {
+      text: "Hey! Tell me in one sentence how your rule decides the round winner. Be creative - I turn it into a valid rule.",
+      who: "ai",
+    },
   ]);
   const [val, setVal] = useState(seed ?? "");
   const [typing, setTyping] = useState(false);
   const [progress, setProgress] = useState<RulePreflightProgress | null>(null);
-  const [interpretation, setInterpretation] = useState<RuleInterpretationApiResult | null>(null);
+  const [interpretation, setInterpretation] =
+    useState<RuleInterpretationApiResult | null>(null);
   const [rule, setRule] = useState<RulePreflightResult | null>(null);
   const [guidance, setGuidance] = useState<RuleGuidanceState | null>(null);
-  const [selectedGuidanceIndex, setSelectedGuidanceIndex] = useState<number | null>(0);
+  const [selectedGuidanceIndex, setSelectedGuidanceIndex] = useState<
+    number | null
+  >(0);
   const [submitted, setSubmitted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [retryingDraftSave, setRetryingDraftSave] = useState(false);
   const [error, setError] = useState<null | string>(null);
   const [activeDraftId, setActiveDraftId] = useState<null | string>(null);
-  const [runStatus, setRunStatus] = useState<ConversationRunSnapshot["status"]>("done");
-  const [connection, setConnection] = useState<ConversationRunSnapshot["connection"]>("closed");
+  const [runStatus, setRunStatus] =
+    useState<ConversationRunSnapshot["status"]>("done");
+  const [connection, setConnection] =
+    useState<ConversationRunSnapshot["connection"]>("closed");
   const [runJob, setRunJob] = useState<ConversationRunJob | null>(null);
   const [resuming, setResuming] = useState(false);
   // The turn countdown the rest of the app shows: the chat is a game surface
@@ -612,83 +1017,94 @@ function CreateChat({ chatId, client, connected, createIntent, endSeconds, fees,
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [guidance]);
 
-  const openGuidance = useCallback((context: Parameters<typeof buildRuleGuidanceOptions>[0]) => {
-    const options = buildRuleGuidanceOptions(context);
-    setGuidance({
-      options,
-      terminalRejection: Boolean(context.triviallyAlwaysTrue),
-      title: getRuleGuidanceTitle(context),
-    });
-    setSelectedGuidanceIndex(options.length > 0 ? 0 : null);
-  }, []);
+  const openGuidance = useCallback(
+    (context: Parameters<typeof buildRuleGuidanceOptions>[0]) => {
+      const options = buildRuleGuidanceOptions(context);
+      setGuidance({
+        options,
+        questions: context.refinementQuestions ?? [],
+        terminalRejection: Boolean(context.triviallyAlwaysTrue),
+        title: getRuleGuidanceTitle(context),
+      });
+      setSelectedGuidanceIndex(options.length > 0 ? 0 : null);
+    },
+    [],
+  );
 
-  const applyRunSnapshot = useCallback((snapshot: ConversationRunSnapshot) => {
-    setMsgs(snapshot.messages);
-    setTyping(snapshot.status === "pending");
-    setProgress(snapshot.progress);
-    setInterpretation(snapshot.interpretation);
-    setRule(snapshot.rule);
-    setError(snapshot.error);
-    setRunStatus(snapshot.status);
-    setConnection(snapshot.connection);
-    setRunJob(snapshot.job);
-    if (snapshot.status === "pending") {
-      setGuidance(null);
-      return;
-    }
-    if (snapshot.status === "disconnected" || snapshot.status === "expired") {
-      // An interrupted run is not a verdict on the rule: never open guidance.
-      setResuming(false);
-      setGuidance(null);
-      return;
-    }
-    if (snapshot.guidanceContext) {
-      openGuidance(snapshot.guidanceContext);
-      return;
-    }
-    if (snapshot.interpretation) {
-      if (!snapshot.interpretation.needsClarification) {
+  const applyRunSnapshot = useCallback(
+    (snapshot: ConversationRunSnapshot) => {
+      setMsgs(snapshot.messages);
+      setTyping(snapshot.status === "pending");
+      setProgress(snapshot.progress);
+      setInterpretation(snapshot.interpretation);
+      setRule(snapshot.rule);
+      setError(snapshot.error);
+      setRunStatus(snapshot.status);
+      setConnection(snapshot.connection);
+      setRunJob(snapshot.job);
+      if (snapshot.status === "pending") {
+        setGuidance(null);
+        return;
+      }
+      if (snapshot.status === "disconnected" || snapshot.status === "expired") {
+        // An interrupted run is not a verdict on the rule: never open guidance.
+        setResuming(false);
+        setGuidance(null);
+        return;
+      }
+      if (snapshot.guidanceContext) {
+        openGuidance(snapshot.guidanceContext);
+        return;
+      }
+      if (snapshot.interpretation) {
+        if (!snapshot.interpretation.needsClarification) {
+          setGuidance(null);
+          return;
+        }
+        clarificationAttemptsRef.current += 1;
+        openGuidance({
+          clarityNote: snapshot.interpretation.clarityNote,
+          currentRuleText: snapshot.interpretation.sanitizedText,
+          needsClarification: true,
+          refinementQuestions: [],
+          suggestedRewrites: snapshot.interpretation.suggestedRewrites,
+        });
+        return;
+      }
+      if (!snapshot.rule) {
+        setGuidance(null);
+        return;
+      }
+      const valid =
+        snapshot.rule.decision === "VALID" && !snapshot.rule.needsClarification;
+      if (valid) {
+        clarificationAttemptsRef.current = 0;
         setGuidance(null);
         return;
       }
       clarificationAttemptsRef.current += 1;
       openGuidance({
-        clarityNote: snapshot.interpretation.clarityNote,
-        currentRuleText: snapshot.interpretation.sanitizedText,
-        needsClarification: true,
-        refinementQuestions: [],
-        suggestedRewrites: snapshot.interpretation.suggestedRewrites,
+        clarityNote: snapshot.rule.clarityNote,
+        confirmationRequired: snapshot.rule.confirmationRequired,
+        currentRuleText: snapshot.rule.sanitizedText,
+        needsClarification: snapshot.rule.needsClarification,
+        reasonSummary: snapshot.rule.reasonSummary ?? null,
+        refinementQuestions: snapshot.rule.refinementQuestions ?? null,
+        reproposalBlocked: snapshot.rule.reproposalBlocked ?? false,
+        sanitizedText: snapshot.rule.sanitizedText,
+        suggestedRewrite: snapshot.rule.suggestedRewrite ?? null,
+        suggestedRewrites: snapshot.rule.suggestedRewrites ?? null,
+        triviallyAlwaysTrue:
+          snapshot.rule.semanticImpact?.triviallyAlwaysTrue ?? false,
       });
-      return;
-    }
-    if (!snapshot.rule) {
-      setGuidance(null);
-      return;
-    }
-    const valid = snapshot.rule.decision === "VALID" && !snapshot.rule.needsClarification;
-    if (valid) {
-      clarificationAttemptsRef.current = 0;
-      setGuidance(null);
-      return;
-    }
-    clarificationAttemptsRef.current += 1;
-    openGuidance({
-      clarityNote: snapshot.rule.clarityNote,
-      confirmationRequired: snapshot.rule.confirmationRequired,
-      currentRuleText: snapshot.rule.sanitizedText,
-      needsClarification: snapshot.rule.needsClarification,
-      reasonSummary: snapshot.rule.reasonSummary ?? null,
-      refinementQuestions: snapshot.rule.refinementQuestions ?? null,
-      reproposalBlocked: snapshot.rule.reproposalBlocked ?? false,
-      sanitizedText: snapshot.rule.sanitizedText,
-      suggestedRewrite: snapshot.rule.suggestedRewrite ?? null,
-      suggestedRewrites: snapshot.rule.suggestedRewrites ?? null,
-      triviallyAlwaysTrue:
-        snapshot.rule.semanticImpact?.triviallyAlwaysTrue ?? false,
-    });
-  }, [openGuidance]);
+    },
+    [openGuidance],
+  );
 
-  useEffect(() => subscribeConversationRun(activeDraftId, applyRunSnapshot), [activeDraftId, applyRunSnapshot]);
+  useEffect(
+    () => subscribeConversationRun(activeDraftId, applyRunSnapshot),
+    [activeDraftId, applyRunSnapshot],
+  );
 
   // Everything that brings a conversation back on mount, in one place and in
   // one order. Three leads can name the same run - the in-memory snapshot, the
@@ -787,7 +1203,9 @@ function CreateChat({ chatId, client, connected, createIntent, endSeconds, fees,
         draft = body?.drafts.find((entry) => entry.draftId === draftId);
       } catch (cause) {
         if (!cancelled) {
-          setError(`Could not load this conversation. ${describeTxError(cause)}`);
+          setError(
+            `Could not load this conversation. ${describeTxError(cause)}`,
+          );
         }
         return;
       }
@@ -842,7 +1260,10 @@ function CreateChat({ chatId, client, connected, createIntent, endSeconds, fees,
     }
     cancelConversationRun(activeDraftId);
     const confirmation = "Yes, generate this rule.";
-    const transcript: ChatMessage[] = [...msgs, { text: confirmation, who: "user" }];
+    const transcript: ChatMessage[] = [
+      ...msgs,
+      { text: confirmation, who: "user" },
+    ];
     setMsgs(transcript);
     setTyping(true);
     setError(null);
@@ -905,18 +1326,25 @@ function CreateChat({ chatId, client, connected, createIntent, endSeconds, fees,
     };
     const refinedDraft =
       !clarificationBudgetExhausted &&
-      pendingRule && !submitted && (!likelyRuleDraft || explicitPatch) &&
+      pendingRule &&
+      !submitted &&
+      (!likelyRuleDraft || explicitPatch) &&
       isRuleRefinementPatch(t, refinementContext)
         ? composeRefinedRuleDraft(t, refinementContext)
         : null;
-    const ruleText = refinedDraft ?? t;
+    const localGreetingReply =
+      !refinedDraft && !likelyRuleDraft ? getLocalGreetingReply(t) : null;
+    const dealerQuestion =
+      !refinedDraft && !likelyRuleDraft && !localGreetingReply ? t : null;
+    const ruleText =
+      refinedDraft ?? (dealerQuestion ? (pendingRule?.sanitizedText ?? t) : t);
     setVal("");
     setError(null);
     setGuidance(null);
     const transcript: ChatMessage[] = [...msgs, { text: t, who: "user" }];
     setMsgs(transcript);
     setTyping(true);
-    setRule(null);
+    setRule(dealerQuestion || localGreetingReply ? pendingRule : null);
     let draftIdForThisSend = activeDraftId;
     if (!draftIdForThisSend) {
       draftIdForThisSend = createClientDraftId(turnId);
@@ -924,10 +1352,12 @@ function CreateChat({ chatId, client, connected, createIntent, endSeconds, fees,
     }
     startConversationRun({
       draftId: draftIdForThisSend,
+      dealerQuestion,
       initialMessages: transcript,
       lastUserMessage: t,
-      localDealerReply: !refinedDraft && !likelyRuleDraft ? getDealerChatReply(t, fees) : null,
+      localDealerReply: localGreetingReply,
       phase: "interpret",
+      previousRule: dealerQuestion || localGreetingReply ? pendingRule : null,
       refinedDraft,
       ruleText,
       turnId,
@@ -966,7 +1396,9 @@ function CreateChat({ chatId, client, connected, createIntent, endSeconds, fees,
         deriveSubmitGuessAccounts({ player, sequence: 1, turnId }),
       ]);
       if (freshTurn.globalConfig.activeTurnId !== turnId) {
-        throw new Error("The active round changed before rule submission. Reopen the rule composer for the current round.");
+        throw new Error(
+          "The active round changed before rule submission. Reopen the rule composer for the current round.",
+        );
       }
       // Phase 1 (create rules + pick numbers) closes at the rule-election
       // cutoff; the program rejects proposals past it (ActionWindowClosed). Gate
@@ -978,10 +1410,15 @@ function CreateChat({ chatId, client, connected, createIntent, endSeconds, fees,
           turn: freshTurn.turnState,
         });
         if (Math.floor(Date.now() / 1000) >= cutoffSeconds) {
-          throw new Error("Rule creation has closed for this round. New rules open when the next round starts.");
+          throw new Error(
+            "Rule creation has closed for this round. New rules open when the next round starts.",
+          );
         }
       }
-      const ruleProposalAddress = await deriveRuleProposalAddress({ ruleId: rule.ruleId, turnId });
+      const ruleProposalAddress = await deriveRuleProposalAddress({
+        ruleId: rule.ruleId,
+        turnId,
+      });
       const existingRuleProposal = await client.runtime.rpc
         .getAccountInfo(ruleProposalAddress, {
           commitment: "confirmed",
@@ -989,14 +1426,20 @@ function CreateChat({ chatId, client, connected, createIntent, endSeconds, fees,
         })
         .send();
       if (existingRuleProposal.value) {
-        throw new Error("This compiled rule id is already used on devnet. Send the same rule text again so the dealer can issue a fresh preflight before payment.");
+        throw new Error(
+          "This compiled rule id is already used on devnet. Send the same rule text again so the dealer can issue a fresh preflight before payment.",
+        );
       }
       await waitForConfirmedProgramAccount({
         account: accounts.gameToken,
         client,
         label: "Your round pass",
       });
-      const instruction = await createProposeRuleInstruction({ player, preflight: rule, turnId });
+      const instruction = await createProposeRuleInstruction({
+        player,
+        preflight: rule,
+        turnId,
+      });
       const signature = await sendInstruction(client, wallet, instruction);
       const ruleProposal = ruleProposalAddress.toString();
       await postRuleProposal({
@@ -1014,7 +1457,10 @@ function CreateChat({ chatId, client, connected, createIntent, endSeconds, fees,
         await saveConversationDraftSnapshot({
           draftId: activeDraftId,
           lastMessage: "Rule submitted to the round.",
-          messages: [...msgs, { text: "Rule submitted to the round.", who: "ai" }],
+          messages: [
+            ...msgs,
+            { text: "Rule submitted to the round.", who: "ai" },
+          ],
           normalizedText: rule.normalizedText || null,
           officialInterpretation: rule.officialInterpretation || null,
           prompt: rule.sanitizedText,
@@ -1030,7 +1476,9 @@ function CreateChat({ chatId, client, connected, createIntent, endSeconds, fees,
         });
         deleteConversationRun(activeDraftId);
       } catch (draftError) {
-        setError(`Rule submitted, but the draft status could not be updated. ${describeTxError(draftError)}`);
+        setError(
+          `Rule submitted, but the draft status could not be updated. ${describeTxError(draftError)}`,
+        );
       }
     } catch (cause) {
       setError(describeTxError(cause));
@@ -1044,7 +1492,9 @@ function CreateChat({ chatId, client, connected, createIntent, endSeconds, fees,
       return;
     }
 
-    const latestUserMessage = [...msgs].reverse().find((message) => message.who === "user")?.text;
+    const latestUserMessage = [...msgs]
+      .reverse()
+      .find((message) => message.who === "user")?.text;
     const prompt = rule?.sanitizedText ?? latestUserMessage;
     if (!prompt) {
       setError("There is no rule text available to save.");
@@ -1076,7 +1526,9 @@ function CreateChat({ chatId, client, connected, createIntent, endSeconds, fees,
     }
   }
 
-  function reset(message = "On to the next one! How does your new rule decide the winner?") {
+  function reset(
+    message = "On to the next one! How does your new rule decide the winner?",
+  ) {
     cancelConversationRun(activeDraftId);
     forgetLatestConversationRun({
       draftId: activeDraftId,
@@ -1128,7 +1580,9 @@ function CreateChat({ chatId, client, connected, createIntent, endSeconds, fees,
     }
 
     cancelConversationRun(activeDraftId);
-    const lastUserMessage = [...msgs].reverse().find((message) => message.who === "user")?.text;
+    const lastUserMessage = [...msgs]
+      .reverse()
+      .find((message) => message.who === "user")?.text;
     const ruleText = runJob?.ruleText ?? lastUserMessage;
     if (!ruleText) {
       setResuming(false);
@@ -1158,35 +1612,155 @@ function CreateChat({ chatId, client, connected, createIntent, endSeconds, fees,
     phase1EndsAt !== null && Math.floor(Date.now() / 1000) >= phase1EndsAt;
 
   return (
-    <div className="ide-app ide-screen ide-chat-screen" style={{ height: "100%", position: "relative", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+    <div
+      className="ide-app ide-screen ide-chat-screen"
+      style={{
+        height: "100%",
+        position: "relative",
+        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
       <div className="ide-ambient" />
-      <div style={{ position: "relative", zIndex: 2, padding: "var(--ide-shell-content-top) 18px 12px", borderBottom: "1px solid var(--line)", background: "rgba(11,9,16,0.6)", backdropFilter: "blur(10px)" }}>
+      <div
+        style={{
+          position: "relative",
+          zIndex: 2,
+          padding: "var(--ide-shell-content-top) 18px 12px",
+          borderBottom: "1px solid var(--line)",
+          background: "rgba(11,9,16,0.6)",
+          backdropFilter: "blur(10px)",
+        }}
+      >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <button onClick={() => go(chatId ? "profile" : "home")} style={{ width: 40, height: 40, borderRadius: 13, background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--text)", display: "grid", placeItems: "center", cursor: "pointer" }} type="button"><Ico.back /></button>
+          <button
+            onClick={() => go(chatId ? "profile" : "home")}
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 13,
+              background: "var(--surface-2)",
+              border: "1px solid var(--line)",
+              color: "var(--text)",
+              display: "grid",
+              placeItems: "center",
+              cursor: "pointer",
+            }}
+            type="button"
+          >
+            <Ico.back />
+          </button>
           <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
             <Dealer size={30} />
             <div>
-              <div style={{ fontWeight: 800, fontSize: 16, lineHeight: 1.15, whiteSpace: "nowrap" }}>Tyche</div>
-              <div style={{ fontSize: 12, color: connection === "reconnecting" ? "var(--yellow)" : "var(--green)", marginTop: 1, whiteSpace: "nowrap" }}>{submitted ? "● rule submitted" : connection === "reconnecting" ? "● reconnecting" : connected ? "● crafting your rule" : "● preflight is free"}</div>
+              <div
+                style={{
+                  fontWeight: 800,
+                  fontSize: 16,
+                  lineHeight: 1.15,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Tyche
+              </div>
+              <div
+                style={{
+                  fontSize: 12,
+                  color:
+                    connection === "reconnecting"
+                      ? "var(--yellow)"
+                      : "var(--green)",
+                  marginTop: 1,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {submitted
+                  ? "● rule submitted"
+                  : connection === "reconnecting"
+                    ? "● reconnecting"
+                    : connected
+                      ? "● crafting your rule"
+                      : "● preflight is free"}
+              </div>
             </div>
           </div>
-          <div style={{ marginLeft: "auto", display: "grid", gap: 2, justifyItems: "end" }}>
+          <div
+            style={{
+              marginLeft: "auto",
+              display: "grid",
+              gap: 2,
+              justifyItems: "end",
+            }}
+          >
             {endSeconds !== null ? (
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>
-                <Ico.clock style={{ color: "var(--yellow)", width: 13, height: 13 }} /> <span className="ide-num" style={{ color: "var(--text)", fontWeight: 700 }}>{turnH}:{turnM}:{turnS}</span>
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
+                  fontSize: 12,
+                  color: "var(--muted)",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                <Ico.clock
+                  style={{ color: "var(--yellow)", width: 13, height: 13 }}
+                />{" "}
+                <span
+                  className="ide-num"
+                  style={{ color: "var(--text)", fontWeight: 700 }}
+                >
+                  {turnH}:{turnM}:{turnS}
+                </span>
               </span>
             ) : null}
-            <span style={{ fontSize: 12, color: "var(--dim)", whiteSpace: "nowrap" }}>submit <span className="ide-num" style={{ color: "var(--muted)" }}>{fees.ruleNext === 0 ? "Free" : fmtSol(fees.ruleNext)}</span></span>
+            <span
+              style={{
+                fontSize: 12,
+                color: "var(--dim)",
+                whiteSpace: "nowrap",
+              }}
+            >
+              submit{" "}
+              <span className="ide-num" style={{ color: "var(--muted)" }}>
+                {fees.ruleNext === 0 ? "Free" : fmtSol(fees.ruleNext)}
+              </span>
+            </span>
           </div>
         </div>
       </div>
 
-      <div ref={scrollRef} className="ide-scroll" style={{ position: "relative", zIndex: 1, flex: 1, overflowY: "auto", overflowX: "hidden", minWidth: 0, padding: "18px 16px 8px", display: "flex", flexDirection: "column", gap: 12 }}>
+      <div
+        ref={scrollRef}
+        className="ide-scroll"
+        style={{
+          position: "relative",
+          zIndex: 1,
+          flex: 1,
+          overflowY: "auto",
+          overflowX: "hidden",
+          minWidth: 0,
+          padding: "18px 16px 8px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+        }}
+      >
         {msgs.map((mm, i) => (
-          <div key={i} className={mm.who === "ai" ? "ide-bubble-ai" : "ide-bubble-user"} style={{ animation: "ide-rise .3s ease both" }}>{mm.text}</div>
+          <div
+            key={i}
+            className={mm.who === "ai" ? "ide-bubble-ai" : "ide-bubble-user"}
+            style={{ animation: "ide-rise .3s ease both" }}
+          >
+            {mm.text}
+          </div>
         ))}
-        {typing ? <AgentProgress connection={connection} progress={progress} /> : null}
-        {!typing && (runStatus === "disconnected" || runStatus === "expired") ? (
+        {typing ? (
+          <AgentProgress connection={connection} progress={progress} />
+        ) : null}
+        {!typing &&
+        (runStatus === "disconnected" || runStatus === "expired") ? (
           <RunInterruptedCard
             busy={resuming}
             kind={runStatus}
@@ -1216,6 +1790,7 @@ function CreateChat({ chatId, client, connected, createIntent, endSeconds, fees,
             onSelect={(index) => setSelectedGuidanceIndex(index)}
             onSubmit={submitGuidance}
             options={guidance.options}
+            questions={guidance.questions}
             selectedIndex={selectedGuidanceIndex}
             terminalRejection={guidance.terminalRejection}
             title={guidance.title}
@@ -1224,55 +1799,201 @@ function CreateChat({ chatId, client, connected, createIntent, endSeconds, fees,
 
         {rule && valid && !typing ? (
           submitted ? (
-            <div style={{ padding: "16px 2px", borderTop: "1px solid rgba(20,241,149,0.3)", borderBottom: "1px solid var(--line)", animation: "ide-rise .3s ease both" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                <span style={{ width: 28, height: 28, borderRadius: 9, background: "var(--green)", color: "#08110C", display: "grid", placeItems: "center" }}><Ico.check /></span>
+            <div
+              style={{
+                padding: "16px 2px",
+                borderTop: "1px solid rgba(20,241,149,0.3)",
+                borderBottom: "1px solid var(--line)",
+                animation: "ide-rise .3s ease both",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  marginBottom: 8,
+                }}
+              >
+                <span
+                  style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: 9,
+                    background: "var(--green)",
+                    color: "#08110C",
+                    display: "grid",
+                    placeItems: "center",
+                  }}
+                >
+                  <Ico.check />
+                </span>
                 <b style={{ fontSize: 15.5 }}>Rule in the round</b>
               </div>
-              <p style={{ margin: "0 0 14px", color: "var(--muted)", fontSize: 14, lineHeight: 1.5 }}>In voting for round {fmtTurnId(turnId)}. If elected and winners exist, you earn <b style={{ color: "var(--text)" }}>15%</b> of one winner's payout.</p>
+              <p
+                style={{
+                  margin: "0 0 14px",
+                  color: "var(--muted)",
+                  fontSize: 14,
+                  lineHeight: 1.5,
+                }}
+              >
+                In voting for round {fmtTurnId(turnId)}. If elected and winners
+                exist, you earn <b style={{ color: "var(--text)" }}>15%</b> of
+                one winner's payout.
+              </p>
               <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={() => reset()} className="ide-btn-ghost ide-btn" style={{ flex: 1, padding: 13 }} type="button">Create another</button>
-                <button onClick={() => go("vote")} className="ide-btn" style={{ flex: 1, padding: 13 }} type="button">See in voting</button>
+                <button
+                  onClick={() => reset()}
+                  className="ide-btn-ghost ide-btn"
+                  style={{ flex: 1, padding: 13 }}
+                  type="button"
+                >
+                  Create another
+                </button>
+                <button
+                  onClick={() => go("vote")}
+                  className="ide-btn"
+                  style={{ flex: 1, padding: 13 }}
+                  type="button"
+                >
+                  See in voting
+                </button>
               </div>
             </div>
           ) : ruleCreationClosed ? (
-            <div style={{ padding: "16px 2px", borderTop: "1px solid rgba(255,210,63,0.3)", borderBottom: "1px solid var(--line)", animation: "ide-rise .3s ease both" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 7 }}>
-                <Ico.lock style={{ color: "var(--yellow)", width: 16, height: 16 }} />
+            <div
+              style={{
+                padding: "16px 2px",
+                borderTop: "1px solid rgba(255,210,63,0.3)",
+                borderBottom: "1px solid var(--line)",
+                animation: "ide-rise .3s ease both",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 9,
+                  marginBottom: 7,
+                }}
+              >
+                <Ico.lock
+                  style={{ color: "var(--yellow)", width: 16, height: 16 }}
+                />
                 <b style={{ fontSize: 15 }}>Rule creation closed</b>
               </div>
-              <p style={{ margin: "0 0 13px", color: "var(--muted)", fontSize: 13.5, lineHeight: 1.5 }}>The create phase for round {fmtTurnId(turnId)} has ended, so new rules can&apos;t be submitted. Your draft is saved and you can submit it when the next round opens.</p>
-              <button onClick={() => go("home")} className="ide-btn" style={{ width: "100%", padding: 13 }} type="button">
-                <Ico.back style={{ color: "#08110C", transform: "rotate(180deg)" }} /> Back to the round
+              <p
+                style={{
+                  margin: "0 0 13px",
+                  color: "var(--muted)",
+                  fontSize: 13.5,
+                  lineHeight: 1.5,
+                }}
+              >
+                The create phase for round {fmtTurnId(turnId)} has ended, so new
+                rules can&apos;t be submitted. Your draft is saved and you can
+                submit it when the next round opens.
+              </p>
+              <button
+                onClick={() => go("home")}
+                className="ide-btn"
+                style={{ width: "100%", padding: 13 }}
+                type="button"
+              >
+                <Ico.back
+                  style={{ color: "#08110C", transform: "rotate(180deg)" }}
+                />{" "}
+                Back to the round
               </button>
             </div>
           ) : played ? (
-            <button onClick={submit} disabled={busy} className="ide-btn" style={{ padding: 15, fontSize: 15.5, animation: "ide-rise .3s ease both", opacity: busy ? 0.7 : 1 }} type="button">
-              <Ico.check style={{ color: "#08110C" }} /> {busy ? "Submitting..." : `Submit to the round · ${fees.ruleNext === 0 ? "Free" : `${fmtSol(fees.ruleNext)} SOL`}`}
+            <button
+              onClick={submit}
+              disabled={busy}
+              className="ide-btn"
+              style={{
+                padding: 15,
+                fontSize: 15.5,
+                animation: "ide-rise .3s ease both",
+                opacity: busy ? 0.7 : 1,
+              }}
+              type="button"
+            >
+              <Ico.check style={{ color: "#08110C" }} />{" "}
+              {busy
+                ? "Submitting..."
+                : `Submit to the round · ${fees.ruleNext === 0 ? "Free" : `${fmtSol(fees.ruleNext)} SOL`}`}
             </button>
           ) : (
-            <div style={{ padding: "16px 2px", borderTop: "1px solid rgba(255,210,63,0.3)", borderBottom: "1px solid var(--line)", animation: "ide-rise .3s ease both" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 7 }}>
-                <Ico.lock style={{ color: "var(--yellow)", width: 16, height: 16 }} />
+            <div
+              style={{
+                padding: "16px 2px",
+                borderTop: "1px solid rgba(255,210,63,0.3)",
+                borderBottom: "1px solid var(--line)",
+                animation: "ide-rise .3s ease both",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 9,
+                  marginBottom: 7,
+                }}
+              >
+                <Ico.lock
+                  style={{ color: "var(--yellow)", width: 16, height: 16 }}
+                />
                 <b style={{ fontSize: 15 }}>Play to submit</b>
               </div>
-              <p style={{ margin: "0 0 13px", color: "var(--muted)", fontSize: 13.5, lineHeight: 1.5 }}>Make a guess this round to unlock submitting. Your draft stays here.</p>
-              <button onClick={() => go("play")} className="ide-btn" style={{ width: "100%", padding: 13 }} type="button">
-                <Ico.bolt style={{ color: "#08110C" }} /> Play now · {fees.playNext === 0 ? "Free" : `${fmtSol(fees.playNext)} SOL`}
+              <p
+                style={{
+                  margin: "0 0 13px",
+                  color: "var(--muted)",
+                  fontSize: 13.5,
+                  lineHeight: 1.5,
+                }}
+              >
+                Make a guess this round to unlock submitting. Your draft stays
+                here.
+              </p>
+              <button
+                onClick={() => go("play")}
+                className="ide-btn"
+                style={{ width: "100%", padding: 13 }}
+                type="button"
+              >
+                <Ico.bolt style={{ color: "#08110C" }} /> Play now ·{" "}
+                {fees.playNext === 0 ? "Free" : `${fmtSol(fees.playNext)} SOL`}
               </button>
             </div>
           )
         ) : null}
 
         {error ? (
-          <div className="ide-card" style={{ borderColor: "rgba(255,107,107,0.3)", color: "var(--red)", display: "grid", fontSize: 13, gap: 10, padding: "11px 14px" }}>
+          <div
+            className="ide-card"
+            style={{
+              borderColor: "rgba(255,107,107,0.3)",
+              color: "var(--red)",
+              display: "grid",
+              fontSize: 13,
+              gap: 10,
+              padding: "11px 14px",
+            }}
+          >
             <span>{error}</span>
             {isConversationDraftSaveError(error) ? (
               <button
                 className="ide-votebtn"
                 disabled={retryingDraftSave}
                 onClick={() => void retryDraftSave()}
-                style={{ justifySelf: "start", opacity: retryingDraftSave ? 0.7 : 1, padding: "8px 12px" }}
+                style={{
+                  justifySelf: "start",
+                  opacity: retryingDraftSave ? 0.7 : 1,
+                  padding: "8px 12px",
+                }}
                 type="button"
               >
                 {retryingDraftSave ? "Saving..." : "Retry saving"}
@@ -1284,7 +2005,16 @@ function CreateChat({ chatId, client, connected, createIntent, endSeconds, fees,
       </div>
 
       {!submitted ? (
-        <div style={{ position: "relative", zIndex: 2, padding: "10px 14px calc(14px + env(safe-area-inset-bottom,0px))", borderTop: "1px solid var(--line)", background: "rgba(11,9,16,0.7)", backdropFilter: "blur(12px)" }}>
+        <div
+          style={{
+            position: "relative",
+            zIndex: 2,
+            padding: "10px 14px calc(14px + env(safe-area-inset-bottom,0px))",
+            borderTop: "1px solid var(--line)",
+            background: "rgba(11,9,16,0.7)",
+            backdropFilter: "blur(12px)",
+          }}
+        >
           <div style={{ display: "flex", alignItems: "flex-end", gap: 9 }}>
             <textarea
               aria-label="Message"
@@ -1302,10 +2032,45 @@ function CreateChat({ chatId, client, connected, createIntent, endSeconds, fees,
                   }
                 }
               }}
-              placeholder={guidance ? guidance.terminalRejection ? "Choose a valid variation or write a different rule..." : "Choose an option or write your own clarification..." : rule ? "Ask for a tweak or describe another rule..." : "Describe your rule..."}
-              style={{ flex: 1, minWidth: 0, resize: "none", background: "var(--surface)", border: "1px solid var(--line-2)", borderRadius: 16, padding: "13px 15px", color: "var(--text)", fontSize: 15, fontFamily: "Outfit", outline: "none", maxHeight: 90 }}
+              placeholder={
+                guidance
+                  ? guidance.terminalRejection
+                    ? "Choose a valid variation or write a different rule..."
+                    : "Choose an option or write your own clarification..."
+                  : rule
+                    ? "Ask for a tweak or describe another rule..."
+                    : "Describe your rule..."
+              }
+              style={{
+                flex: 1,
+                minWidth: 0,
+                resize: "none",
+                background: "var(--surface)",
+                border: "1px solid var(--line-2)",
+                borderRadius: 16,
+                padding: "13px 15px",
+                color: "var(--text)",
+                fontSize: 15,
+                fontFamily: "Outfit",
+                outline: "none",
+                maxHeight: 90,
+              }}
             />
-            <button aria-label="Send message" onClick={() => void send()} className="ide-btn" style={{ width: 48, height: 48, padding: 0, borderRadius: 15, flexShrink: 0 }} type="button"><Ico.send style={{ color: "#08110C" }} /></button>
+            <button
+              aria-label="Send message"
+              onClick={() => void send()}
+              className="ide-btn"
+              style={{
+                width: 48,
+                height: 48,
+                padding: 0,
+                borderRadius: 15,
+                flexShrink: 0,
+              }}
+              type="button"
+            >
+              <Ico.send style={{ color: "#08110C" }} />
+            </button>
           </div>
         </div>
       ) : null}

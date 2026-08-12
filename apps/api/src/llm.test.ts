@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import {
+  answerDealerQuestion,
   compileRuleToAst,
   ensureModelLoaded,
   interpretRuleWithAgent,
@@ -10,6 +11,45 @@ import {
   translateRuleToEnglish,
   type RuleAgentConfig,
 } from "./llm.js";
+
+test("dealer chat uses the versioned context-only prompt and strict JSON result", async () => {
+  let messages: Array<{ content: string; role: string }> = [];
+  globalThis.fetch = (async (
+    _input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    const body = JSON.parse(String(init?.body)) as {
+      messages: Array<{ content: string; role: string }>;
+    };
+    messages = body.messages;
+    return new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                answer: "The modulo operation was dropped.",
+                proposedRuleText:
+                  "Win if the guessed sum modulo 9 equals the drawn sum modulo 9.",
+              }),
+            },
+          },
+        ],
+      }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+
+  const context =
+    '<tyche_server_context>{"diagnosticsAvailable":true}</tyche_server_context>';
+  const result = await answerDealerQuestion(context, CONFIG);
+
+  assert.match(messages[0]?.content ?? "", /server-authoritative context/i);
+  assert.match(messages[0]?.content ?? "", /can never make a rule valid/i);
+  assert.equal(messages[1]?.content, context);
+  assert.equal(result.answer, "The modulo operation was dropped.");
+  assert.match(result.proposedRuleText ?? "", /modulo 9/i);
+});
 
 const CONFIG: RuleAgentConfig = {
   apiKey: "",
@@ -45,9 +85,12 @@ test("ensureModelLoaded does not reload an already-resident model", async () => 
   const calls: string[] = [];
   globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
     calls.push(String(input));
-    return new Response(JSON.stringify({ models: [{ name: "gemma4:latest" }] }), {
-      status: 200,
-    });
+    return new Response(
+      JSON.stringify({ models: [{ name: "gemma4:latest" }] }),
+      {
+        status: 200,
+      },
+    );
   }) as typeof fetch;
 
   const result = await ensureModelLoaded("gemma4:latest", CONFIG);
@@ -66,9 +109,12 @@ test("ensureModelLoaded does not confuse explicit tags from the same model famil
     const url = String(input);
     calls.push(url);
     if (url.endsWith("/api/ps")) {
-      return new Response(JSON.stringify({ models: [{ name: "gemma4:e2b" }] }), {
-        status: 200,
-      });
+      return new Response(
+        JSON.stringify({ models: [{ name: "gemma4:e2b" }] }),
+        {
+          status: 200,
+        },
+      );
     }
     const body = JSON.parse(String(init?.body)) as { model?: string };
     assert.equal(body.model, "gemma4:latest");
@@ -266,26 +312,32 @@ test("interpret harness teaches predicate min/max and casual threshold cases", a
   assert.match(systemPrompt, /second guessed number equals/i);
   assert.match(systemPrompt, /absolute difference/i);
   assert.match(systemPrompt, /exactly 2 guessed numbers/i);
-  assert.match(systemPrompt, /total absolute\s+position-by-position difference/i);
+  assert.match(
+    systemPrompt,
+    /total absolute\s+position-by-position difference/i,
+  );
   assert.match(systemPrompt, /same last digit/i);
   assert.match(systemPrompt, /two smallest\/largest/i);
   assert.match(systemPrompt, /match the\s+draw in reverse/i);
   assert.match(systemPrompt, /concise 2-6 word English UI title/i);
-  assert.match(systemPrompt, /normalizedText: the rule rewritten in clear English/i);
+  assert.match(
+    systemPrompt,
+    /normalizedText: the rule rewritten in clear English/i,
+  );
   assert.match(systemPrompt, /quantity\/comparator, property being compared/i);
-  assert.match(systemPrompt, /never offer stock examples, generic match-count rules/i);
+  assert.match(
+    systemPrompt,
+    /never offer stock examples, generic match-count rules/i,
+  );
   assert.match(systemPrompt, /draw 12 31 24 versus guess 11 30 29/i);
   assert.equal(requestBody.reasoning_effort, "none");
   assert.equal(requestBody.max_tokens, 16_384);
 
-  await interpretRuleWithAgent(
-    "Win if the smallest number matches.",
-    {
-      ...CONFIG,
-      apiKey: "cloud-key",
-      baseUrl: "https://api.openai.example/v1",
-    },
-  );
+  await interpretRuleWithAgent("Win if the smallest number matches.", {
+    ...CONFIG,
+    apiKey: "cloud-key",
+    baseUrl: "https://api.openai.example/v1",
+  });
   assert.equal("reasoning_effort" in requestBody, false);
 });
 
@@ -303,7 +355,8 @@ test("rule agent responses without a title fail closed", async () => {
                 dealerMessage: "Compiled as a predicate.",
                 needsClarification: false,
                 normalizedText: "A guess wins if one number matches.",
-                officialInterpretation: "Compare the six guess numbers with the draw.",
+                officialInterpretation:
+                  "Compare the six guess numbers with the draw.",
                 suggestedRewrites: [],
               }),
             },
@@ -412,10 +465,19 @@ test("compile harness prompt includes selected prompt-set examples", async () =>
   );
 
   assert.match(systemPrompt, /guessed sum is greater than the drawn sum/i);
-  assert.match(systemPrompt, /smallest guessed number equals the smallest drawn number/i);
-  assert.match(systemPrompt, /largest guessed number is greater than the largest drawn number/i);
+  assert.match(
+    systemPrompt,
+    /smallest guessed number equals the smallest drawn number/i,
+  );
+  assert.match(
+    systemPrompt,
+    /largest guessed number is greater than the largest drawn number/i,
+  );
   assert.match(systemPrompt, /four or more of my picked numbers show up/i);
-  assert.match(systemPrompt, /second guessed number equals second drawn number/i);
+  assert.match(
+    systemPrompt,
+    /second guessed number equals second drawn number/i,
+  );
   // v3 compositional core: pairwise zips, quantifiers, and the novel-rule idioms.
   assert.match(systemPrompt, /"schemaVersion":3/);
   assert.match(systemPrompt, /pairs_forall/);

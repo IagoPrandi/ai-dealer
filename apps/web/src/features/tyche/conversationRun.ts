@@ -1,9 +1,13 @@
 "use client";
 
 import type { RulePreflightResult } from "../../solana/tycheProgram";
-import { buildConversationDraftBody, type ConversationDraftBody } from "./conversationDraft";
+import {
+  buildConversationDraftBody,
+  type ConversationDraftBody,
+} from "./conversationDraft";
 import {
   ApiRequestError,
+  askDealer,
   cancelRulePreflightJob,
   consumeRulePreflightJob,
   postConversationDraft,
@@ -11,6 +15,7 @@ import {
   SseStreamExpiredError,
   startRulePreflightJob,
   type ConsumeRulePreflightJobArgs,
+  type DealerQuestionApiResult,
   type RulePreflightJobOutcome,
 } from "./data/apiClient";
 import type { ConversationMessage } from "./data/types";
@@ -35,6 +40,11 @@ type DraftResponse = {
 };
 
 export interface ConversationRunDeps {
+  askDealer: (args: {
+    draftId: string;
+    message: string;
+    signal?: AbortSignal;
+  }) => Promise<DealerQuestionApiResult>;
   cancelPreflightJob: (jobId: string) => Promise<void>;
   consumePreflightJob: (
     args: ConsumeRulePreflightJobArgs,
@@ -47,6 +57,7 @@ export interface ConversationRunDeps {
   ) => Promise<DraftResponse>;
   readStorage: () => null | Storage;
   startPreflightJob: (args: {
+    draftId?: null | string;
     phase: "compile" | "interpret";
     signal?: AbortSignal;
     text: string;
@@ -54,11 +65,13 @@ export interface ConversationRunDeps {
 }
 
 export interface StartConversationRunArgs {
+  dealerQuestion?: null | string;
   draftId: string;
   initialMessages: ConversationMessage[];
   lastUserMessage: string;
   localDealerReply: null | string;
   phase: "compile" | "interpret";
+  previousRule?: null | RulePreflightResult;
   refinedDraft: null | string;
   ruleText: string;
   turnId: number;
@@ -77,6 +90,7 @@ export interface ResumeConversationRunArgs {
 }
 
 const defaultDeps: ConversationRunDeps = {
+  askDealer,
   cancelPreflightJob: cancelRulePreflightJob,
   consumePreflightJob: consumeRulePreflightJob,
   describeError: describeTxError,
@@ -207,10 +221,14 @@ export function startConversationRun(
     job: null,
     messages: args.initialMessages,
     progress: {
-      message: args.phase === "interpret" ? "Reading your rule..." : "Building your rule...",
+      message: args.dealerQuestion
+        ? "Reviewing your question..."
+        : args.phase === "interpret"
+          ? "Reading your rule..."
+          : "Building your rule...",
       stage: "checking_input",
     },
-    rule: null,
+    rule: args.previousRule ?? null,
     status: "pending",
   });
 
@@ -300,26 +318,31 @@ async function runConversation(
 
   try {
     try {
-      draftId = await saveConversationDraftSnapshot({
-        deps,
-        draftId,
-        lastMessage: args.lastUserMessage,
-        messages: transcript,
-        prompt: args.ruleText,
-        signal,
-        turnId: args.turnId,
-        wallet: args.wallet,
-      }) ?? draftId;
+      draftId =
+        (await saveConversationDraftSnapshot({
+          deps,
+          draftId,
+          lastMessage: args.lastUserMessage,
+          messages: transcript,
+          prompt: args.ruleText,
+          signal,
+          turnId: args.turnId,
+          wallet: args.wallet,
+        })) ?? draftId;
       patchConversationRun(args.draftId, {
         error: null,
         guidanceContext: null,
         interpretation: null,
         messages: transcript,
         progress: {
-          message: args.phase === "interpret" ? "Reading your rule..." : "Building your rule...",
+          message: args.dealerQuestion
+            ? "Reviewing your question..."
+            : args.phase === "interpret"
+              ? "Reading your rule..."
+              : "Building your rule...",
           stage: "checking_input",
         },
-        rule: null,
+        rule: args.previousRule ?? null,
         status: "pending",
       });
     } catch (draftError) {
@@ -337,7 +360,7 @@ async function runConversation(
         interpretation: null,
         messages: transcript,
         progress: null,
-        rule: null,
+        rule: args.previousRule ?? null,
         status: "done",
       });
       try {
@@ -360,10 +383,56 @@ async function runConversation(
       return;
     }
 
+    if (args.dealerQuestion) {
+      const dealerAnswer = await deps.askDealer({
+        draftId,
+        message: args.dealerQuestion,
+        signal,
+      });
+      transcript = [...transcript, { text: dealerAnswer.answer, who: "ai" }];
+      patchConversationRun(args.draftId, {
+        connection: "closed",
+        error: null,
+        guidanceContext: dealerAnswer.proposedRuleText
+          ? {
+              dealerSuggestion: true,
+              suggestedRewrites: [dealerAnswer.proposedRuleText],
+            }
+          : null,
+        interpretation: null,
+        job: null,
+        messages: transcript,
+        progress: null,
+        rule: args.previousRule ?? null,
+        status: "done",
+      });
+      try {
+        await saveConversationDraftSnapshot({
+          deps,
+          draftId,
+          lastMessage: dealerAnswer.answer,
+          messages: transcript,
+          prompt: args.ruleText,
+          signal,
+          turnId: args.turnId,
+          wallet: args.wallet,
+        });
+      } catch (draftError) {
+        patchConversationRun(args.draftId, {
+          error: `Dealer replied, but the draft could not be saved. ${deps.describeError(draftError)}`,
+          status: "error",
+        });
+      }
+      return;
+    }
+
     if (args.refinedDraft) {
       transcript = [
         ...transcript,
-        { text: `I applied that to your previous draft: ${args.refinedDraft}`, who: "ai" },
+        {
+          text: `I applied that to your previous draft: ${args.refinedDraft}`,
+          who: "ai",
+        },
       ];
       patchConversationRun(args.draftId, {
         guidanceContext: null,
@@ -373,6 +442,7 @@ async function runConversation(
     }
 
     const { jobId } = await deps.startPreflightJob({
+      draftId,
       phase: args.phase,
       signal,
       text: args.ruleText,
@@ -487,7 +557,8 @@ async function settlePreflightJob(ctx: {
 
     if ("interpretation" in outcome) {
       const { interpretation } = outcome;
-      const dealerMessage = interpretation.dealerMessage ||
+      const dealerMessage =
+        interpretation.dealerMessage ||
         "Here is how I understood your rule. Confirm it before I generate the executable rule.";
       transcript = [...transcript, { text: dealerMessage, who: "ai" }];
       patchConversationRun(draftId, {
@@ -527,7 +598,8 @@ async function settlePreflightJob(ctx: {
     // RulePreflightApiResult is a narrower mirror of what the API actually
     // sends; the on-chain fields the Create screen needs ride along untyped.
     const preflight = outcome.preflight as unknown as RulePreflightResult;
-    const valid = preflight.decision === "VALID" && !preflight.needsClarification;
+    const valid =
+      preflight.decision === "VALID" && !preflight.needsClarification;
     const dealerMessage =
       preflight.dealerMessage ||
       (valid
@@ -601,7 +673,10 @@ function reportConversationRunFailure(ctx: {
   // 4xx — so modelling expiry as an ApiRequestError would tell the player their
   // rule asks the compiler to ignore the app rules.
   if (cause instanceof SseStreamExpiredError) {
-    clearPersistedPreflightJob(deps.readStorage(), ctx.persistedDraftId ?? draftId);
+    clearPersistedPreflightJob(
+      deps.readStorage(),
+      ctx.persistedDraftId ?? draftId,
+    );
     patchConversationRun(draftId, {
       connection: "closed",
       error: null,
@@ -642,7 +717,10 @@ function reportConversationRunFailure(ctx: {
         : cause.code === "RULE_EXTERNAL_DEPENDENCY"
           ? "That is blocked because it depends on information outside this guess and draw. Choose a rewrite that only compares your guess with the official draw."
           : cause.message;
-    clearPersistedPreflightJob(deps.readStorage(), ctx.persistedDraftId ?? draftId);
+    clearPersistedPreflightJob(
+      deps.readStorage(),
+      ctx.persistedDraftId ?? draftId,
+    );
     patchConversationRun(draftId, {
       connection: "closed",
       error: null,
@@ -661,7 +739,10 @@ function reportConversationRunFailure(ctx: {
     return;
   }
 
-  clearPersistedPreflightJob(deps.readStorage(), ctx.persistedDraftId ?? draftId);
+  clearPersistedPreflightJob(
+    deps.readStorage(),
+    ctx.persistedDraftId ?? draftId,
+  );
   patchConversationRun(draftId, {
     connection: "closed",
     error: deps.describeError(cause),
@@ -670,7 +751,10 @@ function reportConversationRunFailure(ctx: {
     job: null,
     messages: [
       ...transcript,
-      { text: "Dealer engine unavailable. The compiler must be online before I can lock a rule.", who: "ai" },
+      {
+        text: "Dealer engine unavailable. The compiler must be online before I can lock a rule.",
+        who: "ai",
+      },
     ],
     progress: null,
     rule: null,

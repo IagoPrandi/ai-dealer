@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { getConversationRun, getLatestConversationRun } from "./conversationRunStore.js";
+import {
+  getConversationRun,
+  getLatestConversationRun,
+} from "./conversationRunStore.js";
 import {
   ApiRequestError,
   SseStreamDisconnectedError,
@@ -55,12 +58,14 @@ const INTERPRETATION: RuleInterpretationApiResult = {
 
 const PREFLIGHT: RulePreflightApiResult = {
   confirmationRequired: false,
+  coverage: { missingFromAst: [], missingOperations: [] },
   dealerMessage: "Done! I compiled your rule.",
   decision: "VALID",
   needsClarification: false,
   normalizedText: "Win if exactly 2 numbers match.",
   officialInterpretation:
     "The player wins when exactly two guessed numbers appear in the draw.",
+  reasonCodes: ["SUPPORTED_RULE"],
   ruleId: 8701,
   sanitizedText: "Win if exactly 2 numbers match.",
   tokenCount: 7,
@@ -73,6 +78,10 @@ function baseDeps(
   draftId: string,
 ): ConversationRunDeps {
   return {
+    askDealer: async () => ({
+      answer: "Dealer answer",
+      proposedRuleText: null,
+    }),
     cancelPreflightJob: async () => undefined,
     describeError: (cause) =>
       cause instanceof Error ? cause.message : String(cause),
@@ -109,7 +118,9 @@ test("conversation run continues while no screen is subscribed", async () => {
   const task = startConversationRun(
     {
       draftId,
-      initialMessages: [{ text: "Win if exactly 2 numbers match.", who: "user" }],
+      initialMessages: [
+        { text: "Win if exactly 2 numbers match.", who: "user" },
+      ],
       lastUserMessage: "Win if exactly 2 numbers match.",
       localDealerReply: null,
       phase: "compile",
@@ -188,7 +199,10 @@ test("interpretation is shown before compilation and keeps clarification detecti
   assert.deepEqual(phases, ["interpret"]);
   assert.equal(run?.rule, null);
   assert.equal(run?.interpretation?.needsClarification, true);
-  assert.match(run?.messages.at(-1)?.text ?? "", /tens digits or units digits/i);
+  assert.match(
+    run?.messages.at(-1)?.text ?? "",
+    /tens digits or units digits/i,
+  );
 });
 
 test("the job pointer is persisted while the run is in flight and cleared after", async () => {
@@ -212,7 +226,9 @@ test("the job pointer is persisted while the run is in flight and cleared after"
   await startConversationRun(
     {
       draftId,
-      initialMessages: [{ text: "Win if exactly 2 numbers match.", who: "user" }],
+      initialMessages: [
+        { text: "Win if exactly 2 numbers match.", who: "user" },
+      ],
       lastUserMessage: "Win if exactly 2 numbers match.",
       localDealerReply: null,
       phase: "interpret",
@@ -295,7 +311,9 @@ test("resuming a run that is already active does not start a second reader", asy
   const task = startConversationRun(
     {
       draftId,
-      initialMessages: [{ text: "Win if exactly 2 numbers match.", who: "user" }],
+      initialMessages: [
+        { text: "Win if exactly 2 numbers match.", who: "user" },
+      ],
       lastUserMessage: "Win if exactly 2 numbers match.",
       localDealerReply: null,
       phase: "interpret",
@@ -349,7 +367,9 @@ test("an expired job is a run to restart, never a blocked rule", async () => {
   await startConversationRun(
     {
       draftId,
-      initialMessages: [{ text: "Win if exactly 2 numbers match.", who: "user" }],
+      initialMessages: [
+        { text: "Win if exactly 2 numbers match.", who: "user" },
+      ],
       lastUserMessage: "Win if exactly 2 numbers match.",
       localDealerReply: null,
       phase: "interpret",
@@ -390,7 +410,9 @@ test("giving up reconnecting keeps the job so the player can reconnect", async (
   await startConversationRun(
     {
       draftId,
-      initialMessages: [{ text: "Win if exactly 2 numbers match.", who: "user" }],
+      initialMessages: [
+        { text: "Win if exactly 2 numbers match.", who: "user" },
+      ],
       lastUserMessage: "Win if exactly 2 numbers match.",
       localDealerReply: null,
       phase: "compile",
@@ -444,7 +466,10 @@ test("a blocked rule reported mid-stream still becomes guidance", async () => {
   const run = getConversationRun(draftId);
   assert.equal(run?.status, "done");
   assert.equal(run?.guidanceContext?.apiCode, "RULE_PROMPT_INJECTION");
-  assert.match(run?.messages.at(-1)?.text ?? "", /asks the compiler to ignore/i);
+  assert.match(
+    run?.messages.at(-1)?.text ?? "",
+    /asks the compiler to ignore/i,
+  );
 });
 
 test("connection state tracks reconnect and recovery", async () => {
@@ -467,7 +492,9 @@ test("connection state tracks reconnect and recovery", async () => {
   await startConversationRun(
     {
       draftId,
-      initialMessages: [{ text: "Win if exactly 2 numbers match.", who: "user" }],
+      initialMessages: [
+        { text: "Win if exactly 2 numbers match.", who: "user" },
+      ],
       lastUserMessage: "Win if exactly 2 numbers match.",
       localDealerReply: null,
       phase: "interpret",
@@ -521,7 +548,9 @@ test("cancelling a pending run does not turn the abort into an error state", asy
   const task = startConversationRun(
     {
       draftId,
-      initialMessages: [{ text: "Win if exactly 2 numbers match.", who: "user" }],
+      initialMessages: [
+        { text: "Win if exactly 2 numbers match.", who: "user" },
+      ],
       lastUserMessage: "Win if exactly 2 numbers match.",
       localDealerReply: null,
       phase: "compile",
@@ -545,9 +574,22 @@ test("cancelling a pending run does not turn the abort into an error state", asy
 });
 
 test("draft-save failures are eligible for an explicit retry", () => {
-  assert.equal(isConversationDraftSaveError("Dealer replied, but the draft could not be saved. POST returned HTTP 502."), true);
-  assert.equal(isConversationDraftSaveError("Draft still could not be saved. POST returned HTTP 502."), true);
-  assert.equal(isConversationDraftSaveError("Dealer engine unavailable."), false);
+  assert.equal(
+    isConversationDraftSaveError(
+      "Dealer replied, but the draft could not be saved. POST returned HTTP 502.",
+    ),
+    true,
+  );
+  assert.equal(
+    isConversationDraftSaveError(
+      "Draft still could not be saved. POST returned HTTP 502.",
+    ),
+    true,
+  );
+  assert.equal(
+    isConversationDraftSaveError("Dealer engine unavailable."),
+    false,
+  );
   assert.equal(isConversationDraftSaveError(null), false);
 });
 
@@ -583,7 +625,9 @@ test("accepting a job records it on the draft, not only in localStorage", async 
   const task = startConversationRun(
     {
       draftId,
-      initialMessages: [{ text: "Win if exactly 2 numbers match.", who: "user" }],
+      initialMessages: [
+        { text: "Win if exactly 2 numbers match.", who: "user" },
+      ],
       lastUserMessage: "Win if exactly 2 numbers match.",
       localDealerReply: null,
       phase: "interpret",
@@ -618,7 +662,10 @@ test("a resume renders the transcript it was handed, not just the rule text", as
   const draftId = "client:104:resume-transcript";
   const transcript = [
     { text: "how to play?", who: "user" as const },
-    { text: "A valid rule can only use the guess and the draw.", who: "ai" as const },
+    {
+      text: "A valid rule can only use the guess and the draw.",
+      who: "ai" as const,
+    },
     { text: "Win if exactly 2 numbers match.", who: "user" as const },
   ];
 
@@ -648,4 +695,55 @@ test("a resume renders the transcript it was handed, not just the rule text", as
     ...transcript,
     { text: INTERPRETATION.dealerMessage, who: "ai" },
   ]);
+});
+
+test("a follow-up question uses dealer chat and never starts preflight", async () => {
+  const draftId = "client:105:dealer-question";
+  const calls: Array<{ draftId: string; message: string }> = [];
+  const deps = baseDeps(
+    {
+      askDealer: async ({ draftId: savedDraftId, message }) => {
+        calls.push({ draftId: savedDraftId, message });
+        return {
+          answer:
+            "The compiled artifact dropped the modulo operation. Keep modulo 9 on both sums.",
+          proposedRuleText:
+            "Win if the guessed sum modulo 9 equals the drawn sum modulo 9.",
+        };
+      },
+      consumePreflightJob: async () => {
+        throw new Error("preflight consumption must not run");
+      },
+      startPreflightJob: async () => {
+        throw new Error("preflight must not start");
+      },
+    },
+    draftId,
+  );
+
+  await startConversationRun(
+    {
+      dealerQuestion: "What needs refinement?",
+      draftId,
+      initialMessages: [{ text: "What needs refinement?", who: "user" }],
+      lastUserMessage: "What needs refinement?",
+      localDealerReply: null,
+      phase: "interpret",
+      refinedDraft: null,
+      ruleText:
+        "Win if the guessed sum modulo 9 equals the drawn sum modulo 9.",
+      turnId: 105,
+      wallet: "wallet-105",
+    },
+    deps,
+  );
+
+  assert.deepEqual(calls, [{ draftId, message: "What needs refinement?" }]);
+  const run = getConversationRun(draftId);
+  assert.equal(run?.status, "done");
+  assert.match(run?.messages.at(-1)?.text ?? "", /modulo operation/i);
+  assert.deepEqual(run?.guidanceContext?.suggestedRewrites, [
+    "Win if the guessed sum modulo 9 equals the drawn sum modulo 9.",
+  ]);
+  assert.equal(run?.guidanceContext?.dealerSuggestion, true);
 });

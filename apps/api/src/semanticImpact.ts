@@ -176,26 +176,26 @@ function isTriviallyAlwaysTrue(ast: RuleAst | null) {
   );
 }
 
-function extractNumericRange(value: string): NumericRange | null {
+function extractNumericRanges(value: string): NumericRange[] {
   const normalized = normalizeForMatching(value);
-  const match =
-    normalized.match(/\b(?:between|entre)\s+(\d{1,3})\s+(?:and|e)\s+(\d{1,3})\b/u) ??
-    normalized.match(/\b(?:from|de)\s+(\d{1,3})\s+(?:to|through|a|ate)\s+(\d{1,3})\b/u);
-  if (!match?.[1] || !match[2]) {
-    return null;
+  const matches = normalized.matchAll(
+    /\b(?:(?:between|entre)\s+(\d{1,3})\s+(?:and|e)\s+(\d{1,3})|(?:from|de)\s+(\d{1,3})\s+(?:to|through|a|ate)\s+(\d{1,3}))\b/gu,
+  );
+  const ranges: NumericRange[] = [];
+  for (const match of matches) {
+    const first = Number(match[1] ?? match[3]);
+    const second = Number(match[2] ?? match[4]);
+    if (
+      Number.isInteger(first) &&
+      Number.isInteger(second) &&
+      first >= 1 &&
+      second <= 100 &&
+      first < second
+    ) {
+      ranges.push({ high: second, low: first });
+    }
   }
-  const first = Number(match[1]);
-  const second = Number(match[2]);
-  if (
-    !Number.isInteger(first) ||
-    !Number.isInteger(second) ||
-    first < 1 ||
-    second > 100 ||
-    first >= second
-  ) {
-    return null;
-  }
-  return { high: second, low: first };
+  return ranges;
 }
 
 function getExplicitBoundaryMode(value: string): "exclusive" | "inclusive" | null {
@@ -260,6 +260,8 @@ function buildRangeRewrites(
   boundaryMode: "exclusive" | "inclusive" | null,
   impact: RuleSemanticImpact,
   normalizedText: string,
+  officialInterpretation: string,
+  rangeCount: number,
 ) {
   const sourceLabel = impact.sharedOutcome
     ? "official draw"
@@ -271,6 +273,14 @@ function buildRangeRewrites(
     : impact.drawIndependent
       ? "The official draw does not affect the result."
       : "";
+
+  // A single [low, high] rewrite cannot represent different bounds for several
+  // positions. In that case the AST-derived interpretation is the only safe
+  // rewrite: it names every position and every bound, and the scope sentence
+  // makes the draw/guess independence explicit for the next preflight pass.
+  if (rangeCount > 1) {
+    return [appendSentence(officialInterpretation, scopeSentence)];
+  }
 
   if (sourceLabel) {
     const inclusive = `A guess wins if all six ${sourceLabel} numbers are between ${range.low} and ${range.high}, inclusive. ${scopeSentence}`.trim();
@@ -308,7 +318,8 @@ export function analyzeRuleSemanticImpact({
   const usesGuess = sources.has("guess");
   const sharedOutcome = usesDraw && !usesGuess;
   const drawIndependent = usesGuess && !usesDraw;
-  const numericRange = extractNumericRange(sourceText);
+  const numericRanges = extractNumericRanges(sourceText);
+  const numericRange = numericRanges[0] ?? null;
   const boundaryMode = getExplicitBoundaryMode(sourceText);
   const rangeBoundsAmbiguous = Boolean(
     numericRange && hasBoundedRangeComparisons(ast) && !boundaryMode,
@@ -393,6 +404,8 @@ export function analyzeRuleSemanticImpact({
         rangeBoundsAmbiguous ? null : boundaryMode,
         impact,
         normalizedText,
+        officialInterpretation,
+        numericRanges.length,
       )
     : [];
   if (suggestedRewrites.length === 0 && sharedOutcome) {

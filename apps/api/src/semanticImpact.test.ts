@@ -286,3 +286,30 @@ test("subject-first wording explicitly confirms that an input is irrelevant", ()
   });
   assert.equal(guessOnly.confirmationRequired, false);
 });
+
+test("position-specific range confirmation preserves every position and bound", () => {
+  const sourceText =
+    "quero ganhar se o primeiro n\u00famero estiver entre 1 e 100, o segundo entre 2 e 99 e o terceiro entre 3 e 98";
+  const compilation = validateAndPrecompileRule({
+    originalText: sourceText,
+    prompt: sourceText,
+    tokenCount: 25,
+  });
+  assert.equal(compilation.decision, "VALID");
+
+  const review = analyzeRuleSemanticImpact({
+    ast: compilation.artifact!.ast,
+    normalizedText: compilation.artifact!.normalizedText,
+    officialInterpretation: compilation.artifact!.officialInterpretation,
+    sourceText,
+  });
+
+  assert.equal(review.confirmationRequired, true);
+  assert.equal(review.suggestedRewrites.length, 1);
+  const rewrite = review.suggestedRewrites[0] ?? "";
+  assert.match(rewrite, /1st number is between 1 and 100/i);
+  assert.match(rewrite, /2nd number is between 2 and 99/i);
+  assert.match(rewrite, /3rd number is between 3 and 98/i);
+  assert.match(rewrite, /official draw does not affect the result/i);
+  assert.doesNotMatch(rewrite, /all six guessed numbers are between 1 and 100/i);
+});

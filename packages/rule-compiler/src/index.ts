@@ -1607,6 +1607,11 @@ function compileSupportedRule(text: string): RuleAst | null {
     return strictGuessRange;
   }
 
+  const positionRanges = parsePositionSpecificRangeRule(text);
+  if (positionRanges) {
+    return positionRanges;
+  }
+
   const drawThreshold = parseDrawAllThresholdRule(text);
   if (drawThreshold) {
     return drawThreshold;
@@ -2912,8 +2917,62 @@ function parseOrdinal(value: string): number | null {
     ["5th", 4],
     ["sixth", 5],
     ["6th", 5],
+    ["primeiro", 0],
+    ["primeira", 0],
+    ["segundo", 1],
+    ["segunda", 1],
+    ["terceiro", 2],
+    ["terceira", 2],
+    ["quarto", 3],
+    ["quarta", 3],
+    ["quinto", 4],
+    ["quinta", 4],
+    ["sexto", 5],
+    ["sexta", 5],
   ]);
   return ordinals.get(normalized) ?? null;
+}
+
+function parsePositionSpecificRangeRule(text: string): RuleAst | null {
+  const ordinal =
+    "first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|sixth|6th|primeir[oa]|segund[oa]|terceir[oa]|quart[oa]|quint[oa]|sext[oa]";
+  const sourceCue = "guessed?|picked|ticket|guess|drawn?|draw";
+  const clausePattern = new RegExp(
+    `\\b(?:the|o|a)?\\s*(${ordinal})(?:\\s+(${sourceCue})?\\s*(?:number|pick|numero))?(?:\\s+(?:is|be|are|must\\s+be|falls?|lies?|sits?|estiver|esta|deve\\s+estar))?\\s+(?:between|entre)\\s+(\\d{1,3})\\s+(?:and|e)\\s+(\\d{1,3})(?:\\s+(?:inclusive|inclusiv[oa]s?))?`,
+    "gi",
+  );
+  const matches = [...text.matchAll(clausePattern)];
+  if (matches.length === 0) {
+    return null;
+  }
+
+  const clauses: PredicateNode[] = [];
+  const seenPositions = new Set<string>();
+  for (const match of matches) {
+    const index = match[1] ? parseOrdinal(match[1]) : null;
+    const sourceName: "draw" | "guess" = /draw/i.test(match[2] ?? "")
+      ? "draw"
+      : "guess";
+    const low = Number(match[3]);
+    const high = Number(match[4]);
+    const positionKey = `${sourceName}:${index}`;
+    if (
+      index === null ||
+      !Number.isInteger(low) ||
+      !Number.isInteger(high) ||
+      low < 1 ||
+      high > 100 ||
+      low > high ||
+      seenPositions.has(positionKey)
+    ) {
+      return null;
+    }
+    seenPositions.add(positionKey);
+    const value = at(source(sourceName), index);
+    clauses.push(compare(value, "gte", lit(low)), compare(value, "lte", lit(high)));
+  }
+
+  return predicateRule({ kind: "and", clauses });
 }
 
 function parseComparisonWord(value: string): CompareOp | null {
@@ -4017,5 +4076,5 @@ function summarizeReasons(
   if (blockingReasons.includes("DIFFICULTY_ALWAYS_TRUE")) {
     return "Rule rejected: every guess wins under this rule, so it cannot distinguish winners from losers.";
   }
-  return `Rule rejected: ${blockingReasons.join(", ")}.`;
+  return "Rule rejected because validation found a blocking safety, fidelity, or runtime issue. Review the structured reason explanations before revising the rule.";
 }

@@ -49,6 +49,28 @@ export const FREE_ACTION_WINDOW_ENDS_BEFORE_TURN_INDEX =
 export const VOTE_FEE_START_TURN = FREE_ACTION_WINDOW_ENDS_BEFORE_TURN_INDEX;
 export const REPEATED_ACTION_FEE_MULTIPLIER = 2;
 
+// PRD SS8.9. Paid actions remain uncapped; these budgets protect free or
+// infrastructure-heavy endpoints. Keeping dealer chat separate from preflight
+// prevents a player asking for an explanation from consuming compile capacity.
+export const MVP_RATE_LIMIT_CONFIG = {
+  tokenCountRequestsPerWalletPerMinute: 30,
+  tokenCountRequestsPerIpPerMinute: 120,
+  rulePreflightRequestsPerWalletPerTurn: 20,
+  rulePreflightRequestsPerWalletPerMinute: 5,
+  ruleDealerQuestionsPerWalletPerTurn: 30,
+  ruleDealerQuestionsPerWalletPerMinute: 10,
+  paidGuessSubmissionsPerWalletPerTurn: null,
+  paidRuleProposalsPerWalletPerTurn: null,
+  paidApprovalVotesPerWalletRuleTurn: null,
+  paidEliminationVotesPerWalletFinalistTurn: null,
+  ruleRemovalsPerWalletPerTurn: 2,
+  ruleRemovalAttemptsPerWalletPerMinute: 3,
+  ruleReportsPerWalletPerTurn: 20,
+  ruleReportsPerRulePerWalletPerTurn: 1,
+  ruleReportsPerWalletPerMinute: 10,
+  failedTransactionRecoveryAttemptsPerWalletPerTurn: 20,
+} as const;
+
 export const MVP_FEES_SOL = {
   guessSubmission: 0.01,
   ruleProposal: 0.02,

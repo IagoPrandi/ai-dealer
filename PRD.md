@@ -1768,6 +1768,14 @@ interface RulePreflightResult {
   needsClarification: boolean;
   reproposalBlocked: boolean;      // already held a mandate (Section 6.13)
   reasonSummary: string;
+  reasonCodes: RuleValidationReasonCode[];
+  coverage: {
+    missingFromAst: number[];
+    missingOperations: Array<"digit" | "mod" | "parity" | "sum">;
+  } | null;
+  refinementFocus?: string[];
+  refinementQuestions?: string[];
+  suggestedRewrites?: string[];
   compiledArtifactHash: string | null;
   ruleMode?: "predicate" | "ranking";
   difficultyClass?: string;        // label only, never a gate
@@ -1858,6 +1866,43 @@ Job lifecycle:
 - concurrency is capped (32 running jobs, 256 total, 8 readers per job). The
   cap is load-bearing, not hygiene: returning `202` removes the ~150s socket
   hold that used to rate-limit this unauthenticated endpoint by accident.
+
+#### 6.15.2 Dealer follow-up questions
+
+```http
+POST /rule-dealer/ask
+```
+
+Request and response:
+
+```typescript
+interface DealerQuestionRequest {
+  draftId: string;
+  message: string;
+}
+
+interface DealerQuestionResponse {
+  answer: string;
+  proposedRuleText?: string;
+}
+```
+
+The API resolves `draftId` to the server-owned conversation and constructs the
+model context from the saved transcript, current draft, dynamic fee schedule,
+and the latest persisted compiler diagnostics. Clients cannot submit or replace
+diagnostics. When no completed preflight exists, the answer must disclose that
+no compiler verdict is available rather than inventing one.
+
+Every compiler reason code has one player-facing explanation covering what
+happened, why it blocks, and what must change. A successful preflight persists
+the compact reason codes, coverage gaps, summary, refinement focus, questions,
+and vetted rewrites on the conversation draft so later questions use the real
+compiler result.
+
+This endpoint is intentionally a blocking JSON request: it performs one bounded
+chat completion and does not own a multi-stage compiler job. The model request
+is aborted when the client disconnects. It cannot create a proposal, alter a
+preflight decision, or bypass the normal compile/payment gates.
 
 ### 6.16 Formal Rule State Machine
 
@@ -2527,6 +2572,21 @@ MCP restrictions:
 
 The prompt contract must instruct agents to compile, not judge winners.
 
+Dealer interpretation and follow-up chat use separate, versioned prompt assets:
+
+- `tyche_rule_interpret_prompt_v1` in
+  `apps/api/src/prompts/dealer-interpret/SKILL.md`, with detailed semantics and
+  examples in its `references/` directory;
+- `tyche_rule_dealer_chat_prompt_v1` in
+  `apps/api/src/prompts/dealer-chat/SKILL.md`.
+
+The API build copies these assets into `dist/prompts` and fails loudly if a
+required prompt file is absent. The interpretation contract remains responsible
+for structured rule normalization. The chat contract answers only from fenced,
+server-authored context, treats transcript and rule text as data rather than
+instructions, discloses missing diagnostics, and labels `proposedRuleText` as an
+uncompiled suggestion that must pass ordinary preflight.
+
 Compiler system behavior:
 
 ```text
@@ -3059,6 +3119,9 @@ const MVP_RATE_LIMIT_CONFIG = {
 
   rulePreflightRequestsPerWalletPerTurn: 20,
   rulePreflightRequestsPerWalletPerMinute: 5,
+
+  ruleDealerQuestionsPerWalletPerTurn: 30,
+  ruleDealerQuestionsPerWalletPerMinute: 10,
 
   paidGuessSubmissionsPerWalletPerTurn: null,
   paidRuleProposalsPerWalletPerTurn: null,

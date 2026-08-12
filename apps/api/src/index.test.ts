@@ -5,13 +5,16 @@ import {
   API_STATE_POSTGRES_SCHEMA,
   M3_7_POSTGRES_AUDIT_SCHEMA,
   authorizeOperatorAiRequest,
+  buildDealerQuestionContext,
   buildOperatorAiAccessMessage,
   calculateAndStoreRewardRecords,
   calculateAndStoreWinnerRecords,
   calculatePrizePoolAccounting,
   calculateRepeatedActionFeeLamports,
+  checkDealerQuestionRateLimit,
   calculateRewardDistribution,
   completeClaimApproval,
+  createRulePreflightJob,
   createOperatorAiAccessChallenge,
   createClaimRecordsForTurn,
   createGuessVerificationJobsForTurn,
@@ -35,6 +38,7 @@ import {
   getRolloverActivityEvents,
   getRoundSummary,
   getRuleRemovalActivityEvents,
+  getRuleReasonExplanations,
   getRuleValidation,
   getTurnRolloverSettlement,
   getTransparencySnapshot,
@@ -70,10 +74,12 @@ import {
   saveRuleProposal,
   saveRuleVote,
   saveConversationDraft,
+  savePreflightDiagnosticsForJob,
   saveTurnRollover,
   settleExpiredUnclaimedClaims,
   settleTurnRollover,
   requestClaimApproval,
+  RULE_REASON_EXPLANATIONS,
   storeAuditLogInPostgres,
   toPostgresAuditLogRow,
   verifyAuditLogIntegrity,
@@ -86,6 +92,7 @@ import {
   enforceSourceClarity,
   selectCompilationText,
   type AuditLogRecord,
+  type ConversationDraftRecord,
   type GuessVerificationResultRecord,
   type RuleProposalRecord,
 } from "./index.js";
@@ -94,6 +101,101 @@ const wallet = "4bYqf3rJ7m2nQh9sV1xCH8kLpWtD6eZaUg5oNbMcXyTH";
 const walletTwo = "5bYqf3rJ7m2nQh9sV1xCH8kLpWtD6eZaUg5oNbMcXyTJ";
 const walletThree = "6bYqf3rJ7m2nQh9sV1xCH8kLpWtD6eZaUg5oNbMcXyTK";
 const base58 = "ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd";
+
+test("every compiler reason code has one actionable player explanation", () => {
+  assert.equal(RULE_REASON_EXPLANATIONS.length, 17);
+  assert.equal(
+    new Set(RULE_REASON_EXPLANATIONS.map((entry) => entry.code)).size,
+    17,
+  );
+  const explanations = getRuleReasonExplanations([
+    "INTERPRETATION_MISMATCH",
+    "UNSUPPORTED_RULE",
+  ]);
+  assert.match(explanations[0]?.whatHappened ?? "", /did not preserve/i);
+  assert.match(explanations[1]?.whatToChange ?? "", /supported rewrite/i);
+});
+
+test("dealer question context carries server diagnostics and discloses their absence", () => {
+  const baseDraft: ConversationDraftRecord = {
+    createdAt: "2026-08-12T12:00:00.000Z",
+    draftId: "client:55:dealer-context",
+    lastMessage: "What needs refinement?",
+    messages: [{ text: "What needs refinement?", who: "user" }],
+    normalizedText: null,
+    officialInterpretation: null,
+    prompt: "Win if the guessed sum modulo 9 equals the drawn sum modulo 9.",
+    ruleId: null,
+    status: "draft",
+    tokenCount: 15,
+    turnId: 55,
+    updatedAt: "2026-08-12T12:00:00.000Z",
+    wallet,
+  };
+
+  const withoutDiagnostics = buildDealerQuestionContext({
+    draft: baseDraft,
+    message: "What needs refinement?",
+  });
+  assert.match(withoutDiagnostics, /"diagnosticsAvailable":false/u);
+  assert.match(withoutDiagnostics, /"preflight":null/u);
+
+  const withDiagnostics = buildDealerQuestionContext({
+    draft: {
+      ...baseDraft,
+      lastPreflight: {
+        coverage: { missingFromAst: [], missingOperations: ["mod"] },
+        decision: "INVALID",
+        difficultyClass: null,
+        normalizedText: baseDraft.prompt,
+        officialInterpretation: "Compare the two sums modulo 9.",
+        originalText: baseDraft.prompt,
+        reasonCodes: ["INTERPRETATION_MISMATCH"],
+        reasonSummary: "The modulo operation was dropped.",
+        refinementFocus: ["Keep the modulo operation."],
+        refinementQuestions: ["Should both sums use modulo 9?"],
+        suggestedRewrites: [],
+      },
+    },
+    message: "What needs refinement?",
+  });
+  assert.match(withDiagnostics, /"diagnosticsAvailable":true/u);
+  assert.match(withDiagnostics, /"missingOperations":\["mod"\]/u);
+  assert.match(withDiagnostics, /INTERPRETATION_MISMATCH/u);
+  assert.match(withDiagnostics, /ruleSubmissionSol/u);
+  assert.match(withDiagnostics, /<tyche_server_context>/u);
+});
+
+test("dealer questions have independent minute and per-turn budgets", () => {
+  resetApiStateForTests();
+  for (let index = 0; index < 10; index += 1) {
+    assert.equal(
+      checkDealerQuestionRateLimit({ nowMs: 1_000, turnId: 7, wallet }).allowed,
+      true,
+    );
+  }
+  assert.equal(
+    checkDealerQuestionRateLimit({ nowMs: 1_000, turnId: 7, wallet }).allowed,
+    false,
+  );
+
+  resetApiStateForTests();
+  for (let index = 0; index < 30; index += 1) {
+    assert.equal(
+      checkDealerQuestionRateLimit({
+        nowMs: index * 60_000,
+        turnId: 7,
+        wallet,
+      }).allowed,
+      true,
+    );
+  }
+  assert.equal(
+    checkDealerQuestionRateLimit({ nowMs: 31 * 60_000, turnId: 7, wallet })
+      .allowed,
+    false,
+  );
+});
 
 test("effective turn duration follows the isolated dev-cycle configuration", () => {
   assert.deepEqual(
@@ -166,6 +268,7 @@ function proposal(turnId: number, ruleId: number): RuleProposalRecord {
     addedOperationalClauses: [],
     clarityNote: "",
     confirmationRequired: false,
+    coverage: { missingFromAst: [], missingOperations: [] },
     decision: "VALID",
     dealerMessage: "Win if at least four of your numbers are drawn.",
     maxTokens: 1000,
@@ -177,6 +280,7 @@ function proposal(turnId: number, ruleId: number): RuleProposalRecord {
       "Compare every eligible guess by counting how many of its numbers appear in the draw; a guess wins when at least four match.",
     officialInterpretationHash: hashArray(2),
     preflightResultHash: hashArray(3),
+    reasonCodes: ["SUPPORTED_RULE"],
     proposer: wallet,
     ruleId,
     ruleProposal: base58,
@@ -197,6 +301,49 @@ function proposal(turnId: number, ruleId: number): RuleProposalRecord {
     turnId,
   };
 }
+
+test("completed preflight diagnostics are attached to the server-owned draft", () => {
+  resetApiStateForTests();
+  const prompt =
+    "Win if the guessed sum modulo 9 equals the drawn sum modulo 9.";
+  const draft = saveConversationDraft({
+    lastMessage: prompt,
+    normalizedText: null,
+    officialInterpretation: null,
+    prompt,
+    ruleId: null,
+    status: "draft",
+    tokenCount: 15,
+    turnId: 55,
+    wallet,
+  });
+  const job = createRulePreflightJob({
+    draftId: draft.draftId,
+    fingerprint: "persist-diagnostics",
+    phase: "compile",
+  });
+  const preflight = {
+    ...proposal(55, 1),
+    coverage: { missingFromAst: [], missingOperations: ["mod" as const] },
+    decision: "INVALID" as const,
+    reasonCodes: ["INTERPRETATION_MISMATCH" as const],
+    reasonSummary: "The modulo operation was omitted from the artifact.",
+    refinementFocus: ["Keep modulo 9 on both sums."],
+    refinementQuestions: ["Should both sums use modulo 9?"],
+  };
+
+  savePreflightDiagnosticsForJob(job, prompt, preflight);
+
+  const stored = listConversationDrafts(wallet)[0]?.lastPreflight;
+  assert.deepEqual(stored?.reasonCodes, ["INTERPRETATION_MISMATCH"]);
+  assert.deepEqual(stored?.coverage?.missingOperations, ["mod"]);
+  assert.equal(stored?.originalText, prompt);
+  assert.equal(
+    isValidConversationDraft({ ...draft, lastPreflight: stored }),
+    false,
+    "clients must not be able to forge compiler diagnostics",
+  );
+});
 
 test("rule preflight refinement feedback explains malformed unordered same-set rules", () => {
   const feedback = buildRuleRefinementFeedback({
@@ -255,6 +402,32 @@ test("rule preflight refinement feedback identifies the missing digit semantics"
     "Should matching compare tens digits, units digits, or either digit?",
   ]);
   assert.equal(feedback.suggestedRewrites.length, 3);
+});
+
+test("rule preflight names a compiler capability gap without inventing ambiguity", () => {
+  const interpretation =
+    "The first guessed number raised to the second guessed number must be below 1,000.";
+  const feedback = buildRuleRefinementFeedback({
+    clarityNote: "",
+    compileText:
+      "A guess wins if the first guessed number raised to the second guessed number is below 1,000.",
+    officialInterpretation: interpretation,
+    reasonCodes: ["UNSUPPORTED_RULE", "UNSAFE_RUNTIME_BOUNDS"],
+    reasonSummary: "Rule rejected: UNSUPPORTED_RULE, UNSAFE_RUNTIME_BOUNDS.",
+    sanitizedText:
+      "I win if the first guessed number raised to the second guessed number is below 1,000.",
+    tokenCount: 25,
+  });
+
+  assert.match(feedback.reasonSummary, /I understood this as:/i);
+  assert.match(feedback.reasonSummary, /compiler.*does not.*support/i);
+  assert.match(feedback.reasonSummary, /not.*ambigu/i);
+  assert.doesNotMatch(feedback.reasonSummary, /from this wording/i);
+  assert.deepEqual(feedback.refinementQuestions, []);
+  assert.doesNotMatch(
+    feedback.dealerMessage,
+    /answer the clarification questions/i,
+  );
 });
 
 test("rule refinement preserves all ordered tens ranges and rejects a generic agent rewrite", () => {
@@ -352,10 +525,7 @@ test("the player's compilable text takes precedence over a lossy model paraphras
   assert.equal(selectCompilationText(source, lossy), source);
 
   const unsupportedSource = "Make the rule numerically beautiful.";
-  assert.equal(
-    selectCompilationText(unsupportedSource, lossy),
-    lossy,
-  );
+  assert.equal(selectCompilationText(unsupportedSource, lossy), lossy);
 });
 
 test("a deterministic objective rule cannot inherit an invented model question", () => {

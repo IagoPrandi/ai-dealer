@@ -1,4 +1,8 @@
 import { buildRuleCompilerSkillPrompt } from "@tyche/rule-compiler";
+import {
+  buildDealerChatPrompt,
+  buildDealerInterpretPrompt,
+} from "./promptSkills.js";
 
 // Real AI Rule Compiler bridge. Talks to an OpenAI-compatible chat-completions
 // endpoint (local Ollama / vLLM / llama.cpp, or a cloud provider) so the dealer
@@ -62,165 +66,6 @@ const DEFAULT_MAX_OUTPUT_TOKENS = 16_384;
 // on. Override with LLM_SEED only if you intentionally want a different anchor.
 const DEFAULT_SEED = 7;
 
-const SYSTEM_PROMPT = [
-  "You are the Tyche Dealer, the AI Rule Compiler for an on-chain lottery game.",
-  "A player proposes an alternative winning rule in natural language. You convert",
-  "their intent into a single, objective, measurable winning condition.",
-  "",
-  "Hard constraints:",
-  "- A rule may only reference the player's `guess` (6 numbers, 1-100) and the",
-  "  official `draw` (6 numbers, 1-100), and comparisons between them.",
-  "- A rule must NOT depend on wallets, votes, prize pool, time, history, other",
-  "  players, randomness, external data, or any identity.",
-  "- Preserve the player's core intent. You may add objective operational guard",
-  "  clauses (range guards, defined division, bounded removal, tie handling) only",
-  "  when needed to make the rule safe and executable. Never invent a different",
-  "  objective and never make a vague rule objective without flagging it.",
-  "- Rewrite first-person wording such as 'I win' as a universal condition:",
-  "  'A guess wins if ...'. A proposed rule applies to every eligible guess,",
-  "  never only to its creator.",
-  "- State whether the executable condition uses the guess, the draw, or both.",
-  "  If it ignores the guess, explicitly say every eligible guess receives the",
-  "  same result. If it ignores the draw, explicitly say the result is fixed",
-  "  before the draw. Treat either consequence as requiring confirmation unless",
-  "  the player explicitly requested it.",
-  "- Never silently choose inclusive or exclusive numeric range endpoints. If",
-  "  the player did not explicitly define the boundary behavior, set",
-  "  needsClarification to true and ask whether both endpoints are included.",
-  "- If the rule is too vague to interpret objectively, set needsClarification to",
-  "  true and explain what is missing in clarityNote.",
-  "- Treat the player's explicit semantics as invariants along four dimensions:",
-  "  quantity/comparator, property being compared, positional/order relation,",
-  "  and polarity/direction. A clarification may vary only a dimension that is",
-  "  genuinely missing or ambiguous. Never drop, weaken, or invent one.",
-  "- When clarification is needed, return 1-3 short clarificationQuestions that",
-  "  name the missing dimensions and 0-3 suggestedRewrites. Every suggestion must",
-  "  be a complete executable rule derived from this player's rule, preserve every",
-  "  explicit invariant, and differ only on an ambiguity named by a question.",
-  "  Never offer stock examples, generic match-count rules, arbitrary thresholds,",
-  "  or unrelated replacement rules. If no faithful complete rewrite can be",
-  "  inferred, return an empty suggestedRewrites array.",
-  "- Preserve polarity and direction EXACTLY. 'more/most' = maximize; 'fewer/",
-  "  least' = minimize. 'miss/wrong/errar' means numbers in the guess that do NOT",
-  "  appear in the draw — count those; never silently flip it to 'correct'.",
-  "- 'at least N' / 'N or more' / 'N or more numbers' is an ABSOLUTE threshold (a",
-  "  fixed count for each guess), NOT a comparison between players. Keep it as a",
-  "  threshold even when the phrasing also says 'or more'.",
-  "- 'win if' means an absolute predicate for each guess unless the player clearly",
-  "  asks for a comparative ranking such as 'the most', 'the fewest', or",
-  "  'closest among all guesses'. Do not rewrite 'win if the smallest guessed",
-  "  number equals the smallest drawn number' as a lowest-number competition.",
-  "- A comparative match-count ranking is valid even when the wording is terse or",
-  "  ungrammatical. 'whoever guesses more numbers wins', 'win who guess more",
-  "  number', 'most matches wins', and 'matches more numbers than anyone else' all",
-  "  mean the same thing: rank each guess by how many of its numbers appear in the",
-  "  official draw; the highest count wins ('fewest/least' = lowest count wins).",
-  "  Treat these as valid rankings. Do NOT set needsClarification just because the",
-  "  phrasing is short or informal.",
-  "- Min/max comparisons are direct comparisons between the guess and draw.",
-  "  'smallest guessed number equals the smallest drawn number' means",
-  "  min(guess) == min(draw). 'largest guessed number is greater than the",
-  "  largest drawn number' means max(guess) > max(draw).",
-  "- Casual objective wording is valid when it contains a measurable threshold:",
-  "  'four or more picked numbers show up in the result' means at least 4 guessed",
-  "  numbers appear in the draw, regardless of order.",
-  "- Position-specific wording is objective: 'second guessed number equals the",
-  "  second drawn number' means guess[2] == draw[2] using 1-based user positions;",
-  "  'first pick is higher than the first drawn number' means guess[1] > draw[1].",
-  "- Absolute position-by-position distance is objective: 'absolute difference",
-  "  between each guessed number and drawn number in the same position is at most",
-  "  5' means every same-position pair has absolute difference <= 5.",
-  "- Exact same-position match counts are objective: 'exactly 2 guessed numbers",
-  "  match in the same position' means count positions where guess[i] == draw[i]",
-  "  and require that count to equal 2.",
-  "- Exact same-position comparison counts are objective: 'exactly 2 guessed",
-  "  numbers are greater than the drawn number in the same position' means count",
-  "  positions where guess[i] > draw[i] and require that count to equal 2.",
-  "- Total position-by-position distance is objective: 'total absolute",
-  "  position-by-position difference between guess and draw is 30 or less' means",
-  "  sum abs(guess[i] - draw[i]) over all positions and require the sum <= 30.",
-  "- Digit and filtered-count wording is objective when it names the property:",
-  "  same last digit as any drawn number, odd-number sums, multiples of 5 counts,",
-  "  and same number of evens are all direct guess-vs-draw predicates.",
-  "- Low/high pair sums and inclusive ranges are objective: compare sums of the",
-  "  two smallest/largest values after sorting, or require every guessed number",
-  "  to be between min(draw) and max(draw), inclusive.",
-  "- Bounded removal is objective when the removal strategy and count are named:",
-  "  'ignore my highest picked number, then the rest total the full draw' means",
-  "  remove_up_to_n(guess, 1, highest), sum the remaining guess numbers, and",
-  "  compare that sum to sum(draw). 'drop up to two lowest picks, then still",
-  "  have three numbers in the draw' means remove_up_to_n(guess, 2, lowest),",
-  "  intersect with draw, and require count >= 3.",
-  "- Guarded mapped values are objective: 'doubling each pick stays within 1 to",
-  "  100, at least three doubled values are in the draw' means map_with_guard",
-  "  guess * 2 with inclusive range 1-100 and drop mapped values outside that",
-  "  range before intersecting with draw.",
-  "- Split-count and slice wording is objective: 'below-50 split' compares the",
-  "  count of guess values < 50 to the count of draw values < 50; 'first three",
-  "  picks add up to first three drawn numbers' sums slice(guess,0,3) and",
-  "  slice(draw,0,3); 'last three' sums slice(guess,3) and slice(draw,3).",
-  "- Position-by-position odd/even wording is objective: compare guess[i] mod 2",
-  "  to draw[i] mod 2 for every position. Do not compile it as numeric",
-  "  closeness.",
-  "- 'within N of at least one drawn number' is NOT same-position closeness.",
-  "  Compile it as value_within_any_count_at_least: count guess values whose",
-  "  absolute distance to ANY draw value is <= N, and require the named count.",
-  "- Sum modulo wording is objective: 'last digit of the totals matters' or",
-  "  'sum modulo 10 equals draw sum modulo 10' means (sum(guess) mod 10) =",
-  "  (sum(draw) mod 10).",
-  "- Reverse-order wording needs precision. If the player only says 'match the",
-  "  draw in reverse', ask for clarification. If they define positions 1->6,",
-  "  2->5, etc., treat it as all 6 reversed positions matching. If they say at",
-  "  least N reversed positions must match, use that N as a predicate threshold.",
-  "- Keep compound rules compound: 'A and B' must stay a conjunction of both",
-  "  conditions; 'A or B' a disjunction. Do not drop a clause.",
-  "- 'same set of numbers, regardless of order' means all 6 guessed numbers",
-  "  appear in the draw with order ignored. Compile it as count(intersection",
-  "  (guess, draw)) == 6, not as ordered equality or a highest-count ranking.",
-  "- 'dezena' is ambiguous: it can mean a drawn number (Brazilian lottery sense)",
-  "  or the tens digit of a number. If the player's intent is unclear, set",
-  "  needsClarification and ask which meaning they want.",
-  "- A same-order example such as draw 12 31 24 versus guess 11 30 29, explained",
-  "  as matching 10 30 20, is NOT full-number equality and is not unordered digit",
-  "  matching. It explicitly means that every corresponding pair belongs to the",
-  "  same tens range after integer division by 10. Preserve 'all' and the",
-  "  position-by-position order in both the normalized rule and its AST.",
-  "- An example where a pick such as 12 is said to win after 10 and 20 are",
-  "  drawn because of 'number 1' or 'number 2' is ambiguous. Ask whether the",
-  "  player means the tens digit, units digit, or either digit; never infer it.",
-  "",
-  "Respond with a single JSON object and nothing else, using exactly these keys:",
-  '{"title": string, "normalizedText": string, "officialInterpretation": string,',
-  ' "addedOperationalClauses": string[], "needsClarification": boolean,',
-  ' "clarityNote": string, "clarificationQuestions": string[],',
-  ' "suggestedRewrites": string[], "dealerMessage": string}',
-  "- title: a concise 2-6 word English UI title that summarizes the executable",
-  "  condition. It must describe the normalized rule, never copy the player's",
-  "  prompt verbatim, and must not promise a winner when clarification is needed.",
-  "- normalizedText: the rule rewritten in clear English as one measurable sentence.",
-  "- officialInterpretation: clear English explaining how the engine evaluates",
-  "  every eligible guess, including any shared-outcome or draw-independent consequence.",
-  "- addedOperationalClauses: each guard clause you added (empty array if none).",
-  "- dealerMessage: a short, friendly note in English to the player about what",
-  "  you understood (1-2 sentences). It must name every material consequence",
-  "  that requires confirmation.",
-  "",
-  "Do not think out loud or add any text before or after the JSON. Output the",
-  "JSON object only. Be deterministic: identical input must produce identical",
-  "output.",
-  "",
-  "Example input: the guess with the most drawn numbers wins",
-  'Example output: {"title":"Most Numbers Match","normalizedText":"The winning guess is the one whose six',
-  ' numbers include the most numbers that also appear in the official draw.",',
-  ' "officialInterpretation":"For each guess, count how many of its six numbers',
-  ' appear in the six-number official draw; the highest count wins.",',
-  ' "addedOperationalClauses":["If two or more guesses tie on the count, the',
-  ' earliest valid submission wins."],"needsClarification":false,',
-  ' "clarityNote":"","clarificationQuestions":[],"suggestedRewrites":[],',
-  ' "dealerMessage":"Got it - the guess matching the most',
-  ' drawn numbers takes the round."}',
-].join("\n");
-
 // Returns the first env var that is set AND non-blank. We deliberately do NOT
 // use `??` here: optional overrides like LLM_MODEL_INTERPRET are commonly
 // present but empty (`LLM_MODEL_INTERPRET=`), and `??` only falls through on
@@ -268,7 +113,10 @@ export function resolveEscalationModel(
 export function resolveTranslateToEnglish(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return cleanEnvValue(env.LLM_TRANSLATE_TO_ENGLISH ?? "true").toLowerCase() !== "false";
+  return (
+    cleanEnvValue(env.LLM_TRANSLATE_TO_ENGLISH ?? "true").toLowerCase() !==
+    "false"
+  );
 }
 
 export function resolveRuleAgentConfig(
@@ -288,7 +136,9 @@ export function resolveRuleAgentConfig(
     );
   }
 
-  const timeoutRaw = Number(cleanEnvValue(env.LLM_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS);
+  const timeoutRaw = Number(
+    cleanEnvValue(env.LLM_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS,
+  );
   const timeoutMs =
     Number.isFinite(timeoutRaw) && timeoutRaw >= MIN_TIMEOUT_MS
       ? timeoutRaw
@@ -688,12 +538,64 @@ export async function interpretRuleWithAgent(
   signal?: AbortSignal,
 ): Promise<RuleAgentInterpretation> {
   const candidate = await requestAgentJson(
-    SYSTEM_PROMPT,
+    buildDealerInterpretPrompt(),
     sanitizedText,
     config,
     signal,
   );
   return coerceInterpretation(extractJsonObject(candidate));
+}
+
+export interface DealerQuestionAnswer {
+  answer: string;
+  proposedRuleText: string | null;
+}
+
+function coerceDealerQuestionAnswer(value: unknown): DealerQuestionAnswer {
+  if (!value || typeof value !== "object") {
+    throw new RuleAgentError(
+      "RULE_AGENT_BAD_RESPONSE",
+      "The dealer chat response was not an object.",
+    );
+  }
+  const record = value as Record<string, unknown>;
+  const answer = typeof record.answer === "string" ? record.answer.trim() : "";
+  const proposedRuleText =
+    record.proposedRuleText === null
+      ? null
+      : typeof record.proposedRuleText === "string"
+        ? record.proposedRuleText.trim()
+        : undefined;
+
+  if (
+    !answer ||
+    Buffer.byteLength(answer, "utf8") > 8_000 ||
+    proposedRuleText === undefined ||
+    (proposedRuleText !== null &&
+      (!proposedRuleText ||
+        Buffer.byteLength(proposedRuleText, "utf8") > 6_000))
+  ) {
+    throw new RuleAgentError(
+      "RULE_AGENT_BAD_RESPONSE",
+      "The dealer chat response omitted or exceeded its required fields.",
+    );
+  }
+
+  return { answer, proposedRuleText };
+}
+
+export async function answerDealerQuestion(
+  context: string,
+  config: RuleAgentConfig = resolveRuleAgentConfig(),
+  signal?: AbortSignal,
+): Promise<DealerQuestionAnswer> {
+  const candidate = await requestAgentJson(
+    buildDealerChatPrompt(),
+    context,
+    config,
+    signal,
+  );
+  return coerceDealerQuestionAnswer(extractJsonObject(candidate));
 }
 
 const TRANSLATE_SYSTEM_PROMPT = [
@@ -722,7 +624,9 @@ export async function translateRuleToEnglish(
   config: RuleAgentConfig = resolveRuleAgentConfig(),
   signal?: AbortSignal,
 ): Promise<string> {
-  const headers: Record<string, string> = { "content-type": "application/json" };
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+  };
   if (config.apiKey) {
     headers.authorization = `Bearer ${config.apiKey}`;
   }
@@ -755,7 +659,10 @@ export async function translateRuleToEnglish(
       throw signal.reason ?? error;
     }
     if (error instanceof Error && error.name === "TimeoutError") {
-      throw new RuleAgentError("RULE_AGENT_TIMEOUT", "The translator did not respond in time.");
+      throw new RuleAgentError(
+        "RULE_AGENT_TIMEOUT",
+        "The translator did not respond in time.",
+      );
     }
     throw new RuleAgentError(
       "RULE_AGENT_UNAVAILABLE",
@@ -763,7 +670,10 @@ export async function translateRuleToEnglish(
     );
   }
   if (!response.ok) {
-    throw new RuleAgentError("RULE_AGENT_UNAVAILABLE", `The translator returned HTTP ${response.status}.`);
+    throw new RuleAgentError(
+      "RULE_AGENT_UNAVAILABLE",
+      `The translator returned HTTP ${response.status}.`,
+    );
   }
   const payload = (await response.json().catch(() => null)) as {
     choices?: Array<{
@@ -780,12 +690,17 @@ export async function translateRuleToEnglish(
   }
   const message = choice?.message;
   const raw = typeof message?.content === "string" ? message.content : "";
-  const reasoning = typeof message?.reasoning === "string" ? message.reasoning : "";
-  const cleaned = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim() || reasoning.trim();
+  const reasoning =
+    typeof message?.reasoning === "string" ? message.reasoning : "";
+  const cleaned =
+    raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim() || reasoning.trim();
   // Strip wrapping quotes the model sometimes adds.
   const englishText = cleaned.replace(/^["'`]+|["'`]+$/g, "").trim();
   if (!englishText) {
-    throw new RuleAgentError("RULE_AGENT_BAD_RESPONSE", "The translator returned no text.");
+    throw new RuleAgentError(
+      "RULE_AGENT_BAD_RESPONSE",
+      "The translator returned no text.",
+    );
   }
   return englishText;
 }

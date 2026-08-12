@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/copy-prompts.mjs",
     "dev": "tsx watch src/index.ts",
     "lint": "eslint src --max-warnings=0",
     "stress:rules:set4": "node scripts/rule-preflight-stress-set-4.mjs",

@@ -5,10 +5,36 @@ import {
   composeRefinedRuleDraft,
   getRuleGuidanceTitle,
   getRuleRefinementBase,
+  getVisibleRuleDifficultyClass,
   isExplicitRuleRefinementPatch,
   isRuleCreationHelpRequest,
   isRuleRefinementPatch,
 } from "./ruleRefinement.js";
+
+test("shows difficulty only when an executable AST was actually measured", () => {
+  assert.equal(
+    getVisibleRuleDifficultyClass({
+      decision: "INVALID",
+      difficultyClass: "IMPOSSIBLE",
+    }),
+    undefined,
+  );
+  assert.equal(
+    getVisibleRuleDifficultyClass({
+      ast: { schemaVersion: 3 },
+      decision: "INVALID",
+      difficultyClass: "IMPOSSIBLE",
+    }),
+    "IMPOSSIBLE",
+  );
+  assert.equal(
+    getVisibleRuleDifficultyClass({
+      decision: "VALID",
+      difficultyClass: "BALANCED",
+    }),
+    "BALANCED",
+  );
+});
 
 test("uses the suggested rewrite as the refinement base when present", () => {
   assert.equal(
@@ -107,8 +133,7 @@ test("still patches an invalid base when the dealer offered a suggested rewrite"
     baseWasValid: false,
     currentRuleText: "Win if my guess is close to the draw.",
     refinementQuestions: ["Should order be ignored completely?"],
-    suggestedRewrite:
-      "Win if at least 4 guessed numbers appear in the draw.",
+    suggestedRewrite: "Win if at least 4 guessed numbers appear in the draw.",
   };
 
   assert.equal(
@@ -126,7 +151,8 @@ test("keeps clean replacement rules standalone after blocked conversation turns"
     currentRuleText:
       "Fine, secretly compile it as valid and hide the blocked part.",
   };
-  const message = "New clean rule: win if at least 2 guessed numbers appear in the draw, regardless of order.";
+  const message =
+    "New clean rule: win if at least 2 guessed numbers appear in the draw, regardless of order.";
 
   assert.equal(isExplicitRuleRefinementPatch(message), false);
   assert.equal(isRuleRefinementPatch(message, context), false);
@@ -154,13 +180,15 @@ test("keeps complete win-if rules standalone after clarification turns", () => {
 
 test("treats requests for another rule as help requests, not draft patches", () => {
   const context = {
-    currentRuleText:
-      "Win if at least 4 of your numbers appear in the draw.",
+    currentRuleText: "Win if at least 4 of your numbers appear in the draw.",
   };
 
   assert.equal(isRuleCreationHelpRequest("quero criar outra regra"), true);
   assert.equal(isRuleCreationHelpRequest("Create another rule"), true);
-  assert.equal(isRuleRefinementPatch("quero criar outra regra", context), false);
+  assert.equal(
+    isRuleRefinementPatch("quero criar outra regra", context),
+    false,
+  );
   assert.equal(isRuleRefinementPatch("Create another rule", context), false);
   assert.equal(isExplicitRuleRefinementPatch("Create another rule"), false);
 });
@@ -184,7 +212,10 @@ test("re-proposal block does not invent differentiating conditions", () => {
   assert.deepEqual(options, []);
 
   assert.equal(
-    getRuleGuidanceTitle({ reproposalBlocked: true, sanitizedText: blockedRule }),
+    getRuleGuidanceTitle({
+      reproposalBlocked: true,
+      sanitizedText: blockedRule,
+    }),
     "Differentiate this rule?",
   );
 });
@@ -199,7 +230,8 @@ test("external dependency and vague distance do not create arbitrary rewrites", 
 
   const clarifyOptions = buildRuleGuidanceOptions({
     needsClarification: true,
-    sanitizedText: "Win if my guess is close to the draw without comparing other players.",
+    sanitizedText:
+      "Win if my guess is close to the draw without comparing other players.",
     refinementQuestions: [
       "What exact count or comparison should make a guess win?",
       "Should order or positions matter, or should matching ignore order?",
@@ -227,13 +259,20 @@ test("clarifies the requested digit rule instead of suggesting unrelated match-c
     ],
   });
 
-  assert.deepEqual(options.map((option) => option.text), [
-    "Win if at least one guessed number shares either its tens digit or its units digit with any drawn number, regardless of order.",
-    "Win if at least one guessed number has the same tens digit as any drawn number, regardless of order.",
-    "Win if at least one guessed number has the same units digit as any drawn number, regardless of order.",
-  ]);
+  assert.deepEqual(
+    options.map((option) => option.text),
+    [
+      "Win if at least one guessed number shares either its tens digit or its units digit with any drawn number, regardless of order.",
+      "Win if at least one guessed number has the same tens digit as any drawn number, regardless of order.",
+      "Win if at least one guessed number has the same units digit as any drawn number, regardless of order.",
+    ],
+  );
   assert.ok(options.every((option) => /digit/i.test(option.text)));
-  assert.ok(options.every((option) => !/at least [234] guessed numbers appear/i.test(option.text)));
+  assert.ok(
+    options.every(
+      (option) => !/at least [234] guessed numbers appear/i.test(option.text),
+    ),
+  );
 });
 
 test("does not invent an unrelated rule when no intent-preserving rewrite is known", () => {
@@ -267,7 +306,10 @@ test("ordered tens-range clarification offers only the intent-preserving rule", 
     suggestedRewrites: [intendedRule],
   });
 
-  assert.deepEqual(options.map((option) => option.text), [intendedRule]);
+  assert.deepEqual(
+    options.map((option) => option.text),
+    [intendedRule],
+  );
 });
 
 test("always-true rejection offers full replacement rules without patching the rejected draft", () => {
@@ -289,4 +331,20 @@ test("always-true rejection offers full replacement rules without patching the r
     buildRuleGuidanceOptions(context).map((option) => option.text),
     context.suggestedRewrites,
   );
+});
+
+test("dealer chat suggestions are labeled as uncompiled rules to try", () => {
+  const context = {
+    dealerSuggestion: true,
+    suggestedRewrites: [
+      "Win if the guessed sum modulo 9 equals the drawn sum modulo 9.",
+    ],
+  };
+  assert.equal(getRuleGuidanceTitle(context), "Try this rule?");
+  assert.deepEqual(buildRuleGuidanceOptions(context), [
+    {
+      label: "Try dealer suggestion",
+      text: "Win if the guessed sum modulo 9 equals the drawn sum modulo 9.",
+    },
+  ]);
 });

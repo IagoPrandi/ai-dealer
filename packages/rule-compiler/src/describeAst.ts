@@ -505,6 +505,66 @@ function describeConjunctionV3(node: PredicateNodeV3): string {
   return joinList(parts, "and");
 }
 
+function describePositionRangeConjunction(node: PredicateNode): string | null {
+  if (node.kind !== "and") {
+    return null;
+  }
+
+  const ranges = new Map<
+    string,
+    { high?: number; index: number; low?: number; source: "draw" | "guess" }
+  >();
+  for (const clause of node.clauses) {
+    if (
+      clause.kind !== "compare" ||
+      (clause.op !== "gte" && clause.op !== "lte") ||
+      clause.left.kind !== "at" ||
+      clause.left.of.kind !== "source" ||
+      clause.right.kind !== "lit"
+    ) {
+      return null;
+    }
+    const key = `${clause.left.of.source}:${clause.left.index}`;
+    const range = ranges.get(key) ?? {
+      index: clause.left.index,
+      source: clause.left.of.source,
+    };
+    if (clause.op === "gte") {
+      if (range.low !== undefined) return null;
+      range.low = clause.right.value;
+    } else {
+      if (range.high !== undefined) return null;
+      range.high = clause.right.value;
+    }
+    ranges.set(key, range);
+  }
+
+  const complete = [...ranges.values()]
+    .filter(
+      (range): range is {
+        high: number;
+        index: number;
+        low: number;
+        source: "draw" | "guess";
+      } => range.low !== undefined && range.high !== undefined,
+    )
+    .sort((left, right) => left.index - right.index);
+  if (complete.length * 2 !== node.clauses.length) {
+    return null;
+  }
+
+  return joinList(
+    complete.map((range) => {
+      const subject =
+        range.source === "guess"
+          ? `its ${ordinal(range.index + 1)} number`
+          : `the official draw's ${ordinal(range.index + 1)} number`;
+      return `${subject} is between ${range.low} and ${range.high} (both included)`;
+    }),
+    "and",
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
@@ -551,6 +611,7 @@ export function describeRuleAstTotal(ast: RuleAst): string {
   const clause =
     ast.schemaVersion === 3
       ? describeConjunctionV3(ast.result.predicate)
-      : describePredicate(ast.result.predicate);
+      : describePositionRangeConjunction(ast.result.predicate) ??
+        describePredicate(ast.result.predicate);
   return sentence(`A guess wins if ${clause}`);
 }

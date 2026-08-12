@@ -2430,6 +2430,33 @@ test("G04 preserves the negative bound for a sum that is at least N lower", () =
   }
 });
 
+test("position-specific inclusive ranges compile in English and Portuguese", () => {
+  const texts = [
+    "A guess wins if the first number is between 1 and 100, the second between 2 and 99, and the third between 3 and 98.",
+    "Quero ganhar se o primeiro n\u00famero estiver entre 1 e 100, o segundo entre 2 e 99 e o terceiro entre 3 e 98.",
+  ];
+
+  for (const text of texts) {
+    const result = compile(text);
+    assert.equal(result.decision, "VALID", text);
+    assert.equal(
+      result.artifact?.officialInterpretation,
+      "A guess wins if its 1st number is between 1 and 100 (both included), its 2nd number is between 2 and 99 (both included) and its 3rd number is between 3 and 98 (both included).",
+    );
+
+    const evaluate = (guess: number[]) =>
+      evaluatePredicate(result.artifact!.ast, {
+        draw: [10, 20, 30, 40, 50, 60],
+        guess,
+      }).result;
+
+    assert.equal(evaluate([1, 2, 3, 40, 50, 60]), "WIN", "lower endpoints win");
+    assert.equal(evaluate([100, 99, 98, 40, 50, 60]), "WIN", "upper endpoints win");
+    assert.equal(evaluate([1, 1, 3, 40, 50, 60]), "LOSE", "second position below range loses");
+    assert.equal(evaluate([1, 2, 99, 40, 50, 60]), "LOSE", "third position above range loses");
+  }
+});
+
 test("stress set 4 objective rules compile to their stated boundary behaviour", () => {
   const cases: Array<{
     text: string;

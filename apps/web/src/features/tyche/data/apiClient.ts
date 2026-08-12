@@ -264,10 +264,15 @@ export interface RulePreflightApiResult {
   // create screen passes this straight into createProposeRuleInstruction.
   [key: string]: unknown;
   confirmationRequired: boolean;
+  coverage: {
+    missingFromAst: number[];
+    missingOperations: Array<"digit" | "mod" | "parity" | "sum">;
+  } | null;
   decision?: "INVALID" | "VALID";
   dealerMessage: string;
   needsClarification: boolean;
   normalizedText: string;
+  reasonCodes: string[];
   ruleId: number;
   tokenCount: number;
 }
@@ -345,6 +350,7 @@ export async function cancelRulePreflightJob(jobId: string) {
  * ApiRequestError, so the caller's blocked-rule handling is unchanged.
  */
 export function startRulePreflightJob(args: {
+  draftId?: null | string;
   phase: RulePreflightPhase;
   signal?: AbortSignal;
   text: string;
@@ -356,8 +362,30 @@ export function startRulePreflightJob(args: {
     status: string;
   }>(
     "/rule-preflight",
-    { phase: args.phase, text: args.text },
+    {
+      ...(args.draftId ? { draftId: args.draftId } : {}),
+      phase: args.phase,
+      text: args.text,
+    },
     { accept: "text/event-stream" },
+    args.signal,
+  );
+}
+
+export interface DealerQuestionApiResult {
+  answer: string;
+  proposedRuleText: string | null;
+}
+
+export function askDealer(args: {
+  draftId: string;
+  message: string;
+  signal?: AbortSignal;
+}) {
+  return postStrictJson<DealerQuestionApiResult>(
+    "/rule-dealer/ask",
+    { draftId: args.draftId, message: args.message },
+    {},
     args.signal,
   );
 }
