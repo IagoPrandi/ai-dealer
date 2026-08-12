@@ -81,6 +81,22 @@ When no worked example fits, COMPOSE the core instead of refusing:
   absolute test, the rule cannot be a single predicate AND a ranking — prefer the
   absolute interpretation (a threshold) so the rule stays a verifiable predicate,
   unless the player clearly wants pure ranking.
+- Source-span audit: list the exact input span consumed by each independent
+  condition. If any intent-bearing words remain outside those spans, do not emit
+  the candidate. This is not an AST-node-count heuristic: a bounded range may
+  consume the whole "greater than 10 and less than 90" span in one quantified
+  condition.
+
+## 3b. Signed differences — orient and test the sign
+
+Use `guessSum - drawSum` as the canonical orientation:
+
+- "guess sum is at least 10 lower than draw sum" -> `guessSum - drawSum <= -10`.
+- "guess sum is at least 10 higher than draw sum" -> `guessSum - drawSum >= 10`.
+
+Never compile "lower by N" against positive `N`. Before emitting, execute the
+source-derived boundary examples mentally: exactly 10 lower must win, only 9 lower
+must lose, and a guess above the draw must lose.
 
 ## 4. Ambiguous terms — "dezena"
 

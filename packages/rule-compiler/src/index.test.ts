@@ -99,6 +99,9 @@ test("the compile_rule_to_ast skill prompt is versioned and covers both rule mod
   assert.ok(prompt.includes('"kind":"contains"'));
   assert.ok(prompt.includes('"kind":"forall"'));
   assert.ok(prompt.includes('"kind":"abs"'));
+  assert.ok(prompt.includes("consumedSpans"));
+  assert.ok(prompt.includes("workedExamples"));
+  assert.ok(prompt.includes("guessSum - drawSum <= -10"));
   assert.ok(prompt.includes('"up":1'));
   assert.ok(prompt.includes("first pick only needs to be higher"));
   assert.ok(prompt.includes("sum(guess) mod 10"));
@@ -1454,6 +1457,128 @@ test("rejects a text-to-AST reviewer mismatch from an LLM provider", async () =>
   assert.ok(result.log.reasonCodes.includes("REVIEWER_MISMATCH"));
 });
 
+test("provider source spans reject an omitted clause without a conjunction heuristic", async () => {
+  const text =
+    "A guess wins if all six guessed numbers are strictly greater than 10 and strictly less than 90.";
+  const rangeAst = {
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "forall",
+        of: { kind: "source", source: "guess" },
+        where: {
+          kind: "and",
+          clauses: [
+            {
+              kind: "compare",
+              left: { kind: "elem" },
+              op: "gt",
+              right: { kind: "lit", value: 10 },
+            },
+            {
+              kind: "compare",
+              left: { kind: "elem" },
+              op: "lt",
+              right: { kind: "lit", value: 90 },
+            },
+          ],
+        },
+      },
+    },
+  };
+  const workedExamples = [
+    {
+      draw: [1, 2, 3, 4, 5, 6],
+      guess: [11, 20, 30, 40, 50, 89],
+      outcome: "WIN" as const,
+    },
+    {
+      draw: [1, 2, 3, 4, 5, 6],
+      guess: [10, 20, 30, 40, 50, 89],
+      outcome: "LOSE" as const,
+    },
+  ];
+
+  const omitted = await compileRuleArtifact(
+    { originalText: text, prompt: text, tokenCount: countWords(text) },
+    {
+      astProvider: async () => ({
+        ast: rangeAst,
+        consumedSpans: [
+          { text: "all six guessed numbers are strictly greater than 10" },
+        ],
+        workedExamples,
+      }),
+      requireProviderEvidence: true,
+    },
+  );
+  assert.equal(omitted.decision, "INVALID");
+  assert.ok(omitted.log.reasonCodes.includes("INTERPRETATION_MISMATCH"));
+
+  const complete = await compileRuleArtifact(
+    { originalText: text, prompt: text, tokenCount: countWords(text) },
+    {
+      astProvider: async () => ({
+        ast: rangeAst,
+        // One source span is valid here: it records that the quantified range
+        // consumed both bounds. No AST `and` node count is inferred from prose.
+        consumedSpans: [{ text: text.toLowerCase() }],
+        workedExamples,
+      }),
+      requireProviderEvidence: true,
+    },
+  );
+  assert.equal(complete.decision, "VALID");
+  assert.deepEqual(complete.artifact?.workedExamples, workedExamples);
+});
+
+test("provider worked examples catch an inverted signed bound", async () => {
+  const text =
+    "After adding ten to my ticket total, it must still be below the draw total.";
+  const wrongSignAst = {
+    schemaVersion: 2,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "compare",
+        left: {
+          kind: "arith",
+          left: { kind: "reduce", of: { kind: "source", source: "guess" }, op: "sum" },
+          op: "sub",
+          right: { kind: "reduce", of: { kind: "source", source: "draw" }, op: "sum" },
+        },
+        op: "lte",
+        right: { kind: "lit", value: 10 },
+      },
+    },
+  };
+  const result = await compileRuleArtifact(
+    { originalText: text, prompt: text, tokenCount: countWords(text) },
+    {
+      astProvider: async () => ({
+        ast: wrongSignAst,
+        consumedSpans: [{ text: text.toLowerCase() }],
+        workedExamples: [
+          {
+            draw: [10, 20, 30, 40, 50, 60],
+            guess: [5, 15, 25, 35, 55, 65],
+            outcome: "WIN",
+          },
+          {
+            draw: [10, 20, 30, 40, 50, 60],
+            guess: [5, 15, 25, 35, 56, 65],
+            outcome: "LOSE",
+          },
+        ],
+      }),
+      requireProviderEvidence: true,
+    },
+  );
+  assert.equal(result.decision, "INVALID");
+  assert.ok(result.log.reasonCodes.includes("INTERPRETATION_MISMATCH"));
+});
+
 test("can prefer deterministic compilation for known preflight patterns", async () => {
   let providerCalled = false;
   const result = await compileRuleArtifact(
@@ -1539,7 +1664,8 @@ test("rejects an LLM-emitted ALWAYS_TRUE rule (PRD 6.8)", async () => {
 test("exposes the prompt contract for audit", () => {
   const contract = getRuleValidationPromptContract();
 
-  assert.equal(contract.version, "tyche_rule_validation_prompt_v1");
+  assert.equal(contract.version, "tyche_rule_validation_prompt_v2");
+  assert.equal(contract.output, "RuleCompilationCandidate | INVALID");
   assert.deepEqual(contract.allowedInputs, ["guess", "draw"]);
 });
 
@@ -1958,7 +2084,7 @@ test("keeps a legitimately rare rule winnable instead of impossible", () => {
 // --- Layer 2: a second opinion where no deterministic reading exists ----------
 
 const NO_REFERENCE_PROMPT =
-  "My ticket total should be at least ten lower than the draw total.";
+  "After adding ten to my ticket total, it must still be below the draw total.";
 
 function sumCompareAst(op: "gt" | "lt", offset: number) {
   return {
@@ -2089,4 +2215,204 @@ test("records that a required second opinion could not be obtained", async () =>
 
   assert.equal(result.decision, "VALID");
   assert.ok(result.log.reasonCodes.includes("SECOND_OPINION_UNAVAILABLE"));
+});
+
+// Regression set from the 2026-08-11 rule-agent behaviour session
+// (docs/rule-proposal-prompt-test-set-3.md). Each case below shipped a VALID
+// artifact whose behaviour contradicted the rule the player wrote.
+
+function compile(text: string) {
+  return validateAndPrecompileRule({
+    originalText: text,
+    prompt: text,
+    tokenCount: countWords(text),
+  });
+}
+
+function countWords(text: string) {
+  return text.trim().split(/\s+/u).filter(Boolean).length;
+}
+
+test("a cardinality phrase is not a match threshold", () => {
+  // Every guess and every draw always has exactly six numbers, so "its six
+  // numbers" describes the ticket, never how many of them must match. Reading
+  // it as a threshold turned three unrelated rules into `match_count_at_least 6`
+  // — the first of them being the exact logical inverse of the request.
+  const zeroOverlap = compile(
+    "a guess wins if none of its six numbers appear in the official draw.",
+  );
+  assert.equal(zeroOverlap.decision, "VALID");
+  assert.equal(
+    evaluatePredicate(zeroOverlap.artifact!.ast, {
+      draw: [7, 8, 9, 10, 11, 12],
+      guess: [1, 2, 3, 4, 5, 6],
+    }).result,
+    "WIN",
+    "no overlap must win",
+  );
+  assert.equal(
+    evaluatePredicate(zeroOverlap.artifact!.ast, {
+      draw: [6, 8, 9, 10, 11, 12],
+      guess: [1, 2, 3, 4, 5, 6],
+    }).result,
+    "LOSE",
+    "one overlap must lose",
+  );
+
+  // The same sentence without the cardinality word already compiled correctly;
+  // both readings must now agree.
+  assert.deepEqual(
+    compile("a guess wins if none of its numbers appear in the official draw.")
+      .artifact!.ast,
+    zeroOverlap.artifact!.ast,
+  );
+
+  const sumEquality = compile(
+    "a guess wins if the sum of its six numbers equals the sum of the six drawn numbers.",
+  );
+  assert.equal(sumEquality.decision, "VALID");
+  assert.deepEqual(sumEquality.artifact!.ast, {
+    node: { kind: "sum_equals" },
+    schemaVersion: 1,
+  });
+
+  // Unsupported, so it must fail closed rather than compile to a match count.
+  assert.equal(
+    compile(
+      "a guess wins if its six numbers are all even and the six drawn numbers are all odd.",
+    ).decision,
+    "INVALID",
+  );
+});
+
+test("interpretation coverage runs when no independent reviewer exists", () => {
+  // The reviewer used to be the same compileSupportedRule call on the same text
+  // as the AST under review, so it always agreed with itself and the coverage
+  // gate behind it never ran on the deterministic path — leaving the turn-55
+  // failure reachable.
+  const exactSet = compile(
+    "A guess wins if its six numbers are exactly 1, 2, 3, 4, 5 and 6 in any order.",
+  );
+  assert.equal(exactSet.decision, "INVALID");
+  assert.ok(exactSet.log.reasonCodes.includes("INTERPRETATION_MISMATCH"));
+});
+
+test("an operation the player named must survive compilation", () => {
+  // A dropped VALUE is not the only way to freeze a different rule: these all
+  // kept every literal the player wrote and still changed the rule.
+  for (const text of [
+    "A guess wins if the sum of the guessed numbers modulo 10 equals the sum of the drawn numbers modulo 10.",
+    "A guess wins if it has exactly three odd guessed numbers and the official draw also has exactly three odd drawn numbers.",
+    "A guess wins if at least one guessed number appears in the official draw and at least one guessed number has the same tens digit as a drawn number.",
+    "A guess wins if at least three of its guessed numbers appear in the official draw and the sum of the guessed numbers is greater than 200.",
+  ]) {
+    const result = compile(text);
+    assert.equal(result.decision, "INVALID", text);
+    assert.ok(result.log.reasonCodes.includes("INTERPRETATION_MISMATCH"), text);
+  }
+
+  // ...while a rule that genuinely performs the operation still compiles. A
+  // modulus of 10 IS the last digit and a modulus of 2 IS parity, so one
+  // arithmetic node satisfies every cue it actually implements.
+  for (const text of [
+    "Only the last digit of the totals matters: my ticket sum modulo 10 equals the draw sum modulo 10.",
+    "A guess wins if the count of even guessed numbers equals the count of even drawn numbers.",
+    "A guess wins if the sum of its six numbers equals the sum of the six drawn numbers.",
+  ]) {
+    assert.equal(compile(text).decision, "VALID", text);
+  }
+});
+
+test("a threshold over filtered numbers is not an overlap count", () => {
+  // "at least one drawn number is above 50" counts numbers passing a threshold.
+  // Read as an overlap it collapsed a two-condition rule into
+  // `match_count_at_least 1`, which any guess sharing one number would win.
+  const result = compile(
+    "A guess wins if it contains the number 13 and at least one drawn number is above 50.",
+  );
+  if (result.decision === "VALID") {
+    assert.notDeepEqual(result.artifact!.ast, {
+      node: { kind: "match_count_at_least", value: 1 },
+      schemaVersion: 1,
+    });
+  }
+});
+
+test("H03 keeps both same-position conditions executable", () => {
+  const result = compile(
+    "Each guessed number is within 6 of the drawn number in the same position, and at least one guessed number equals the drawn number in the same position.",
+  );
+  assert.equal(result.decision, "VALID");
+  assert.equal(result.artifact?.ast.schemaVersion, 3);
+  assert.equal(
+    result.artifact?.officialInterpretation,
+    "A guess wins if every guessed number is within 6 of the drawn number in the same position and at least one guessed number equals the drawn number in the same position.",
+  );
+
+  const evaluate = (guess: number[], draw: number[]) =>
+    evaluatePredicate(result.artifact!.ast, { draw, guess }).result;
+
+  assert.equal(
+    evaluate([10, 26, 36, 46, 56, 66], [10, 20, 30, 40, 50, 60]),
+    "WIN",
+    "all positions are within 6 and position 1 is exact",
+  );
+  assert.equal(
+    evaluate([16, 26, 36, 46, 56, 66], [10, 20, 30, 40, 50, 60]),
+    "LOSE",
+    "being within 6 everywhere is insufficient without an exact position",
+  );
+  assert.equal(
+    evaluate([10, 27, 36, 46, 56, 66], [10, 20, 30, 40, 50, 60]),
+    "LOSE",
+    "an exact position is insufficient when another position is more than 6 away",
+  );
+});
+
+test("G04 preserves the negative bound for a sum that is at least N lower", () => {
+  for (const text of [
+    "A guess wins if the sum of the guessed numbers is at least 10 lower than the sum of the drawn numbers.",
+    "My ticket total should be at least ten lower than the draw total.",
+  ]) {
+    const result = compile(text);
+    assert.equal(result.decision, "VALID", text);
+    assert.deepEqual(result.artifact?.ast, {
+      schemaVersion: 2,
+      result: {
+        type: "predicate",
+        predicate: {
+          kind: "compare",
+          left: {
+            kind: "arith",
+            left: {
+              kind: "reduce",
+              of: { kind: "source", source: "guess" },
+              op: "sum",
+            },
+            op: "sub",
+            right: {
+              kind: "reduce",
+              of: { kind: "source", source: "draw" },
+              op: "sum",
+            },
+          },
+          op: "lte",
+          right: { kind: "lit", value: -10 },
+        },
+      },
+    });
+    assert.equal(
+      result.artifact?.officialInterpretation,
+      "A guess wins if the sum of the guessed numbers is at least 10 lower than the sum of the drawn numbers.",
+    );
+
+    const evaluate = (guess: number[]) =>
+      evaluatePredicate(result.artifact!.ast, {
+        draw: [10, 20, 30, 40, 50, 60],
+        guess,
+      }).result;
+    assert.equal(evaluate([5, 15, 25, 35, 55, 65]), "WIN", "exactly 10 lower");
+    assert.equal(evaluate([5, 15, 25, 35, 56, 65]), "LOSE", "only 9 lower");
+    assert.equal(evaluate([10, 20, 30, 40, 50, 70]), "LOSE", "10 higher");
+  }
 });

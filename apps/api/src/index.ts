@@ -47,6 +47,7 @@ import {
   type RuleAstProvider,
   type RuleCompiledArtifact,
   type RuleConfidenceAction,
+  type RuleSourceSpan,
   type RuleValidationDecision,
   type RuleValidationReasonCode,
   type RuleValidationTestResult,
@@ -158,6 +159,24 @@ export interface GuessReceiptRecord {
 
 export interface RulePreflightResult {
   addedOperationalClauses: string[];
+  // The compiled artifact itself, or null when nothing compiled. The official
+  // interpretation is DERIVED from this AST, so prose alone can never reveal a
+  // rule that compiled to something other than what the player wrote — it
+  // faithfully describes whatever was compiled. Returning the AST is what makes
+  // "the announcement is the rule" checkable: execute it through
+  // @tyche/rule-runtime and compare against the player's own intent.
+  //
+  // Deliberately NOT gated on `decision`: a rule that compiled and was then
+  // rejected (re-proposal gate, scope confirmation, trivially-true) is exactly
+  // the case where seeing the AST explains the verdict. `decision` and
+  // `compiledArtifactHash` remain the acceptance signals.
+  //
+  // Every preflight response sets this. It is optional only because
+  // RuleProposalRecord extends this shape and proposals persisted before this
+  // field existed do not carry it.
+  ast?: RuleAst | null;
+  /** Auditable normalized-rule spans consumed into the accepted AST. */
+  sourceSpans?: readonly RuleSourceSpan[] | null;
   clarityNote: string;
   confirmationRequired: boolean;
   // Compile gate (PRD §7.5): the rule is only payable/proposable when the dealer
@@ -2550,8 +2569,8 @@ async function createRulePreflight(
       model,
       stage: "compiling",
     });
-    const astProvider: RuleAstProvider = async ({ prompt }) =>
-      compileRuleToAst(prompt, passConfig, signal);
+    const astProvider: RuleAstProvider = async ({ normalizedText }) =>
+      compileRuleToAst(normalizedText, passConfig, signal);
     const validation = await compileRuleArtifact(
       {
         model,
@@ -2565,7 +2584,11 @@ async function createRulePreflight(
         ruleId,
         tokenCount,
       },
-      { astProvider, preferDeterministic: true },
+      {
+        astProvider,
+        preferDeterministic: true,
+        requireProviderEvidence: true,
+      },
     );
     let grounded: boolean | undefined;
     if (guardianConfig.enabled && validation.decision === "VALID") {
@@ -2643,6 +2666,7 @@ async function createRulePreflight(
   const guardianBlocked = guardianGrounded === false;
 
   const ruleAst = validation.artifact?.ast ?? null;
+  const sourceSpans = validation.artifact?.sourceSpans ?? null;
   // Technical validity is not the same as confirmed intent. Inspect the frozen
   // AST instead of trusting model prose so tautologies, draw-only/guess-only
   // outcomes, and unstated numeric range boundaries cannot pass silently.
@@ -2738,6 +2762,10 @@ async function createRulePreflight(
       : null);
 
   const preflightResult = JSON.stringify({
+    // Hashed alongside everything else the player is shown: the commitment must
+    // cover the artifact they can now inspect, not only the prose about it.
+    ast: ruleAst,
+    sourceSpans,
     compiledArtifactHash: decision === "VALID" ? validation.artifactHash : null,
     confirmationRequired: semanticReview.confirmationRequired,
     decision,
@@ -2753,11 +2781,12 @@ async function createRulePreflight(
     semanticImpact: semanticReview.impact,
     title: interpretation.title,
     tokenCount,
-    version: 9,
+    version: 11,
   });
 
   return {
     addedOperationalClauses: interpretation.addedOperationalClauses,
+    ast: ruleAst,
     clarityNote:
       refinementFeedback?.clarityNote ??
       (needsClarification && !interpretation.clarityNote
@@ -2796,6 +2825,7 @@ async function createRulePreflight(
     sanitizedText,
     sanitizedTextHash: hashBytes(sanitizedText),
     semanticImpact: semanticReview.impact,
+    sourceSpans,
     ...(refinementFeedback?.suggestedRewrite
       ? { suggestedRewrite: refinementFeedback.suggestedRewrite }
       : {}),
@@ -3124,7 +3154,9 @@ function isValidCompiledArtifact(
   const artifact = value as Partial<RuleCompiledArtifact>;
 
   return (
-    (artifact.schemaVersion === 1 || artifact.schemaVersion === 2) &&
+    (artifact.schemaVersion === 1 ||
+      artifact.schemaVersion === 2 ||
+      artifact.schemaVersion === 3) &&
     isValidRuleAst(artifact.ast) &&
     typeof artifact.originalText === "string" &&
     artifact.originalText.length > 0 &&

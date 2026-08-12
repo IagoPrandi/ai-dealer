@@ -7,17 +7,34 @@ import type { RuleAst } from "@tyche/rule-schema";
 // "guess is exactly {1,2,3,4,5,6} and a drawn number is in [1,99]" as
 // `count(guess ∩ draw) == 6`, so nobody could win what the card promised.
 //
-// The check is deterministic and one-directional: every numeric constraint the
-// player stated explicitly must survive into the compiled AST and into the
-// interpretation shown back to them. It never asks the reverse (an AST may
-// legitimately carry values the prose does not spell out).
+// The check is deterministic and one-directional: every numeric constraint AND
+// every load-bearing operation the player stated explicitly must survive into
+// the compiled AST and into the interpretation shown back to them. It never asks
+// the reverse (an AST may legitimately carry values or operations the prose does
+// not spell out).
+//
+// Operations are checked because values alone are not enough: "the guessed sum
+// modulo 9 equals the drawn sum modulo 9" compiled to plain `sum_equals` with
+// every literal intact, and "exactly three odd guessed numbers and three odd
+// drawn numbers" compiled to a bare match count. Both kept their numbers and
+// both froze a different rule.
 
 export interface InterpretationCoverage {
   covered: boolean;
   missingFromAst: number[];
   missingFromInterpretation: number[];
+  missingOperations: RuleOperation[];
+  requiredOperations: RuleOperation[];
   requiredValues: number[];
 }
+
+/**
+ * Load-bearing operations a player can name explicitly. Deliberately a small
+ * closed set: each one changes which guesses win, each one has an unambiguous
+ * signature in the AST, and none of them can be "simplified away" the way a
+ * count or a position can.
+ */
+export type RuleOperation = "digit" | "mod" | "parity" | "sum";
 
 export interface InterpretationCoverageInput {
   ast: RuleAst;
@@ -76,6 +93,13 @@ const NUMBER_ENUMERATION =
   /\b\d{1,3}(?:\s*(?:,|;|\band\b|\be\b|\bor\b|\bou\b|\s)\s*\d{1,3}){2,}\b/gu;
 const NUMERIC_RANGE =
   /\b(?:between|entre)\s+(\d{1,3})\s+(?:and|e)\s+(\d{1,3})\b|\b(?:from|de)\s+(\d{1,3})\s+(?:to|through|a|ate)\s+(\d{1,3})\b/gu;
+
+// "contains the number 13" states a membership requirement, and dropping it
+// always changes which guesses win — unlike a count or a threshold, there is no
+// equivalent rewrite that omits it. The lookahead keeps counts out: "contains 3
+// numbers" is a count, not a value.
+const MEMBERSHIP_LITERAL =
+  /\b(?:contains?|includes?|contem|inclui)\s+(?:the\s+number\s+|o\s+numero\s+|a\s+dezena\s+)?(\d{1,3})\b(?!\s*(?:numbers?|numeros?|matches|hits|acertos?|dezenas?|of\b|or\s+more))/gu;
 
 // A range that already covers the whole number domain constrains nothing, so a
 // compiler that drops it loses no meaning. [1, 99] is NOT such a range (it
@@ -142,6 +166,9 @@ export function collectRequiredValues(text: string): number[] {
   for (const match of prepared.matchAll(NUMERIC_RANGE)) {
     readDigits(match[0]).forEach((value) => required.add(value));
   }
+  for (const [, literal] of prepared.matchAll(MEMBERSHIP_LITERAL)) {
+    readDigits(literal ?? "").forEach((value) => required.add(value));
+  }
 
   return [...required].sort((a, b) => a - b);
 }
@@ -191,6 +218,100 @@ export function collectAstValues(ast: RuleAst): Set<number> {
   return values;
 }
 
+// A dropped VALUE is not the only way a compile can promise one rule and freeze
+// another. "the guessed sum modulo 9 equals the drawn sum modulo 9" compiled to
+// plain `sum_equals` and "exactly three odd guessed numbers AND three odd drawn
+// numbers" compiled to a bare match count — in both cases every literal the
+// player wrote survived, so value coverage saw nothing wrong, while the frozen
+// rule was a different rule.
+//
+// These cues are matched one-directionally, exactly like values: an AST may use
+// an operation the prose does not name, never the reverse. "even if" and "even
+// though" are excluded because they are conjunctions, not parity.
+const OPERATION_TEXT_CUES: ReadonlyArray<readonly [RuleOperation, RegExp]> = [
+  ["mod", /\b(?:modulo|modulus|mod|remainder|resto)\b/u],
+  [
+    "parity",
+    /\b(?:even(?!\s+(?:if|though|when|so))|odd|numeros?\s+pares?|pares|impar(?:es)?)\b/u,
+  ],
+  ["sum", /\b(?:sum|sums|total|totals|soma|somam?)\b/u],
+  ["digit", /\b(?:digit|digits|digito|digitos)\b/u],
+];
+
+export function collectRequiredOperations(text: string): RuleOperation[] {
+  const prepared = stripExampleClauses(normalize(text));
+  return OPERATION_TEXT_CUES.filter(([, pattern]) => pattern.test(prepared)).map(
+    ([operation]) => operation,
+  );
+}
+
+function readLiteral(node: unknown): number | null {
+  if (!node || typeof node !== "object") {
+    return null;
+  }
+  const record = node as Record<string, unknown>;
+  return record.kind === "lit" && typeof record.value === "number"
+    ? record.value
+    : null;
+}
+
+/**
+ * Operations the AST actually performs. Over-inclusive on purpose (this is the
+ * covering side), so a broader reading can only reduce false rejections.
+ */
+export function collectAstOperations(ast: RuleAst): Set<RuleOperation> {
+  const operations = new Set<RuleOperation>();
+  if (ast.schemaVersion === 1) {
+    if (ast.node.kind === "sum_equals") {
+      operations.add("sum");
+    }
+    return operations;
+  }
+
+  const visit = (node: unknown) => {
+    if (Array.isArray(node)) {
+      node.forEach(visit);
+      return;
+    }
+    if (!node || typeof node !== "object") {
+      return;
+    }
+    const record = node as Record<string, unknown>;
+    const kind = typeof record.kind === "string" ? record.kind : "";
+    const op = typeof record.op === "string" ? record.op : "";
+
+    if (kind.includes("digit") || kind === "digits") {
+      operations.add("digit");
+    }
+    // A modulus is not just "modulo": mod 2 IS a parity test and mod 10 IS the
+    // units digit. Players write it both ways ("the last digit of the totals
+    // matters: my sum modulo 10 ..."), so one arithmetic node has to satisfy
+    // every cue it genuinely implements, or correct compiles get rejected.
+    const modulus =
+      typeof record.operand === "number"
+        ? record.operand
+        : readLiteral(record.right);
+    if (kind === "filter_mod" || op === "mod") {
+      operations.add("mod");
+      const value = kind === "filter_mod" ? record.modulus : modulus;
+      if (value === 2) {
+        operations.add("parity");
+      }
+      if (value === 10) {
+        operations.add("digit");
+      }
+    }
+    // `total_ordered_abs_diff_lte` adds up per-position differences: a total is
+    // a sum, whatever the node is called.
+    if (op === "sum" || kind.includes("sum") || kind.includes("total")) {
+      operations.add("sum");
+    }
+    Object.values(record).forEach(visit);
+  };
+  visit(ast);
+  return operations;
+}
+
 export function analyzeInterpretationCoverage({
   ast,
   officialInterpretation,
@@ -206,11 +327,21 @@ export function analyzeInterpretationCoverage({
     (value) => !interpretationValues.has(value),
   );
 
+  const requiredOperations = collectRequiredOperations(text);
+  const astOperations = collectAstOperations(ast);
+  const missingOperations = requiredOperations.filter(
+    (operation) => !astOperations.has(operation),
+  );
+
   return {
     covered:
-      missingFromAst.length === 0 && missingFromInterpretation.length === 0,
+      missingFromAst.length === 0 &&
+      missingFromInterpretation.length === 0 &&
+      missingOperations.length === 0,
     missingFromAst,
     missingFromInterpretation,
+    missingOperations,
+    requiredOperations,
     requiredValues,
   };
 }

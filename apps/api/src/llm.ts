@@ -790,10 +790,11 @@ export async function translateRuleToEnglish(
   return englishText;
 }
 
-// Compile step (PRD §7.3.1): ask the model to EMIT a rule AST conforming to the
-// DSL JSON schema. The JSON schema is embedded in the prompt and json_object
-// response mode is requested (Ollama-compatible). The returned object is raw and
-// is schema-validated by @tyche/rule-compiler — this function never decides
+// Compile step (PRD §7.3.1): ask the model to emit an auditable compilation
+// candidate (AST + consumed source spans + source-derived worked examples).
+// json_object response mode is requested (Ollama-compatible). The returned
+// object is raw; @tyche/rule-compiler schema-validates the AST, verifies span
+// coverage, and executes the examples. This transport function never decides
 // validity. Throws a typed RuleAgentError so the caller can escalate.
 export async function compileRuleToAst(
   normalizedText: string,

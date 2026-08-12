@@ -113,9 +113,37 @@ export type RuleAstProvider = (params: {
   providerConfig: AgentProviderConfig;
 }) => Promise<unknown>;
 
+export interface RuleSourceSpan {
+  /** Exact substring of the normalized rule that produced an AST condition. */
+  text: string;
+}
+
+export interface RuleProviderWorkedExample {
+  draw: number[];
+  guess: number[];
+  /** Predicate examples use outcome; ranking examples use score. */
+  outcome?: "WIN" | "LOSE";
+  score?: number;
+}
+
+/**
+ * Auditable provider response. The AST alone cannot prove that every source
+ * clause was consumed, and examples generated from that AST only prove that the
+ * runtime agrees with itself. Production preflight therefore asks the provider
+ * for source spans plus examples derived from the player's text before the AST
+ * can be accepted.
+ */
+export interface RuleCompilationCandidate {
+  ast: unknown;
+  consumedSpans: RuleSourceSpan[];
+  workedExamples: RuleProviderWorkedExample[];
+}
+
 export interface RuleCompileArtifactOptions {
   astProvider: RuleAstProvider;
   preferDeterministic?: boolean;
+  /** Fail closed unless an LLM response includes verified source evidence. */
+  requireProviderEvidence?: boolean;
 }
 
 export interface RuleCompilationRequest {
@@ -205,6 +233,8 @@ export interface RuleCompiledArtifact {
   ruleMode: "predicate" | "ranking";
   schemaVersion: 1 | 2 | 3;
   skillVersion: string;
+  /** Exact normalized-rule spans the compiler consumed into the AST. */
+  sourceSpans: readonly RuleSourceSpan[];
   testCoverageScore: number;
   testHarnessVersion: string;
   /** Concrete inputs showing the frozen rule winning and losing (PRD §6.5). */
@@ -218,10 +248,10 @@ export type ProviderFailureMode =
 
 export interface RuleValidationPromptContract {
   allowedInputs: readonly ["guess", "draw"];
-  output: "RuleAst | INVALID";
+  output: "RuleCompilationCandidate | INVALID";
   prohibitedReferences: readonly string[];
   requiredChecks: readonly string[];
-  version: "tyche_rule_validation_prompt_v1";
+  version: "tyche_rule_validation_prompt_v2";
 }
 
 const NUMBER_WORDS = new Map<string, number>([
@@ -310,7 +340,7 @@ const EXTERNAL_DEPENDENCY_PATTERNS = [
 
 const PROMPT_CONTRACT: RuleValidationPromptContract = {
   allowedInputs: ["guess", "draw"],
-  output: "RuleAst | INVALID",
+  output: "RuleCompilationCandidate | INVALID",
   prohibitedReferences: [
     "wallet metadata",
     "vote counts",
@@ -324,11 +354,13 @@ const PROMPT_CONTRACT: RuleValidationPromptContract = {
     "reject ambiguity",
     "reject dependencies outside guess and draw",
     "compile only supported bounded AST nodes",
+    "verify every intent-bearing source span was consumed",
+    "execute source-derived worked examples against the compiled AST",
     "generate deterministic standard and adversarial test cases",
     "execute tests through the deterministic runtime",
     "compute confidence breakdown",
   ],
-  version: "tyche_rule_validation_prompt_v1",
+  version: "tyche_rule_validation_prompt_v2",
 };
 
 export function getRuleValidationPromptContract(): RuleValidationPromptContract {
@@ -677,6 +709,161 @@ interface AttemptContext {
   reasonCodes: Set<RuleValidationReasonCode>;
 }
 
+interface ProviderCompilationEvidence {
+  consumedSpans: unknown;
+  workedExamples: unknown;
+}
+
+interface VerifiedProviderEvidence {
+  sourceSpans: readonly RuleSourceSpan[];
+  workedExamples: readonly RuleWorkedExample[];
+}
+
+function unwrapProviderCompilation(value: unknown): {
+  evidence: ProviderCompilationEvidence | null;
+  rawAst: unknown;
+} {
+  if (!value || typeof value !== "object" || !("ast" in value)) {
+    return { evidence: null, rawAst: value };
+  }
+  const candidate = value as Record<string, unknown>;
+  return {
+    evidence: {
+      consumedSpans: candidate.consumedSpans,
+      workedExamples: candidate.workedExamples,
+    },
+    rawAst: candidate.ast,
+  };
+}
+
+function isSixUniqueDomainNumbers(value: unknown): value is number[] {
+  return (
+    Array.isArray(value) &&
+    value.length === 6 &&
+    value.every(
+      (number) =>
+        Number.isInteger(number) &&
+        typeof number === "number" &&
+        number >= 1 &&
+        number <= 100,
+    ) &&
+    new Set(value).size === 6
+  );
+}
+
+function verifySourceSpanCoverage(
+  text: string,
+  value: unknown,
+): readonly RuleSourceSpan[] | null {
+  if (!Array.isArray(value) || value.length === 0) {
+    return null;
+  }
+  const covered = Array.from({ length: text.length }, () => false);
+  const sourceSpans: RuleSourceSpan[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") {
+      return null;
+    }
+    const rawSpan = (item as Record<string, unknown>).text;
+    if (typeof rawSpan !== "string") {
+      return null;
+    }
+    const span = normalizeRuleText(rawSpan);
+    if (!span) {
+      return null;
+    }
+    const start = text.indexOf(span);
+    if (start < 0) {
+      return null;
+    }
+    sourceSpans.push({ text: span });
+    for (let index = start; index < start + span.length; index += 1) {
+      covered[index] = true;
+    }
+  }
+
+  // Spans cover semantic source text, not UI scaffolding. This is intentionally
+  // not a "text contains AND -> AST contains and" heuristic: one span may cover
+  // a whole range expression that a single quantified node consumes. Whatever
+  // shape the AST takes, no intent-bearing comparison/threshold text may remain.
+  const uncovered = [...text]
+    .map((character, index) => (covered[index] ? " " : character))
+    .join("")
+    .replace(
+      /\b(?:a|an|the|if|then|when|and|or|e|ou|guess|ticket|rule|win|wins|winning|should|must|it)\b/gu,
+      " ",
+    )
+    .replace(/[^a-z0-9]+/gu, "");
+  return uncovered.length === 0 ? sourceSpans : null;
+}
+
+function verifyProviderEvidence(
+  ast: RuleAst,
+  normalizedText: string,
+  evidence: ProviderCompilationEvidence,
+): VerifiedProviderEvidence | null {
+  const sourceSpans = verifySourceSpanCoverage(
+    normalizedText,
+    evidence.consumedSpans,
+  );
+  if (!sourceSpans) {
+    return null;
+  }
+  if (!Array.isArray(evidence.workedExamples) || evidence.workedExamples.length < 2) {
+    return null;
+  }
+
+  const predicateExamples: RuleWorkedExample[] = [];
+  const outcomes = new Set<"WIN" | "LOSE">();
+  for (const rawExample of evidence.workedExamples) {
+    if (!rawExample || typeof rawExample !== "object") {
+      return null;
+    }
+    const example = rawExample as Record<string, unknown>;
+    if (
+      !isSixUniqueDomainNumbers(example.guess) ||
+      !isSixUniqueDomainNumbers(example.draw)
+    ) {
+      return null;
+    }
+    try {
+      if (isRankingRule(ast)) {
+        if (
+          typeof example.score !== "number" ||
+          !Number.isFinite(example.score) ||
+          scoreGuess(ast, { draw: example.draw, guess: example.guess }) !==
+            example.score
+        ) {
+          return null;
+        }
+      } else {
+        if (example.outcome !== "WIN" && example.outcome !== "LOSE") {
+          return null;
+        }
+        const actual = evaluatePredicate(ast, {
+          draw: example.draw,
+          guess: example.guess,
+        }).result;
+        if (actual !== example.outcome) {
+          return null;
+        }
+        outcomes.add(example.outcome);
+        predicateExamples.push({
+          draw: example.draw,
+          guess: example.guess,
+          outcome: example.outcome,
+        });
+      }
+    } catch {
+      return null;
+    }
+  }
+  if (!isRankingRule(ast) && (outcomes.size !== 2 || predicateExamples.length < 2)) {
+    return null;
+  }
+  return { sourceSpans, workedExamples: predicateExamples };
+}
+
 function buildAttemptContext(
   request: RuleCompilationRequest,
   providerConfig: AgentProviderConfig,
@@ -764,6 +951,16 @@ function validateResolvedAst(
   providerConfig: AgentProviderConfig,
   ctx: AttemptContext,
   rawAst: unknown,
+  // Where `rawAst` came from. The reviewer below re-reads the text with
+  // `compileSupportedRule`, so it is only an INDEPENDENT second opinion when the
+  // AST under review came from somewhere else. On the deterministic path it is
+  // the very same call on the very same text: it always agreed with itself,
+  // which silently disabled both REVIEWER_MISMATCH and — because that gate is
+  // guarded by `!reviewerAst` — the interpretation-coverage check that exists to
+  // stop a stated value from being dropped during compilation.
+  astSource: "deterministic" | "provider",
+  providerEvidence: ProviderCompilationEvidence | null = null,
+  requireProviderEvidence = false,
 ): ProviderEvaluation {
   const { forcedFailure, modelIdentity, normalizedText } = ctx;
   const reasonCodes = ctx.reasonCodes;
@@ -785,9 +982,23 @@ function validateResolvedAst(
   // the structured battery, so an equivalent-but-differently-shaped compile
   // passes and a rule that merely looks similar does not.
   const reviewerAst =
-    ast && !forcedFailure ? compileSupportedRule(normalizedText) : null;
+    ast && !forcedFailure && astSource === "provider"
+      ? compileSupportedRule(normalizedText)
+      : null;
   if (ast && reviewerAst && !knownAstSemanticsMatch(reviewerAst, ast)) {
     reasonCodes.add("REVIEWER_MISMATCH");
+  }
+
+  const verifiedProviderEvidence =
+    ast && astSource === "provider" && providerEvidence
+      ? verifyProviderEvidence(ast, normalizedText, providerEvidence)
+      : null;
+  if (
+    astSource === "provider" &&
+    ((providerEvidence !== null && verifiedProviderEvidence === null) ||
+      (requireProviderEvidence && verifiedProviderEvidence === null))
+  ) {
+    reasonCodes.add("INTERPRETATION_MISMATCH");
   }
 
   const bounds = ast && !forcedFailure ? validateRuntimeBounds(ast) : null;
@@ -802,9 +1013,12 @@ function validateResolvedAst(
   // The frozen AST is what pays the prize; the player only reads prose. Reject
   // when a numeric constraint the player wrote did not survive compilation, so a
   // rule can never be elected under a promise its artifact does not keep.
-  // Last line of defence, and only where no reference AST exists: semantics beat
-  // literals, so a rule the reviewer already certified is never second-guessed
-  // by literal matching (which cannot tell an equivalent rewrite from a drop).
+  // Last line of defence, and only where no INDEPENDENT reference AST exists:
+  // semantics beat literals, so a rule a genuine reviewer already certified is
+  // never second-guessed by literal matching (which cannot tell an equivalent
+  // rewrite from a drop). On the deterministic path there is no such reviewer —
+  // see the `astSource` note above — so this check is the only thing standing
+  // between a dropped literal and an elected rule nobody can win.
   if (ast && !forcedFailure && !reviewerAst) {
     const coverage = analyzeInterpretationCoverage({
       ast,
@@ -912,9 +1126,12 @@ function validateResolvedAst(
           ruleMode,
           schemaVersion: ast.schemaVersion,
           skillVersion: RULE_COMPILER_SKILL_VERSION,
+          sourceSpans:
+            verifiedProviderEvidence?.sourceSpans ?? [{ text: normalizedText }],
           testCoverageScore: harness?.coverageScore ?? 0,
           testHarnessVersion: RULE_TEST_HARNESS_VERSION,
-          workedExamples: collectWorkedExamples(ast),
+          workedExamples:
+            verifiedProviderEvidence?.workedExamples ?? collectWorkedExamples(ast),
         }
       : null;
   const artifactHash = artifact ? hashJson(artifact) : null;
@@ -951,7 +1168,14 @@ function evaluateProviderAttempt(
   const rawAst = ctx.forcedFailure
     ? null
     : compileSupportedRule(ctx.normalizedText);
-  return validateResolvedAst(request, timestamp, providerConfig, ctx, rawAst);
+  return validateResolvedAst(
+    request,
+    timestamp,
+    providerConfig,
+    ctx,
+    rawAst,
+    "deterministic",
+  );
 }
 
 // LLM attempt: AST is emitted by the injected provider (constrained decoding).
@@ -963,6 +1187,7 @@ async function evaluateProviderAttemptAsync(
 ): Promise<ProviderEvaluation> {
   const ctx = buildAttemptContext(request, providerConfig);
   let rawAst: unknown = null;
+  let providerEvidence: ProviderCompilationEvidence | null = null;
   if (!ctx.forcedFailure) {
     if (options.preferDeterministic) {
       const deterministicAst = compileSupportedRule(ctx.normalizedText);
@@ -976,22 +1201,35 @@ async function evaluateProviderAttemptAsync(
           providerConfig,
           ctx,
           deterministicAst,
+          "deterministic",
         );
       }
     }
 
     try {
-      rawAst = await options.astProvider({
+      const providerValue = await options.astProvider({
         normalizedText: ctx.normalizedText,
         prompt: request.prompt,
         providerConfig,
       });
+      const unwrapped = unwrapProviderCompilation(providerValue);
+      rawAst = unwrapped.rawAst;
+      providerEvidence = unwrapped.evidence;
     } catch {
       ctx.reasonCodes.add("PROVIDER_MALFORMED_RESPONSE");
       rawAst = null;
     }
   }
-  return validateResolvedAst(request, timestamp, providerConfig, ctx, rawAst);
+  return validateResolvedAst(
+    request,
+    timestamp,
+    providerConfig,
+    ctx,
+    rawAst,
+    "provider",
+    providerEvidence,
+    options.requireProviderEvidence === true,
+  );
 }
 
 function normalizeProviderRouting(
@@ -1409,6 +1647,12 @@ function compileSupportedRule(text: string): RuleAst | null {
     return predicateRule(reversePositionMatch);
   }
 
+  const compoundWithinAndExactPosition =
+    parseCompoundWithinAndExactPositionRule(text);
+  if (compoundWithinAndExactPosition) {
+    return compoundWithinAndExactPosition;
+  }
+
   const absDiffRule = parseOrderedAbsoluteDifferenceRule(text);
   if (absDiffRule) {
     return predicateRule(absDiffRule);
@@ -1509,7 +1753,13 @@ function compileSupportedRule(text: string): RuleAst | null {
 
   if (
     /\bno\b.{0,40}\b(guessed?|picked|ticket|your)\s+numbers?\b.{0,60}\b(appear|appears|match|matches|drawn|in the draw)\b/i.test(text) ||
-    /\bnone\s+of\s+(my|your|the)\s+numbers?\b.{0,60}\b(appear|appears|match|matches)\b/i.test(text) ||
+    // "none of its six numbers appear in the draw". The determiner and the
+    // cardinality phrase are both optional: "its"/"their" were missing from the
+    // original alternation, and an intervening "six" pushed the sentence into
+    // the match-count parser instead. A qualifier between the determiner and
+    // "numbers" (e.g. "none of its EVEN numbers") is deliberately not accepted —
+    // that is a different rule about a subset, not zero overlap.
+    /\b(?:none\s+of|not\s+one\s+of)\s+(?:my|your|the|its|their)?\s*(?:six\s+|6\s+)?(?:guessed?|picked|chosen|ticket)?\s*numbers?\b.{0,60}\b(appear|appears|match|matches|drawn|in the draw)\b/i.test(text) ||
     /\b(ticket|picks?|numbers?)\b.{0,40}\bdodges?\s+the\s+draw\b/i.test(text)
   ) {
     return predicateRule(
@@ -1886,26 +2136,59 @@ function parseSlicedSumComparisonRule(text: string): PredicateNode | null {
   return compare(sum(sliceFor("guess")), "eq", sum(sliceFor("draw")));
 }
 
-// #82: "guessed sum is greater than the drawn sum by at least 20" -> compare the
-// difference of the two sums against the threshold (at least=gte, more than=gt,
-// exactly=eq).
+// Difference between totals. Both surface orders are supported:
+// - "guessed sum is greater than the drawn sum by at least 20"
+// - "guessed sum is at least 10 lower than the drawn sum"
+//
+// The second form is where sign inversions are especially easy to miss. Keep a
+// single canonical orientation (`guessSum - drawSum`) and negate the threshold
+// for "lower": at least 10 lower is <= -10, never <= +10.
 function parseSumDifferenceThresholdRule(text: string): PredicateNode | null {
-  const match = text.match(
+  const differenceAfterComparison = text.match(
     /\b(guessed?|picked|ticket|your)\s+sum\b[^.]{0,30}\b(greater|higher|above|more|exceeds?|larger|bigger)\b[^.]{0,30}\b(drawn?|draw)\s+sum\b[^.]{0,20}\bby\s+(at least|more than|over|exactly)\s+(\d+)\b/i,
   );
-  if (!match) {
+  if (differenceAfterComparison) {
+    const value = Number(differenceAfterComparison[5]);
+    if (!Number.isInteger(value) || value < 0 || value > 600) {
+      return null;
+    }
+    const kind = (differenceAfterComparison[4] ?? "").toLowerCase();
+    const op: CompareOp =
+      kind === "exactly" ? "eq" : kind === "at least" ? "gte" : "gt";
+    return compare(
+      arith("sub", sum(source("guess")), sum(source("draw"))),
+      op,
+      lit(value),
+    );
+  }
+
+  const relativeDifference = text.match(
+    /\b(?:the\s+)?(?:(?:sum|total)\s+of\s+(?:the\s+)?(?:guessed?|picked|ticket|your)\s+numbers?|(?:guessed?|picked|ticket|your)\s+(?:sum|total))\b[^.]{0,30}\b(?:is\s+)?(at least|more than|over|exactly)\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(lower|less|below|higher|greater|above|more)\s+than\b[^.]{0,35}\b(?:the\s+)?(?:(?:sum|total)\s+of\s+(?:the\s+)?(?:drawn?|draw)\s+numbers?|(?:drawn?|draw)\s+(?:sum|total))\b/i,
+  );
+  if (!relativeDifference) {
     return null;
   }
-  const value = Number(match[5]);
-  if (!Number.isInteger(value) || value < 0 || value > 600) {
+  const value = parseWordOrDigit(relativeDifference[2] ?? "");
+  if (value === null || value < 0 || value > 600) {
     return null;
   }
-  const kind = (match[4] ?? "").toLowerCase();
-  const op: CompareOp = kind === "exactly" ? "eq" : kind === "at least" ? "gte" : "gt";
+  const kind = (relativeDifference[1] ?? "").toLowerCase();
+  const direction = (relativeDifference[3] ?? "").toLowerCase();
+  const lower = /lower|less|below/i.test(direction);
+  const op: CompareOp =
+    kind === "exactly"
+      ? "eq"
+      : kind === "at least"
+        ? lower
+          ? "lte"
+          : "gte"
+        : lower
+          ? "lt"
+          : "gt";
   return compare(
     arith("sub", sum(source("guess")), sum(source("draw"))),
     op,
-    lit(value),
+    lit(lower ? -value : value),
   );
 }
 
@@ -2369,6 +2652,37 @@ function describePredicate(predicate: PredicateNode): string | null {
     return null;
   }
 
+  if (
+    predicate.left.kind === "arith" &&
+    predicate.left.op === "sub" &&
+    predicate.left.left.kind === "reduce" &&
+    predicate.left.left.op === "sum" &&
+    predicate.left.left.of.kind === "source" &&
+    predicate.left.left.of.source === "guess" &&
+    predicate.left.right.kind === "reduce" &&
+    predicate.left.right.op === "sum" &&
+    predicate.left.right.of.kind === "source" &&
+    predicate.left.right.of.source === "draw" &&
+    predicate.right.kind === "lit"
+  ) {
+    const difference = predicate.right.value;
+    if (difference < 0 && (predicate.op === "lte" || predicate.op === "lt")) {
+      return `the sum of the guessed numbers is ${
+        predicate.op === "lte" ? "at least" : "more than"
+      } ${Math.abs(difference)} lower than the sum of the drawn numbers`;
+    }
+    if (difference > 0 && (predicate.op === "gte" || predicate.op === "gt")) {
+      return `the sum of the guessed numbers is ${
+        predicate.op === "gte" ? "at least" : "more than"
+      } ${difference} higher than the sum of the drawn numbers`;
+    }
+    if (predicate.op === "eq" && difference !== 0) {
+      return `the sum of the guessed numbers is exactly ${Math.abs(
+        difference,
+      )} ${difference < 0 ? "lower" : "higher"} than the sum of the drawn numbers`;
+    }
+  }
+
   const left = describeScalar(predicate.left);
   const right = describeScalar(predicate.right);
   const op = describeCompareOp(predicate.op);
@@ -2606,6 +2920,68 @@ function parseOrderedAbsoluteDifferenceRule(text: string): PredicateNode | null 
     left: source("guess"),
     right: source("draw"),
     value,
+  };
+}
+
+// H03: two independently load-bearing same-position conditions. This is kept as
+// a compositional v3 predicate so "within 6" and "at least one exact match" are
+// separately executable clauses. A single all-within node is not a valid
+// simplification: it accepts guesses with no exact position match.
+function parseCompoundWithinAndExactPositionRule(text: string): RuleAst | null {
+  const within = parseOrderedAbsoluteDifferenceRule(text);
+  if (!within || within.kind !== "all_ordered_abs_diff_lte") {
+    return null;
+  }
+  if (
+    !/\b(?:and|e)\s+at\s+least\s+(?:one|1)\b[^.]{0,60}\b(?:guessed?|picked|ticket|your)?\s*numbers?\b[^.]{0,60}\b(?:equals?|matches?)\b[^.]{0,60}\b(?:drawn?|draw)\s+numbers?\b[^.]{0,60}\b(?:same|corresponding)\s+position\b/i.test(
+      text,
+    )
+  ) {
+    return null;
+  }
+
+  const guess = { kind: "source", source: "guess" } as const;
+  const draw = { kind: "source", source: "draw" } as const;
+  return {
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "and",
+        clauses: [
+          {
+            kind: "pairs_forall",
+            left: guess,
+            right: draw,
+            where: {
+              kind: "compare",
+              op: "lte",
+              left: {
+                kind: "abs",
+                of: {
+                  kind: "arith",
+                  op: "sub",
+                  left: { kind: "pair", side: "left" },
+                  right: { kind: "pair", side: "right" },
+                },
+              },
+              right: { kind: "lit", value: within.value },
+            },
+          },
+          {
+            kind: "pairs_exists",
+            left: guess,
+            right: draw,
+            where: {
+              kind: "compare",
+              op: "eq",
+              left: { kind: "pair", side: "left" },
+              right: { kind: "pair", side: "right" },
+            },
+          },
+        ],
+      },
+    },
   };
 }
 
@@ -2971,6 +3347,20 @@ const UNMODELLED_MATCH_QUALIFIERS = [
   /\b(?:same|matching)\s+(?:position|slot|place)\b/iu,
   /\bmesma\s+posicao\b/iu,
   /\bposition\s+by\s+position\b/iu,
+  // "at least one drawn number IS ABOVE 50" counts numbers passing a threshold;
+  // it is not an overlap between guess and draw. Without this the threshold cue
+  // plus the bare word "drawn" was enough to compile "contains 13 and at least
+  // one drawn number is above 50" down to `match_count_at_least 1`, dropping
+  // both stated conditions.
+  //
+  // The gap before the comparison verb is deliberate: the dealer's normalized
+  // wording moves the source into a prepositional phrase ("at least one number
+  // IN THE OFFICIAL DRAW is greater than 50"). It cannot cross a clause
+  // boundary, so it never reaches the comparison of a following clause.
+  new RegExp(
+    `\\b(?:at least|at most|no more than|no fewer than|exactly|pelo menos|no minimo|exatamente)\\s+${MATCH_COUNT_NUMBER_0_TO_6}\\s+(?:of\\s+(?:the|its|my|your)\\s+)?(?:drawn|guessed?|picked|ticket)?\\s*(?:numbers?|numeros?)\\b[^.,;:]{0,32}?\\b(?:is|are|be|sao|e)\\s+(?:above|below|over|under|greater|higher|lower|less|smaller|bigger|acima|abaixo|maior|menor)\\b`,
+    "iu",
+  ),
 ];
 
 function parseMatchCountRule(text: string) {
@@ -3013,9 +3403,22 @@ function parseMatchCountRule(text: string) {
       "i",
     ),
   );
+  // "seis numeros certos", "four numbers correct" — a count qualified by an
+  // explicit correctness adjective.
+  //
+  // This must NOT accept a generic match action. Every guess and every draw has
+  // exactly six numbers, so the cardinality phrase "its six numbers" appears in
+  // rules that are not about match counts at all; with a generic action in the
+  // third group, "none of its six numbers appear in the draw" and "the sum of
+  // its six numbers equals the sum of the six drawn numbers" both matched here
+  // and compiled to `match_count_at_least 6` — the first one being the exact
+  // logical inverse of what the player wrote. Generic phrasings are already
+  // covered by numericMatch / verbThresholdMatch / verbCountMatch /
+  // directMatch / compactMatch, each of which binds the number to the matching
+  // verb far more tightly than this pattern can.
   const adjectiveCountMatch = text.match(
     new RegExp(
-      `\\b(${MATCH_COUNT_NUMBER_1_TO_6})\\b.{0,25}\\b(?:${MATCH_COUNT_NOUN}|bilhete|palpite)\\b.{0,35}\\b(?:certos?|corretos?|acertados?|${MATCH_COUNT_ACTION})\\b`,
+      `\\b(${MATCH_COUNT_NUMBER_1_TO_6})\\b.{0,25}\\b(?:${MATCH_COUNT_NOUN}|bilhete|palpite)\\b.{0,35}\\b(?:certos?|corretos?|acertados?|correct|right)\\b`,
       "i",
     ),
   );

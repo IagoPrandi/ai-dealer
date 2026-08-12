@@ -365,19 +365,38 @@ test("compile harness prompt includes selected prompt-set examples", async () =>
           {
             message: {
               content: JSON.stringify({
-                result: {
-                  predicate: {
-                    kind: "count_at_least",
-                    of: {
-                      kind: "intersection",
-                      left: { kind: "source", source: "guess" },
-                      right: { kind: "source", source: "draw" },
+                ast: {
+                  result: {
+                    predicate: {
+                      kind: "count_at_least",
+                      of: {
+                        kind: "intersection",
+                        left: { kind: "source", source: "guess" },
+                        right: { kind: "source", source: "draw" },
+                      },
+                      value: 4,
                     },
-                    value: 4,
+                    type: "predicate",
                   },
-                  type: "predicate",
+                  schemaVersion: 2,
                 },
-                schemaVersion: 2,
+                consumedSpans: [
+                  {
+                    text: "four or more picked numbers show up in the result",
+                  },
+                ],
+                workedExamples: [
+                  {
+                    draw: [1, 2, 3, 4, 5, 6],
+                    guess: [1, 2, 3, 4, 90, 91],
+                    outcome: "WIN",
+                  },
+                  {
+                    draw: [1, 2, 3, 4, 5, 6],
+                    guess: [1, 2, 3, 90, 91, 92],
+                    outcome: "LOSE",
+                  },
+                ],
               }),
             },
           },
@@ -407,4 +426,7 @@ test("compile harness prompt includes selected prompt-set examples", async () =>
   assert.match(systemPrompt, /below-50 split/i);
   assert.match(systemPrompt, /"up":1/);
   assert.match(systemPrompt, /sum\(guess\) mod 10/i);
+  assert.match(systemPrompt, /consumedSpans/);
+  assert.match(systemPrompt, /workedExamples/);
+  assert.match(systemPrompt, /guessSum - drawSum <= -10/);
 });

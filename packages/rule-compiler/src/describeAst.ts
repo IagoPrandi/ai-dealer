@@ -303,6 +303,46 @@ function describeScalarV3(node: ScalarExprV3): string {
   }
 }
 
+function describeSamePositionPredicate(node: PredicateNodeV3): string | null {
+  if (
+    (node.kind !== "pairs_forall" && node.kind !== "pairs_exists") ||
+    node.left.kind !== "source" ||
+    node.left.source !== "guess" ||
+    node.right.kind !== "source" ||
+    node.right.source !== "draw" ||
+    node.where.kind !== "compare"
+  ) {
+    return null;
+  }
+  const condition = node.where;
+  if (
+    condition.op === "eq" &&
+    condition.left.kind === "pair" &&
+    condition.left.side === "left" &&
+    condition.right.kind === "pair" &&
+    condition.right.side === "right"
+  ) {
+    return node.kind === "pairs_forall"
+      ? "every guessed number equals the drawn number in the same position"
+      : "at least one guessed number equals the drawn number in the same position";
+  }
+  if (
+    node.kind === "pairs_forall" &&
+    condition.op === "lte" &&
+    condition.left.kind === "abs" &&
+    condition.left.of.kind === "arith" &&
+    condition.left.of.op === "sub" &&
+    condition.left.of.left.kind === "pair" &&
+    condition.left.of.left.side === "left" &&
+    condition.left.of.right.kind === "pair" &&
+    condition.left.of.right.side === "right" &&
+    condition.right.kind === "lit"
+  ) {
+    return `every guessed number is within ${condition.right.value} of the drawn number in the same position`;
+  }
+  return null;
+}
+
 function describePredicateV3(node: PredicateNodeV3): string {
   switch (node.kind) {
     case "compare":
@@ -314,13 +354,19 @@ function describePredicateV3(node: PredicateNodeV3): string {
     case "exists":
       return `at least one value of ${describeArrayV3(node.of)} satisfies that ${describePredicateV3(node.where)}`;
     case "pairs_forall":
-      return `in every position of ${describeArrayV3(node.left)} and ${describeArrayV3(
-        node.right,
-      )}, ${describePredicateV3(node.where)}`;
+      return (
+        describeSamePositionPredicate(node) ??
+        `in every position of ${describeArrayV3(node.left)} and ${describeArrayV3(
+          node.right,
+        )}, ${describePredicateV3(node.where)}`
+      );
     case "pairs_exists":
-      return `in at least one position of ${describeArrayV3(node.left)} and ${describeArrayV3(
-        node.right,
-      )}, ${describePredicateV3(node.where)}`;
+      return (
+        describeSamePositionPredicate(node) ??
+        `in at least one position of ${describeArrayV3(node.left)} and ${describeArrayV3(
+          node.right,
+        )}, ${describePredicateV3(node.where)}`
+      );
     case "and":
       return joinList(node.clauses.map(describePredicateV3), "and");
     case "or":

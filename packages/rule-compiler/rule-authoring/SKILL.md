@@ -7,8 +7,9 @@ description: Authoring guidance for the Tyche AI Rule Compiler — converts a pl
 
 ## Overview
 
-Convert a player's winning rule into a single JSON object — a rule AST — that the
-deterministic runtime can execute. You compile **intent into a verifiable
+Convert a player's winning rule into a single auditable JSON compilation candidate
+that contains a rule AST, the exact source spans consumed by that AST, and worked
+examples derived from the player's wording. You compile **intent into a verifiable
 condition**. You do NOT decide winners, execute payouts, or read external data.
 Output the JSON object only: no prose, no markdown, no comments.
 
@@ -24,7 +25,29 @@ comparison (see references/patterns.md).
 
 ## Output shape and the predicate-vs-ranking decision
 
-Top level: `{"schemaVersion":3,"result":<result>}`. Choose `<result>`:
+The top-level response is:
+
+`{"ast":<rule-ast>,"consumedSpans":[{"text":<exact-source-substring>}],"workedExamples":[<examples>]}`
+
+- `consumedSpans` must quote exact substrings from the normalized input. Together
+  they must cover every intent-bearing condition. Report the smallest complete
+  condition span(s) actually used; never claim text that the AST did not compile.
+  A range such as "strictly greater than 10 and strictly less than 90" may be one
+  span even when represented by one quantified AST condition. A compound rule
+  with two independent conditions needs coverage for both.
+- For a predicate, `workedExamples` must contain at least one `WIN` and one `LOSE`:
+  `{"guess":[six unique 1-100 numbers],"draw":[six unique 1-100 numbers],"outcome":"WIN"|"LOSE"}`.
+  Derive the expected outcomes from the player's text before checking the AST.
+  Include boundary cases for signed differences (for "at least 10 lower", test
+  exactly 10 lower and only 9 lower).
+- For a ranking, provide at least two examples with the exact numeric `score`
+  instead of `outcome`.
+
+The validator rejects missing/unconsumed text and executes every example against
+the AST. Do not generate examples by merely evaluating the AST: their purpose is
+to provide an independent oracle for the source intent.
+
+The `ast` value is `{"schemaVersion":3,"result":<result>}`. Choose `<result>`:
 
 - **predicate** — an ABSOLUTE win/lose test for a single guess (it does not depend
   on other players). Use for "win if ...", "at least N", "exactly", "matches".
@@ -83,6 +106,10 @@ an empty array = 0, `product` of empty = 1, `min`/`max`/`range_span` of empty = 
 `x div 0` = 0, `x mod m` = 0 for m ≤ 0. Division is integer (truncated).
 
 ## Macro cookbook — common intents as compositions
+
+The JSON snippets in this document and in `references/examples.md` show only the
+value of the top-level `ast` field. Always wrap that value in the auditable output
+shape above.
 
 Building blocks: matches = `intersection(guess,draw)`; misses =
 `difference(guess,draw)`; even numbers = `filter(src, elem mod 2 == 0)`; count of

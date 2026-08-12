@@ -13,9 +13,8 @@ import { fileURLToPath } from "node:url";
 
 export const RULE_COMPILER_SKILL = {
   name: "compile_rule_to_ast",
-  // v7: intent-preserving clarification invariants plus explicit ordered
-  // tens-range semantics for examples that project 12/11 -> 10, etc.
-  version: "tyche_rule_compiler_skill_v7",
+  // v8: auditable source-span coverage and source-derived worked examples.
+  version: "tyche_rule_compiler_skill_v8",
   allowedInputs: ["guess", "draw"] as const,
 } as const;
 
