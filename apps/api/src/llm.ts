@@ -559,6 +559,10 @@ function coerceDealerQuestionAnswer(value: unknown): DealerQuestionAnswer {
     );
   }
   const record = value as Record<string, unknown>;
+  // `answerLanguage` is a steering field, not a payload: the contract asks the
+  // model to name the player's language before writing, which is what stops it
+  // from inheriting the language of the rule text and transcript instead. It
+  // has no consumer, so a model that skips it must not fail the whole answer.
   const answer = typeof record.answer === "string" ? record.answer.trim() : "";
   const proposedRuleText =
     record.proposedRuleText === null

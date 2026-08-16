@@ -6,6 +6,7 @@ import {
   M3_7_POSTGRES_AUDIT_SCHEMA,
   authorizeOperatorAiRequest,
   buildDealerQuestionContext,
+  getBlockingRuleReasonExplanations,
   buildOperatorAiAccessMessage,
   calculateAndStoreRewardRecords,
   calculateAndStoreWinnerRecords,
@@ -147,13 +148,24 @@ test("dealer question context carries server diagnostics and discloses their abs
         coverage: { missingFromAst: [], missingOperations: ["mod"] },
         decision: "INVALID",
         difficultyClass: null,
+        estimatedWinRate: null,
         normalizedText: baseDraft.prompt,
         officialInterpretation: "Compare the two sums modulo 9.",
         originalText: baseDraft.prompt,
-        reasonCodes: ["INTERPRETATION_MISMATCH"],
+        // SUPPORTED_RULE rides along on most rejections; the chat context must
+        // not present it as an explanation next to the real blocker.
+        reasonCodes: ["SUPPORTED_RULE", "INTERPRETATION_MISMATCH"],
         reasonSummary: "The modulo operation was dropped.",
         refinementFocus: ["Keep the modulo operation."],
         refinementQuestions: ["Should both sums use modulo 9?"],
+        semanticImpact: {
+          drawIndependent: false,
+          rangeBoundsAmbiguous: false,
+          sharedOutcome: false,
+          triviallyAlwaysTrue: false,
+          usesDraw: true,
+          usesGuess: true,
+        },
         suggestedRewrites: [],
       },
     },
@@ -164,6 +176,31 @@ test("dealer question context carries server diagnostics and discloses their abs
   assert.match(withDiagnostics, /INTERPRETATION_MISMATCH/u);
   assert.match(withDiagnostics, /ruleSubmissionSol/u);
   assert.match(withDiagnostics, /<tyche_server_context>/u);
+  assert.match(
+    withDiagnostics,
+    /"blockingReasonCode":"INTERPRETATION_MISMATCH"/u,
+  );
+  assert.match(withDiagnostics, /"usesDraw":true/u);
+
+  const payload = JSON.parse(
+    withDiagnostics.split("<tyche_server_context>")[1]?.split("</")[0] ?? "{}",
+  ) as { preflight: { reasons: { code: string }[] } };
+  assert.deepEqual(
+    payload.preflight.reasons.map((reason) => reason.code),
+    ["INTERPRETATION_MISMATCH"],
+    "only blocking codes may be explained to the player",
+  );
+});
+
+test("blocking reason explanations drop the non-blocking SUPPORTED_RULE code", () => {
+  assert.deepEqual(
+    getBlockingRuleReasonExplanations([
+      "SUPPORTED_RULE",
+      "DIFFICULTY_ALWAYS_TRUE",
+    ]).map((explanation) => explanation.code),
+    ["DIFFICULTY_ALWAYS_TRUE"],
+  );
+  assert.deepEqual(getBlockingRuleReasonExplanations(["SUPPORTED_RULE"]), []);
 });
 
 test("dealer questions have independent minute and per-turn budgets", () => {
@@ -271,6 +308,7 @@ function proposal(turnId: number, ruleId: number): RuleProposalRecord {
     coverage: { missingFromAst: [], missingOperations: [] },
     decision: "VALID",
     dealerMessage: "Win if at least four of your numbers are drawn.",
+    difficultyMeasured: true,
     maxTokens: 1000,
     needsClarification: false,
     normalizedText:

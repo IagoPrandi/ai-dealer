@@ -875,6 +875,7 @@ export function CreateScreen() {
     phase1EndsAt,
     played,
     reloadAll,
+    returnTo,
     seed,
     turnId,
     wallet,
@@ -898,6 +899,7 @@ export function CreateScreen() {
         phase1EndsAt,
         played,
         reloadAll,
+        returnTo,
         seed,
         turnId,
         wallet,
@@ -919,6 +921,7 @@ type ChatProps = Pick<
   | "phase1EndsAt"
   | "played"
   | "reloadAll"
+  | "returnTo"
   | "seed"
   | "turnId"
   | "wallet"
@@ -936,6 +939,7 @@ function CreateChat({
   phase1EndsAt,
   played,
   reloadAll,
+  returnTo,
   seed,
   turnId,
   wallet,
@@ -1635,7 +1639,8 @@ function CreateChat({
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <button
-            onClick={() => go(chatId ? "profile" : "home")}
+            aria-label="Back"
+            onClick={() => go(returnTo)}
             style={{
               width: 40,
               height: 40,

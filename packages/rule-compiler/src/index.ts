@@ -189,6 +189,10 @@ export interface RuleValidationLog {
   confidenceWeights: CompilerConfidenceWeights;
   decision: RuleValidationDecision;
   difficultyClass: RuleDifficultyClass;
+  /** False when no harness ran, so `difficultyClass` is the unmeasured default.
+   *  Consumers that show or explain difficulty must check this first: an
+   *  unsupported rule reports IMPOSSIBLE without a single sampled guess. */
+  difficultyMeasured: boolean;
   estimatedWinRate: number;
   evaluatedTestCases: RuleValidationTestResult[];
   fallbackRateSample: number;
@@ -572,6 +576,7 @@ function finalizeValidation(
       confidenceWeights: COMPILER_CONFIDENCE_WEIGHTS,
       decision: selectedAttempt.decision,
       difficultyClass: selectedAttempt.difficultyClass,
+      difficultyMeasured: selectedAttempt.difficultyMeasured,
       estimatedWinRate: selectedAttempt.estimatedWinRate,
       evaluatedTestCases: selectedAttempt.evaluatedTestCases,
       fallbackRateSample: fallbackTriggered ? 1 : 0,
@@ -693,6 +698,8 @@ interface ProviderEvaluation {
   confidenceAction: RuleConfidenceAction;
   decision: RuleValidationDecision;
   difficultyClass: RuleDifficultyClass;
+  /** False when no harness ran, so `difficultyClass` is the unmeasured default. */
+  difficultyMeasured: boolean;
   estimatedWinRate: number;
   evaluatedTestCases: RuleValidationTestResult[];
   generatedTestCases: RuleValidationTestCase[];
@@ -1147,6 +1154,7 @@ function validateResolvedAst(
     confidenceAction,
     decision,
     difficultyClass,
+    difficultyMeasured: harness !== null,
     estimatedWinRate,
     evaluatedTestCases,
     generatedTestCases,

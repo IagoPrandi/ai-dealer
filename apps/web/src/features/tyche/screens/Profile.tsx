@@ -12,12 +12,11 @@ import { useState } from "react";
 import { useTyche } from "../context";
 import { lamportsToSol, fmtClaimSol, fmtTurnId, timeAgo } from "../data/format";
 import { useConversationDrafts, usePlayerClaims, usePlayerHistory } from "../data/hooks";
-import { isPreflightJobPointerFresh } from "../preflightJobStore";
 import { claimRecordToWallet } from "../data/claimFlow";
 import { summarizePlayerClaims } from "../data/claimState";
 import { describeTxError } from "../data/tx";
-import { Dealer, Ico, VoteTally } from "../shared";
-import type { ConversationDraftApi, PlayerHistoryEventApi } from "../data/types";
+import { ConversationList, Dealer, Ico, VoteTally } from "../shared";
+import type { PlayerHistoryEventApi } from "../data/types";
 
 /* withdraw-breakdown tile */
 function BreakdownItem({ icon, label, value }: { icon: React.ReactNode; label: string; value: number }) {
@@ -37,39 +36,6 @@ function MetricCell({ icon, l, n, unit }: { icon: React.ReactNode; l: string; n:
       <div className="ide-num" style={{ fontSize: 26, fontWeight: 800, lineHeight: 1 }}>{n}{unit ? <span style={{ fontSize: 13, color: "var(--purple-soft)", fontWeight: 700, marginLeft: 3 }}>{unit}</span> : null}</div>
       <div style={{ fontSize: 12.5, color: "var(--dim)", marginTop: 5 }}>{l}</div>
     </div>
-  );
-}
-
-function ConversationRow({ draft, onResume }: { draft: ConversationDraftApi; onResume: () => void }) {
-  const isDraft = draft.status !== "submitted";
-  // The pointer alone is not enough: it is cleared by whichever client sees the
-  // run end, so a tab that was closed mid-run leaves it set. Bounding it by the
-  // longest life the API gives a job keeps the badge from promising a
-  // reconnect that can only 404.
-  const compiling =
-    Boolean(draft.preflightJobId) &&
-    isPreflightJobPointerFresh(Date.parse(draft.updatedAt), Date.now());
-  return (
-    <button onClick={onResume} className="ide-listrow" type="button">
-      <span style={{ width: 34, height: 34, borderRadius: 11, display: "grid", placeItems: "center", flexShrink: 0, background: compiling ? "rgba(94,234,152,0.12)" : isDraft ? "rgba(255,210,63,0.12)" : "var(--surface-2)", color: compiling ? "var(--green)" : isDraft ? "var(--yellow)" : "var(--dim)" }}>
-        <Ico.chat style={{ color: "currentColor" }} />
-      </span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 700, fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {draft.normalizedText || draft.prompt}
-        </div>
-        <div style={{ fontSize: 12.5, color: "var(--dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {compiling ? <span style={{ color: "var(--green)", fontWeight: 700 }}>● compiling</span> : isDraft ? "draft" : `submitted · ${fmtTurnId(draft.turnId)}`} · <span className="ide-num">{draft.tokenCount}</span> tokens · {timeAgo(draft.updatedAt)}
-        </div>
-      </div>
-      {compiling ? (
-        <span style={{ flexShrink: 0, color: "var(--green)", fontWeight: 700, fontSize: 13, display: "inline-flex", alignItems: "center", gap: 5 }}><Ico.bolt style={{ color: "currentColor" }} /> Reconnect</span>
-      ) : isDraft ? (
-        <span style={{ flexShrink: 0, color: "var(--yellow)", fontWeight: 700, fontSize: 13, display: "inline-flex", alignItems: "center", gap: 5 }}><Ico.edit style={{ color: "currentColor" }} /> continue</span>
-      ) : (
-        <Ico.chevron style={{ color: "var(--dim)", transform: "rotate(-90deg)", flexShrink: 0 }} />
-      )}
-    </button>
   );
 }
 
@@ -284,28 +250,14 @@ export function ProfileScreen() {
         ) : null}
 
         {tab === "chats" ? (
-          conversations.loading ? (
-            <div className="ide-notice" style={{ borderTop: "none", textAlign: "center", color: "var(--muted)", fontSize: 14 }}>Loading conversations…</div>
-          ) : conversations.error ? (
-            <div className="ide-notice" style={{ borderTop: "none", textAlign: "center", color: "var(--red)", fontSize: 14 }}>Could not load saved conversations.</div>
-          ) : conversations.drafts.length === 0 ? (
-            <div className="ide-notice" style={{ borderTop: "none", textAlign: "center" }}>
-              <div style={{ display: "grid", placeItems: "center", marginBottom: 10 }}><Ico.chat style={{ color: "var(--dim)", width: 22, height: 22 }} /></div>
-              <div style={{ fontWeight: 700, fontSize: 15 }}>No AI drafts yet</div>
-              <p style={{ margin: "6px 0 14px", fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>Drafts appear here after the dealer compiles a rule preview.</p>
-              <button onClick={() => go("create", { newConversation: true })} className="ide-btn-ghost ide-btn" style={{ padding: 12 }} type="button"><Ico.spark style={{ color: "var(--purple-soft)" }} /> Create a rule</button>
-            </div>
-          ) : (
-            <div className="ide-list">
-              {conversations.drafts.map((draft) => (
-                <ConversationRow
-                  key={draft.draftId}
-                  draft={draft}
-                  onResume={() => go("create", { chatId: draft.draftId, seed: draft.prompt })}
-                />
-              ))}
-            </div>
-          )
+          <ConversationList
+            drafts={conversations.drafts}
+            error={conversations.error}
+            loading={conversations.loading}
+            onCreate={() => go("create", { newConversation: true, returnTo: "profile" })}
+            onResume={(draft) => go("create", { chatId: draft.draftId, returnTo: "profile", seed: draft.prompt })}
+            onRetry={conversations.reload}
+          />
         ) : null}
 
         {tab === "hist" ? (

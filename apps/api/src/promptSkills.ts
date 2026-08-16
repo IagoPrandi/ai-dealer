@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 const PROMPTS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "prompts");
 
 export const DEALER_INTERPRET_PROMPT_VERSION = "tyche_rule_interpret_prompt_v1";
-export const DEALER_CHAT_PROMPT_VERSION = "tyche_rule_dealer_chat_prompt_v1";
+export const DEALER_CHAT_PROMPT_VERSION = "tyche_rule_dealer_chat_prompt_v2";
 
 function readPromptFile(relativePath: string): string {
   // Prompt assets are runtime code. A missing file must stop the request rather

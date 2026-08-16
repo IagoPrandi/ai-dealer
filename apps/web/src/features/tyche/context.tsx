@@ -18,6 +18,7 @@ export type Screen =
   | "home"
   | "guesses"
   | "invite"
+  | "myrules"
   | "play"
   | "profile"
   | "rewards"
@@ -29,6 +30,12 @@ export interface NavParams {
   chatId?: null | string;
   newConversation?: boolean;
   resultTurnId?: number;
+  /**
+   * Where the back control of the screen being opened should return to.
+   * Defaults to `"home"`, so a screen only has to pass it when it is not the
+   * round itself that launched the navigation.
+   */
+  returnTo?: Screen;
   seed?: string;
 }
 
@@ -120,6 +127,8 @@ export interface TycheContextValue {
   reloadAll: () => void;
   removeBusyRuleId: null | number;
   removeRule: (ruleId: number) => Promise<void>;
+  /** Screen the current screen's back control returns to (see NavParams.returnTo). */
+  returnTo: Screen;
   round: RoundSummaryApi | null;
   roundLoading: boolean;
   rules: RulesView;

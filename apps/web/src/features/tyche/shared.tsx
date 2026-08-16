@@ -8,8 +8,9 @@
 import Image from "next/image";
 import { useEffect, useState, type CSSProperties, type SVGProps } from "react";
 
-import { fmtCountdown, fmtSol } from "./data/format";
-import type { UiRule } from "./data/types";
+import { fmtCountdown, fmtSol, fmtTurnId, timeAgo } from "./data/format";
+import type { ConversationDraftApi, UiRule } from "./data/types";
+import { isPreflightJobPointerFresh } from "./preflightJobStore";
 
 type IconProps = SVGProps<SVGSVGElement>;
 type IconComponent = (props: IconProps) => React.ReactElement;
@@ -338,6 +339,93 @@ export function ScreenHead({ onBack, right, title }: { onBack: () => void; right
       <button onClick={onBack} style={{ width: 40, height: 40, borderRadius: 13, background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--text)", display: "grid", placeItems: "center", cursor: "pointer", flexShrink: 0 }}><Ico.back /></button>
       <h1 style={{ fontSize: 21, fontWeight: 800, margin: 0, flex: 1, letterSpacing: "-0.02em" }}>{title}</h1>
       {right}
+    </div>
+  );
+}
+
+/* ------------------- CONVERSATION DRAFTS (rule chats) ------------------- */
+
+export function ConversationRow({ draft, onResume }: { draft: ConversationDraftApi; onResume: () => void }) {
+  const isDraft = draft.status !== "submitted";
+  // The pointer alone is not enough: it is cleared by whichever client sees the
+  // run end, so a tab that was closed mid-run leaves it set. Bounding it by the
+  // longest life the API gives a job keeps the badge from promising a
+  // reconnect that can only 404.
+  const compiling =
+    Boolean(draft.preflightJobId) &&
+    isPreflightJobPointerFresh(Date.parse(draft.updatedAt), Date.now());
+  return (
+    <button onClick={onResume} className="ide-listrow" type="button">
+      <span style={{ width: 34, height: 34, borderRadius: 11, display: "grid", placeItems: "center", flexShrink: 0, background: compiling ? "rgba(94,234,152,0.12)" : isDraft ? "rgba(255,210,63,0.12)" : "var(--surface-2)", color: compiling ? "var(--green)" : isDraft ? "var(--yellow)" : "var(--dim)" }}>
+        <Ico.chat style={{ color: "currentColor" }} />
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 700, fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {draft.normalizedText || draft.prompt}
+        </div>
+        <div style={{ fontSize: 12.5, color: "var(--dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {compiling ? <span style={{ color: "var(--green)", fontWeight: 700 }}>● compiling</span> : isDraft ? "draft" : `submitted · ${fmtTurnId(draft.turnId)}`} · <span className="ide-num">{draft.tokenCount}</span> tokens · {timeAgo(draft.updatedAt)}
+        </div>
+      </div>
+      {compiling ? (
+        <span style={{ flexShrink: 0, color: "var(--green)", fontWeight: 700, fontSize: 13, display: "inline-flex", alignItems: "center", gap: 5 }}><Ico.bolt style={{ color: "currentColor" }} /> Reconnect</span>
+      ) : isDraft ? (
+        <span style={{ flexShrink: 0, color: "var(--yellow)", fontWeight: 700, fontSize: 13, display: "inline-flex", alignItems: "center", gap: 5 }}><Ico.edit style={{ color: "currentColor" }} /> continue</span>
+      ) : (
+        <Ico.chevron style={{ color: "var(--dim)", transform: "rotate(-90deg)", flexShrink: 0 }} />
+      )}
+    </button>
+  );
+}
+
+/**
+ * Every state of the saved rule-conversation list, shared by the My rules
+ * screen and the Account screen's Conversations tab so both stay identical.
+ */
+export function ConversationList({
+  drafts,
+  error,
+  loading,
+  onCreate,
+  onResume,
+  onRetry,
+}: {
+  drafts: ConversationDraftApi[];
+  error: null | string;
+  loading: boolean;
+  onCreate: () => void;
+  onResume: (draft: ConversationDraftApi) => void;
+  onRetry: () => void;
+}) {
+  if (loading) {
+    return <div className="ide-notice" style={{ borderTop: "none", textAlign: "center", color: "var(--muted)", fontSize: 14 }}>Loading conversations…</div>;
+  }
+
+  if (error) {
+    return (
+      <div className="ide-notice" style={{ borderTop: "none", textAlign: "center" }}>
+        <div style={{ color: "var(--red)", fontSize: 14, fontWeight: 700 }}>Could not load saved conversations.</div>
+        <button onClick={onRetry} className="ide-btn-ghost ide-btn" style={{ marginTop: 12, padding: 12 }} type="button">Try again</button>
+      </div>
+    );
+  }
+
+  if (drafts.length === 0) {
+    return (
+      <div className="ide-notice" style={{ borderTop: "none", textAlign: "center" }}>
+        <div style={{ display: "grid", placeItems: "center", marginBottom: 10 }}><Ico.chat style={{ color: "var(--dim)", width: 22, height: 22 }} /></div>
+        <div style={{ fontWeight: 700, fontSize: 15 }}>No AI drafts yet</div>
+        <p style={{ margin: "6px 0 14px", fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>Drafts appear here after the dealer compiles a rule preview.</p>
+        <button onClick={onCreate} className="ide-btn-ghost ide-btn" style={{ padding: 12 }} type="button"><Ico.spark style={{ color: "var(--purple-soft)" }} /> Create a rule</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="ide-list">
+      {drafts.map((draft) => (
+        <ConversationRow key={draft.draftId} draft={draft} onResume={() => onResume(draft)} />
+      ))}
     </div>
   );
 }

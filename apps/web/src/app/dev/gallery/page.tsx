@@ -52,6 +52,7 @@ const CARDS: Array<{ label: string; screen: Screen }> = [
   { label: "My guesses", screen: "guesses" },
   { label: "Play (number picker)", screen: "play" },
   { label: "Rules (voting)", screen: "vote" },
+  { label: "My rules (conversations)", screen: "myrules" },
   { label: "Create rule (dealer chat)", screen: "create" },
   { label: "Stake & earn", screen: "rewards" },
   { label: "Account (claims)", screen: "profile" },

@@ -69,6 +69,7 @@ import { HomeScreen } from "./screens/Home";
 import { GuessesScreen } from "./screens/Guesses";
 import { PlayScreen } from "./screens/Play";
 import { VoteScreen } from "./screens/Vote";
+import { MyRulesScreen } from "./screens/MyRules";
 import { CreateScreen } from "./screens/Create";
 import { ProfileScreen } from "./screens/Profile";
 import { ClaimsScreen } from "./screens/Claims";
@@ -233,6 +234,7 @@ export function TycheApp({
   const [seed, setSeed] = useState("");
   const [chatId, setChatId] = useState<null | string>(null);
   const [createIntent, setCreateIntent] = useState<CreateIntent>(null);
+  const [returnTo, setReturnTo] = useState<Screen>("home");
   const [newConversationKey, setNewConversationKey] = useState(0);
   const [detail, setDetail] = useState<{
     canAgainst: boolean;
@@ -276,6 +278,7 @@ export function TycheApp({
         }
       }
       setCreateIntent(resolveCreateIntent(params));
+      setReturnTo(params?.returnTo ?? "home");
       if (params?.newConversation) {
         setSeed("");
         setChatId(null);
@@ -606,6 +609,7 @@ export function TycheApp({
     reloadAll,
     removeBusyRuleId,
     removeRule: sendRemoveRule,
+    returnTo,
     round,
     roundLoading,
     rules,
@@ -627,6 +631,7 @@ export function TycheApp({
   const showNav =
     screen === "home" ||
     screen === "vote" ||
+    screen === "myrules" ||
     screen === "rewards" ||
     screen === "profile";
   const detailRule = detail
@@ -661,6 +666,7 @@ export function TycheApp({
             {screen === "guesses" ? <GuessesScreen /> : null}
             {screen === "play" ? <PlayScreen /> : null}
             {screen === "vote" ? <VoteScreen /> : null}
+            {screen === "myrules" ? <MyRulesScreen /> : null}
             {screen === "create" ? <CreateScreen /> : null}
             {screen === "profile" ? <ProfileScreen /> : null}
             {screen === "claims" ? <ClaimsScreen /> : null}
@@ -686,12 +692,19 @@ export function TycheApp({
                   <Ico.vote style={{ color: "currentColor" }} /> Rules
                 </button>
                 <button
-                  className="ide-nav-fab"
-                  onClick={() => go("create", { newConversation: true })}
-                  title="Create rule"
+                  className={
+                    "ide-nav-btn ide-nav-fabslot" +
+                    (screen === "myrules" ? " on" : "")
+                  }
+                  onClick={() => go("myrules")}
                   type="button"
                 >
-                  <Ico.plus style={{ color: "#08110C" }} />
+                  <span aria-hidden="true" className="ide-nav-fab">
+                    <Ico.spark
+                      style={{ color: "#08110C", width: 22, height: 22 }}
+                    />
+                  </span>
+                  My rules
                 </button>
                 <button
                   className={

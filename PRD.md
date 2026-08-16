@@ -1896,8 +1896,24 @@ no compiler verdict is available rather than inventing one.
 Every compiler reason code has one player-facing explanation covering what
 happened, why it blocks, and what must change. A successful preflight persists
 the compact reason codes, coverage gaps, summary, refinement focus, questions,
-and vetted rewrites on the conversation draft so later questions use the real
-compiler result.
+vetted rewrites, semantic impact, and the measured difficulty on the
+conversation draft so later questions use the real compiler result.
+
+Only **blocking** reason codes are explained to the player. `SUPPORTED_RULE`
+rides along on most rejections and its explanation reads "no change is
+required", so passing the raw code list tells the reader their rule is fine
+next to the reason it was refused. The context names the single top blocking
+code so the answer leads with it.
+
+Difficulty is reported only when the test harness actually measured it. With no
+harness the compiler reports `IMPOSSIBLE` with a zero win rate as an unmeasured
+default, and presenting that as a verdict would explain a measurement that
+never ran; `difficultyMeasured` gates it, and the draft stores `null` instead.
+
+The answer is written in the language of the player's question, not the
+language of their rule, their transcript, or the English compiler fields. The
+compiler and interpretation strings themselves stay in English: they are
+server-authored records of a verdict, not conversation.
 
 This endpoint is intentionally a blocking JSON request: it performs one bounded
 chat completion and does not own a multi-stage compiler job. The model request
@@ -2577,7 +2593,7 @@ Dealer interpretation and follow-up chat use separate, versioned prompt assets:
 - `tyche_rule_interpret_prompt_v1` in
   `apps/api/src/prompts/dealer-interpret/SKILL.md`, with detailed semantics and
   examples in its `references/` directory;
-- `tyche_rule_dealer_chat_prompt_v1` in
+- `tyche_rule_dealer_chat_prompt_v2` in
   `apps/api/src/prompts/dealer-chat/SKILL.md`.
 
 The API build copies these assets into `dist/prompts` and fails loudly if a
@@ -2585,7 +2601,15 @@ required prompt file is absent. The interpretation contract remains responsible
 for structured rule normalization. The chat contract answers only from fenced,
 server-authored context, treats transcript and rule text as data rather than
 instructions, discloses missing diagnostics, and labels `proposedRuleText` as an
-uncompiled suggestion that must pass ordinary preflight.
+uncompiled suggestion that must pass ordinary preflight. It must also ground the
+answer in the player's own clause rather than restating the reason-code table,
+never print a context field name, and answer in the language of the question.
+
+Language selection is positional, not only stated: the server repeats the
+player's question, angle brackets stripped, as the last line after the fenced
+context. The instruction alone loses to the bulk of the context — a player
+asking in English about a Portuguese rule was answered in Portuguese in 3 of 3
+measured attempts, and in 5 of 5 once their question came last.
 
 Compiler system behavior:
 
