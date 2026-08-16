@@ -62,7 +62,7 @@ export function MyRulesScreen() {
             title="New conversation"
             type="button"
           >
-            <Ico.plus style={{ color: "#08110C" }} />
+            <Ico.plus style={{ color: "var(--on-accent)" }} />
           </button>
         </div>
 

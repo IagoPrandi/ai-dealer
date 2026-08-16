@@ -70,41 +70,42 @@ export function DrawResultPopup() {
         className="ide-scroll"
         style={{
           width: "100%", maxHeight: "90%", overflowY: "auto", WebkitOverflowScrolling: "touch", overscrollBehavior: "contain",
-          background: "var(--bg-2)", border: "1px solid var(--line-2)", borderRadius: 24,
+          background: "var(--surface)", border: "none", borderRadius: 0,
+          boxShadow: "var(--solid-6), 0 0 70px -14px rgba(255,46,136,0.6)",
           padding: "18px 18px 20px", animation: "ide-rise .32s cubic-bezier(.2,.8,.3,1) both",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-          <span className="ide-pill" style={{ color: "var(--gold)", borderColor: "rgba(255,210,63,0.3)" }}>
-            <Ico.trophy style={{ color: "var(--gold)", width: 14, height: 14 }} /> Round {fmtTurnId(resultTurnId)} settled
+          <span className="ide-live" style={{ fontSize: 11, letterSpacing: "0.18em", padding: "6px 14px" }}>
+            <span>Round {fmtTurnId(resultTurnId)} settled</span>
           </span>
           <button
             onClick={dismiss}
             aria-label="Close result"
-            style={{ background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--muted)", borderRadius: 12, padding: 7, display: "grid", placeItems: "center", cursor: "pointer", flexShrink: 0 }}
+            style={{ background: "transparent", border: "none", boxShadow: "var(--ring-soft)", color: "var(--muted)", borderRadius: 0, width: 32, height: 32, display: "grid", placeItems: "center", cursor: "pointer", flexShrink: 0 }}
             type="button"
           >
             <Ico.close />
           </button>
         </div>
 
-        <h2 style={{ margin: "0 0 14px", fontSize: 24, fontWeight: 800, letterSpacing: "-0.02em" }}>The numbers are out</h2>
+        <h2 className="ide-plate" style={{ margin: "0 0 14px", fontSize: 26, lineHeight: 1.05 }}>The numbers are out</h2>
 
         <SectionLabel>Drawn numbers</SectionLabel>
         <div style={{ display: "flex", gap: 8, margin: "10px 0 16px", flexWrap: "wrap" }}>
           {draw.map((n) => (
-            <span key={n} className="ide-num" style={{ width: 44, height: 44, borderRadius: 13, background: "var(--surface-2)", border: "1px solid var(--line-2)", display: "grid", placeItems: "center", fontWeight: 700, fontSize: 17 }}>{n}</span>
+            <span key={n} className="ide-num" style={{ width: 42, height: 42, borderRadius: 0, background: "var(--silver)", color: "var(--on-accent)", border: "none", boxShadow: "var(--solid-magenta)", display: "grid", placeItems: "center", fontSize: 15 }}>{n}</span>
           ))}
         </div>
 
-        <div className="ide-card" style={{ padding: 15, marginBottom: 10, borderColor: "rgba(255,210,63,0.35)", background: "linear-gradient(120deg, rgba(255,210,63,0.1), var(--surface))" }}>
+        <div className="ide-card" style={{ padding: "13px 14px", marginBottom: 10, marginRight: 4, background: "var(--surface-3)", boxShadow: "var(--solid-yellow)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: electedRule ? 8 : 0 }}>
-            <span style={{ width: 28, height: 28, borderRadius: 9, background: "var(--gold)", color: "#0B0910", display: "grid", placeItems: "center", flexShrink: 0 }}>
-              <Ico.spark style={{ color: "#0B0910", width: 16, height: 16 }} />
+            <span style={{ width: 28, height: 28, borderRadius: 0, background: "var(--gold)", color: "var(--on-accent)", display: "grid", placeItems: "center", flexShrink: 0 }}>
+              <Ico.spark style={{ color: "var(--on-accent)", width: 16, height: 16 }} />
             </span>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 11.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--dim)" }}>Active rule</div>
-              <div style={{ fontWeight: 800, fontSize: 16 }}>
+              <div style={{ fontFamily: "Oswald, sans-serif", fontSize: 10, fontWeight: 600, letterSpacing: "0.2em", textTransform: "uppercase", color: "var(--muted)" }}>Active rule</div>
+              <div style={{ fontFamily: "Bevan, serif", fontSize: 17, textTransform: "uppercase", color: "var(--yellow)", marginTop: 4 }}>
                 {electedRule?.title ?? (originalOnly ? "Original rule only" : "No alternative rule elected")}
               </div>
             </div>
@@ -156,7 +157,7 @@ export function DrawResultPopup() {
           style={{ width: "100%", padding: 13 }}
           type="button"
         >
-          <Ico.trophy style={{ color: "#08110C" }} /> See the full result
+          <Ico.trophy style={{ color: "var(--on-accent)" }} /> See the full result
         </button>
       </div>
     </div>

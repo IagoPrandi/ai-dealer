@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Bevan&family=Oswald:wght@400;500;600;700&family=DM+Mono:wght@400;500&family=Archivo:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  body { margin:0; background:#07060C; color:#F4EFE4; font-family:Archivo, system-ui, sans-serif; padding:48px; display:flex; }
+  @keyframes rb-pulse { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
+  .rb-scroll::-webkit-scrollbar { width: 0; height: 0 }
+  .rb-scroll { scrollbar-width: none }
+</style></head><body>
+<div style="display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; align-items: center; gap: 10px;"><span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: .12em; padding: 4px 9px; background: #FFD23F; color: #170B22;">04</span><span style="font-size: 16px; font-weight: 700;">Play · Guess confirmed</span></div>
+      <div style="width: 402px; height: 868px; border-radius: 52px; overflow: hidden; position: relative; background: #170B22; box-shadow: 0 50px 100px -30px rgba(0,0,0,.75), 0 0 0 1px rgba(255,255,255,.08);">
+        <div style="position: absolute; inset: 0; z-index: 0; pointer-events: none; background-image: radial-gradient(rgba(255,46,136,.22) 1px, transparent 1.3px); background-size: 4px 4px;"></div>
+        <div style="position: absolute; inset: 0; z-index: 1; overflow: hidden; pointer-events: none; mask-image: radial-gradient(closest-side at 50% 34%, #000 20%, transparent 72%); -webkit-mask-image: radial-gradient(closest-side at 50% 34%, #000 20%, transparent 72%);">
+          <div style="position: absolute; top: 34%; left: 50%; transform: translate(-50%,-50%); width: 900px; height: 900px; background: repeating-conic-gradient(from 0deg at 50% 50%, rgba(53,240,224,.3) 0deg 4deg, transparent 4deg 13deg);"></div>
+        </div>
+        <div style="position: absolute; top: 11px; left: 50%; transform: translateX(-50%); width: 122px; height: 35px; border-radius: 22px; background: #0C0512; z-index: 90;"></div>
+        <div style="position: absolute; inset: 0; z-index: 20; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 0 28px;">
+          <span style="font-family: Oswald, sans-serif; font-weight: 600; font-size: 12px; letter-spacing: .3em; text-transform: uppercase; color: #35F0E0;">Round #0142</span>
+          <h2 style="margin: 10px 0 8px; font-family: Bevan, serif; font-size: 34px; line-height: 1.05; text-transform: uppercase; color: #F1E8D6; text-shadow: -3px 0 0 #FF2E88, 3px 0 0 #35F0E0, 0 0 30px rgba(255,46,136,.7);">Guess confirmed!</h2>
+          <p style="margin: 0 0 22px; font-family: Archivo, sans-serif; font-size: 14.5px; line-height: 1.5; color: #A88FBF;">You're in round <b style="color:#F1E8D6">#0142</b>. You can now vote and create rules.</p>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-bottom: 30px;">
+            <span style="width: 42px; height: 42px; display: grid; place-items: center; background: #FFD23F; color: #170B22; font-family: 'DM Mono', monospace; font-size: 15px; box-shadow: 3px 3px 0 #FF6A1F;">7</span>
+            <span style="width: 42px; height: 42px; display: grid; place-items: center; background: #FFD23F; color: #170B22; font-family: 'DM Mono', monospace; font-size: 15px; box-shadow: 3px 3px 0 #FF6A1F;">19</span>
+            <span style="width: 42px; height: 42px; display: grid; place-items: center; background: #FFD23F; color: #170B22; font-family: 'DM Mono', monospace; font-size: 15px; box-shadow: 3px 3px 0 #FF6A1F;">42</span>
+            <span style="width: 42px; height: 42px; display: grid; place-items: center; background: #FFD23F; color: #170B22; font-family: 'DM Mono', monospace; font-size: 15px; box-shadow: 3px 3px 0 #FF6A1F;">63</span>
+            <span style="width: 42px; height: 42px; display: grid; place-items: center; background: #FFD23F; color: #170B22; font-family: 'DM Mono', monospace; font-size: 15px; box-shadow: 3px 3px 0 #FF6A1F;">77</span>
+            <span style="width: 42px; height: 42px; display: grid; place-items: center; background: #FFD23F; color: #170B22; font-family: 'DM Mono', monospace; font-size: 15px; box-shadow: 3px 3px 0 #FF6A1F;">91</span>
+          </div>
+          <button style="width: 100%; padding: 16px; margin-right: 3px; border: none; border-radius: 24px; background: #FFD23F; color: #170B22; font-family: Bevan, serif; font-size: 18px; letter-spacing: .06em; text-transform: uppercase; box-shadow: 5px 5px 0 #FF6A1F, 0 0 26px -6px rgba(53,240,224,.45);">CREATE A RULE</button>
+          <button style="width: 100%; padding: 14px; margin-top: 12px; border: none; background: transparent; color: #F1E8D6; font-family: Oswald, sans-serif; font-size: 14px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; box-shadow: inset 0 0 0 1.5px rgba(53,240,224,.55), 0 0 34px -10px rgba(53,240,224,.55), 0 0 66px -18px rgba(53,240,224,.4); border-radius: 999px">VOTE ON THE RULES</button>
+          <button style="width: 100%; padding: 14px; margin-top: 10px; border: none; background: transparent; color: #A88FBF; font-family: Oswald, sans-serif; font-size: 14px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; box-shadow: inset 0 0 0 1.5px rgba(241,232,214,.25), 0 0 34px -12px rgba(255,46,136,.55), 0 0 66px -20px rgba(255,46,136,.4); border-radius: 999px">Back to the round</button>
+        </div>
+        <div style="position: absolute; bottom: 7px; left: 50%; transform: translateX(-50%); width: 134px; height: 5px; border-radius: 3px; background: rgba(241,232,214,.5); z-index: 95;"></div>
+      </div>
+    </div>
+</body></html>

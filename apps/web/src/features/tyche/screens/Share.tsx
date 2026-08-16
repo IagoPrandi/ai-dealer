@@ -70,7 +70,7 @@ export function ShareScreen() {
 
         <div style={{ display: "grid", gap: 10 }}>
           <button className="ide-btn" onClick={() => void shareRound()} style={{ width: "100%", justifyContent: "center", padding: 14 }} type="button">
-            <Ico.send style={{ color: "#08110C" }} /> Share round
+            <Ico.send style={{ color: "var(--on-accent)" }} /> Share round
           </button>
           <button className="ide-btn-ghost ide-btn" onClick={() => void copyLink()} style={{ width: "100%", justifyContent: "center", padding: 14 }} type="button">
             <Ico.copy style={{ color: "var(--purple-soft)" }} /> Copy public link

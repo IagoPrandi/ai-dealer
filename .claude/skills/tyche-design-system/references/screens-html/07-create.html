@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Bevan&family=Oswald:wght@400;500;600;700&family=DM+Mono:wght@400;500&family=Archivo:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  body { margin:0; background:#07060C; color:#F4EFE4; font-family:Archivo, system-ui, sans-serif; padding:48px; display:flex; }
+  @keyframes rb-pulse { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
+  .rb-scroll::-webkit-scrollbar { width: 0; height: 0 }
+  .rb-scroll { scrollbar-width: none }
+</style></head><body>
+<div style="display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; align-items: center; gap: 10px;"><span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: .12em; padding: 4px 9px; background: #FFD23F; color: #170B22;">07</span><span style="font-size: 16px; font-weight: 700;">Create · rule with AI</span></div>
+      <div style="width: 402px; height: 868px; border-radius: 52px; overflow: hidden; position: relative; background: #170B22; box-shadow: 0 50px 100px -30px rgba(0,0,0,.75), 0 0 0 1px rgba(255,255,255,.08);">
+        <div style="position: absolute; inset: 0; z-index: 0; pointer-events: none; background-image: radial-gradient(rgba(255,46,136,.22) 1px, transparent 1.3px); background-size: 4px 4px;"></div>
+        <div style="position: absolute; top: 11px; left: 50%; transform: translateX(-50%); width: 122px; height: 35px; border-radius: 22px; background: #0C0512; z-index: 90;"></div>
+        <div class="rb-scroll" style="position: absolute; inset: 0; z-index: 20; overflow-y: auto; overflow-x: hidden; padding: 62px 16px 104px;">
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px;">
+            <span style="font-family: Bevan, serif; font-size: 22px; text-transform: uppercase; color: #F1E8D6; text-shadow: -2px 0 0 #FF2E88, 2px 0 0 #35F0E0;">Create your rule</span>
+            <span style="font-family: Oswald, sans-serif; font-weight: 600; font-size: 10.5px; letter-spacing: .18em; text-transform: uppercase; color: #170B22; background: #35F0E0; padding: 4px 10px;">with AI</span>
+          </div>
+          <div style="display: grid; gap: 12px;">
+            <div style="justify-self: end; max-width: 78%; padding: 12px 14px; background: #FFD23F; color: #170B22; font-family: Archivo, sans-serif; font-size: 13.5px; line-height: 1.45; box-shadow: 4px 4px 0 #FF6A1F;">the sum of the six numbers has to be closest to 100</div>
+            <div style="max-width: 88%; padding: 13px 15px; background: #120A1B; box-shadow: 4px 4px 0 rgba(53,240,224,.55);">
+              <div style="font-family: Oswald, sans-serif; font-weight: 600; font-size: 10.5px; letter-spacing: .2em; text-transform: uppercase; color: #35F0E0; margin-bottom: 7px;">How it works</div>
+              <p style="margin: 0; font-family: Archivo, sans-serif; font-size: 13px; line-height: 1.5; color: #E4DACB;">The guess whose sum is nearest to 100 wins. Ties split the alternative pool equally.</p>
+            </div>
+            <div style="max-width: 88%; padding: 13px 15px; background: #120A1B; box-shadow: 4px 4px 0 rgba(255,46,136,.5);">
+              <div style="font-family: Oswald, sans-serif; font-weight: 600; font-size: 10.5px; letter-spacing: .2em; text-transform: uppercase; color: #FF7AB8; margin-bottom: 8px;">Questions to answer</div>
+              <div style="display: grid; gap: 7px; font-family: Archivo, sans-serif; font-size: 13px; line-height: 1.45; color: #E4DACB;">
+                <div style="display: flex; gap: 8px;"><span style="font-family: 'DM Mono', monospace; color: #FFD23F;">01</span><span>Does the sum use all six numbers?</span></div>
+                <div style="display: flex; gap: 8px;"><span style="font-family: 'DM Mono', monospace; color: #FFD23F;">02</span><span>What happens when two guesses tie?</span></div>
+              </div>
+            </div>
+            <div style="padding: 14px 16px; margin-right: 3px; background: #120A1B; box-shadow: 5px 5px 0 #FF6A1F, 0 0 50px -14px rgba(53,240,224,.5);">
+              <div style="font-family: Oswald, sans-serif; font-weight: 600; font-size: 10.5px; letter-spacing: .2em; text-transform: uppercase; color: #35F0E0;">My interpretation</div>
+              <div style="font-family: Bevan, serif; font-size: 19px; text-transform: uppercase; color: #F1E8D6; margin: 8px 0 8px;">Closest Sum</div>
+              <p style="margin: 0 0 12px; font-family: 'DM Mono', monospace; font-size: 12px; line-height: 1.5; color: #A992BF;">WIN if abs(sum(guess) − 100) is minimal among all entries.</p>
+              <div style="display: flex; align-items: center; gap: 9px; margin-bottom: 6px;">
+                <span style="font-family: Oswald, sans-serif; font-weight: 600; font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase; color: #A88FBF; white-space: nowrap;">How hard to win</span>
+                <span style="flex: 1; height: 8px; background: rgba(241,232,214,.14); overflow: hidden;"><span style="display: block; height: 100%; width: 62%; background: #FF2E88; box-shadow: 0 0 18px rgba(255,46,136,.8);"></span></span>
+                <span style="font-family: 'DM Mono', monospace; font-size: 11.5px; color: #FFD23F;">62%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style="position: absolute; left: 0; right: 0; bottom: 0; z-index: 40; padding: 14px 16px 22px; background: linear-gradient(180deg, transparent, #170B22 30%);">
+          <div style="display: flex; align-items: center; gap: 9px;">
+            <div style="flex: 1; min-width: 0; padding: 13px 14px; font-family: 'DM Mono', monospace; font-size: 12.5px; color: #A992BF; background: #1E1226;">answer or refine your rule…</div>
+            <button style="width: 46px; height: 46px; flex-shrink: 0; margin-right: 3px; border: none; border-radius: 14px; background: #FFD23F; display: grid; place-items: center; box-shadow: 4px 4px 0 #FF6A1F;"><svg viewBox="0 0 24 24" fill="none" width="19" height="19" style="color:#170B22"><path d="M5 12h13M12 5l7 7-7 7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+          </div>
+        </div>
+        <div style="position: absolute; bottom: 7px; left: 50%; transform: translateX(-50%); width: 134px; height: 5px; border-radius: 3px; background: rgba(241,232,214,.5); z-index: 95;"></div>
+      </div>
+    </div>
+</body></html>

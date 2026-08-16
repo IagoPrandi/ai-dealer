@@ -1,0 +1,108 @@
+:root {
+  /* ── superfícies ───────────────────────────── */
+  --tyche-bg:            #170B22; /* fundo de toda tela */
+  --tyche-bg-deep:       #0C0512; /* tab bar, notch */
+  --tyche-surface-1:     #120A1B; /* cartão destacado (com sombra sólida) */
+  --tyche-surface-2:     #0F0618; /* cartão de lista, ícone-botão quadrado */
+  --tyche-surface-3:     #1E1226; /* input, chip interno, bloco de stat em modal */
+  --tyche-surface-2-a70: #0F0618B3; /* fundo de botão fantasma */
+  --tyche-surface-2-a60: #0F061899; /* bloco de stat sobre os raios */
+  --tyche-canvas:        #07060C; /* fundo do board de apresentação (fora do app) */
+
+  /* ── texto ─────────────────────────────────── */
+  --tyche-ink:           #F1E8D6; /* títulos e valores */
+  --tyche-ink-warm:      #F4EFE4;
+  --tyche-ink-body:      #E4DACB; /* corpo dentro de cartão */
+  --tyche-ink-2:         #A88FBF; /* parágrafos, rótulos */
+  --tyche-ink-3:         #7E6A94; /* terciário, ícone inativo */
+  --tyche-mono-mute:     #A992BF; /* placeholder de input, pseudocódigo */
+  --tyche-num-idle:      #C6B6D6; /* número não selecionado na grade */
+
+  /* ── acentos ───────────────────────────────── */
+  --tyche-yellow:        #FFD23F; /* ação primária — um por tela */
+  --tyche-orange:        #FF6A1F; /* SÓ sombra sólida sob amarelo */
+  --tyche-cyan:          #35F0E0; /* rótulo de seção, voto a favor, positivo */
+  --tyche-magenta:       #FF2E88; /* chapa, aba ativa, meio-tom */
+  --tyche-magenta-soft:  #FF7AB8;
+  --tyche-red:           #E8231A; /* badge ao vivo */
+  --tyche-red-bright:    #FF3B2F; /* voto contra */
+  --tyche-red-soft:      #FF6E63; /* eliminado */
+  --tyche-red-ink:       #FFE9A3; /* texto sobre vermelho */
+  --tyche-green:         #7CF6B8; /* confirmado, winners */
+  --tyche-bronze:        #FF9B4A; /* medalha 3º */
+  --tyche-cyan-ink:      #062220; /* texto sobre ficha ciano */
+  --tyche-on-accent:     #170B22; /* texto sobre amarelo/ciano/osso */
+
+  /* ── linhas ────────────────────────────────── */
+  --tyche-line:          rgba(241,232,214,.14); /* divisor de lista */
+  --tyche-line-2:        rgba(241,232,214,.16); /* filete de seção */
+  --tyche-rule-track:    rgba(241,232,214,.3);  /* régua ao lado de título */
+
+  /* ── tipografia ────────────────────────────── */
+  --tyche-font-display:  Bevan, serif;              /* sempre uppercase */
+  --tyche-font-label:    Oswald, sans-serif;        /* uppercase, tracking largo */
+  --tyche-font-mono:     'DM Mono', monospace;      /* todo número */
+  --tyche-font-body:     Archivo, system-ui, sans-serif;
+
+  /* ── efeitos assinatura ────────────────────── */
+  --tyche-plate:         -2px 0 0 #FF2E88, 2px 0 0 #35F0E0;
+  --tyche-plate-lg:      -3px 0 0 #FF2E88, 3px 0 0 #35F0E0;
+  --tyche-plate-num:     -3px 0 0 #FF2E88, 3px 0 0 #35F0E0, 0 0 26px rgba(255,46,136,.95);
+
+  --tyche-solid-3:       3px 3px 0 #FF6A1F;
+  --tyche-solid-4:       4px 4px 0 #FF6A1F;
+  --tyche-solid-5:       5px 5px 0 #FF6A1F;
+  --tyche-solid-6:       6px 6px 0 #FF6A1F;
+  --tyche-solid-cyan-5:  5px 5px 0 #35F0E0;
+  --tyche-solid-cyan-4:  4px 4px 0 rgba(53,240,224,.55);
+  --tyche-solid-magenta: 4px 4px 0 #FF2E88;
+  --tyche-solid-yellow:  4px 4px 0 #FFD23F;
+
+  --tyche-halo-cyan:     0 0 26px -6px rgba(53,240,224,.45);
+  --tyche-halo-cyan-lg:  0 0 50px -12px rgba(53,240,224,.5);
+  --tyche-halo-magenta:  0 0 34px rgba(255,46,136,.5);
+  --tyche-halo-red:      0 0 34px rgba(255,59,47,.6);
+
+  --tyche-ring:          inset 0 0 0 1.5px rgba(241,232,214,.2);
+  --tyche-ring-soft:     inset 0 0 0 1.5px rgba(241,232,214,.25);
+  --tyche-ring-thin:     inset 0 0 0 1.2px rgba(241,232,214,.16);
+  --tyche-ring-cyan:     inset 0 0 0 1.5px rgba(53,240,224,.5);
+  --tyche-ring-yellow:   inset 0 0 0 1.5px rgba(255,210,63,.4);
+  --tyche-ring-magenta:  inset 0 0 0 1.5px rgba(255,46,136,.5);
+  --tyche-ghost-cyan:    inset 0 0 0 1.5px rgba(53,240,224,.55), 0 0 34px -10px rgba(53,240,224,.55), 0 0 66px -18px rgba(53,240,224,.4);
+  --tyche-ghost-neutral: 0 0 0 1.5px rgba(241,232,214,.6), 0 0 34px -10px rgba(53,240,224,.5), 0 0 64px -18px rgba(255,46,136,.45);
+
+  --tyche-halftone:      radial-gradient(rgba(255,46,136,.22) 1px, transparent 1.3px);
+  --tyche-dashed:        repeating-linear-gradient(90deg, #F1E8D6 0 6px, transparent 6px 10px);
+  --tyche-dashed-thin:   repeating-linear-gradient(90deg, rgba(241,232,214,.6) 0 5px, transparent 5px 9px);
+
+  /* ── geometria ─────────────────────────────── */
+  --tyche-radius-card:   0px;   /* cartão, chip, ficha, badge, bloco de stat */
+  --tyche-radius-btn:    24px;  /* CTA full-width grande */
+  --tyche-radius-btn-sm: 20px;  /* CTA dentro de cartão / modal */
+  --tyche-radius-btn-xs: 14px;  /* ícone-botão de seta 46×46 */
+  --tyche-radius-pill:   999px; /* botão fantasma, chip de ação */
+  --tyche-radius-fab:    22px;
+  --tyche-radius-bezel:  52px;
+
+  --tyche-shell-w:       402px;
+  --tyche-shell-h:       868px;
+  --tyche-pad-x:         16px;  /* 16 ou 18 */
+  --tyche-pad-top:       58px;  /* 58–62 */
+  --tyche-pad-bottom:    96px;  /* 40 sem chrome · 96 tab bar · 104–130 CTA fixo */
+}
+
+/* overlay de meio-tom — primeiro filho de toda tela */
+.tyche-halftone {
+  position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background-image: var(--tyche-halftone);
+  background-size: 4px 4px;
+}
+
+/* scroll sem barra visível */
+.tyche-scroll { scrollbar-width: none; -ms-overflow-style: none; }
+.tyche-scroll::-webkit-scrollbar { width: 0; height: 0; }
+
+@keyframes rb-pulse { 0%, 100% { opacity: 1 } 50% { opacity: .25 } }
+
+/* fontes: Bevan · Oswald 400;500;600;700 · DM Mono 400;500 · Archivo 400;600;700 */

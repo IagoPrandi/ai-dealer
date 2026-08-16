@@ -113,7 +113,7 @@ const GALLERY_CSS = `
   background:
     radial-gradient(1200px 800px at 50% -8%, #2a2533 0%, #1a1722 55%, #131019 100%);
   color: #f4f1fa;
-  font-family: 'Outfit', system-ui, sans-serif;
+  font-family: Archivo, system-ui, sans-serif;
 }
 .gx-top { max-width: 720px; margin: 0 auto 28px; text-align: center; }
 .gx-top h1 { margin: 0 0 8px; font-size: 20px; font-weight: 700; }
@@ -151,7 +151,7 @@ const GALLERY_CSS = `
 .gx-disabled {
   min-height: 100vh; display: grid; place-content: center; gap: 12px;
   padding: 40px; text-align: center; color: #f4f1fa; background: #0b0910;
-  font-family: 'Outfit', system-ui, sans-serif;
+  font-family: Archivo, system-ui, sans-serif;
 }
 .gx-disabled code {
   display: inline-block; margin: 0 6px; padding: 2px 8px; border-radius: 6px;

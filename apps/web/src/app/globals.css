@@ -1,20 +1,23 @@
+/* Retro-cyberpunk "3a · Tinta Neon" ground. The Tyche app itself is themed in
+   features/tyche/tyche.css; these are the page-level surfaces behind and around
+   the phone shell, plus the dev/tokenomics routes. */
 :root {
   color-scheme: dark;
-  --background: #0b0910;
-  --surface: #17121f;
-  --surface-raised: #211a2d;
-  --surface-warm: #241d18;
-  --foreground: #f4f1fa;
-  --muted: #aaa3b9;
-  --subtle: #756e84;
-  --line: #342c42;
-  --accent: #14f195;
-  --accent-strong: #79f8bd;
-  --purple: #9945ff;
-  --purple-soft: #c77dff;
+  --background: #170b22;
+  --surface: #120a1b;
+  --surface-raised: #1e1226;
+  --surface-warm: #1e1226;
+  --foreground: #f1e8d6;
+  --muted: #a88fbf;
+  --subtle: #7e6a94;
+  --line: rgb(241 232 214 / 20%);
+  --accent: #35f0e0;
+  --accent-strong: #7cf6b8;
+  --purple: #ff2e88;
+  --purple-soft: #ff7ab8;
   --gold: #ffd23f;
-  --danger: #ff7a7a;
-  --success: #7bd88f;
+  --danger: #ff3b2f;
+  --success: #7cf6b8;
   --shadow: 0 18px 52px rgb(0 0 0 / 38%);
 }
 
@@ -29,8 +32,7 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family:
-    Outfit,
-    Avenir,
+    Archivo,
     ui-sans-serif,
     system-ui,
     -apple-system,
@@ -993,7 +995,7 @@ p {
   border-radius: 14px;
   background: rgb(20 241 149 / 7%);
   color: var(--platform-green);
-  font-family: "Space Grotesk", Consolas, monospace;
+  font-family: 'DM Mono', Consolas, monospace;
   font-size: 18px;
   font-weight: 800;
 }
@@ -1175,7 +1177,7 @@ p {
   border-radius: 8px;
   background: var(--platform-bg);
   color: var(--platform-yellow);
-  font-family: "Space Grotesk", Consolas, monospace;
+  font-family: 'DM Mono', Consolas, monospace;
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.02em;
@@ -1255,7 +1257,7 @@ p {
   margin: 0;
   overflow-wrap: anywhere;
   color: var(--platform-text);
-  font-family: "Space Grotesk", Consolas, monospace;
+  font-family: 'DM Mono', Consolas, monospace;
   font-size: 13px;
   font-weight: 800;
 }
@@ -2481,7 +2483,7 @@ p {
     #131019 100%
   );
   color: var(--platform-text);
-  font-family: Outfit, Avenir, ui-sans-serif, system-ui, sans-serif;
+  font-family: Archivo, ui-sans-serif, system-ui, sans-serif;
 }
 
 .platform-phone-shell {
@@ -2843,7 +2845,7 @@ p {
 .platform-win-card h2 {
   margin: 4px 0 2px;
   color: var(--platform-text);
-  font-family: "Space Grotesk", Consolas, monospace;
+  font-family: 'DM Mono', Consolas, monospace;
   font-size: 38px;
   font-weight: 800;
 }
@@ -2889,7 +2891,7 @@ p {
 
 .platform-result-meta strong {
   color: var(--platform-purple-soft);
-  font-family: "Space Grotesk", Consolas, monospace;
+  font-family: 'DM Mono', Consolas, monospace;
   font-size: 13px;
   letter-spacing: 0.12em;
 }
@@ -2941,7 +2943,7 @@ p {
   border-radius: 13px;
   background: var(--platform-surface-2);
   color: var(--platform-text);
-  font-family: "Space Grotesk", Consolas, monospace;
+  font-family: 'DM Mono', Consolas, monospace;
   font-size: 17px;
   font-weight: 700;
 }
@@ -3051,7 +3053,7 @@ p {
 
 .platform-result-rule-list article > span {
   color: var(--platform-dim);
-  font-family: "Space Grotesk", Consolas, monospace;
+  font-family: 'DM Mono', Consolas, monospace;
   font-size: 14px;
   font-weight: 700;
   text-align: center;
@@ -3065,7 +3067,7 @@ p {
 
 .platform-result-rule-list article > b {
   color: var(--platform-muted);
-  font-family: "Space Grotesk", Consolas, monospace;
+  font-family: 'DM Mono', Consolas, monospace;
   font-size: 14px;
 }
 
@@ -3129,7 +3131,7 @@ p {
   border-radius: 14px;
   background: rgb(20 241 149 / 7%);
   color: var(--platform-green);
-  font-family: "Space Grotesk", Consolas, monospace;
+  font-family: 'DM Mono', Consolas, monospace;
   font-size: 18px;
   font-weight: 800;
 }
@@ -3175,7 +3177,7 @@ p {
   place-items: center;
   border: 1px solid var(--platform-line-2);
   border-radius: 12px;
-  font-family: "Space Grotesk", Consolas, monospace;
+  font-family: 'DM Mono', Consolas, monospace;
   font-size: 16px;
   font-weight: 800;
 }
@@ -3236,7 +3238,7 @@ p {
   background: var(--platform-surface-2);
   color: var(--platform-text);
   cursor: pointer;
-  font-family: "Space Grotesk", Consolas, monospace;
+  font-family: 'DM Mono', Consolas, monospace;
   font-size: 16px;
   font-weight: 800;
 }
@@ -3292,7 +3294,7 @@ p {
   margin: 0;
   overflow-wrap: anywhere;
   color: var(--platform-text);
-  font-family: "Space Grotesk", Consolas, monospace;
+  font-family: 'DM Mono', Consolas, monospace;
   font-size: 13.5px;
   font-weight: 800;
   text-align: right;
@@ -3541,7 +3543,7 @@ p {
 }
 
 .wallet-connected-card strong {
-  font-family: "Space Grotesk", Consolas, monospace;
+  font-family: 'DM Mono', Consolas, monospace;
   overflow-wrap: anywhere;
 }
 
@@ -3900,7 +3902,7 @@ p {
 
 .platform-last-result > b em {
   color: var(--platform-yellow);
-  font-family: "Space Grotesk", Consolas, monospace;
+  font-family: 'DM Mono', Consolas, monospace;
   font-style: normal;
 }
 
@@ -3964,7 +3966,7 @@ p {
 
 .platform-pill strong {
   color: var(--platform-text);
-  font-family: "Space Grotesk", Consolas, monospace;
+  font-family: 'DM Mono', Consolas, monospace;
 }
 
 .platform-prize-hero > p {
@@ -3983,7 +3985,7 @@ p {
   justify-content: center;
   max-width: none;
   margin: 0;
-  font-family: "Space Grotesk", Consolas, monospace;
+  font-family: 'DM Mono', Consolas, monospace;
 }
 
 .platform-prize-hero h1 strong,
@@ -4045,7 +4047,7 @@ p {
   border-radius: 8px;
   background: rgb(255 210 63 / 12%);
   color: var(--platform-yellow);
-  font-family: "Space Grotesk", Consolas, monospace;
+  font-family: 'DM Mono', Consolas, monospace;
   font-size: 11px;
 }
 
@@ -4254,7 +4256,7 @@ button.platform-primary-button {
   background: var(--platform-yellow);
   box-shadow: 0 0 14px -2px var(--platform-yellow);
   color: #0b0910;
-  font-family: "Space Grotesk", Consolas, monospace;
+  font-family: 'DM Mono', Consolas, monospace;
   font-size: 12px;
   font-weight: 800;
 }
@@ -4297,7 +4299,7 @@ button.platform-primary-button {
 
 .platform-vote-bars button > em strong {
   color: var(--platform-yellow);
-  font-family: "Space Grotesk", Consolas, monospace;
+  font-family: 'DM Mono', Consolas, monospace;
   font-size: 17px;
 }
 
@@ -4516,7 +4518,7 @@ button.platform-primary-button {
 
 .platform-account-identity small {
   color: var(--platform-muted);
-  font-family: "Space Grotesk", Consolas, monospace;
+  font-family: 'DM Mono', Consolas, monospace;
 }
 
 .platform-account-result {
@@ -4576,7 +4578,7 @@ button.platform-primary-button {
 .platform-balance-card h2 {
   margin: 6px 0 14px;
   color: var(--platform-green);
-  font-family: "Space Grotesk", Consolas, monospace;
+  font-family: 'DM Mono', Consolas, monospace;
   font-size: 40px;
 }
 
@@ -4605,7 +4607,7 @@ button.platform-primary-button {
 }
 
 .platform-account-stats article strong {
-  font-family: "Space Grotesk", Consolas, monospace;
+  font-family: 'DM Mono', Consolas, monospace;
   font-size: 21px;
 }
 

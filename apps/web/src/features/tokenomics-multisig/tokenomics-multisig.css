@@ -70,7 +70,7 @@
   background: linear-gradient(135deg, #9945ff, #14f195);
   color: #08110c;
   font:
-    800 14px/1 "Space Grotesk",
+    800 14px/1 'DM Mono',
     sans-serif;
 }
 
@@ -101,7 +101,7 @@
   max-width: 760px;
   margin: 0;
   font:
-    700 clamp(36px, 7vw, 64px) / 0.98 "Sora",
+    700 clamp(36px, 7vw, 64px) / 0.98 Oswald,
     sans-serif;
   letter-spacing: -0.055em;
 }
@@ -147,7 +147,7 @@
 .tm-success h2 {
   margin: 5px 0 0;
   font:
-    650 clamp(20px, 4vw, 27px) / 1.1 "Sora",
+    650 clamp(20px, 4vw, 27px) / 1.1 Oswald,
     sans-serif;
   letter-spacing: -0.035em;
 }
@@ -196,7 +196,7 @@
   background: #271f3b;
   color: #c77dff;
   font:
-    700 14px/1 "Space Grotesk",
+    700 14px/1 'DM Mono',
     sans-serif;
 }
 

@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Bevan&family=Oswald:wght@400;500;600;700&family=DM+Mono:wght@400;500&family=Archivo:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  body { margin:0; background:#07060C; color:#F4EFE4; font-family:Archivo, system-ui, sans-serif; padding:48px; display:flex; }
+  @keyframes rb-pulse { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
+  .rb-scroll::-webkit-scrollbar { width: 0; height: 0 }
+  .rb-scroll { scrollbar-width: none }
+</style></head><body>
+<div style="display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; align-items: center; gap: 10px;"><span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: .12em; padding: 4px 9px; background: #FFD23F; color: #170B22;">12</span><span style="font-size: 16px; font-weight: 700;">Claims</span></div>
+      <div style="width: 402px; height: 868px; border-radius: 52px; overflow: hidden; position: relative; background: #170B22; box-shadow: 0 50px 100px -30px rgba(0,0,0,.75), 0 0 0 1px rgba(255,255,255,.08);">
+        <div style="position: absolute; inset: 0; z-index: 0; pointer-events: none; background-image: radial-gradient(rgba(255,46,136,.22) 1px, transparent 1.3px); background-size: 4px 4px;"></div>
+        <div style="position: absolute; top: 11px; left: 50%; transform: translateX(-50%); width: 122px; height: 35px; border-radius: 22px; background: #0C0512; z-index: 90;"></div>
+        <div class="rb-scroll" style="position: absolute; inset: 0; z-index: 20; overflow-y: auto; overflow-x: hidden; padding: 62px 18px 40px;">
+          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+            <span style="width: 38px; height: 38px; display: grid; place-items: center; background: #0F0618; box-shadow: inset 0 0 0 1.5px rgba(241,232,214,.25); color: #F1E8D6;"><svg viewBox="0 0 24 24" fill="none" width="18" height="18"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></span>
+            <span style="font-family: Bevan, serif; font-size: 24px; text-transform: uppercase; color: #F1E8D6; text-shadow: -2px 0 0 #FF2E88, 2px 0 0 #35F0E0;">Claims</span>
+          </div>
+          <div style="padding: 18px 16px; margin: 0 3px 14px 0; background: #120A1B; box-shadow: 5px 5px 0 #FF6A1F, 0 0 60px -14px rgba(53,240,224,.5);">
+            <div style="font-family: Oswald, sans-serif; font-weight: 600; font-size: 11px; letter-spacing: .2em; text-transform: uppercase; color: #A88FBF;">Available to claim</div>
+            <div style="display: flex; align-items: flex-start; gap: 6px; margin-top: 6px;">
+              <span style="font-family: Bevan, serif; font-size: 42px; line-height: 1; color: #F1E8D6; text-shadow: -2px 0 0 #FF2E88, 2px 0 0 #35F0E0;">2.40</span>
+              <span style="font-family: 'DM Mono', monospace; font-size: 13px; margin-top: 10px; color: #35F0E0;">SOL</span>
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; margin-bottom: 16px;">
+            <div style="padding: 12px; background: #0F0618; box-shadow: inset 0 0 0 1.5px rgba(53,240,224,.35);"><div style="font-family: Bevan, serif; font-size: 22px; color: #F1E8D6;">2</div><div style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: #7E6A94; margin-top: 3px;">claimable</div></div>
+            <div style="padding: 12px; background: #0F0618; box-shadow: inset 0 0 0 1.5px rgba(255,210,63,.35);"><div style="font-family: Bevan, serif; font-size: 22px; color: #F1E8D6;">1</div><div style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: #7E6A94; margin-top: 3px;">pending</div></div>
+            <div style="padding: 12px; background: #0F0618; box-shadow: inset 0 0 0 1.5px rgba(241,232,214,.18);"><div style="font-family: Bevan, serif; font-size: 22px; color: #F1E8D6;">6</div><div style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: #7E6A94; margin-top: 3px;">claimed</div></div>
+          </div>
+          <div style="display: grid; gap: 10px; margin-right: 3px;">
+            <div style="padding: 14px 15px; background: #0F0618; box-shadow: 5px 5px 0 #35F0E0;">
+              <div style="display: flex; align-items: center; gap: 11px;">
+                <span style="width: 36px; height: 36px; display: grid; place-items: center; background: #FFD23F; color: #170B22; flex-shrink: 0;"><svg viewBox="0 0 24 24" fill="none" width="17" height="17"><path d="M7 4h10v4a5 5 0 01-10 0V4zM9 20h6M12 13v7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg></span>
+                <div style="flex: 1; min-width: 0;">
+                  <div style="display: flex; align-items: center; gap: 8px;"><span style="font-family: Oswald, sans-serif; font-size: 14.5px; letter-spacing: .05em; text-transform: uppercase; color: #F1E8D6;">Prize payout</span><span style="font-family: Oswald, sans-serif; font-weight: 600; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: #170B22; background: #7CF6B8; padding: 3px 7px;">Claimable</span></div>
+                  <div style="font-family: 'DM Mono', monospace; font-size: 11.5px; color: #7E6A94; margin-top: 4px;">#0141 · 7fA…c2B</div>
+                </div>
+                <div style="text-align: right; flex-shrink: 0;"><div style="font-family: Bevan, serif; font-size: 17px; color: #F1E8D6;">2.10</div><div style="font-family: 'DM Mono', monospace; font-size: 10.5px; color: #35F0E0;">SOL</div></div>
+              </div>
+              <button style="width: 100%; margin-top: 12px; padding: 12px; border: none; border-radius: 18px; background: #FFD23F; color: #170B22; font-family: Bevan, serif; font-size: 15px; letter-spacing: .06em; text-transform: uppercase; box-shadow: 4px 4px 0 #FF6A1F;">Claim to wallet</button>
+            </div>
+            <div style="padding: 14px 15px; background: #0F0618; box-shadow: inset 0 0 0 1.5px rgba(255,210,63,.35);">
+              <div style="display: flex; align-items: center; gap: 11px;">
+                <span style="width: 36px; height: 36px; display: grid; place-items: center; background: #1E1226; color: #7CF6B8; flex-shrink: 0;"><svg viewBox="0 0 24 24" fill="none" width="17" height="17"><rect x="3.5" y="8.5" width="17" height="11" stroke="currentColor" stroke-width="1.7"></rect><path d="M12 8.5V20M3.5 12.5h17" stroke="currentColor" stroke-width="1.7"></path></svg></span>
+                <div style="flex: 1; min-width: 0;">
+                  <div style="display: flex; align-items: center; gap: 8px;"><span style="font-family: Oswald, sans-serif; font-size: 14.5px; letter-spacing: .05em; text-transform: uppercase; color: #F1E8D6;">Voter reward</span><span style="font-family: Oswald, sans-serif; font-weight: 600; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: #170B22; background: #FFD23F; padding: 3px 7px;">Pending</span></div>
+                  <div style="font-family: 'DM Mono', monospace; font-size: 11.5px; color: #7E6A94; margin-top: 4px;">#0140 · 91K…4dE</div>
+                </div>
+                <div style="text-align: right; flex-shrink: 0;"><div style="font-family: Bevan, serif; font-size: 17px; color: #F1E8D6;">0.30</div><div style="font-family: 'DM Mono', monospace; font-size: 10.5px; color: #35F0E0;">SOL</div></div>
+              </div>
+              <div style="margin-top: 10px; font-family: Archivo, sans-serif; font-size: 12.5px; color: #A88FBF;">Pending wallet approval — resume in your wallet.</div>
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 16px;">
+            <button style="padding: 12px; border: none; background: transparent; color: #F1E8D6; font-family: Oswald, sans-serif; font-size: 12.5px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; border-radius: 999px; box-shadow: inset 0 0 0 1.5px rgba(53,240,224,.45), 0 0 30px -10px rgba(53,240,224,.5), 0 0 58px -18px rgba(53,240,224,.38);">Join next round</button>
+            <button style="padding: 12px; border: none; background: transparent; color: #F1E8D6; font-family: Oswald, sans-serif; font-size: 12.5px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; border-radius: 999px; box-shadow: inset 0 0 0 1.5px rgba(255,46,136,.45), 0 0 30px -10px rgba(255,46,136,.5), 0 0 58px -18px rgba(255,46,136,.38);">Reward history</button>
+          </div>
+        </div>
+      </div>
+    </div>
+</body></html>

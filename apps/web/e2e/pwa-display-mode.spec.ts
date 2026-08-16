@@ -13,7 +13,10 @@ test("keeps preview chrome in the browser and keeps standalone PWA mode interact
   await expect(dynamicIsland).toBeVisible();
   await expect(statusBar).toBeVisible();
   await expect(homeIndicator).toBeVisible();
-  await expect(page.locator(".ide-scroll").first()).toHaveCSS("padding-top", "52px");
+  // 58px is the "3a" screen anatomy's top padding (58-62), replacing the 52px
+  // of the previous theme. Both come from --ide-shell-content-top; the
+  // standalone value below is unchanged because the OS supplies its own inset.
+  await expect(page.locator(".ide-scroll").first()).toHaveCSS("padding-top", "58px");
 
   const pwaPage = await context.newPage();
   await pwaPage.addInitScript(() => {

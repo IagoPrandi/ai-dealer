@@ -6,8 +6,8 @@
   "start_url": "/play",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#0b0910",
-  "theme_color": "#0b0910",
+  "background_color": "#170B22",
+  "theme_color": "#170B22",
   "orientation": "portrait",
   "categories": ["games", "finance"],
   "icons": [

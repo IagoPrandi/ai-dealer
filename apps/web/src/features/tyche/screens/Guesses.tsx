@@ -158,7 +158,7 @@ export function GuessesScreen() {
             style={{ width: "100%", padding: 16 }}
             type="button"
           >
-            <Ico.wallet style={{ color: "#08110C" }} /> Connect wallet
+            <Ico.wallet style={{ color: "var(--on-accent)" }} /> Connect wallet
           </button>
           <button
             className="ide-btn-ghost ide-btn"
@@ -311,7 +311,7 @@ export function GuessesScreen() {
             style={{ padding: "14px 22px", opacity: turnReadyToPlay ? 1 : 0.5 }}
             type="button"
           >
-            <Ico.dice style={{ color: "#08110C" }} />{" "}
+            <Ico.dice style={{ color: "var(--on-accent)" }} />{" "}
             {receipts.length > 0 ? "Play again" : "Make a guess"}
           </button>
         </div>

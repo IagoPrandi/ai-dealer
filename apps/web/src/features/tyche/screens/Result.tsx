@@ -18,7 +18,7 @@ import { Confetti, Ico, ScreenHead, SectionLabel, VoteTally } from "../shared";
 function EligItem({ label, ok }: { label: string; ok: boolean }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-      <span style={{ width: 24, height: 24, borderRadius: 8, display: "grid", placeItems: "center", flexShrink: 0, background: ok ? "rgba(20,241,149,0.16)" : "var(--surface-2)", color: ok ? "var(--green)" : "var(--dim)" }}>
+      <span style={{ width: 24, height: 24, borderRadius: 8, display: "grid", placeItems: "center", flexShrink: 0, background: ok ? "rgba(124,246,184,0.16)" : "var(--surface-2)", color: ok ? "var(--green)" : "var(--dim)" }}>
         {ok ? <Ico.check style={{ color: "var(--green)", width: 15, height: 15 }} /> : <Ico.close style={{ color: "var(--dim)", width: 14, height: 14 }} />}
       </span>
       <span style={{ fontSize: 13, color: ok ? "var(--text)" : "var(--dim)", fontWeight: 600 }}>{label}</span>
@@ -177,7 +177,7 @@ export function ResultScreen() {
 
         {!walletAddress ? (
           <div style={{ textAlign: "center", padding: "18px 0 24px", borderBottom: "1px solid var(--line)", marginBottom: 22 }}>
-            <div style={{ fontSize: 16.5, fontWeight: 800 }}>Round settled</div>
+            <div style={{ fontFamily: "Bevan, serif", fontSize: 17, textTransform: "uppercase" }}>Round settled</div>
             <div style={{ fontSize: 13.5, color: "var(--muted)", marginTop: 5 }}>Draw, rule, and payout results are available on-chain.</div>
           </div>
         ) : youWon ? (
@@ -185,15 +185,15 @@ export function ResultScreen() {
             <div style={{ position: "absolute", inset: "-10px 40px auto", height: 160, background: "radial-gradient(circle, rgba(255,210,63,0.2), transparent 68%)", filter: "blur(14px)", zIndex: 0 }} />
             <div style={{ position: "relative", zIndex: 1 }}>
               <div style={{ fontSize: 40, marginBottom: 4 }}>🏆</div>
-              <div style={{ fontSize: 13, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--gold)", fontWeight: 800 }}>You won!</div>
-              <div className="ide-num" style={{ fontSize: 44, fontWeight: 800, margin: "6px 0 2px" }}>+{fmtSol(lamportsToSol(youWonLamports))} <span style={{ fontSize: 18, color: "var(--purple-soft)" }}>SOL</span></div>
+              <div style={{ fontFamily: "Oswald, sans-serif", fontSize: 12, fontWeight: 700, letterSpacing: "0.3em", textTransform: "uppercase", color: "var(--yellow)" }}>You won!</div>
+              <div style={{ fontFamily: "Bevan, serif", fontSize: 46, lineHeight: 0.95, margin: "6px 0 2px", color: "var(--text)", textShadow: "var(--plate-lg)" }}>+{fmtSol(lamportsToSol(youWonLamports))} <span className="ide-num" style={{ fontSize: 13, color: "var(--cyan)" }}>SOL</span></div>
               <div style={{ fontSize: 13.5, color: "var(--muted)" }}>available to claim in your account</div>
-              <button onClick={() => go("claims")} className="ide-btn" style={{ width: "100%", marginTop: 20, padding: 14 }} type="button"><Ico.withdraw style={{ color: "#08110C" }} /> Go to claims</button>
+              <button onClick={() => go("claims")} className="ide-btn" style={{ width: "100%", marginTop: 20, padding: 14 }} type="button"><Ico.withdraw style={{ color: "var(--on-accent)" }} /> Go to claims</button>
             </div>
           </div>
         ) : (
           <div style={{ textAlign: "center", padding: "18px 0 24px", borderBottom: "1px solid var(--line)", marginBottom: 22 }}>
-            <div style={{ fontSize: 16.5, fontWeight: 800 }}>Not this time</div>
+            <div style={{ fontFamily: "Bevan, serif", fontSize: 17, textTransform: "uppercase" }}>Not this time</div>
             <div style={{ fontSize: 13.5, color: "var(--muted)", marginTop: 5 }}>The next round is already live — good luck!</div>
           </div>
         )}
@@ -221,8 +221,8 @@ export function ResultScreen() {
           {/* elected alternative rule — emphasis by color, not by box */}
           <div style={{ padding: "2px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
-              <span style={{ width: 26, height: 26, borderRadius: 8, background: "var(--gold)", color: "#0B0910", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.trophy style={{ color: "#0B0910", width: 15, height: 15 }} /></span>
-              <div style={{ fontWeight: 800, fontSize: 16, color: "var(--gold)" }}>{electedRule?.title ?? "No alternative rule elected"}</div>
+              <span style={{ width: 26, height: 26, borderRadius: 8, background: "var(--gold)", color: "var(--on-accent)", display: "grid", placeItems: "center", flexShrink: 0 }}><Ico.trophy style={{ color: "var(--on-accent)", width: 15, height: 15 }} /></span>
+              <div style={{ fontFamily: "Bevan, serif", fontSize: 19, textTransform: "uppercase", color: "var(--yellow)" }}>{electedRule?.title ?? "No alternative rule elected"}</div>
             </div>
             {electedRule ? (
               <>

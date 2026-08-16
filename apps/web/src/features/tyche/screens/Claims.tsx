@@ -105,7 +105,7 @@ function ClaimRow({
           style={{ width: "100%", justifyContent: "center", marginTop: 12, padding: 12, opacity: busy ? 0.6 : 1 }}
           type="button"
         >
-          <Ico.withdraw style={{ color: "#08110C" }} /> {busy ? "Claiming..." : actionLabel}
+          <Ico.withdraw style={{ color: "var(--on-accent)" }} /> {busy ? "Claiming..." : actionLabel}
         </button>
       ) : (
         <div style={{ color: "var(--dim)", fontSize: 12.5, lineHeight: 1.45, marginTop: 10 }}>
@@ -168,7 +168,7 @@ export function ClaimsScreen() {
           <Dealer size={60} />
           <h2 style={{ fontSize: 23, fontWeight: 800, margin: "16px 0 8px" }}>Connect your wallet to see claims</h2>
           <p style={{ color: "var(--muted)", fontSize: 15, margin: "0 0 24px" }}>Claimable payouts, pending approvals, and claimed rewards are wallet-scoped.</p>
-          <a href="/play/wallet" className="ide-btn" style={{ width: "100%", padding: 16, justifyContent: "center", textDecoration: "none" }}><Ico.wallet style={{ color: "#08110C" }} /> Connect wallet</a>
+          <a href="/play/wallet" className="ide-btn" style={{ width: "100%", padding: 16, justifyContent: "center", textDecoration: "none" }}><Ico.wallet style={{ color: "var(--on-accent)" }} /> Connect wallet</a>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, width: "100%", marginTop: 12 }}>
             <a href="/play/pick" className="ide-btn-ghost ide-btn" style={{ padding: 12, justifyContent: "center", textDecoration: "none" }}>Join next round</a>
             <a href="/play/rewards" className="ide-btn-ghost ide-btn" style={{ padding: 12, justifyContent: "center", textDecoration: "none" }}>Reward history</a>

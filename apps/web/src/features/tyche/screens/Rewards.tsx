@@ -759,7 +759,7 @@ export function RewardsScreen() {
             your wallet address.
           </p>
           <button className="ide-btn" onClick={connect} type="button">
-            <Ico.wallet style={{ color: "#08110C" }} /> Connect wallet
+            <Ico.wallet style={{ color: "var(--on-accent)" }} /> Connect wallet
           </button>
         </div>
       </div>

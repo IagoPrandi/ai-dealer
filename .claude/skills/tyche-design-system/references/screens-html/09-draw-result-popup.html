@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Bevan&family=Oswald:wght@400;500;600;700&family=DM+Mono:wght@400;500&family=Archivo:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  body { margin:0; background:#07060C; color:#F4EFE4; font-family:Archivo, system-ui, sans-serif; padding:48px; display:flex; }
+  @keyframes rb-pulse { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
+  .rb-scroll::-webkit-scrollbar { width: 0; height: 0 }
+  .rb-scroll { scrollbar-width: none }
+</style></head><body>
+<div style="display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; align-items: center; gap: 10px;"><span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: .12em; padding: 4px 9px; background: #FFD23F; color: #170B22;">09</span><span style="font-size: 16px; font-weight: 700;">Draw result · pop-up</span></div>
+      <div style="width: 402px; height: 868px; border-radius: 52px; overflow: hidden; position: relative; background: #170B22; box-shadow: 0 50px 100px -30px rgba(0,0,0,.75), 0 0 0 1px rgba(255,255,255,.08);">
+        <div style="position: absolute; inset: 0; z-index: 0; pointer-events: none; background-image: radial-gradient(rgba(255,46,136,.22) 1px, transparent 1.3px); background-size: 4px 4px;"></div>
+        <div style="position: absolute; inset: 0; z-index: 30; background: rgba(6,4,10,.72); backdrop-filter: blur(6px);"></div>
+        <div style="position: absolute; top: 11px; left: 50%; transform: translateX(-50%); width: 122px; height: 35px; border-radius: 22px; background: #0C0512; z-index: 90;"></div>
+        <div style="position: absolute; z-index: 40; left: 18px; right: 18px; top: 50%; transform: translateY(-50%); padding: 18px 18px 20px; background: #120A1B; box-shadow: 6px 6px 0 #FF6A1F, 0 0 70px -14px rgba(255,46,136,.6);">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+            <span style="display: inline-block; transform: skewX(-10deg); padding: 6px 14px; background: #E8231A; font-family: Oswald, sans-serif; font-weight: 600; font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: #FFE9A3; box-shadow: 0 0 30px rgba(255,59,47,.6);"><span style="display: inline-block; transform: skewX(10deg);">Round #0141 settled</span></span>
+            <span style="width: 32px; height: 32px; display: grid; place-items: center; color: #A88FBF; box-shadow: inset 0 0 0 1.5px rgba(241,232,214,.25);"><svg viewBox="0 0 24 24" fill="none" width="15" height="15"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg></span>
+          </div>
+          <h2 style="margin: 0 0 14px; font-family: Bevan, serif; font-size: 26px; line-height: 1.05; text-transform: uppercase; color: #F1E8D6; text-shadow: -2px 0 0 #FF2E88, 2px 0 0 #35F0E0;">The numbers are out</h2>
+          <div style="font-family: Oswald, sans-serif; font-weight: 600; font-size: 10.5px; letter-spacing: .22em; text-transform: uppercase; color: #35F0E0; margin-bottom: 10px;">Drawn numbers</div>
+          <div style="display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 16px;">
+            <span style="width: 42px; height: 42px; display: grid; place-items: center; background: #F1E8D6; color: #170B22; font-family: 'DM Mono', monospace; font-size: 15px; box-shadow: 3px 3px 0 #FF2E88;">7</span>
+            <span style="width: 42px; height: 42px; display: grid; place-items: center; background: #F1E8D6; color: #170B22; font-family: 'DM Mono', monospace; font-size: 15px; box-shadow: 3px 3px 0 #FF2E88;">19</span>
+            <span style="width: 42px; height: 42px; display: grid; place-items: center; background: #F1E8D6; color: #170B22; font-family: 'DM Mono', monospace; font-size: 15px; box-shadow: 3px 3px 0 #FF2E88;">23</span>
+            <span style="width: 42px; height: 42px; display: grid; place-items: center; background: #F1E8D6; color: #170B22; font-family: 'DM Mono', monospace; font-size: 15px; box-shadow: 3px 3px 0 #FF2E88;">42</span>
+            <span style="width: 42px; height: 42px; display: grid; place-items: center; background: #F1E8D6; color: #170B22; font-family: 'DM Mono', monospace; font-size: 15px; box-shadow: 3px 3px 0 #FF2E88;">63</span>
+            <span style="width: 42px; height: 42px; display: grid; place-items: center; background: #F1E8D6; color: #170B22; font-family: 'DM Mono', monospace; font-size: 15px; box-shadow: 3px 3px 0 #FF2E88;">88</span>
+          </div>
+          <div style="padding: 13px 14px; margin-bottom: 12px; background: #1E1226; box-shadow: 4px 4px 0 #FFD23F;">
+            <div style="font-family: Oswald, sans-serif; font-weight: 600; font-size: 10px; letter-spacing: .2em; text-transform: uppercase; color: #A88FBF;">Active rule</div>
+            <div style="font-family: Bevan, serif; font-size: 17px; text-transform: uppercase; color: #FFD23F; margin-top: 4px;">Closest Sum</div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px;">
+            <div style="padding: 11px 13px; background: #1E1226;"><div style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: .16em; text-transform: uppercase; color: #7E6A94;">Prize pool</div><div style="font-family: Bevan, serif; font-size: 20px; color: #F1E8D6; margin-top: 3px;">20.50 <span style="font-family: 'DM Mono', monospace; font-size: 11px; color: #35F0E0;">SOL</span></div></div>
+            <div style="padding: 11px 13px; background: #1E1226;"><div style="font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: .16em; text-transform: uppercase; color: #7E6A94;">Winners</div><div style="font-family: Bevan, serif; font-size: 20px; color: #7CF6B8; margin-top: 3px;">4</div></div>
+          </div>
+          <div style="display: grid; gap: 8px; margin-bottom: 16px;">
+            <div style="display: flex; align-items: center; gap: 9px; padding: 10px 13px; box-shadow: inset 0 0 0 1.5px rgba(241,232,214,.2);"><span style="font-family: Oswald, sans-serif; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: #F1E8D6; flex: 1;">Original rule</span><span style="font-family: 'DM Mono', monospace; font-size: 11.5px; color: #A88FBF;"><span style="color:#7E6A94">0</span> won · 10.25 SOL</span></div>
+            <div style="display: flex; align-items: center; gap: 9px; padding: 10px 13px; box-shadow: inset 0 0 0 1.5px rgba(255,210,63,.4);"><span style="font-family: Oswald, sans-serif; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: #FFD23F; flex: 1;">Elected rule</span><span style="font-family: 'DM Mono', monospace; font-size: 11.5px; color: #A88FBF;"><span style="color:#7CF6B8">4</span> won · 10.25 SOL</span></div>
+          </div>
+          <button style="width: 100%; padding: 13px; margin-right: 3px; border: none; border-radius: 20px; background: #FFD23F; color: #170B22; font-family: Bevan, serif; font-size: 16px; letter-spacing: .06em; text-transform: uppercase; box-shadow: 4px 4px 0 #FF6A1F;">See the full result</button>
+        </div>
+        <div style="position: absolute; bottom: 7px; left: 50%; transform: translateX(-50%); width: 134px; height: 5px; border-radius: 3px; background: rgba(241,232,214,.5); z-index: 95;"></div>
+      </div>
+    </div>
+</body></html>

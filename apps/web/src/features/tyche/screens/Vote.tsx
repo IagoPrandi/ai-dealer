@@ -85,16 +85,16 @@ export function getFinalistPhaseView({
 function VoteGate() {
   const { fees, go } = useTyche();
   return (
-    <div className="ide-notice" style={{ marginBottom: 18, borderTopColor: "rgba(255,210,63,0.28)" }}>
+    <div style={{ padding: "14px 16px", margin: "0 3px 18px 0", background: "var(--surface)", boxShadow: "var(--solid-5), 0 0 50px -14px rgba(255,46,136,0.5)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 7 }}>
         <Ico.lock style={{ color: "var(--yellow)", width: 16, height: 16 }} />
-        <b style={{ fontSize: 15 }}>Play to unlock voting</b>
+        <b style={{ fontFamily: "Bevan, serif", fontSize: 17, fontWeight: 400, textTransform: "uppercase" }}>Play to unlock voting</b>
       </div>
-      <p style={{ margin: "0 0 13px", fontSize: 13.5, color: "var(--muted)", lineHeight: 1.5 }}>
+      <p style={{ margin: "0 0 13px", fontFamily: "Archivo, sans-serif", fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>
         You can follow everything now. To vote, make a guess this round - it issues your round pass.
       </p>
-      <button onClick={() => go("play")} className="ide-btn" style={{ width: "100%", padding: 13 }} type="button">
-        <Ico.bolt style={{ color: "#08110C" }} /> Play now - {fees.playNext === 0 ? "Free" : `${fmtSol(fees.playNext)} SOL`}
+      <button onClick={() => go("play")} className="ide-btn" style={{ width: "100%", padding: 13, fontSize: 16, borderRadius: "var(--radius-btn-sm)", boxShadow: "var(--solid-4)" }} type="button">
+        <Ico.bolt style={{ color: "var(--on-accent)" }} /> Play now - {fees.playNext === 0 ? "Free" : `${fmtSol(fees.playNext)} SOL`}
       </button>
     </div>
   );
@@ -107,11 +107,11 @@ function RuleVoteRow({ rank, rule, votingOpen }: { rank: number; rule: UiRule; v
   const feeLabel =
     rule.nextApproveFeeSol === 0 ? "Free" : `${fmtSol(rule.nextApproveFeeSol)} SOL`;
   return (
-    <div className="ide-rulerow ide-tap" style={{ borderColor: isTop ? "var(--line-2)" : "var(--line)" }}>
+    <div className="ide-rulerow ide-tap" style={{ boxShadow: isTop ? "inset 0 0 0 1.5px rgba(255,46,136,0.5)" : "var(--ring)" }}>
       <div onClick={() => openDetail(rule.ruleId, { canAgainst: false, rank })} style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
         <Medal pos={rank} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 700, fontSize: 15.5, lineHeight: 1.2 }}>{rule.title}</div>
+          <div style={{ fontFamily: "Oswald, sans-serif", fontWeight: 500, fontSize: 15, letterSpacing: "0.04em", textTransform: "uppercase", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rule.title}</div>
           <div style={{ marginTop: 4 }}><VoteTally approve={rule.approve} against={rule.against} size="sm" /></div>
         </div>
       </div>
@@ -144,8 +144,13 @@ function FinalistRow({ rule, votingOpen }: { rule: UiRule; votingOpen: boolean }
   return (
     <div className="ide-card" style={{
       padding: "13px 15px",
-      borderColor: dead ? "rgba(255,107,107,0.3)" : st === "risco" ? "rgba(255,210,63,0.3)" : "var(--line)",
-      opacity: dead ? 0.72 : 1,
+      boxShadow: dead
+        ? "var(--ring-red)"
+        : st === "risco"
+          ? "var(--ring-yellow), var(--solid-yellow)"
+          : "var(--ring-cyan), var(--solid-cyan-5)",
+      marginRight: dead ? 0 : 5,
+      opacity: dead ? 0.65 : 1,
     }}>
       <div onClick={() => openDetail(rule.ruleId, { canAgainst: true })} className="ide-tap" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 11 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -236,7 +241,7 @@ export function VoteScreen() {
       <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", padding: "var(--ide-shell-content-top) 20px 96px" }}>
 
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 18 }}>
-          <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0, letterSpacing: "-0.025em" }}>Rules</h1>
+          <h1 className="ide-plate" style={{ fontSize: 30, margin: 0 }}>Rules</h1>
           <div style={{ display: "grid", gap: 3, justifyItems: "end" }}>
             <span className="ide-num" style={{ fontSize: 12.5, color: "var(--purple-soft)", fontWeight: 700, letterSpacing: "0.06em" }}>{fmtTurnId(turnId)}</span>
             {endSeconds !== null ? (
@@ -254,12 +259,12 @@ export function VoteScreen() {
 
         {gated ? <VoteGate /> : null}
         {phase === "unavailable" ? (
-          <div className="ide-notice" style={{ marginBottom: 18, borderTopColor: "rgba(255,107,107,0.28)" }}>
+          <div className="ide-notice" style={{ marginBottom: 18, borderTopColor: "rgba(255,59,47,0.28)" }}>
             Live round status is unavailable. Voting is disabled until it reloads.
           </div>
         ) : null}
         {actionError ? (
-          <div className="ide-card" style={{ padding: "11px 14px", marginBottom: 14, borderColor: "rgba(255,107,107,0.3)", color: "var(--red)", fontSize: 13 }}>{actionError}</div>
+          <div className="ide-card" style={{ padding: "11px 14px", marginBottom: 14, borderColor: "rgba(255,59,47,0.3)", color: "var(--red)", fontSize: 13 }}>{actionError}</div>
         ) : null}
 
         {tab === "abertas" ? (

@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Bevan&family=Oswald:wght@400;500;600;700&family=DM+Mono:wght@400;500&family=Archivo:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  body { margin:0; background:#07060C; color:#F4EFE4; font-family:Archivo, system-ui, sans-serif; padding:48px; display:flex; }
+  @keyframes rb-pulse { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
+  .rb-scroll::-webkit-scrollbar { width: 0; height: 0 }
+  .rb-scroll { scrollbar-width: none }
+</style></head><body>
+<div style="display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; align-items: center; gap: 10px;"><span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: .12em; padding: 4px 9px; background: #FFD23F; color: #170B22;">02</span><span style="font-size: 16px; font-weight: 700;">Play · Make a guess</span></div>
+      <div style="width: 402px; height: 868px; border-radius: 52px; overflow: hidden; position: relative; background: #170B22; box-shadow: 0 50px 100px -30px rgba(0,0,0,.75), 0 0 0 1px rgba(255,255,255,.08);">
+        <div style="position: absolute; inset: 0; z-index: 0; pointer-events: none; background-image: radial-gradient(rgba(255,46,136,.22) 1px, transparent 1.3px); background-size: 4px 4px;"></div>
+        <div style="position: absolute; top: 11px; left: 50%; transform: translateX(-50%); width: 122px; height: 35px; border-radius: 22px; background: #0C0512; z-index: 90;"></div>
+        <div style="position: absolute; top: 0; left: 0; right: 0; height: 54px; z-index: 80; display: flex; align-items: center; justify-content: space-between; padding: 0 30px;">
+          <span style="font-family: 'DM Mono', monospace; font-size: 14px; color: #F1E8D6; margin-top: 8px;">9:41</span>
+          <span style="display: flex; gap: 7px; align-items: center; margin-top: 8px;"><svg width="18" height="11" viewBox="0 0 18 11"><rect x="0" y="7" width="3" height="4" rx="1.2" fill="#F1E8D6"></rect><rect x="4.6" y="4.8" width="3" height="6.2" rx="1.2" fill="#F1E8D6"></rect><rect x="9.2" y="2.6" width="3" height="8.4" rx="1.2" fill="#F1E8D6"></rect><rect x="13.8" y="0" width="3" height="11" rx="1.2" fill="#F1E8D6"></rect></svg><svg width="22" height="11" viewBox="0 0 22 11"><rect x="0" y="0" width="18" height="11" rx="3" fill="none" stroke="#F1E8D6" stroke-width="1.2"></rect><rect x="2" y="2" width="11" height="7" rx="2" fill="#35F0E0"></rect><rect x="19.4" y="3.6" width="2" height="3.8" rx="1" fill="#F1E8D6"></rect></svg></span>
+        </div>
+        <div class="rb-scroll" style="position: absolute; inset: 0; z-index: 20; overflow-y: auto; overflow-x: hidden; padding: 58px 16px 120px;">
+          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+            <span style="width: 38px; height: 38px; display: grid; place-items: center; background: #0F0618; box-shadow: inset 0 0 0 1.5px rgba(241,232,214,.25); color: #F1E8D6; flex-shrink: 0;"><svg viewBox="0 0 24 24" fill="none" width="18" height="18"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></span>
+            <span style="font-family: Bevan, serif; font-size: 24px; text-transform: uppercase; color: #F1E8D6; text-shadow: -2px 0 0 #FF2E88, 2px 0 0 #35F0E0;">Make a guess</span>
+            <span style="margin-left: auto; font-family: Oswald, sans-serif; font-weight: 600; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: #7E6A94;">clear</span>
+          </div>
+          <div style="text-align: center; margin-bottom: 16px;">
+            <div style="font-family: Oswald, sans-serif; font-size: 14.5px; letter-spacing: .04em; color: #A88FBF;">Pick <b style="color:#F1E8D6">6 numbers</b> from 1 to 100</div>
+            <div style="margin-top: 6px; font-family: 'DM Mono', monospace; font-size: 13px; color: #FFD23F;">4/6 selected</div>
+          </div>
+          <button style="width: 100%; padding: 12px; margin-bottom: 16px; border: none; color: #F1E8D6; font-family: Oswald, sans-serif; font-size: 14px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; box-shadow: inset 0 0 0 1.5px rgba(53,240,224,.55), 0 0 34px -10px rgba(53,240,224,.55), 0 0 66px -18px rgba(53,240,224,.4); border-radius: 999px; background-color: #0F0618B3">Choose for me</button>
+          <div style="display: flex; gap: 8px; justify-content: center; margin-bottom: 18px;">
+            <span style="width: 44px; height: 44px; display: grid; place-items: center; background: #FFD23F; color: #170B22; font-family: 'DM Mono', monospace; font-size: 16px; box-shadow: 3px 3px 0 #FF6A1F;">7</span>
+            <span style="width: 44px; height: 44px; display: grid; place-items: center; background: #FFD23F; color: #170B22; font-family: 'DM Mono', monospace; font-size: 16px; box-shadow: 3px 3px 0 #FF6A1F;">19</span>
+            <span style="width: 44px; height: 44px; display: grid; place-items: center; background: #FFD23F; color: #170B22; font-family: 'DM Mono', monospace; font-size: 16px; box-shadow: 3px 3px 0 #FF6A1F;">42</span>
+            <span style="width: 44px; height: 44px; display: grid; place-items: center; background: #FFD23F; color: #170B22; font-family: 'DM Mono', monospace; font-size: 16px; box-shadow: 3px 3px 0 #FF6A1F;">63</span>
+            <span style="width: 44px; height: 44px; display: grid; place-items: center; color: #7E6A94; font-family: 'DM Mono', monospace; font-size: 16px; box-shadow: inset 0 0 0 1.5px rgba(241,232,214,.2);">·</span>
+            <span style="width: 44px; height: 44px; display: grid; place-items: center; color: #7E6A94; font-family: 'DM Mono', monospace; font-size: 16px; box-shadow: inset 0 0 0 1.5px rgba(241,232,214,.2);">·</span>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px;">
+            
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">1</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">2</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">3</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">4</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">5</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">6</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #170B22; background: #FFD23F; box-shadow: 3px 3px 0 #FF6A1F;">7</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">8</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">9</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">10</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">11</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">12</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">13</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">14</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">15</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">16</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">17</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">18</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #170B22; background: #FFD23F; box-shadow: 3px 3px 0 #FF6A1F;">19</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">20</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">21</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">22</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">23</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">24</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">25</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">26</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">27</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">28</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">29</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">30</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">31</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">32</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">33</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">34</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">35</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">36</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">37</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">38</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">39</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">40</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">41</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #170B22; background: #FFD23F; box-shadow: 3px 3px 0 #FF6A1F;">42</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">43</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">44</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">45</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">46</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">47</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">48</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">49</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">50</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">51</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">52</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">53</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">54</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">55</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">56</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">57</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">58</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">59</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">60</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">61</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">62</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #170B22; background: #FFD23F; box-shadow: 3px 3px 0 #FF6A1F;">63</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">64</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">65</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">66</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">67</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">68</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">69</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">70</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">71</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">72</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">73</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">74</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">75</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">76</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">77</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">78</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">79</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">80</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">81</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">82</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">83</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">84</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">85</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">86</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">87</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">88</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">89</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">90</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">91</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">92</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">93</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">94</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">95</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">96</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">97</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">98</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">99</span>
+            
+
+              <span style="aspect-ratio: 1; display: grid; place-items: center; font-family: 'DM Mono', monospace; font-size: 13px; color: #C6B6D6; background: transparent; box-shadow: inset 0 0 0 1.2px rgba(241,232,214,.16);">100</span>
+            
+          </div>
+        </div>
+        <div style="position: absolute; left: 0; right: 0; bottom: 0; z-index: 40; padding: 16px 19px 22px; background: linear-gradient(180deg, transparent, #170B22 36%);">
+          <button style="width: 100%; padding: 16px; margin-right: 3px; border: none; border-radius: 24px; background: #FFD23F; color: #170B22; font-family: Bevan, serif; font-size: 18px; letter-spacing: .06em; text-transform: uppercase; box-shadow: 5px 5px 0 #FF6A1F, 0 0 26px -6px rgba(53,240,224,.45);">2 numbers left</button>
+        </div>
+        <div style="position: absolute; bottom: 7px; left: 50%; transform: translateX(-50%); width: 134px; height: 5px; border-radius: 3px; background: rgba(241,232,214,.5); z-index: 95;"></div>
+      </div>
+    </div>
+</body></html>

@@ -701,7 +701,7 @@ export function TycheApp({
                 >
                   <span aria-hidden="true" className="ide-nav-fab">
                     <Ico.spark
-                      style={{ color: "#08110C", width: 22, height: 22 }}
+                      style={{ color: "var(--on-accent)", width: 22, height: 22 }}
                     />
                   </span>
                   My rules

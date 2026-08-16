@@ -366,7 +366,7 @@ function RulePreview({ rule }: { rule: RulePreflightResult }) {
           style={{
             width: `${Math.min(100, pct)}%`,
             height: "100%",
-            background: valid ? "var(--grad-btn)" : statusColor,
+            background: valid ? "var(--yellow)" : statusColor,
             borderRadius: 4,
             transition: "width .4s",
           }}
@@ -489,7 +489,7 @@ function ClarificationPrompt({
                 color: "var(--text)",
                 cursor: "pointer",
                 display: "grid",
-                fontFamily: "Outfit",
+                fontFamily: "Archivo",
                 gap: 12,
                 gridTemplateColumns: "44px minmax(0, 1fr)",
                 minHeight: 54,
@@ -544,7 +544,7 @@ function ClarificationPrompt({
             color: "var(--muted)",
             cursor: "pointer",
             display: "grid",
-            fontFamily: "Outfit",
+            fontFamily: "Archivo",
             gap: 12,
             gridTemplateColumns: "44px minmax(0, 1fr)",
             minHeight: 48,
@@ -601,7 +601,7 @@ function ClarificationPrompt({
             border: "none",
             color: "var(--muted)",
             cursor: "pointer",
-            fontFamily: "Outfit",
+            fontFamily: "Archivo",
             fontSize: 14.5,
             fontWeight: 650,
             minHeight: 44,
@@ -662,15 +662,23 @@ function InterpretationConfirmation({
     >
       <div>
         <SectionLabel>My interpretation</SectionLabel>
-        <h2 style={{ fontSize: 19, lineHeight: 1.25, margin: "5px 0 7px" }}>
+        <h2
+          style={{
+            fontFamily: "Bevan, serif",
+            fontSize: 19,
+            textTransform: "uppercase",
+            lineHeight: 1.25,
+            margin: "8px 0 8px",
+          }}
+        >
           {interpretation.title}
         </h2>
         <p
+          className="ide-num"
           style={{
-            color: "var(--text)",
-            fontSize: 15,
-            fontWeight: 600,
-            lineHeight: 1.48,
+            color: "var(--mono-mute)",
+            fontSize: 12,
+            lineHeight: 1.5,
             margin: 0,
           }}
         >
@@ -849,7 +857,7 @@ function RunInterruptedCard({
         style={{ opacity: busy ? 0.7 : 1, padding: 13, width: "100%" }}
         type="button"
       >
-        <Ico.bolt style={{ color: "#08110C" }} />{" "}
+        <Ico.bolt style={{ color: "var(--on-accent)" }} />{" "}
         {busy
           ? expired
             ? "Starting..."
@@ -1807,7 +1815,7 @@ function CreateChat({
             <div
               style={{
                 padding: "16px 2px",
-                borderTop: "1px solid rgba(20,241,149,0.3)",
+                borderTop: "1px solid rgba(124,246,184,0.3)",
                 borderBottom: "1px solid var(--line)",
                 animation: "ide-rise .3s ease both",
               }}
@@ -1826,7 +1834,7 @@ function CreateChat({
                     height: 28,
                     borderRadius: 9,
                     background: "var(--green)",
-                    color: "#08110C",
+                    color: "var(--on-accent)",
                     display: "grid",
                     placeItems: "center",
                   }}
@@ -1907,7 +1915,7 @@ function CreateChat({
                 type="button"
               >
                 <Ico.back
-                  style={{ color: "#08110C", transform: "rotate(180deg)" }}
+                  style={{ color: "var(--on-accent)", transform: "rotate(180deg)" }}
                 />{" "}
                 Back to the round
               </button>
@@ -1925,7 +1933,7 @@ function CreateChat({
               }}
               type="button"
             >
-              <Ico.check style={{ color: "#08110C" }} />{" "}
+              <Ico.check style={{ color: "var(--on-accent)" }} />{" "}
               {busy
                 ? "Submitting..."
                 : `Submit to the round · ${fees.ruleNext === 0 ? "Free" : `${fmtSol(fees.ruleNext)} SOL`}`}
@@ -1969,7 +1977,7 @@ function CreateChat({
                 style={{ width: "100%", padding: 13 }}
                 type="button"
               >
-                <Ico.bolt style={{ color: "#08110C" }} /> Play now ·{" "}
+                <Ico.bolt style={{ color: "var(--on-accent)" }} /> Play now ·{" "}
                 {fees.playNext === 0 ? "Free" : `${fmtSol(fees.playNext)} SOL`}
               </button>
             </div>
@@ -1980,7 +1988,7 @@ function CreateChat({
           <div
             className="ide-card"
             style={{
-              borderColor: "rgba(255,107,107,0.3)",
+              borderColor: "rgba(255,59,47,0.3)",
               color: "var(--red)",
               display: "grid",
               fontSize: 13,
@@ -2056,7 +2064,7 @@ function CreateChat({
                 padding: "13px 15px",
                 color: "var(--text)",
                 fontSize: 15,
-                fontFamily: "Outfit",
+                fontFamily: "Archivo",
                 outline: "none",
                 maxHeight: 90,
               }}
@@ -2074,7 +2082,7 @@ function CreateChat({
               }}
               type="button"
             >
-              <Ico.send style={{ color: "#08110C" }} />
+              <Ico.send style={{ color: "var(--on-accent)" }} />
             </button>
           </div>
         </div>

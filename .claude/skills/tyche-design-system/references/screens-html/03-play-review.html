@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Bevan&family=Oswald:wght@400;500;600;700&family=DM+Mono:wght@400;500&family=Archivo:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  body { margin:0; background:#07060C; color:#F4EFE4; font-family:Archivo, system-ui, sans-serif; padding:48px; display:flex; }
+  @keyframes rb-pulse { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
+  .rb-scroll::-webkit-scrollbar { width: 0; height: 0 }
+  .rb-scroll { scrollbar-width: none }
+</style></head><body>
+<div style="display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; align-items: center; gap: 10px;"><span style="font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: .12em; padding: 4px 9px; background: #FFD23F; color: #170B22;">03</span><span style="font-size: 16px; font-weight: 700;">Play · Review guess</span></div>
+      <div style="width: 402px; height: 868px; border-radius: 52px; overflow: hidden; position: relative; background: #170B22; box-shadow: 0 50px 100px -30px rgba(0,0,0,.75), 0 0 0 1px rgba(255,255,255,.08);">
+        <div style="position: absolute; inset: 0; z-index: 0; pointer-events: none; background-image: radial-gradient(rgba(255,46,136,.22) 1px, transparent 1.3px); background-size: 4px 4px;"></div>
+        <div style="position: absolute; top: 11px; left: 50%; transform: translateX(-50%); width: 122px; height: 35px; border-radius: 22px; background: #0C0512; z-index: 90;"></div>
+        <div style="position: absolute; top: 0; left: 0; right: 0; height: 54px; z-index: 80; display: flex; align-items: center; justify-content: space-between; padding: 0 30px;">
+          <span style="font-family: 'DM Mono', monospace; font-size: 14px; color: #F1E8D6; margin-top: 8px;">9:41</span>
+          <span style="display: flex; gap: 7px; align-items: center; margin-top: 8px;"><svg width="22" height="11" viewBox="0 0 22 11"><rect x="0" y="0" width="18" height="11" rx="3" fill="none" stroke="#F1E8D6" stroke-width="1.2"></rect><rect x="2" y="2" width="11" height="7" rx="2" fill="#35F0E0"></rect></svg></span>
+        </div>
+        <div class="rb-scroll" style="position: absolute; inset: 0; z-index: 20; overflow-y: auto; overflow-x: hidden; padding: 58px 18px 130px;">
+          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+            <span style="width: 38px; height: 38px; display: grid; place-items: center; background: #0F0618; box-shadow: inset 0 0 0 1.5px rgba(241,232,214,.25); color: #F1E8D6;"><svg viewBox="0 0 24 24" fill="none" width="18" height="18"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></span>
+            <span style="font-family: Bevan, serif; font-size: 24px; text-transform: uppercase; color: #F1E8D6; text-shadow: -2px 0 0 #FF2E88, 2px 0 0 #35F0E0;">Review guess</span>
+          </div>
+          <p style="margin: 0 0 20px; font-size: 13.5px; line-height: 1.5; color: #A88FBF; font-family: Archivo, sans-serif;">Check your numbers before confirming. Once submitted, the guess <b style="color:#F1E8D6">cannot be edited</b>.</p>
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 14px;">
+            <span style="font-family: Oswald, sans-serif; font-weight: 600; font-size: 11.5px; letter-spacing: .2em; text-transform: uppercase; color: #35F0E0;">Your numbers</span>
+            <span style="flex: 1; height: 3px; border-radius: 999px; background: repeating-linear-gradient(90deg, rgba(241,232,214,.6) 0 5px, transparent 5px 9px);"></span>
+            <span style="width: 8px; height: 8px; transform: rotate(45deg); background: #FFD23F;"></span>
+            <span style="font-family: Oswald, sans-serif; font-weight: 600; font-size: 11.5px; letter-spacing: .16em; text-transform: uppercase; color: #FFD23F;">edit</span>
+          </div>
+          <div style="display: flex; gap: 9px; flex-wrap: wrap; justify-content: center; margin-bottom: 24px;">
+            <span style="width: 46px; height: 46px; display: grid; place-items: center; background: #FFD23F; color: #170B22; font-family: 'DM Mono', monospace; font-size: 17px; box-shadow: 4px 4px 0 #FF6A1F;">7</span>
+            <span style="width: 46px; height: 46px; display: grid; place-items: center; background: #FFD23F; color: #170B22; font-family: 'DM Mono', monospace; font-size: 17px; box-shadow: 4px 4px 0 #FF6A1F;">19</span>
+            <span style="width: 46px; height: 46px; display: grid; place-items: center; background: #FFD23F; color: #170B22; font-family: 'DM Mono', monospace; font-size: 17px; box-shadow: 4px 4px 0 #FF6A1F;">42</span>
+            <span style="width: 46px; height: 46px; display: grid; place-items: center; background: #FFD23F; color: #170B22; font-family: 'DM Mono', monospace; font-size: 17px; box-shadow: 4px 4px 0 #FF6A1F;">63</span>
+            <span style="width: 46px; height: 46px; display: grid; place-items: center; background: #FFD23F; color: #170B22; font-family: 'DM Mono', monospace; font-size: 17px; box-shadow: 4px 4px 0 #FF6A1F;">77</span>
+            <span style="width: 46px; height: 46px; display: grid; place-items: center; background: #FFD23F; color: #170B22; font-family: 'DM Mono', monospace; font-size: 17px; box-shadow: 4px 4px 0 #FF6A1F;">91</span>
+          </div>
+          <div style="display: grid; gap: 0; margin-bottom: 22px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 13px 2px; border-bottom: 1px solid rgba(241,232,214,.14);"><span style="font-family: Oswald, sans-serif; font-size: 13.5px; letter-spacing: .06em; color: #A88FBF;">Round</span><span style="font-family: 'DM Mono', monospace; font-size: 14px; color: #F1E8D6;">#0142</span></div>
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 13px 2px; border-bottom: 1px solid rgba(241,232,214,.14);"><span style="font-family: Oswald, sans-serif; font-size: 13.5px; letter-spacing: .06em; color: #A88FBF;">Numbers chosen</span><span style="font-family: 'DM Mono', monospace; font-size: 14px; color: #F1E8D6;">6 of 6</span></div>
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 13px 2px; border-bottom: 1px solid rgba(241,232,214,.14);"><span style="font-family: Oswald, sans-serif; font-size: 13.5px; letter-spacing: .06em; color: #A88FBF;">Entry fee</span><span style="font-family: 'DM Mono', monospace; font-size: 14px; color: #35F0E0;">0.01 SOL</span></div>
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 13px 2px;"><span style="font-family: Oswald, sans-serif; font-size: 13.5px; letter-spacing: .06em; color: #A88FBF;">Account rent + network fee</span><span style="font-family: Oswald, sans-serif; font-size: 13.5px; color: #F1E8D6;">shown by wallet</span></div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 9px; padding: 12px 14px; background: #120A1B; box-shadow: 4px 4px 0 rgba(53,240,224,.6);">
+            <svg viewBox="0 0 24 24" fill="none" width="17" height="17" style="color:#35F0E0; flex-shrink:0"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"></circle><path d="M12 10.5v6M12 7.6v.9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path></svg>
+            <span style="font-family: Archivo, sans-serif; font-size: 12.5px; line-height: 1.45; color: #A88FBF;">Playing issues your round pass — unlocks creating rules and voting.</span>
+          </div>
+        </div>
+        <div style="position: absolute; left: 0; right: 0; bottom: 0; z-index: 40; padding: 16px 19px 22px; background: linear-gradient(180deg, transparent, #170B22 36%);">
+          <button style="width: 100%; padding: 17px; margin-right: 3px; border: none; border-radius: 24px; background: #FFD23F; color: #170B22; font-family: Bevan, serif; font-size: 18px; letter-spacing: .06em; text-transform: uppercase; box-shadow: 5px 5px 0 #FF6A1F, 0 0 26px -6px rgba(53,240,224,.45);">Confirm and submit</button>
+        </div>
+        <div style="position: absolute; bottom: 7px; left: 50%; transform: translateX(-50%); width: 134px; height: 5px; border-radius: 3px; background: rgba(241,232,214,.5); z-index: 95;"></div>
+      </div>
+    </div>
+</body></html>

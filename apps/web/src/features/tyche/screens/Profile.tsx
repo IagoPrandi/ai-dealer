@@ -18,23 +18,26 @@ import { describeTxError } from "../data/tx";
 import { ConversationList, Dealer, Ico, VoteTally } from "../shared";
 import type { PlayerHistoryEventApi } from "../data/types";
 
-/* withdraw-breakdown tile */
-function BreakdownItem({ icon, label, value }: { icon: React.ReactNode; label: string; value: number }) {
+/* withdraw-breakdown tile — square block on the inner surface, DM Mono micro
+   label over a Bevan value tinted by what the money is (prize vs reward). */
+function BreakdownItem({ label, tone, value }: { label: string; tone: string; value: number }) {
   return (
-    <div style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 13, padding: "10px 12px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--muted)", fontSize: 12, marginBottom: 5 }}>{icon} {label}</div>
-      <div className="ide-num" style={{ fontSize: 18, fontWeight: 800 }}>{fmtClaimSol(value)} <span style={{ fontSize: 11, color: "var(--purple-soft)", fontWeight: 700 }}>SOL</span></div>
+    <div style={{ background: "var(--surface-3)", borderRadius: 0, padding: "10px 12px" }}>
+      <div className="ide-num" style={{ fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--dim)" }}>{label}</div>
+      <div style={{ fontFamily: "Bevan, serif", fontSize: 18, color: tone, marginTop: 2 }}>{fmtClaimSol(value)}</div>
     </div>
   );
 }
 
-/* metric cell — number over the background, separated by hairlines */
-function MetricCell({ icon, l, n, unit }: { icon: React.ReactNode; l: string; n: number | string; unit?: string }) {
+/* metric cell — Bevan number over the background, separated by hairlines */
+function MetricCell({ l, n, unit }: { l: string; n: number | string; unit?: string }) {
   return (
     <div className="ide-metric">
-      <div style={{ marginBottom: 9 }}>{icon}</div>
-      <div className="ide-num" style={{ fontSize: 26, fontWeight: 800, lineHeight: 1 }}>{n}{unit ? <span style={{ fontSize: 13, color: "var(--purple-soft)", fontWeight: 700, marginLeft: 3 }}>{unit}</span> : null}</div>
-      <div style={{ fontSize: 12.5, color: "var(--dim)", marginTop: 5 }}>{l}</div>
+      <div style={{ fontFamily: "Bevan, serif", fontSize: 24, color: "var(--text)" }}>
+        {n}
+        {unit ? <span className="ide-num" style={{ fontSize: 11, color: "var(--cyan)", marginLeft: 5 }}>{unit}</span> : null}
+      </div>
+      <div className="ide-num" style={{ fontSize: 10.5, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--dim)", marginTop: 4 }}>{l}</div>
     </div>
   );
 }
@@ -61,7 +64,7 @@ function HistoryRow({ event }: { event: PlayerHistoryEventApi }) {
   const isWin = event.type === "claim";
   return (
     <div className="ide-listrow" style={{ cursor: "default", minWidth: 0 }}>
-      <span style={{ width: 32, height: 32, borderRadius: 10, display: "grid", placeItems: "center", flexShrink: 0, background: isWin ? "rgba(20,241,149,0.14)" : "var(--surface-2)" }}>
+      <span style={{ width: 32, height: 32, borderRadius: 0, display: "grid", placeItems: "center", flexShrink: 0, background: isWin ? "rgba(124,246,184,0.14)" : "var(--surface-2)" }}>
         {historyIcon(event.type)}
       </span>
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -103,9 +106,9 @@ export function ProfileScreen() {
         <div className="ide-ambient" />
         <div style={{ position: "relative", zIndex: 1, height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: "0 28px" }}>
           <Dealer size={60} />
-          <h2 style={{ fontSize: 23, fontWeight: 800, margin: "16px 0 8px" }}>Your wallet</h2>
+          <h2 className="ide-plate" style={{ fontSize: 26, fontWeight: 400, margin: "16px 0 8px" }}>Your wallet</h2>
           <p style={{ color: "var(--muted)", fontSize: 15, margin: "0 0 24px" }}>Connect to see your rules, earnings, and claims.</p>
-          <button onClick={() => connect()} className="ide-btn" style={{ width: "100%", padding: 16 }} type="button"><Ico.wallet style={{ color: "#08110C" }} /> Connect wallet</button>
+          <button onClick={() => connect()} className="ide-btn" style={{ width: "100%", padding: 16 }} type="button"><Ico.wallet style={{ color: "var(--on-accent)" }} /> Connect wallet</button>
         </div>
       </div>
     );
@@ -157,69 +160,70 @@ export function ProfileScreen() {
   return (
     <div className="ide-app ide-screen" style={{ height: "100%", position: "relative", overflow: "hidden" }}>
       <div className="ide-ambient" />
-      <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", overflowX: "hidden", padding: "var(--ide-shell-content-top) 20px 96px" }}>
+      <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", overflowX: "hidden", padding: "var(--ide-shell-content-top) 18px 96px" }}>
 
-        {/* identity — no box */}
-        <div style={{ marginBottom: 30 }}>
-          <div style={{ color: "var(--muted)", fontSize: 13.5 }} className="ide-num">Solana devnet</div>
+        {/* screen head — plate title, network on the right */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16 }}>
+          <h1 className="ide-plate" style={{ fontSize: 24, fontWeight: 400, margin: 0 }}>Account</h1>
+          <span className="ide-num" style={{ fontSize: 12, color: "var(--dim)" }}>Solana devnet</span>
         </div>
 
-        {/* CLAIM HERO */}
-        <div className="ide-card" style={{ padding: 18, marginBottom: 14, position: "relative", overflow: "hidden", borderColor: "var(--line-2)", background: "linear-gradient(150deg, var(--surface-2), var(--surface))" }}>
-          <div style={{ position: "absolute", top: -30, right: -20, width: 130, height: 130, background: "radial-gradient(circle, rgba(20,241,149,0.28), transparent 65%)", filter: "blur(8px)" }} />
-          <div style={{ position: "relative" }}>
-            <div style={{ fontSize: 12.5, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--dim)", fontWeight: 700 }}>Available to claim</div>
-            <div className="ide-num" style={{ display: "flex", alignItems: "flex-end", gap: 6, margin: "6px 0 14px" }}>
-              <span className="ide-grad-text" style={{ fontSize: 40, fontWeight: 700, lineHeight: 1 }}>{fmtClaimSol(wd)}</span>
-              <span style={{ fontSize: 16, fontWeight: 700, color: "var(--purple-soft)", marginBottom: 4 }}>SOL</span>
-            </div>
-
-            {/* prize | reward breakdown */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9, marginBottom: 14 }}>
-              <BreakdownItem icon={<Ico.trophy style={{ color: "var(--gold)", width: 15, height: 15 }} />} label="Prize" value={wdPrize} />
-              <BreakdownItem icon={<Ico.gift style={{ color: "var(--green)", width: 15, height: 15 }} />} label="Reward" value={wdReward} />
-            </div>
-
-            <button onClick={withdrawAll} disabled={wd <= 0 || busy} className="ide-btn" style={{ width: "100%", padding: 14, opacity: wd > 0 && !busy ? 1 : 0.45, pointerEvents: wd > 0 && !busy ? "auto" : "none" }} type="button">
-              <Ico.withdraw style={{ color: "#08110C" }} /> {busy ? "Claiming…" : wd > 0 ? "Claim to wallet" : "Nothing to claim"}
-            </button>
-            {done ? <div style={{ marginTop: 10, fontSize: 13, color: "var(--green)", display: "flex", alignItems: "center", gap: 6, justifyContent: "center" }}><Ico.check style={{ color: "var(--green)" }} /> Claim sent to your wallet</div> : null}
-            {txError ? <div style={{ marginTop: 10, fontSize: 13, color: "var(--red)", textAlign: "center" }}>{txError}</div> : null}
-            {error ? <div style={{ marginTop: 10, fontSize: 12.5, color: "var(--dim)", textAlign: "center" }}>Could not load your claim ledger. Pull to retry.</div> : null}
+        {/* CLAIM HERO — sits directly on the page surface: no fill and no solid
+            offset, so the yellow CTA is the only weight in the block. */}
+        <div style={{ borderRadius: 0, padding: "18px 0", marginBottom: 14 }}>
+          <div style={{ fontFamily: "Oswald, sans-serif", fontWeight: 600, fontSize: 11, letterSpacing: "0.2em", textTransform: "uppercase", color: "var(--muted)" }}>Available to claim</div>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 6, margin: "6px 0 14px" }}>
+            <span style={{ fontFamily: "Bevan, serif", fontSize: 44, lineHeight: 1, color: "var(--text)", textShadow: "var(--plate-num-md)" }}>{fmtClaimSol(wd)}</span>
+            <span className="ide-num" style={{ fontSize: 13, color: "var(--cyan)", marginTop: 10 }}>SOL</span>
           </div>
+
+          {/* prize | reward breakdown */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9, marginBottom: 14 }}>
+            <BreakdownItem label="Prize" tone="var(--yellow)" value={wdPrize} />
+            <BreakdownItem label="Reward" tone="var(--green)" value={wdReward} />
+          </div>
+
+          <button onClick={withdrawAll} disabled={wd <= 0 || busy} className="ide-btn" style={{ width: "100%", padding: 13, fontSize: 16, opacity: wd > 0 && !busy ? 1 : 0.45, pointerEvents: wd > 0 && !busy ? "auto" : "none" }} type="button">
+            {busy ? "Claiming…" : wd > 0 ? "Claim to wallet" : "Nothing to claim"}
+          </button>
+          {done ? <div style={{ marginTop: 10, fontSize: 13, color: "var(--green)", display: "flex", alignItems: "center", gap: 6, justifyContent: "center" }}><Ico.check style={{ color: "var(--green)" }} /> Claim sent to your wallet</div> : null}
+          {txError ? <div style={{ marginTop: 10, fontSize: 13, color: "var(--red)", textAlign: "center" }}>{txError}</div> : null}
+          {error ? <div style={{ marginTop: 10, fontSize: 12.5, color: "var(--dim)", textAlign: "center" }}>Could not load your claim ledger. Pull to retry.</div> : null}
         </div>
 
-        <button onClick={() => go("rewards")} className="ide-btn-ghost ide-btn" style={{ width: "100%", padding: 13, marginBottom: 6 }} type="button">
-          <Ico.gift style={{ color: "var(--green)" }} /> Reward history
-        </button>
-
-        <button onClick={() => go("invite")} className="ide-btn-ghost ide-btn" style={{ width: "100%", padding: 13, marginBottom: 6 }} type="button">
-          <Ico.users style={{ color: "var(--purple-soft)" }} /> Invite friends
-        </button>
+        {/* secondary actions — cyan ghost, then the magenta tertiary */}
+        <div style={{ display: "grid", gap: 8, marginBottom: 16 }}>
+          <button onClick={() => go("rewards")} className="ide-btn-ghost ide-btn" style={{ width: "100%", padding: 13, fontSize: 13.5 }} type="button">
+            Reward history
+          </button>
+          <button onClick={() => go("invite")} className="ide-btn-ghost ide-btn is-magenta" style={{ width: "100%", padding: 13, fontSize: 13.5 }} type="button">
+            Invite friends
+          </button>
+        </div>
 
         {/* PREVIOUS ROUND RESULT — follows the invite action */}
         {showResultLink ? (
-          <button onClick={() => go("result", { resultTurnId })} className="ide-listrow" style={{ marginTop: 14, padding: "15px 2px", borderTop: "1px solid var(--line)", borderBottom: "1px solid var(--line)" }} type="button">
-            <span style={{ width: 36, height: 36, borderRadius: 11, background: "var(--gold)", color: "#0B0910", display: "grid", placeItems: "center", flexShrink: 0 }}>
-              <Ico.trophy style={{ color: "#0B0910" }} />
+          <button onClick={() => go("result", { resultTurnId })} className="ide-listrow" style={{ background: "var(--surface-2)", borderRadius: 0, boxShadow: "var(--solid-yellow)", padding: "13px 14px", margin: "0 3px 18px 0", width: "calc(100% - 3px)" }} type="button">
+            <span style={{ width: 34, height: 34, borderRadius: 0, background: "var(--yellow)", color: "var(--on-accent)", display: "grid", placeItems: "center", flexShrink: 0 }}>
+              <Ico.trophy style={{ color: "var(--on-accent)", width: 17, height: 17 }} />
             </span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 14.5, fontWeight: 700 }}>Result of round {fmtTurnId(resultTurnId)}</div>
-            </div>
-            <Ico.arrow style={{ color: "var(--gold)", flexShrink: 0 }} />
+            <span style={{ flex: 1, minWidth: 0, fontFamily: "Oswald, sans-serif", fontSize: 14, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--text)" }}>
+              Result of round {fmtTurnId(resultTurnId)}
+            </span>
+            <Ico.arrow style={{ color: "var(--yellow)", flexShrink: 0, width: 18, height: 18 }} />
           </button>
         ) : null}
 
         {/* accumulated metrics — 2x2 grid divided by hairlines (no boxes) */}
-        <div className="ide-metrics rows2" style={{ margin: "18px 0 26px" }}>
-          <MetricCell icon={<Ico.trophy style={{ color: "var(--gold)" }} />} n={fmtClaimSol(lifetimePrize)} unit="SOL" l="total prize won" />
-          <MetricCell icon={<Ico.gift style={{ color: "var(--green)" }} />} n={fmtClaimSol(claimedReward)} unit="SOL" l="reward claimed" />
-          <MetricCell icon={<Ico.spark style={{ color: "var(--purple-soft)" }} />} n={myRules.length} l="rules this round" />
-          <MetricCell icon={<Ico.dice style={{ color: "var(--yellow)" }} />} n={loading ? "—" : records.length} l="claim records" />
+        <div className="ide-metrics" style={{ marginBottom: 18 }}>
+          <MetricCell n={fmtClaimSol(lifetimePrize)} unit="SOL" l="total prize won" />
+          <MetricCell n={fmtClaimSol(claimedReward)} unit="SOL" l="reward claimed" />
+          <MetricCell n={myRules.length} l="rules this round" />
+          <MetricCell n={loading ? "—" : records.length} l="claim records" />
         </div>
 
         {/* underline tabs */}
-        <div className="ide-tabs" style={{ marginBottom: 6 }}>
+        <div className="ide-tabs is-spread" style={{ marginBottom: 6 }}>
           <button className={tab === "regras" ? "on" : ""} onClick={() => setTab("regras")} type="button">Rules</button>
           <button className={tab === "chats" ? "on" : ""} onClick={() => setTab("chats")} type="button">Conversations{conversations.drafts.length ? ` · ${conversations.drafts.length}` : ""}</button>
           <button className={tab === "hist" ? "on" : ""} onClick={() => setTab("hist")} type="button">History</button>
@@ -235,14 +239,12 @@ export function ProfileScreen() {
               {myRules.map((r) => (
                 <div key={r.id} className="ide-listrow" style={{ cursor: "default" }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, fontSize: 15.5 }}>{r.title}</div>
-                    <div style={{ marginTop: 4 }}><VoteTally approve={r.approve} against={r.against} size="sm" /></div>
+                    <div style={{ fontFamily: "Oswald, sans-serif", fontSize: 15, letterSpacing: "0.04em", textTransform: "uppercase" }}>{r.title}</div>
+                    <div style={{ marginTop: 3 }}><VoteTally approve={r.approve} against={r.against} size="sm" /></div>
                   </div>
-                  {r.finalist ? (
-                    <span style={{ color: "var(--purple-soft)", fontWeight: 700, fontSize: 13, display: "inline-flex", alignItems: "center", gap: 5, flexShrink: 0 }}><Ico.shield style={{ width: 13, height: 13, color: "var(--purple-soft)" }} /> finalist</span>
-                  ) : (
-                    <span style={{ color: "var(--green)", fontWeight: 700, fontSize: 13, flexShrink: 0 }}>● in voting</span>
-                  )}
+                  <span style={{ fontFamily: "Oswald, sans-serif", fontWeight: 600, fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase", flexShrink: 0, color: r.finalist ? "var(--cyan)" : "var(--yellow)" }}>
+                    {r.finalist ? "finalist" : "● in voting"}
+                  </span>
                 </div>
               ))}
             </div>

@@ -29,10 +29,15 @@ function WalletBtn() {
     <button
       onClick={() => (connected ? go("profile") : connect())}
       className="ide-btn"
-      style={{ padding: "9px 14px", fontSize: 14, borderRadius: 13 }}
+      style={{
+        padding: "10px 16px", borderRadius: "var(--radius-pill)",
+        fontFamily: "Oswald, sans-serif", fontSize: 13, fontWeight: 600,
+        letterSpacing: "0.14em",
+        boxShadow: "var(--solid-4), var(--halo-magenta)",
+      }}
       type="button"
     >
-      <Ico.wallet style={{ color: "#08110C" }} />{" "}
+      <Ico.wallet style={{ color: "var(--on-accent)" }} />{" "}
       {connected && walletAddress ? truncateAddress(walletAddress) : "Connect"}
     </button>
   );
@@ -47,39 +52,48 @@ function PromptInput() {
   };
   return (
     <div
-      className="ide-card"
       style={{
-        padding: 12,
-        borderColor: "var(--line-2)",
-        background: "linear-gradient(180deg, var(--surface-2), var(--surface))",
+        padding: "14px 16px 15px",
+        marginRight: 3,
+        background: "var(--surface)",
+        boxShadow: "var(--solid-5), var(--halo-cyan-lg)",
       }}
     >
       <div
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 8,
-          marginBottom: 10,
+          gap: 9,
+          marginBottom: 11,
           flexWrap: "wrap",
         }}
       >
-        <span style={{ fontSize: 13.5, fontWeight: 700, whiteSpace: "nowrap" }}>
+        <span
+          style={{
+            fontFamily: "Bevan, serif",
+            fontSize: 13,
+            textTransform: "uppercase",
+            whiteSpace: "nowrap",
+          }}
+        >
           Create your rule
         </span>
-        <span className="ide-pill" style={{ padding: "3px 8px", fontSize: 11 }}>
-          <Ico.spark
-            style={{ width: 12, height: 12, color: "var(--purple-soft)" }}
-          />{" "}
-          with AI
-        </span>
-        <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--dim)" }}>
-          cost{" "}
-          <span className="ide-num" style={{ color: "var(--muted)" }}>
-            {fees.ruleNext === 0 ? "Free" : `${fmtSol(fees.ruleNext)} SOL`}
-          </span>
+        <span className="ide-tag">with AI</span>
+        <span
+          style={{
+            marginLeft: "auto",
+            fontFamily: "Oswald, sans-serif",
+            fontSize: 11,
+            fontWeight: 600,
+            letterSpacing: "0.16em",
+            textTransform: "uppercase",
+            color: "var(--yellow)",
+          }}
+        >
+          {fees.ruleNext === 0 ? "free" : `${fmtSol(fees.ruleNext)} SOL`}
         </span>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
         <input
           value={val}
           onChange={(e) => setVal(e.target.value)}
@@ -92,24 +106,27 @@ function PromptInput() {
           style={{
             flex: 1,
             minWidth: 0,
-            background: "var(--bg)",
-            border: "1px solid var(--line-2)",
-            borderRadius: 13,
+            background: "var(--surface-3)",
+            border: "none",
+            borderRadius: 0,
             padding: "13px 14px",
             color: "var(--text)",
-            fontSize: 14.5,
-            fontFamily: "Outfit",
+            fontSize: 12.5,
+            fontFamily: "var(--num-font, 'DM Mono'), ui-monospace, monospace",
             outline: "none",
           }}
         />
         <button
           onClick={openComposer}
           className="ide-btn"
-          style={{ padding: 13, borderRadius: 13, flexShrink: 0 }}
+          style={{
+            width: 46, height: 46, padding: 0, flexShrink: 0,
+            borderRadius: "var(--radius-btn-xs)", boxShadow: "var(--solid-4)",
+          }}
           title="Create rule"
           type="button"
         >
-          <Ico.send style={{ color: "#08110C" }} />
+          <Ico.send style={{ color: "var(--on-accent)" }} />
         </button>
       </div>
     </div>
@@ -202,13 +219,7 @@ export function HomeScreen() {
         >
           <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
             <Dealer size={34} />
-            <span
-              style={{
-                fontWeight: 800,
-                fontSize: 19,
-                letterSpacing: "-0.02em",
-              }}
-            >
+            <span className="ide-plate" style={{ fontSize: 26 }}>
               Tyche
             </span>
           </div>
@@ -232,9 +243,9 @@ export function HomeScreen() {
               borderRadius: 16,
               cursor: "pointer",
               color: "var(--text)",
-              border: "1px solid rgba(255,107,107,0.45)",
+              border: "1px solid rgba(255,59,47,0.45)",
               background:
-                "linear-gradient(110deg, rgba(255,107,107,0.14), var(--surface))",
+                "linear-gradient(110deg, rgba(255,59,47,0.14), var(--surface))",
               display: "flex",
               alignItems: "center",
               gap: 12,
@@ -247,13 +258,13 @@ export function HomeScreen() {
                 height: 38,
                 borderRadius: 12,
                 background: "#ff6b6b",
-                color: "#0B0910",
+                color: "var(--on-accent)",
                 display: "grid",
                 placeItems: "center",
                 flexShrink: 0,
               }}
             >
-              <Ico.clock style={{ color: "#0B0910" }} />
+              <Ico.clock style={{ color: "var(--on-accent)" }} />
             </span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 14.5, fontWeight: 700 }}>
@@ -275,14 +286,23 @@ export function HomeScreen() {
             marginBottom: 24,
           }}
         >
+          {/* Prize rays + halo. Both are decoration: pointer-events off and
+              behind the content, so they never intercept a tap. */}
           <div
+            aria-hidden="true"
+            className="ide-sunburst"
+            style={{ inset: "-14px -18px auto", height: 250, zIndex: 0 }}
+          />
+          <div
+            aria-hidden="true"
             style={{
               position: "absolute",
-              inset: "-26px 16px auto",
-              height: 210,
+              inset: "34px 30px auto",
+              height: 120,
+              pointerEvents: "none",
               background:
-                "radial-gradient(circle, rgba(20,241,149,0.2), transparent 68%)",
-              filter: "blur(14px)",
+                "radial-gradient(50% 50% at 50% 50%, rgba(255,46,136,0.75), rgba(53,240,224,0.35) 55%, transparent 78%)",
+              filter: "blur(26px)",
               animation: "ide-pulse 3.6s ease-in-out infinite",
               zIndex: 0,
             }}
@@ -308,18 +328,15 @@ export function HomeScreen() {
                   {turnStatusMessage}
                 </span>
               ) : inPhase1 ? (
-                <span className="ide-pill" style={{ color: "var(--muted)" }}>
-                  <Ico.clock style={{ color: "var(--green)" }} /> Create &amp;
-                  play · ends in{" "}
-                  <span
-                    className="ide-num"
-                    style={{
-                      color: "var(--text)",
-                      fontWeight: 700,
-                      marginLeft: 2,
-                    }}
-                  >
-                    {p1h}:{p1m}:{p1s}
+                // The one genuinely live state on this screen gets the skewed
+                // red badge; every other phase stays a neutral status chip.
+                <span className="ide-live">
+                  <span className="ide-live-dot" />
+                  <span>
+                    Create &amp; play ·{" "}
+                    <span className="ide-num" style={{ letterSpacing: "0.1em" }}>
+                      {p1h}:{p1m}:{p1s}
+                    </span>
                   </span>
                 </span>
               ) : shortlistDrawPending ? (
@@ -327,7 +344,7 @@ export function HomeScreen() {
                   className="ide-pill"
                   style={{
                     color: "var(--muted)",
-                    borderColor: "rgba(199,125,255,0.3)",
+                    borderColor: "rgba(255,122,184,0.3)",
                   }}
                 >
                   <Ico.dice
@@ -380,7 +397,7 @@ export function HomeScreen() {
                   className="ide-pill"
                   style={{
                     color: "var(--muted)",
-                    borderColor: "rgba(20,241,149,0.3)",
+                    borderColor: "rgba(124,246,184,0.3)",
                   }}
                 >
                   <Ico.check
@@ -393,7 +410,7 @@ export function HomeScreen() {
                   className="ide-pill"
                   style={{
                     color: "var(--muted)",
-                    borderColor: "rgba(199,125,255,0.3)",
+                    borderColor: "rgba(255,122,184,0.3)",
                   }}
                 >
                   <Ico.dice
@@ -420,18 +437,20 @@ export function HomeScreen() {
             </div>
             <div
               style={{
-                fontSize: 13,
-                letterSpacing: "0.14em",
+                fontFamily: "Oswald, sans-serif",
+                fontSize: 11,
+                fontWeight: 600,
+                letterSpacing: "0.28em",
                 textTransform: "uppercase",
-                color: "var(--dim)",
-                fontWeight: 700,
+                color: "var(--cyan)",
                 marginBottom: 2,
               }}
             >
               Accumulated prize
             </div>
+            {/* The integer carries the plate, the decimals drop to gold and the
+                unit to DM Mono cyan — one weight per line, per screens.md. */}
             <div
-              className="ide-num"
               style={{
                 display: "flex",
                 alignItems: "flex-start",
@@ -440,28 +459,46 @@ export function HomeScreen() {
               }}
             >
               <span
-                className="ide-grad-text"
-                style={{ fontSize: 72, fontWeight: 700, lineHeight: 0.9 }}
+                style={{
+                  fontFamily: "Bevan, serif",
+                  fontSize: 70,
+                  lineHeight: 0.92,
+                  color: "var(--text)",
+                  textShadow: "var(--plate-num)",
+                }}
               >
                 {intStr}
               </span>
               <span
-                className="ide-grad-text"
-                style={{ fontSize: 34, fontWeight: 700, marginTop: 6 }}
+                style={{
+                  fontFamily: "Bevan, serif",
+                  fontSize: 34,
+                  marginTop: 16,
+                  color: "var(--yellow)",
+                  textShadow: "0 0 22px rgba(255,210,63,0.9)",
+                }}
               >
                 {decStr}
               </span>
               <span
+                className="ide-num"
                 style={{
-                  fontSize: 21,
-                  fontWeight: 700,
-                  color: "var(--purple-soft)",
-                  marginTop: 11,
-                  marginLeft: 4,
+                  fontSize: 13,
+                  letterSpacing: "0.16em",
+                  color: "var(--cyan)",
+                  margin: "22px 0 0 6px",
                 }}
               >
                 SOL
               </span>
+            </div>
+            <div
+              aria-hidden="true"
+              style={{ display: "flex", alignItems: "center", gap: 10, margin: "8px 4px" }}
+            >
+              <span className="ide-dashed" />
+              <span className="ide-diamond" />
+              <span className="ide-dashed" />
             </div>
             {apiUnavailable ? null : (
               <div
@@ -469,15 +506,12 @@ export function HomeScreen() {
                 aria-label={`${fmtInt(players)} playing, ${rules.rules.length} rules`}
               >
                 <span className="ide-hero-stat">
-                  <Ico.users style={{ color: "var(--purple-soft)" }} />
-                  <span className="ide-num">{fmtInt(players)}</span>
-                  playing
+                  <span className="ide-hero-stat-value">{fmtInt(players)}</span>
+                  <span className="ide-hero-stat-label">playing</span>
                 </span>
-                <span className="ide-hero-stat-divider" aria-hidden="true" />
                 <span className="ide-hero-stat">
-                  <Ico.spark style={{ color: "var(--yellow)" }} />
-                  <span className="ide-num">{rules.rules.length}</span>
-                  rules
+                  <span className="ide-hero-stat-value">{rules.rules.length}</span>
+                  <span className="ide-hero-stat-label">rules</span>
                 </span>
               </div>
             )}
@@ -510,14 +544,14 @@ export function HomeScreen() {
                   height: 28,
                   borderRadius: 9,
                   background: "var(--gold)",
-                  color: "#0B0910",
+                  color: "var(--on-accent)",
                   display: "grid",
                   placeItems: "center",
                   flexShrink: 0,
                 }}
               >
                 <Ico.spark
-                  style={{ color: "#0B0910", width: 16, height: 16 }}
+                  style={{ color: "var(--on-accent)", width: 16, height: 16 }}
                 />
               </span>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -623,13 +657,13 @@ export function HomeScreen() {
                 height: 38,
                 borderRadius: 12,
                 background: "var(--yellow)",
-                color: "#0B0910",
+                color: "var(--on-accent)",
                 display: "grid",
                 placeItems: "center",
                 flexShrink: 0,
               }}
             >
-              <Ico.vote style={{ color: "#0B0910" }} />
+              <Ico.vote style={{ color: "var(--on-accent)" }} />
             </span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 14.5, fontWeight: 700 }}>
@@ -658,7 +692,7 @@ export function HomeScreen() {
               color: "var(--text)",
               border: "none",
               background:
-                "linear-gradient(110deg, rgba(20,241,149,0.13), var(--surface))",
+                "linear-gradient(110deg, rgba(124,246,184,0.13), var(--surface))",
               display: "flex",
               alignItems: "center",
               gap: 12,
@@ -671,13 +705,13 @@ export function HomeScreen() {
                 height: 38,
                 borderRadius: 12,
                 background: "var(--green)",
-                color: "#08110C",
+                color: "var(--on-accent)",
                 display: "grid",
                 placeItems: "center",
                 flexShrink: 0,
               }}
             >
-              <Ico.gift style={{ color: "#08110C" }} />
+              <Ico.gift style={{ color: "var(--on-accent)" }} />
             </span>
             <div
               style={{ flex: 1, minWidth: 0, fontSize: 15.5, fontWeight: 700 }}
@@ -717,7 +751,7 @@ export function HomeScreen() {
                 background: "none",
                 color: "var(--text)",
                 textAlign: "left",
-                fontFamily: "Outfit",
+                fontFamily: "Archivo",
                 cursor: "pointer",
                 minHeight: 44,
               }}
@@ -729,7 +763,7 @@ export function HomeScreen() {
                   height: 30,
                   borderRadius: 10,
                   background: "var(--green)",
-                  color: "#08110C",
+                  color: "var(--on-accent)",
                   display: "grid",
                   placeItems: "center",
                   flexShrink: 0,
@@ -750,7 +784,7 @@ export function HomeScreen() {
               style={{ width: "100%", padding: 17, fontSize: 17 }}
               type="button"
             >
-              <Ico.bolt style={{ color: "#08110C" }} />
+              <Ico.bolt style={{ color: "var(--on-accent)" }} />
               Play again ·{" "}
               {fees.playNext === 0 ? "Free" : `${fmtSol(fees.playNext)} SOL`}
             </button>
@@ -769,7 +803,7 @@ export function HomeScreen() {
             }}
             type="button"
           >
-            <Ico.bolt style={{ color: "#08110C" }} />{" "}
+            <Ico.bolt style={{ color: "var(--on-accent)" }} />{" "}
             {turnReadyToPlay
               ? `Play now · ${fees.playNext === 0 ? "Free" : `${fmtSol(fees.playNext)} SOL`}`
               : turnStatusUnavailable
@@ -784,44 +818,48 @@ export function HomeScreen() {
         </div>
 
         {/* RULE PREVIEW → voting */}
+        {/* Section head: plate title, then a rule that fills the gap, then the
+            secondary exit — screens.md "Título de seção". */}
         <div
           style={{
             display: "flex",
             alignItems: "baseline",
-            justifyContent: "space-between",
-            margin: "0 2px 12px",
+            gap: 10,
+            margin: "0 2px 10px",
           }}
         >
-          <span
-            style={{
-              fontWeight: 800,
-              fontSize: 22,
-              letterSpacing: "-0.025em",
-              whiteSpace: "nowrap",
-            }}
-          >
+          <span className="ide-plate" style={{ fontSize: 24, whiteSpace: "nowrap" }}>
             The rules
           </span>
+          <span
+            aria-hidden="true"
+            style={{
+              flex: 1,
+              height: 2,
+              borderRadius: 999,
+              background: "rgba(241,232,214,0.3)",
+            }}
+          />
           <button
             onClick={() => go("vote")}
+            className="ide-num"
             style={{
               background: "none",
               border: "none",
-              color: "var(--purple-soft)",
-              fontSize: 13.5,
-              fontWeight: 700,
+              color: "var(--yellow)",
+              fontSize: 11,
+              letterSpacing: "0.14em",
+              textTransform: "uppercase",
               cursor: "pointer",
-              fontFamily: "Outfit",
               display: "inline-flex",
               alignItems: "center",
               gap: 4,
+              whiteSpace: "nowrap",
             }}
             type="button"
           >
             vote{" "}
-            <Ico.arrow
-              style={{ color: "var(--purple-soft)", width: 15, height: 15 }}
-            />
+            <Ico.arrow style={{ color: "var(--yellow)", width: 14, height: 14 }} />
           </button>
         </div>
 
@@ -855,9 +893,8 @@ export function HomeScreen() {
                 onClick={() => openDetail(r.ruleId, { rank: i + 1 })}
                 className="ide-rulerow ide-tap"
                 style={{
-                  borderColor: i === 0 ? "var(--line-2)" : "var(--line)",
                   boxShadow:
-                    i === 0 ? "0 0 24px -14px rgba(255,210,63,0.6)" : "none",
+                    i === 0 ? "inset 0 0 0 1.5px rgba(255,46,136,0.5)" : "none",
                 }}
                 type="button"
               >
@@ -865,8 +902,11 @@ export function HomeScreen() {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div
                     style={{
-                      fontWeight: 700,
+                      fontFamily: "Oswald, sans-serif",
+                      fontWeight: 500,
                       fontSize: 15.5,
+                      letterSpacing: "0.04em",
+                      textTransform: "uppercase",
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                       whiteSpace: "nowrap",

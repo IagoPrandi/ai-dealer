@@ -27,7 +27,7 @@
 .tg-allocations strong {
   overflow-wrap: anywhere;
   font:
-    650 clamp(18px, 4vw, 24px) / 1.15 "Sora",
+    650 clamp(18px, 4vw, 24px) / 1.15 Oswald,
     sans-serif;
   letter-spacing: -0.035em;
 }

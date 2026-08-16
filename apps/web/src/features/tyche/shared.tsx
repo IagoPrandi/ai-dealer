@@ -105,36 +105,44 @@ export function Dealer({ size = 38 }: { size?: number }) {
   );
 }
 
+/**
+ * Rank index. 3a shows the position as a square Bevan plate: gold for 1st, a
+ * bone outline for 2nd, bronze for 3rd, a neutral outline beyond that.
+ */
 export function Medal({ pos }: { pos: number }) {
-  const map: Record<number, { c: string; l: string }> = {
-    1: { c: "var(--gold)", l: "1st" },
-    2: { c: "var(--silver)", l: "2nd" },
-    3: { c: "var(--bronze)", l: "3rd" },
+  const base: CSSProperties = {
+    width: 30, height: 30, flexShrink: 0, display: "grid", placeItems: "center",
+    borderRadius: 0, fontFamily: "Bevan, serif", fontSize: 13, fontWeight: 400,
   };
-  const m = map[pos];
-  if (!m) {
-    return <span className="ide-num" style={{ width: 26, textAlign: "center", color: "var(--dim)", fontWeight: 700, fontSize: 15 }}>{pos}</span>;
+  const fill: Record<number, string> = {
+    1: "var(--gold)",
+    3: "var(--bronze)",
+  };
+  const label = String(pos).padStart(2, "0");
+  if (pos === 2) {
+    return <span style={{ ...base, color: "var(--text)", boxShadow: "inset 0 0 0 1.5px rgba(241,232,214,0.4)" }}>{label}</span>;
   }
-  return (
-    <span className="ide-num" style={{
-      width: 26, height: 26, borderRadius: 9, display: "grid", placeItems: "center",
-      fontSize: 12, fontWeight: 800, color: "#0B0910",
-      background: m.c, boxShadow: `0 0 14px -2px ${m.c}`,
-    }}>{m.l}</span>
-  );
+  const bg = fill[pos];
+  if (!bg) {
+    return <span style={{ ...base, color: "var(--muted)", boxShadow: "var(--ring)" }}>{label}</span>;
+  }
+  return <span style={{ ...base, background: bg, color: "var(--on-accent)" }}>{label}</span>;
 }
 
 export function VoteTally({ approve, against, size = "md" }: { against: number; approve: number; size?: "md" | "sm" }) {
   const sm = size === "sm";
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: sm ? 9 : 12 }}>
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: "var(--green)", fontSize: sm ? 12.5 : 13.5 }}>
-        <Ico.up style={{ color: "var(--green)", width: sm ? 13 : 15, height: sm ? 13 : 15 }} />
-        <span className="ide-num" style={{ fontWeight: 700 }}>{approve}</span>
+    // Approve reads cyan, against reads red once it is non-zero and stays dim
+    // at zero. The arrows remain SVG rather than ▲/▼ glyphs so the accessible
+    // text content — which the e2e suite matches on — is unchanged.
+    <div style={{ display: "flex", alignItems: "center", gap: sm ? 9 : 11 }}>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: "var(--cyan)", fontSize: sm ? 11 : 11.5 }}>
+        <Ico.up style={{ color: "var(--cyan)", width: sm ? 12 : 13, height: sm ? 12 : 13 }} />
+        <span className="ide-num">{approve}</span>
       </span>
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: against > 0 ? "var(--red)" : "var(--dim)", fontSize: sm ? 12.5 : 13.5 }}>
-        <Ico.down style={{ color: against > 0 ? "var(--red)" : "var(--dim)", width: sm ? 13 : 15, height: sm ? 13 : 15 }} />
-        <span className="ide-num" style={{ fontWeight: 700 }}>{against}</span>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: against > 0 ? "var(--red)" : "var(--dim)", fontSize: sm ? 11 : 11.5 }}>
+        <Ico.down style={{ color: against > 0 ? "var(--red)" : "var(--dim)", width: sm ? 12 : 13, height: sm ? 12 : 13 }} />
+        <span className="ide-num">{against}</span>
       </span>
     </div>
   );
@@ -155,7 +163,7 @@ export function finalistStatus(r: { against: number; approve: number; finalist: 
 }
 
 export function SectionLabel({ children }: { children: React.ReactNode }) {
-  return <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--dim)" }}>{children}</div>;
+  return <div className="ide-eyebrow">{children}</div>;
 }
 
 export function Meta({ label, value, mono }: { label: string; mono?: boolean; value: React.ReactNode }) {
@@ -209,9 +217,9 @@ export function RuleDetail({
   const balance = rule.approve - rule.against;
   const cardStyle: CSSProperties = {
     width: "100%", maxHeight: "90%", overflowY: "auto", WebkitOverflowScrolling: "touch", overscrollBehavior: "contain",
-    background: "var(--bg-2)", borderTopLeftRadius: 28, borderTopRightRadius: 28,
-    border: "1px solid var(--line-2)", borderBottom: "none",
-    padding: "10px 20px 28px", animation: "ide-rise .32s cubic-bezier(.2,.8,.3,1) both",
+    background: "var(--surface)", borderRadius: 0, border: "none",
+    boxShadow: "0 -6px 0 var(--orange), 0 -40px 90px -20px rgba(255,46,136,0.55)",
+    padding: "14px 20px 28px", animation: "ide-rise .32s cubic-bezier(.2,.8,.3,1) both",
   };
   return (
     <div onClick={onClose} style={{
@@ -224,9 +232,9 @@ export function RuleDetail({
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {rank && rank <= 3 ? <Medal pos={rank} /> : null}
-            {rule.finalist ? <span className="ide-pill" style={{ color: "var(--purple-soft)", borderColor: "rgba(199,125,255,0.3)" }}><Ico.shield style={{ color: "var(--purple-soft)", width: 13, height: 13 }} /> finalist</span> : null}
-            {rule.removed ? <span className="ide-pill" style={{ color: "var(--red)", borderColor: "rgba(255,107,107,0.3)" }}><Ico.close style={{ color: "var(--red)", width: 13, height: 13 }} /> Removed</span> : null}
-            {st === "eliminada" ? <span className="ide-pill" style={{ color: "var(--red)", borderColor: "rgba(255,107,107,0.3)" }}>eliminated</span> : null}
+            {rule.finalist ? <span className="ide-pill" style={{ color: "var(--purple-soft)", borderColor: "rgba(255,122,184,0.3)" }}><Ico.shield style={{ color: "var(--purple-soft)", width: 13, height: 13 }} /> finalist</span> : null}
+            {rule.removed ? <span className="ide-pill" style={{ color: "var(--red)", borderColor: "rgba(255,59,47,0.3)" }}><Ico.close style={{ color: "var(--red)", width: 13, height: 13 }} /> Removed</span> : null}
+            {st === "eliminada" ? <span className="ide-pill" style={{ color: "var(--red)", borderColor: "rgba(255,59,47,0.3)" }}>eliminated</span> : null}
             {st === "risco" ? <span className="ide-pill" style={{ color: "var(--yellow)", borderColor: "rgba(255,210,63,0.3)" }}><Ico.flame style={{ color: "var(--yellow)", width: 12, height: 12 }} /> at risk</span> : null}
           </div>
           <button onClick={onClose} style={{ background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--muted)", borderRadius: 12, padding: 7, display: "grid", placeItems: "center", cursor: "pointer" }}>
@@ -256,7 +264,7 @@ export function RuleDetail({
         ) : null}
 
         {removalUnlocked ? (
-          <div style={{ margin: "0 0 20px", padding: "13px", background: "rgba(255,107,107,0.08)", border: "1px solid rgba(255,107,107,0.22)", borderRadius: 16 }}>
+          <div style={{ margin: "0 0 20px", padding: "13px", background: "rgba(255,59,47,0.08)", border: "1px solid rgba(255,59,47,0.22)", borderRadius: 16 }}>
             <button
               className="ide-votebtn against"
               disabled={vote.removeBusy}
@@ -319,7 +327,7 @@ export function RuleDetail({
 }
 
 export function Confetti() {
-  const cols = ["#9945FF", "#14F195", "#FFD23F", "#C77DFF"];
+  const cols = ["#FF2E88", "#35F0E0", "#FFD23F", "#FF6A1F"];
   return (
     <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none", zIndex: 5 }}>
       {Array.from({ length: 28 }).map((_, i) => (
@@ -335,9 +343,19 @@ export function Confetti() {
 
 export function ScreenHead({ onBack, right, title }: { onBack: () => void; right?: React.ReactNode; title: string }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-      <button onClick={onBack} style={{ width: 40, height: 40, borderRadius: 13, background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--text)", display: "grid", placeItems: "center", cursor: "pointer", flexShrink: 0 }}><Ico.back /></button>
-      <h1 style={{ fontSize: 21, fontWeight: 800, margin: 0, flex: 1, letterSpacing: "-0.02em" }}>{title}</h1>
+    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+      <button
+        onClick={onBack}
+        style={{
+          width: 38, height: 38, borderRadius: 0, background: "var(--surface-2)",
+          border: "none", boxShadow: "var(--ring-soft)", color: "var(--text)",
+          display: "grid", placeItems: "center", cursor: "pointer", flexShrink: 0,
+        }}
+        type="button"
+      >
+        <Ico.back style={{ width: 18, height: 18 }} />
+      </button>
+      <h1 className="ide-plate" style={{ fontSize: 24, fontWeight: 400, margin: 0, flex: 1, minWidth: 0 }}>{title}</h1>
       {right}
     </div>
   );
@@ -356,7 +374,7 @@ export function ConversationRow({ draft, onResume }: { draft: ConversationDraftA
     isPreflightJobPointerFresh(Date.parse(draft.updatedAt), Date.now());
   return (
     <button onClick={onResume} className="ide-listrow" type="button">
-      <span style={{ width: 34, height: 34, borderRadius: 11, display: "grid", placeItems: "center", flexShrink: 0, background: compiling ? "rgba(94,234,152,0.12)" : isDraft ? "rgba(255,210,63,0.12)" : "var(--surface-2)", color: compiling ? "var(--green)" : isDraft ? "var(--yellow)" : "var(--dim)" }}>
+      <span style={{ width: 34, height: 34, borderRadius: 11, display: "grid", placeItems: "center", flexShrink: 0, background: compiling ? "rgba(124,246,184,0.12)" : isDraft ? "rgba(255,210,63,0.12)" : "var(--surface-2)", color: compiling ? "var(--green)" : isDraft ? "var(--yellow)" : "var(--dim)" }}>
         <Ico.chat style={{ color: "currentColor" }} />
       </span>
       <div style={{ flex: 1, minWidth: 0 }}>

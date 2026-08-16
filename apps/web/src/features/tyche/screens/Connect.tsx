@@ -53,7 +53,7 @@ export function ConnectOverlay({
         </div>
 
         {error ? (
-          <div className="ide-card" style={{ padding: "11px 14px", marginTop: 14, borderColor: "rgba(255,107,107,0.3)", color: "var(--red)", fontSize: 13 }}>
+          <div className="ide-card" style={{ padding: "11px 14px", marginTop: 14, borderColor: "rgba(255,59,47,0.3)", color: "var(--red)", fontSize: 13 }}>
             {error}
           </div>
         ) : null}

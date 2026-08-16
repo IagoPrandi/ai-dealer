@@ -180,12 +180,12 @@ function PlayDone({ sel, turnId }: { sel: number[]; turnId: number }) {
       <Confetti />
       <div style={{ position: "relative", zIndex: 1, height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "0 28px", textAlign: "center" }}>
         <div style={{ animation: "ide-pop .5s cubic-bezier(.2,.8,.3,1) both" }}><Dealer size={72} /></div>
-        <h2 style={{ fontSize: 27, fontWeight: 800, margin: "20px 0 8px", letterSpacing: "-0.02em" }}>Guess confirmed!</h2>
+        <h2 className="ide-plate ide-plate-lg" style={{ fontSize: 32, lineHeight: 1.05, margin: "20px 0 8px" }}>Guess confirmed!</h2>
         <p style={{ color: "var(--muted)", fontSize: 15.5, lineHeight: 1.5, margin: "0 0 22px" }}>You&apos;re in round <b style={{ color: "var(--text)" }}>{fmtTurnId(turnId)}</b>. You can now vote and create rules.</p>
         <div style={{ display: "flex", gap: 8, marginBottom: 30, flexWrap: "wrap", justifyContent: "center" }}>
-          {sel.map((n) => <span key={n} className="ide-chip" style={{ width: 40, height: 40, fontSize: 15 }}>{n}</span>)}
+          {sel.map((n) => <span key={n} className="ide-chip" style={{ width: 42, height: 42, fontSize: 15, boxShadow: "var(--solid-3)" }}>{n}</span>)}
         </div>
-        <button onClick={() => go("vote")} className="ide-btn" style={{ width: "100%", padding: 16, fontSize: 16 }} type="button"><Ico.vote style={{ color: "#08110C", width: 19, height: 19 }} /> Vote on the rules</button>
+        <button onClick={() => go("vote")} className="ide-btn" style={{ width: "100%", padding: 16, fontSize: 16 }} type="button"><Ico.vote style={{ color: "var(--on-accent)", width: 19, height: 19 }} /> Vote on the rules</button>
         <button onClick={() => go("create", { newConversation: true })} className="ide-btn-ghost ide-btn" style={{ width: "100%", padding: 14, marginTop: 10 }} type="button"><Ico.chat style={{ color: "var(--purple-soft)" }} /> Create a rule</button>
         <button onClick={() => go("home")} className="ide-btn-ghost ide-btn" style={{ width: "100%", padding: 14, marginTop: 10 }} type="button">Back to the round</button>
       </div>
@@ -466,7 +466,7 @@ function PlayFlow() {
             <WalletActionStatus action={visiblePendingAction} onClear={clearAction} />
           ) : null}
           {error ? (
-            <div className="ide-card" style={{ padding: "11px 14px", marginBottom: 14, borderColor: "rgba(255,107,107,0.3)", color: "var(--red)", fontSize: 13 }}>{error}</div>
+            <div className="ide-card" style={{ padding: "11px 14px", marginBottom: 14, borderColor: "rgba(255,59,47,0.3)", color: "var(--red)", fontSize: 13 }}>{error}</div>
           ) : (
             <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 2px", fontSize: 12.5, color: "var(--dim)" }}>
               <Ico.info style={{ color: "var(--purple-soft)", flexShrink: 0 }} />
@@ -477,9 +477,9 @@ function PlayFlow() {
         <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 30, padding: "16px 20px calc(20px + env(safe-area-inset-bottom,0px))", background: "linear-gradient(180deg, transparent, var(--bg) 36%)" }}>
           <button onClick={confirm} disabled={busy || submitBlocked} className="ide-btn" style={{ width: "100%", padding: 17, fontSize: 17, opacity: busy || submitBlocked ? 0.7 : 1 }} type="button">
             {busy ? <><span className="ide-spin" style={{ width: 18, height: 18, border: "2px solid #08110C", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block" }} /> Submitting…</>
-              : submitBlocked ? <><Ico.clock style={{ color: "#08110C" }} /> Wallet action pending</>
-              : connected ? <><Ico.check style={{ color: "#08110C" }} /> Confirm and submit</>
-              : <><Ico.wallet style={{ color: "#08110C" }} /> Connect and submit</>}
+              : submitBlocked ? <><Ico.clock style={{ color: "var(--on-accent)" }} /> Wallet action pending</>
+              : connected ? <><Ico.check style={{ color: "var(--on-accent)" }} /> Confirm and submit</>
+              : <><Ico.wallet style={{ color: "var(--on-accent)" }} /> Connect and submit</>}
           </button>
         </div>
       </div>
@@ -492,27 +492,27 @@ function PlayFlow() {
       <div className="ide-ambient" />
       <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", padding: "var(--ide-shell-content-top) 20px 150px" }}>
         <ScreenHead onBack={() => go("home")} title="Make a guess"
-          right={sel.length > 0 ? <button onClick={() => setSel([])} style={{ background: "none", border: "none", color: "var(--dim)", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "Outfit" }} type="button">clear</button> : undefined} />
+          right={sel.length > 0 ? <button onClick={() => setSel([])} style={{ background: "none", border: "none", color: "var(--dim)", fontFamily: "Oswald, sans-serif", fontSize: 12, fontWeight: 600, letterSpacing: "0.14em", textTransform: "uppercase", cursor: "pointer" }} type="button">clear</button> : undefined} />
 
         <div style={{ textAlign: "center", margin: "4px 0 16px" }}>
-          <div style={{ fontSize: 15, color: "var(--muted)" }}>Pick <b style={{ color: "var(--text)" }}>{PICK} numbers</b> from 1 to {MAXN}</div>
-          <div className="ide-num" style={{ marginTop: 6, fontSize: 14, color: complete ? "var(--green)" : "var(--dim)", fontWeight: 700 }}>{sel.length}/{PICK} selected</div>
+          <div style={{ fontFamily: "Oswald, sans-serif", fontSize: 14.5, letterSpacing: "0.04em", color: "var(--muted)" }}>Pick <b style={{ color: "var(--text)", fontWeight: 500 }}>{PICK} numbers</b> from 1 to {MAXN}</div>
+          <div className="ide-num" style={{ marginTop: 6, fontSize: 13, color: complete ? "var(--green)" : "var(--yellow)" }}>{sel.length}/{PICK} selected</div>
         </div>
 
         {visiblePendingAction ? (
           <WalletActionStatus action={visiblePendingAction} onClear={clearAction} />
         ) : null}
 
-        <button onClick={quickPick} className="ide-votebtn" style={{ width: "100%", justifyContent: "center", padding: "12px", fontSize: 14.5, marginBottom: 16 }} type="button">
-          <Ico.dice style={{ color: "var(--purple-soft)" }} /> Lucky pick (choose for me)
+        <button onClick={quickPick} className="ide-btn ide-btn-ghost" style={{ width: "100%", justifyContent: "center", padding: "12px", fontSize: 14, marginBottom: 16 }} type="button">
+          <Ico.dice style={{ color: "var(--cyan)" }} /> Lucky pick (choose for me)
         </button>
 
         <div style={{ display: "flex", gap: 8, justifyContent: "center", marginBottom: 16, flexWrap: "wrap" }}>
           {Array.from({ length: PICK }).map((_, i) => {
             const n = sel[i];
             return n != null
-              ? <span key={i} className="ide-chip" style={{ width: 42, height: 42, fontSize: 16 }}>{n}</span>
-              : <span key={i} className="ide-num" style={{ width: 42, height: 42, borderRadius: 13, border: "1px dashed var(--line-2)", display: "grid", placeItems: "center", color: "var(--dim)", fontSize: 16, fontWeight: 700 }}>·</span>;
+              ? <span key={i} className="ide-chip" style={{ width: 44, height: 44, fontSize: 16, boxShadow: "var(--solid-3)" }}>{n}</span>
+              : <span key={i} className="ide-num" style={{ width: 44, height: 44, borderRadius: 0, border: "none", boxShadow: "var(--ring)", display: "grid", placeItems: "center", color: "var(--dim)", fontSize: 16 }}>·</span>;
           })}
         </div>
 
@@ -525,7 +525,7 @@ function PlayFlow() {
 
       <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 30, padding: "16px 20px calc(20px + env(safe-area-inset-bottom,0px))", background: "linear-gradient(180deg, transparent, var(--bg) 36%)" }}>
         <button onClick={() => complete && setStep("review")} disabled={!complete || !turnReadyToPlay} className="ide-btn" style={{ width: "100%", padding: 17, fontSize: 17, opacity: complete && turnReadyToPlay ? 1 : 0.4 }} type="button">
-          {complete ? <>Review guess <Ico.arrow style={{ color: "#08110C" }} /></> : `${PICK - sel.length} number${PICK - sel.length === 1 ? "" : "s"} left`}
+          {complete ? <>Review guess <Ico.arrow style={{ color: "var(--on-accent)" }} /></> : `${PICK - sel.length} number${PICK - sel.length === 1 ? "" : "s"} left`}
         </button>
       </div>
     </div>

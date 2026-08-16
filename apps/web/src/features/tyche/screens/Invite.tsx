@@ -343,7 +343,7 @@ export function InviteScreen() {
                 onClick={() => void copy(inviteLink, "Invite link")}
                 type="button"
               >
-                <Ico.copy style={{ color: "#08110C" }} /> Copy link
+                <Ico.copy style={{ color: "var(--on-accent)" }} /> Copy link
               </button>
               <button
                 className="ide-btn ide-btn-ghost"
@@ -391,7 +391,7 @@ export function InviteScreen() {
               any account.
             </p>
             <button className="ide-btn" onClick={connect} style={{ width: "100%" }} type="button">
-              <Ico.wallet style={{ color: "#08110C" }} /> Connect wallet
+              <Ico.wallet style={{ color: "var(--on-accent)" }} /> Connect wallet
             </button>
           </div>
         )}
@@ -422,7 +422,7 @@ export function InviteScreen() {
                     display: "grid",
                     placeItems: "center",
                     flexShrink: 0,
-                    background: "rgba(20,241,149,0.14)",
+                    background: "rgba(124,246,184,0.14)",
                   }}
                 >
                   <Ico.users style={{ color: "var(--green)" }} />
@@ -464,7 +464,7 @@ export function InviteScreen() {
                 style={{ width: "100%" }}
                 type="button"
               >
-                <Ico.check style={{ color: "#08110C" }} />
+                <Ico.check style={{ color: "var(--on-accent)" }} />
                 {busy ? "Waiting for wallet…" : "Register invite"}
               </button>
             </div>

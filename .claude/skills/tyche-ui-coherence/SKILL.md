@@ -16,12 +16,14 @@ Before editing UI, open:
 - `.claude/skills`
 - `.claude/skills/tyche-design-system/SKILL.md`
 - Relevant `tyche-design-system/references/*` files:
-  - `01-tokens.md` for colors, fonts, spacing, radius, shadows, effects
-  - `02-components.md` for buttons, cards, pills, nav, number grid, chat bubbles
-  - `03-screens-and-state.md` for screen structure, navigation, gates, overlays
-  - `04-new-screen-recipe.md` for new screens or new flows
+  - `tokens.css` for colors, fonts, spacing, radius, shadows, signature effects
+  - `components.md` for buttons, cards, pills, nav, number chips, chat bubbles, badges, tabs, modal, sheet
+  - `screens.md` for screen anatomy, the 16-screen inventory, states and behaviour
+  - `repo-integration.md` before writing any TSX — it maps the design language onto this repo
+  - `screens-html/NN-*.html` — **the source of truth**. When prose and the HTML disagree, the HTML wins.
+  - `screenshots/NN-*.png` for visual reference
 
-Also open the real implementation files for the surface being edited. For the current Next.js app, inspect `apps/web/src/features/tyche/tyche.css`, `shared.tsx`, `TycheApp.tsx`, and neighboring screens in `apps/web/src/features/tyche/screens/`. For legacy prototype work, inspect the corresponding `Tyche.html`, `tyche.css`, `shared.jsx`, `app*.jsx` files if present.
+Also open the real implementation files for the surface being edited: `apps/web/src/features/tyche/tyche.css`, `shared.tsx`, `TycheApp.tsx`, and neighboring screens in `apps/web/src/features/tyche/screens/`.
 
 Confirm in the work log or PR description which required documents were opened.
 
