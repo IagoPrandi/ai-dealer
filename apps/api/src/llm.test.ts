@@ -118,6 +118,14 @@ test("dealer chat uses the versioned context-only prompt and strict JSON result"
     messages[0]?.content ?? "",
     /never promise an automatic or guaranteed payment/i,
   );
+  assert.match(
+    messages[0]?.content ?? "",
+    /accepts natural-language winner conditions in both English and Portuguese/i,
+  );
+  assert.match(
+    messages[0]?.content ?? "",
+    /never claim that Portuguese is unsupported/i,
+  );
   assert.equal(messages[1]?.content, context);
   assert.equal(result.answer, "The modulo operation was dropped.");
   assert.match(result.proposedRuleText ?? "", /modulo 9/i);
@@ -401,6 +409,10 @@ test("interpret harness teaches predicate min/max and casual threshold cases", a
     systemPrompt,
     /never offer stock examples, generic match-count rules/i,
   );
+  assert.match(systemPrompt, /fewer than six values.*complete guess/i);
+  assert.match(systemPrompt, /condition applies to the unspecified values/i);
+  assert.match(systemPrompt, /never ask a generic question/i);
+  assert.match(systemPrompt, /remaining guessed number/i);
   assert.match(systemPrompt, /draw 12 31 24 versus guess 11 30 29/i);
   assert.equal(requestBody.reasoning_effort, "none");
   assert.equal(requestBody.max_tokens, 16_384);

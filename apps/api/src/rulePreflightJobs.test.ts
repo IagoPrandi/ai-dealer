@@ -57,6 +57,7 @@ function progressEvent(message: string) {
 function interpretation(): RuleInterpretationResult {
   return {
     addedOperationalClauses: [],
+    clarificationQuestions: [],
     clarityNote: "",
     dealerMessage: "I read this as an at-least-four match.",
     englishText: "Win if at least four of your numbers appear in the draw.",

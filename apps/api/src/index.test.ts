@@ -88,6 +88,7 @@ import {
   exportTransparencySnapshotCsv,
   getOperatorAiOperationsSnapshot,
   buildRuleRefinementFeedback,
+  enforceIncompleteTicketClarity,
   enforceKnownRuleInterpretation,
   enforceSourceAmbiguity,
   enforceSourceClarity,
@@ -477,6 +478,85 @@ test("rule preflight refinement feedback identifies the missing digit semantics"
   assert.equal(feedback.suggestedRewrites.length, 3);
 });
 
+test("incomplete six-number assignments ask about the actual missing values", () => {
+  const baseInterpretation = {
+    addedOperationalClauses: [],
+    clarificationQuestions: [],
+    clarityNote: "",
+    dealerMessage: "Understood.",
+    needsClarification: false,
+    normalizedText:
+      "A guess wins if its numbers are 7, 18, 42, 63, and 90 and the draw avoids those values.",
+    officialInterpretation:
+      "The draw must not contain 7, 18, 42, 63, or 90.",
+    suggestedRewrites: [],
+    title: "Avoid Five Values",
+  };
+  const clarified = enforceIncompleteTicketClarity(
+    "My guess is 7, 18, 42, 63, and 90, and the draw must avoid those values.",
+    baseInterpretation,
+  );
+
+  assert.equal(clarified.needsClarification, true);
+  assert.deepEqual(clarified.clarificationQuestions, [
+    "A guess must have six unique numbers, but this rule specifies only five values: 7, 18, 42, 63, and 90. What condition should apply to the remaining guessed number?",
+  ]);
+  assert.match(clarified.clarityNote, /remaining guessed number/i);
+  assert.deepEqual(clarified.suggestedRewrites, []);
+
+  const membershipRule = enforceIncompleteTicketClarity(
+    "Win if my guess contains 7, 18, 42, 63, and 90 and the draw avoids those values.",
+    baseInterpretation,
+  );
+  assert.equal(membershipRule, baseInterpretation);
+
+  const portuguese = enforceIncompleteTicketClarity(
+    "Eu venço se os meus números forem 1 2 3 4 e se os números do sorteio não contiverem nenhum desses números.",
+    baseInterpretation,
+  );
+  assert.match(
+    portuguese.clarificationQuestions[0] ?? "",
+    /only four values: 1, 2, 3, and 4.*remaining two guessed numbers/iu,
+  );
+
+  const incompleteDraw = enforceIncompleteTicketClarity(
+    "The official draw numbers are 3, 8, and 12.",
+    baseInterpretation,
+  );
+  assert.match(
+    incompleteDraw.clarificationQuestions[0] ?? "",
+    /only three values: 3, 8, and 12.*remaining three drawn numbers/iu,
+  );
+});
+
+test("the reported four-number rule asks what happens to the other two numbers", () => {
+  const text =
+    "I win if my numbers are 1 2 3 4 and the lottery numbers contain none of these numbers.";
+  const feedback = buildRuleRefinementFeedback({
+    agentClarificationQuestions: [
+      "Which exact comparison in this rule still needs to be defined?",
+    ],
+    clarityNote: "",
+    compileText: text,
+    officialInterpretation:
+      "The guess wins only when none of the numbers 1, 2, 3, or 4 are drawn.",
+    reasonCodes: ["INTERPRETATION_MISMATCH"],
+    reasonSummary: "Rule rejected: INTERPRETATION_MISMATCH.",
+    sanitizedText: text,
+    tokenCount: text.trim().split(/\s+/u).length,
+  });
+
+  assert.deepEqual(feedback.refinementQuestions, [
+    "A guess must have six unique numbers, but this rule specifies only four values: 1, 2, 3, and 4. What condition should apply to the remaining two guessed numbers?",
+  ]);
+  assert.ok(
+    feedback.refinementFocus.some((item) =>
+      /remaining two guessed numbers/i.test(item),
+    ),
+  );
+  assert.doesNotMatch(feedback.dealerMessage, /restate the complete/iu);
+});
+
 test("a rejected rule is never asked which sides it compares", () => {
   // The artifact only exists for a VALID compile, so every rejection reaches the
   // refinement builder with `ast: null` — and an all-false impact reads exactly
@@ -506,6 +586,7 @@ test("a rejected rule is never asked which sides it compares", () => {
   for (const question of rejected.refinementQuestions) {
     assert.doesNotMatch(question, /neither your guess nor the official draw/iu);
   }
+  assert.deepEqual(rejected.refinementQuestions, []);
 
   // A rule that really was compiled and really ignores one side still gets the
   // specific question — that is what the wording is for.

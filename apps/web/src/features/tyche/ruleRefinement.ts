@@ -49,8 +49,29 @@ const CHAT_TOPIC_PATTERN =
 const REFINEMENT_PATTERN =
   /\b(add|also|instead|change|make|require|requires|use|count|remove|replace|with|without|yes|no|sim|nao|ignore|regardless|any order|unordered|order|ordered|same order|in order|all\s*6|six|exactly|at least|at most|more|less|greater|lower|higher|same|equal|sum|digit|digits|units|tens|even|odd|match|matches|miss|misses)\b/i;
 
-const NEW_RULE_PATTERN =
-  /^(new\s+(clean\s+)?rule|replace\s+with|start\s+over|use\s+this\s+instead|win\s+if)\b/i;
+const RULE_REPLACEMENT_PATTERN =
+  /^(new\s+(clean\s+)?rule|replace\s+with|start\s+over|use\s+this\s+instead|nova\s+regra|substitu(?:a|ir)\s+por|come(?:ce|car)\s+de\s+novo|use\s+isto\s+no\s+lugar)\b/i;
+
+const DECLARATIVE_RULE_PATTERN =
+  /^(?:(?:i|eu)\s+)?(?:win|wins|ganho|ganha|venco|vence)\s+(?:if|when|se|quando)\b/i;
+
+/**
+ * Detect a complete winner-condition statement before topic-based chat routing.
+ * The broader heuristic in Create also recognizes rules by their data terms,
+ * but a direct declaration such as "vence se ..." is already unambiguously a
+ * rule even when the rest uses vocabulary the client has not seen before.
+ */
+export function isDeclarativeRuleDraft(message: string) {
+  return DECLARATIVE_RULE_PATTERN.test(normalizeIntentText(message));
+}
+
+function isNewRuleIntent(message: string) {
+  const normalized = normalizeIntentText(message);
+  return (
+    RULE_REPLACEMENT_PATTERN.test(normalized) ||
+    DECLARATIVE_RULE_PATTERN.test(normalized)
+  );
+}
 
 const EXPLICIT_PATCH_PATTERN =
   /^(add|also|change|make|require|requires|count|remove|with|without|instead)\b/i;
@@ -113,10 +134,10 @@ export function getRuleRefinementBase(context: RuleRefinementContext) {
 }
 
 export function isExplicitRuleRefinementPatch(message: string) {
-  const trimmed = message.trim();
+  const trimmed = normalizeIntentText(message);
   return (
     Boolean(trimmed) &&
-    !NEW_RULE_PATTERN.test(trimmed) &&
+    !isNewRuleIntent(trimmed) &&
     EXPLICIT_PATCH_PATTERN.test(trimmed)
   );
 }
@@ -138,7 +159,7 @@ export function isRuleRefinementPatch(
     !base ||
     !trimmed ||
     CHAT_TOPIC_PATTERN.test(trimmed) ||
-    NEW_RULE_PATTERN.test(trimmed) ||
+    isNewRuleIntent(trimmed) ||
     isRuleCreationHelpRequest(trimmed)
   ) {
     return false;

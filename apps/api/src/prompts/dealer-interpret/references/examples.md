@@ -87,3 +87,9 @@ Output does not normalize this into a guess/draw rule. It explains that wallets 
 Input: `If 10 and 20 are drawn, a pick of 12 wins because of number 1 or number 2.`
 
 Output asks whether the player means tens digit, units digit, or either digit and supplies no unrelated rewrite.
+
+## Incomplete ticket assignment
+
+Input: `My guess is 7, 18, 42, 63, and 90, and the draw must avoid those values.`
+
+Output sets `needsClarification` to true. It says that a guess contains six unique numbers, names the five supplied values, and asks what condition applies to the remaining guessed number. It does not turn the partial assignment into a membership rule and does not ask the player to restate the entire condition.

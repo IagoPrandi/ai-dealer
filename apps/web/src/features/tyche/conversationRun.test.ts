@@ -42,6 +42,7 @@ function fakeStorage() {
 
 const INTERPRETATION: RuleInterpretationApiResult = {
   addedOperationalClauses: [],
+  clarificationQuestions: [],
   clarityNote: "",
   dealerMessage: "I understand the rule.",
   englishText: "Win if exactly 2 numbers match.",
@@ -161,6 +162,9 @@ test("interpretation is shown before compilation and keeps clarification detecti
       consumePreflightJob: async () => ({
         interpretation: {
           ...INTERPRETATION,
+          clarificationQuestions: [
+            "Should matching use tens digits or units digits?",
+          ],
           clarityNote: "The digit place is not specified.",
           dealerMessage: "Do you mean tens digits or units digits?",
           needsClarification: true,
@@ -199,6 +203,9 @@ test("interpretation is shown before compilation and keeps clarification detecti
   assert.deepEqual(phases, ["interpret"]);
   assert.equal(run?.rule, null);
   assert.equal(run?.interpretation?.needsClarification, true);
+  assert.deepEqual(run?.interpretation?.clarificationQuestions, [
+    "Should matching use tens digits or units digits?",
+  ]);
   assert.match(
     run?.messages.at(-1)?.text ?? "",
     /tens digits or units digits/i,
@@ -571,6 +578,59 @@ test("cancelling a pending run does not turn the abort into an error state", asy
   assert.notEqual(getConversationRun(draftId)?.status, "error");
   assert.equal(isConversationRunActive(draftId), false);
   assert.deepEqual(cancelledJobs, ["job-102"]);
+});
+
+test("cancelling after interpretation does not report its interrupted save as an error", async () => {
+  const draftId = "client:102:cancelled-interpretation-save";
+  let postCount = 0;
+  let finalSaveStarted!: () => void;
+  const savingInterpretation = new Promise<void>((resolve) => {
+    finalSaveStarted = resolve;
+  });
+  const deps = baseDeps(
+    {
+      consumePreflightJob: async () => ({ interpretation: INTERPRETATION }),
+      postDraft: async (_wallet, body, signal) => {
+        postCount += 1;
+        if (postCount < 3) {
+          return { draft: { draftId: body.draftId ?? draftId } };
+        }
+        finalSaveStarted();
+        return new Promise((_, reject) => {
+          signal?.addEventListener("abort", () => reject(signal.reason), {
+            once: true,
+          });
+        });
+      },
+      startPreflightJob: async () => ({ jobId: "job-102-interpretation" }),
+    },
+    draftId,
+  );
+
+  const task = startConversationRun(
+    {
+      draftId,
+      initialMessages: [
+        { text: "Win if exactly 2 numbers match.", who: "user" },
+      ],
+      lastUserMessage: "Win if exactly 2 numbers match.",
+      localDealerReply: null,
+      phase: "interpret",
+      refinedDraft: null,
+      ruleText: "Win if exactly 2 numbers match.",
+      turnId: 102,
+      wallet: "wallet-102",
+    },
+    deps,
+  );
+
+  await savingInterpretation;
+  cancelConversationRun(draftId, deps);
+  await task;
+
+  assert.equal(postCount, 3);
+  assert.equal(getConversationRun(draftId)?.status, "done");
+  assert.equal(getConversationRun(draftId)?.error, null);
 });
 
 test("draft-save failures are eligible for an explicit retry", () => {

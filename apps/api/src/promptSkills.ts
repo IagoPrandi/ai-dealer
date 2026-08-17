@@ -6,8 +6,8 @@ const PROMPTS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "prompts");
 
 // Bumped when the prompt body changes. The `tyche_` prefix is the internal
 // codename and stays; the persona the player sees is the commercial name.
-export const DEALER_INTERPRET_PROMPT_VERSION = "tyche_rule_interpret_prompt_v2";
-export const DEALER_CHAT_PROMPT_VERSION = "tyche_rule_dealer_chat_prompt_v5";
+export const DEALER_INTERPRET_PROMPT_VERSION = "tyche_rule_interpret_prompt_v3";
+export const DEALER_CHAT_PROMPT_VERSION = "tyche_rule_dealer_chat_prompt_v6";
 
 function readPromptFile(relativePath: string): string {
   // Prompt assets are runtime code. A missing file must stop the request rather

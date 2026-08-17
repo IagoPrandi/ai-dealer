@@ -35,6 +35,7 @@ import {
   composeRefinedRuleDraft,
   getRuleGuidanceTitle,
   getVisibleRuleDifficultyClass,
+  isDeclarativeRuleDraft,
   isExplicitRuleRefinementPatch,
   isRuleRefinementPatch,
   type RuleGuidanceOption,
@@ -118,6 +119,9 @@ function isLikelyRuleDraft(text: string) {
   const trimmed = text.trim();
   if (!trimmed || GREETING_PATTERN.test(trimmed)) {
     return false;
+  }
+  if (isDeclarativeRuleDraft(trimmed)) {
+    return true;
   }
   if (
     QUESTION_PATTERN.test(trimmed) ||
@@ -1124,7 +1128,7 @@ function CreateChat({
           clarityNote: snapshot.interpretation.clarityNote,
           currentRuleText: snapshot.interpretation.sanitizedText,
           needsClarification: true,
-          refinementQuestions: [],
+          refinementQuestions: snapshot.interpretation.clarificationQuestions,
           suggestedRewrites: snapshot.interpretation.suggestedRewrites,
         });
         return;

@@ -424,6 +424,7 @@ export function getBlockingRuleReasonExplanations(
  */
 export interface RuleInterpretationResult {
   addedOperationalClauses: string[];
+  clarificationQuestions: string[];
   clarityNote: string;
   dealerMessage: string;
   englishText: string;
@@ -2359,8 +2360,149 @@ interface RuleRefinementFeedback {
 }
 
 interface IntentSpecificRefinement {
+  focus: readonly string[];
   questions: readonly string[];
   rewrites: readonly string[];
+}
+
+interface IncompleteTicketAssignment {
+  side: "draw" | "guess";
+  values: readonly number[];
+}
+
+const NUMBER_ASSIGNMENT_SEQUENCE =
+  String.raw`(\d{1,3}(?:(?:\s*[,;]\s*(?:(?:and|or|e|ou)\s+)?|\s+(?:and|or|e|ou)\s+|\s+)\d{1,3}){0,5})`;
+
+const TICKET_ASSIGNMENT_PATTERNS: ReadonlyArray<{
+  pattern: RegExp;
+  side: IncompleteTicketAssignment["side"];
+}> = [
+  {
+    pattern: new RegExp(
+      String.raw`\b(?:my|your|the player's|a player's)\s+(?:(?:six|6)\s+)?(?:(?:guessed|chosen|picked)\s+)?(?:numbers?|guess|ticket|picks?)\s+(?:are|is|equals?|must\s+be)\s*[\[({]?\s*${NUMBER_ASSIGNMENT_SEQUENCE}`,
+      "gu",
+    ),
+    side: "guess",
+  },
+  {
+    pattern: new RegExp(
+      String.raw`\b(?:meus?|minhas?|seus?|suas?)\s+(?:(?:seis|6)\s+)?(?:numeros?|dezenas?)\s+(?:sao|serao|forem|foram|devem\s+ser|e)\s*[\[({]?\s*${NUMBER_ASSIGNMENT_SEQUENCE}`,
+      "gu",
+    ),
+    side: "guess",
+  },
+  {
+    pattern: new RegExp(
+      String.raw`\b(?:meu|minha|seu|sua)\s+(?:jogo|aposta|palpite)\s+(?:sera|for|foi|deve\s+ser|e)\s*[\[({]?\s*${NUMBER_ASSIGNMENT_SEQUENCE}`,
+      "gu",
+    ),
+    side: "guess",
+  },
+  {
+    pattern: new RegExp(
+      String.raw`\b(?:the\s+)?(?:official\s+draw|draw|drawn|lottery)\s+numbers?\s+(?:are|is|equals?|must\s+be)\s*[\[({]?\s*${NUMBER_ASSIGNMENT_SEQUENCE}`,
+      "gu",
+    ),
+    side: "draw",
+  },
+  {
+    pattern: new RegExp(
+      String.raw`\bnumeros?\s+(?:do\s+)?sorteio\s+(?:sao|serao|forem|foram|devem\s+ser|e)\s*[\[({]?\s*${NUMBER_ASSIGNMENT_SEQUENCE}`,
+      "gu",
+    ),
+    side: "draw",
+  },
+];
+
+const ENGLISH_SMALL_NUMBERS = [
+  "zero",
+  "one",
+  "two",
+  "three",
+  "four",
+  "five",
+  "six",
+] as const;
+
+function normalizeIntentText(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/gu, "")
+    .toLowerCase();
+}
+
+function findIncompleteTicketAssignment(
+  text: string,
+): IncompleteTicketAssignment | null {
+  const normalized = normalizeIntentText(text);
+  for (const { pattern, side } of TICKET_ASSIGNMENT_PATTERNS) {
+    pattern.lastIndex = 0;
+    const match = pattern.exec(normalized);
+    const values = [
+      ...new Set(
+        (match?.[1]?.match(/\d{1,3}/gu) ?? [])
+          .map(Number)
+          .filter((value) => value >= 1 && value <= 100),
+      ),
+    ];
+    if (values.length > 0 && values.length < 6) {
+      return { side, values };
+    }
+  }
+  return null;
+}
+
+function formatEnglishList(values: readonly number[]) {
+  if (values.length <= 1) {
+    return String(values[0] ?? "");
+  }
+  if (values.length === 2) {
+    return `${values[0]} and ${values[1]}`;
+  }
+  return `${values.slice(0, -1).join(", ")}, and ${values.at(-1)}`;
+}
+
+function describeIncompleteTicketAssignment(text: string) {
+  const assignment = findIncompleteTicketAssignment(text);
+  if (!assignment) {
+    return null;
+  }
+  const specifiedCount = assignment.values.length;
+  const remainingCount = 6 - specifiedCount;
+  const subject = assignment.side === "guess" ? "A guess" : "The official draw";
+  const numberLabel = assignment.side === "guess" ? "guessed" : "drawn";
+  const valueNoun = specifiedCount === 1 ? "value" : "values";
+  const remainingNumbers =
+    remainingCount === 1
+      ? `the remaining ${numberLabel} number`
+      : `the remaining ${ENGLISH_SMALL_NUMBERS[remainingCount]} ${numberLabel} numbers`;
+  return {
+    focus: `Define what must be true of ${remainingNumbers}.`,
+    question: `${subject} must have six unique numbers, but this rule specifies only ${ENGLISH_SMALL_NUMBERS[specifiedCount]} ${valueNoun}: ${formatEnglishList(assignment.values)}. What condition should apply to ${remainingNumbers}?`,
+  };
+}
+
+export function enforceIncompleteTicketClarity(
+  sourceText: string,
+  interpretation: RuleAgentInterpretation,
+): RuleAgentInterpretation {
+  const detail = describeIncompleteTicketAssignment(sourceText);
+  if (!detail) {
+    return interpretation;
+  }
+  return {
+    ...interpretation,
+    clarificationQuestions: dedupeBoundedStrings([
+      detail.question,
+      ...interpretation.clarificationQuestions,
+    ]),
+    clarityNote: detail.focus,
+    dealerMessage: `${detail.focus} ${detail.question}`,
+    needsClarification: true,
+    // A complete rewrite would have to invent the unspecified values or their
+    // constraints, so no selectable rewrite is safe until the player answers.
+    suggestedRewrites: [],
+  };
 }
 
 function looksLikeUnorderedSameSetRule(text: string) {
@@ -2391,8 +2533,17 @@ function looksLikeAmbiguousDigitExample(text: string) {
 }
 
 function inferIntentSpecificRefinement(text: string): IntentSpecificRefinement {
+  const incompleteTicket = describeIncompleteTicketAssignment(text);
+  if (incompleteTicket) {
+    return {
+      focus: [incompleteTicket.focus],
+      questions: [incompleteTicket.question],
+      rewrites: [],
+    };
+  }
   if (looksLikeOrderedTensRangeRule(text)) {
     return {
+      focus: [],
       questions: [],
       rewrites: [
         "Win if all six guessed numbers are in the same tens range as the drawn number in the corresponding position.",
@@ -2401,6 +2552,7 @@ function inferIntentSpecificRefinement(text: string): IntentSpecificRefinement {
   }
   if (looksLikeUnorderedSameSetRule(text)) {
     return {
+      focus: [],
       questions: [
         "Should this require all six guessed numbers to appear in the draw?",
         "Should order be ignored completely?",
@@ -2412,6 +2564,7 @@ function inferIntentSpecificRefinement(text: string): IntentSpecificRefinement {
   }
   if (looksLikeAmbiguousDigitExample(text)) {
     return {
+      focus: [],
       questions: [
         "Should matching compare tens digits, units digits, or either digit?",
       ],
@@ -2422,7 +2575,13 @@ function inferIntentSpecificRefinement(text: string): IntentSpecificRefinement {
       ],
     };
   }
-  return { questions: [], rewrites: [] };
+  return { focus: [], questions: [], rewrites: [] };
+}
+
+function isGenericClarificationQuestion(question: string) {
+  return /(?:which exact comparison.*needs to be defined|restate (?:the|your) (?:complete|full) rule|restate the complete winning condition|what needs (?:to be )?clarified|please be more specific)/iu.test(
+    question,
+  );
 }
 
 function dedupeBoundedStrings(values: readonly string[], limit = 3): string[] {
@@ -2564,7 +2723,9 @@ export function buildRuleRefinementFeedback(
   const deterministicRefinement = inferIntentSpecificRefinement(sourceText);
   const questions = dedupeBoundedStrings([
     ...deterministicRefinement.questions,
-    ...(input.agentClarificationQuestions ?? []),
+    ...(input.agentClarificationQuestions ?? []).filter(
+      (question) => !isGenericClarificationQuestion(question),
+    ),
   ]);
   const agentRewrites = (input.agentSuggestedRewrites ?? []).filter((rewrite) =>
     isIntentPreservingRewrite(sourceText, rewrite),
@@ -2586,16 +2747,19 @@ export function buildRuleRefinementFeedback(
     input.officialInterpretation.trim().length > 0;
   const explanations = getBlockingRuleReasonExplanations(input.reasonCodes);
   explanations.forEach((explanation) => focus.add(explanation.whatToChange));
+  deterministicRefinement.focus.forEach((item) => focus.add(item));
 
   if (questions.length === 0 && !unsupportedButUnderstood) {
-    // The generic question is the last resort, not the default. When the
-    // semantic review knows *which* of the two number sets the rule failed to
-    // use, asking about that is the difference between a question the player
-    // can answer and one that only restates "be more specific".
-    questions.push(
-      describeMissingComparisonQuestion(input.semanticImpact) ??
-        "Which exact comparison in this rule still needs to be defined?",
+    const semanticQuestion = describeMissingComparisonQuestion(
+      input.semanticImpact,
     );
+    // Do not fabricate a generic question when the available diagnostics do
+    // not identify a missing dimension. A false question is worse than no
+    // question: the player cannot repair a compiler mismatch by guessing what
+    // the system failed to preserve.
+    if (semanticQuestion) {
+      questions.push(semanticQuestion);
+    }
   }
 
   if (deterministicCheck.decision === "VALID" && deterministicCheck.artifact) {
@@ -2727,17 +2891,21 @@ async function createRuleInterpretation(
     model: agentConfig.model,
     stage: "interpreting",
   });
-  const interpretation = reconcileSourceClarity(
-    sanitizedText,
-    knownInterpretation ??
-      enforceKnownRuleInterpretation(
-        `${englishText} ${sanitizedText}`,
-        await interpretRuleWithAgent(englishText, agentConfig, signal),
-      ),
+  const interpretation = enforceIncompleteTicketClarity(
+    `${englishText} ${sanitizedText}`,
+    reconcileSourceClarity(
+      sanitizedText,
+      knownInterpretation ??
+        enforceKnownRuleInterpretation(
+          `${englishText} ${sanitizedText}`,
+          await interpretRuleWithAgent(englishText, agentConfig, signal),
+        ),
+    ),
   );
 
   return {
     addedOperationalClauses: interpretation.addedOperationalClauses,
+    clarificationQuestions: interpretation.clarificationQuestions,
     clarityNote: interpretation.clarityNote,
     dealerMessage: interpretation.dealerMessage,
     englishText,
@@ -2887,13 +3055,16 @@ async function createRulePreflight(
       model,
       stage: model === agentConfig.model ? "interpreting" : "escalating",
     });
-    const interpretation = reconcileSourceClarity(
-      sanitizedText,
-      knownInterpretation ??
-        enforceKnownRuleInterpretation(
-          `${compileText} ${sanitizedText}`,
-          await interpretRuleWithAgent(compileText, passConfig, signal),
-        ),
+    const interpretation = enforceIncompleteTicketClarity(
+      `${compileText} ${sanitizedText}`,
+      reconcileSourceClarity(
+        sanitizedText,
+        knownInterpretation ??
+          enforceKnownRuleInterpretation(
+            `${compileText} ${sanitizedText}`,
+            await interpretRuleWithAgent(compileText, passConfig, signal),
+          ),
+      ),
     );
     reportProgress({
       message: "Building and testing the executable rule...",

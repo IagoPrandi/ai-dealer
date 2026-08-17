@@ -6,10 +6,39 @@ import {
   getRuleGuidanceTitle,
   getRuleRefinementBase,
   getVisibleRuleDifficultyClass,
+  isDeclarativeRuleDraft,
   isExplicitRuleRefinementPatch,
   isRuleCreationHelpRequest,
   isRuleRefinementPatch,
 } from "./ruleRefinement.js";
+
+test("recognizes direct English and Portuguese winner conditions as rule drafts", () => {
+  assert.equal(
+    isDeclarativeRuleDraft("vence se a sequencia jogada for 1 2 3 4"),
+    true,
+  );
+  assert.equal(
+    isDeclarativeRuleDraft("Venço quando meus números somarem 100"),
+    true,
+  );
+  assert.equal(
+    isDeclarativeRuleDraft("Win if the guessed sequence is 1 2 3 4"),
+    true,
+  );
+  assert.equal(
+    isDeclarativeRuleDraft("Ganha se o valor total dos números for 100"),
+    true,
+  );
+  assert.equal(
+    isDeclarativeRuleDraft("Como funciona uma regra vencedora?"),
+    false,
+  );
+  assert.equal(
+    isDeclarativeRuleDraft("Por que esta regra precisa de ajuste?"),
+    false,
+  );
+  assert.equal(isDeclarativeRuleDraft("Nova regra"), false);
+});
 
 test("shows difficulty only when an executable AST was actually measured", () => {
   assert.equal(

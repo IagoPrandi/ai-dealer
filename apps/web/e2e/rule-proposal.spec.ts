@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
 import { mockRulePreflight } from "./helpers/preflight";
 import { mockShellData } from "./helpers/shell";
@@ -7,10 +7,11 @@ function hashBytes(seed: number) {
   return Array.from({ length: 32 }, (_, index) => (seed + index) % 256);
 }
 
-function interpretation(text: string, options: { needsClarification?: boolean; suggestedRewrites?: string[] } = {}) {
+function interpretation(text: string, options: { clarificationQuestions?: string[]; needsClarification?: boolean; suggestedRewrites?: string[] } = {}) {
   return {
     interpretation: {
       addedOperationalClauses: [],
+      clarificationQuestions: options.clarificationQuestions ?? [],
       clarityNote: options.needsClarification ? "The rule needs a more precise definition." : "",
       dealerMessage: options.needsClarification ? "I need clarification before I can generate this rule." : "This is how I understand your rule.",
       englishText: text,

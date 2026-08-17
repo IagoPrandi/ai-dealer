@@ -279,6 +279,7 @@ export interface RulePreflightApiResult {
 
 export interface RuleInterpretationApiResult {
   addedOperationalClauses: string[];
+  clarificationQuestions: string[];
   clarityNote: string;
   dealerMessage: string;
   englishText: string;

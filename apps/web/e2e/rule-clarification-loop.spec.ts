@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
 import { mockRulePreflight } from "./helpers/preflight";
 import { mockShellData } from "./helpers/shell";
@@ -7,10 +7,15 @@ function hashBytes(seed: number) {
   return Array.from({ length: 32 }, (_, index) => (seed + index) % 256);
 }
 
-function interpretation(text: string, needsClarification = false) {
+function interpretation(
+  text: string,
+  needsClarification = false,
+  clarificationQuestions: string[] = [],
+) {
   return {
     interpretation: {
       addedOperationalClauses: [],
+      clarificationQuestions,
       clarityNote: needsClarification
         ? "The rule needs a precise measurable threshold."
         : "",
@@ -59,6 +64,78 @@ function validPreflight(text: string, ruleId: number) {
     },
   };
 }
+
+test("shows the interpretation agent's specific question before compilation", async ({
+  page,
+}) => {
+  await mockShellData(page);
+  const phases: string[] = [];
+  const question =
+    "A guess must have six unique numbers, but this rule specifies only four values: 1, 2, 3, and 4. What condition should apply to the remaining two guessed numbers?";
+  await mockRulePreflight(page, (body) => {
+    phases.push(body.phase);
+    return {
+      json: interpretation(body.text, true, [question]),
+      status: 200,
+    };
+  });
+
+  await page.goto("/play/propose");
+  await page
+    .getByLabel("Message", { exact: true })
+    .fill(
+      "I win if my numbers are 1 2 3 4 and the lottery numbers contain none of these numbers.",
+    );
+  await page.getByRole("button", { name: "Send message" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "Clarify this rule?" }),
+  ).toBeVisible();
+  await expect(page.getByText(question)).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Confirm and generate" }),
+  ).toHaveCount(0);
+  expect(phases).toEqual(["interpret"]);
+});
+
+test("routes a direct Portuguese winner condition to interpretation, not dealer chat", async ({
+  page,
+}) => {
+  await mockShellData(page);
+  const phases: string[] = [];
+  let dealerChatCalls = 0;
+  const question =
+    "A guess must have six unique numbers, but this rule specifies only four values: 1, 2, 3, and 4. What condition should apply to the remaining two guessed numbers?";
+
+  await page.route("**/rule-dealer/ask", async (route) => {
+    dealerChatCalls += 1;
+    await route.fulfill({
+      contentType: "application/json",
+      json: { answer: "This route should not be used.", proposedRuleText: null },
+      status: 200,
+    });
+  });
+  await mockRulePreflight(page, (body) => {
+    phases.push(body.phase);
+    return {
+      json: interpretation(body.text, true, [question]),
+      status: 200,
+    };
+  });
+
+  await page.goto("/play/propose");
+  await page
+    .getByLabel("Message", { exact: true })
+    .fill("vence se a sequencia jogada for 1 2 3 4");
+  await page.getByRole("button", { name: "Send message" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "Clarify this rule?" }),
+  ).toBeVisible();
+  await expect(page.getByText(question)).toBeVisible();
+  expect(phases).toEqual(["interpret"]);
+  expect(dealerChatCalls).toBe(0);
+});
 
 // A vague rule that the compiler cannot turn into a measurable rule, with NO
 // suggestedRewrite — this is the base that previously caused an infinite

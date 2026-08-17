@@ -17,6 +17,7 @@ function interpretationFrame(id: number) {
     data: {
       interpretation: {
         addedOperationalClauses: [],
+        clarificationQuestions: [],
         clarityNote: "",
         dealerMessage: "This is how I understand your rule.",
         englishText: RULE_TEXT,

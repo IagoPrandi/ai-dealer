@@ -36,6 +36,7 @@ Use these mappings when the named information is explicit. Do not use them to fi
 | `drop highest/lowest N`                      | Bounded removal using the named strategy                                     | Remove up to two lowest picks.                                                                  |
 | `map value and keep in 1-100`                | Apply mapping with a range guard                                             | Double picks, discard results outside the domain.                                               |
 | explicit `A and B` / `A or B`                | Preserve both clauses and connector                                          | Never compile only the easier clause.                                                           |
+| fewer than six values presented as full guess/draw | Incomplete ticket assignment                                           | Ask what condition applies to the unspecified values; do not assume they are irrelevant.       |
 | guess ignored                                | Shared outcome for all eligible guesses                                      | Requires confirmation unless explicit.                                                          |
 | draw ignored                                 | Outcome fixed before draw                                                    | Requires confirmation unless explicit.                                                          |
 

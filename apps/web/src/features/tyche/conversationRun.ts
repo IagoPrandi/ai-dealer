@@ -109,6 +109,12 @@ export function isConversationDraftSaveError(error: null | string) {
   return error?.toLowerCase().includes("could not be saved") ?? false;
 }
 
+function rethrowCancelledSave(signal: AbortSignal, cause: unknown) {
+  if (signal.aborted) {
+    throw cause;
+  }
+}
+
 export async function saveConversationDraftSnapshot({
   deps = defaultDeps,
   draftId,
@@ -346,6 +352,7 @@ async function runConversation(
         status: "pending",
       });
     } catch (draftError) {
+      rethrowCancelledSave(signal, draftError);
       patchConversationRun(args.draftId, {
         error: `Your message was sent, but the draft could not be saved. ${deps.describeError(draftError)}`,
         status: "pending",
@@ -375,6 +382,7 @@ async function runConversation(
           wallet: args.wallet,
         });
       } catch (draftError) {
+        rethrowCancelledSave(signal, draftError);
         patchConversationRun(args.draftId, {
           error: `Dealer replied, but the draft could not be saved. ${deps.describeError(draftError)}`,
           status: "error",
@@ -418,6 +426,7 @@ async function runConversation(
           wallet: args.wallet,
         });
       } catch (draftError) {
+        rethrowCancelledSave(signal, draftError);
         patchConversationRun(args.draftId, {
           error: `Dealer replied, but the draft could not be saved. ${deps.describeError(draftError)}`,
           status: "error",
@@ -479,6 +488,7 @@ async function runConversation(
         wallet: args.wallet,
       });
     } catch (draftError) {
+      rethrowCancelledSave(signal, draftError);
       patchConversationRun(args.draftId, {
         error: `Your rule is compiling, but the draft could not be saved, so reopening it later may not reconnect. ${deps.describeError(draftError)}`,
         status: "pending",
@@ -587,6 +597,7 @@ async function settlePreflightJob(ctx: {
           wallet: ctx.wallet,
         });
       } catch (draftError) {
+        rethrowCancelledSave(ctx.signal, draftError);
         patchConversationRun(draftId, {
           error: `Interpretation received, but the draft could not be saved. ${deps.describeError(draftError)}`,
           status: "error",
@@ -635,6 +646,7 @@ async function settlePreflightJob(ctx: {
         wallet: ctx.wallet,
       });
     } catch (draftError) {
+      rethrowCancelledSave(ctx.signal, draftError);
       patchConversationRun(draftId, {
         error: `Rule compiled, but the draft could not be saved. ${deps.describeError(draftError)}`,
         status: "error",
