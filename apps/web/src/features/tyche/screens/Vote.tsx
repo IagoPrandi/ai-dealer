@@ -5,7 +5,7 @@ import { useTyche } from "../context";
 import { fmtSol, fmtTurnId } from "../data/format";
 import type { UiRule } from "../data/types";
 import { getRoundPhase } from "../roundPhase";
-import { Ico, Medal, VoteTally, finalistStatus, useCountdownTo } from "../shared";
+import { Dealer, Ico, Medal, VoteTally, finalistStatus, useCountdownTo } from "../shared";
 
 type FinalistPhaseKind = "decision" | "locked" | "original_only" | "pending" | "waiting";
 
@@ -241,7 +241,10 @@ export function VoteScreen() {
       <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", padding: "var(--ide-shell-content-top) 20px 96px" }}>
 
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 18 }}>
-          <h1 className="ide-plate" style={{ fontSize: 25, margin: 0 }}>Rules</h1>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+            <Dealer size={34} />
+            <h1 className="ide-plate" style={{ fontSize: 22, margin: 0 }}>Rules</h1>
+          </div>
           <div style={{ display: "grid", gap: 3, justifyItems: "end" }}>
             <span className="ide-num" style={{ fontSize: 12.5, color: "var(--purple-soft)", fontWeight: 700, letterSpacing: "0.06em" }}>{fmtTurnId(turnId)}</span>
             {endSeconds !== null ? (

@@ -9,7 +9,7 @@
  */
 import { useTyche } from "../context";
 import { useConversationDrafts } from "../data/hooks";
-import { ConversationList, Ico } from "../shared";
+import { ConversationList, Dealer, Ico } from "../shared";
 
 export function MyRulesScreen() {
   const { connect, connected, go, walletAddress } = useTyche();
@@ -44,16 +44,19 @@ export function MyRulesScreen() {
             marginBottom: 18,
           }}
         >
-          <h1
-            style={{
-              fontSize: 24,
-              fontWeight: 800,
-              margin: 0,
-              letterSpacing: "-0.025em",
-            }}
-          >
-            My rules
-          </h1>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+            <Dealer size={34} />
+            <h1
+              style={{
+                fontSize: 24,
+                fontWeight: 800,
+                margin: 0,
+                letterSpacing: "-0.025em",
+              }}
+            >
+              My rules
+            </h1>
+          </div>
           <button
             aria-label="New conversation"
             className="ide-btn"

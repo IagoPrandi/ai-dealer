@@ -332,7 +332,7 @@ function NotificationSheet({
 }
 
 export function RewardsScreen() {
-  const { client, connect, go, wallet, walletAddress } = useTyche();
+  const { client, connect, wallet, walletAddress } = useTyche();
   const { claims, error, loading, reload } = usePlayerClaims(walletAddress);
   const tokenomics = useTokenomics(walletAddress);
   const [tab, setTab] = useState<"activity" | "overview">("overview");
@@ -843,8 +843,9 @@ export function RewardsScreen() {
                 : "Pull to refresh"}
           </span>
         </div>
+        {/* Reachable from the bottom nav, so the head leads with the brand
+            mark instead of a back arrow. */}
         <ScreenHead
-          onBack={() => go("profile")}
           right={
             <button
               aria-label={

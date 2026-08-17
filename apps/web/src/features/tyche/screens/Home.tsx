@@ -10,7 +10,6 @@ import {
   fmtInt,
   fmtSol,
   lamportsToSol,
-  truncateAddress,
 } from "../data/format";
 import { usePlayerClaims } from "../data/hooks";
 import { summarizePlayerClaims } from "../data/claimState";
@@ -20,29 +19,10 @@ import {
   Ico,
   Medal,
   VoteTally,
+  WalletButton,
   useCountdownTo,
   useLivePrize,
 } from "../shared";
-
-function WalletBtn() {
-  const { connect, connected, go, walletAddress } = useTyche();
-  return (
-    <button
-      onClick={() => (connected ? go("profile") : connect())}
-      className="ide-btn"
-      style={{
-        padding: "10px 16px", borderRadius: "var(--radius-pill)",
-        fontFamily: "Oswald, sans-serif", fontSize: 13, fontWeight: 600,
-        letterSpacing: "0.14em",
-        boxShadow: "var(--solid-4), var(--halo-magenta)",
-      }}
-      type="button"
-    >
-      <Ico.wallet style={{ color: "var(--on-accent)" }} />{" "}
-      {connected && walletAddress ? truncateAddress(walletAddress) : "Connect"}
-    </button>
-  );
-}
 
 function PromptInput() {
   const { fees, go } = useTyche();
@@ -220,12 +200,12 @@ export function HomeScreen() {
         >
           <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
             <Dealer size={34} />
-            <span className="ide-plate" style={{ fontSize: 25 }}>
+            <span className="ide-plate" style={{ fontSize: 22 }}>
               {BRAND_NAME}
             </span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <WalletBtn />
+            <WalletButton />
           </div>
         </div>
 

@@ -1701,7 +1701,7 @@ function CreateChat({
             <Ico.back style={{ width: 18, height: 18 }} />
           </button>
           <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-            <Dealer size={30} />
+            <Dealer size={34} />
             <div>
               <div
                 style={{

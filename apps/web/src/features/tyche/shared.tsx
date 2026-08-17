@@ -8,7 +8,8 @@
 import Image from "next/image";
 import { useEffect, useState, type CSSProperties, type SVGProps } from "react";
 
-import { fmtCountdown, fmtSol, fmtTurnId, timeAgo } from "./data/format";
+import { useTyche } from "./context";
+import { fmtCountdown, fmtSol, fmtTurnId, timeAgo, truncateAddress } from "./data/format";
 import type { ConversationDraftApi, UiRule } from "./data/types";
 import { isPreflightJobPointerFresh } from "./preflightJobStore";
 
@@ -102,6 +103,35 @@ export function Dealer({ size = 38 }: { size?: number }) {
         unoptimized
       />
     </span>
+  );
+}
+
+/**
+ * Wallet pill of the round header. Shared so every screen that shows the
+ * wallet — the round, the account head — carries the same control instead of
+ * a per-screen copy. It keeps the truncated address on one line and trades
+ * padding and type size for width on narrow shells, where the head also has
+ * to hold the brand mark and the screen title.
+ */
+export function WalletButton() {
+  const { connect, connected, go, walletAddress } = useTyche();
+  return (
+    <button
+      onClick={() => (connected ? go("profile") : connect())}
+      className="ide-btn"
+      style={{
+        flexShrink: 0, whiteSpace: "nowrap",
+        padding: "clamp(8px, 2.5vw, 10px) clamp(11px, 4vw, 16px)",
+        borderRadius: "var(--radius-pill)",
+        fontFamily: "Oswald, sans-serif", fontSize: "clamp(11px, 3.4vw, 13px)", fontWeight: 600,
+        letterSpacing: "0.14em",
+        boxShadow: "var(--solid-4), var(--halo-magenta)",
+      }}
+      type="button"
+    >
+      <Ico.wallet style={{ color: "var(--on-accent)" }} />{" "}
+      {connected && walletAddress ? truncateAddress(walletAddress) : "Connect"}
+    </button>
   );
 }
 
@@ -341,13 +371,24 @@ export function Confetti() {
   );
 }
 
-export function ScreenHead({ onBack, right, title }: { onBack: () => void; right?: React.ReactNode; title: string }) {
+/**
+ * Head of every secondary screen: back control, brand mark, plate title, and
+ * an optional control on the right. `onBack` is omitted by the screens that
+ * are reachable from the bottom nav — there the brand mark takes the slot the
+ * back arrow would occupy.
+ */
+export function ScreenHead({ onBack, right, title }: { onBack?: () => void; right?: React.ReactNode; title: string }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-      <button aria-label="Back" className="ide-iconbtn" onClick={onBack} type="button">
-        <Ico.back style={{ width: 18, height: 18 }} />
-      </button>
-      <h1 className="ide-plate" style={{ fontSize: 22, fontWeight: 400, margin: 0, flex: 1, minWidth: 0 }}>{title}</h1>
+    <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 16 }}>
+      {onBack ? (
+        <button aria-label="Back" className="ide-iconbtn" onClick={onBack} type="button">
+          <Ico.back style={{ width: 18, height: 18 }} />
+        </button>
+      ) : null}
+      <Dealer size={34} />
+      {/* The brand mark costs the row ~35px, so the plate gives width back on
+          narrow shells instead of wrapping the longest titles onto two lines. */}
+      <h1 className="ide-plate" style={{ fontSize: "clamp(18px, 5.4vw, 22px)", fontWeight: 400, margin: 0, flex: 1, minWidth: 0 }}>{title}</h1>
       {right}
     </div>
   );

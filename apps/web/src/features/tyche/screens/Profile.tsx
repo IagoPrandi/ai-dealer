@@ -15,7 +15,7 @@ import { useConversationDrafts, usePlayerClaims, usePlayerHistory } from "../dat
 import { claimRecordToWallet } from "../data/claimFlow";
 import { summarizePlayerClaims } from "../data/claimState";
 import { describeTxError } from "../data/tx";
-import { ConversationList, Dealer, Ico, VoteTally } from "../shared";
+import { ConversationList, Dealer, Ico, VoteTally, WalletButton } from "../shared";
 import type { PlayerHistoryEventApi } from "../data/types";
 
 /* withdraw-breakdown tile — square block on the inner surface, DM Mono micro
@@ -162,10 +162,13 @@ export function ProfileScreen() {
       <div className="ide-ambient" />
       <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", overflowX: "hidden", padding: "var(--ide-shell-content-top) 18px 96px" }}>
 
-        {/* screen head — plate title, network on the right */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16 }}>
-          <h1 className="ide-plate" style={{ fontSize: 22, fontWeight: 400, margin: 0 }}>Account</h1>
-          <span className="ide-num" style={{ fontSize: 12, color: "var(--dim)" }}>Solana devnet</span>
+        {/* screen head — brand mark, plate title, the round's wallet pill */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+            <Dealer size={34} />
+            <h1 className="ide-plate" style={{ fontSize: "clamp(18px, 5.4vw, 22px)", fontWeight: 400, margin: 0, whiteSpace: "nowrap" }}>Account</h1>
+          </div>
+          <WalletButton />
         </div>
 
         {/* CLAIM HERO — sits directly on the page surface: no fill and no solid
