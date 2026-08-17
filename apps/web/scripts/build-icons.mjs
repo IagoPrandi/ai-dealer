@@ -1,10 +1,10 @@
 // Regenerates the favicon and PWA / home-screen icons from the canonical
-// transparent blindfolded-bust artwork. The portrait is cropped from the top
-// into a strict square, filled with the brand gradient, and kept transparent.
+// magenta goddess logo. The source is already square, monochrome, and
+// transparent, so the icon builder preserves its authored shape and colour.
 //
 // Usage:
 //   node scripts/build-icons.mjs [srcSvg] [outDir]
-// Defaults: public/illustrations/busto-vendado.svg -> public/icons
+// Defaults: public/illustrations/logo-deusa-vetorizada.svg -> public/icons
 
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -17,64 +17,17 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(here, "..");
 const srcPath = process.argv[2]
   ? path.resolve(process.cwd(), process.argv[2])
-  : path.join(webRoot, "public/illustrations/busto-vendado.svg");
+  : path.join(webRoot, "public/illustrations/logo-deusa-vetorizada.svg");
 const outDir = process.argv[3]
   ? path.resolve(process.cwd(), process.argv[3])
   : path.join(webRoot, "public/icons");
 
-const GRADIENT = ["#c77dff", "#9945ff", "#2ed6a6", "#14f195"];
 const M = 1024; // master render size
 
-const squareBust = await sharp(srcPath, { density: 200, limitInputPixels: false })
-  .resize(M, M, { fit: "cover", position: "north" })
+const masterFullBleed = await sharp(srcPath, { density: 200, limitInputPixels: false })
+  .resize(M, M, { fit: "contain" })
   .png()
   .toBuffer();
-
-// The supplied transparent source is a white/black master. Flattening it on
-// black turns the visible white artwork into a luminance mask while preserving
-// the blindfold, facial shadows, and transparent background as negative space.
-const { data: bustMask, info: maskInfo } = await sharp(squareBust)
-  .flatten({ background: "#000000" })
-  .greyscale()
-  .removeAlpha()
-  .raw()
-  .toBuffer({ resolveWithObject: true });
-
-const gradientSvg = Buffer.from(
-  `<svg xmlns="http://www.w3.org/2000/svg" width="${M}" height="${M}">
-     <defs>
-       <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-         <stop offset="0" stop-color="${GRADIENT[0]}"/>
-         <stop offset="0.34" stop-color="${GRADIENT[1]}"/>
-         <stop offset="0.78" stop-color="${GRADIENT[2]}"/>
-         <stop offset="1" stop-color="${GRADIENT[3]}"/>
-       </linearGradient>
-     </defs>
-     <rect width="${M}" height="${M}" fill="url(#g)"/>
-   </svg>`,
-  "utf8",
-);
-
-const { data: gradientRgb, info: gradientInfo } = await sharp(gradientSvg)
-  .removeAlpha()
-  .raw()
-  .toBuffer({ resolveWithObject: true });
-
-const gradientBust = await sharp(gradientRgb, {
-  raw: {
-    width: gradientInfo.width,
-    height: gradientInfo.height,
-    channels: 3,
-  },
-})
-  .joinChannel(bustMask, {
-    raw: { width: maskInfo.width, height: maskInfo.height, channels: 1 },
-  })
-  .png()
-  .toBuffer();
-
-// Full-bleed master (browser, iOS, and PWA "any").
-const masterFullBleed = gradientBust;
 
 // Maskable master (Android): figure shrunk into the ~78% safe zone so the
 // circle/squircle mask never clips the head or shoulders.

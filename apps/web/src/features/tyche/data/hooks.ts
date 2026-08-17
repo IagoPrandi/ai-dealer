@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSolanaClient, useWalletConnection } from "@solana/react-hooks";
 import { address } from "@solana/kit";
+import { BRAND_NAME } from "@tyche/config";
 import {
   MVP_FEES_SOL,
   REPEATED_ACTION_FEE_MULTIPLIER,
@@ -556,7 +557,7 @@ export function usePlayerGuesses(
         }
         console.warn("Failed to load guess receipts.", cause);
         setReceipts([]);
-        setError("Tyche could not load your guesses for this round.");
+        setError(`${BRAND_NAME} could not load your guesses for this round.`);
       })
       .finally(() => {
         if (!controller.signal.aborted) {

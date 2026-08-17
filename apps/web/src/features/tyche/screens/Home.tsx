@@ -2,6 +2,7 @@
 
 /** RODADA (home) — prize, time, main action, rule preview. Ported from app-home.jsx. */
 import { useState } from "react";
+import { BRAND_NAME } from "@tyche/config";
 
 import { useTyche } from "../context";
 import {
@@ -219,8 +220,8 @@ export function HomeScreen() {
         >
           <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
             <Dealer size={34} />
-            <span className="ide-plate" style={{ fontSize: 26 }}>
-              Tyche
+            <span className="ide-plate" style={{ fontSize: 25 }}>
+              {BRAND_NAME}
             </span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -828,7 +829,7 @@ export function HomeScreen() {
             margin: "0 2px 10px",
           }}
         >
-          <span className="ide-plate" style={{ fontSize: 24, whiteSpace: "nowrap" }}>
+          <span className="ide-plate" style={{ fontSize: 22, whiteSpace: "nowrap" }}>
             The rules
           </span>
           <span

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { BRAND_NAME } from "@tyche/config";
 
 import { useTyche } from "../context";
 import { fmtInt, fmtSol, fmtTurnId } from "../data/format";
@@ -19,9 +20,9 @@ export function ShareScreen() {
 
   const shareText = useMemo(() => {
     if (draw.length > 0) {
-      return `Tyche ${fmtTurnId(turnId)} settled with draw ${draw.join(", ")}. Prize pool: ${fmtSol(prizeSol)} SOL.`;
+      return `${BRAND_NAME} ${fmtTurnId(turnId)} settled with draw ${draw.join(", ")}. Prize pool: ${fmtSol(prizeSol)} SOL.`;
     }
-    return `Tyche ${fmtTurnId(turnId)} is live with ${fmtSol(prizeSol)} SOL in the visible prize pool and ${fmtInt(rules.rules.length)} community rules.`;
+    return `${BRAND_NAME} ${fmtTurnId(turnId)} is live with ${fmtSol(prizeSol)} SOL in the visible prize pool and ${fmtInt(rules.rules.length)} community rules.`;
   }, [draw, prizeSol, rules.rules.length, turnId]);
 
   async function copyLink() {
@@ -33,7 +34,7 @@ export function ShareScreen() {
     if (navigator.share) {
       await navigator.share({
         text: shareText,
-        title: `Tyche ${fmtTurnId(turnId)}`,
+        title: `${BRAND_NAME} ${fmtTurnId(turnId)}`,
         url: publicRoundUrl,
       });
       return;

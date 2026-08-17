@@ -128,8 +128,8 @@
 .ide-plate { font-family: Bevan, serif; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text); text-shadow: var(--plate); }
 .ide-plate-lg { text-shadow: var(--plate-lg); }
 
-/* Canonical dealer mark: a strict 1:1 crop of the supplied gradient bust,
-   rendered without a border or background tile. */
+/* Canonical brand mark: the supplied square goddess vector in the same
+   magenta used by the home prize rays, without a border or background tile. */
 .ide-dealer {
   position: relative;
   display: block;
@@ -138,8 +138,8 @@
 }
 
 .ide-dealer-image {
-  object-fit: cover;
-  object-position: center top;
+  object-fit: contain;
+  object-position: center;
 }
 
 /* scrollbars hidden inside phone */

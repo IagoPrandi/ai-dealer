@@ -1,11 +1,12 @@
-# Tyche — Narrative A Messaging System
+# Tywish — Narrative A Messaging System
 
 > **Version:** 1.2.0
 > **Status:** Adopted — narrative spine confirmed by the owner on 2026-08-09. The mythic register (§3.1 / §4.7) was added on 2026-08-09 and revised the same day on the owner's direction: the god does answer wishes, and grants exactly one per round.
 > **Last updated:** 2026-08-09
 > **Scope:** Single source of truth for every public-facing sentence: X, Telegram, site, docs, video, creator kits, partner briefs.
+> **Naming:** **Tywish** is the commercial name and the only one used in public communication. `tyche` is the internal engineering codename and appears only inside the repository. **Tyche the Goddess** keeps her mythological name — she is the character, not the product.
 > **Language:** All public output is **English only**. This document is the reference; the copy inside it is production copy.
-> **Parents:** [PRD.md](../../PRD.md) §3 · [guia-identidade-publica-tyche.md](../../guia-identidade-publica-tyche.md) · [nova-narrativa-jogo.md](../../nova-narrativa-jogo.md) · [PRD-TOKENOMICS-v2.8.md](../../PRD-TOKENOMICS-v2.8.md)
+> **Parents:** [PRD.md](../../PRD.md) §3 · [guia-identidade-publica-tywish.md](../../guia-identidade-publica-tywish.md) · [nova-narrativa-jogo.md](../../nova-narrativa-jogo.md) · [PRD-TOKENOMICS-v2.8.md](../../PRD-TOKENOMICS-v2.8.md)
 
 ---
 
@@ -15,7 +16,7 @@
 
 The real privilege of any house was never the edge. It was being the only party allowed to write the winning condition and the fine print, and to write them where no one else could read them in time.
 
-**Thesis:** Tyche takes the pen out of the house's hand and gives it to the player. Every round, the winning condition is written, contested, and **frozen in public before the draw** — and explained after it.
+**Thesis:** Tywish takes the pen out of the house's hand and gives it to the player. Every round, the winning condition is written, contested, and **frozen in public before the draw** — and explained after it.
 
 This is what "built for and by the community, against the status quo" means concretely here. It is not an adjective about the team. It is a transfer of a specific power — rule authorship — evidenced every round by a frozen artifact and a public verdict.
 
@@ -70,7 +71,7 @@ Without this, Narrative A is a slogan. With it, it is a content engine. Every el
 
 ### Controlled vocabulary
 
-The narrative layer from [guia-identidade-publica-tyche.md](../../guia-identidade-publica-tyche.md) §5 stays in force and is additive to Narrative A. The Goddess is the character inside the game; the House is the antagonist outside it. They do not compete: the Goddess personifies chance and is impartial; the House personifies authorship of the rules and is what Tyche displaces.
+The narrative layer from [guia-identidade-publica-tywish.md](../../guia-identidade-publica-tywish.md) §5 stays in force and is additive to Narrative A. The Goddess is the character inside the game; the House is the antagonist outside it. They do not compete: the Goddess personifies chance and is impartial; the House personifies authorship of the rules and is what Tywish displaces.
 
 | Objective concept | Public term | Note |
 |---|---|---|
@@ -149,11 +150,11 @@ The register must not collapse three distinct figures into one. This is not a st
 
 | Figure | What it is | May be said to | May never be said to |
 |---|---|---|---|
-| **Tyche, the Goddess** | Personification of chance ([nova-narrativa-jogo.md](../../nova-narrativa-jogo.md) §6). Abstract, blindfolded, impartial. The figure who takes the wishes. | Hear every wish, grant the one the community elected, and settle the round. | Favour, recognise, or reward anyone; grant a win; control the dice — per [guia-identidade-publica-tyche.md](../../guia-identidade-publica-tyche.md), she personifies chance rather than controlling it. |
+| **Tyche, the Goddess** | Personification of chance ([nova-narrativa-jogo.md](../../nova-narrativa-jogo.md) §6). Abstract, blindfolded, impartial. The figure who takes the wishes. | Hear every wish, grant the one the community elected, and settle the round. | Favour, recognise, or reward anyone; grant a win; control the dice — per [guia-identidade-publica-tywish.md](../../guia-identidade-publica-tywish.md), she personifies chance rather than controlling it. |
 | **The AI** (rule compiler and runtime) | The scribe: it reads a wish, validates it, freezes it, and publishes the reasoning. | Read, validate, freeze, publish, execute. | Pick a winner, run or influence the draw, or decide a verdict. The verdict is computed; the randomness is external and verifiable. |
 | **The House** | The antagonist: authorship of the rules, faceless and generic. | Be displaced. | Be named (§4.2), or be given a deity register — the House is not mythologised. |
 
-The granting is a two-part act and both parts must stay visible: **the community elects the wish, the god grants what was elected.** A piece where the deity picks the wish on its own contradicts §1 — that is the House's privilege, not Tyche's.
+The granting is a two-part act and both parts must stay visible: **the community elects the wish, the god grants what was elected.** A piece where the deity picks the wish on its own contradicts §1 — that is the House's privilege, not Tywish's.
 
 #### Prohibited constructions
 
@@ -188,7 +189,7 @@ This is both a factual accuracy requirement and a direct rule from [nova-narrati
 
 Fine Print examples must be generic or drawn from publicly documented, uncontested facts, and must never assert wrongdoing by an identifiable party.
 
-### 4.3 Never describe Tyche as a casino or betting product
+### 4.3 Never describe Tywish as a casino or betting product
 
 In bio, site metadata, page titles, docs, app manifests, store listings, and partner briefs, the product description is a **game of rules** / **on-chain social game**. "House" is content rhetoric and belongs in posts, not in classification surfaces.
 
@@ -196,7 +197,7 @@ Rationale: X classifies gambling products — explicitly including lotteries —
 
 ### 4.4 Zero compensated content
 
-No one is paid — in JDR, SOL, fiat, NFTs, allowlist spots, or product access — to post, reply, repost, or mention Tyche. No affiliate deals, no ambassador programmes, no post-to-earn mechanics, no engagement quests that pay per post.
+No one is paid — in JDR, SOL, fiat, NFTs, allowlist spots, or product access — to post, reply, repost, or mention Tywish. No affiliate deals, no ambassador programmes, no post-to-earn mechanics, no engagement quests that pay per post.
 
 This is a hard external constraint, not a preference:
 
@@ -251,11 +252,11 @@ The facts, per [PRD-TOKENOMICS-v2.8.md](../../PRD-TOKENOMICS-v2.8.md):
 
 ## 6. Pre-publication checklist
 
-Applied to every piece, in addition to [guia-identidade-publica-tyche.md](../../guia-identidade-publica-tyche.md) §11 (truth, comprehension, context, coherence, proof):
+Applied to every piece, in addition to [guia-identidade-publica-tywish.md](../../guia-identidade-publica-tywish.md) §11 (truth, comprehension, context, coherence, proof):
 
 1. Does it claim, imply, or joke about a probability advantage? → reject.
 2. Does it name a real operator, platform, or person as the antagonist? → reject.
-3. Does it describe Tyche as a casino, betting, or gambling product? → reject.
+3. Does it describe Tywish as a casino, betting, or gambling product? → reject.
 4. Is anyone being compensated, in any form, for posting it or for reacting to it? → reject.
 5. Does it promise price, return, or inevitability? → reject.
 6. Does it make a factual claim about a round without a hash or verification link? → add the proof or cut the claim.

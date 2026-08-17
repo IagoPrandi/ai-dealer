@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { address } from "@solana/kit";
 
+import { BRAND_NAME } from "@tyche/config";
 import { RULE_MAX_TOKENS } from "@tyche/constants";
 
 import {
@@ -828,7 +829,7 @@ function AgentProgress({
             textTransform: "uppercase",
           }}
         >
-          Tyche
+          {BRAND_NAME}
         </span>
         <span style={{ color: "var(--text)", fontSize: 14, lineHeight: 1.4 }}>
           {reconnecting
@@ -1710,7 +1711,7 @@ function CreateChat({
                   whiteSpace: "nowrap",
                 }}
               >
-                Tyche
+                {BRAND_NAME}
               </div>
               <div
                 style={{

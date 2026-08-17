@@ -7,6 +7,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { address } from "@solana/kit";
+import { BRAND_NAME } from "@tyche/config";
 
 import {
   createSubmitGuessInstruction,
@@ -67,7 +68,7 @@ function walletActionCopy(action: WalletPendingAction) {
     return {
       tone: "var(--yellow)",
       title: "Transaction pending",
-      message: "The wallet signed the transaction. Tyche is waiting for confirmed network status before allowing another submit.",
+      message: `The wallet signed the transaction. ${BRAND_NAME} is waiting for confirmed network status before allowing another submit.`,
     };
   }
   if (action.status === "delayed_confirmation") {
@@ -88,7 +89,7 @@ function walletActionCopy(action: WalletPendingAction) {
     return {
       tone: "var(--yellow)",
       title: "Round changed during approval",
-      message: `The wallet action targeted round ${fmtTurnId(action.turnId ?? 0)}. Tyche refreshed the live round before allowing another submit.`,
+      message: `The wallet action targeted round ${fmtTurnId(action.turnId ?? 0)}. ${BRAND_NAME} refreshed the live round before allowing another submit.`,
     };
   }
   if (action.status === "confirmed") {
@@ -384,7 +385,7 @@ function PlayFlow() {
           walletAddress,
         });
         reloadAll();
-        setError("The wallet signed the guess, but Tyche could not verify the on-chain round pass yet. Wait a moment, then refresh before retrying.");
+        setError(`The wallet signed the guess, but ${BRAND_NAME} could not verify the on-chain round pass yet. Wait a moment, then refresh before retrying.`);
         return;
       }
 

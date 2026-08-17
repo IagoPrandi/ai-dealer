@@ -1,6 +1,8 @@
 "use client";
 
 /** Wallet-connect bottom sheet. Replaces the standalone /play/wallet flow. */
+import { BRAND_NAME } from "@tyche/config";
+
 import { Dealer, Ico } from "../shared";
 
 interface Connector {
@@ -61,7 +63,7 @@ export function ConnectOverlay({
         <div style={{ display: "grid", gap: 9, marginTop: 14 }}>
           {connectors.length === 0 ? (
             <p style={{ fontSize: 14, color: "var(--muted)", lineHeight: 1.5 }}>
-              No compatible wallet was detected. Open Tyche inside a Solana wallet&apos;s browser (Phantom, Backpack, Solflare) or install a Wallet Standard wallet.
+              No compatible wallet was detected. Open {BRAND_NAME} inside a Solana wallet&apos;s browser (Phantom, Backpack, Solflare) or install a Wallet Standard wallet.
             </p>
           ) : (
             connectors.map((connector) => (

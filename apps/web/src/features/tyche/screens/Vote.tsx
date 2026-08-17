@@ -241,7 +241,7 @@ export function VoteScreen() {
       <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", padding: "var(--ide-shell-content-top) 20px 96px" }}>
 
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 18 }}>
-          <h1 className="ide-plate" style={{ fontSize: 30, margin: 0 }}>Rules</h1>
+          <h1 className="ide-plate" style={{ fontSize: 25, margin: 0 }}>Rules</h1>
           <div style={{ display: "grid", gap: 3, justifyItems: "end" }}>
             <span className="ide-num" style={{ fontSize: 12.5, color: "var(--purple-soft)", fontWeight: 700, letterSpacing: "0.06em" }}>{fmtTurnId(turnId)}</span>
             {endSeconds !== null ? (

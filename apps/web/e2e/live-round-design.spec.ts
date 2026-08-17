@@ -9,7 +9,7 @@ test("play route reproduces the Plataforma app flow", async ({ page }) => {
   await expect(page.getByText("Drawn numbers")).toBeVisible();
 
   await page.getByRole("button", { name: "Back to current round" }).first().click();
-  await expect(page.getByText("Tyche")).toBeVisible();
+  await expect(page.getByText("Tywish")).toBeVisible();
   await expect(page.locator(".platform-prize-hero h1")).toHaveText("24.86SOL");
   await expect(
     page

@@ -1,6 +1,17 @@
-# Tyche
+# Tywish
 
-Tyche is a mobile-first Solana DApp monorepo for a social lottery game where each turn can have a community-elected alternative winning rule.
+Tywish is a mobile-first Solana DApp monorepo for a social lottery game where each turn can have a community-elected alternative winning rule.
+
+## Naming
+
+The project carries two names. **Tywish** is the commercial name and the only one a player
+ever sees. **`tyche`** is the internal codename and stays in every technical identifier:
+the `@tyche/*` package scope, the `TYCHE_*` environment prefix, the Docker project and
+volumes, the Postgres database, the Rust crate and its `tyche.so` artifact, and all
+deployed or hash-verified manifests. `tyche` in the code is deliberate, not a leftover.
+
+The commercial name has one source of truth, `BRAND_NAME` in `packages/config`; the static
+PWA manifest duplicates it because it cannot import.
 
 ## Workspace
 

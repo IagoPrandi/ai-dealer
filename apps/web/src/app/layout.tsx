@@ -1,22 +1,23 @@
 import type { Metadata, Viewport } from "next";
+import { BRAND_NAME } from "@tyche/config";
 import { PwaRegistrar } from "./PwaRegistrar";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  applicationName: "Tyche",
+  applicationName: BRAND_NAME,
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "Tyche",
+    title: BRAND_NAME,
   },
-  title: "Tyche",
+  title: BRAND_NAME,
   description: "Mobile-first Solana DApp for community-elected lottery rules.",
   icons: {
-    apple: "/icons/apple-touch-icon.png?v=blindfolded-bust-transparent-v2",
+    apple: "/icons/apple-touch-icon.png?v=goddess-magenta-v1",
     icon: [
-      { rel: "icon", sizes: "32x32", type: "image/png", url: "/icons/favicon-32.png?v=blindfolded-bust-transparent-v2" },
-      { rel: "icon", sizes: "192x192", type: "image/png", url: "/icons/icon-192.png?v=blindfolded-bust-transparent-v2" },
-      { rel: "icon", sizes: "512x512", type: "image/png", url: "/icons/icon-512.png?v=blindfolded-bust-transparent-v2" },
+      { rel: "icon", sizes: "32x32", type: "image/png", url: "/icons/favicon-32.png?v=goddess-magenta-v1" },
+      { rel: "icon", sizes: "192x192", type: "image/png", url: "/icons/icon-192.png?v=goddess-magenta-v1" },
+      { rel: "icon", sizes: "512x512", type: "image/png", url: "/icons/icon-512.png?v=goddess-magenta-v1" },
     ],
   },
   manifest: "/manifest.webmanifest",

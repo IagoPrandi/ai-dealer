@@ -98,7 +98,7 @@ export function Dealer({ size = 38 }: { size?: number }) {
         className="ide-dealer-image"
         fill
         sizes={`${size}px`}
-        src="/icons/icon-192.png?v=blindfolded-bust-transparent-v2"
+        src="/illustrations/logo-deusa-vetorizada.svg?v=goddess-magenta-v1"
         unoptimized
       />
     </span>
@@ -347,7 +347,7 @@ export function ScreenHead({ onBack, right, title }: { onBack: () => void; right
       <button aria-label="Back" className="ide-iconbtn" onClick={onBack} type="button">
         <Ico.back style={{ width: 18, height: 18 }} />
       </button>
-      <h1 className="ide-plate" style={{ fontSize: 24, fontWeight: 400, margin: 0, flex: 1, minWidth: 0 }}>{title}</h1>
+      <h1 className="ide-plate" style={{ fontSize: 22, fontWeight: 400, margin: 0, flex: 1, minWidth: 0 }}>{title}</h1>
       {right}
     </div>
   );

@@ -164,7 +164,7 @@ export function ProfileScreen() {
 
         {/* screen head — plate title, network on the right */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16 }}>
-          <h1 className="ide-plate" style={{ fontSize: 24, fontWeight: 400, margin: 0 }}>Account</h1>
+          <h1 className="ide-plate" style={{ fontSize: 22, fontWeight: 400, margin: 0 }}>Account</h1>
           <span className="ide-num" style={{ fontSize: 12, color: "var(--dim)" }}>Solana devnet</span>
         </div>
 

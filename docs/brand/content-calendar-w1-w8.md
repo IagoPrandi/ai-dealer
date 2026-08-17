@@ -1,8 +1,9 @@
-# Tyche — Channels, Cadence and Content Calendar (Weeks 1–8)
+# Tywish — Channels, Cadence and Content Calendar (Weeks 1–8)
 
 > **Version:** 1.1.0
 > **Status:** Adopted — operational plan derived from the confirmed narrative. Revised on 2026-08-09 to carry the mythic register.
 > **Last updated:** 2026-08-09
+> **Naming:** **Tywish** is the commercial name used in every public piece; `tyche` is the internal codename and never appears in published content.
 > **Narrative source:** [narrative-a-messaging.md](narrative-a-messaging.md) — every piece below inherits its guardrails, including the mythic register (§3.1) and its limits (§4.7)
 > **Stage assumption:** weeks 1–4 pre-launch (product closed); weeks 5–8 launch and live rounds
 > **Language:** English only, all channels
@@ -16,7 +17,7 @@ Three external facts rule out the default "token-funded social campaign" playboo
 
 | Finding | Date | Consequence |
 |---|---|---|
-| X prohibits apps that reward users for posting ("InfoFi"); API access revoked. Kaito sunset Yaps, token fell ~17%, Yapper account (≈157k members) banned. | 2026-01-15 | No "post about Tyche, receive JDR" mechanic exists in a safe form. |
+| X prohibits apps that reward users for posting ("InfoFi"); API access revoked. Kaito sunset Yaps, token fell ~17%, Yapper account (≈157k members) banned. | 2026-01-15 | No "post about Tywish, receive JDR" mechanic exists in a safe form. |
 | X prohibits paid partnerships for gambling products, **explicitly including lotteries** — covering affiliates, ambassadors, and disclosed compensated organic posts. | 2026-02-19 | Paying creators for content, in JDR or anything else, violates policy. Uncompensated organic mentions remain fine. |
 | Sybil farming is the dominant failure mode of per-wallet reward programmes; the defence that works is time-weighted scoring, not volume. | 2026 | Referral-heavy growth amplifies a risk this project already carries around per-wallet election capture. |
 
@@ -192,7 +193,7 @@ Price, volume, and market cap live in a **separate panel**. They are context and
 | Follows per 1k impressions | new followers / (impressions / 1000) | Real reach efficiency |
 | Amplification | (reposts + quotes + shares) / impressions | Third-party distribution capacity |
 | Profile conversion | profile visits / impressions | Clarity of the first line |
-| Unique weekly UGC creators | accounts publishing original Tyche content | Whether production is actually decentralising |
+| Unique weekly UGC creators | accounts publishing original Tywish content | Whether production is actually decentralising |
 | Community/official reach ratio | estimated member reach / official reach | Dependence on the main account |
 | Activation | new members contributing within 7 days / new members | Whether onboarding creates participants |
 | 30-day retention | active on day 30 / entry cohort | Durability |
@@ -220,7 +221,7 @@ How to know this is working rather than merely looking busy:
 1. **Dashboard before the first post.** Non-negotiable — it is the only baseline that will ever exist.
 2. **Frequency A/B/C blocks** (2/3/4 originals per day, two weeks each, mix and timing constant). Compare impressions per post, net followers per day, follows per 1k impressions, and unfollow/mute rate.
 3. **Median review by format and pillar** at the end of weeks 2 and 4.
-4. **Publication checklist** ([guia-identidade-publica-tyche.md](../../guia-identidade-publica-tyche.md) §11) on every piece.
+4. **Publication checklist** ([guia-identidade-publica-tywish.md](../../guia-identidade-publica-tywish.md) §11) on every piece.
 5. **Weekly guardrail audit** ([narrative-a-messaging.md](narrative-a-messaging.md) §6): no probability-advantage claim, no named operator, no casino self-description, no compensated post, no price promise, no unproven round claim — plus the §4.7 register pass: what was granted was the rule, the election stayed visible, no personal favour, no equal-odds claim, and the register never reached a classification surface or an incident post.
 6. **The organicity test:** if the official account goes silent for seven days, does the community keep writing rules, debating, and welcoming newcomers? Run it for real in week 8. That answer — not follower count — is the actual measure of "built for and by the community".
 

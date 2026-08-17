@@ -9,6 +9,7 @@ import {
 } from "@solana-mobile/wallet-standard-mobile";
 import { autoDiscover, createClient } from "@solana/client";
 import { SolanaProvider } from "@solana/react-hooks";
+import { BRAND_NAME } from "@tyche/config";
 
 import { resolvePublicSolanaConfig } from "./publicRpcConfig";
 import { isSupportedTycheWallet } from "./walletDiscovery";
@@ -35,7 +36,7 @@ function registerMobileWalletAdapter() {
   registrationState[MWA_REGISTRATION_KEY] = true;
   registerMwa({
     appIdentity: {
-      name: "Tyche",
+      name: BRAND_NAME,
       uri: window.location.origin,
     },
     authorizationCache: createDefaultAuthorizationCache(),

@@ -11,6 +11,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { address } from "@solana/kit";
+import { BRAND_NAME } from "@tyche/config";
 
 import {
   CAMPAIGN_REWARD_BPS_DENOMINATOR,
@@ -233,10 +234,10 @@ export function InviteScreen() {
 
   async function shareInvite() {
     setMessage(null);
-    const text = `Play Tyche with me — the AI writes the rule, the chain draws the winner. Your first invited guess earns ${INVITEE_REWARD_LABEL}.`;
+    const text = `Play ${BRAND_NAME} with me — the AI writes the rule, the chain draws the winner. Your first invited guess earns ${INVITEE_REWARD_LABEL}.`;
     try {
       if (navigator.share) {
-        await navigator.share({ text, title: "Tyche invite", url: inviteLink });
+        await navigator.share({ text, title: `${BRAND_NAME} invite`, url: inviteLink });
         return;
       }
       await copy(`${text} ${inviteLink}`, "Invite text");
