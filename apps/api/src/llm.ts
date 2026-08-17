@@ -41,10 +41,18 @@ export type RuleAgentErrorCode =
 export class RuleAgentError extends Error {
   readonly code: RuleAgentErrorCode;
 
-  constructor(code: RuleAgentErrorCode, message: string) {
+  /**
+   * Operator-only context (e.g. the excerpt of a response that would not parse).
+   * Never part of `message`, which reaches the player: a bad response is not the
+   * player's fault and raw model output is not an explanation they can act on.
+   */
+  readonly detail: string | undefined;
+
+  constructor(code: RuleAgentErrorCode, message: string, detail?: string) {
     super(message);
     this.name = "RuleAgentError";
     this.code = code;
+    this.detail = detail;
   }
 }
 
@@ -84,6 +92,16 @@ function firstConfigured(...values: Array<string | undefined>): string {
   return "";
 }
 
+// Suppresses the hidden reasoning trace on Ollama-served models.
+//
+// Applied to every step, and dropped only on a compile RE-ASK. The compile step
+// is the one that has to emit a large, exactly-nested JSON structure, and on the
+// configured model (`nemotron-3-super:cloud`) suppressing the trace measurably
+// breaks that structure: the same compile prompt returned a complete envelope
+// minus its final closing brace in 3 of 6 calls with the flag (~700 completion
+// tokens, `finish_reason: "stop"`, nowhere near the budget) and parsed 5 of 5
+// times without it (~2700 tokens). Since only structurally large rules hit that
+// wall, the first compile call keeps the saving and the retry buys the trace.
 function ollamaThinkingControl(config: RuleAgentConfig) {
   const usesOllama =
     config.apiKey.toLowerCase() === "ollama" ||
@@ -293,6 +311,41 @@ export async function ensureModelLoaded(
   }
 }
 
+/**
+ * Index of the `}` that closes the object opened at `start`, or -1 when the
+ * object never closes. String contents are skipped so a brace inside a quoted
+ * value does not shift the depth.
+ */
+function findObjectEnd(value: string, start: number) {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < value.length; index += 1) {
+    const character = value[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+    } else if (character === "{") {
+      depth += 1;
+    } else if (character === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return index;
+      }
+    }
+  }
+  return -1;
+}
+
 function extractJsonObject(content: string): unknown {
   const trimmed = content.trim();
   const withoutFences = trimmed
@@ -309,14 +362,32 @@ function extractJsonObject(content: string): unknown {
     );
   }
 
-  try {
-    return JSON.parse(withoutFences.slice(start, end + 1));
-  } catch {
-    throw new RuleAgentError(
-      "RULE_AGENT_BAD_RESPONSE",
-      "The rule agent returned malformed JSON.",
-    );
+  // Read to the brace that actually CLOSES the first object, then fall back to
+  // the last brace in the response. Slicing straight to the last brace threw
+  // away an otherwise perfect compilation whenever the model appended one stray
+  // character after it — a trailing `}`, a second object, a closing remark —
+  // and the player saw the rule fail for a reason no rewording could fix.
+  const balancedEnd = findObjectEnd(withoutFences, start);
+  const candidates = [
+    ...(balancedEnd === -1
+      ? []
+      : [withoutFences.slice(start, balancedEnd + 1)]),
+    withoutFences.slice(start, end + 1),
+  ];
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      // Try the next reading; a genuinely malformed response fails below.
+    }
   }
+  throw new RuleAgentError(
+    "RULE_AGENT_BAD_RESPONSE",
+    "The rule agent returned malformed JSON.",
+    `${withoutFences.length} chars, head=${JSON.stringify(
+      withoutFences.slice(0, 240),
+    )}, tail=${JSON.stringify(withoutFences.slice(-240))}`,
+  );
 }
 
 function coerceInterpretation(value: unknown): RuleAgentInterpretation {
@@ -418,6 +489,9 @@ async function requestAgentJson(
   userText: string,
   config: RuleAgentConfig,
   signal?: AbortSignal,
+  // Let the model think before answering. Off everywhere except the compile
+  // step — see the note on `ollamaThinkingControl`.
+  allowReasoning = false,
 ): Promise<string> {
   const headers: Record<string, string> = {
     "content-type": "application/json",
@@ -442,7 +516,7 @@ async function requestAgentJson(
         // Rule preflight needs the constrained JSON result, not a hidden
         // reasoning trace. Ollama otherwise enables thinking by default for
         // thinking-capable models.
-        ...ollamaThinkingControl(config),
+        ...(allowReasoning ? {} : ollamaThinkingControl(config)),
         response_format: { type: "json_object" },
         seed: config.seed,
         stream: false,
@@ -709,6 +783,26 @@ export async function translateRuleToEnglish(
   return englishText;
 }
 
+// Retries for a response that is not JSON at all, and for nothing else.
+//
+// Measured on the configured compile model (nemotron-3-super:cloud) with
+// `reasoning_effort: "none"`: 3 of 6 identical calls returned a complete
+// envelope MINUS its final closing brace, with `finish_reason: "stop"` and no
+// output-budget pressure (~700 completion tokens against a 16k ceiling). The
+// same prompt without that flag returned parseable JSON 5 of 5 times, at roughly
+// 4x the completion tokens. So it is a decoding defect of the model in that mode,
+// not a property of the rule — the player blocked by it had nothing to rewrite.
+//
+// The truncated text is NEVER repaired: appending the missing delimiters would
+// happily complete an `and` whose later clauses were cut off, and that weaker
+// rule can still pass schema validation. A re-ask is the only safe recovery.
+//
+// Every other failure (timeout, endpoint down, output-budget exhaustion) is
+// reported on the first attempt: retrying those hides a real condition behind a
+// longer wait. Whatever does come back is still fully validated downstream by
+// the schema, span, worked-example, and coverage gates.
+const COMPILE_BAD_RESPONSE_ATTEMPTS = 3;
+
 // Compile step (PRD §7.3.1): ask the model to emit an auditable compilation
 // candidate (AST + consumed source spans + source-derived worked examples).
 // json_object response mode is requested (Ollama-compatible). The returned
@@ -725,11 +819,34 @@ export async function compileRuleToAst(
   // The full JSON schema is intentionally NOT embedded (it bloats the prompt and
   // stalls small local models); the skill conveys the grammar compactly and Zod
   // re-validates the output against the real schema.
-  const candidate = await requestAgentJson(
-    buildRuleCompilerSkillPrompt(),
-    normalizedText,
-    config,
-    signal,
-  );
-  return extractJsonObject(candidate);
+  const prompt = buildRuleCompilerSkillPrompt();
+  for (let attempt = 1; ; attempt += 1) {
+    // First ask in the fast, no-trace mode every other step uses. A rule whose
+    // AST is small comes back correct and the player pays no extra latency; the
+    // shapes that break it are the large nested ones, and those get the thinking
+    // re-ask below rather than making every rule wait for a reasoning trace.
+    const candidate = await requestAgentJson(
+      prompt,
+      normalizedText,
+      config,
+      signal,
+      attempt > 1,
+    );
+    try {
+      return extractJsonObject(candidate);
+    } catch (error) {
+      const retryable =
+        error instanceof RuleAgentError &&
+        error.code === "RULE_AGENT_BAD_RESPONSE" &&
+        attempt < COMPILE_BAD_RESPONSE_ATTEMPTS &&
+        !signal?.aborted;
+      if (!retryable) {
+        throw error;
+      }
+      console.error(
+        `Rule compile attempt ${attempt} returned no usable JSON; retrying.`,
+        error instanceof RuleAgentError ? error.detail : "",
+      );
+    }
+  }
 }

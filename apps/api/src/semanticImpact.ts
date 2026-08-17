@@ -1,6 +1,15 @@
 import type { RuleAst } from "@tyche/rule-compiler";
 
 export interface RuleSemanticImpact {
+  /**
+   * Whether the flags below were read from a compiled AST. Every rejection
+   * arrives here with `ast: null` (the artifact only exists for a VALID
+   * compile), which reads identically to "the rule inspects neither side" —
+   * so a blocked player was told their rule "uses neither your guess nor the
+   * official draw" about text that plainly named both. Consumers must not
+   * describe the rule's inputs when this is false.
+   */
+  astAvailable: boolean;
   drawIndependent: boolean;
   rangeBoundsAmbiguous: boolean;
   sharedOutcome: boolean;
@@ -331,6 +340,7 @@ export function analyzeRuleSemanticImpact({
   const confirmationRequired =
     !triviallyAlwaysTrue && (scopeConfirmationMissing || rangeBoundsAmbiguous);
   const impact: RuleSemanticImpact = {
+    astAvailable: ast !== null,
     drawIndependent,
     rangeBoundsAmbiguous,
     sharedOutcome,

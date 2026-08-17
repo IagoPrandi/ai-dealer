@@ -38,7 +38,13 @@ import {
   type RuleWorkedExample,
 } from "@tyche/rule-test-harness";
 import { describeRuleAstTotal } from "./describeAst.js";
-import { analyzeInterpretationCoverage } from "./interpretationCoverage.js";
+import {
+  analyzeInterpretationCoverage,
+  collectAstOperations,
+  collectAstValues,
+  collectRequiredOperations,
+  collectRequiredValues,
+} from "./interpretationCoverage.js";
 import { RULE_COMPILER_SKILL_VERSION } from "./skill.js";
 
 export type {
@@ -760,6 +766,46 @@ function isSixUniqueDomainNumbers(value: unknown): value is number[] {
   );
 }
 
+// Which leftover source text actually blocks a compile.
+//
+// The rule used to be: strip a short list of articles and connectives, then
+// demand the residue be EMPTY. That rejected faithful compiles over ordinary
+// framing words — "a guess wins ONLY if ...", "the PLAYER wins when ..." — and
+// the player had no way to rewrite around an invisible stopword list, because
+// the advice they were shown ("restate every load-bearing number") does not
+// touch the word that blocked them.
+//
+// Test positively instead: unconsumed text blocks the compile when it still
+// carries something that can change who wins — a number, a comparator, a
+// quantifier, a negation, an operation, or an ordering/position word. Bare
+// source nouns (guess, draw, ticket) are deliberately NOT in the list: alone
+// they state no condition, and a genuinely dropped clause always brings one of
+// the categories below with it ("and the drawn sum is even" carries both `sum`
+// and `even`).
+const INTENT_BEARING_RESIDUE = new RegExp(
+  [
+    "\\d",
+    // comparators, thresholds, distances
+    "\\b(?:greater|higher|above|over|more|most|larger|bigger|less|lower|below|under|fewer|least|smaller|equals?|identical|same|different|differs?|differ|exact|exactly|precisely|between|within|than|close|closer|closest|near|nearest|apart)\\b",
+    // Quantifiers and negation. Bare "no" is deliberately absent: it is a
+    // Portuguese preposition ("no sorteio"), and the English determiner never
+    // travels alone — "no guessed number APPEARS in the draw" is caught by the
+    // matching verb below.
+    "\\b(?:all|every|each|both|any|none|neither|nor|not|never)\\b",
+    // aggregation and arithmetic
+    "\\b(?:sum|sums|summed|total|totals|count|counts|average|product|plus|minus|times|divided|double|doubled|triple|half|modulo|mod|remainder|multiple|multiples)\\b",
+    // number properties
+    "\\b(?:even|odd|parity|digits?|units?|tens|dezenas?)\\b",
+    // ordering and positions
+    "\\b(?:order|ordered|sequence|positions?|index|reverse|reversed|sorted|sort|first|second|third|fourth|fifth|sixth|last|highest|lowest|smallest|largest|minimum|maximum)\\b",
+    // matching and membership
+    "\\b(?:match|matches|matching|appears?|appearing|contains?|includes?|hits?|miss|misses|missing|wrong|shares?|overlaps?|repeats?)\\b",
+    // Portuguese equivalents (text is diacritic-stripped and lowercased)
+    "\\b(?:maior(?:es)?|menor(?:es)?|igua(?:l|is)|diferentes?|exat[oa]|exatamente|entre|acima|abaixo|somas?|somam|totais?|media|quantidade|resto|multiplos?|dobro|metade|pares?|impares?|ordem|posicoes?|primeiro|ultimo|invertid[oa]|inversa|acerta(?:r|m)?|acertos?|errar|erros?|aparece(?:m)?|contem|tod[oa]s?|cada|nenhum[ao]?|nao|sem|mais|menos|pelo|maximo|minimo)\\b",
+  ].join("|"),
+  "u",
+);
+
 function verifySourceSpanCoverage(
   text: string,
   value: unknown,
@@ -797,13 +843,8 @@ function verifySourceSpanCoverage(
   // shape the AST takes, no intent-bearing comparison/threshold text may remain.
   const uncovered = [...text]
     .map((character, index) => (covered[index] ? " " : character))
-    .join("")
-    .replace(
-      /\b(?:a|an|the|if|then|when|and|or|e|ou|guess|ticket|rule|win|wins|winning|should|must|it)\b/gu,
-      " ",
-    )
-    .replace(/[^a-z0-9]+/gu, "");
-  return uncovered.length === 0 ? sourceSpans : null;
+    .join("");
+  return INTENT_BEARING_RESIDUE.test(uncovered) ? null : sourceSpans;
 }
 
 function verifyProviderEvidence(
@@ -1002,7 +1043,14 @@ function validateResolvedAst(
     ast && astSource === "provider" && providerEvidence
       ? verifyProviderEvidence(ast, normalizedText, providerEvidence)
       : null;
+  // Only a compiled artifact can mis-state the rule. With no AST there is
+  // nothing to compare the wording against, and the real cause is already
+  // recorded (PROVIDER_MALFORMED_RESPONSE / SCHEMA_INVALID / UNSUPPORTED_RULE) —
+  // adding a fidelity code here told the player their numbers were dropped from
+  // an artifact that was never built, and sent them rewriting a rule that was
+  // never the problem.
   if (
+    ast &&
     astSource === "provider" &&
     ((providerEvidence !== null && verifiedProviderEvidence === null) ||
       (requireProviderEvidence && verifiedProviderEvidence === null))
@@ -1579,7 +1627,38 @@ function hasPattern(value: string, patterns: readonly RegExp[]) {
   return patterns.some((pattern) => pattern.test(value));
 }
 
+// Every value and load-bearing operation the text states explicitly must survive
+// into the AST the pattern compiler produced from that same text. The pattern
+// compiler is an ordered list of regexes ending in deliberately broad
+// fallbacks ("exactly ... order ... match" -> the v1 `ordered_exact` macro), and
+// a broad fallback that fires on a rule it does not actually implement produces
+// an artifact for a DIFFERENT rule — "a guess wins only if it equals 1 2 3 4 5 6
+// in that order and the draw does not" compiled to plain `guess == draw`.
+//
+// Downstream that mis-compile had two costs, not one: as the primary AST it was
+// blocked by the coverage gate (INTERPRETATION_MISMATCH) with no wording the
+// player could write to escape it, and as the independent reviewer AST it
+// rejected a CORRECT provider compile of the same text (REVIEWER_MISMATCH). A
+// pattern match that drops what the player wrote is not a weaker reading of the
+// rule, it is a different rule — so treat it as no match at all and let the
+// provider path compile the text instead.
+function deterministicPatternPreservesText(ast: RuleAst, text: string) {
+  const astValues = collectAstValues(ast);
+  if (collectRequiredValues(text).some((value) => !astValues.has(value))) {
+    return false;
+  }
+  const astOperations = collectAstOperations(ast);
+  return collectRequiredOperations(text).every((operation) =>
+    astOperations.has(operation),
+  );
+}
+
 function compileSupportedRule(text: string): RuleAst | null {
+  const ast = compileSupportedRulePattern(text);
+  return ast && deterministicPatternPreservesText(ast, text) ? ast : null;
+}
+
+function compileSupportedRulePattern(text: string): RuleAst | null {
   // Comparative "most/fewest matching numbers wins" ranking. Guarded to fire only
   // on genuine ranking intent, so it never steals absolute-threshold or
   // guess-vs-draw predicates handled below.
@@ -1879,10 +1958,16 @@ function compileSupportedRule(text: string): RuleAst | null {
     return { schemaVersion: 1, node: { kind: "sum_equals" } };
   }
 
+  // `ordered_exact` is "the guess equals the DRAW, position by position". Both
+  // sides have to be named: without the draw requirement this fallback also
+  // swallowed rules that compare the guess against numbers the player listed
+  // ("exactly 1 2 3 4 5 6 in that order"), freezing an unrelated condition.
   if (
     /\b(exact|exactly)\b/.test(text) &&
     /\b(order|ordered|sequence|position|same positions?)\b/.test(text) &&
-    /\b(match|matches|same)\b/.test(text)
+    /\b(match|matches|same)\b/.test(text) &&
+    /\b(draw|drawn)\b/.test(text) &&
+    /\b(guess|guessed|picked|picks?|ticket|your|my)\b/.test(text)
   ) {
     return { schemaVersion: 1, node: { kind: "ordered_exact" } };
   }

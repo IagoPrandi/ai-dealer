@@ -46,6 +46,78 @@ test("dealer chat uses the versioned context-only prompt and strict JSON result"
 
   assert.match(messages[0]?.content ?? "", /server-authoritative context/i);
   assert.match(messages[0]?.content ?? "", /can never make a rule valid/i);
+  assert.match(
+    messages[0]?.content ?? "",
+    /server-authored `game` object is the authoritative product context/i,
+  );
+  assert.match(
+    messages[0]?.content ?? "",
+    /players try to win the round with their submitted numbers/i,
+  );
+  assert.match(
+    messages[0]?.content ?? "",
+    /do not guess, discover, or "get" a rule right/i,
+  );
+  assert.match(
+    messages[0]?.content ?? "",
+    /explain both independent winning conditions from the context/i,
+  );
+  assert.match(
+    messages[0]?.content ?? "",
+    /three separate paths: a game prize in SOL, campaign-based Tyche-token rewards/i,
+  );
+  assert.match(
+    messages[0]?.content ?? "",
+    /merely holding tokens earns fees/i,
+  );
+  assert.match(
+    messages[0]?.content ?? "",
+    /keep action, active-rule, and referral rewards separate/i,
+  );
+  assert.match(
+    messages[0]?.content ?? "",
+    /action reward needs an elected rule or winners/i,
+  );
+  assert.match(
+    messages[0]?.content ?? "",
+    /complete server-authored `game` object, including every reward field, is also authored in English/i,
+  );
+  assert.match(
+    messages[0]?.content ?? "",
+    /no English or Spanish words or phrases when the latest player message is Portuguese/i,
+  );
+  assert.match(
+    messages[0]?.content ?? "",
+    /no English or Spanish words or phrases when the latest player message is Portuguese/i,
+  );
+  assert.match(
+    messages[0]?.content ?? "",
+    /use `rodada` for `round` and `regra` for `rule`/i,
+  );
+  assert.match(
+    messages[0]?.content ?? "",
+    /defined \*\*treasury-fee share\*\*, not to one hundred percent of all game-action fees/i,
+  );
+  assert.match(
+    messages[0]?.content ?? "",
+    /action token reward may follow a successfully confirmed rule proposal or in-favour vote while the campaign has funds/i,
+  );
+  assert.match(
+    messages[0]?.content ?? "",
+    /does \*\*not\*\* require that rule to be elected, active, or to produce winners/i,
+  );
+  assert.match(
+    messages[0]?.content ?? "",
+    /campaign-token rewards depend on their eligibility and available campaign funds/i,
+  );
+  assert.match(
+    messages[0]?.content ?? "",
+    /exactly three top-level categories: game prize in SOL; Tyche-token campaign rewards; and treasury-fee distribution in SOL/i,
+  );
+  assert.match(
+    messages[0]?.content ?? "",
+    /never promise an automatic or guaranteed payment/i,
+  );
   assert.equal(messages[1]?.content, context);
   assert.equal(result.answer, "The modulo operation was dropped.");
   assert.match(result.proposedRuleText ?? "", /modulo 9/i);
@@ -491,4 +563,181 @@ test("compile harness prompt includes selected prompt-set examples", async () =>
   assert.match(systemPrompt, /consumedSpans/);
   assert.match(systemPrompt, /workedExamples/);
   assert.match(systemPrompt, /guessSum - drawSum <= -10/);
+});
+
+test("a stray character after the compiled JSON does not discard the compilation", async () => {
+  // Observed from the live compile model: a correct envelope followed by one
+  // extra `}`. Reading the response from the first brace to the LAST brace in
+  // the string made the whole thing unparseable, so a faithful compilation was
+  // reported to the player as a malformed provider response — and no rewording
+  // of the rule could ever fix it.
+  const candidate = {
+    ast: {
+      result: {
+        predicate: {
+          kind: "compare",
+          left: { kind: "at", index: 0, of: { kind: "source", source: "guess" } },
+          op: "eq",
+          right: { kind: "lit", value: 1 },
+        },
+        type: "predicate",
+      },
+      schemaVersion: 3,
+    },
+    consumedSpans: [{ text: "the first guessed number is 1" }],
+    workedExamples: [
+      { draw: [10, 20, 30, 40, 50, 60], guess: [1, 2, 3, 4, 5, 6], outcome: "WIN" },
+      { draw: [10, 20, 30, 40, 50, 60], guess: [2, 3, 4, 5, 6, 7], outcome: "LOSE" },
+    ],
+  };
+
+  for (const suffix of ["}", "\n}", "\nDone.", '\n{"note":"trailing"}']) {
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            { message: { content: `${JSON.stringify(candidate)}${suffix}` } },
+          ],
+        }),
+        { status: 200 },
+      )) as typeof fetch;
+
+    assert.deepEqual(
+      await compileRuleToAst("A guess wins if the first guessed number is 1.", CONFIG),
+      candidate,
+      suffix,
+    );
+  }
+
+  // A response that carries no parseable object still fails closed.
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({ choices: [{ message: { content: '{"ast": ,}' } }] }),
+      { status: 200 },
+    )) as typeof fetch;
+  await assert.rejects(
+    compileRuleToAst("A guess wins if the first guessed number is 1.", CONFIG),
+    /malformed JSON/i,
+  );
+});
+
+test("an unparseable compile response is re-asked before it blocks the rule", async () => {
+  const candidate = {
+    ast: {
+      result: {
+        predicate: {
+          kind: "compare",
+          left: { kind: "reduce", op: "sum", of: { kind: "source", source: "guess" } },
+          op: "gt",
+          right: { kind: "reduce", op: "sum", of: { kind: "source", source: "draw" } },
+        },
+        type: "predicate",
+      },
+      schemaVersion: 3,
+    },
+    consumedSpans: [{ text: "the guessed sum is greater than the drawn sum" }],
+    workedExamples: [
+      { draw: [1, 2, 3, 4, 5, 6], guess: [95, 96, 97, 98, 99, 100], outcome: "WIN" },
+      { draw: [95, 96, 97, 98, 99, 100], guess: [1, 2, 3, 4, 5, 6], outcome: "LOSE" },
+    ],
+  };
+  const text = "A guess wins if the guessed sum is greater than the drawn sum.";
+
+  let calls = 0;
+  const respond = (content: string) =>
+    new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
+      status: 200,
+    });
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return respond(calls === 1 ? "{not json at all,}" : JSON.stringify(candidate));
+  }) as typeof fetch;
+
+  assert.deepEqual(await compileRuleToAst(text, CONFIG), candidate);
+  assert.equal(calls, 2);
+
+  // The retry is bounded: a second unparseable response still fails closed.
+  calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return respond("{not json at all,}");
+  }) as typeof fetch;
+  await assert.rejects(compileRuleToAst(text, CONFIG), /malformed JSON/i);
+  assert.equal(calls, 3);
+
+  // A non-JSON failure mode is NOT retried — it is a real condition to report.
+  calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return new Response("upstream exploded", { status: 500 });
+  }) as typeof fetch;
+  await assert.rejects(compileRuleToAst(text, CONFIG));
+  assert.equal(calls, 1);
+});
+
+test("a compile re-ask lets the model think; first calls keep the fast mode", async () => {
+  const bodies: Array<Record<string, unknown>> = [];
+  const capture = (content: string) =>
+    (async (
+      _input: Parameters<typeof fetch>[0],
+      init?: Parameters<typeof fetch>[1],
+    ) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content } }] }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+  // Ollama-served config: the thinking control only applies there at all.
+  const ollamaConfig: RuleAgentConfig = { ...CONFIG, apiKey: "ollama" };
+
+  const compiled = JSON.stringify({
+    ast: { schemaVersion: 1, node: { kind: "sum_equals" } },
+    consumedSpans: [{ text: "the sums are equal" }],
+    workedExamples: [],
+  });
+  globalThis.fetch = capture(compiled);
+  await compileRuleToAst("Win if the sums are equal.", ollamaConfig);
+
+  // Same call, but the first response is unparseable: the re-ask drops the flag.
+  let compileCalls = 0;
+  globalThis.fetch = (async (
+    _input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    compileCalls += 1;
+    bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+    return new Response(
+      JSON.stringify({
+        choices: [
+          { message: { content: compileCalls === 1 ? "{broken,}" : compiled } },
+        ],
+      }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+  await compileRuleToAst("Win if the sums are equal.", ollamaConfig);
+
+  globalThis.fetch = capture(
+    JSON.stringify({
+      addedOperationalClauses: [],
+      clarificationQuestions: [],
+      clarityNote: "",
+      dealerMessage: "Understood.",
+      needsClarification: false,
+      normalizedText: "Win if the sums are equal.",
+      officialInterpretation: "The two sums must be equal.",
+      suggestedRewrites: [],
+      title: "Equal Sums",
+    }),
+  );
+  await interpretRuleWithAgent("Win if the sums are equal.", ollamaConfig);
+
+  // First compile call: fast mode, like every other step. Re-ask after an
+  // unparseable response: reasoning allowed, because that is the failure the
+  // suppressed trace causes. The interpret step always keeps the saving.
+  assert.equal(bodies[0]?.reasoning_effort, "none", "first compile call");
+  assert.equal(bodies[1]?.reasoning_effort, "none", "compile retry, attempt 1");
+  assert.equal(bodies[2]?.reasoning_effort, undefined, "compile retry, attempt 2");
+  assert.equal(bodies[3]?.reasoning_effort, "none", "interpret");
 });

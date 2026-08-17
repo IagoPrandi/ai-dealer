@@ -47,6 +47,12 @@ The validator rejects missing/unconsumed text and executes every example against
 the AST. Do not generate examples by merely evaluating the AST: their purpose is
 to provide an independent oracle for the source intent.
 
+Every example is also checked for shape before it is executed: each `guess` and
+each `draw` must be six DISTINCT numbers in 1-100. A repeated number (e.g.
+`[2,2,3,4,5,6]`) invalidates the whole candidate, however correct the AST is.
+Emit the JSON object and nothing after it — no trailing text and no extra
+brackets.
+
 The `ast` value is `{"schemaVersion":3,"result":<result>}`. Choose `<result>`:
 
 - **predicate** — an ABSOLUTE win/lose test for a single guess (it does not depend
@@ -151,6 +157,27 @@ X = `reduce count`; "N smallest/largest" = `sort` + `slice`.
 - "ticket sum modulo 10 equals draw sum modulo 10" -> `compare(sum(guess) mod 10, eq, sum(draw) mod 10)`.
 - positions are 1-based in user language, 0-based in the AST: "second pick equals second drawn number" -> `at(guess,1) == at(draw,1)`.
 - min/max stay direct comparisons: "smallest pick equals smallest drawn" -> `min(guess) == min(draw)`; "largest pick beats largest drawn" -> `max(guess) > max(draw)`.
+
+### Numbers the player named
+
+A rule may compare a side against SPECIFIC numbers the player listed, not only
+against the other side. Those numbers ARE the rule: every one of them must appear
+as a `lit` in the AST, and a compile that keeps the shape but loses the values
+freezes a different rule.
+
+- "I win with exactly 1 2 3 4 5 6, in that order" (ordered literal sequence) ->
+  `and(at(guess,0) == 1, at(guess,1) == 2, ..., at(guess,5) == 6)`. Use `at` per
+  position; `pairs_forall` cannot be used, because there is no second array.
+- "my ticket must be exactly 1 2 3 4 5 6, in any order" (unordered literal set) ->
+  `and(contains(guess,1), contains(guess,2), ..., contains(guess,6))`.
+- "my ticket must include 7 and 13" -> `and(contains(guess,7), contains(guess,13))`.
+- "the draw must NOT be 1 2 3 4 5 6 in that order" -> wrap the ordered form in
+  `not`: `not(and(at(draw,0) == 1, ..., at(draw,5) == 6))`. Do not rewrite this as
+  "the guess differs from the draw" — a literal sequence and the other side are
+  different comparisons.
+- the same wording may name both sides: "wins with exactly 1 2 3 4 5 6 in that
+  order, and only when the draw is not that same sequence" is an `and` of the two
+  clauses above, one over `guess` and one negated over `draw`.
 
 ## Novel-composition idioms (when no cookbook entry fits)
 

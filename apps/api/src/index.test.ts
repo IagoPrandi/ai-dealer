@@ -140,6 +140,39 @@ test("dealer question context carries server diagnostics and discloses their abs
   });
   assert.match(withoutDiagnostics, /"diagnosticsAvailable":false/u);
   assert.match(withoutDiagnostics, /"preflight":null/u);
+  assert.match(withoutDiagnostics, /"contextVersion":4/u);
+  assert.match(
+    withoutDiagnostics,
+    /"playerObjective":"Win the round with the submitted six-number guess\. The player does not guess, discover, or get a rule right\."/u,
+  );
+  assert.match(
+    withoutDiagnostics,
+    /"original":"Match all six official draw numbers in the exact drawn order\."/u,
+  );
+  assert.match(
+    withoutDiagnostics,
+    /"alternative":"The active community-created alternative rule is evaluated independently when one exists;/u,
+  );
+  assert.match(
+    withoutDiagnostics,
+    /"asset":"Tyche tokens"/u,
+  );
+  assert.match(
+    withoutDiagnostics,
+    /"actionRewards":\{"eligibility":"While an approved promotion campaign has remaining funds, a successfully confirmed on-chain rule proposal or in-favour vote may receive its configured token reward\. This path does not require the proposed or supported rule to become active or produce winners\."/u,
+  );
+  assert.match(
+    withoutDiagnostics,
+    /"activeRuleRewards":\{"eligibility":"When the active alternative rule produces at least one winner, its creator and the unique wallets with an in-favour vote for that elected rule may receive campaign-token rewards\./u,
+  );
+  assert.match(
+    withoutDiagnostics,
+    /"eligibility":"Lock Tyche tokens in the protocol-controlled escrow before or during the accounting epoch\. Holding unlocked tokens alone does not qualify\."/u,
+  );
+  assert.match(
+    withoutDiagnostics,
+    /"source":"One hundred percent of the defined treasury-fee share from paid game actions goes to the token-lock distribution vault;/u,
+  );
 
   const withDiagnostics = buildDealerQuestionContext({
     draft: {
@@ -159,6 +192,7 @@ test("dealer question context carries server diagnostics and discloses their abs
         refinementFocus: ["Keep the modulo operation."],
         refinementQuestions: ["Should both sums use modulo 9?"],
         semanticImpact: {
+          astAvailable: true,
           drawIndependent: false,
           rangeBoundsAmbiguous: false,
           sharedOutcome: false,
@@ -325,6 +359,7 @@ function proposal(turnId: number, ruleId: number): RuleProposalRecord {
     sanitizedText: "Win if at least 4 of your numbers appear in the draw.",
     sanitizedTextHash: hashArray(4),
     semanticImpact: {
+      astAvailable: true,
       drawIndependent: false,
       rangeBoundsAmbiguous: false,
       sharedOutcome: false,
@@ -440,6 +475,63 @@ test("rule preflight refinement feedback identifies the missing digit semantics"
     "Should matching compare tens digits, units digits, or either digit?",
   ]);
   assert.equal(feedback.suggestedRewrites.length, 3);
+});
+
+test("a rejected rule is never asked which sides it compares", () => {
+  // The artifact only exists for a VALID compile, so every rejection reaches the
+  // refinement builder with `ast: null` — and an all-false impact reads exactly
+  // like "the rule inspects neither side". A player whose rule named both sides
+  // was told it "uses neither your guess nor the official draw" and asked which
+  // numbers to compare, which their wording already answered.
+  const text =
+    "A guess wins only if it exactly equals [1, 2, 3, 4, 5, 6] in that order and the official draw does not equal [1, 2, 3, 4, 5, 6] in that same order.";
+  const rejected = buildRuleRefinementFeedback({
+    clarityNote: "",
+    compileText: text,
+    officialInterpretation: "",
+    reasonCodes: ["INTERPRETATION_MISMATCH"],
+    reasonSummary: "Rule rejected: INTERPRETATION_MISMATCH.",
+    sanitizedText: text,
+    semanticImpact: {
+      astAvailable: false,
+      drawIndependent: false,
+      rangeBoundsAmbiguous: false,
+      sharedOutcome: false,
+      triviallyAlwaysTrue: false,
+      usesDraw: false,
+      usesGuess: false,
+    },
+    tokenCount: text.trim().split(/\s+/u).length,
+  });
+  for (const question of rejected.refinementQuestions) {
+    assert.doesNotMatch(question, /neither your guess nor the official draw/iu);
+  }
+
+  // A rule that really was compiled and really ignores one side still gets the
+  // specific question — that is what the wording is for.
+  const compiled = buildRuleRefinementFeedback({
+    clarityNote: "",
+    compileText: "A guess wins if the sum of the drawn numbers is even.",
+    officialInterpretation: "",
+    reasonCodes: ["INTERPRETATION_MISMATCH"],
+    reasonSummary: "Rule rejected: INTERPRETATION_MISMATCH.",
+    sanitizedText: "A guess wins if the sum of the drawn numbers is even.",
+    semanticImpact: {
+      astAvailable: true,
+      drawIndependent: false,
+      rangeBoundsAmbiguous: false,
+      sharedOutcome: true,
+      triviallyAlwaysTrue: false,
+      usesDraw: true,
+      usesGuess: false,
+    },
+    tokenCount: 11,
+  });
+  assert.ok(
+    compiled.refinementQuestions.some((question) =>
+      /never looks at your own six numbers/iu.test(question),
+    ),
+  );
 });
 
 test("rule preflight names a compiler capability gap without inventing ambiguity", () => {

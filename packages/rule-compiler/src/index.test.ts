@@ -1694,6 +1694,67 @@ test("rejects an LLM response that is not a valid AST and escalates", async () =
   assert.ok(result.log.reasonCodes.includes("SCHEMA_INVALID"));
 });
 
+test("a provider that returned no AST is not reported as a fidelity failure", async () => {
+  // With required evidence, every provider failure also produced
+  // INTERPRETATION_MISMATCH — "the compiled artifact did not preserve every
+  // stated value" about an artifact that was never built. The player was sent
+  // to rewrite numbers that were never the problem; the real cause is the
+  // provider code already recorded.
+  const text = "A guess wins if at least four of its numbers are drawn.";
+  for (const provider of [
+    async () => {
+      throw new Error("provider unreachable");
+    },
+    async () => ({ ast: { totally: "not an ast" }, consumedSpans: [], workedExamples: [] }),
+  ]) {
+    const result = await compileRuleArtifact(
+      { originalText: text, prompt: text, tokenCount: countWords(text) },
+      { astProvider: provider, requireProviderEvidence: true },
+    );
+    assert.equal(result.decision, "INVALID");
+    assert.equal(
+      result.log.reasonCodes.includes("INTERPRETATION_MISMATCH"),
+      false,
+      JSON.stringify(result.log.reasonCodes),
+    );
+    assert.ok(result.log.reasonCodes.includes("UNSUPPORTED_RULE"));
+  }
+
+  // A provider that DID emit an AST but no usable evidence still fails closed.
+  const unevidenced = await compileRuleArtifact(
+    { originalText: text, prompt: text, tokenCount: countWords(text) },
+    {
+      astProvider: async () => ({
+        ast: {
+          schemaVersion: 3,
+          result: {
+            type: "predicate",
+            predicate: {
+              kind: "compare",
+              op: "gte",
+              left: {
+                kind: "reduce",
+                op: "count",
+                of: {
+                  kind: "intersection",
+                  left: { kind: "source", source: "guess" },
+                  right: { kind: "source", source: "draw" },
+                },
+              },
+              right: { kind: "lit", value: 4 },
+            },
+          },
+        },
+        consumedSpans: [],
+        workedExamples: [],
+      }),
+      requireProviderEvidence: true,
+    },
+  );
+  assert.equal(unevidenced.decision, "INVALID");
+  assert.ok(unevidenced.log.reasonCodes.includes("INTERPRETATION_MISMATCH"));
+});
+
 test("rejects an LLM-emitted ALWAYS_TRUE rule (PRD 6.8)", async () => {
   // A rule every guess wins cannot distinguish winners from losers, so electing
   // it only burns a turn — PRD §6.8 rejects it.
@@ -2368,9 +2429,174 @@ test("an explicit six-number set compiles without losing enumerated values", () 
   );
 });
 
+test("an enumerated ordered sequence is not a guess-versus-draw ordered match", async () => {
+  // Reported from the app: the player asked for "win with 1 2 3 4 5 6, in that
+  // order, when the draw is not that sequence". The pattern compiler's broad
+  // `exact + order + match` fallback answered with the v1 `ordered_exact` macro
+  // — "the guess equals the DRAW" — which mentions none of the six values and
+  // inverts the draw clause. It then blocked the player twice: as the primary
+  // AST (INTERPRETATION_MISMATCH, with no rewrite that escapes it) and as the
+  // reviewer AST, which rejected a faithful provider compile of the same text.
+  const text =
+    "A guess wins only if it exactly equals [1, 2, 3, 4, 5, 6] in that order and the official draw does not equal [1, 2, 3, 4, 5, 6] in that same order.";
+
+  const deterministic = compile(text);
+  assert.equal(deterministic.decision, "INVALID");
+  assert.equal(deterministic.artifact, null);
+
+  const orderedLiteral = (source: "draw" | "guess") => ({
+    kind: "and",
+    clauses: [1, 2, 3, 4, 5, 6].map((value, index) => ({
+      kind: "compare",
+      op: "eq",
+      left: { kind: "at", index, of: { kind: "source", source } },
+      right: { kind: "lit", value },
+    })),
+  });
+  const result = await compileRuleArtifact(
+    { originalText: text, prompt: text, tokenCount: countWords(text) },
+    {
+      astProvider: async () => ({
+        ast: {
+          schemaVersion: 3,
+          result: {
+            type: "predicate",
+            predicate: {
+              kind: "and",
+              clauses: [
+                orderedLiteral("guess"),
+                { kind: "not", clause: orderedLiteral("draw") },
+              ],
+            },
+          },
+        },
+        consumedSpans: [
+          { text: "it exactly equals [1, 2, 3, 4, 5, 6] in that order" },
+          {
+            text: "the official draw does not equal [1, 2, 3, 4, 5, 6] in that same order",
+          },
+        ],
+        workedExamples: [
+          {
+            draw: [10, 20, 30, 40, 50, 60],
+            guess: [1, 2, 3, 4, 5, 6],
+            outcome: "WIN" as const,
+          },
+          {
+            draw: [1, 2, 3, 4, 5, 6],
+            guess: [1, 2, 3, 4, 5, 6],
+            outcome: "LOSE" as const,
+          },
+        ],
+      }),
+      preferDeterministic: true,
+      requireProviderEvidence: true,
+    },
+  );
+
+  assert.equal(result.decision, "VALID");
+  const frozen = result.artifact!.ast;
+  for (const [expected, guess, draw] of [
+    ["WIN", [1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12]],
+    ["LOSE", [1, 2, 3, 4, 5, 6], [1, 2, 3, 4, 5, 6]],
+    ["LOSE", [6, 5, 4, 3, 2, 1], [7, 8, 9, 10, 11, 12]],
+    ["LOSE", [1, 2, 3, 4, 5, 7], [7, 8, 9, 10, 11, 12]],
+  ] as const) {
+    assert.equal(
+      evaluatePredicate(frozen, { draw: [...draw], guess: [...guess] }).result,
+      expected,
+      `${guess.join(" ")} vs ${draw.join(" ")}`,
+    );
+  }
+
+  // The fallback still serves the rule it actually implements: both sides named,
+  // no enumerated values to drop.
+  const guessVersusDraw = compile(
+    "A guess wins if its numbers match the official draw exactly, in the same order.",
+  );
+  assert.equal(guessVersusDraw.decision, "VALID");
+  assert.deepEqual(guessVersusDraw.artifact?.ast, {
+    node: { kind: "ordered_exact" },
+    schemaVersion: 1,
+  });
+});
+
+test("framing words outside the consumed spans do not block a faithful compile", async () => {
+  // Source-span coverage exists to catch a CONDITION the AST never compiled. It
+  // used to demand that the leftover text be empty after stripping a short
+  // stopword list, so ordinary framing ("wins ONLY if", "the PLAYER wins")
+  // rejected correct compiles — and the player was told to restate their
+  // numbers, which could never fix the word that actually blocked them.
+  const text =
+    "The player wins only if the sum of the guessed numbers is greater than the sum of the drawn numbers.";
+  const condition = {
+    kind: "compare",
+    op: "gt",
+    left: { kind: "reduce", op: "sum", of: { kind: "source", source: "guess" } },
+    right: { kind: "reduce", op: "sum", of: { kind: "source", source: "draw" } },
+  };
+  const workedExamples = [
+    {
+      draw: [1, 2, 3, 4, 5, 6],
+      guess: [95, 96, 97, 98, 99, 100],
+      outcome: "WIN" as const,
+    },
+    {
+      draw: [95, 96, 97, 98, 99, 100],
+      guess: [1, 2, 3, 4, 5, 6],
+      outcome: "LOSE" as const,
+    },
+  ];
+  const framed = await compileRuleArtifact(
+    { originalText: text, prompt: text, tokenCount: countWords(text) },
+    {
+      astProvider: async () => ({
+        ast: { schemaVersion: 3, result: { type: "predicate", predicate: condition } },
+        consumedSpans: [
+          {
+            text: "the sum of the guessed numbers is greater than the sum of the drawn numbers",
+          },
+        ],
+        workedExamples,
+      }),
+      requireProviderEvidence: true,
+    },
+  );
+  assert.equal(framed.decision, "VALID");
+
+  // A clause the AST never compiled still blocks: the residue carries its own
+  // operation and comparator.
+  const compoundText = `${text.replace(/\.$/u, "")} and at least two guessed numbers appear in the official draw.`;
+  const dropped = await compileRuleArtifact(
+    {
+      originalText: compoundText,
+      prompt: compoundText,
+      tokenCount: countWords(compoundText),
+    },
+    {
+      astProvider: async () => ({
+        ast: { schemaVersion: 3, result: { type: "predicate", predicate: condition } },
+        consumedSpans: [
+          {
+            text: "the sum of the guessed numbers is greater than the sum of the drawn numbers",
+          },
+        ],
+        workedExamples,
+      }),
+      requireProviderEvidence: true,
+    },
+  );
+  assert.equal(dropped.decision, "INVALID");
+  assert.ok(dropped.log.reasonCodes.includes("INTERPRETATION_MISMATCH"));
+});
+
 test("an operation the player named must survive compilation", () => {
   // A dropped VALUE is not the only way to freeze a different rule: these all
-  // kept every literal the player wrote and still changed the rule.
+  // kept every literal the player wrote and still changed the rule. The pattern
+  // compiler now declines them outright (UNSUPPORTED_RULE) instead of emitting
+  // the mis-compile for the coverage gate to catch, so in production the
+  // provider still gets to compile the text — but on this deterministic-only
+  // path the outcome that matters is unchanged: no artifact is frozen.
   for (const text of [
     "A guess wins if the sum of the guessed numbers modulo 10 equals the sum of the drawn numbers modulo 10.",
     "A guess wins if it has exactly three odd guessed numbers and the official draw also has exactly three odd drawn numbers.",
@@ -2379,7 +2605,12 @@ test("an operation the player named must survive compilation", () => {
   ]) {
     const result = compile(text);
     assert.equal(result.decision, "INVALID", text);
-    assert.ok(result.log.reasonCodes.includes("INTERPRETATION_MISMATCH"), text);
+    assert.equal(result.artifact, null, text);
+    assert.ok(
+      result.log.reasonCodes.includes("UNSUPPORTED_RULE") ||
+        result.log.reasonCodes.includes("INTERPRETATION_MISMATCH"),
+      text,
+    );
   }
 
   // ...while a rule that genuinely performs the operation still compiles. A

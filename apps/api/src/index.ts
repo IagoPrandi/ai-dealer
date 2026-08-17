@@ -2529,6 +2529,14 @@ function describeMissingComparisonQuestion(
   if (!impact) {
     return null;
   }
+  // Nothing compiled, so nothing is known about which sides the rule inspects.
+  // The flags are all false here for the same reason they are false for a rule
+  // that genuinely reads neither side, and asking "which numbers from each side
+  // should be compared?" about a rule that already names both sends the player
+  // in circles. Stay silent and let the caller keep its blocking-reason wording.
+  if (!impact.astAvailable) {
+    return null;
+  }
   if (!impact.usesDraw && impact.usesGuess) {
     return "This rule never looks at the official draw. Which drawn number or numbers should your guess be compared against?";
   }
@@ -2892,8 +2900,29 @@ async function createRulePreflight(
       model,
       stage: "compiling",
     });
-    const astProvider: RuleAstProvider = async ({ normalizedText }) =>
-      compileRuleToAst(normalizedText, passConfig, signal);
+    const astProvider: RuleAstProvider = async ({ normalizedText }) => {
+      try {
+        return await compileRuleToAst(normalizedText, passConfig, signal);
+      } catch (error) {
+        if (signal?.aborted) {
+          throw signal.reason ?? error;
+        }
+        // The compiler collapses any provider throw into the single reason code
+        // PROVIDER_MALFORMED_RESPONSE and keeps nothing else, so without this an
+        // operator investigating a blocked rule cannot tell a timeout from
+        // unparseable output from a model that refused to answer.
+        const detail =
+          error instanceof RuleAgentError && error.detail
+            ? ` ${error.detail}`
+            : "";
+        console.error(
+          `Rule compile provider failed (rule ${ruleId}, model ${model}):`,
+          error instanceof Error ? error.message : String(error),
+          detail,
+        );
+        throw error;
+      }
+    };
     const compilationText = selectCompilationText(
       sanitizedText,
       interpretation.normalizedText,
@@ -3125,7 +3154,8 @@ async function createRulePreflight(
     semanticImpact: semanticReview.impact,
     title: interpretation.title,
     tokenCount,
-    version: 12,
+    // 13: `semanticImpact` carries `astAvailable`.
+    version: 13,
   });
 
   return {
@@ -6208,12 +6238,71 @@ export function buildDealerQuestionContext(args: {
     ? getBlockingRuleReasonExplanations(diagnostics.reasonCodes)
     : [];
   const payload = {
-    contextVersion: 2,
+    contextVersion: 4,
     diagnosticsAvailable: diagnostics !== null,
     fees: {
       chatSol: 0,
       preflightSol: 0,
       ruleSubmissionSol: nextRuleFeeLamports / LAMPORTS_PER_SOL,
+    },
+    game: {
+      format:
+        "A social lottery game with community-created alternative winning rules.",
+      guess:
+        "Before the official draw, a player submits six unique numbers from 1 through 100.",
+      name: "Tywish",
+      playerObjective:
+        "Win the round with the submitted six-number guess. The player does not guess, discover, or get a rule right.",
+      rewards: {
+        gamePrize: {
+          asset: "SOL",
+          eligibility:
+            "A submitted eligible guess wins when it satisfies the original winning condition or, when active, the alternative winning condition.",
+          source:
+            "The relevant round prize pool. Token rewards and treasury-fee distributions never reduce the winner's prize payout.",
+        },
+        gameTokens: {
+          asset: "Tyche tokens",
+          limitation:
+            "Campaign rewards require their specific eligibility conditions and available campaign funds. They are not automatic, guaranteed, or paid from the prize pool.",
+          paths: {
+            actionRewards: {
+              eligibility:
+                "While an approved promotion campaign has remaining funds, a successfully confirmed on-chain rule proposal or in-favour vote may receive its configured token reward. This path does not require the proposed or supported rule to become active or produce winners.",
+            },
+            activeRuleRewards: {
+              eligibility:
+                "When the active alternative rule produces at least one winner, its creator and the unique wallets with an in-favour vote for that elected rule may receive campaign-token rewards. Repeated votes do not add reward shares, and elimination votes do not qualify.",
+            },
+            referralRewards: {
+              eligibility:
+                "An eligible referral may receive the campaign's configured token rewards only after the referred player completes a first confirmed guess.",
+            },
+          },
+        },
+        treasuryFeeDistribution: {
+          asset: "SOL",
+          calculation:
+            "After a closed seven-turn accounting epoch, each eligible locked position receives a proportional share based on its locked token amount and how long those tokens were locked during that epoch.",
+          eligibility:
+            "Lock Tyche tokens in the protocol-controlled escrow before or during the accounting epoch. Holding unlocked tokens alone does not qualify.",
+          source:
+            "One hundred percent of the defined treasury-fee share from paid game actions goes to the token-lock distribution vault; prize-pool funds remain separate.",
+        },
+      },
+      roundFlow: [
+        "Choose and submit six unique numbers from 1 through 100.",
+        "Optionally propose alternative winning rules and vote on community proposals.",
+        "One eligible alternative rule may become active for the round.",
+        "Wait for the official draw of six unique numbers from 1 through 100.",
+        "The game evaluates every eligible guess under the original winning condition and, when present, the active alternative winning condition.",
+      ],
+      winningConditions: {
+        alternative:
+          "The active community-created alternative rule is evaluated independently when one exists; a guess may win through it without matching the original rule.",
+        original:
+          "Match all six official draw numbers in the exact drawn order.",
+      },
     },
     latestPlayerMessage: args.message,
     preflight: diagnostics
