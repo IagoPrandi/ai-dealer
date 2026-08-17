@@ -454,176 +454,65 @@ function ClarificationPrompt({
   return (
     <div
       aria-label={title}
-      className="ide-card"
+      className="ide-clarification-card"
       style={{
         animation: "ide-rise .3s ease both",
-        background: "rgba(23,18,31,0.96)",
-        borderColor: "rgba(255,255,255,0.12)",
-        borderRadius: 24,
-        boxShadow: "0 22px 44px -28px rgba(0,0,0,0.9)",
-        display: "grid",
-        gap: 10,
-        padding: 12,
       }}
     >
-      <h2
-        style={{
-          color: "var(--text)",
-          fontSize: 17,
-          fontWeight: 800,
-          letterSpacing: "-0.01em",
-          lineHeight: 1.2,
-          margin: "0 2px 2px",
-        }}
-      >
-        {title}
-      </h2>
-      {questions.length > 0 ? (
-        <div
-          aria-label="Clarification questions"
-          style={{
-            background: "var(--surface-2)",
-            border: "1px solid var(--line)",
-            borderRadius: 16,
-            display: "grid",
-            gap: 8,
-            padding: "11px 12px",
-          }}
-        >
-          <SectionLabel>Questions to answer</SectionLabel>
-          {questions.map((question, index) => (
-            <div
-              key={question}
-              style={{
-                alignItems: "start",
-                color: "var(--muted)",
-                display: "grid",
-                fontSize: 13.5,
-                gap: 8,
-                gridTemplateColumns: "22px minmax(0, 1fr)",
-                lineHeight: 1.45,
-              }}
-            >
-              <span
-                className="ide-num"
-                style={{ color: "var(--purple-soft)", fontWeight: 800 }}
+      <div className="ide-clarification-prompt">
+        <h2 className="ide-clarification-title">{title}</h2>
+        {questions.length > 0 ? (
+          <div
+            aria-label="Clarification questions"
+            className="ide-clarification-questions"
+          >
+            <SectionLabel>Questions to answer</SectionLabel>
+            {questions.map((question) => (
+              <div
+                key={question}
+                className="ide-clarification-question"
               >
-                {index + 1}.
-              </span>
-              <span>{question}</span>
-            </div>
-          ))}
-        </div>
-      ) : null}
-      <div style={{ display: "grid", gap: 7 }}>
+                {question}
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
+      <div className="ide-clarification-options">
         {options.map((option, index) => {
           const selected = selectedIndex === index;
           return (
             <button
               aria-pressed={selected}
+              className={`ide-clarification-option${selected ? " is-selected" : ""}`}
               key={option.text}
               onClick={() => onSelect(index)}
-              style={{
-                alignItems: "center",
-                background: selected
-                  ? "rgba(255,255,255,0.08)"
-                  : "rgba(255,255,255,0.035)",
-                border: "1px solid transparent",
-                borderColor: selected
-                  ? "rgba(255,255,255,0.08)"
-                  : "transparent",
-                borderRadius: 18,
-                color: "var(--text)",
-                cursor: "pointer",
-                display: "grid",
-                fontFamily: "Archivo",
-                gap: 12,
-                gridTemplateColumns: "44px minmax(0, 1fr)",
-                minHeight: 54,
-                padding: "10px 12px",
-                textAlign: "left",
-              }}
               type="button"
             >
-              <span
-                className="ide-num"
-                style={{
-                  alignItems: "center",
-                  background: selected
-                    ? "rgba(244,241,250,0.9)"
-                    : "rgba(255,255,255,0.12)",
-                  borderRadius: 999,
-                  color: selected ? "#17121F" : "var(--muted)",
-                  display: "inline-flex",
-                  fontSize: 17,
-                  fontWeight: 800,
-                  height: 40,
-                  justifyContent: "center",
-                  width: 40,
-                }}
-              >
-                {index + 1}
+              <span className="ide-num ide-clarification-option-index">
+                {String(index + 1).padStart(2, "0")}
               </span>
-              <span
-                style={{
-                  color: selected ? "var(--text)" : "var(--muted)",
-                  fontSize: 15,
-                  fontWeight: 400,
-                  lineHeight: 1.45,
-                  minWidth: 0,
-                  overflowWrap: "anywhere",
-                }}
-              >
-                {option.text}
-              </span>
+              <span className="ide-clarification-option-text">{option.text}</span>
             </button>
           );
         })}
         <button
           aria-pressed={selectedIndex === null}
+          className={`ide-clarification-option ide-clarification-manual${selectedIndex === null ? " is-selected" : ""}`}
           onClick={onManualSelect}
-          style={{
-            alignItems: "center",
-            background:
-              selectedIndex === null ? "rgba(255,255,255,0.06)" : "transparent",
-            border: "1px solid transparent",
-            borderRadius: 16,
-            color: "var(--muted)",
-            cursor: "pointer",
-            display: "grid",
-            fontFamily: "Archivo",
-            gap: 12,
-            gridTemplateColumns: "44px minmax(0, 1fr)",
-            minHeight: 48,
-            padding: "6px 12px",
-            textAlign: "left",
-          }}
           type="button"
         >
-          <span
-            style={{
-              alignItems: "center",
-              border: "1px solid rgba(255,255,255,0.14)",
-              borderRadius: 999,
-              display: "inline-flex",
-              height: 34,
-              justifyContent: "center",
-              width: 34,
-            }}
-          >
+          <span className="ide-clarification-manual-icon">
             <Ico.edit
-              style={{ color: "var(--muted)", height: 17, width: 17 }}
+              style={{
+                color:
+                  selectedIndex === null ? "var(--on-cyan)" : "var(--muted)",
+                height: 17,
+                width: 17,
+              }}
             />
           </span>
-          <span
-            style={{
-              fontSize: 15,
-              fontWeight: 400,
-              lineHeight: 1.45,
-              minWidth: 0,
-              overflowWrap: "anywhere",
-            }}
-          >
+          <span className="ide-clarification-option-text">
             {manualText.trim()
               ? manualText
               : terminalRejection
@@ -632,51 +521,24 @@ function ClarificationPrompt({
           </span>
         </button>
       </div>
-      <div
-        style={{
-          alignItems: "center",
-          display: "flex",
-          gap: 10,
-          justifyContent: "space-between",
-          paddingTop: 2,
-        }}
-      >
+      <div className="ide-clarification-actions">
         <button
+          className="ide-clarification-dismiss"
           onClick={onDismiss}
-          style={{
-            background: "transparent",
-            border: "none",
-            color: "var(--muted)",
-            cursor: "pointer",
-            fontFamily: "Archivo",
-            fontSize: 14.5,
-            fontWeight: 650,
-            minHeight: 44,
-            padding: "9px 2px",
-          }}
           type="button"
         >
           Dismiss
         </button>
         <button
-          className="ide-btn"
+          className="ide-btn ide-clarification-submit"
           disabled={disabled || !canSubmit}
           onClick={onSubmit}
-          style={{
-            background: "#78b7df",
-            borderRadius: 20,
-            boxShadow: "none",
-            color: "#09131A",
-            minWidth: 112,
-            opacity: disabled || !canSubmit ? 0.5 : 1,
-            padding: "13px 18px",
-          }}
           type="button"
         >
           {terminalRejection ? "Use rule" : "Submit"}{" "}
           <Ico.back
             style={{
-              color: "#09131A",
+              color: "var(--on-accent)",
               height: 18,
               transform: "rotate(180deg)",
               width: 18,
@@ -2135,9 +1997,15 @@ function CreateChat({
               }}
             />
             <button
-              aria-label="Send message"
-              onClick={() => void send()}
-              className="ide-btn"
+              aria-label={guidance ? "Submit clarification" : "Send message"}
+              onClick={() => {
+                if (guidance) {
+                  submitGuidance();
+                  return;
+                }
+                void send();
+              }}
+              className={`ide-btn ide-composer-send${guidance ? " is-guidance" : ""}`}
               style={{
                 width: 48,
                 height: 48,
@@ -2147,7 +2015,11 @@ function CreateChat({
               }}
               type="button"
             >
-              <Ico.send style={{ color: "var(--on-accent)" }} />
+              <Ico.send
+                style={{
+                  color: guidance ? "var(--cyan)" : "var(--on-accent)",
+                }}
+              />
             </button>
           </div>
         </div>

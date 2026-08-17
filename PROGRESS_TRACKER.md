@@ -4,6 +4,62 @@ This tracker records milestone status, work logs, and required document confirma
 
 ## Work Log
 
+### 2026-08-17 (Clarification flow restored to the Create conversation pattern)
+
+- Reopened the required `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, and `.claude/skills`; followed the local Tyche design-system, UI-coherence, frontend, test-and-verify, and Playwright guidance; and inspected the canonical token, component, screen, repository-integration, `07-create.html`, current Create implementation, and neighboring shared UI references before editing.
+- Replaced the clarification panel's modal-like nested treatment with the canonical Create conversation hierarchy: a compact magenta question bubble, Archivo question copy, restrained DM Mono option indexes, neutral answer rows, and a cyan selected state. The single yellow submit action now owns the primary emphasis instead of competing with oversized yellow index tiles.
+- During clarification, the fixed composer arrow now becomes a cyan secondary action and submits through the same clarification path as Enter. This removes the duplicate yellow CTA and keeps the manual-answer interaction consistent without changing rule selection, compiler, fee, wallet, or on-chain behavior.
+- Verification passed for `@tyche/web`: TypeScript typecheck, all `257/257` unit tests, ESLint with zero warnings, production build, and `git diff --check`. The production-build Playwright flow rendered and exposed the complete clarification state at the Pixel 5 viewport; the reviewed capture is `output/playwright/clarification-panel-updated.jpeg`, with no horizontal clipping in the rendered panel. The existing material-impact E2E proceeds into this state but then fails on its pre-existing expectation for removed `94% interpretation confidence` copy; the blocked-injection scenario now follows its current inline rejection behavior instead of opening guidance. Neither unrelated assertion was hidden or changed in this UI task.
+- No milestone checkbox was changed because milestone completion still requires explicit user confirmation. Final inconsistency review confirmed UTF-8 English UI copy, square card geometry, token-only colors, 44px+ actions, visible focus treatment, one yellow primary action, and preserved clarification semantics.
+
+### 2026-08-17 (Clarification option typography corrected)
+
+- Reopened `PRD.md`, `AGENTS.md`, `.claude/skills`, and the Tyche design-system/UI-coherence references before correcting the clarification list typography.
+- Restored clarification option copy to the inherited Archivo body treatment (`13.5px` / `1.45`); removed the unintended Oswald, uppercase, and display-label overrides. The Bevan treatment remains limited to the yellow numeric index cells, as required by the design-system list recipe.
+- No milestone checkbox was changed because confirmation is still required.
+
+### 2026-08-17 (Agent-message shadow aligned to orange reference)
+
+- Reopened `PRD.md`, `AGENTS.md`, `.claude/skills`, and the Tyche design-system/UI-coherence guidance before applying the supplied message reference.
+- Changed the agent chat bubble's projected shadow from cyan to the canonical orange `--solid-4` (`#FF6A1F`), matching the shadow treatment in the supplied reference. Its dark surface, square geometry, type, spacing, and all other card states are unchanged.
+- Rendered and inspected `output/playwright/agent-message-orange-shadow.png` using the app's actual classes and tokens.
+- No milestone checkbox was changed because confirmation is still required.
+
+### 2026-08-17 (Clarification cards matched to supplied references)
+
+- Reopened `PRD.md`, `AGENTS.md`, `.claude/skills`, and the Tyche design-system and UI-coherence guidance before applying the supplied card references.
+- Matched the outer **Clarify this rule?** panel to the diagnostic-card pattern: dark surface, neutral square contour, and a cyan 5px projected offset. Removed the prior magenta outer treatment. Matched list choices to the supplied rule-row pattern: dark square cards, neutral contours, cyan offset on the selected row only, yellow Bevan `01`/`02` index cells, and Oswald uppercase option copy. The manual row remains secondary while retaining its border.
+- Rendered and visually inspected the local token/class preview at `output/playwright/clarification-panel-preview.png`.
+- Verification passed: `@tyche/web` typecheck, `257/257` tests, zero-warning lint, production build, and `git diff --check`. No milestone checkbox was changed because confirmation is still required.
+
+### 2026-08-17 (Clarification-index and unselected-card alignment)
+
+- Reopened `PRD.md`, `AGENTS.md`, `.claude/skills`, and the Tyche design-system/UI-coherence guidance before correcting the requested list treatment.
+- Corrected the zero-padded choice index to the canonical Bevan list-index treatment; it remains `01`, `02`, … and its number cell still has no projected shadow. Nonselected choice cards now use the design system's neutral inset ring (`--ring`) as their border, while the selected choice alone retains the solid orange offset.
+- Verification passed: `@tyche/web` typecheck, `257/257` tests, zero-warning lint, production build, and `git diff --check`. No milestone checkbox was changed because confirmation is still required.
+
+### 2026-08-17 (Clarification-choice card states refined)
+
+- Reopened `PRD.md`, `AGENTS.md`, `.claude/skills`, and the Tyche design-system/UI-coherence guidance before applying the requested choice-card refinement.
+- Restored zero-padded choice indexes (`01`, `02`, …) in the numeric display treatment. Removed shadows from those index cells. The selected choice now uses the supplied composer-card pattern: dark input surface, square corners, reserved right space, and the solid orange 5px offset. Unselected and manual choices are transparent, retain their 44px+ tap targets, and have no outline or shadow.
+- Re-rendered the local token/class preview and inspected the selected plus unselected states in `output/playwright/clarification-panel-preview.png`.
+- Verification passed: `@tyche/web` typecheck, `257/257` tests, zero-warning lint, production build, and `git diff --check`. No milestone checkbox was changed because confirmation is still required.
+
+### 2026-08-17 (Clarification-panel density refinement)
+
+- Reopened `PRD.md`, `AGENTS.md`, `.claude/skills`, and the Tyche UI coherence and design-system guidance before refining the panel.
+- Reduced the clarification title to the compact 19px display scale and reduced the primary submit button to a 44px high, 15px-label action. Removed every ordinal from clarification questions. Answer choices now use an unpadded single-digit Bevan list marker, replacing the incorrect `01` DM Mono chip treatment.
+- Rendered and inspected an isolated local preview using the app's real classes and tokens; the current visual capture is `output/playwright/clarification-panel-preview.png`.
+- Verification passed: `@tyche/web` typecheck, `257/257` tests, zero-warning lint, production build, and `git diff --check`. No milestone checkbox was changed because confirmation is still required.
+
+### 2026-08-17 (Clarification panel aligned with Tinta Neon)
+
+- Opened `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, and `.claude/skills` before working. Applied `.claude/skills/tyche-ui-coherence/SKILL.md`, `.claude/skills/tyche-design-system/SKILL.md`, its required token, component, screen, repository-integration, and Create-screen references, plus the frontend and test-and-verify guidance.
+- Reworked the rule-clarification panel in `Create.tsx` to use the established Create conversation language: a square dark question card with magenta offset, Bevan chromatic-plate title, cyan section label, DM Mono two-digit indexes, inset-outlined answer cards, and a yellow canonical CTA. The prior rounded containers, diffuse shadow, conventional borders, and blue submit button were removed.
+- Added scoped clarification-panel styles to `tyche.css`, including mobile-safe grid text wrapping, selected and focus-visible states, the existing token palette, and no new visual token or component primitive. The selection and submit behavior remains unchanged.
+- Verification passed: `@tyche/web` typecheck, zero-warning lint, production build, and `git diff --check`. The E2E suite could not be cleanly started by its default configuration because another user-owned Next dev server already held the app directory; redirecting the suite to that stale server did not reach its mocked routes, so its six scenarios are not recorded as a valid pass. The process was left untouched. No milestone checkbox was changed because explicit user confirmation is still required.
+- Final consistency review confirmed that the panel uses UTF-8 English copy, preserves accessible button semantics and focus treatment, has no horizontal-layout masking or hidden-error fallback, and matches the mobile-first Tinta Neon card/button/font rules.
+
 ### 2026-08-17 (Read-only audit of rule-flow terminal states)
 
 - Reopened `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, the browser-use guidance, `.claude/skills/tyche-ui-coherence/SKILL.md`, and `.claude/skills/tyche-test-and-verify/SKILL.md` before auditing the post-fix user experience. This was a read-only diagnosis; no application code or milestone checkbox changed.

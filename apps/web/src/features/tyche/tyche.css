@@ -485,10 +485,10 @@
 .ide-result-legend .both { background: linear-gradient(135deg, var(--purple) 0 49%, var(--cyan) 51% 100%); }
 
 /* Chat bubbles — square blocks with a solid offset. The dealer speaks from a
-   dark card with a cyan offset; the player speaks in yellow with orange. */
+   dark card with an orange offset; the player speaks in yellow with orange. */
 .ide-bubble-ai {
   max-width: 88%; align-self: flex-start; overflow-wrap: anywhere; word-break: break-word;
-  background: var(--surface); box-shadow: var(--solid-cyan-4);
+  background: var(--surface); box-shadow: var(--solid-4);
   border-radius: var(--radius-card); padding: 13px 15px; margin-right: 4px;
   font-family: Archivo, sans-serif; font-size: 13px; line-height: 1.5;
   color: var(--ink-body); white-space: pre-line;
@@ -499,6 +499,166 @@
   color: var(--on-accent); font-weight: 400;
   border-radius: var(--radius-card); padding: 12px 14px; margin-right: 4px;
   font-family: Archivo, sans-serif; font-size: 13.5px; line-height: 1.45; white-space: pre-line;
+}
+
+/* Clarification continues the dealer conversation instead of becoming a modal.
+   The prompt follows the magenta question-bubble reference from screen 07;
+   answers stay compact and subordinate to the single yellow submit action. */
+.ide-clarification-card {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  margin: 0 4px 4px 0;
+}
+.ide-clarification-prompt {
+  display: grid;
+  gap: 9px;
+  max-width: 88%;
+  min-width: 0;
+  margin-right: 4px;
+  padding: 13px 15px;
+  background: var(--surface);
+  box-shadow: var(--solid-magenta);
+  border-radius: var(--radius-card);
+}
+.ide-clarification-title {
+  margin: 0;
+  color: var(--text);
+  font-family: Bevan, serif;
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1.15;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-shadow: var(--plate);
+}
+.ide-clarification-questions {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+.ide-clarification-question {
+  color: var(--ink-body);
+  font-family: Archivo, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.ide-clarification-options {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.ide-clarification-option {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-height: 52px;
+  padding: 9px 11px;
+  border: none;
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+  box-shadow: var(--ring);
+  color: var(--ink-body);
+  cursor: pointer;
+  font-family: Archivo, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: left;
+  transition: color .12s ease, box-shadow .12s ease, transform .12s ease;
+}
+.ide-clarification-option:hover {
+  color: var(--text);
+  box-shadow: var(--ring-soft);
+}
+.ide-clarification-option.is-selected {
+  background: var(--surface);
+  margin-right: 4px;
+  box-shadow: var(--ring-cyan), var(--solid-cyan-4);
+  color: var(--text);
+}
+.ide-clarification-option-index {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  color: var(--yellow);
+  background: var(--surface-3);
+  box-shadow: var(--ring-thin);
+  border-radius: var(--radius-card);
+  font-family: var(--num-font, 'DM Mono'), ui-monospace, monospace;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+}
+.ide-clarification-option.is-selected .ide-clarification-option-index {
+  color: var(--on-cyan);
+  background: var(--cyan);
+  box-shadow: none;
+}
+.ide-clarification-option-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ide-clarification-manual-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  color: var(--muted);
+  background: var(--surface-3);
+  box-shadow: none;
+  border-radius: var(--radius-card);
+}
+.ide-clarification-manual {
+  grid-template-columns: 30px minmax(0, 1fr);
+  min-height: 48px;
+  color: var(--muted);
+}
+.ide-clarification-manual.is-selected .ide-clarification-manual-icon {
+  background: var(--cyan);
+}
+.ide-clarification-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 2px;
+}
+.ide-clarification-dismiss {
+  min-height: 44px;
+  padding: 9px 2px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: Oswald, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.ide-clarification-dismiss:hover { color: var(--cyan); }
+.ide-clarification-submit {
+  min-width: 108px;
+  min-height: 44px;
+  padding: 10px 15px;
+  font-size: 15px;
+}
+.ide-composer-send.is-guidance,
+.ide-composer-send.is-guidance:active {
+  margin-right: 0;
+  background: var(--surface-2);
+  box-shadow: var(--ring-cyan);
+  transform: none;
+}
+.ide-clarification-option:focus-visible,
+.ide-clarification-dismiss:focus-visible,
+.ide-clarification-submit:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 3px;
 }
 .ide-typing span {
   display: inline-block; width: 7px; height: 7px; border-radius: 0; margin-right: 4px;
