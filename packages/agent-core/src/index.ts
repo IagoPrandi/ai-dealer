@@ -85,6 +85,13 @@ export interface AgentProviderAttemptLog {
   priority: AgentProviderPriority;
   provider: string;
   request_shape: AgentProviderRequestShape;
+  /**
+   * Why the emitted AST failed schema validation (first issues, as
+   * `path: message`), or null when the schema was not the problem. Without this
+   * SCHEMA_INVALID is a dead end for an operator: the rule is blocked and the
+   * response that caused it is discarded.
+   */
+  schema_error?: string | null;
   status: AgentProviderAttemptStatus;
 }
 

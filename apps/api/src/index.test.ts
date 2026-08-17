@@ -686,6 +686,73 @@ test("rule preflight names a compiler capability gap without inventing ambiguity
   );
 });
 
+test("provider disagreement is reported as a compiler conflict, not another clarification", () => {
+  const text =
+    "The player wins if their six-number guess contains the numbers 1, 2, 3, and 4 (in any order) and two other distinct numbers from 5 to 100, with no repeats.";
+  const interpretation =
+    "Engine verifies the guess includes exactly the values 1, 2, 3, 4, plus two additional values each from 5 through 100, all six values being unique; if satisfied, the guess wins.";
+  const feedback = buildRuleRefinementFeedback({
+    agentClarificationQuestions: [
+      "What condition should apply to the remaining two guessed numbers?",
+    ],
+    clarityNote: "",
+    compileText: text,
+    officialInterpretation: interpretation,
+    reasonCodes: [
+      "UNSUPPORTED_RULE",
+      "SCHEMA_INVALID",
+      "UNSAFE_RUNTIME_BOUNDS",
+      "PROVIDER_DISAGREEMENT",
+    ],
+    reasonSummary: "Rule rejected: PROVIDER_DISAGREEMENT.",
+    sanitizedText: text,
+    tokenCount: text.trim().split(/\s+/u).length,
+  });
+
+  assert.deepEqual(feedback.refinementQuestions, []);
+  assert.match(feedback.reasonSummary, /wording is clear/iu);
+  assert.match(feedback.reasonSummary, /compiler conflict/iu);
+  assert.match(feedback.dealerMessage, /do not repeat the same clarification/iu);
+  assert.doesNotMatch(feedback.dealerMessage, /rewrite the rule as one direct/iu);
+  assert.ok(
+    feedback.refinementFocus.some((item) =>
+      /no missing rule detail was identified/iu.test(item),
+    ),
+  );
+});
+
+test("a recorded disagreement that did not block is not blamed for the block", () => {
+  // Consensus disabled: PROVIDER_DISAGREEMENT is still measured and logged, but
+  // some other reason rejected the rule. Leading with the conflict message would
+  // send the player to fix a conflict that is not why they were blocked.
+  const text =
+    "The player wins if their six-number guess contains the numbers 1, 2, 3, and 4 (in any order) and two other distinct numbers from 5 to 100, with no repeats.";
+  const feedback = buildRuleRefinementFeedback({
+    clarityNote: "",
+    compileText: text,
+    officialInterpretation:
+      "Engine verifies the guess includes exactly the values 1, 2, 3, 4, plus two additional values each from 5 through 100.",
+    providerDisagreementBlocked: false,
+    reasonCodes: [
+      "UNSUPPORTED_RULE",
+      "SCHEMA_INVALID",
+      "UNSAFE_RUNTIME_BOUNDS",
+      "PROVIDER_DISAGREEMENT",
+    ],
+    reasonSummary: "Rule rejected: UNSUPPORTED_RULE.",
+    sanitizedText: text,
+    tokenCount: text.trim().split(/\s+/u).length,
+  });
+
+  assert.doesNotMatch(feedback.reasonSummary, /compiler conflict/iu);
+  assert.ok(
+    !feedback.refinementFocus.some((item) =>
+      /no missing rule detail was identified/iu.test(item),
+    ),
+    `focus must not claim there is nothing to fix: ${feedback.refinementFocus.join(" | ")}`,
+  );
+});
+
 test("rule refinement preserves all ordered tens ranges and rejects a generic agent rewrite", () => {
   const original =
     "Vence quem acertar todas as dezenas na mesma ordem. Por exemplo, se sair 12 31 24 e eu jogar 11 30 29, eu venço pois acertei as dezenas na ordem (10 30 20).";

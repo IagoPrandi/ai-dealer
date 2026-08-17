@@ -254,6 +254,10 @@ test("compiles every literal in an unordered guess-membership list", async () =>
     "A player wins if their six-number guess contains the numbers 1, 2, 3, and 4 in any order.",
     "The player wins if their guess includes 1, 2, 3, and 4, regardless of order or the other two numbers.",
     "Se o número do jogador tiver 1 2 3 4 em qualquer ordem, ele ganha.",
+    "Se o número do jogador tiver 1 2 3 4 em qualquer ordem, ele ganha. The official draw does not affect the result.",
+    "The player wins when their guess includes the numbers 1, 2, 3, and 4; the draw does not affect the outcome.",
+    "The player wins if their six-number guess contains the numbers 1, 2, 3, and 4 (in any order) and two other distinct numbers from 5 to 100, with no repeats.",
+    "The guess must contain 1, 2, 3, and 4, plus two additional values each from 5 through 100, all six values being unique; if satisfied, the guess wins.",
     "My ticket must include 7 and 13.",
   ];
 
@@ -294,29 +298,36 @@ test("compiles every literal in an unordered guess-membership list", async () =>
     assert.deepEqual(coverage.missingFromAst, [], prompt);
     assert.deepEqual(
       coverage.requiredValues,
-      prompt.includes("7 and 13") ? [7, 13] : [1, 2, 3, 4],
+      prompt.includes("7 and 13")
+        ? [7, 13]
+        : /from 5 (?:to|through) 100/i.test(prompt)
+          ? [1, 2, 3, 4, 5, 100]
+          : [1, 2, 3, 4],
       prompt,
     );
   }
 
   let providerCalls = 0;
-  const productionText = prompts[0]!;
-  const productionResult = await compileRuleArtifact(
-    {
-      originalText: productionText,
-      prompt: productionText,
-      tokenCount: tokenCount(productionText),
-    },
-    {
-      astProvider: async () => {
-        providerCalls += 1;
-        throw new Error("provider should not be needed for literal membership");
+  for (const productionText of prompts) {
+    const productionResult = await compileRuleArtifact(
+      {
+        originalText: productionText,
+        prompt: productionText,
+        tokenCount: tokenCount(productionText),
       },
-      preferDeterministic: true,
-      requireProviderEvidence: true,
-    },
-  );
-  assert.equal(productionResult.decision, "VALID");
+      {
+        astProvider: async () => {
+          providerCalls += 1;
+          throw new Error(
+            "provider should not be needed for literal membership",
+          );
+        },
+        preferDeterministic: true,
+        requireProviderEvidence: true,
+      },
+    );
+    assert.equal(productionResult.decision, "VALID", productionText);
+  }
   assert.equal(providerCalls, 0);
 
   const compound =
@@ -336,6 +347,19 @@ test("compiles every literal in an unordered guess-membership list", async () =>
   });
   assert.equal(prefixedRejection.decision, "INVALID");
   assert.equal(prefixedRejection.artifact, null);
+
+  for (const unsafeRemainder of [
+    "The guess must contain 1, 2, 3, and 4, plus one other distinct number from 5 to 100.",
+    "The guess must contain 1, 2, 3, and 4, plus two other distinct numbers from 6 to 100.",
+    "The guess must contain 1, 2, 3, and 4, plus two other numbers from 5 to 100.",
+  ]) {
+    const invalid = validateAndPrecompileRule({
+      prompt: unsafeRemainder,
+      tokenCount: tokenCount(unsafeRemainder),
+    });
+    assert.equal(invalid.decision, "INVALID", unsafeRemainder);
+    assert.equal(invalid.artifact, null, unsafeRemainder);
+  }
 });
 
 test("deterministically compiles the canonical most/fewest-matches ranking family", () => {
@@ -2024,7 +2048,14 @@ test("supports local-only OpenAI-compatible routing with Ollama request shape", 
   assert.equal(result.log.modelIdentity.serving_engine, "ollama");
 });
 
-test("uses tertiary path and fails closed when providers disagree", () => {
+test("differing confidence over the same reading is not a disagreement", () => {
+  // Every attempt here compiles the SAME text with the SAME deterministic
+  // compiler, so all three hold the identical reading and only their confidence
+  // action differs. That is not dissent: confidence is enforced by the
+  // thresholds and the escalation ladder, and counting it again as disagreement
+  // blocked rules every provider had read the same way. Genuine divergence —
+  // providers emitting ASTs that behave differently — is covered by the
+  // compileRuleArtifact tests further down.
   const result = validateAndPrecompileRule({
     prompt: "Win if at least 4 of your numbers appear in the draw.",
     providerConfidenceActionByPriority: {
@@ -2034,14 +2065,15 @@ test("uses tertiary path and fails closed when providers disagree", () => {
     tokenCount: 12,
   });
 
-  assert.equal(result.decision, "INVALID");
-  assert.equal(result.artifactHash, null);
+  assert.equal(result.log.providerDisagreementRateSample, 0);
+  assert.ok(!result.log.reasonCodes.includes("PROVIDER_DISAGREEMENT"));
+  assert.equal(result.decision, "VALID");
+  assert.ok(result.artifactHash);
+  // The escalated primary still hands off, so the fallback path is exercised.
   assert.equal(result.log.fallbackTriggered, true);
-  assert.equal(result.log.providerDisagreementRateSample, 1);
-  assert.ok(result.log.reasonCodes.includes("PROVIDER_DISAGREEMENT"));
   assert.deepEqual(
     result.log.providerPath.map((attempt) => attempt.priority),
-    ["primary", "secondary", "tertiary"],
+    ["primary", "secondary"],
   );
 });
 
@@ -2415,6 +2447,152 @@ test("fails closed when two providers compile the same text differently", async 
   assert.equal(result.artifact, null);
   assert.equal(result.log.providerDisagreementRateSample, 1);
   assert.ok(result.log.reasonCodes.includes("PROVIDER_DISAGREEMENT"));
+});
+
+test("disableConsensus lifts the rejection but still records the divergence", async () => {
+  const answers = [sumCompareAst("lt", 10), sumCompareAst("gt", 10)];
+  let index = 0;
+  let calls = 0;
+  const result = await compileRuleArtifact(
+    { originalText: NO_REFERENCE_PROMPT, prompt: NO_REFERENCE_PROMPT, tokenCount: 14 },
+    {
+      astProvider: async () => {
+        calls += 1;
+        return answers[index++] ?? answers[0];
+      },
+      disableConsensus: true,
+    },
+  );
+
+  // The mandatory second opinion is not bought, so the second reading that
+  // would have contradicted the first is never requested.
+  assert.equal(calls, 1);
+  assert.equal(result.log.providerDisagreementRateSample, 0);
+  assert.equal(result.decision, "VALID");
+  assert.ok(result.artifact);
+  assert.ok(!result.log.reasonCodes.includes("SECOND_OPINION_UNAVAILABLE"));
+});
+
+test("disableConsensus keeps PROVIDER_DISAGREEMENT in the log when it still happens", async () => {
+  // The primary escalates, so the loop reaches the secondary regardless of the
+  // flag and the readings do diverge. The divergence must stay auditable; only
+  // the rejection is lifted.
+  const answers = [sumCompareAst("lt", 10), sumCompareAst("gt", 10)];
+  let index = 0;
+  const result = await compileRuleArtifact(
+    {
+      originalText: NO_REFERENCE_PROMPT,
+      prompt: NO_REFERENCE_PROMPT,
+      providerConfidenceActionByPriority: { primary: "ESCALATE" },
+      tokenCount: 14,
+    },
+    {
+      astProvider: async () => answers[index++] ?? answers[0],
+      disableConsensus: true,
+    },
+  );
+
+  assert.equal(result.log.providerDisagreementRateSample, 1);
+  assert.ok(result.log.reasonCodes.includes("PROVIDER_DISAGREEMENT"));
+  assert.ok(
+    !result.log.reasonSummary.includes("provider attempts disagreed"),
+    `disagreement must not drive the summary: ${result.log.reasonSummary}`,
+  );
+});
+
+test("the tertiary resolves a real disagreement by behaviour, not byte equality", async () => {
+  // The primary reads the rule one way; the secondary and tertiary read it the
+  // other way in two DIFFERENT but algebraically identical shapes. Requiring
+  // byte-identical serialized ASTs to corroborate made this unreachable, so
+  // every genuine divergence was a permanent dead end.
+  const shifted = {
+    schemaVersion: 2,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "compare",
+        op: "lt",
+        left: {
+          kind: "arith",
+          op: "add",
+          left: { kind: "reduce", op: "sum", of: { kind: "source", source: "guess" } },
+          right: { kind: "lit", value: 10 },
+        },
+        right: { kind: "reduce", op: "sum", of: { kind: "source", source: "draw" } },
+      },
+    },
+  };
+  const answers: unknown[] = [
+    sumCompareAst("gt", 10), // primary — a genuinely different rule
+    sumCompareAst("lt", 10), // secondary
+    shifted, // tertiary — same behaviour as the secondary, different shape
+  ];
+  let index = 0;
+  const result = await compileRuleArtifact(
+    { originalText: NO_REFERENCE_PROMPT, prompt: NO_REFERENCE_PROMPT, tokenCount: 14 },
+    { astProvider: async () => answers[index++] ?? answers[0] },
+  );
+
+  // The divergence is real and stays on the record...
+  assert.equal(result.log.providerDisagreementRateSample, 1);
+  assert.ok(result.log.reasonCodes.includes("PROVIDER_DISAGREEMENT"));
+  assert.equal(result.log.providerPath.length, 3);
+  // ...and the tiebreaker now actually resolves it.
+  assert.equal(result.decision, "VALID");
+  assert.ok(result.artifact);
+  // The corroborated reading is what got frozen: a low guess total against a
+  // high draw total WINS under the secondary/tertiary reading and LOSES under
+  // the primary's inverted one.
+  assert.equal(
+    evaluatePredicate(result.artifact.ast, {
+      draw: [90, 91, 92, 93, 94, 95],
+      guess: [1, 2, 3, 4, 5, 6],
+    }).result,
+    "WIN",
+  );
+});
+
+test("a schema-invalid response holds no opinion, so it is not dissent", async () => {
+  // The primary emits a node the schema cannot express; the secondary compiles
+  // the text fine. That is one compiler producing nothing, not two compilers
+  // disagreeing, and the player must not be told otherwise.
+  const answers: unknown[] = [
+    {
+      schemaVersion: 2,
+      result: {
+        type: "predicate",
+        predicate: { kind: "definitely_not_a_real_kind", value: 3 },
+      },
+    },
+    sumCompareAst("lt", 10),
+  ];
+  let index = 0;
+  const result = await compileRuleArtifact(
+    {
+      originalText: NO_REFERENCE_PROMPT,
+      prompt: NO_REFERENCE_PROMPT,
+      providerConfidenceActionByPriority: { primary: "ESCALATE" },
+      tokenCount: 14,
+    },
+    { astProvider: async () => answers[index++] ?? answers[1] },
+  );
+
+  assert.equal(result.log.providerDisagreementRateSample, 0);
+  assert.ok(!result.log.reasonCodes.includes("PROVIDER_DISAGREEMENT"));
+  assert.equal(result.log.providerDisagreementBlocked, false);
+  // The aggregate reason codes describe the SELECTED reading, so the discarded
+  // attempt's fault lives on its own providerPath entry — which is exactly where
+  // an operator asking "why was a second opinion needed" will look.
+  assert.equal(result.log.providerPath[0]?.decision, "INVALID");
+  assert.equal(result.log.providerPath[0]?.status, "escalated");
+  const schemaError = result.log.providerPath[0]?.schema_error;
+  assert.ok(
+    typeof schemaError === "string" && schemaError.length > 0,
+    `expected the rejected AST's schema error to be recorded, got ${String(schemaError)}`,
+  );
+  // One reading survived and nothing corroborated it — say so rather than
+  // presenting it as a checked result.
+  assert.ok(result.log.reasonCodes.includes("SECOND_OPINION_UNAVAILABLE"));
 });
 
 test("treats an equivalent rewrite as agreement, not disagreement", async () => {

@@ -374,20 +374,47 @@ function extractJsonObject(content: string): unknown {
       : [withoutFences.slice(start, balancedEnd + 1)]),
     withoutFences.slice(start, end + 1),
   ];
+  let lastFailure: unknown = null;
+  let lastCandidate = "";
   for (const candidate of candidates) {
     try {
       return JSON.parse(candidate);
-    } catch {
+    } catch (error) {
       // Try the next reading; a genuinely malformed response fails below.
+      lastFailure = error;
+      lastCandidate = candidate;
     }
   }
   throw new RuleAgentError(
     "RULE_AGENT_BAD_RESPONSE",
     "The rule agent returned malformed JSON.",
-    `${withoutFences.length} chars, head=${JSON.stringify(
+    // Head and tail alone are useless when the break is in the middle, which is
+    // the common case for a long AST: both ends look perfect and the operator
+    // has nowhere to go. The parser already knows the offset — quote it.
+    `${withoutFences.length} chars, ${describeJsonParseFailure(
+      lastFailure,
+      lastCandidate,
+    )}, head=${JSON.stringify(
       withoutFences.slice(0, 240),
     )}, tail=${JSON.stringify(withoutFences.slice(-240))}`,
   );
+}
+
+// Number of characters to quote on each side of the reported parse offset.
+const JSON_FAILURE_CONTEXT_CHARS = 120;
+
+function describeJsonParseFailure(error: unknown, candidate: string): string {
+  const message = error instanceof Error ? error.message : String(error);
+  // V8 reports "... at position N (line L column C)"; older forms omit it.
+  const offset = Number(/at position (\d+)/u.exec(message)?.[1] ?? Number.NaN);
+  if (!Number.isFinite(offset)) {
+    return `parseError=${JSON.stringify(message)}`;
+  }
+  const from = Math.max(0, offset - JSON_FAILURE_CONTEXT_CHARS);
+  const to = Math.min(candidate.length, offset + JSON_FAILURE_CONTEXT_CHARS);
+  return `parseError=${JSON.stringify(message)}, around=${JSON.stringify(
+    candidate.slice(from, to),
+  )}`;
 }
 
 function coerceInterpretation(value: unknown): RuleAgentInterpretation {

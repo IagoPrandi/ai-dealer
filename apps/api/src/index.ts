@@ -2342,6 +2342,14 @@ interface RuleRefinementFeedbackInput {
   clarityNote: string;
   compileText: string;
   officialInterpretation: string;
+  /**
+   * Whether a measured PROVIDER_DISAGREEMENT actually decided the outcome.
+   * Defaults to true, which is what the code means whenever the consensus gate
+   * is on: there, a disagreement always blocks. Only a run with consensus
+   * disabled passes false, and then the code is present but some other reason
+   * did the blocking — attributing the block to the conflict would hide it.
+   */
+  providerDisagreementBlocked?: boolean;
   reasonCodes: readonly RuleValidationReasonCode[];
   reasonSummary: string;
   sanitizedText: string;
@@ -2879,8 +2887,28 @@ export function buildRuleRefinementFeedback(
     reasonCodes.has("UNSUPPORTED_RULE") &&
     !reasonCodes.has("AMBIGUOUS_RULE") &&
     input.officialInterpretation.trim().length > 0;
+  const understoodInterpretation = input.officialInterpretation
+    .trim()
+    .replace(/[.]+$/u, "");
+  const compilerConflictWithoutAmbiguity =
+    reasonCodes.has("PROVIDER_DISAGREEMENT") &&
+    (input.providerDisagreementBlocked ?? true) &&
+    !reasonCodes.has("AMBIGUOUS_RULE") &&
+    understoodInterpretation.length > 0;
+  const compilerConflictAction =
+    "No missing rule detail was identified. Do not repeat the same clarification; retry the exact interpretation once, and edit it only if the interpretation above is not what you meant.";
+  if (compilerConflictWithoutAmbiguity) {
+    // A provider conflict is not made repairable by asking the player an
+    // invented question. Repeating a clarification that both providers already
+    // received sends the conversation into a loop while hiding the real fault.
+    questions.splice(0, questions.length);
+  }
   const explanations = getBlockingRuleReasonExplanations(input.reasonCodes);
-  explanations.forEach((explanation) => focus.add(explanation.whatToChange));
+  if (compilerConflictWithoutAmbiguity) {
+    focus.add(compilerConflictAction);
+  } else {
+    explanations.forEach((explanation) => focus.add(explanation.whatToChange));
+  }
   deterministicRefinement.focus.forEach((item) => focus.add(item));
 
   if (questions.length === 0 && !unsupportedButUnderstood) {
@@ -2908,22 +2936,21 @@ export function buildRuleRefinementFeedback(
     );
   }
 
-  const understoodInterpretation = input.officialInterpretation
-    .trim()
-    .replace(/[.]+$/u, "");
   const topExplanation =
     explanations[0] ?? RULE_REASON_EXPLANATION_BY_CODE.get("UNSUPPORTED_RULE");
   if (!topExplanation) {
     throw new Error("RULE_REASON_EXPLANATION_MISSING:UNSUPPORTED_RULE");
   }
-  const reasonSummary = unsupportedButUnderstood
-    ? `I understood this as: ${understoodInterpretation}. ${topExplanation.whatHappened} ${topExplanation.whyItBlocks}`
-    : `${topExplanation.whatHappened} ${topExplanation.whyItBlocks}`;
+  const reasonSummary = compilerConflictWithoutAmbiguity
+    ? `I understood this as: ${understoodInterpretation}. Your wording is clear, but independent compiler attempts produced different executable readings. This is a compiler conflict, not a missing answer from you.`
+    : unsupportedButUnderstood
+      ? `I understood this as: ${understoodInterpretation}. ${topExplanation.whatHappened} ${topExplanation.whyItBlocks}`
+      : `${topExplanation.whatHappened} ${topExplanation.whyItBlocks}`;
   const rewriteLine =
     suggestedRewrites.length > 0
       ? ` Choose one of the ${suggestedRewrites.length} intent-preserving rewrites or write your own.`
       : "";
-  const dealerMessage = `[${topExplanation.code}] ${reasonSummary} ${topExplanation.whatToChange}${rewriteLine}${
+  const dealerMessage = `[${topExplanation.code}] ${reasonSummary} ${compilerConflictWithoutAmbiguity ? compilerConflictAction : topExplanation.whatToChange}${rewriteLine}${
     questions.length > 0
       ? " Answer the clarification questions by sending a revised rule."
       : ""
@@ -3247,6 +3274,12 @@ async function createRulePreflight(
       },
       {
         astProvider,
+        // Diagnostic only: lifts the cross-provider consensus gate so a rule
+        // that keeps hitting PROVIDER_DISAGREEMENT can be compiled and
+        // inspected. The divergence is still recorded in the validation log.
+        disableConsensus: envFlag(
+          process.env.TYCHE_RULE_COMPILER_CONSENSUS_DISABLED,
+        ),
         preferDeterministic: true,
         requireProviderEvidence: true,
       },
@@ -3429,6 +3462,8 @@ async function createRulePreflight(
           clarityNote: interpretation.clarityNote,
           compileText,
           officialInterpretation,
+          providerDisagreementBlocked:
+            validation.log.providerDisagreementBlocked,
           reasonCodes: validation.log.reasonCodes,
           reasonSummary,
           sanitizedText,

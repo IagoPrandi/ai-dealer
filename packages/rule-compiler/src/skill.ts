@@ -13,9 +13,12 @@ import { fileURLToPath } from "node:url";
 
 export const RULE_COMPILER_SKILL = {
   name: "compile_rule_to_ast",
+  // v11: the negated-unordered-set idiom (`not(or(contains ...))`) and the
+  // explicit clause budget, so a rule naming a set on BOTH sides groups each
+  // side instead of flattening every value into the top-level `and`.
   // v10: ordered literal prefixes with an explicitly unconstrained remainder,
   // on top of v9's full literal sequences, sets, and their negation.
-  version: "tyche_rule_compiler_skill_v10",
+  version: "tyche_rule_compiler_skill_v11",
   allowedInputs: ["guess", "draw"] as const,
 } as const;
 

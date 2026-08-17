@@ -101,6 +101,12 @@ Predicate nodes (produce true/false):
 - `{"kind":"forall"|"exists","of":<array>,"where":<pred>}` — quantify over elements; `where` sees `{"kind":"elem"}`
 - `{"kind":"pairs_forall"|"pairs_exists","left":<array>,"right":<array>,"where":<pred>}` — quantify over same-position pairs
 - `{"kind":"and"|"or","clauses":[<pred>,...]}`  `{"kind":"not","clause":<pred>}`
+  Hard limit: **at most 10 clauses in a single `and`/`or`**. When one condition
+  covers a LIST of values, nest that list in its own `and`/`or` and give the
+  parent a single clause for it — flattening every value into the top level burns
+  the budget and the whole rule is rejected. A rule naming a set on both sides
+  must therefore be `and(<set over guess>, <negated set over draw>)`, not one
+  clause per number.
 
 Binder scopes: `map`/`filter`/`forall`/`exists` bind one element; `pairs_*` bind a
 pair. Nesting is capped at 2 binders. Inside a nested binder, `{"kind":"elem","up":1}`
@@ -176,6 +182,12 @@ freezes a different rule.
 - "my ticket must be exactly 1 2 3 4 5 6, in any order" (unordered literal set) ->
   `and(contains(guess,1), contains(guess,2), ..., contains(guess,6))`.
 - "my ticket must include 7 and 13" -> `and(contains(guess,7), contains(guess,13))`.
+- "the draw contains NONE of 1 2 3 4" / "nenhum dos numeros 1 2 3 4 e sorteado"
+  (negated unordered set) -> group the whole set under ONE `not(or(...))`:
+  `not(or(contains(draw,1), contains(draw,2), contains(draw,3), contains(draw,4)))`.
+  Do NOT emit one `not(contains(...))` per value at the top level: that is the
+  same rule, but it spends one top-level clause per number and overflows the
+  clause budget as soon as the other side also names a set.
 - "the draw must NOT be 1 2 3 4 5 6 in that order" -> wrap the ordered form in
   `not`: `not(and(at(draw,0) == 1, ..., at(draw,5) == 6))`. Do not rewrite this as
   "the guess differs from the draw" — a literal sequence and the other side are

@@ -150,6 +150,15 @@ export interface RuleCompileArtifactOptions {
   preferDeterministic?: boolean;
   /** Fail closed unless an LLM response includes verified source evidence. */
   requireProviderEvidence?: boolean;
+  /**
+   * Diagnostic escape hatch: stop buying a mandatory second opinion and stop
+   * rejecting on PROVIDER_DISAGREEMENT. The disagreement is still measured and
+   * still recorded in the audit log — only the rejection is lifted, so a
+   * divergence never becomes invisible. Defaults OFF; the API gates it behind
+   * TYCHE_RULE_COMPILER_CONSENSUS_DISABLED and it must stay off in production,
+   * where one unchecked reading decides who gets paid.
+   */
+  disableConsensus?: boolean;
 }
 
 export interface RuleCompilationRequest {
@@ -209,6 +218,14 @@ export interface RuleValidationLog {
   normalizedText: string;
   promptContract: RuleValidationPromptContract;
   provider: string;
+  /**
+   * True only when a measured disagreement actually decided the outcome. It is
+   * false when consensus is disabled, so a consumer must not read
+   * `providerDisagreementRateSample` alone as "the disagreement is why this rule
+   * was blocked" — the sample records that it happened, this records that it
+   * mattered.
+   */
+  providerDisagreementBlocked: boolean;
   providerDisagreementRateSample: number;
   providerPath: AgentProviderAttemptLog[];
   reasonCodes: RuleValidationReasonCode[];
@@ -491,7 +508,7 @@ function finalizeValidation(
   timestamp: string,
   attempts: ProviderEvaluation[],
   fallbackAttempt: ProviderEvaluation,
-  options: { requireSecondOpinion?: boolean } = {},
+  options: { disableConsensus?: boolean; requireSecondOpinion?: boolean } = {},
 ): RuleValidationResult {
   let finalEvaluation: ProviderEvaluation | null = null;
   // Only attempts that actually produced an opinion may decide the outcome. A
@@ -520,16 +537,20 @@ function finalizeValidation(
     providerDisagreementRateSample === 1
       ? resolveProviderDisagreement(attempts)
       : null;
-  const selectedAttempt =
-    providerDisagreementRateSample === 1
-      ? (disagreementResolution ?? {
-          ...finalEvaluation,
-          artifact: null,
-          artifactHash: null,
-          decision: "INVALID" as const,
-          status: "provider_disagreement" as const,
-        })
-      : finalEvaluation;
+  // The disagreement is measured either way; this flag only decides whether it
+  // blocks. With consensus disabled the sample and the reason code still reach
+  // the audit log below, so a divergence stays visible instead of vanishing.
+  const disagreementBlocks =
+    providerDisagreementRateSample === 1 && !options.disableConsensus;
+  const selectedAttempt = disagreementBlocks
+    ? (disagreementResolution ?? {
+        ...finalEvaluation,
+        artifact: null,
+        artifactHash: null,
+        decision: "INVALID" as const,
+        status: "provider_disagreement" as const,
+      })
+    : finalEvaluation;
 
   const reasonCodes = new Set(selectedAttempt.reasonCodes);
   if (providerDisagreementRateSample === 1) {
@@ -553,7 +574,7 @@ function finalizeValidation(
     [...reasonCodes].filter((reason) => reason !== "SUPPORTED_RULE"),
     selectedAttempt.confidence.final_confidence,
     fallbackTriggered,
-    providerDisagreementRateSample === 1 && disagreementResolution === null,
+    disagreementBlocks && disagreementResolution === null,
   );
 
   const artifact: RuleCompiledArtifact | null =
@@ -593,6 +614,7 @@ function finalizeValidation(
       normalizedText: selectedAttempt.normalizedText,
       promptContract: PROMPT_CONTRACT,
       provider: selectedAttempt.modelIdentity.provider,
+      providerDisagreementBlocked: disagreementBlocks,
       providerDisagreementRateSample,
       providerPath,
       reasonCodes: [...reasonCodes],
@@ -659,7 +681,9 @@ export async function compileRuleArtifact(
   const providerRouting = normalizeProviderRouting(request);
   const attempts: ProviderEvaluation[] = [];
 
-  const requireSecondOpinion = lacksDeterministicReference(request);
+  const consensusDisabled = options.disableConsensus === true;
+  const requireSecondOpinion =
+    !consensusDisabled && lacksDeterministicReference(request);
 
   for (const providerConfig of providerRouting.providers) {
     const evaluation = await evaluateProviderAttemptAsync(
@@ -691,6 +715,7 @@ export async function compileRuleArtifact(
       createDefaultProviderRoutingPolicy().providers[0] as AgentProviderConfig,
     );
   return finalizeValidation(request, timestamp, attempts, fallback, {
+    disableConsensus: consensusDisabled,
     requireSecondOpinion,
   });
 }
@@ -714,6 +739,8 @@ interface ProviderEvaluation {
   priority: AgentProviderPriority;
   reasonCodes: RuleValidationReasonCode[];
   requestShape: AgentProviderConfig["request_shape"];
+  /** Why the emitted AST failed `ruleAstSchema`, or null when it did not. */
+  schemaError: string | null;
   status: AgentProviderAttemptStatus;
 }
 
@@ -1024,8 +1051,10 @@ function validateResolvedAst(
   } else {
     reasonCodes.add("SUPPORTED_RULE");
   }
+  let schemaError: string | null = null;
   if (rawAst != null && !forcedFailure && !parsed?.success) {
     reasonCodes.add("SCHEMA_INVALID");
+    schemaError = summarizeSchemaError(parsed);
   }
   // An independent deterministic reading of the same text. When it exists it is
   // the strongest available check: the two ASTs are compared by BEHAVIOR over
@@ -1211,6 +1240,7 @@ function validateResolvedAst(
     priority: providerConfig.priority,
     reasonCodes: [...reasonCodes],
     requestShape: providerConfig.request_shape,
+    schemaError,
     status: determineAttemptStatus(forcedFailure, confidenceAction, decision),
   };
 }
@@ -1364,23 +1394,52 @@ function resolveProviderPath(
     priority: attempt.priority,
     provider: attempt.modelIdentity.provider,
     request_shape: attempt.requestShape,
+    schema_error: attempt.schemaError,
     status: attempt.status,
   }));
+}
+
+// The first few Zod issues as `path: message`. Bounded on purpose: a rejected
+// AST can produce dozens of union-branch issues, and the audit log is not the
+// place to replay all of them — the leading paths are what identify the node the
+// model could not express.
+const SCHEMA_ERROR_ISSUE_LIMIT = 5;
+
+function summarizeSchemaError(
+  parsed: ReturnType<typeof ruleAstSchema.safeParse> | null,
+): string | null {
+  if (!parsed || parsed.success) {
+    return null;
+  }
+  const issues = parsed.error.issues;
+  const shown = issues
+    .slice(0, SCHEMA_ERROR_ISSUE_LIMIT)
+    .map((issue) => `${issue.path.join(".") || "<root>"}: ${issue.message}`)
+    .join("; ");
+  return issues.length > SCHEMA_ERROR_ISSUE_LIMIT
+    ? `${shown}; +${issues.length - SCHEMA_ERROR_ISSUE_LIMIT} more`
+    : shown;
 }
 
 // Two providers agree when they reach the same verdict AND their ASTs behave
 // identically. Comparing serialized ASTs instead (the previous rule) called every
 // equivalent-but-differently-shaped compile a disagreement, and — worse — said
 // nothing about behaviour, which is the only thing that decides who gets paid.
+// Agreement is about the READING, not about how sure each provider was. Also
+// comparing `decision`/`confidenceAction` conflated the two: three providers
+// compiled "guess contains 1,2,3,4 and the draw contains none of them" to ASTs
+// that were behaviourally identical (two of them byte-identical), and the rule
+// was still blocked as PROVIDER_DISAGREEMENT purely because one landed on
+// ACCEPT and another on ESCALATE. Confidence is already enforced on its own, by
+// the thresholds and the escalation ladder; counting it a second time as dissent
+// only rejected rules everyone had read the same way. When two ASTs behave
+// identically there is nothing to disagree about — the frozen artifact is the
+// same rule either way.
 function providerOpinionsAgree(
   left: ProviderEvaluation,
   right: ProviderEvaluation,
 ) {
-  if (
-    left.decision !== right.decision ||
-    left.confidenceAction !== right.confidenceAction ||
-    left.normalizedText !== right.normalizedText
-  ) {
+  if (left.normalizedText !== right.normalizedText) {
     return false;
   }
   if (left.ast === null || right.ast === null) {
@@ -1421,12 +1480,12 @@ function resolveProviderDisagreement(attempts: ProviderEvaluation[]) {
     return null;
   }
 
-  const secondarySignature = providerDecisionSignature(secondary);
-  const tertiarySignature = providerDecisionSignature(tertiary);
-  if (
-    secondarySignature !== tertiarySignature ||
-    tertiary.decision !== "VALID"
-  ) {
+  // Corroboration is behavioural, matching how the disagreement was detected.
+  // Requiring byte-identical serialized ASTs made the tiebreaker unreachable for
+  // any non-trivial rule — two models practically never emit the same JSON shape
+  // — so every genuine divergence was a permanent dead end with a message that
+  // told the player there was nothing to fix.
+  if (!providerOpinionsAgree(secondary, tertiary) || tertiary.decision !== "VALID") {
     return null;
   }
 
@@ -1436,23 +1495,23 @@ function resolveProviderDisagreement(attempts: ProviderEvaluation[]) {
 // A provider that never answered holds no opinion, so it can neither corroborate
 // nor contradict. Counting a transport failure as dissent would let an
 // unreachable secondary provider reject every rule that needs a second opinion.
+//
+// A response that failed `ruleAstSchema` is the same kind of non-answer: it
+// carries no executable reading. Counting it as dissent compared a null AST
+// against a real one in `providerOpinionsAgree`, which can never match — so one
+// model failing to emit valid JSON was reported to the player as
+// PROVIDER_DISAGREEMENT ("the compilers disagree") instead of the truth ("one
+// compiler produced nothing"). The real failure is still recorded via
+// SCHEMA_INVALID and the attempt's `schema_error`.
 function isCompletedProviderOpinion(attempt: ProviderEvaluation) {
   return (
     attempt.status !== "timeout" &&
     attempt.status !== "malformed_response" &&
     attempt.status !== "schema_validation_failed" &&
     !attempt.reasonCodes.includes("PROVIDER_TIMEOUT") &&
-    !attempt.reasonCodes.includes("PROVIDER_MALFORMED_RESPONSE")
+    !attempt.reasonCodes.includes("PROVIDER_MALFORMED_RESPONSE") &&
+    !attempt.reasonCodes.includes("SCHEMA_INVALID")
   );
-}
-
-function providerDecisionSignature(attempt: ProviderEvaluation) {
-  return JSON.stringify({
-    ast: attempt.ast,
-    confidenceAction: attempt.confidenceAction,
-    decision: attempt.decision,
-    normalizedText: attempt.normalizedText,
-  });
 }
 
 function normalizeRuleText(value: string) {
@@ -3390,6 +3449,9 @@ function parseDrawAllThresholdRule(text: string): RuleAst | null {
  * The whole suffix is validated so a later condition can never be swallowed as
  * another list item. Ticket uniqueness makes a six-value membership list an
  * exact unordered set; shorter lists deliberately leave the other slots free.
+ * A player may spell those free slots out as the complementary tail of the
+ * number domain (1..N plus the remaining values from N+1..100); that redundant
+ * constraint is retained in the AST so every stated bound stays auditable.
  */
 function parseGuessContainsLiteralSetRule(text: string): RuleAst | null {
   const subject = text.match(
@@ -3425,11 +3487,15 @@ function parseGuessContainsLiteralSetRule(text: string): RuleAst | null {
     return null;
   }
 
-  const remainder = suffix.slice(list[0].length).trim();
+  const remainder = stripConfirmedDrawIndependence(
+    suffix.slice(list[0].length).trim(),
+  );
   const harmlessRemainder = new RegExp(
     [
       "^(?:[,;.]\\s*)?",
+      "(?:\\(\\s*)?",
       "(?:(?:in|regardless\\s+of)\\s+(?:any\\s+)?order|em\\s+qualquer\\s+ordem|qualquer\\s+ordem)?",
+      "(?:\\s*\\))?",
       "(?:\\s+or\\s+the\\s+other\\s+(?:one|two|three|four|five|[1-5])\\s+numbers?)?",
       "(?:\\s*[,;.]\\s*)?",
       "(?:(?:then\\s+)?(?:the\\s+player|they|it|ele|ela)\\s+(?:wins?|ganha|vence))?",
@@ -3437,21 +3503,102 @@ function parseGuessContainsLiteralSetRule(text: string): RuleAst | null {
     ].join(""),
     "i",
   );
-  if (!harmlessRemainder.test(remainder)) {
-    return null;
-  }
-
   const clauses: PredicateNodeV3[] = values.map((value) => ({
     kind: "contains",
     array: { kind: "source", source: "guess" },
     value: { kind: "lit", value },
   }));
+  if (!harmlessRemainder.test(remainder)) {
+    const explicitRemainder = parseExplicitLiteralSetRemainder(
+      remainder,
+      values,
+    );
+    if (!explicitRemainder) {
+      return null;
+    }
+    clauses.push(explicitRemainder);
+  }
   return {
     schemaVersion: 3,
     result: {
       type: "predicate",
       predicate: { kind: "and", clauses },
     },
+  };
+}
+
+function stripConfirmedDrawIndependence(value: string) {
+  const scope = value.match(
+    /(?:[.;]\s*)?(?:(?:the\s+)?(?:official\s+)?draw\s+(?:does\s+not\s+(?:affect|matter|change|influence)|is\s+(?:irrelevant|not\s+used))\s+(?:the\s+)?(?:result|outcome|rule)|(?:o\s+)?sorteio(?:\s+oficial)?\s+nao\s+(?:afeta|muda|influencia)\s+(?:o\s+)?(?:resultado|regra))[.!?]*$/i,
+  );
+  return scope && scope.index !== undefined
+    ? value.slice(0, scope.index).trim()
+    : value;
+}
+
+function parseExplicitLiteralSetRemainder(
+  remainder: string,
+  values: readonly number[],
+): PredicateNodeV3 | null {
+  const match = remainder.match(
+    /^(?:[,;.]?\s*)?(?:(?:\(\s*)?(?:(?:in|regardless\s+of)\s+(?:any\s+)?order|em\s+qualquer\s+ordem|qualquer\s+ordem)(?:\s*\))?\s*)?(?:[,;]?\s*)?(?:and|plus|e|mais)\s+(?:any\s+|quaisquer?\s+)?(two|three|four|five|dois|duas|tres|quatro|cinco|[2-5])\s+(?:other|additional|remaining|outros?|adicionais?|restantes?)\s+(?:(?:distinct|unique|distintos?|diferentes?|unicos?)\s+)?(?:numbers?|values?|numeros?|valores?)\s+(?:each\s+)?(?:from|de)\s+(\d{1,3})\s+(?:to|through|a|ate)\s+(\d{1,3})(?:\s*,?\s*(?:with\s+)?(?:no\s+(?:repeats?|duplicates?)|all\s+six\s+(?:values?\s+)?(?:being\s+)?unique|sem\s+(?:repeticoes?|duplicatas?)))?(?:\s*;\s*if\s+satisfied,?\s*the\s+guess\s+wins)?[.!?]*$/i,
+  );
+  if (!match?.[1] || !match[2] || !match[3]) {
+    return null;
+  }
+
+  const remainingCount = 6 - values.length;
+  const statedCount = readSmallCount(match[1]);
+  const low = Number(match[2]);
+  const high = Number(match[3]);
+  const sortedValues = [...values].sort((left, right) => left - right);
+  const isContiguousPrefix = sortedValues.every(
+    (value, index) => value === index + 1,
+  );
+  const statesUniqueness =
+    /\b(?:distinct|unique|distintos?|diferentes?|unicos?|no\s+(?:repeats?|duplicates?)|sem\s+(?:repeticoes?|duplicatas?))\b/i.test(
+      match[0],
+    );
+  if (
+    remainingCount < 1 ||
+    statedCount !== remainingCount ||
+    !isContiguousPrefix ||
+    low !== values.length + 1 ||
+    high !== 100 ||
+    !statesUniqueness
+  ) {
+    return null;
+  }
+
+  return {
+    kind: "compare",
+    left: {
+      kind: "reduce",
+      op: "count",
+      of: {
+        kind: "filter",
+        of: { kind: "source", source: "guess" },
+        where: {
+          kind: "and",
+          clauses: [
+            {
+              kind: "compare",
+              left: { kind: "elem" },
+              op: "gte",
+              right: { kind: "lit", value: low },
+            },
+            {
+              kind: "compare",
+              left: { kind: "elem" },
+              op: "lte",
+              right: { kind: "lit", value: high },
+            },
+          ],
+        },
+      },
+    },
+    op: "eq",
+    right: { kind: "lit", value: remainingCount },
   };
 }
 
@@ -4056,7 +4203,13 @@ function parseMatchCountRule(text: string) {
   return Number.isInteger(value) && value >= 1 && value <= 6 ? value : null;
 }
 
-const MAX_COMPLEXITY = 64;
+// Total node count budget for a compiled rule. Raised from 64 to 100 because a
+// rule naming a four-number set on both sides expands to ~8 `contains` subtrees
+// (the DSL has no set literal, so each value is its own node) and measured 65-80
+// nodes — rejected as COMPLEXITY_EXCEEDED while being an ordinary rule. Depth
+// (MAX_AST_DEPTH) and binder nesting (MAX_V3_BINDER_DEPTH) are what bound
+// worst-case evaluation; node count is linear, so this stays within the sandbox.
+const MAX_COMPLEXITY = 100;
 
 interface RuntimeBounds {
   safe: boolean;

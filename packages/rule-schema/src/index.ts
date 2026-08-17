@@ -32,6 +32,16 @@ export const CURRENT_SCHEMA_VERSION = 3 as const;
 export const MAX_AST_DEPTH = 16;
 export const MAX_REMOVABLE_NUMBERS = 4;
 export const MAX_COUNT_VALUE = 12;
+/**
+ * Maximum clauses in a single `and`/`or`. Raised from 8 to 10 because a rule
+ * naming a four-number set on BOTH sides ("guess contains 1,2,3,4 and the draw
+ * contains none of them") needs 4 + 4 clauses plus any cardinality clause, and
+ * models that flattened it instead of grouping the negated half under one `or`
+ * landed at 9 — one over the old cap. The evaluation cost is linear in clause
+ * count, so this widens the accepted shapes without loosening the depth or
+ * complexity ceilings that actually bound runtime.
+ */
+export const MAX_PREDICATE_CLAUSES = 10;
 
 // ---------------------------------------------------------------------------
 // TypeScript shapes (used to type the recursive zod schemas precisely).
@@ -423,11 +433,11 @@ const predicateNodeSchema: z.ZodType<PredicateNode> = z.lazy(() =>
     }),
     z.object({
       kind: z.literal("and"),
-      clauses: z.array(predicateNodeSchema).min(1).max(8),
+      clauses: z.array(predicateNodeSchema).min(1).max(MAX_PREDICATE_CLAUSES),
     }),
     z.object({
       kind: z.literal("or"),
-      clauses: z.array(predicateNodeSchema).min(1).max(8),
+      clauses: z.array(predicateNodeSchema).min(1).max(MAX_PREDICATE_CLAUSES),
     }),
     z.object({ kind: z.literal("not"), clause: predicateNodeSchema }),
   ]),
@@ -589,11 +599,11 @@ const predicateNodeV3Schema: z.ZodType<PredicateNodeV3> = z.lazy(() =>
     }),
     z.object({
       kind: z.literal("and"),
-      clauses: z.array(predicateNodeV3Schema).min(1).max(8),
+      clauses: z.array(predicateNodeV3Schema).min(1).max(MAX_PREDICATE_CLAUSES),
     }),
     z.object({
       kind: z.literal("or"),
-      clauses: z.array(predicateNodeV3Schema).min(1).max(8),
+      clauses: z.array(predicateNodeV3Schema).min(1).max(MAX_PREDICATE_CLAUSES),
     }),
     z.object({ kind: z.literal("not"), clause: predicateNodeV3Schema }),
   ]),

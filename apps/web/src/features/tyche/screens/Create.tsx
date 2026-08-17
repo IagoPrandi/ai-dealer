@@ -1082,10 +1082,23 @@ function CreateChat({
   const openGuidance = useCallback(
     (context: Parameters<typeof buildRuleGuidanceOptions>[0]) => {
       const options = buildRuleGuidanceOptions(context);
+      const questions = context.refinementQuestions ?? [];
+      const terminalRejection = Boolean(context.triviallyAlwaysTrue);
+      if (
+        options.length === 0 &&
+        questions.length === 0 &&
+        !terminalRejection
+      ) {
+        // The verdict card already explains compiler-only failures. Opening an
+        // empty "Clarify" panel adds a disabled Submit button and falsely tells
+        // the player that an answer is missing when the API identified none.
+        setGuidance(null);
+        return;
+      }
       setGuidance({
         options,
-        questions: context.refinementQuestions ?? [],
-        terminalRejection: Boolean(context.triviallyAlwaysTrue),
+        questions,
+        terminalRejection,
         title: getRuleGuidanceTitle(context),
       });
       setSelectedGuidanceIndex(options.length > 0 ? 0 : null);

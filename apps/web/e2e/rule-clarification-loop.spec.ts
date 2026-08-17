@@ -257,6 +257,70 @@ function alwaysTruePreflight(text: string) {
   };
 }
 
+function providerConflictPreflight(text: string) {
+  return {
+    preflight: {
+      addedOperationalClauses: [],
+      clarityNote:
+        "No missing rule detail was identified. Do not repeat the same clarification.",
+      compiledArtifactHash: null,
+      confirmationRequired: false,
+      coverage: null,
+      decision: "INVALID",
+      dealerMessage:
+        "[PROVIDER_DISAGREEMENT] Your wording is clear, but independent compiler attempts produced different executable readings. This is a compiler conflict, not a missing answer from you.",
+      finalConfidence: 0.7,
+      maxTokens: 1000,
+      needsClarification: true,
+      normalizedText: text,
+      normalizedTextHash: hashBytes(13),
+      officialInterpretation:
+        "The guess contains 1, 2, 3, and 4 in any order.",
+      officialInterpretationHash: hashBytes(14),
+      preflightResultHash: hashBytes(15),
+      reasonCodes: ["PROVIDER_DISAGREEMENT"],
+      refinementFocus: [
+        "No missing rule detail was identified. Do not repeat the same clarification.",
+      ],
+      refinementQuestions: [],
+      ruleId: 963,
+      sanitizedText: text,
+      sanitizedTextHash: hashBytes(16),
+      suggestedRewrites: [],
+      title: "Four Required Values",
+      tokenCount: 24,
+    },
+  };
+}
+
+test("a compiler-only conflict does not open an empty clarification panel", async ({
+  page,
+}) => {
+  await mockShellData(page);
+  await mockRulePreflight(page, (body) => ({
+    json:
+      body.phase === "interpret"
+        ? interpretation(body.text)
+        : providerConflictPreflight(body.text),
+    status: 200,
+  }));
+
+  await page.goto("/play/propose");
+  await page
+    .getByLabel("Message", { exact: true })
+    .fill(
+      "The player wins if their guess contains 1, 2, 3, and 4 in any order.",
+    );
+  await page.getByRole("button", { name: "Send message" }).click();
+  await page.getByRole("button", { name: "Confirm and generate" }).click();
+
+  await expect(page.getByText(/This is a compiler conflict/iu)).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Clarify this rule?" }),
+  ).toHaveCount(0);
+  await expect(page.getByLabel("Message", { exact: true })).toBeEnabled();
+});
+
 // Regression for the clarification loop: when a vague rule (no suggestedRewrite,
 // never VALID) gets a clarification and the user answers with a short natural
 // reply, the client must NOT keep re-appending the answer to the unfixable base
