@@ -4,6 +4,15 @@ This tracker records milestone status, work logs, and required document confirma
 
 ## Work Log
 
+### 2026-08-16 (Direct guess-sum versus draw-sum compilation)
+
+- Opened the required `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, and `.claude/skills` before working. Followed `best-practices` with its agent-principles, code-quality, testing, and final-checklist references, plus `tyche-test-and-verify` for the package verification ladder.
+- Reproduced the reported rule in all three relevant forms: the original Portuguese wording (`a soma dos seus seis números ... maior que ... o sorteio oficial`), the explicit English interpretation, and the dealer wording shown in the UI (`its total sum is higher than the draw's total sum`). All three were incorrectly `UNSUPPORTED_RULE`, forcing the production flow through provider evidence and exposing a clear rule to an avoidable `INTERPRETATION_MISMATCH` rejection.
+- Added a bounded deterministic parser for direct whole-guess-sum versus whole-draw-sum comparisons in English and Portuguese. The parser emits a schema-v3 comparison over `sum(guess)` and `sum(draw)` and recognizes greater/lower vocabulary without weakening provider-evidence validation. It deliberately refuses separate `AND`/`OR` clauses, so an unsupported second condition cannot be silently discarded.
+- Added a regression that runs the production `preferDeterministic` plus `requireProviderEvidence` options, proves the provider is never called for the three reported forms, executes both a winning and losing fixture against each frozen AST, and confirms an unsupported compound Portuguese rule still fails closed.
+- Verification passed: `@tyche/rule-compiler` typecheck, `65/65` tests, lint with zero warnings, and build; `@tyche/api` typecheck, `153/153` tests, lint with zero warnings, and build. The local API on port `3002` remained healthy and its watch process reloaded after the shared-package build. `git diff --check` passed before the work-log update.
+- Final consistency review found no relaxed fidelity gate, hidden fallback, schema/runtime change, provider prompt change, or UI copy change. The existing uncommitted web rebrand edits were preserved untouched. No milestone checkbox was changed because milestone completion still requires explicit user confirmation.
+
 ### 2026-08-15 (Bottom-nav centre opens a My rules conversation hub)
 
 - Opened the required `PRD.md`, `PROGRESS_TRACKER.md`, `.claude/CLAUDE.md`, and `.claude/skills` (`tyche-ui-coherence` and the `tyche-design-system` references it points at) before implementing. No milestone checkbox was changed because milestone completion still requires explicit user confirmation.

@@ -131,6 +131,30 @@ export function formatLamportString(value: string): string {
   return fraction ? `${whole}.${fraction}` : whole.toString();
 }
 
+const DISPLAY_MIN_DECIMALS = 2;
+const DISPLAY_MAX_DECIMALS = 4;
+
+/**
+ * Display precision for the headline and stat values: at least two decimals so
+ * the column reads as a money grid, at most four so a 9-decimal atom string
+ * cannot overrun the line. It truncates instead of rounding, so a balance is
+ * never shown above what the chain actually holds, and a remainder that only
+ * exists below the cap is reported as such instead of collapsing to a zero.
+ */
+export function formatDisplayAmount(value: string): string {
+  const [whole = "0", fraction = ""] = value.split(".");
+  if (fraction.length > DISPLAY_MAX_DECIMALS) {
+    const kept = fraction.slice(0, DISPLAY_MAX_DECIMALS).replace(/0+$/, "");
+    if (!kept) {
+      return whole === "0"
+        ? `<0.${"0".repeat(DISPLAY_MAX_DECIMALS - 1)}1`
+        : `${whole}.${"0".repeat(DISPLAY_MIN_DECIMALS)}`;
+    }
+    return `${whole}.${kept.padEnd(DISPLAY_MIN_DECIMALS, "0")}`;
+  }
+  return `${whole}.${fraction.padEnd(DISPLAY_MIN_DECIMALS, "0")}`;
+}
+
 export function getTreasuryClaimMinimumMessage(
   claimableLamports: string | null,
 ): string | null {
@@ -841,37 +865,31 @@ export function RewardsScreen() {
           title="Stake & earn"
         />
 
+        <p className="ide-rewards-status">Live {TOKEN_SYMBOL} rewards on devnet</p>
+
         <section
           className="ide-rewards-hero"
           aria-labelledby="staking-balance-title"
         >
-          <div className="ide-rewards-hero-glow" />
           <div className="ide-rewards-hero-content">
-            <span className="ide-rewards-status" id="staking-balance-title">
-              Live JDR rewards on devnet
+            <span className="ide-rewards-micro-label" id="staking-balance-title">
+              {TOKEN_SYMBOL} claimable
             </span>
-            <div className="ide-rewards-balance-strip">
-              <div>
-                <span>{TOKEN_SYMBOL} available</span>
-                <strong className="ide-num">
-                  {onChainBalance.loading
-                    ? "Loading…"
-                    : onChainBalance.error
-                      ? "Unavailable"
-                      : `${formatTokenAtoms(onChainBalance.atoms ?? "0")} ${TOKEN_SYMBOL}`}
-                </strong>
-              </div>
-              <i aria-hidden="true" />
-              <div>
-                <span>{TOKEN_SYMBOL} claimable</span>
-                <strong className="ide-num">
-                  {manualRewards.loading
-                    ? "Loading…"
-                    : manualRewards.error
-                      ? "Unavailable"
-                      : `${formatTokenAtoms(manualClaimableAtoms.toString())} ${TOKEN_SYMBOL}`}
-                </strong>
-              </div>
+            <div className="ide-rewards-display">
+              {manualRewards.loading ? (
+                <b className="is-state">Loading…</b>
+              ) : manualRewards.error ? (
+                <b className="is-state">Unavailable</b>
+              ) : (
+                <>
+                  <b>
+                    {formatDisplayAmount(
+                      formatTokenAtoms(manualClaimableAtoms.toString()),
+                    )}
+                  </b>
+                  <i className="ide-num">{TOKEN_SYMBOL}</i>
+                </>
+              )}
             </div>
             <div
               className="ide-rewards-actions is-single"
@@ -889,8 +907,7 @@ export function RewardsScreen() {
                 onClick={() => void claimManualJdr()}
                 type="button"
               >
-                <Ico.withdraw />
-                {tokenBusy ? "Waiting for wallet…" : "Claim JDR"}
+                {tokenBusy ? "Waiting for wallet…" : `Claim ${TOKEN_SYMBOL}`}
               </button>
             </div>
             <p id="jdr-claim-note">
@@ -938,47 +955,66 @@ export function RewardsScreen() {
         {tab === "overview" ? (
           <div className="ide-rewards-panel-stack" role="tabpanel">
             <section className="ide-card ide-rewards-overview-card">
-              <div className="ide-rewards-epoch-heading">
-                <span>Treasury revenue</span>
-                <strong className="ide-num">
+              <div className="ide-rewards-card-head">
+                <span className="ide-rewards-micro-label">
+                  Treasury revenue
+                </span>
+                <em className="ide-num">
                   {publicProjection?.currentEpoch
-                    ? `#${publicProjection.currentEpoch.epochId}`
-                    : "Accrued"}
-                </strong>
+                    ? `Epoch #${publicProjection.currentEpoch.epochId}`
+                    : "Accruing"}
+                </em>
               </div>
-              <div className="ide-rewards-epoch-metrics">
+              <div className="ide-rewards-display">
+                {tokenomics.loading ? (
+                  <b className="is-state">Loading…</b>
+                ) : tokenomics.error || sealedClaimableLamports === null ? (
+                  <b className="is-state">Unavailable</b>
+                ) : (
+                  <>
+                    <b>
+                      {formatDisplayAmount(
+                        formatLamportString(sealedClaimableLamports),
+                      )}
+                    </b>
+                    <i className="ide-num">SOL</i>
+                  </>
+                )}
+              </div>
+              <p className="ide-rewards-display-note">
+                Sealed revenue ready to claim
+                {tokenomics.loading ||
+                tokenomics.error ||
+                revenuePoolLamports === null
+                  ? ""
+                  : ` · pool ${formatDisplayAmount(formatLamportString(revenuePoolLamports))} SOL`}
+              </p>
+              <div className="ide-rewards-stat-grid">
                 <div>
-                  <span>Locked {TOKEN_SYMBOL}</span>
-                  <strong className="ide-num">
+                  <span className="ide-num">Locked {TOKEN_SYMBOL}</span>
+                  <strong>
                     {onChainPosition.loading
                       ? "Loading…"
                       : onChainPosition.error
                         ? "Unavailable"
-                        : formatTokenAtoms(
-                            onChainPosition.data?.lockedAtoms ?? "0",
+                        : formatDisplayAmount(
+                            formatTokenAtoms(
+                              onChainPosition.data?.lockedAtoms ?? "0",
+                            ),
                           )}
                   </strong>
                 </div>
+                <i aria-hidden="true" />
                 <div>
-                  <span>Treasury pool</span>
-                  <strong className="ide-num">
-                    {tokenomics.loading
+                  <span className="ide-num">Available {TOKEN_SYMBOL}</span>
+                  <strong>
+                    {onChainBalance.loading
                       ? "Loading…"
-                      : tokenomics.error || revenuePoolLamports === null
+                      : onChainBalance.error
                         ? "Unavailable"
-                        : formatLamportString(revenuePoolLamports)}{" "}
-                    <small>SOL</small>
-                  </strong>
-                </div>
-                <div>
-                  <span>Claimable now</span>
-                  <strong className="ide-num">
-                    {tokenomics.loading
-                      ? "Loading…"
-                      : tokenomics.error || sealedClaimableLamports === null
-                        ? "Unavailable"
-                        : formatLamportString(sealedClaimableLamports)}{" "}
-                    <small>SOL</small>
+                        : formatDisplayAmount(
+                            formatTokenAtoms(onChainBalance.atoms ?? "0"),
+                          )}
                   </strong>
                 </div>
               </div>
@@ -988,7 +1024,7 @@ export function RewardsScreen() {
                 onClick={() => void claimTokenomicsSol()}
                 type="button"
               >
-                <Ico.withdraw /> Claim sealed SOL
+                Claim sealed SOL
               </button>
               {treasuryClaimMessage ? (
                 <p
@@ -1005,7 +1041,7 @@ export function RewardsScreen() {
                   aria-describedby="staking-lock-note"
                 >
                   <button
-                    className="ide-btn"
+                    className="ide-btn ide-btn-ghost"
                     disabled={
                       !onChainPosition.data ||
                       BigInt(onChainBalance.atoms ?? "0") === 0n ||
@@ -1014,7 +1050,7 @@ export function RewardsScreen() {
                     onClick={() => setTokenAction("lock")}
                     type="button"
                   >
-                    <Ico.lock /> Lock
+                    Lock
                   </button>
                   <button
                     className="ide-btn ide-btn-ghost"
@@ -1026,7 +1062,7 @@ export function RewardsScreen() {
                     onClick={() => setTokenAction("unlock")}
                     type="button"
                   >
-                    <Ico.unlock /> Unlock
+                    Unlock
                   </button>
                 </div>
                 {tokenAction ? (

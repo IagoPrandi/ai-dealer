@@ -1625,6 +1625,64 @@ test("can prefer deterministic compilation for known preflight patterns", async 
   );
 });
 
+test("compiles direct ticket-sum comparisons without provider evidence", async () => {
+  let providerCalls = 0;
+  const prompts = [
+    "Got it - your guess wins when its total sum is higher than the draw's total sum.",
+    "A guess wins if the sum of your six numbers is greater than the sum of the official draw's six numbers.",
+    "Você vence se a soma dos seus seis números for maior que a soma dos números do sorteio oficial.",
+  ];
+
+  for (const prompt of prompts) {
+    const result = await compileRuleArtifact(
+      {
+        originalText: prompt,
+        prompt,
+        tokenCount: tokenCount(prompt),
+      },
+      {
+        astProvider: async () => {
+          providerCalls += 1;
+          throw new Error("provider should not be needed for direct sum comparisons");
+        },
+        preferDeterministic: true,
+        requireProviderEvidence: true,
+      },
+    );
+
+    assert.equal(result.decision, "VALID", prompt);
+    assert.match(
+      result.artifact?.officialInterpretation ?? "",
+      /sum of the guess's six numbers is greater than the sum of the official draw's six numbers/i,
+    );
+    assert.equal(
+      evaluatePredicate(result.artifact!.ast, {
+        draw: [1, 2, 3, 4, 5, 6],
+        guess: [10, 11, 12, 13, 14, 15],
+      }).result,
+      "WIN",
+    );
+    assert.equal(
+      evaluatePredicate(result.artifact!.ast, {
+        draw: [10, 11, 12, 13, 14, 15],
+        guess: [1, 2, 3, 4, 5, 6],
+      }).result,
+      "LOSE",
+    );
+  }
+
+  assert.equal(providerCalls, 0);
+
+  const unsupportedCompound = validateAndPrecompileRule({
+    originalText:
+      "Você vence se a soma dos seus seis números for maior que a soma dos números do sorteio oficial e o primeiro número for par.",
+    prompt:
+      "Você vence se a soma dos seus seis números for maior que a soma dos números do sorteio oficial e o primeiro número for par.",
+    tokenCount: 24,
+  });
+  assert.equal(unsupportedCompound.decision, "INVALID");
+});
+
 test("rejects an LLM response that is not a valid AST and escalates", async () => {
   const result = await compileRuleArtifact(
     { prompt: "Win if the numbers feel lucky.", tokenCount: 7 },

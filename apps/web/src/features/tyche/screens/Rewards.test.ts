@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { formatTokenAtoms } from "../data/format";
 import type { ClaimRecordApi } from "../data/types";
 import {
+  formatDisplayAmount,
   formatLamportString,
   getTreasuryClaimMinimumMessage,
   parseTokenAmountToAtoms,
@@ -59,6 +60,16 @@ test("token and SOL formatting stays exact above Number safe integer range", () 
     "9007199254.740993",
   );
   assert.throws(() => parseTokenAmountToAtoms("1.0000000001"), /up to 9/);
+});
+
+test("displayed values keep two to four decimals without rounding a balance up or hiding dust", () => {
+  assert.equal(formatDisplayAmount("0"), "0.00");
+  assert.equal(formatDisplayAmount("128.4"), "128.40");
+  assert.equal(formatDisplayAmount("0.78"), "0.78");
+  assert.equal(formatDisplayAmount("1.52456789"), "1.5245");
+  assert.equal(formatDisplayAmount("0.99999999"), "0.9999");
+  assert.equal(formatDisplayAmount("12.000000001"), "12.00");
+  assert.equal(formatDisplayAmount("0.000000001"), "<0.0001");
 });
 
 test("the minimum treasury claim notice appears only for an attempted amount below the threshold", () => {

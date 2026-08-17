@@ -344,15 +344,7 @@ export function Confetti() {
 export function ScreenHead({ onBack, right, title }: { onBack: () => void; right?: React.ReactNode; title: string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-      <button
-        onClick={onBack}
-        style={{
-          width: 38, height: 38, borderRadius: 0, background: "var(--surface-2)",
-          border: "none", boxShadow: "var(--ring-soft)", color: "var(--text)",
-          display: "grid", placeItems: "center", cursor: "pointer", flexShrink: 0,
-        }}
-        type="button"
-      >
+      <button aria-label="Back" className="ide-iconbtn" onClick={onBack} type="button">
         <Ico.back style={{ width: 18, height: 18 }} />
       </button>
       <h1 className="ide-plate" style={{ fontSize: 24, fontWeight: 400, margin: 0, flex: 1, minWidth: 0 }}>{title}</h1>

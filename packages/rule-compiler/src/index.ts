@@ -1763,6 +1763,11 @@ function compileSupportedRule(text: string): RuleAst | null {
     return predicateRule(compoundMatchAndSumComparison);
   }
 
+  const directSumComparison = parseDirectSumComparisonRule(text);
+  if (directSumComparison) {
+    return predicateRule(directSumComparison);
+  }
+
   if (
     /\b(guessed?|picked|ticket|your)(?:\s+sum|\s+total)?\b.{0,30}\b(greater|higher|above|more|bigger|larger)\b.{0,60}\b(draw|drawn)(?:\s+sum|\s+total)?\b/i.test(text) &&
     /\bat least\s+([1-6]|one|two|three|four|five|six)\b.{0,80}\b(numbers?\s+)?(match|matches|appear|appears|hits?)\b/i.test(text)
@@ -2984,13 +2989,17 @@ function parsePositionSpecificRangeRule(text: string): RuleAst | null {
 }
 
 function parseComparisonWord(value: string): CompareOp | null {
-  if (/^(equal|equals|same|match|matches|is)$/i.test(value)) {
+  if (/^(equal|equals|same|match|matches|is|igual)$/i.test(value)) {
     return "eq";
   }
-  if (/^(greater|higher|above|more|bigger|larger|beats?|exceeds?)$/i.test(value)) {
+  if (
+    /^(greater|higher|above|more|bigger|larger|beats?|exceeds?|maior|superior|excede)$/i.test(
+      value,
+    )
+  ) {
     return "gt";
   }
-  if (/^(lower|less|below|smaller)$/i.test(value)) {
+  if (/^(lower|less|below|smaller|menor|inferior)$/i.test(value)) {
     return "lt";
   }
   return null;
@@ -3556,6 +3565,27 @@ function parseCompoundMatchAndSumComparisonRule(text: string): PredicateNode | n
       },
     ],
   };
+}
+
+// A direct comparison between the complete ticket sum and the complete draw
+// sum is one of the smallest rules the DSL can express. Keep the grammar tight:
+// the comparison must connect the two complete sources directly, and a separate
+// AND/OR clause is left to a compound parser or to the provider. That prevents a
+// clear first clause from silently swallowing an unsupported second condition.
+function parseDirectSumComparisonRule(text: string): PredicateNode | null {
+  if (/\b(?:and|or|e|ou)\b/iu.test(text)) {
+    return null;
+  }
+
+  const english = text.match(
+    /\b(?:(?:sum|total(?:\s+sum)?)\s+of\s+(?:(?:the\s+)?(?:guess|ticket)(?:'s)?|(?:the\s+)?(?:guessed|picked)|your|my|its)(?:\s+(?:six|6))?\s+numbers?|(?:(?:your|my)\s+)?(?:guess|ticket|guessed|picked)(?:'s)?\s+(?:total\s+sum|sum|total)|its\s+(?:total\s+sum|sum|total))\s+(?:is|be|are)\s+(greater|higher|above|more|bigger|larger|lower|less|below|smaller)(?:\s+than)?\s+(?:(?:the\s+)?(?:sum|total(?:\s+sum)?)\s+of\s+(?:the\s+)?(?:official\s+)?(?:draw|drawn)(?:'s)?(?:\s+(?:six|6))?\s+numbers?|(?:the\s+)?(?:official\s+)?(?:draw|drawn)(?:'s)?\s+(?:total\s+sum|sum|total))\b/iu,
+  );
+  const portuguese = text.match(
+    /\b(?:a\s+)?soma(?:\s+total)?\s+d(?:os|as)\s+(?:seus?|suas?|meus?|minhas?)\s+(?:(?:seis|6)\s+)?numeros?\s+(?:e|for|seja)\s+(maior|superior|menor|inferior)(?:\s+(?:que|do\s+que))?\s+(?:a\s+)?soma(?:\s+total)?\s+d(?:os|as)\s+(?:(?:seis|6)\s+)?numeros?\s+d(?:o|a)\s+sorteio(?:\s+oficial)?\b/iu,
+  );
+  const comparison = english?.[1] ?? portuguese?.[1];
+  const op = comparison ? parseComparisonWord(comparison) : null;
+  return op ? compare(sum(source("guess")), op, sum(source("draw"))) : null;
 }
 
 function parseDefinedDivisionRule(text: string): PredicateNode | null {

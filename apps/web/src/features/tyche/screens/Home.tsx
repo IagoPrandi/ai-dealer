@@ -509,7 +509,7 @@ export function HomeScreen() {
                   <span className="ide-hero-stat-value">{fmtInt(players)}</span>
                   <span className="ide-hero-stat-label">playing</span>
                 </span>
-                <span className="ide-hero-stat">
+                <span className="ide-hero-stat is-green">
                   <span className="ide-hero-stat-value">{rules.rules.length}</span>
                   <span className="ide-hero-stat-label">rules</span>
                 </span>

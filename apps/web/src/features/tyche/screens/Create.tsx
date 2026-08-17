@@ -217,69 +217,75 @@ function RulePreview({ rule }: { rule: RulePreflightResult }) {
     : undefined;
   const pct = Math.round((rule.tokenCount / RULE_MAX_TOKENS) * 100);
   return (
+    // Highlighted card (components.md → "Cartão destacado"): square corners, a
+    // solid orange offset plus the cyan halo, never a border or a soft radius.
     <div
       style={{
-        padding: 16,
-        border: "1px solid var(--line)",
-        borderRadius: 16,
-        background: "var(--surface)",
         animation: "ide-rise .3s ease both",
+        background: "var(--surface)",
+        borderRadius: 0,
+        boxShadow: "var(--solid-5), var(--halo-cyan-lg)",
+        marginRight: 3,
+        padding: "14px 16px",
       }}
     >
-      <div
+      {valid && !difficulty ? null : (
+        <div
+          style={{
+            alignItems: "center",
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 8,
+            marginBottom: 10,
+          }}
+        >
+          {valid ? null : (
+            <span
+              className="ide-pill"
+              style={{ color: statusColor, padding: "4px 10px" }}
+            >
+              <Ico.info style={{ width: 13, height: 13, color: statusColor }} />{" "}
+              {statusLabel}
+            </span>
+          )}
+          {difficulty ? (
+            <span
+              className="ide-pill"
+              style={{
+                color: difficulty.color,
+                fontSize: 11,
+                marginLeft: "auto",
+                padding: "3px 9px",
+              }}
+              title="How hard this rule is to win"
+            >
+              {difficulty.label}
+            </span>
+          ) : null}
+        </div>
+      )}
+      <h2
         style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          marginBottom: 10,
-          flexWrap: "wrap",
+          fontFamily: "Bevan, serif",
+          fontSize: 19,
+          fontWeight: 400,
+          lineHeight: 1.25,
+          margin: "0 0 8px",
+          textTransform: "uppercase",
         }}
       >
-        {valid ? null : (
-          <span
-            className="ide-pill"
-            style={{ color: statusColor, padding: "4px 10px" }}
-          >
-            <Ico.info style={{ width: 13, height: 13, color: statusColor }} />{" "}
-            {statusLabel}
-          </span>
-        )}
-        {difficulty ? (
-          <span
-            className="ide-pill"
-            style={{
-              marginLeft: "auto",
-              color: difficulty.color,
-              padding: "3px 9px",
-              fontSize: 11,
-            }}
-            title="How hard this rule is to win"
-          >
-            {difficulty.label}
-          </span>
-        ) : null}
-        <span
-          style={{
-            marginLeft: difficulty ? undefined : "auto",
-            fontSize: 11.5,
-            color: "var(--dim)",
-          }}
-          className="ide-num"
-        >
-          {rule.tokenCount}/{RULE_MAX_TOKENS} tokens
-        </span>
-      </div>
-      <h2 style={{ margin: "0 0 6px", fontSize: 19, lineHeight: 1.25 }}>
         {rule.title}
       </h2>
       {rule.normalizedText ? (
+        // The compiled wording is machine text, so it reads in DM Mono like the
+        // interpretation card rather than as an Archivo paragraph.
         <p
+          className="ide-num"
           style={{
+            color: "var(--mono-mute)",
+            fontSize: 12,
+            lineHeight: 1.5,
             margin: "0 0 14px",
-            fontSize: 15,
-            color: "var(--text)",
-            lineHeight: 1.45,
-            fontWeight: 600,
           }}
         >
           {rule.normalizedText}
@@ -290,10 +296,10 @@ function RulePreview({ rule }: { rule: RulePreflightResult }) {
           <SectionLabel>How it works</SectionLabel>
           <p
             style={{
+              color: "var(--ink-body)",
+              fontSize: 13,
+              lineHeight: 1.5,
               margin: "7px 0 0",
-              fontSize: 14,
-              lineHeight: 1.55,
-              color: "var(--muted)",
             }}
           >
             {rule.officialInterpretation}
@@ -353,24 +359,60 @@ function RulePreview({ rule }: { rule: RulePreflightResult }) {
           re-proposed.
         </p>
       ) : null}
+      {/* Token meter: the label + square rail + DM Mono value row from
+          screens-html/07-create.html, carrying the PRD §6.3 "Tokens used"
+          wording. Cyan fill with its glow — yellow stays the primary action. */}
       <div
         style={{
+          alignItems: "center",
+          display: "flex",
+          gap: 9,
           marginTop: 14,
-          height: 6,
-          borderRadius: 4,
-          background: "var(--surface-3)",
-          overflow: "hidden",
         }}
       >
-        <div
+        <span
           style={{
-            width: `${Math.min(100, pct)}%`,
-            height: "100%",
-            background: valid ? "var(--yellow)" : statusColor,
-            borderRadius: 4,
-            transition: "width .4s",
+            color: "var(--muted)",
+            fontFamily: "Oswald, sans-serif",
+            fontSize: 10.5,
+            fontWeight: 600,
+            letterSpacing: "0.16em",
+            textTransform: "uppercase",
+            whiteSpace: "nowrap",
           }}
-        />
+        >
+          Tokens used
+        </span>
+        <span
+          style={{
+            background: "var(--line)",
+            borderRadius: 0,
+            flex: 1,
+            height: 8,
+            overflow: "hidden",
+          }}
+        >
+          <span
+            style={{
+              background: "var(--cyan)",
+              boxShadow: "0 0 18px rgba(53,240,224,0.8)",
+              display: "block",
+              height: "100%",
+              transition: "width .4s",
+              width: `${Math.min(100, pct)}%`,
+            }}
+          />
+        </span>
+        <span
+          className="ide-num"
+          style={{
+            color: "var(--yellow)",
+            fontSize: 11.5,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {rule.tokenCount} / {RULE_MAX_TOKENS}
+        </span>
       </div>
     </div>
   );
@@ -666,9 +708,12 @@ function InterpretationConfirmation({
           style={{
             fontFamily: "Bevan, serif",
             fontSize: 19,
-            textTransform: "uppercase",
+            // Bevan ships a single weight; without this the h2 default renders
+            // as synthetic bold and stops matching the other plates.
+            fontWeight: 400,
             lineHeight: 1.25,
             margin: "8px 0 8px",
+            textTransform: "uppercase",
           }}
         >
           {interpretation.title}
@@ -687,9 +732,9 @@ function InterpretationConfirmation({
       </div>
       <p
         style={{
-          color: "var(--muted)",
-          fontSize: 14,
-          lineHeight: 1.55,
+          color: "var(--ink-body)",
+          fontSize: 13,
+          lineHeight: 1.5,
           margin: 0,
         }}
       >
@@ -1648,21 +1693,11 @@ function CreateChat({
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <button
             aria-label="Back"
+            className="ide-iconbtn"
             onClick={() => go(returnTo)}
-            style={{
-              width: 40,
-              height: 40,
-              borderRadius: 13,
-              background: "var(--surface-2)",
-              border: "1px solid var(--line)",
-              color: "var(--text)",
-              display: "grid",
-              placeItems: "center",
-              cursor: "pointer",
-            }}
             type="button"
           >
-            <Ico.back />
+            <Ico.back style={{ width: 18, height: 18 }} />
           </button>
           <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
             <Dealer size={30} />
