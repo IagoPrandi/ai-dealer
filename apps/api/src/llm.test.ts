@@ -411,6 +411,10 @@ test("interpret harness teaches predicate min/max and casual threshold cases", a
   );
   assert.match(systemPrompt, /fewer than six values.*complete guess/i);
   assert.match(systemPrompt, /condition applies to the unspecified values/i);
+  assert.match(
+    systemPrompt,
+    /explicitly says that the exact remaining values are ignored.*do not ask the same question again/i,
+  );
   assert.match(systemPrompt, /never ask a generic question/i);
   assert.match(systemPrompt, /remaining guessed number/i);
   assert.match(systemPrompt, /draw 12 31 24 versus guess 11 30 29/i);

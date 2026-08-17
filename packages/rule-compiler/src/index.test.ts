@@ -190,6 +190,48 @@ test("validates supported sum and exact-order rules", () => {
   );
 });
 
+test("compiles an ordered literal prefix while leaving the stated remainder free", () => {
+  const prompts = [
+    "Win if the first four guessed numbers, in that order, are 1, 2, 3, and 4; the remaining two guessed numbers may be any values from 1 to 100, subject only to uniqueness.",
+    "vence se a sequencia jogada for 1 2 3 4. os demais dois numeros devem ser ignorados.",
+    "Only the first four guessed numbers in order need to match 1, 2, 3, 4; the final two numbers do not matter.",
+  ];
+
+  for (const prompt of prompts) {
+    const result = validateAndPrecompileRule({
+      prompt,
+      tokenCount: tokenCount(prompt),
+    });
+
+    assert.equal(result.decision, "VALID", prompt);
+    assert.ok(result.artifact, prompt);
+    assert.equal(
+      evaluatePredicate(result.artifact.ast, {
+        draw: [90, 91, 92, 93, 94, 95],
+        guess: [1, 2, 3, 4, 80, 81],
+      }).result,
+      "WIN",
+      prompt,
+    );
+    assert.equal(
+      evaluatePredicate(result.artifact.ast, {
+        draw: [1, 2, 3, 4, 80, 81],
+        guess: [1, 2, 9, 4, 80, 81],
+      }).result,
+      "LOSE",
+      prompt,
+    );
+    const coverage = analyzeInterpretationCoverage({
+      ast: result.artifact.ast,
+      officialInterpretation: result.artifact.officialInterpretation,
+      text: prompt,
+    });
+    assert.equal(coverage.covered, true, prompt);
+    assert.deepEqual(coverage.missingFromAst, [], prompt);
+    assert.deepEqual(coverage.missingOperations, [], prompt);
+  }
+});
+
 test("validates unordered same-set rules as all six numbers matched", () => {
   const result = validateAndPrecompileRule({
     prompt:
@@ -205,6 +247,95 @@ test("validates unordered same-set rules as all six numbers matched", () => {
   assert.equal(predicate.op, "eq");
   assert.deepEqual(predicate.right, { kind: "lit", value: 6 });
   assert.match(result.artifactHash ?? "", /^[0-9a-f]{64}$/);
+});
+
+test("compiles every literal in an unordered guess-membership list", async () => {
+  const prompts = [
+    "A player wins if their six-number guess contains the numbers 1, 2, 3, and 4 in any order.",
+    "The player wins if their guess includes 1, 2, 3, and 4, regardless of order or the other two numbers.",
+    "Se o número do jogador tiver 1 2 3 4 em qualquer ordem, ele ganha.",
+    "My ticket must include 7 and 13.",
+  ];
+
+  for (const prompt of prompts) {
+    const result = validateAndPrecompileRule({
+      prompt,
+      tokenCount: tokenCount(prompt),
+    });
+
+    assert.equal(result.decision, "VALID", prompt);
+    assert.ok(result.artifact, prompt);
+    assert.equal(
+      evaluatePredicate(result.artifact.ast, {
+        draw: [90, 91, 92, 93, 94, 95],
+        guess: prompt.includes("7 and 13")
+          ? [13, 80, 7, 81, 82, 83]
+          : [4, 80, 2, 1, 81, 3],
+      }).result,
+      "WIN",
+      prompt,
+    );
+    assert.equal(
+      evaluatePredicate(result.artifact.ast, {
+        draw: [1, 2, 3, 4, 5, 6],
+        guess: prompt.includes("7 and 13")
+          ? [7, 80, 81, 82, 83, 84]
+          : [1, 2, 3, 80, 81, 82],
+      }).result,
+      "LOSE",
+      prompt,
+    );
+    const coverage = analyzeInterpretationCoverage({
+      ast: result.artifact.ast,
+      officialInterpretation: result.artifact.officialInterpretation,
+      text: prompt,
+    });
+    assert.equal(coverage.covered, true, prompt);
+    assert.deepEqual(coverage.missingFromAst, [], prompt);
+    assert.deepEqual(
+      coverage.requiredValues,
+      prompt.includes("7 and 13") ? [7, 13] : [1, 2, 3, 4],
+      prompt,
+    );
+  }
+
+  let providerCalls = 0;
+  const productionText = prompts[0]!;
+  const productionResult = await compileRuleArtifact(
+    {
+      originalText: productionText,
+      prompt: productionText,
+      tokenCount: tokenCount(productionText),
+    },
+    {
+      astProvider: async () => {
+        providerCalls += 1;
+        throw new Error("provider should not be needed for literal membership");
+      },
+      preferDeterministic: true,
+      requireProviderEvidence: true,
+    },
+  );
+  assert.equal(productionResult.decision, "VALID");
+  assert.equal(providerCalls, 0);
+
+  const compound =
+    "A guess wins if it contains 1, 2, 3, and 4 and the drawn sum is above 100.";
+  const rejected = validateAndPrecompileRule({
+    prompt: compound,
+    tokenCount: tokenCount(compound),
+  });
+  assert.equal(rejected.decision, "INVALID");
+  assert.equal(rejected.artifact, null);
+
+  const prefixedCompound =
+    "The draw differs from the guess and the ticket must include 7 and 13.";
+  const prefixedRejection = validateAndPrecompileRule({
+    prompt: prefixedCompound,
+    tokenCount: tokenCount(prefixedCompound),
+  });
+  assert.equal(prefixedRejection.decision, "INVALID");
+  assert.equal(prefixedRejection.artifact, null);
 });
 
 test("deterministically compiles the canonical most/fewest-matches ranking family", () => {

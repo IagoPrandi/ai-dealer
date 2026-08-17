@@ -573,11 +573,70 @@ test("cancelling a pending run does not turn the abort into an error state", asy
   await Promise.resolve();
 
   cancelConversationRun(draftId, deps);
+  assert.equal(isConversationRunActive(draftId), false);
   await task;
 
   assert.notEqual(getConversationRun(draftId)?.status, "error");
   assert.equal(isConversationRunActive(draftId), false);
   assert.deepEqual(cancelledJobs, ["job-102"]);
+});
+
+test("a replacement run starts immediately after the previous run is cancelled", async () => {
+  const draftId = "client:102:immediate-replacement";
+  let firstRunAborted = false;
+  let consumeCount = 0;
+  const phases: string[] = [];
+  const deps = baseDeps(
+    {
+      consumePreflightJob: async (args) => {
+        consumeCount += 1;
+        if (consumeCount === 1) {
+          return new Promise((_, reject) => {
+            args.signal?.addEventListener(
+              "abort",
+              () => {
+                firstRunAborted = true;
+                reject(args.signal?.reason);
+              },
+              { once: true },
+            );
+          });
+        }
+        return { interpretation: INTERPRETATION };
+      },
+      startPreflightJob: async (args) => {
+        phases.push(args.phase);
+        return { jobId: `job-${phases.length}` };
+      },
+    },
+    draftId,
+  );
+  const args = {
+    draftId,
+    initialMessages: [
+      { text: "Win if exactly 2 numbers match.", who: "user" as const },
+    ],
+    lastUserMessage: "Win if exactly 2 numbers match.",
+    localDealerReply: null,
+    phase: "interpret" as const,
+    refinedDraft: null,
+    ruleText: "Win if exactly 2 numbers match.",
+    turnId: 102,
+    wallet: null,
+  };
+
+  const firstTask = startConversationRun(args, deps);
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  cancelConversationRun(draftId, deps);
+  const secondTask = startConversationRun(args, deps);
+
+  assert.notEqual(secondTask, firstTask);
+  await Promise.all([firstTask, secondTask]);
+  assert.equal(firstRunAborted, true);
+  assert.deepEqual(phases, ["interpret", "interpret"]);
+  assert.equal(getConversationRun(draftId)?.status, "done");
 });
 
 test("cancelling after interpretation does not report its interrupted save as an error", async () => {

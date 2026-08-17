@@ -38,6 +38,10 @@ Examples:
 - Position wording uses 1-based user positions but 0-based AST indexes:
   "second guessed number equals second drawn number" = `at(guess,1) == at(draw,1)`;
   "first pick is higher than first drawn number" = `at(guess,0) > at(draw,0)`.
+- A literal ordered prefix leaves only the stated remainder unconstrained:
+  "first four picks are 1 2 3 4 in order; final two do not matter" =
+  `and(at(guess,0)==1, at(guess,1)==2, at(guess,2)==3, at(guess,3)==4)`.
+  Never turn it into a six-value assignment or a guess-versus-draw comparison.
 - "absolute difference between each guessed number and drawn number in the same
   position is at most 5" is a same-position predicate, not a ranking; emit
   `pairs_forall(guess, draw, abs(left - right) <= 5)`.

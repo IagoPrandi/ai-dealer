@@ -519,6 +519,51 @@ test("incomplete six-number assignments ask about the actual missing values", ()
     /only four values: 1, 2, 3, and 4.*remaining two guessed numbers/iu,
   );
 
+  const repeatedQuestion =
+    "A guess must have six unique numbers, but this rule specifies only four values: 1, 2, 3, and 4. What condition should apply to the remaining two guessed numbers?";
+  const resolvedEnglish = enforceIncompleteTicketClarity(
+    "I win if my numbers are 1 2 3 4 and the lottery numbers contain none of these numbers. ignored the remaining two guessed numbers.",
+    {
+      ...baseInterpretation,
+      clarificationQuestions: [repeatedQuestion],
+      clarityNote: "Define the remaining two guessed numbers.",
+      dealerMessage: repeatedQuestion,
+      needsClarification: true,
+    },
+  );
+  assert.equal(resolvedEnglish.needsClarification, false);
+  assert.deepEqual(resolvedEnglish.clarificationQuestions, []);
+  assert.match(
+    resolvedEnglish.dealerMessage,
+    /remaining two guessed numbers.*do not affect this rule/iu,
+  );
+
+  const resolvedPortuguese = enforceIncompleteTicketClarity(
+    "Eu venço se os meus números forem 1 2 3 4. Os demais dois números devem ser ignorados.",
+    baseInterpretation,
+  );
+  assert.equal(resolvedPortuguese, baseInterpretation);
+
+  const wrongRemainderCount = enforceIncompleteTicketClarity(
+    "I win if my numbers are 1 2 3 4. The remaining one guessed number is ignored.",
+    baseInterpretation,
+  );
+  assert.equal(wrongRemainderCount.needsClarification, true);
+  assert.match(
+    wrongRemainderCount.clarificationQuestions[0] ?? "",
+    /remaining two guessed numbers/iu,
+  );
+
+  const negatedRemainder = enforceIncompleteTicketClarity(
+    "I win if my numbers are 1 2 3 4. Do not ignore the remaining two guessed numbers.",
+    baseInterpretation,
+  );
+  assert.equal(negatedRemainder.needsClarification, true);
+  assert.match(
+    negatedRemainder.clarificationQuestions[0] ?? "",
+    /remaining two guessed numbers/iu,
+  );
+
   const incompleteDraw = enforceIncompleteTicketClarity(
     "The official draw numbers are 3, 8, and 12.",
     baseInterpretation,

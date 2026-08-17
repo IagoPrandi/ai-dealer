@@ -175,6 +175,59 @@ test("still patches an invalid base when the dealer offered a suggested rewrite"
   );
 });
 
+test("applies a short answer to the interpretation that asked for it", () => {
+  const context = {
+    baseCanBeClarified: true,
+    currentRuleText: "vence se a sequencia jogada for 1 2 3 4",
+    refinementQuestions: [
+      "What condition should apply to the remaining two guessed numbers?",
+    ],
+  };
+  const answer = "os demais dois números devem ser ignorados";
+
+  assert.equal(isRuleRefinementPatch(answer, context), true);
+  assert.equal(
+    composeRefinedRuleDraft(answer, context),
+    "vence se a sequencia jogada for 1 2 3 4. The remaining two guessed numbers may be any valid unique values and do not affect the winning condition.",
+  );
+});
+
+test("normalizes the reported English remainder answer instead of re-asking it", () => {
+  const context = {
+    baseCanBeClarified: true,
+    currentRuleText:
+      "I win if my numbers are 1 2 3 4 and the lottery numbers contain none of these numbers.",
+    refinementQuestions: [
+      "What condition should apply to the remaining two guessed numbers?",
+    ],
+  };
+  const answer = "ignored the remaining two guessed numbers";
+
+  assert.equal(isRuleRefinementPatch(answer, context), true);
+  assert.equal(
+    composeRefinedRuleDraft(answer, context),
+    "I win if my numbers are 1 2 3 4 and the lottery numbers contain none of these numbers. The remaining two guessed numbers may be any valid unique values and do not affect the winning condition.",
+  );
+});
+
+test("does not turn a negated remainder answer into ignored order", () => {
+  const context = {
+    baseCanBeClarified: true,
+    currentRuleText: "Win if my numbers are 1 2 3 4.",
+    refinementQuestions: [
+      "What condition should apply to the remaining two guessed numbers?",
+    ],
+  };
+
+  assert.equal(
+    composeRefinedRuleDraft(
+      "do not ignore the remaining two guessed numbers",
+      context,
+    ),
+    "Win if my numbers are 1 2 3 4. do not ignore the remaining two guessed numbers.",
+  );
+});
+
 test("keeps clean replacement rules standalone after blocked conversation turns", () => {
   const context = {
     currentRuleText:

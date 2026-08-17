@@ -1367,6 +1367,7 @@ function CreateChat({
     // old job before starting a new one.
     cancelConversationRun(activeDraftId);
     const pendingRule = rule;
+    const pendingInterpretation = interpretation;
     const likelyRuleDraft = isLikelyRuleDraft(t);
     const explicitPatch = isExplicitRuleRefinementPatch(t);
     // A fresh rule draft restarts the clarification budget.
@@ -1379,16 +1380,27 @@ function CreateChat({
       clarificationAttemptsRef.current >= MAX_CLARIFICATION_ATTEMPTS;
     const refinementContext = {
       baseWasValid: pendingRule?.decision === "VALID",
-      currentRuleText: pendingRule?.sanitizedText ?? null,
-      refinementQuestions: pendingRule?.refinementQuestions ?? null,
-      suggestedRewrite: pendingRule?.suggestedRewrite ?? null,
-      suggestedRewrites: pendingRule?.suggestedRewrites ?? null,
+      baseCanBeClarified: Boolean(pendingInterpretation?.needsClarification),
+      currentRuleText:
+        pendingRule?.sanitizedText ?? pendingInterpretation?.sanitizedText ?? null,
+      refinementQuestions:
+        pendingRule?.refinementQuestions ??
+        pendingInterpretation?.clarificationQuestions ??
+        null,
+      suggestedRewrite:
+        pendingRule?.suggestedRewrite ??
+        pendingInterpretation?.suggestedRewrites[0] ??
+        null,
+      suggestedRewrites:
+        pendingRule?.suggestedRewrites ??
+        pendingInterpretation?.suggestedRewrites ??
+        null,
       triviallyAlwaysTrue:
         pendingRule?.semanticImpact?.triviallyAlwaysTrue ?? false,
     };
     const refinedDraft =
       !clarificationBudgetExhausted &&
-      pendingRule &&
+      (pendingRule || pendingInterpretation) &&
       !submitted &&
       (!likelyRuleDraft || explicitPatch) &&
       isRuleRefinementPatch(t, refinementContext)

@@ -13,10 +13,9 @@ import { fileURLToPath } from "node:url";
 
 export const RULE_COMPILER_SKILL = {
   name: "compile_rule_to_ast",
-  // v9: comparisons against numbers the player named (literal ordered sequences,
-  // literal sets, and their negation) on top of v8's auditable source-span
-  // coverage and source-derived worked examples.
-  version: "tyche_rule_compiler_skill_v9",
+  // v10: ordered literal prefixes with an explicitly unconstrained remainder,
+  // on top of v9's full literal sequences, sets, and their negation.
+  version: "tyche_rule_compiler_skill_v10",
   allowedInputs: ["guess", "draw"] as const,
 } as const;
 

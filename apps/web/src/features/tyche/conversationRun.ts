@@ -198,7 +198,14 @@ export function cancelConversationRun(
       );
     });
   }
-  activeRuns.get(draftId)?.controller.abort();
+  const activeRun = activeRuns.get(draftId);
+  activeRun?.controller.abort();
+  // A follow-up may start in the same event turn. Release the slot now instead
+  // of making it reuse the task we just aborted; the old task's identity check
+  // in `finally` guarantees it cannot delete the replacement run later.
+  if (activeRun && activeRuns.get(draftId) === activeRun) {
+    activeRuns.delete(draftId);
+  }
   clearPersistedPreflightJob(deps.readStorage(), draftId);
 }
 

@@ -3,6 +3,9 @@ export interface RuleRefinementContext {
    * only build on a usable base; appending a correction to a still-invalid draft
    * cannot fix it and re-triggers the same clarification (an infinite loop). */
   baseWasValid?: boolean;
+  /** An interpretation awaiting the player's answer is also a safe refinement
+   * base: unlike a rejected compiled rule, it has not failed preflight yet. */
+  baseCanBeClarified?: boolean;
   currentRuleText?: string | null;
   refinementQuestions?: readonly string[] | null;
   suggestedRewrite?: string | null;
@@ -55,6 +58,15 @@ const RULE_REPLACEMENT_PATTERN =
 const DECLARATIVE_RULE_PATTERN =
   /^(?:(?:i|eu)\s+)?(?:win|wins|ganho|ganha|venco|vence)\s+(?:if|when|se|quando)\b/i;
 
+const REMAINDER_QUESTION_PATTERN =
+  /\bremaining\s+(?:(one|two|three|four|five|[1-5])\s+)?(guessed|drawn)\s+numbers?\b/i;
+const REMAINDER_REFERENCE_PATTERN =
+  /\b(remaining|other|final|last|demais|restantes|ultimos?|resto|them|those|eles|elas)\b/i;
+const REMAINDER_RESOLUTION_PATTERN =
+  /\b(ignore(?:d|s|ing)?|unconstrained|irrelevant|free|may be any|can be any|do not matter|does not matter|do not affect|does not affect|ignorad[oa]s?|ignorar|livres?|qualquer|quaisquer|nao importam?|nao afetam?)\b/i;
+const NEGATED_REMAINDER_RESOLUTION_PATTERN =
+  /\b(do not|does not|must not|should not)\s+(?:be\s+)?(?:ignore(?:d)?|unconstrained|irrelevant)|\bnao\s+(?:devem?\s+ser\s+)?ignorad[oa]s?\b/i;
+
 /**
  * Detect a complete winner-condition statement before topic-based chat routing.
  * The broader heuristic in Create also recognizes rules by their data terms,
@@ -100,6 +112,34 @@ function normalizeIntentText(value: string) {
     .trim();
 }
 
+function buildResolvedRemainderClause(
+  message: string,
+  questions: readonly string[] | null | undefined,
+) {
+  const questionMatch = questions
+    ?.map((question) => question.match(REMAINDER_QUESTION_PATTERN))
+    .find((match): match is RegExpMatchArray => Boolean(match));
+  if (!questionMatch) {
+    return null;
+  }
+
+  const normalized = normalizeIntentText(message);
+  if (
+    !REMAINDER_REFERENCE_PATTERN.test(normalized) ||
+    !REMAINDER_RESOLUTION_PATTERN.test(normalized) ||
+    NEGATED_REMAINDER_RESOLUTION_PATTERN.test(normalized) ||
+    /\border\b/i.test(normalized)
+  ) {
+    return null;
+  }
+
+  const count = questionMatch[1] ?? "one";
+  const numberNoun = count === "one" || count === "1" ? "number" : "numbers";
+  const valueNoun = numberNoun === "number" ? "value" : "values";
+  const effectVerb = numberNoun === "number" ? "does" : "do";
+  return `The remaining ${count} ${questionMatch[2]} ${numberNoun} may be any valid unique ${valueNoun} and ${effectVerb} not affect the winning condition.`;
+}
+
 function dedupeOptions(options: RuleGuidanceOption[]) {
   const seen = new Set<string>();
   const result: RuleGuidanceOption[] = [];
@@ -118,16 +158,17 @@ export function getRuleRefinementBase(context: RuleRefinementContext) {
   if (context.triviallyAlwaysTrue) {
     return null;
   }
-  // Prefer the dealer's concrete suggested rewrite. Only fall back to the raw
-  // current rule text when it was previously VALID — otherwise a clarification
-  // answer would be appended to an unfixable draft and loop forever.
+  // Prefer the dealer's concrete suggested rewrite. Only fall back to raw text
+  // when it was previously VALID or is the current pre-compilation
+  // interpretation. A rejected compiled rule remains an unsafe base because
+  // appending to it can re-trigger the same clarification forever.
   const rewrite =
     context.suggestedRewrites?.find((candidate) => candidate.trim())?.trim() ??
     context.suggestedRewrite?.trim();
   if (rewrite) {
     return rewrite;
   }
-  if (context.baseWasValid) {
+  if (context.baseWasValid || context.baseCanBeClarified) {
     return context.currentRuleText?.trim() || null;
   }
   return null;
@@ -182,6 +223,14 @@ export function composeRefinedRuleDraft(
     return null;
   }
 
+  const resolvedRemainder = buildResolvedRemainderClause(
+    correction,
+    context.refinementQuestions,
+  );
+  if (resolvedRemainder) {
+    return `${cleanSentence(base)}. ${resolvedRemainder}`;
+  }
+
   if (/^(yes|sim)$/iu.test(correction)) {
     const orderQuestion = context.refinementQuestions?.some((question) =>
       /\border\b/i.test(question),
@@ -228,9 +277,9 @@ export function composeRefinedRuleDraft(
   }
 
   if (
-    /\b(ignore|regardless|any order|unordered|order does not matter)\b/i.test(
+    /\b(regardless of order|any order|unordered|order does not matter)\b/i.test(
       correction,
-    )
+    ) || /\bignore(?:d|s|ing)?\s+(?:the\s+)?order\b/i.test(correction)
   ) {
     return `${cleanSentence(base)}. Order is ignored.`;
   }
@@ -244,6 +293,10 @@ export function composeRefinedRuleDraft(
       correction,
     )
   ) {
+    return `${cleanSentence(base)}. ${correction}.`;
+  }
+
+  if (context.baseCanBeClarified) {
     return `${cleanSentence(base)}. ${correction}.`;
   }
 

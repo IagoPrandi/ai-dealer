@@ -168,6 +168,11 @@ freezes a different rule.
 - "I win with exactly 1 2 3 4 5 6, in that order" (ordered literal sequence) ->
   `and(at(guess,0) == 1, at(guess,1) == 2, ..., at(guess,5) == 6)`. Use `at` per
   position; `pairs_forall` cannot be used, because there is no second array.
+- "the first four guessed numbers are 1 2 3 4 in order; the final two do not
+  matter" (ordered literal prefix) -> `and(at(guess,0) == 1, ...,
+  at(guess,3) == 4)`. Do not add clauses for the explicitly free positions, and
+  do not require the official draw; the standard ticket domain and uniqueness
+  constraints still apply to all six values.
 - "my ticket must be exactly 1 2 3 4 5 6, in any order" (unordered literal set) ->
   `and(contains(guess,1), contains(guess,2), ..., contains(guess,6))`.
 - "my ticket must include 7 and 13" -> `and(contains(guess,7), contains(guess,13))`.

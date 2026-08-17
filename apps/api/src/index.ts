@@ -2424,6 +2424,21 @@ const ENGLISH_SMALL_NUMBERS = [
   "six",
 ] as const;
 
+const PORTUGUESE_SMALL_NUMBERS = [
+  "zero",
+  "um",
+  "dois",
+  "tres",
+  "quatro",
+  "cinco",
+  "seis",
+] as const;
+
+const REMAINDER_RESOLUTION_PATTERN =
+  /\b(ignore(?:d|s|ing)?|unconstrained|irrelevant|free|may be any|can be any|do not matter|does not matter|do not affect|does not affect|ignorad[oa]s?|ignorar|livres?|qualquer|quaisquer|nao importam?|nao afetam?)\b/i;
+const NEGATED_REMAINDER_RESOLUTION_PATTERN =
+  /\b(do not|does not|must not|should not)\s+(?:be\s+)?(?:ignore(?:d)?|unconstrained|irrelevant)|\bnao\s+(?:devem?\s+ser\s+)?ignorad[oa]s?\b/i;
+
 function normalizeIntentText(value: string) {
   return value
     .normalize("NFD")
@@ -2450,6 +2465,118 @@ function findIncompleteTicketAssignment(
     }
   }
   return null;
+}
+
+function hasExplicitUnconstrainedRemainder(
+  text: string,
+  assignment: IncompleteTicketAssignment,
+) {
+  const normalized = normalizeIntentText(text);
+  const remainingCount = 6 - assignment.values.length;
+  const englishCount = ENGLISH_SMALL_NUMBERS[remainingCount];
+  const portugueseCount = PORTUGUESE_SMALL_NUMBERS[remainingCount];
+  const countPrefix =
+    remainingCount === 1
+      ? `(?:(?:1|${englishCount})\\s+)?`
+      : `(?:${remainingCount}|${englishCount})\\s+`;
+  const portugueseCountPrefix =
+    remainingCount === 1
+      ? `(?:(?:1|um|uma)\\s+)?`
+      : `(?:${remainingCount}|${portugueseCount}|${remainingCount === 2 ? "duas" : portugueseCount})\\s+`;
+  const englishSubject =
+    assignment.side === "guess"
+      ? String.raw`(?:guessed|picked|chosen|ticket)\s+(?:numbers?|values?|picks?)`
+      : String.raw`(?:drawn|lottery|official\s+draw)\s+(?:numbers?|values?)`;
+  const portugueseSubject =
+    assignment.side === "guess"
+      ? String.raw`(?:numeros?|valores?|dezenas?)(?:\s+(?:jogados?|escolhidos?|apostados?))?`
+      : String.raw`(?:numeros?|valores?|dezenas?)\s+(?:(?:do\s+)?sorteio|sorteados?)`;
+  const targets = [
+    new RegExp(
+      String.raw`\b(?:remaining|other|final|last)\s+${countPrefix}${englishSubject}\b`,
+      "i",
+    ),
+    new RegExp(
+      String.raw`\b(?:demais|restantes|ultimos?)\s+${portugueseCountPrefix}${portugueseSubject}\b`,
+      "i",
+    ),
+  ];
+
+  return targets.some((target) => {
+    const match = target.exec(normalized);
+    if (!match || match.index === undefined) {
+      return false;
+    }
+    const context = normalized.slice(
+      Math.max(0, match.index - 80),
+      Math.min(normalized.length, match.index + match[0].length + 120),
+    );
+    return (
+      REMAINDER_RESOLUTION_PATTERN.test(context) &&
+      !NEGATED_REMAINDER_RESOLUTION_PATTERN.test(context)
+    );
+  });
+}
+
+function isResolvedRemainderQuestion(
+  question: string,
+  assignment: IncompleteTicketAssignment,
+) {
+  const normalized = normalizeIntentText(question);
+  const remainingCount = 6 - assignment.values.length;
+  const countMentioned =
+    remainingCount === 1 ||
+    new RegExp(
+      String.raw`\b(?:${remainingCount}|${ENGLISH_SMALL_NUMBERS[remainingCount]})\b`,
+      "i",
+    ).test(normalized);
+  const sideMentioned =
+    assignment.side === "guess"
+      ? /\b(guess|guessed|ticket|pick|picked)\b/i.test(normalized)
+      : /\b(draw|drawn|lottery)\b/i.test(normalized);
+  return (
+    countMentioned &&
+    sideMentioned &&
+    /\b(remaining|other|final|last|unspecified)\b/i.test(normalized)
+  );
+}
+
+function applyResolvedRemainder(
+  interpretation: RuleAgentInterpretation,
+  assignment: IncompleteTicketAssignment,
+): RuleAgentInterpretation {
+  const unresolvedQuestions = interpretation.clarificationQuestions.filter(
+    (question) => !isResolvedRemainderQuestion(question, assignment),
+  );
+  if (
+    unresolvedQuestions.length === interpretation.clarificationQuestions.length
+  ) {
+    return interpretation;
+  }
+
+  if (unresolvedQuestions.length > 0) {
+    return {
+      ...interpretation,
+      clarificationQuestions: unresolvedQuestions,
+      clarityNote: unresolvedQuestions.join(" "),
+      dealerMessage: `I applied the condition for the ticket's remaining numbers. ${unresolvedQuestions.join(" ")}`,
+      needsClarification: true,
+    };
+  }
+
+  const remainingCount = 6 - assignment.values.length;
+  const numberLabel = assignment.side === "guess" ? "guessed" : "drawn";
+  const numberNoun = remainingCount === 1 ? "number" : "numbers";
+  const valueNoun = remainingCount === 1 ? "value" : "values";
+  const effectVerb = remainingCount === 1 ? "does" : "do";
+  return {
+    ...interpretation,
+    clarificationQuestions: [],
+    clarityNote: "",
+    dealerMessage: `I applied that clarification: the remaining ${ENGLISH_SMALL_NUMBERS[remainingCount]} ${numberLabel} ${numberNoun} may be any valid unique ${valueNoun} and ${effectVerb} not affect this rule.`,
+    needsClarification: false,
+    suggestedRewrites: [],
+  };
 }
 
 function formatEnglishList(values: readonly number[]) {
@@ -2486,6 +2613,13 @@ export function enforceIncompleteTicketClarity(
   sourceText: string,
   interpretation: RuleAgentInterpretation,
 ): RuleAgentInterpretation {
+  const assignment = findIncompleteTicketAssignment(sourceText);
+  if (
+    assignment &&
+    hasExplicitUnconstrainedRemainder(sourceText, assignment)
+  ) {
+    return applyResolvedRemainder(interpretation, assignment);
+  }
   const detail = describeIncompleteTicketAssignment(sourceText);
   if (!detail) {
     return interpretation;

@@ -1672,6 +1672,11 @@ function compileSupportedRulePattern(text: string): RuleAst | null {
     return orderedTensRange;
   }
 
+  const orderedGuessPrefix = parseOrderedGuessPrefixRule(text);
+  if (orderedGuessPrefix) {
+    return orderedGuessPrefix;
+  }
+
   // Before the generic match-count fallbacks: an enumerated exact set must never
   // be mistaken for "match N of the draw" (the turn-55 failure).
   const exactGuessSet = parseExactGuessSetRule(text);
@@ -1702,6 +1707,11 @@ function compileSupportedRulePattern(text: string): RuleAst | null {
   const drawThreshold = parseDrawAllThresholdRule(text);
   if (drawThreshold) {
     return drawThreshold;
+  }
+
+  const guessContainsSet = parseGuessContainsLiteralSetRule(text);
+  if (guessContainsSet) {
+    return guessContainsSet;
   }
 
   const guessContains = parseGuessContainsLiteralRule(text);
@@ -1973,6 +1983,110 @@ function compileSupportedRulePattern(text: string): RuleAst | null {
   }
 
   return null;
+}
+
+const SMALL_COUNT_VALUE = new Map<string, number>([
+  ["one", 1],
+  ["um", 1],
+  ["uma", 1],
+  ["two", 2],
+  ["dois", 2],
+  ["duas", 2],
+  ["three", 3],
+  ["tres", 3],
+  ["four", 4],
+  ["quatro", 4],
+  ["five", 5],
+  ["cinco", 5],
+]);
+
+function readSmallCount(value: string | undefined) {
+  if (!value) {
+    return null;
+  }
+  const numeric = Number(value);
+  return Number.isInteger(numeric)
+    ? numeric
+    : (SMALL_COUNT_VALUE.get(value) ?? null);
+}
+
+/**
+ * Compile a literal ordered prefix while leaving the other ticket positions
+ * unconstrained. The distinction matters: `[1,2,3,4,90,91]` wins, while a
+ * full six-number literal sequence and an unordered literal set are different
+ * rules. Both the prefix and the explicitly free remainder must be present so
+ * an incomplete ticket is never silently accepted.
+ */
+function parseOrderedGuessPrefixRule(text: string): RuleAst | null {
+  const remainder =
+    text.match(
+      /\b(?:the\s+)?(?:remaining|final|last|other)\s+(one|two|three|four|five|[1-5])\b[^.]{0,90}\b(?:ignored|unconstrained|irrelevant|may be any|can be any|do not matter|does not matter)\b/i,
+    ) ??
+    text.match(
+      /\b(?:os\s+|as\s+)?(?:demais|restantes|ultimos?)\s+(um|uma|dois|duas|tres|quatro|cinco|[1-5])\b[^.]{0,90}\b(?:ignorad[oa]s?|livres?|qualquer(?:es)?|nao importam?)\b/i,
+    ) ??
+    text.match(
+      /\b(?:ignoring|ignore|ignorando|ignorar)\s+(?:the\s+|os\s+|as\s+)?(?:remaining|final|last|other|demais|restantes|ultimos?)\s+(one|two|three|four|five|um|uma|dois|duas|tres|quatro|cinco|[1-5])\b/i,
+    );
+  const remainingCount = readSmallCount(remainder?.[1]);
+  if (!remainder || !remainingCount || remainder.index === undefined) {
+    return null;
+  }
+
+  const prefix = text.match(
+    /\b(?:the\s+)?(?:first|primeir[oa]s?)\s+(one|two|three|four|five|um|uma|dois|duas|tres|quatro|cinco|[1-5])\s+(?:(?:guessed?|played|picked|ticket|palpite|jogad[oa]s?)\s+)?(?:numbers?|numeros?)\b/i,
+  );
+  const sequence = text.match(
+    /\b(?:(?:played|guessed|picked)\s+sequence|sequence\s+(?:played|guessed|picked)|sequencia\s+jogada)\b/i,
+  );
+  const cue = prefix ?? sequence;
+  if (!cue || cue.index === undefined || cue.index >= remainder.index) {
+    return null;
+  }
+
+  const literalSpan = text.slice(cue.index + cue[0].length, remainder.index);
+  const values = (literalSpan.match(/\b(?:100|[1-9]?\d)\b/g) ?? []).map(
+    Number,
+  );
+  const statedPrefixCount = prefix ? readSmallCount(prefix[1]) : values.length;
+  if (
+    !statedPrefixCount ||
+    statedPrefixCount < 1 ||
+    statedPrefixCount > 5 ||
+    statedPrefixCount + remainingCount !== 6 ||
+    values.length !== statedPrefixCount ||
+    new Set(values).size !== values.length ||
+    values.some((value) => value < 1 || value > 100)
+  ) {
+    return null;
+  }
+
+  const orderIsExplicit =
+    Boolean(sequence) ||
+    /\b(?:in\s+(?:(?:that|this|the|same)\s+)?order|ordered|nessa ordem|na ordem|em ordem)\b/i.test(
+      literalSpan,
+    );
+  if (!orderIsExplicit) {
+    return null;
+  }
+
+  const clauses: PredicateNodeV3[] = values.map((value, index) => ({
+    kind: "compare",
+    left: { kind: "at", index, of: { kind: "source", source: "guess" } },
+    op: "eq",
+    right: { kind: "lit", value },
+  }));
+
+  return {
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate:
+        clauses.length === 1
+          ? clauses[0]!
+          : { kind: "and", clauses },
+    },
+  };
 }
 
 function source(sourceName: "draw" | "guess"): ArrayExpr {
@@ -3267,6 +3381,76 @@ function parseDrawAllThresholdRule(text: string): RuleAst | null {
           right: { kind: "lit", value },
         },
       },
+    },
+  };
+}
+
+/**
+ * Compile a ticket that must contain every value in an explicit literal list.
+ * The whole suffix is validated so a later condition can never be swallowed as
+ * another list item. Ticket uniqueness makes a six-value membership list an
+ * exact unordered set; shorter lists deliberately leave the other slots free.
+ */
+function parseGuessContainsLiteralSetRule(text: string): RuleAst | null {
+  const subject = text.match(
+    /\b(?:guess|ticket|palpite|bilhete|numeros?\s+do\s+jogador|numero\s+do\s+jogador)\b[^.;]{0,35}?\b(?:contains?|includes?|include|has|have|tiver|tenha|contem|inclui)\b/i,
+  );
+  if (!subject || subject.index === undefined) {
+    return null;
+  }
+
+  const prefix = text.slice(0, subject.index);
+  if (
+    INTENT_BEARING_RESIDUE.test(prefix) ||
+    /\b(?:and|or|e|ou)\b|[.;]/i.test(prefix)
+  ) {
+    return null;
+  }
+
+  const suffix = text.slice(subject.index + subject[0].length).trim();
+  const list = suffix.match(
+    /^(?:(?:the|os|as)\s+)?(?:numbers?|numeros?|dezenas?)?\s*((?:100|[1-9]?\d)(?:(?:\s*[,;]\s*(?:(?:and|e)\s+)?|\s+(?:and|e)\s+|\s+)(?:100|[1-9]?\d)){1,5})\b/i,
+  );
+  if (!list?.[1]) {
+    return null;
+  }
+
+  const values = (list[1].match(/\b(?:100|[1-9]?\d)\b/g) ?? []).map(Number);
+  if (
+    values.length < 2 ||
+    values.length > 6 ||
+    new Set(values).size !== values.length ||
+    values.some((value) => value < 1 || value > 100)
+  ) {
+    return null;
+  }
+
+  const remainder = suffix.slice(list[0].length).trim();
+  const harmlessRemainder = new RegExp(
+    [
+      "^(?:[,;.]\\s*)?",
+      "(?:(?:in|regardless\\s+of)\\s+(?:any\\s+)?order|em\\s+qualquer\\s+ordem|qualquer\\s+ordem)?",
+      "(?:\\s+or\\s+the\\s+other\\s+(?:one|two|three|four|five|[1-5])\\s+numbers?)?",
+      "(?:\\s*[,;.]\\s*)?",
+      "(?:(?:then\\s+)?(?:the\\s+player|they|it|ele|ela)\\s+(?:wins?|ganha|vence))?",
+      "[.!?]*$",
+    ].join(""),
+    "i",
+  );
+  if (!harmlessRemainder.test(remainder)) {
+    return null;
+  }
+
+  const clauses: PredicateNodeV3[] = values.map((value) => ({
+    kind: "contains",
+    array: { kind: "source", source: "guess" },
+    value: { kind: "lit", value },
+  }));
+  return {
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: { kind: "and", clauses },
     },
   };
 }

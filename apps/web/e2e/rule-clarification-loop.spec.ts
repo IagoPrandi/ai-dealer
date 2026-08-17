@@ -65,17 +65,22 @@ function validPreflight(text: string, ruleId: number) {
   };
 }
 
-test("shows the interpretation agent's specific question before compilation", async ({
+test("the reported English clarification resolves without repeating the question", async ({
   page,
 }) => {
   await mockShellData(page);
   const phases: string[] = [];
+  const preflightTexts: string[] = [];
   const question =
     "A guess must have six unique numbers, but this rule specifies only four values: 1, 2, 3, and 4. What condition should apply to the remaining two guessed numbers?";
   await mockRulePreflight(page, (body) => {
     phases.push(body.phase);
+    preflightTexts.push(body.text);
     return {
-      json: interpretation(body.text, true, [question]),
+      json:
+        phases.length === 1
+          ? interpretation(body.text, true, [question])
+          : interpretation(body.text),
       status: 200,
     };
   });
@@ -95,7 +100,22 @@ test("shows the interpretation agent's specific question before compilation", as
   await expect(
     page.getByRole("button", { name: "Confirm and generate" }),
   ).toHaveCount(0);
-  expect(phases).toEqual(["interpret"]);
+  await page
+    .getByLabel("Message", { exact: true })
+    .fill("ignored the remaining two guessed numbers");
+  await page.getByRole("button", { name: "Send message" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "Clarify this rule?" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Confirm and generate" }),
+  ).toBeVisible();
+  expect(phases).toEqual(["interpret", "interpret"]);
+  expect(preflightTexts).toEqual([
+    "I win if my numbers are 1 2 3 4 and the lottery numbers contain none of these numbers.",
+    "I win if my numbers are 1 2 3 4 and the lottery numbers contain none of these numbers. The remaining two guessed numbers may be any valid unique values and do not affect the winning condition.",
+  ]);
 });
 
 test("routes a direct Portuguese winner condition to interpretation, not dealer chat", async ({
@@ -103,6 +123,7 @@ test("routes a direct Portuguese winner condition to interpretation, not dealer 
 }) => {
   await mockShellData(page);
   const phases: string[] = [];
+  const preflightTexts: string[] = [];
   let dealerChatCalls = 0;
   const question =
     "A guess must have six unique numbers, but this rule specifies only four values: 1, 2, 3, and 4. What condition should apply to the remaining two guessed numbers?";
@@ -117,8 +138,12 @@ test("routes a direct Portuguese winner condition to interpretation, not dealer 
   });
   await mockRulePreflight(page, (body) => {
     phases.push(body.phase);
+    preflightTexts.push(body.text);
     return {
-      json: interpretation(body.text, true, [question]),
+      json:
+        phases.length === 1
+          ? interpretation(body.text, true, [question])
+          : interpretation(body.text),
       status: 200,
     };
   });
@@ -133,7 +158,19 @@ test("routes a direct Portuguese winner condition to interpretation, not dealer 
     page.getByRole("heading", { name: "Clarify this rule?" }),
   ).toBeVisible();
   await expect(page.getByText(question)).toBeVisible();
-  expect(phases).toEqual(["interpret"]);
+  await page
+    .getByLabel("Message", { exact: true })
+    .fill("os demais dois números devem ser ignorados");
+  await page.getByRole("button", { name: "Send message" }).click();
+
+  await expect(
+    page.getByRole("button", { name: "Confirm and generate" }),
+  ).toBeVisible();
+  expect(phases).toEqual(["interpret", "interpret"]);
+  expect(preflightTexts).toEqual([
+    "vence se a sequencia jogada for 1 2 3 4",
+    "vence se a sequencia jogada for 1 2 3 4. The remaining two guessed numbers may be any valid unique values and do not affect the winning condition.",
+  ]);
   expect(dealerChatCalls).toBe(0);
 });
 

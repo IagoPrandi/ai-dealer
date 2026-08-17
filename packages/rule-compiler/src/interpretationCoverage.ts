@@ -91,6 +91,8 @@ const EXAMPLE_MARKERS =
 const BRACED_SET = /[{[]([^}\]]*)[}\]]/gu;
 const NUMBER_ENUMERATION =
   /\b\d{1,3}(?:\s*(?:,|;|\band\b|\be\b|\bor\b|\bou\b|\s)\s*\d{1,3}){2,}\b/gu;
+const MEMBERSHIP_ENUMERATION =
+  /\b(?:contains?|includes?|contem|inclui)\s+(?:(?:the|os|as)\s+)?(?:numbers?|numeros?|dezenas?)?\s*(\d{1,3}(?:\s*(?:[,;]\s*(?:(?:and|e)\s+)?|(?:and|e)\s+|\s+)\d{1,3})+)\b/gu;
 const NUMERIC_RANGE =
   /\b(?:between|entre)\s+(\d{1,3})\s+(?:and|e)\s+(\d{1,3})\b|\b(?:from|de)\s+(\d{1,3})\s+(?:to|through|a|ate)\s+(\d{1,3})\b/gu;
 
@@ -162,6 +164,9 @@ export function collectRequiredValues(text: string): number[] {
   }
   for (const [enumeration] of prepared.matchAll(NUMBER_ENUMERATION)) {
     readDigits(enumeration).forEach((value) => required.add(value));
+  }
+  for (const [, enumeration] of prepared.matchAll(MEMBERSHIP_ENUMERATION)) {
+    readDigits(enumeration ?? "").forEach((value) => required.add(value));
   }
   for (const match of prepared.matchAll(NUMERIC_RANGE)) {
     readDigits(match[0]).forEach((value) => required.add(value));
