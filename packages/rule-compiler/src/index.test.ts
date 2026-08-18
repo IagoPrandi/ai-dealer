@@ -297,13 +297,13 @@ test("compiles every literal in an unordered guess-membership list", async () =>
     });
     assert.equal(coverage.covered, true, prompt);
     assert.deepEqual(coverage.missingFromAst, [], prompt);
+    // "two other numbers from 5 to 100" adds nothing to require: the four
+    // pinned values leave exactly 5..100 for the other two, so only 1..4 are
+    // load-bearing. The AST here does carry the range, and that stays fine —
+    // coverage is one-directional, an artifact may say more than the prose.
     assert.deepEqual(
       coverage.requiredValues,
-      prompt.includes("7 and 13")
-        ? [7, 13]
-        : /from 5 (?:to|through) 100/i.test(prompt)
-          ? [1, 2, 3, 4, 5, 100]
-          : [1, 2, 3, 4],
+      prompt.includes("7 and 13") ? [7, 13] : [1, 2, 3, 4],
       prompt,
     );
   }
@@ -3442,5 +3442,86 @@ test("a vacuously true remainder clause is not an unread condition", async () =>
   assert.ok(
     dropped.log.reasonCodes.includes("PROVIDER_SPAN_COVERAGE_INCOMPLETE"),
     JSON.stringify(dropped.log.reasonCodes),
+  );
+});
+
+test("a range over the numbers a rule has not pinned is vacuous, not a required literal", () => {
+  // Reported from the app: the player asked for "1, 2, 3, 4 in my guess, none of
+  // them in the draw, and the other two between 5 and 100". A ticket holds six
+  // distinct values from 1..100, so once 1..4 are pinned the other two are
+  // ALREADY in 5..100 — the clause constrains nothing. Requiring 5 and 100 to
+  // survive into the AST left the rule with no reachable compile: a faithful
+  // artifact omits the redundant bounds and fails coverage, while one that reads
+  // the bounds as covering the whole guess contradicts the pinned values and is
+  // IMPOSSIBLE. Two providers landing on the two readings is also a
+  // PROVIDER_DISAGREEMENT, which tells the player the fault is not theirs to fix.
+  const pinned = [1, 2, 3, 4];
+  const ast = {
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "and",
+        clauses: [
+          ...pinned.map((value) => ({
+            kind: "contains",
+            array: { kind: "source", source: "guess" },
+            value: { kind: "lit", value },
+          })),
+          ...pinned.map((value) => ({
+            kind: "not",
+            clause: {
+              kind: "contains",
+              array: { kind: "source", source: "draw" },
+              value: { kind: "lit", value },
+            },
+          })),
+        ],
+      },
+    },
+  } as const;
+  const parsedAst = ruleAstSchema.parse(ast);
+
+  for (const text of [
+    "I win if my numbers are 1 2 3 4 and the lottery numbers contain none of these numbers. The remaining two guessed numbers should be any number between 5 and 100, including 5 and 100.",
+    "Win if my guess contains 1, 2, 3, 4 in any order, the draw has none of those, and the other two numbers are each between 5 and 100 inclusive.",
+  ]) {
+    const coverage = analyzeInterpretationCoverage({
+      ast: parsedAst,
+      officialInterpretation:
+        "The guess contains 1, 2, 3 and 4, and the official draw contains none of them.",
+      text,
+    });
+    assert.deepEqual(coverage.requiredValues, pinned, text);
+    assert.equal(coverage.covered, true, JSON.stringify(coverage));
+  }
+
+  // The narrowing is about a range that provably adds nothing, not about
+  // dropping bounds. Without the remainder cue the same words constrain the
+  // WHOLE guess and contradict the pinned values, so the bounds stay required
+  // and the contradiction is still reported instead of being relaxed away.
+  const wholeGuess = analyzeInterpretationCoverage({
+    ast: parsedAst,
+    officialInterpretation:
+      "The guess contains 1, 2, 3 and 4, and the official draw contains none of them.",
+    text:
+      "I win if my guess contains 1, 2, 3, 4 and all six guessed numbers are between 5 and 100.",
+  });
+  assert.deepEqual(wholeGuess.requiredValues, [1, 2, 3, 4, 5, 100]);
+  assert.deepEqual(wholeGuess.missingFromAst, [5, 100]);
+  assert.equal(wholeGuess.covered, false);
+
+  // A gap in the pinned block means the range genuinely excludes something: with
+  // 2 and 4 pinned, "the others between 5 and 100" rules out 1 and 3.
+  const gapped = analyzeInterpretationCoverage({
+    ast: parsedAst,
+    officialInterpretation:
+      "The guess contains 1, 2, 3 and 4, and the official draw contains none of them.",
+    text:
+      "I win if my guess contains 2 and 4 and the remaining four numbers are between 5 and 100.",
+  });
+  assert.ok(
+    gapped.requiredValues.includes(5) && gapped.requiredValues.includes(100),
+    JSON.stringify(gapped.requiredValues),
   );
 });

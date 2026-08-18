@@ -3916,3 +3916,41 @@ test("settled rule election creates a public M9.0 proof audit log", () => {
     1,
   );
 });
+
+test("a suggested rewrite that cannot clear preflight is never offered", () => {
+  // The intent check only compares a candidate against the player's wording, so
+  // the dealer could hand back a sentence that is dead on arrival — the player
+  // spends a turn on the dealer's own proposal and lands where they started. Both
+  // screens are deterministic: the admission gates that THROW before any compiler
+  // runs, and a deterministic compile that disqualifies only on a proven defect.
+  const text = "I win if at least three of my guessed numbers appear in the official draw.";
+  const offer = (rewrite: string) =>
+    buildRuleRefinementFeedback({
+      agentSuggestedRewrites: [rewrite],
+      clarityNote: "",
+      compileText: text,
+      officialInterpretation:
+        "At least three of your numbers appear in the official draw.",
+      reasonCodes: ["AMBIGUOUS_RULE"],
+      reasonSummary: "Rule rejected: AMBIGUOUS_RULE.",
+      sanitizedText: text,
+      tokenCount: text.trim().split(/\s+/u).length,
+    }).suggestedRewrites;
+
+  // A guess holds six numbers, so "at least 7 appear" can never be satisfied.
+  assert.deepEqual(
+    offer("A guess wins if at least 7 of the guessed numbers appear in the official draw."),
+    [],
+  );
+  // An outside source is refused at submission, so offering it wastes a turn.
+  assert.deepEqual(
+    offer("A guess wins if the guessed numbers appear on tonight's TV broadcast draw."),
+    [],
+  );
+
+  // The screen must not swallow usable suggestions: a rewrite that compiles is
+  // still offered, and the dealer message still points at it.
+  const viable =
+    "A guess wins if at least three of the guessed numbers appear in the official draw.";
+  assert.deepEqual(offer(viable), [viable]);
+});

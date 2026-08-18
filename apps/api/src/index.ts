@@ -2763,6 +2763,58 @@ function dedupeBoundedStrings(values: readonly string[], limit = 3): string[] {
   return result;
 }
 
+/**
+ * Reason codes that prove a candidate rewrite is unusable as written. Each one is
+ * only ever recorded once an AST exists, so a rewrite the deterministic compiler
+ * does not recognize is never disqualified by this list — UNSUPPORTED_RULE here
+ * means "no deterministic reading exists", not "bad rewrite", and the LLM path is
+ * what judges those.
+ */
+const DISQUALIFYING_REWRITE_REASONS: readonly RuleValidationReasonCode[] = [
+  "DIFFICULTY_ALWAYS_TRUE",
+  "DIFFICULTY_IMPOSSIBLE",
+  "INTERPRETATION_MISMATCH",
+  "RUNTIME_TEST_FAILED",
+];
+
+/**
+ * `isIntentPreservingRewrite` compares a candidate against the player's wording.
+ * Nothing compared it against the gates that will actually judge it, so the
+ * dealer could offer a sentence that cannot clear preflight — the player spends a
+ * turn on the suggestion and lands where they started, with the dealer's own
+ * proposal as the thing that failed.
+ *
+ * Two screens, both deterministic. First the admission gates from
+ * `createRuleInterpretation`: those THROW before a rewrite ever reaches a
+ * compiler, so a candidate that trips one is guaranteed dead. Then the
+ * deterministic compile, which only disqualifies on a proven defect.
+ */
+function isPreflightViableRewrite(rewrite: string): boolean {
+  const sanitized = sanitizeRuleText(rewrite);
+  if (
+    !sanitized ||
+    hasPreventedRulePattern(sanitized) ||
+    hasRulePattern(
+      externalDependencyGateText(sanitized),
+      RULE_EXTERNAL_BLOCK_PATTERNS,
+    ) ||
+    hasExternalDependency(sanitized) ||
+    hasInvalidConstraint(sanitized) ||
+    countRuleTokens(sanitized) > RULE_MAX_TOKENS ||
+    Buffer.byteLength(sanitized, "utf8") > MAX_RULE_TEXT_BYTES
+  ) {
+    return false;
+  }
+  const check = validateAndPrecompileRule({
+    originalText: sanitized,
+    prompt: sanitized,
+    tokenCount: countRuleTokens(sanitized),
+  });
+  return !check.log.reasonCodes.some((code) =>
+    DISQUALIFYING_REWRITE_REASONS.includes(code),
+  );
+}
+
 function isIntentPreservingRewrite(source: string, rewrite: string): boolean {
   const normalizedSource = source.toLowerCase();
   const normalizedRewrite = rewrite.toLowerCase();
@@ -2891,10 +2943,11 @@ export function buildRuleRefinementFeedback(
   const agentRewrites = (input.agentSuggestedRewrites ?? []).filter((rewrite) =>
     isIntentPreservingRewrite(sourceText, rewrite),
   );
-  const suggestedRewrites = dedupeBoundedStrings([
-    ...deterministicRefinement.rewrites,
-    ...agentRewrites,
-  ]);
+  const suggestedRewrites = dedupeBoundedStrings(
+    [...deterministicRefinement.rewrites, ...agentRewrites].filter(
+      isPreflightViableRewrite,
+    ),
+  );
   const suggestedRewrite = suggestedRewrites[0];
   const deterministicCheck = validateAndPrecompileRule({
     officialInterpretation: input.officialInterpretation,

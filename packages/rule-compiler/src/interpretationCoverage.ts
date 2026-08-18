@@ -148,6 +148,58 @@ function readDigits(value: string) {
     .filter((parsed) => Number.isSafeInteger(parsed));
 }
 
+// A range stated over the numbers a rule has NOT already pinned is vacuous in
+// exactly the same way a 1..100 range is, and for the same reason: a ticket
+// holds six distinct values from 1..100, so once 1, 2, 3 and 4 are pinned the
+// other two are necessarily in 5..100. Requiring those bounds to survive into
+// the AST put such a rule in a dead end with no way out: a faithful compile
+// omits the redundant bounds and fails coverage (INTERPRETATION_MISMATCH),
+// while a compile that keeps them as a constraint over the WHOLE guess
+// contradicts the pinned values and is rejected as IMPOSSIBLE. Two providers
+// picking the two readings is also a PROVIDER_DISAGREEMENT, which reports the
+// fault as a compiler conflict the player is told not to fix — so the rule could
+// never be frozen however it was reworded.
+//
+// Narrow on purpose. The range must be introduced as covering the REMAINING
+// numbers, the pinned values must fill 1..low-1 with no gap, and the upper bound
+// must reach the top of the domain. "the guess contains 1, 2, 3, 4 and all six
+// numbers are between 5 and 100" carries no remainder cue, so its bounds stay
+// required — that rule really is self-contradictory and must be reported as
+// such, not silently relaxed into a different rule.
+const REMAINDER_SCOPE =
+  /\b(?:remaining|other|others|additional|extra|extras|rest|final|last|restantes?|adicionais?|demais|resto|outr[oa]s?|ultim[oa]s?)\b/u;
+
+const CLAUSE_BOUNDARIES = [".", ";", ",", ":"] as const;
+
+/** Is the range at `index` introduced as constraining the leftover numbers? */
+function isRemainderScopedRange(prepared: string, index: number) {
+  const clauseStart = Math.max(
+    ...CLAUSE_BOUNDARIES.map((mark) => prepared.lastIndexOf(mark, index)),
+  );
+  return REMAINDER_SCOPE.test(prepared.slice(clauseStart + 1, index));
+}
+
+/**
+ * Does `[low, high]` cover exactly what is left of the domain once `pinned` is
+ * removed? Only a gapless block from 1 counts: with 2 and 4 pinned, "the others
+ * between 5 and 100" genuinely excludes 1 and 3, so its bounds are load-bearing.
+ */
+function coversRemainingDomain(bounds: number[], pinned: ReadonlySet<number>) {
+  if (bounds.length !== 2) {
+    return false;
+  }
+  const [low, high] = bounds as [number, number];
+  if (low <= NUMBER_DOMAIN_MIN || high < NUMBER_DOMAIN_MAX) {
+    return false;
+  }
+  for (let value = NUMBER_DOMAIN_MIN; value < low; value += 1) {
+    if (!pinned.has(value)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /**
  * The value-level numbers the player stated: members of an explicit set of
  * numbers, and the bounds of an explicit numeric range. Spelled-out words are
@@ -166,11 +218,23 @@ export function collectRequiredValues(text: string): number[] {
   for (const [, enumeration] of prepared.matchAll(MEMBERSHIP_ENUMERATION)) {
     readDigits(enumeration ?? "").forEach((value) => required.add(value));
   }
-  for (const match of prepared.matchAll(NUMERIC_RANGE)) {
-    readDigits(match[0]).forEach((value) => required.add(value));
-  }
   for (const [, literal] of prepared.matchAll(MEMBERSHIP_LITERAL)) {
     readDigits(literal ?? "").forEach((value) => required.add(value));
+  }
+
+  // Ranges are read last: whether a range constrains anything at all depends on
+  // the values pinned above, so the pinned set has to be complete first.
+  const pinned = new Set(required);
+  for (const match of prepared.matchAll(NUMERIC_RANGE)) {
+    const bounds = readDigits(match[0]);
+    if (
+      match.index !== undefined &&
+      isRemainderScopedRange(prepared, match.index) &&
+      coversRemainingDomain(bounds, pinned)
+    ) {
+      continue;
+    }
+    bounds.forEach((value) => required.add(value));
   }
 
   return [...required].sort((a, b) => a - b);
