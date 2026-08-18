@@ -105,10 +105,10 @@ const walletThree = "6bYqf3rJ7m2nQh9sV1xCH8kLpWtD6eZaUg5oNbMcXyTK";
 const base58 = "ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd";
 
 test("every compiler reason code has one actionable player explanation", () => {
-  assert.equal(RULE_REASON_EXPLANATIONS.length, 17);
+  assert.equal(RULE_REASON_EXPLANATIONS.length, 19);
   assert.equal(
     new Set(RULE_REASON_EXPLANATIONS.map((entry) => entry.code)).size,
-    17,
+    19,
   );
   const explanations = getRuleReasonExplanations([
     "INTERPRETATION_MISMATCH",
@@ -116,6 +116,25 @@ test("every compiler reason code has one actionable player explanation", () => {
   ]);
   assert.match(explanations[0]?.whatHappened ?? "", /did not preserve/i);
   assert.match(explanations[1]?.whatToChange ?? "", /supported rewrite/i);
+
+  // Turn 57 regression: three unrelated compiler faults used to share
+  // INTERPRETATION_MISMATCH, so a player whose model contradicted its own
+  // worked examples was told to "restate every load-bearing number" — advice
+  // that could not resolve a fault their wording never caused. Each code must
+  // now carry the remedy for its own fault.
+  const evidence = getRuleReasonExplanations([
+    "PROVIDER_EVIDENCE_UNVERIFIED",
+  ])[0];
+  assert.ok(evidence, "PROVIDER_EVIDENCE_UNVERIFIED needs an explanation");
+  assert.doesNotMatch(evidence.whatToChange, /restate every load-bearing/i);
+  assert.match(evidence.whatToChange, /retry/i);
+
+  const spans = getRuleReasonExplanations([
+    "PROVIDER_SPAN_COVERAGE_INCOMPLETE",
+  ])[0];
+  assert.ok(spans, "PROVIDER_SPAN_COVERAGE_INCOMPLETE needs an explanation");
+  assert.doesNotMatch(spans.whatToChange, /restate every load-bearing/i);
+  assert.match(spans.whatToChange, /clause/i);
 });
 
 test("dealer question context carries server diagnostics and discloses their absence", () => {

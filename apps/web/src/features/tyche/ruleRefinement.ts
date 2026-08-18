@@ -206,6 +206,16 @@ export function isRuleRefinementPatch(
     return false;
   }
 
+  // An interpretation explicitly awaiting an answer makes the next message that
+  // answer, whatever words it uses. Without this, a legitimate but wordy answer
+  // ("the remaining number should be any number between 5 and 100") matches no
+  // refinement keyword, is too long for the short-answer allowance, and falls
+  // through to the conversational path — where the dealer judges it as if it
+  // were a standalone rule and reports it is not a complete winner condition.
+  if (context.baseCanBeClarified) {
+    return true;
+  }
+
   return REFINEMENT_PATTERN.test(trimmed) || countWords(trimmed) <= 8;
 }
 

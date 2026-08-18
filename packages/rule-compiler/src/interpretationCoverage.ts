@@ -107,7 +107,7 @@ const MEMBERSHIP_LITERAL =
 // compiler that drops it loses no meaning. [1, 99] is NOT such a range (it
 // excludes 100), which is why the turn-55 rule still has to carry its bounds.
 const FULL_DOMAIN_RANGE =
-  /\b(?:between|entre|from|de)\s+(\d{1,3})\s+(?:and|e|to|through|a|ate)\s+(\d{1,3})\b/gu;
+  /\b(?:between|entre|from|de)\s+\d{1,3}\s+(?:and|e|to|through|a|ate)\s+\d{1,3}\b|\b\d{1,3}\s*[-\u2010-\u2015]\s*\d{1,3}\b/gu;
 
 const NUMBER_DOMAIN_MIN = 1;
 const NUMBER_DOMAIN_MAX = 100;
@@ -131,16 +131,14 @@ function stripExampleClauses(value: string) {
     .join(" ");
 }
 
-function stripVacuousRanges(value: string) {
-  return value.replace(FULL_DOMAIN_RANGE, (match, low: string, high: string) => {
-    const lowValue = Number(low);
-    const highValue = Number(high);
-    const coversDomain =
-      Number.isInteger(lowValue) &&
-      Number.isInteger(highValue) &&
-      lowValue <= NUMBER_DOMAIN_MIN &&
-      highValue >= NUMBER_DOMAIN_MAX;
-    return coversDomain ? " " : match;
+export function stripVacuousRanges(value: string) {
+  return value.replace(FULL_DOMAIN_RANGE, (match) => {
+    const bounds = readDigits(match);
+    if (bounds.length !== 2) {
+      return match;
+    }
+    const [low, high] = bounds as [number, number];
+    return low <= NUMBER_DOMAIN_MIN && high >= NUMBER_DOMAIN_MAX ? " " : match;
   });
 }
 
@@ -349,4 +347,117 @@ export function analyzeInterpretationCoverage({
     requiredOperations,
     requiredValues,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Statement fidelity: the headline sentence vs the frozen artifact.
+//
+// Coverage above answers "did the player's numbers and operations survive into
+// the AST?". This answers the other half, and it is the half that reaches the
+// player: the sentence printed on the rule card — and hashed into
+// `normalizedTextHash` on-chain — is MODEL PROSE, not a rendering of the AST.
+// Nothing tied the two together beyond their numbers, so a model could keep
+// every literal and still change the claim with a single quantifier. Turn 57
+// shipped "contains EXACTLY the numbers 1, 2, 3 and 4 (and two other numbers
+// from 5 through 100)" over an AST that merely requires the guess to INCLUDE
+// those four — the card asserts set equality over four values while the ticket
+// always holds six, so it is not even self-consistent, and a voter reading it
+// is voting on a rule that does not exist.
+//
+// The check is deliberately one-directional and narrow, exactly like the cues
+// above: prose may say LESS than the AST, never MORE. And unlike coverage, an
+// unsupported claim is not the player's fault — they did not write the
+// sentence — so the remedy is to replace the prose with the AST-derived
+// description, never to reject the rule.
+
+/** Claims a statement can make that the artifact has to back. */
+export type RuleStatementClaim = "exclusive_guess_set";
+
+export interface StatementFidelity {
+  faithful: boolean;
+  unsupportedClaims: RuleStatementClaim[];
+}
+
+const TICKET_SIZE = 6;
+
+// "exactly / only / just THESE numbers" — the cue has to introduce the
+// enumeration itself, not merely share a sentence with it. Anchoring matters:
+// "includes 1, 2, 3 and the sum is exactly 100" enumerates values and contains
+// an exclusivity word, but claims exclusivity over neither, and treating it as a
+// set claim would replace a perfectly faithful headline with a clumsier one.
+const EXCLUSIVE_SET_CLAIM =
+  /\b(?:exactly|only|precisely|solely|just|apenas|somente|exatamente)\s+(?:the\s+|os\s+|as\s+)?(?:numbers?|values?|numeros?|dezenas?|set\s+of\s+)?\s*(\d{1,3}(?:\s*(?:[,;]\s*(?:(?:and|e|or|ou)\s+)?|(?:and|e|or|ou)\s+|\s+)\d{1,3})+)/gu;
+
+/**
+ * Values the AST pins onto the guess by membership (`contains(guess, <lit>)`).
+ * A guess holds six distinct numbers, so pinning all six IS set equality — that
+ * is the only shape in which an artifact genuinely claims exclusivity.
+ */
+export function collectGuessPinnedValues(ast: RuleAst): Set<number> {
+  const pinned = new Set<number>();
+  const visit = (node: unknown) => {
+    if (Array.isArray(node)) {
+      node.forEach(visit);
+      return;
+    }
+    if (!node || typeof node !== "object") {
+      return;
+    }
+    const record = node as Record<string, unknown>;
+    const array = record.array as Record<string, unknown> | undefined;
+    const value = record.value as Record<string, unknown> | undefined;
+    if (
+      record.kind === "contains" &&
+      array?.kind === "source" &&
+      array.source === "guess" &&
+      value?.kind === "lit" &&
+      typeof value.value === "number"
+    ) {
+      pinned.add(value.value);
+    }
+    Object.values(record).forEach(visit);
+  };
+  visit(ast);
+  return pinned;
+}
+
+/** Does the statement assert that a ticket is exactly some enumerated set? */
+function claimsExclusiveSet(statement: string): null | number[] {
+  const prepared = stripExampleClauses(normalize(statement));
+  for (const [, enumeration] of prepared.matchAll(EXCLUSIVE_SET_CLAIM)) {
+    const enumerated = readDigits(enumeration ?? "");
+    if (enumerated.length > 0) {
+      return [...new Set(enumerated)].sort((a, b) => a - b);
+    }
+  }
+  return null;
+}
+
+/**
+ * Whether the headline statement may be shown as-is, or must be replaced by the
+ * AST-derived description. Never a rejection: see the note above.
+ */
+export function analyzeStatementFidelity({
+  ast,
+  statement,
+}: {
+  ast: RuleAst;
+  statement: string;
+}): StatementFidelity {
+  const unsupportedClaims: RuleStatementClaim[] = [];
+  const exclusiveSet = claimsExclusiveSet(statement);
+  if (exclusiveSet !== null) {
+    const pinned = collectGuessPinnedValues(ast);
+    // Exclusivity holds only when the artifact pins a full ticket AND pins the
+    // very values the sentence enumerates. A claim over fewer than six values
+    // fails on the first test and is self-contradictory on its own terms.
+    const backed =
+      exclusiveSet.length === TICKET_SIZE &&
+      pinned.size === TICKET_SIZE &&
+      exclusiveSet.every((value) => pinned.has(value));
+    if (!backed) {
+      unsupportedClaims.push("exclusive_guess_set");
+    }
+  }
+  return { faithful: unsupportedClaims.length === 0, unsupportedClaims };
 }

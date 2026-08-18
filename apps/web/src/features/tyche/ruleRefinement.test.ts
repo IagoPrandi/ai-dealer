@@ -210,6 +210,30 @@ test("normalizes the reported English remainder answer instead of re-asking it",
   );
 });
 
+test("merges a constrained remainder answer instead of judging it standalone", () => {
+  // Regression: the player answered the remainder question with a value range
+  // rather than "ignore them". No refinement keyword matches and the answer is
+  // longer than the short-answer allowance, so it used to be routed to the
+  // dealer on its own and reported as "not a complete winner condition" even
+  // though the winner condition was stated in the message right before it.
+  const context = {
+    baseCanBeClarified: true,
+    currentRuleText:
+      "I win if my numbers are 1 2 3 4 and the lottery numbers contain none of these numbers.",
+    refinementQuestions: [
+      "What condition should apply to the remaining two guessed numbers?",
+    ],
+  };
+  const answer =
+    "the remaining number should be any number between 5 and 100, including 5 and 100";
+
+  assert.equal(isRuleRefinementPatch(answer, context), true);
+  assert.equal(
+    composeRefinedRuleDraft(answer, context),
+    "I win if my numbers are 1 2 3 4 and the lottery numbers contain none of these numbers. the remaining number should be any number between 5 and 100, including 5 and 100.",
+  );
+});
+
 test("does not turn a negated remainder answer into ignored order", () => {
   const context = {
     baseCanBeClarified: true,

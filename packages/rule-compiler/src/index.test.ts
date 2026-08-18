@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
   analyzeInterpretationCoverage,
+  analyzeStatementFidelity,
   buildRuleCompilerSkillPrompt,
   compileRuleArtifact,
   createLocalOnlyProviderRoutingPolicy,
@@ -1669,7 +1670,16 @@ test("provider source spans reject an omitted clause without a conjunction heuri
     },
   );
   assert.equal(omitted.decision, "INVALID");
-  assert.ok(omitted.log.reasonCodes.includes("INTERPRETATION_MISMATCH"));
+  // An unread clause is a span-coverage fault, not a dropped literal: the codes
+  // stay distinct so the player is told what actually blocked them.
+  assert.ok(
+    omitted.log.reasonCodes.includes("PROVIDER_SPAN_COVERAGE_INCOMPLETE"),
+    JSON.stringify(omitted.log.reasonCodes),
+  );
+  assert.equal(
+    omitted.log.reasonCodes.includes("INTERPRETATION_MISMATCH"),
+    false,
+  );
 
   const complete = await compileRuleArtifact(
     { originalText: text, prompt: text, tokenCount: countWords(text) },
@@ -1731,7 +1741,13 @@ test("provider worked examples catch an inverted signed bound", async () => {
     },
   );
   assert.equal(result.decision, "INVALID");
-  assert.ok(result.log.reasonCodes.includes("INTERPRETATION_MISMATCH"));
+  // The model contradicted its own artifact. Nothing the player wrote was
+  // dropped, so this must not surface as INTERPRETATION_MISMATCH.
+  assert.ok(
+    result.log.reasonCodes.includes("PROVIDER_EVIDENCE_UNVERIFIED"),
+    JSON.stringify(result.log.reasonCodes),
+  );
+  assert.equal(result.log.reasonCodes.includes("INTERPRETATION_MISMATCH"), false);
 });
 
 test("can prefer deterministic compilation for known preflight patterns", async () => {
@@ -1907,7 +1923,14 @@ test("a provider that returned no AST is not reported as a fidelity failure", as
     },
   );
   assert.equal(unevidenced.decision, "INVALID");
-  assert.ok(unevidenced.log.reasonCodes.includes("INTERPRETATION_MISMATCH"));
+  assert.ok(
+    unevidenced.log.reasonCodes.includes("PROVIDER_SPAN_COVERAGE_INCOMPLETE"),
+    JSON.stringify(unevidenced.log.reasonCodes),
+  );
+  assert.equal(
+    unevidenced.log.reasonCodes.includes("INTERPRETATION_MISMATCH"),
+    false,
+  );
 });
 
 test("rejects an LLM-emitted ALWAYS_TRUE rule (PRD 6.8)", async () => {
@@ -2896,7 +2919,10 @@ test("framing words outside the consumed spans do not block a faithful compile",
     },
   );
   assert.equal(dropped.decision, "INVALID");
-  assert.ok(dropped.log.reasonCodes.includes("INTERPRETATION_MISMATCH"));
+  assert.ok(
+    dropped.log.reasonCodes.includes("PROVIDER_SPAN_COVERAGE_INCOMPLETE"),
+    JSON.stringify(dropped.log.reasonCodes),
+  );
 });
 
 test("an operation the player named must survive compilation", () => {
@@ -3159,4 +3185,262 @@ test("stress set 4 objective rules compile to their stated boundary behaviour", 
       );
     }
   }
+});
+
+// Turn 57 regression, defect 1 of 2.
+//
+// The card printed "a guess wins if and only if it contains EXACTLY the numbers
+// 1, 2, 3 and 4 (and two other numbers from 5 through 100)" over an AST that
+// only requires the guess to INCLUDE those four. Every literal survived, so the
+// value/operation coverage gate saw nothing; the claim that changed was a
+// quantifier. That sentence is what the player reads, what voters vote on, and
+// what `normalizedTextHash` commits on-chain.
+test("a headline that claims exclusivity the artifact does not implement is not faithful", () => {
+  const includesFour = {
+    result: {
+      predicate: {
+        clauses: [1, 2, 3, 4].map((value) => ({
+          array: { kind: "source", source: "guess" },
+          kind: "contains",
+          value: { kind: "lit", value },
+        })),
+        kind: "and",
+      },
+      type: "predicate",
+    },
+    schemaVersion: 3,
+  } as const;
+  const ast = ruleAstSchema.parse(includesFour);
+
+  const unfaithful = analyzeStatementFidelity({
+    ast,
+    statement:
+      "a guess wins if and only if it contains exactly the numbers 1, 2, 3 and 4 (and two other numbers from 5 through 100), and none of the numbers 1, 2, 3 or 4 appears in the official draw.",
+  });
+  assert.equal(unfaithful.faithful, false);
+  assert.deepEqual(unfaithful.unsupportedClaims, ["exclusive_guess_set"]);
+
+  // The same artifact described without the exclusivity claim is fine.
+  assert.equal(
+    analyzeStatementFidelity({
+      ast,
+      statement:
+        "a guess wins if it contains the numbers 1, 2, 3 and 4 and none of 1, 2, 3, 4 appears in the official draw.",
+    }).faithful,
+    true,
+  );
+
+  // And an artifact that DOES pin a whole ticket may say "exactly": six pinned
+  // values over six distinct slots is set equality.
+  const pinsSix = ruleAstSchema.parse({
+    result: {
+      predicate: {
+        clauses: [1, 2, 3, 4, 5, 6].map((value) => ({
+          array: { kind: "source", source: "guess" },
+          kind: "contains",
+          value: { kind: "lit", value },
+        })),
+        kind: "and",
+      },
+      type: "predicate",
+    },
+    schemaVersion: 3,
+  });
+  assert.equal(
+    analyzeStatementFidelity({
+      ast: pinsSix,
+      statement:
+        "a guess wins if its six numbers are exactly 1, 2, 3, 4, 5 and 6, in any order.",
+    }).faithful,
+    true,
+  );
+
+  // An exclusivity word with no enumeration states no set claim at all.
+  assert.equal(
+    analyzeStatementFidelity({
+      ast,
+      statement: "a guess wins if only the sum of its numbers is greater than 200.",
+    }).faithful,
+    true,
+  );
+
+  // ...and neither does one that merely shares a sentence with an enumeration.
+  // The cue has to introduce the set, or every rule that pins a few values and
+  // states an exact threshold would lose its readable headline for no reason.
+  assert.equal(
+    analyzeStatementFidelity({
+      ast,
+      statement:
+        "a guess wins if it contains the numbers 1, 2, 3 and 4 and the sum of its numbers is exactly 100.",
+    }).faithful,
+    true,
+  );
+});
+
+// Turn 57 regression, defect 2 of 2.
+//
+// A correct compile of a rare winning condition was rejected because the model
+// could not hand-build a WINNING ticket for it. Discrimination is measured
+// downstream over many samples (DIFFICULTY_IMPOSSIBLE / DIFFICULTY_ALWAYS_TRUE);
+// requiring the provider to also demonstrate it by example penalised exactly the
+// hard rules it was meant to protect, and reported the refusal as if the player
+// had dropped a number.
+test("provider evidence does not have to include a winning example", async () => {
+  const text =
+    "A guess wins if it contains the numbers 1, 2, 3 and 4 and none of 1, 2, 3 or 4 appears in the official draw.";
+  const ast = {
+    result: {
+      predicate: {
+        clauses: [
+          ...[1, 2, 3, 4].map((value) => ({
+            array: { kind: "source", source: "guess" },
+            kind: "contains",
+            value: { kind: "lit", value },
+          })),
+          {
+            clause: {
+              clauses: [1, 2, 3, 4].map((value) => ({
+                array: { kind: "source", source: "draw" },
+                kind: "contains",
+                value: { kind: "lit", value },
+              })),
+              kind: "or",
+            },
+            kind: "not",
+          },
+        ],
+        kind: "and",
+      },
+      type: "predicate",
+    },
+    schemaVersion: 3,
+  };
+  const losingOnly = [
+    { draw: [1, 20, 30, 40, 50, 60], guess: [1, 2, 3, 4, 57, 88], outcome: "LOSE" },
+    { draw: [9, 20, 30, 40, 50, 60], guess: [5, 6, 7, 8, 57, 88], outcome: "LOSE" },
+  ];
+  const accepted = await compileRuleArtifact(
+    { originalText: text, prompt: text, tokenCount: countWords(text) },
+    {
+      astProvider: async () => ({
+        ast,
+        consumedSpans: [{ text: text.toLowerCase() }],
+        workedExamples: losingOnly,
+      }),
+      requireProviderEvidence: true,
+    },
+  );
+  assert.equal(
+    accepted.decision,
+    "VALID",
+    JSON.stringify(accepted.log.reasonCodes),
+  );
+
+  // What evidence still proves: an example that contradicts the artifact blocks,
+  // under the code that names that fault.
+  const contradicting = await compileRuleArtifact(
+    { originalText: text, prompt: text, tokenCount: countWords(text) },
+    {
+      astProvider: async () => ({
+        ast,
+        consumedSpans: [{ text: text.toLowerCase() }],
+        workedExamples: [
+          losingOnly[0],
+          { draw: [1, 20, 30, 40, 50, 60], guess: [1, 2, 3, 4, 57, 88], outcome: "WIN" },
+        ],
+      }),
+      requireProviderEvidence: true,
+    },
+  );
+  assert.equal(contradicting.decision, "INVALID");
+  assert.ok(
+    contradicting.log.reasonCodes.includes("PROVIDER_EVIDENCE_UNVERIFIED"),
+    JSON.stringify(contradicting.log.reasonCodes),
+  );
+  assert.equal(
+    contradicting.log.reasonCodes.includes("INTERPRETATION_MISMATCH"),
+    false,
+  );
+});
+
+// Turn 57 regression, defect 3 of 3 — the block that survived the first two fixes.
+//
+// Once the player confirms that the remaining numbers are unrestricted, the
+// interpret agent preserves that remainder in the wording (its own contract says
+// to, so the same question is not asked twice). The compiler then refuses to
+// compile the remainder, because for a ticket that already contains 1, 2, 3 and
+// 4 the clause "the remaining two numbers are distinct and from 1 to 100
+// excluding 1, 2, 3, and 4" is true of every valid guess. The span gate used to
+// read that unconsumed no-op as a dropped condition, so the two contracts
+// contradicted each other and no wording satisfied both.
+test("a vacuously true remainder clause is not an unread condition", async () => {
+  const text =
+    "A guess wins if it contains the numbers 1, 2, 3, and 4, does not contain any of the numbers 1, 2, 3, or 4 in the official draw, and the remaining two numbers in the guess are distinct and from 1 to 100 excluding 1, 2, 3, and 4.";
+  const ast = {
+    result: {
+      predicate: {
+        clauses: [
+          ...[1, 2, 3, 4].map((value) => ({
+            array: { kind: "source", source: "guess" },
+            kind: "contains",
+            value: { kind: "lit", value },
+          })),
+          {
+            clause: {
+              clauses: [1, 2, 3, 4].map((value) => ({
+                array: { kind: "source", source: "draw" },
+                kind: "contains",
+                value: { kind: "lit", value },
+              })),
+              kind: "or",
+            },
+            kind: "not",
+          },
+        ],
+        kind: "and",
+      },
+      type: "predicate",
+    },
+    schemaVersion: 3,
+  };
+  // The spans the provider actually reported for this text in production: the
+  // two load-bearing clauses, and not the vacuous remainder.
+  const consumedSpans = [
+    { text: "contains the numbers 1, 2, 3, and 4" },
+    {
+      text: "does not contain any of the numbers 1, 2, 3, or 4 in the official draw",
+    },
+  ];
+  const workedExamples = [
+    { draw: [1, 20, 30, 40, 50, 60], guess: [1, 2, 3, 4, 57, 88], outcome: "LOSE" },
+    { draw: [9, 20, 30, 40, 50, 60], guess: [1, 2, 3, 4, 57, 88], outcome: "WIN" },
+  ];
+  const result = await compileRuleArtifact(
+    { originalText: text, prompt: text, tokenCount: countWords(text) },
+    {
+      astProvider: async () => ({ ast, consumedSpans, workedExamples }),
+      requireProviderEvidence: true,
+    },
+  );
+  assert.equal(result.decision, "VALID", JSON.stringify(result.log.reasonCodes));
+
+  // The narrowing is about vacuous text, not about leniency: a leftover clause
+  // that can still change who wins keeps blocking, digits or no digits.
+  const withRealDrop = `${text.replace(/\.$/u, "")} and at least two guessed numbers appear in the official draw.`;
+  const dropped = await compileRuleArtifact(
+    {
+      originalText: withRealDrop,
+      prompt: withRealDrop,
+      tokenCount: countWords(withRealDrop),
+    },
+    {
+      astProvider: async () => ({ ast, consumedSpans, workedExamples }),
+      requireProviderEvidence: true,
+    },
+  );
+  assert.equal(dropped.decision, "INVALID");
+  assert.ok(
+    dropped.log.reasonCodes.includes("PROVIDER_SPAN_COVERAGE_INCOMPLETE"),
+    JSON.stringify(dropped.log.reasonCodes),
+  );
 });

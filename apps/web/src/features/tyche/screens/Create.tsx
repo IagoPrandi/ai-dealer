@@ -2010,7 +2010,7 @@ function CreateChat({
                 width: 48,
                 height: 48,
                 padding: 0,
-                borderRadius: 15,
+                borderRadius: "var(--radius-btn-sm)",
                 flexShrink: 0,
               }}
               type="button"

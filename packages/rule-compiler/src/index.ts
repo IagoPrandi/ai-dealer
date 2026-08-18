@@ -44,6 +44,7 @@ import {
   collectAstValues,
   collectRequiredOperations,
   collectRequiredValues,
+  stripVacuousRanges,
 } from "./interpretationCoverage.js";
 import { RULE_COMPILER_SKILL_VERSION } from "./skill.js";
 
@@ -81,7 +82,10 @@ export {
 export { describeRuleAstTotal } from "./describeAst.js";
 export {
   analyzeInterpretationCoverage,
+  analyzeStatementFidelity,
   type InterpretationCoverage,
+  type RuleStatementClaim,
+  type StatementFidelity,
 } from "./interpretationCoverage.js";
 export {
   buildRuleCompilerSkillPrompt,
@@ -99,8 +103,10 @@ export type RuleValidationReasonCode =
   | "EXTERNAL_DEPENDENCY"
   | "INTERPRETATION_MISMATCH"
   | "PROVIDER_DISAGREEMENT"
+  | "PROVIDER_EVIDENCE_UNVERIFIED"
   | "PROVIDER_MALFORMED_RESPONSE"
   | "PROVIDER_SCHEMA_UNCONSTRAINED"
+  | "PROVIDER_SPAN_COVERAGE_INCOMPLETE"
   | "REVIEWER_MISMATCH"
   | "PROVIDER_TIMEOUT"
   | "RUNTIME_TEST_FAILED"
@@ -833,9 +839,45 @@ const INTENT_BEARING_RESIDUE = new RegExp(
   "u",
 );
 
+// What the residue test must NOT count as a dropped clause.
+//
+// The gate asks "is there leftover text that could change who wins?". Two kinds
+// of leftover provably cannot, and counting them rejected correct compiles:
+//
+//   - A range spanning the whole number domain. A guess is always six numbers
+//     from 1 to 100, so "from 1 to 100" restates the ticket rather than
+//     constraining it — the same reasoning `stripVacuousRanges` already applies
+//     on the coverage side.
+//   - A value the frozen artifact already implements. The residue exists to
+//     surface assertions the AST does NOT carry; a literal it does carry is
+//     evidence of nothing. This is the exact dual of the coverage gate.
+//
+// Turn 57 was blocked by precisely this: after the player confirmed that the two
+// remaining numbers are unrestricted, the interpret agent (correctly, per its
+// own contract) preserved that remainder in the wording — "the remaining two
+// numbers are distinct and from 1 to 100 excluding 1, 2, 3, and 4" — which is
+// vacuously true of every valid ticket that already contains 1, 2, 3 and 4. The
+// compiler rightly refused to compile a no-op, then the gate read the unconsumed
+// no-op as a missing condition. The two contracts contradicted each other and
+// the player had no wording that could satisfy both.
+//
+// Word-level cues are untouched: a genuinely dropped clause always brings a
+// comparator, quantifier, operation or matching verb with it ("and at least two
+// guessed numbers appear in the official draw" still blocks on `least`/`appear`,
+// whatever its digits).
+function stripNonConstrainingResidue(
+  residue: string,
+  astValues: ReadonlySet<number>,
+) {
+  return stripVacuousRanges(residue).replace(/\d{1,3}/gu, (digits) =>
+    astValues.has(Number(digits)) ? " " : digits,
+  );
+}
+
 function verifySourceSpanCoverage(
   text: string,
   value: unknown,
+  astValues: ReadonlySet<number>,
 ): readonly RuleSourceSpan[] | null {
   if (!Array.isArray(value) || value.length === 0) {
     return null;
@@ -871,60 +913,87 @@ function verifySourceSpanCoverage(
   const uncovered = [...text]
     .map((character, index) => (covered[index] ? " " : character))
     .join("");
-  return INTENT_BEARING_RESIDUE.test(uncovered) ? null : sourceSpans;
+  return INTENT_BEARING_RESIDUE.test(
+    stripNonConstrainingResidue(uncovered, astValues),
+  )
+    ? null
+    : sourceSpans;
 }
+
+// Why the outcome is a discriminated failure rather than `null`.
+//
+// Provider evidence can fail for reasons that share nothing but their timing:
+// the model left an intent-bearing clause unconsumed (a possible DROPPED
+// constraint), or its own worked examples disagree with the AST it emitted (a
+// SELF-CONTRADICTORY compile), or it returned examples that are not even
+// well-formed. Collapsing all of them into one reason code made the pipeline
+// tell every blocked player the same thing — "restate every load-bearing number
+// and operation" — which is only true for the first case. A player whose model
+// simply mis-numbered a worked example was sent rewriting numbers that were
+// never dropped, and the only escape was to reword until the model got lucky.
+type ProviderEvidenceFailure =
+  | "examples_disagree"
+  | "examples_malformed"
+  | "span_coverage_incomplete";
+
+type ProviderEvidenceVerification =
+  | { evidence: VerifiedProviderEvidence; ok: true }
+  | { failure: ProviderEvidenceFailure; ok: false };
 
 function verifyProviderEvidence(
   ast: RuleAst,
   normalizedText: string,
   evidence: ProviderCompilationEvidence,
-): VerifiedProviderEvidence | null {
+): ProviderEvidenceVerification {
   const sourceSpans = verifySourceSpanCoverage(
     normalizedText,
     evidence.consumedSpans,
+    collectAstValues(ast),
   );
   if (!sourceSpans) {
-    return null;
+    return { failure: "span_coverage_incomplete", ok: false };
   }
-  if (!Array.isArray(evidence.workedExamples) || evidence.workedExamples.length < 2) {
-    return null;
+  if (
+    !Array.isArray(evidence.workedExamples) ||
+    evidence.workedExamples.length < 2
+  ) {
+    return { failure: "examples_malformed", ok: false };
   }
 
   const predicateExamples: RuleWorkedExample[] = [];
-  const outcomes = new Set<"WIN" | "LOSE">();
   for (const rawExample of evidence.workedExamples) {
     if (!rawExample || typeof rawExample !== "object") {
-      return null;
+      return { failure: "examples_malformed", ok: false };
     }
     const example = rawExample as Record<string, unknown>;
     if (
       !isSixUniqueDomainNumbers(example.guess) ||
       !isSixUniqueDomainNumbers(example.draw)
     ) {
-      return null;
+      return { failure: "examples_malformed", ok: false };
     }
     try {
       if (isRankingRule(ast)) {
+        if (typeof example.score !== "number" || !Number.isFinite(example.score)) {
+          return { failure: "examples_malformed", ok: false };
+        }
         if (
-          typeof example.score !== "number" ||
-          !Number.isFinite(example.score) ||
           scoreGuess(ast, { draw: example.draw, guess: example.guess }) !==
-            example.score
+          example.score
         ) {
-          return null;
+          return { failure: "examples_disagree", ok: false };
         }
       } else {
         if (example.outcome !== "WIN" && example.outcome !== "LOSE") {
-          return null;
+          return { failure: "examples_malformed", ok: false };
         }
         const actual = evaluatePredicate(ast, {
           draw: example.draw,
           guess: example.guess,
         }).result;
         if (actual !== example.outcome) {
-          return null;
+          return { failure: "examples_disagree", ok: false };
         }
-        outcomes.add(example.outcome);
         predicateExamples.push({
           draw: example.draw,
           guess: example.guess,
@@ -932,13 +1001,28 @@ function verifyProviderEvidence(
         });
       }
     } catch {
-      return null;
+      return { failure: "examples_malformed", ok: false };
     }
   }
-  if (!isRankingRule(ast) && (outcomes.size !== 2 || predicateExamples.length < 2)) {
-    return null;
+  // Deliberately NOT "the provider must supply one WIN and one LOSE example".
+  //
+  // That requirement measured the model's luck, not the rule's fidelity, and it
+  // was biased against exactly the rules it should protect: the rarer the win
+  // condition, the harder it is for a model to construct a valid winning ticket
+  // by hand, so a correct EXTREME compile was rejected while a trivial one
+  // sailed through. Whether the compiled rule can actually separate winners from
+  // losers is established downstream, deterministically and over many samples,
+  // by the difficulty harness — DIFFICULTY_IMPOSSIBLE and DIFFICULTY_ALWAYS_TRUE
+  // already block both degenerate cases. What provider evidence uniquely proves
+  // is that the model did not contradict its own artifact, and every example
+  // above had to agree with the AST for us to get here.
+  if (!isRankingRule(ast) && predicateExamples.length < 2) {
+    return { failure: "examples_malformed", ok: false };
   }
-  return { sourceSpans, workedExamples: predicateExamples };
+  return {
+    evidence: { sourceSpans, workedExamples: predicateExamples },
+    ok: true,
+  };
 }
 
 function buildAttemptContext(
@@ -1068,23 +1152,38 @@ function validateResolvedAst(
     reasonCodes.add("REVIEWER_MISMATCH");
   }
 
-  const verifiedProviderEvidence =
+  const evidenceVerification =
     ast && astSource === "provider" && providerEvidence
       ? verifyProviderEvidence(ast, normalizedText, providerEvidence)
       : null;
+  const verifiedProviderEvidence = evidenceVerification?.ok
+    ? evidenceVerification.evidence
+    : null;
   // Only a compiled artifact can mis-state the rule. With no AST there is
   // nothing to compare the wording against, and the real cause is already
   // recorded (PROVIDER_MALFORMED_RESPONSE / SCHEMA_INVALID / UNSUPPORTED_RULE) —
   // adding a fidelity code here told the player their numbers were dropped from
   // an artifact that was never built, and sent them rewriting a rule that was
   // never the problem.
-  if (
-    ast &&
-    astSource === "provider" &&
-    ((providerEvidence !== null && verifiedProviderEvidence === null) ||
-      (requireProviderEvidence && verifiedProviderEvidence === null))
-  ) {
-    reasonCodes.add("INTERPRETATION_MISMATCH");
+  //
+  // Each evidence failure gets the code that names it. INTERPRETATION_MISMATCH
+  // is reserved for the one cause its player-facing advice actually describes: a
+  // value or operation the player wrote that did not survive into the AST (the
+  // coverage gate below). An unconsumed source span and a self-contradictory
+  // worked example are different faults with different remedies, and telling
+  // either one "restate every load-bearing number" is advice the player cannot
+  // act on.
+  if (ast && astSource === "provider") {
+    if (evidenceVerification && !evidenceVerification.ok) {
+      reasonCodes.add(
+        evidenceVerification.failure === "span_coverage_incomplete"
+          ? "PROVIDER_SPAN_COVERAGE_INCOMPLETE"
+          : "PROVIDER_EVIDENCE_UNVERIFIED",
+      );
+    } else if (requireProviderEvidence && verifiedProviderEvidence === null) {
+      // Evidence was mandatory and the provider returned none at all.
+      reasonCodes.add("PROVIDER_EVIDENCE_UNVERIFIED");
+    }
   }
 
   const bounds = ast && !forcedFailure ? validateRuntimeBounds(ast) : null;
@@ -1165,7 +1264,9 @@ function validateResolvedAst(
     // rule disagrees with the AST the provider emitted.
     hasReviewerMismatch:
       reasonCodes.has("REVIEWER_MISMATCH") ||
-      reasonCodes.has("INTERPRETATION_MISMATCH"),
+      reasonCodes.has("INTERPRETATION_MISMATCH") ||
+      reasonCodes.has("PROVIDER_EVIDENCE_UNVERIFIED") ||
+      reasonCodes.has("PROVIDER_SPAN_COVERAGE_INCOMPLETE"),
     hasSafeRuntimeBounds,
     hasSupportedRule: ast !== null,
     schemaValid: parsed?.success === true,
@@ -4525,10 +4626,17 @@ function summarizeReasons(
   if (blockingReasons.length === 0) {
     return `Rule rejected because final confidence ${finalConfidence.toFixed(4)} is below escalation threshold ${COMPILER_CONFIDENCE_THRESHOLDS.escalate_min}.`;
   }
-  // These three carry a concrete, player-actionable cause, so state it instead
-  // of printing the raw code.
+  // These carry a concrete, player-actionable cause, so state it instead of
+  // printing the raw code. Each cause gets its own sentence: "restate the
+  // condition" is the remedy for a dropped literal and for nothing else.
   if (blockingReasons.includes("INTERPRETATION_MISMATCH")) {
     return "Rule rejected: the compiled rule dropped a numeric condition from the wording, so it would not pay what the rule promises. Restate the condition explicitly.";
+  }
+  if (blockingReasons.includes("PROVIDER_SPAN_COVERAGE_INCOMPLETE")) {
+    return "Rule rejected: part of the wording was never accounted for by the compiler, so a condition may be missing from the executable rule. Split the rule into separate explicit clauses.";
+  }
+  if (blockingReasons.includes("PROVIDER_EVIDENCE_UNVERIFIED")) {
+    return "Rule rejected: the compiler could not prove its own reading — its worked examples disagreed with the rule it produced. Nothing is wrong with the numbers you wrote; retry, or state the winning condition as one sentence.";
   }
   if (blockingReasons.includes("DIFFICULTY_IMPOSSIBLE")) {
     return "Rule rejected: no guess can win under this rule, so it cannot distinguish winners from losers.";

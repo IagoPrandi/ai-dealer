@@ -4,6 +4,14 @@ This tracker records milestone status, work logs, and required document confirma
 
 ## Work Log
 
+### 2026-08-18 (Create composer submit button aligned to supplied reference)
+
+- Opened the required `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, and `.claude/skills` directory before working. Applied the local frontend, Tyche design-system, UI-coherence, and test-and-verify guidance; reviewed the canonical token, component, screen, repository-integration, and Create-screen references plus the current Create implementation.
+- Reformatted the Create composer’s yellow arrow-only action by using the existing 20px button radius, while preserving its original 48px by 48px size, icon, content, and orange offset shadow. The clarification state keeps its established cyan arrow-only secondary action so the existing yellow clarification CTA remains the sole primary action.
+- Verification passed: `@tyche/web` typecheck, 257 unit tests, zero-warning lint, production build, and `git diff --check`.
+- Final inconsistency review confirmed that no card copy, button content, button size, interaction, fee, wallet, or on-chain behavior changed.
+- No milestone checkbox was changed because milestone completion still requires explicit user confirmation.
+
 ### 2026-08-17 (Clarification flow restored to the Create conversation pattern)
 
 - Reopened the required `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, and `.claude/skills`; followed the local Tyche design-system, UI-coherence, frontend, test-and-verify, and Playwright guidance; and inspected the canonical token, component, screen, repository-integration, `07-create.html`, current Create implementation, and neighboring shared UI references before editing.

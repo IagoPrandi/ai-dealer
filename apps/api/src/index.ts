@@ -35,6 +35,7 @@ import {
 import {
   compileRuleArtifact,
   analyzeInterpretationCoverage,
+  analyzeStatementFidelity,
   externalDependencyGateText,
   hasAmbiguousWording,
   hasExternalDependency,
@@ -298,6 +299,15 @@ export const RULE_REASON_EXPLANATIONS: readonly RuleReasonExplanation[] = [
       "Rewrite the rule as one direct comparison with explicit thresholds and order behavior.",
   },
   {
+    code: "PROVIDER_EVIDENCE_UNVERIFIED",
+    whatHappened:
+      "The compiler could not prove its own reading: the worked examples it produced disagree with the rule it compiled.",
+    whyItBlocks:
+      "An artifact its own author cannot demonstrate cannot be frozen as the condition that pays the prize.",
+    whatToChange:
+      "Nothing is missing from your numbers. Retry the same rule, or state the winning condition as one sentence.",
+  },
+  {
     code: "PROVIDER_MALFORMED_RESPONSE",
     whatHappened:
       "This rule needs refinement because a compiler provider returned an incomplete or malformed result.",
@@ -313,6 +323,15 @@ export const RULE_REASON_EXPLANATIONS: readonly RuleReasonExplanation[] = [
       "Unconstrained operations cannot enter the deterministic runtime.",
     whatToChange:
       "Use a supported operation such as counts, sums, digits, parity, ranges, positions, or bounded ranking.",
+  },
+  {
+    code: "PROVIDER_SPAN_COVERAGE_INCOMPLETE",
+    whatHappened:
+      "Part of the wording was never accounted for by the compiler, so a stated condition may be missing from the executable rule.",
+    whyItBlocks:
+      "An unread clause can change who wins, and the frozen artifact would not carry it.",
+    whatToChange:
+      "Split the rule into separate explicit clauses, one condition per clause.",
   },
   {
     code: "PROVIDER_TIMEOUT",
@@ -3351,7 +3370,7 @@ async function createRulePreflight(
   }
 
   const { interpretation, validation } = pass;
-  const normalizedText =
+  const modelNormalizedText =
     validation.artifact?.normalizedText ?? interpretation.normalizedText;
   const baseOfficialInterpretation =
     validation.artifact?.officialInterpretation ??
@@ -3360,6 +3379,18 @@ async function createRulePreflight(
   const guardianBlocked = guardianGrounded === false;
 
   const ruleAst = validation.artifact?.ast ?? null;
+  // The headline sentence is model prose, but it is what the player reads, what
+  // voters vote on, and what `normalizedTextHash` commits on-chain. When it
+  // claims something the frozen AST does not implement, the prose is the part
+  // that is wrong — the player never wrote it — so it is replaced by the
+  // AST-derived description rather than blamed on them or shipped as written.
+  const statementFidelity = ruleAst
+    ? analyzeStatementFidelity({ ast: ruleAst, statement: modelNormalizedText })
+    : null;
+  const normalizedText =
+    statementFidelity && !statementFidelity.faithful
+      ? baseOfficialInterpretation
+      : modelNormalizedText;
   const sourceSpans = validation.artifact?.sourceSpans ?? null;
   // Technical validity is not the same as confirmed intent. Inspect the frozen
   // AST instead of trusting model prose so tautologies, draw-only/guess-only
@@ -3494,8 +3525,13 @@ async function createRulePreflight(
     semanticImpact: semanticReview.impact,
     title: interpretation.title,
     tokenCount,
+    // Audit trail for a replaced headline: which claims the model's own wording
+    // made that the frozen artifact does not back.
+    unsupportedStatementClaims: statementFidelity?.unsupportedClaims ?? [],
     // 13: `semanticImpact` carries `astAvailable`.
-    version: 13,
+    // 14: `unsupportedStatementClaims`; `normalizedText` is AST-derived when the
+    //     model's wording failed statement fidelity.
+    version: 14,
   });
 
   return {
@@ -9212,6 +9248,8 @@ function isGuardrailReason(reason: string) {
     "DIFFICULTY_IMPOSSIBLE",
     "EXTERNAL_DEPENDENCY",
     "INTERPRETATION_MISMATCH",
+    "PROVIDER_EVIDENCE_UNVERIFIED",
+    "PROVIDER_SPAN_COVERAGE_INCOMPLETE",
     "REVIEWER_MISMATCH",
     "RUNTIME_TEST_FAILED",
     "SECOND_OPINION_UNAVAILABLE",
