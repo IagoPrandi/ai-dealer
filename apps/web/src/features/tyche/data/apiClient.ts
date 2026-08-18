@@ -220,10 +220,26 @@ export function getPlayerHistory(
   );
 }
 
-export function getConversationDrafts(wallet: string, signal?: AbortSignal) {
-  return getJson<{ drafts: ConversationDraftApi[] }>(
-    `/players/${wallet}/conversation-drafts`,
-    signal ? { signal } : {},
+export function getConversationDrafts(
+  wallet: string,
+  args: { cursor?: string | null; limit?: number; signal?: AbortSignal } = {},
+) {
+  const params = new URLSearchParams();
+  if (args.cursor) {
+    params.set("cursor", args.cursor);
+  }
+  if (args.limit) {
+    params.set("limit", String(args.limit));
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return getJson<{
+    cursor: string | null;
+    drafts: ConversationDraftApi[];
+    limit: number;
+    nextCursor: string | null;
+  }>(
+    `/players/${wallet}/conversation-drafts${suffix}`,
+    args.signal ? { signal: args.signal } : {},
   );
 }
 

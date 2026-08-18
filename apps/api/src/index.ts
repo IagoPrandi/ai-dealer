@@ -6599,6 +6599,27 @@ export function listConversationDrafts(wallet: string) {
     );
 }
 
+export function listConversationDraftsPage(args: {
+  cursor?: string | null;
+  limit?: number;
+  wallet: string;
+}) {
+  const safeLimit = Math.min(Math.max(args.limit ?? 25, 1), 100);
+  const offset = args.cursor ? Number(args.cursor) : 0;
+  const start = Number.isInteger(offset) && offset > 0 ? offset : 0;
+  const drafts = listConversationDrafts(args.wallet);
+  const page = drafts.slice(start, start + safeLimit);
+  const nextOffset = start + page.length;
+
+  return {
+    cursor: args.cursor ?? null,
+    drafts: page,
+    limit: safeLimit,
+    nextCursor: nextOffset < drafts.length ? String(nextOffset) : null,
+    wallet: args.wallet,
+  };
+}
+
 function toConversationLastPreflight(
   originalText: string,
   preflight: RulePreflightResult,
@@ -11850,13 +11871,25 @@ export function handleApiRequest(
       url.pathname.length - "/conversation-drafts".length,
     );
 
-    if (!isBase58Like(wallet)) {
-      sendJson(request, response, 400, { error: "invalid_wallet" });
+    const cursor = url.searchParams.get("cursor");
+    const rawLimit = url.searchParams.get("limit");
+    const limit = rawLimit === null ? undefined : Number(rawLimit);
+
+    if (
+      !isBase58Like(wallet) ||
+      (cursor !== null && !/^\d+$/.test(cursor)) ||
+      (limit !== undefined && (!Number.isInteger(limit) || limit <= 0))
+    ) {
+      sendJson(request, response, 400, { error: "invalid_query" });
       return;
     }
 
     sendJson(request, response, 200, {
-      drafts: listConversationDrafts(wallet),
+      ...listConversationDraftsPage({
+        ...(cursor === null ? {} : { cursor }),
+        ...(limit === undefined ? {} : { limit }),
+        wallet,
+      }),
     });
     return;
   }

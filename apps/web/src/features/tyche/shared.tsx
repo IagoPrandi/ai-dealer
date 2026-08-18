@@ -437,14 +437,22 @@ export function ConversationList({
   drafts,
   error,
   loading,
+  hasMore = false,
+  loadingMore = false,
+  loadMoreError = null,
+  onLoadMore,
   onCreate,
   onResume,
   onRetry,
 }: {
   drafts: ConversationDraftApi[];
   error: null | string;
+  hasMore?: boolean;
   loading: boolean;
+  loadingMore?: boolean;
+  loadMoreError?: null | string;
   onCreate: () => void;
+  onLoadMore?: () => void;
   onResume: (draft: ConversationDraftApi) => void;
   onRetry: () => void;
 }) {
@@ -477,6 +485,20 @@ export function ConversationList({
       {drafts.map((draft) => (
         <ConversationRow key={draft.draftId} draft={draft} onResume={() => onResume(draft)} />
       ))}
+      {loadingMore ? (
+        <div aria-live="polite" style={{ color: "var(--dim)", fontSize: 12.5, padding: "14px 0 2px", textAlign: "center" }}>
+          Loading more conversations...
+        </div>
+      ) : null}
+      {loadMoreError ? (
+        <div style={{ padding: "12px 0 2px", textAlign: "center" }}>
+          <div style={{ color: "var(--red)", fontSize: 12.5, marginBottom: 8 }}>Could not load more conversations.</div>
+          <button className="ide-btn-ghost ide-btn" onClick={onLoadMore} style={{ padding: "9px 12px" }} type="button">Try again</button>
+        </div>
+      ) : null}
+      {hasMore && !loadingMore && !loadMoreError ? (
+        <div aria-hidden="true" style={{ height: 1 }} />
+      ) : null}
     </div>
   );
 }

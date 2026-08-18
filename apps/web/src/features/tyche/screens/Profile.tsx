@@ -7,7 +7,7 @@
  * (GET /players/{wallet}/claims). Conversations and History now read the
  * player projection endpoints instead of deferred empty states.
  */
-import { useState } from "react";
+import { useEffect, useState, type UIEvent } from "react";
 
 import { useTyche } from "../context";
 import { lamportsToSol, fmtClaimSol, fmtTurnId, timeAgo } from "../data/format";
@@ -96,9 +96,15 @@ export function ProfileScreen() {
   const history = usePlayerHistory(walletAddress);
   const conversations = useConversationDrafts(walletAddress);
   const [tab, setTab] = useState<"chats" | "hist" | "regras">("regras");
+  const [visibleRuleCount, setVisibleRuleCount] = useState(10);
   const [busy, setBusy] = useState(false);
   const [txError, setTxError] = useState<null | string>(null);
   const [done, setDone] = useState(false);
+  const myRules = rules.rules.filter((r) => r.mine);
+
+  useEffect(() => {
+    setVisibleRuleCount(10);
+  }, [myRules.length]);
 
   if (!connected) {
     return (
@@ -122,7 +128,6 @@ export function ProfileScreen() {
   const wd = wdPrize + wdReward;
   const lifetimePrize = lamportsToSol(claimTotals.lifetimePrizeLamports);
   const claimedReward = lamportsToSol(claimTotals.claimedRewardLamports);
-  const myRules = rules.rules.filter((r) => r.mine);
   // Only point at a round the API has actually settled: either an earlier turn
   // than the live one, or the live turn once its draw/winners are published.
   const showResultLink =
@@ -157,10 +162,26 @@ export function ProfileScreen() {
     }
   }
 
+  function loadMoreOnScroll(event: UIEvent<HTMLDivElement>) {
+    const { clientHeight, scrollHeight, scrollTop } = event.currentTarget;
+    if (scrollHeight - scrollTop - clientHeight > 160) {
+      return;
+    }
+    if (tab === "regras") {
+      setVisibleRuleCount((count) => Math.min(count + 10, myRules.length));
+      return;
+    }
+    if (tab === "chats") {
+      conversations.loadMore();
+      return;
+    }
+    history.loadMore();
+  }
+
   return (
     <div className="ide-app ide-screen" style={{ height: "100%", position: "relative", overflow: "hidden" }}>
       <div className="ide-ambient" />
-      <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", overflowX: "hidden", padding: "var(--ide-shell-content-top) 18px 96px" }}>
+      <div className="ide-scroll" onScroll={loadMoreOnScroll} style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", overflowX: "hidden", padding: "var(--ide-shell-content-top) 18px 96px" }}>
 
         {/* screen head — brand mark, plate title, the round's wallet pill */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 16 }}>
@@ -239,7 +260,7 @@ export function ProfileScreen() {
             </div>
           ) : (
             <div className="ide-list">
-              {myRules.map((r) => (
+              {myRules.slice(0, visibleRuleCount).map((r) => (
                 <div key={r.id} className="ide-listrow" style={{ cursor: "default" }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontFamily: "Oswald, sans-serif", fontSize: 15, letterSpacing: "0.04em", textTransform: "uppercase" }}>{r.title}</div>
@@ -250,6 +271,7 @@ export function ProfileScreen() {
                   </span>
                 </div>
               ))}
+              {visibleRuleCount < myRules.length ? <div aria-hidden="true" style={{ height: 1 }} /> : null}
             </div>
           )
         ) : null}
@@ -258,8 +280,12 @@ export function ProfileScreen() {
           <ConversationList
             drafts={conversations.drafts}
             error={conversations.error}
+            hasMore={conversations.hasMore}
             loading={conversations.loading}
+            loadingMore={conversations.loadingMore}
+            loadMoreError={conversations.loadMoreError}
             onCreate={() => go("create", { newConversation: true, returnTo: "profile" })}
+            onLoadMore={conversations.loadMore}
             onResume={(draft) => go("create", { chatId: draft.draftId, returnTo: "profile", seed: draft.prompt })}
             onRetry={conversations.reload}
           />
@@ -279,9 +305,11 @@ export function ProfileScreen() {
           ) : (
             <div className="ide-list">
               {history.history?.events.map((event, index) => <HistoryRow key={historyRowKey(event, index)} event={event} />)}
+              {history.loadingMore ? <div aria-live="polite" style={{ color: "var(--dim)", fontSize: 12.5, textAlign: "center", padding: "14px 0 2px" }}>Loading more history...</div> : null}
+              {history.loadMoreError ? <div style={{ padding: "12px 0 2px", textAlign: "center" }}><div style={{ color: "var(--red)", fontSize: 12.5, marginBottom: 8 }}>Could not load more history.</div><button className="ide-btn-ghost ide-btn" onClick={history.loadMore} style={{ padding: "9px 12px" }} type="button">Try again</button></div> : null}
               <div style={{ color: "var(--dim)", fontSize: 12.5, textAlign: "center", padding: "14px 0 2px" }}>
                 {history.history?.nextCursor
-                  ? <>Showing latest <span className="ide-num">{history.history.events.length}</span> events.</>
+                  ? <>Scroll down to load 10 more events.</>
                   : <>End of history · <span className="ide-num">{history.history?.events.length ?? 0}</span> events</>}
               </div>
             </div>

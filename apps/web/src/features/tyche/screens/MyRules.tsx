@@ -7,6 +7,8 @@
  * Like the Home composer, starting one does not require a connected wallet —
  * only the saved list does, because drafts are keyed by wallet.
  */
+import type { UIEvent } from "react";
+
 import { useTyche } from "../context";
 import { useConversationDrafts } from "../data/hooks";
 import { ConversationList, Dealer, Ico } from "../shared";
@@ -17,6 +19,13 @@ export function MyRulesScreen() {
 
   const startNewConversation = () =>
     go("create", { newConversation: true, returnTo: "myrules" });
+
+  const loadMoreOnScroll = (event: UIEvent<HTMLDivElement>) => {
+    const { clientHeight, scrollHeight, scrollTop } = event.currentTarget;
+    if (scrollHeight - scrollTop - clientHeight <= 160) {
+      conversations.loadMore();
+    }
+  };
 
   return (
     <div
@@ -34,6 +43,7 @@ export function MyRulesScreen() {
           overflowX: "hidden",
           padding: "var(--ide-shell-content-top) 20px 96px",
         }}
+        onScroll={loadMoreOnScroll}
       >
         <div
           style={{
@@ -73,8 +83,12 @@ export function MyRulesScreen() {
           <ConversationList
             drafts={conversations.drafts}
             error={conversations.error}
+            hasMore={conversations.hasMore}
             loading={conversations.loading}
+            loadingMore={conversations.loadingMore}
+            loadMoreError={conversations.loadMoreError}
             onCreate={startNewConversation}
+            onLoadMore={conversations.loadMore}
             onResume={(draft) =>
               go("create", {
                 chatId: draft.draftId,

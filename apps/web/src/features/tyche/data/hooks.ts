@@ -673,21 +673,28 @@ export function useTokenomics(walletAddress: string | undefined) {
   };
 }
 
+const PLAYER_LIST_PAGE_SIZE = 10;
+
 export function usePlayerHistory(walletAddress: string | undefined) {
   const [history, setHistory] = useState<PlayerHistoryApi | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<null | string>(null);
+  const [loadMoreError, setLoadMoreError] = useState<null | string>(null);
 
   const reload = useCallback(
     (signal?: AbortSignal) => {
       if (!walletAddress) {
         setHistory(null);
         setLoading(false);
+        setLoadingMore(false);
+        setLoadMoreError(null);
         return;
       }
       setLoading(true);
+      setLoadMoreError(null);
       getPlayerHistory(walletAddress, {
-        limit: 25,
+        limit: PLAYER_LIST_PAGE_SIZE,
         ...(signal ? { signal } : {}),
       })
         .then((body) => {
@@ -712,25 +719,76 @@ export function usePlayerHistory(walletAddress: string | undefined) {
     return () => controller.abort();
   }, [reload]);
 
-  return { error, history, loading, reload: () => reload() };
+  const loadMore = useCallback(() => {
+    if (!walletAddress || !history?.nextCursor || loadingMore) {
+      return;
+    }
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    getPlayerHistory(walletAddress, {
+      cursor: history.nextCursor,
+      limit: PLAYER_LIST_PAGE_SIZE,
+    })
+      .then((body) => {
+        const nextPage = body?.history;
+        if (!nextPage) {
+          return;
+        }
+        setHistory((current) =>
+          current
+            ? {
+                ...nextPage,
+                cursor: current.cursor,
+                events: [...current.events, ...nextPage.events],
+              }
+            : nextPage,
+        );
+      })
+      .catch((cause: unknown) => {
+        console.warn("Failed to load more player history.", cause);
+        setLoadMoreError("history_unavailable");
+      })
+      .finally(() => setLoadingMore(false));
+  }, [history?.nextCursor, loadingMore, walletAddress]);
+
+  return {
+    error,
+    history,
+    loadMore,
+    loadMoreError,
+    loading,
+    loadingMore,
+    reload: () => reload(),
+  };
 }
 
 export function useConversationDrafts(walletAddress: string | undefined) {
   const [drafts, setDrafts] = useState<ConversationDraftApi[]>([]);
+  const [nextCursor, setNextCursor] = useState<null | string>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<null | string>(null);
+  const [loadMoreError, setLoadMoreError] = useState<null | string>(null);
 
   const reload = useCallback(
     (signal?: AbortSignal) => {
       if (!walletAddress) {
         setDrafts([]);
+        setNextCursor(null);
         setLoading(false);
+        setLoadingMore(false);
+        setLoadMoreError(null);
         return;
       }
       setLoading(true);
-      getConversationDrafts(walletAddress, signal)
+      setLoadMoreError(null);
+      getConversationDrafts(walletAddress, {
+        limit: PLAYER_LIST_PAGE_SIZE,
+        ...(signal ? { signal } : {}),
+      })
         .then((body) => {
           setDrafts(body?.drafts ?? []);
+          setNextCursor(body?.nextCursor ?? null);
           setError(null);
         })
         .catch((cause: unknown) => {
@@ -751,5 +809,36 @@ export function useConversationDrafts(walletAddress: string | undefined) {
     return () => controller.abort();
   }, [reload]);
 
-  return { drafts, error, loading, reload: () => reload() };
+  const loadMore = useCallback(() => {
+    if (!walletAddress || !nextCursor || loadingMore) {
+      return;
+    }
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    getConversationDrafts(walletAddress, {
+      cursor: nextCursor,
+      limit: PLAYER_LIST_PAGE_SIZE,
+    })
+      .then((body) => {
+        const nextDrafts = body?.drafts ?? [];
+        setDrafts((current) => [...current, ...nextDrafts]);
+        setNextCursor(body?.nextCursor ?? null);
+      })
+      .catch((cause: unknown) => {
+        console.warn("Failed to load more conversation drafts.", cause);
+        setLoadMoreError("drafts_unavailable");
+      })
+      .finally(() => setLoadingMore(false));
+  }, [loadingMore, nextCursor, walletAddress]);
+
+  return {
+    drafts,
+    error,
+    hasMore: nextCursor !== null,
+    loadMore,
+    loadMoreError,
+    loading,
+    loadingMore,
+    reload: () => reload(),
+  };
 }

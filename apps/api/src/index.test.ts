@@ -26,6 +26,7 @@ import {
   getConsoleReadOnlyMethodRejection,
   getPlayerClaimsSummary,
   listConversationDrafts,
+  listConversationDraftsPage,
   listPlayerHistory,
   getMandatedRuleSignatures,
   getPrizePoolAccounting,
@@ -3953,4 +3954,48 @@ test("a suggested rewrite that cannot clear preflight is never offered", () => {
   const viable =
     "A guess wins if at least three of the guessed numbers appear in the official draw.";
   assert.deepEqual(offer(viable), [viable]);
+});
+
+test("conversation drafts paginate newest-first without crossing wallets", () => {
+  resetApiStateForTests();
+  for (let index = 0; index < 12; index += 1) {
+    saveConversationDraft({
+      lastMessage: `Message ${index}`,
+      normalizedText: null,
+      officialInterpretation: null,
+      prompt: `Rule ${index}`,
+      ruleId: null,
+      status: "draft",
+      tokenCount: index + 1,
+      turnId: 245,
+      updatedAt: `2026-06-12T12:${String(index).padStart(2, "0")}:00.000Z`,
+      wallet,
+    });
+  }
+  saveConversationDraft({
+    lastMessage: "Other wallet",
+    normalizedText: null,
+    officialInterpretation: null,
+    prompt: "Other rule",
+    ruleId: null,
+    status: "draft",
+    tokenCount: 1,
+    turnId: 245,
+    updatedAt: "2026-06-12T12:59:00.000Z",
+    wallet: walletTwo,
+  });
+
+  const firstPage = listConversationDraftsPage({ limit: 10, wallet });
+  const secondPage = listConversationDraftsPage({
+    cursor: firstPage.nextCursor,
+    limit: 10,
+    wallet,
+  });
+
+  assert.equal(firstPage.drafts.length, 10);
+  assert.equal(firstPage.nextCursor, "10");
+  assert.equal(firstPage.drafts[0]?.prompt, "Rule 11");
+  assert.equal(secondPage.drafts.length, 2);
+  assert.equal(secondPage.nextCursor, null);
+  assert.equal(secondPage.drafts[1]?.prompt, "Rule 0");
 });
