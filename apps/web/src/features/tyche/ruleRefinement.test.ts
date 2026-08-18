@@ -6,8 +6,10 @@ import {
   getRuleGuidanceTitle,
   getRuleRefinementBase,
   getVisibleRuleDifficultyClass,
+  getLocalGreetingReply,
   isDeclarativeRuleDraft,
   isExplicitRuleRefinementPatch,
+  isLikelyRuleDraft,
   isRuleCreationHelpRequest,
   isRuleRefinementPatch,
 } from "./ruleRefinement.js";
@@ -453,4 +455,45 @@ test("dealer chat suggestions are labeled as uncompiled rules to try", () => {
       text: "Win if the guessed sum modulo 9 equals the drawn sum modulo 9.",
     },
   ]);
+});
+
+test("product questions route to the dealer instead of the rule compiler", () => {
+  // Every one of these is a question the player asked in plain language. Any of
+  // them classified as a rule draft is sent to preflight and comes back as a
+  // compiler rejection instead of an answer.
+  for (const question of [
+    "Que tipo de regra eu posso criar",
+    "Achei confuso explica melhor",
+    "Que regras sao essas? Nao to entendo",
+    "como funciona a premiação?",
+    "qual a estratégia pra ganhar mais",
+    "quanto custa enviar uma regra",
+    "o que é tokenomics",
+    "como funciona a votação de eliminação",
+    "quantos finalistas tem por rodada",
+    "me da um exemplo de regra",
+  ]) {
+    assert.equal(isLikelyRuleDraft(question), false, question);
+  }
+});
+
+test("real rule drafts are still compiled, including ones that read like topics", () => {
+  // The topic vocabulary must not swallow a genuine winner condition. `eliminar`
+  // is an allowed rule operation and `rodada` appears in ordinary rule wording.
+  for (const draft of [
+    "vence quem acertar pelo menos 3 numeros do sorteio",
+    "win if the sum of my guess is greater than the draw sum",
+    "vence a rodada quem tiver a maior soma",
+    "vence quem eliminar os dois menores numeros e tiver a maior soma",
+  ]) {
+    assert.equal(isLikelyRuleDraft(draft), true, draft);
+  }
+});
+
+test("the greeting fast-path answers in the language of the greeting", () => {
+  // This path never reaches the dealer, so it selects the language itself.
+  assert.match(String(getLocalGreetingReply("oi")), /^Oi!/u);
+  assert.match(String(getLocalGreetingReply("bom dia")), /^Oi!/u);
+  assert.match(String(getLocalGreetingReply("hello")), /^Hey\./u);
+  assert.equal(getLocalGreetingReply("vence quem acertar 3 numeros"), null);
 });

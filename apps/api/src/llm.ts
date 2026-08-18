@@ -699,6 +699,14 @@ export async function answerDealerQuestion(
     context,
     config,
     signal,
+    // Reasoning stays ON for the chat answer. With `reasoning_effort: "none"`
+    // the model stops honouring `response_format: json_object` once the chat
+    // prompt carries its product-knowledge references, and replies with bare
+    // prose that fails `coerceDealerQuestionAnswer` — measured 0/4 valid JSON
+    // with it off against 4/4 with it on, same prompt and context. Unlike
+    // interpret and compile, a chat answer feeds no AST and no on-chain hash,
+    // so it needs no reproducible decoding.
+    true,
   );
   return coerceDealerQuestionAnswer(extractJsonObject(candidate));
 }

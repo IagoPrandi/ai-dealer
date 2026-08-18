@@ -16,7 +16,9 @@ import {
   CREATOR_REWARD_RATE_BPS,
   CREATOR_REWARD_RESERVE_SHARE_BPS,
   countRuleTokens,
+  FREE_ACTION_WINDOW_ENDS_BEFORE_TURN_INDEX,
   LAMPORTS_PER_SOL,
+  MAX_REMOVABLE_NUMBERS,
   MINIMUM_CLAIM_THRESHOLD_SOL,
   MVP_FEES_SOL,
   MVP_RATE_LIMIT_CONFIG,
@@ -6688,12 +6690,21 @@ export function buildDealerQuestionContext(args: {
     ? getBlockingRuleReasonExplanations(diagnostics.reasonCodes)
     : [];
   const payload = {
-    contextVersion: 4,
+    contextVersion: 5,
     diagnosticsAvailable: diagnostics !== null,
     fees: {
       chatSol: 0,
+      // Every paid action doubles per repeat within the same round, and the
+      // first action of each scope is free until the configured turn index.
+      // Both are environment-configured, so they travel with the request
+      // instead of being frozen into the prompt reference files.
+      freeFirstActionBeforeTurnIndex: FREE_ACTION_WINDOW_ENDS_BEFORE_TURN_INDEX,
+      guessSubmissionBaseSol: MVP_FEES_SOL.guessSubmission,
       preflightSol: 0,
+      repeatedActionFeeMultiplier: REPEATED_ACTION_FEE_MULTIPLIER,
+      ruleProposalBaseSol: MVP_FEES_SOL.ruleProposal,
       ruleSubmissionSol: nextRuleFeeLamports / LAMPORTS_PER_SOL,
+      voteBaseSol: MVP_FEES_SOL.vote,
     },
     game: {
       format:
@@ -6703,6 +6714,15 @@ export function buildDealerQuestionContext(args: {
       name: "Tywish",
       playerObjective:
         "Win the round with the submitted six-number guess. The player does not guess, discover, or get a rule right.",
+      prizeSplit: {
+        alternativeSharePercent: 50,
+        originalSharePercent: 50,
+        rollover:
+          "A share with no winner is not redistributed. It rolls over into the same share of the next round, together with rounding remainders and payouts below the minimum claim threshold.",
+        source:
+          "The playable prize pool is what remains of the round's paid game actions after the treasury share is taken out. Each share is divided equally among its winners.",
+        treasuryFeePercent: TREASURY_FEE_BPS / 100,
+      },
       rewards: {
         gamePrize: {
           asset: "SOL",
@@ -6723,6 +6743,7 @@ export function buildDealerQuestionContext(args: {
             activeRuleRewards: {
               eligibility:
                 "When the active alternative rule produces at least one winner, its creator and the unique wallets with an in-favour vote for that elected rule may receive campaign-token rewards. Repeated votes do not add reward shares, and elimination votes do not qualify.",
+              rate: `The creator reward and the shared voter reward pool are each ${CREATOR_REWARD_RATE_BPS / 100} percent of ONE individual alternative-rule winner payout, not of the whole prize pool, so neither scales with the number of winners. The voter pool is split equally among unique in-favour voter wallets.`,
             },
             referralRewards: {
               eligibility:
@@ -6755,6 +6776,15 @@ export function buildDealerQuestionContext(args: {
       },
     },
     latestPlayerMessage: args.message,
+    limits: {
+      guessNumberCount: 6,
+      guessNumberMax: 100,
+      guessNumberMin: 1,
+      maxRemovableNumbers: MAX_REMOVABLE_NUMBERS,
+      ruleLanguages:
+        "Rule text may be written in Portuguese or English. No keyword such as WIN IF or VENCE SE is required.",
+      ruleMaxTokens: RULE_MAX_TOKENS,
+    },
     preflight: diagnostics
       ? {
           ...diagnostics,

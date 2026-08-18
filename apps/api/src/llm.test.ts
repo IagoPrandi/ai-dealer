@@ -80,7 +80,7 @@ test("dealer chat uses the versioned context-only prompt and strict JSON result"
   );
   assert.match(
     messages[0]?.content ?? "",
-    /complete server-authored `game` object, including every reward field, is also authored in English/i,
+    /complete server-authored `game` object, including every reward field, and every reference section appended below are also authored in English/i,
   );
   assert.match(
     messages[0]?.content ?? "",
@@ -93,6 +93,27 @@ test("dealer chat uses the versioned context-only prompt and strict JSON result"
   assert.match(
     messages[0]?.content ?? "",
     /use `rodada` for `round` and `regra` for `rule`/i,
+  );
+  // The wall-of-text and the identical re-answer the player reported are both
+  // prevented by prompt contracts, so they have to reach the model.
+  assert.match(messages[0]?.content ?? "", /under 120 words/i);
+  assert.match(
+    messages[0]?.content ?? "",
+    /must carry no markdown: no `\*\*`, no `#` headings/i,
+  );
+  assert.match(
+    messages[0]?.content ?? "",
+    /treat your previous answer as the thing that failed/i,
+  );
+  assert.match(
+    messages[0]?.content ?? "",
+    /Never speculate about price and never give financial advice/i,
+  );
+  // Grounding for mechanics, limits and tokenomics questions.
+  assert.match(messages[0]?.content ?? "", /Reference — Tywish game mechanics/i);
+  assert.match(
+    messages[0]?.content ?? "",
+    /Reference — prizes, fees and token economy/i,
   );
   assert.match(
     messages[0]?.content ?? "",

@@ -7,7 +7,7 @@ const PROMPTS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "prompts");
 // Bumped when the prompt body changes. The `tyche_` prefix is the internal
 // codename and stays; the persona the player sees is the commercial name.
 export const DEALER_INTERPRET_PROMPT_VERSION = "tyche_rule_interpret_prompt_v4";
-export const DEALER_CHAT_PROMPT_VERSION = "tyche_rule_dealer_chat_prompt_v6";
+export const DEALER_CHAT_PROMPT_VERSION = "tyche_rule_dealer_chat_prompt_v7";
 
 function readPromptFile(relativePath: string): string {
   // Prompt assets are runtime code. A missing file must stop the request rather
@@ -38,6 +38,18 @@ export function buildDealerInterpretPrompt(): string {
 }
 
 export function buildDealerChatPrompt(): string {
-  dealerChatPrompt ??= buildPrompt("dealer-chat/SKILL.md", []);
+  // `output-contract.md` is deliberately LAST, after the reference sections.
+  // The references are bulky prose; with reasoning disabled (the Ollama
+  // `reasoning_effort: "none"` path) a JSON contract buried above them stops
+  // being honoured and the model answers in plain prose, which fails
+  // `coerceDealerQuestionAnswer` as RULE_AGENT_BAD_RESPONSE. Same positional
+  // lesson as the player question in `buildDealerQuestionContext`: whatever
+  // must win has to be read last.
+  dealerChatPrompt ??= buildPrompt("dealer-chat/SKILL.md", [
+    "dealer-chat/references/game-mechanics.md",
+    "dealer-chat/references/rules-and-limits.md",
+    "dealer-chat/references/economy.md",
+    "dealer-chat/output-contract.md",
+  ]);
   return dealerChatPrompt;
 }

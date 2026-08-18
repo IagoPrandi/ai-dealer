@@ -99,6 +99,16 @@ import {
   type GuessVerificationResultRecord,
   type RuleProposalRecord,
 } from "./index.js";
+import {
+  CREATOR_REWARD_RATE_BPS,
+  FREE_ACTION_WINDOW_ENDS_BEFORE_TURN_INDEX,
+  MAX_REMOVABLE_NUMBERS,
+  MVP_FEES_SOL,
+  REPEATED_ACTION_FEE_MULTIPLIER,
+  RULE_MAX_TOKENS,
+  TREASURY_FEE_BPS,
+} from "@tyche/constants";
+import { buildDealerChatPrompt } from "./promptSkills.js";
 
 const wallet = "4bYqf3rJ7m2nQh9sV1xCH8kLpWtD6eZaUg5oNbMcXyTH";
 const walletTwo = "5bYqf3rJ7m2nQh9sV1xCH8kLpWtD6eZaUg5oNbMcXyTJ";
@@ -161,7 +171,7 @@ test("dealer question context carries server diagnostics and discloses their abs
   });
   assert.match(withoutDiagnostics, /"diagnosticsAvailable":false/u);
   assert.match(withoutDiagnostics, /"preflight":null/u);
-  assert.match(withoutDiagnostics, /"contextVersion":4/u);
+  assert.match(withoutDiagnostics, /"contextVersion":5/u);
   assert.match(
     withoutDiagnostics,
     /"playerObjective":"Win the round with the submitted six-number guess\. The player does not guess, discover, or get a rule right\."/u,
@@ -245,6 +255,86 @@ test("dealer question context carries server diagnostics and discloses their abs
     ["INTERPRETATION_MISMATCH"],
     "only blocking codes may be explained to the player",
   );
+});
+
+test("dealer question context sources every player-facing number from constants", () => {
+  // The prompt reference files explain the concepts; every configurable number
+  // has to ride in the request instead, or a change to @tyche/constants would
+  // silently leave the dealer quoting a stale fee, limit or rate to players.
+  const context = buildDealerQuestionContext({
+    draft: {
+      createdAt: "2026-08-12T12:00:00.000Z",
+      draftId: "client:55:dealer-numbers",
+      lastMessage: "Como funciona a premiação?",
+      messages: [{ text: "Como funciona a premiação?", who: "user" }],
+      normalizedText: null,
+      officialInterpretation: null,
+      prompt: "Win if at least three guessed numbers are drawn.",
+      ruleId: null,
+      status: "draft",
+      tokenCount: 12,
+      turnId: 55,
+      updatedAt: "2026-08-12T12:00:00.000Z",
+      wallet,
+    },
+    message: "Como funciona a premiação?",
+  });
+  const payload = JSON.parse(
+    context.split("<tyche_server_context>")[1]?.split("</")[0] ?? "{}",
+  ) as {
+    fees: Record<string, number>;
+    game: { prizeSplit: Record<string, unknown> };
+    limits: Record<string, unknown>;
+  };
+
+  assert.equal(payload.limits.ruleMaxTokens, RULE_MAX_TOKENS);
+  assert.equal(payload.limits.maxRemovableNumbers, MAX_REMOVABLE_NUMBERS);
+  assert.equal(payload.limits.guessNumberCount, 6);
+  assert.equal(payload.limits.guessNumberMin, 1);
+  assert.equal(payload.limits.guessNumberMax, 100);
+
+  assert.equal(
+    payload.fees.repeatedActionFeeMultiplier,
+    REPEATED_ACTION_FEE_MULTIPLIER,
+  );
+  assert.equal(
+    payload.fees.freeFirstActionBeforeTurnIndex,
+    FREE_ACTION_WINDOW_ENDS_BEFORE_TURN_INDEX,
+  );
+  assert.equal(payload.fees.ruleProposalBaseSol, MVP_FEES_SOL.ruleProposal);
+  assert.equal(payload.fees.guessSubmissionBaseSol, MVP_FEES_SOL.guessSubmission);
+  assert.equal(payload.fees.voteBaseSol, MVP_FEES_SOL.vote);
+  assert.equal(payload.fees.chatSol, 0, "asking the dealer is always free");
+  assert.equal(payload.fees.preflightSol, 0, "preflight is always free");
+
+  // Both halves plus the treasury cut, so the dealer can answer "where does the
+  // money go" without inventing a split.
+  assert.equal(payload.game.prizeSplit.originalSharePercent, 50);
+  assert.equal(payload.game.prizeSplit.alternativeSharePercent, 50);
+  assert.equal(payload.game.prizeSplit.treasuryFeePercent, TREASURY_FEE_BPS / 100);
+  assert.match(String(payload.game.prizeSplit.rollover), /rolls over/u);
+
+  // 22.5%, not the superseded 15% still quoted in docs/product-rule-summary.md.
+  assert.match(
+    context,
+    new RegExp(`${CREATOR_REWARD_RATE_BPS / 100} percent of ONE individual`, "u"),
+  );
+});
+
+test("dealer chat prompt carries the game, rule and economy references", () => {
+  const prompt = buildDealerChatPrompt();
+  // Without these the model has no grounding for mechanics, limits or
+  // tokenomics questions and falls back to restating the round flow.
+  assert.match(prompt, /Reference — Tywish game mechanics/u);
+  assert.match(prompt, /Reference — what a rule may say, and worked examples/u);
+  assert.match(prompt, /Reference — prizes, fees and token economy/u);
+  // Answer-shape and anti-repetition contracts are what stop the wall-of-text
+  // and the identical re-answer the player reported.
+  assert.match(prompt, /under 120 words/u);
+  assert.match(prompt, /Not repeating yourself/u);
+  assert.match(prompt, /Out of scope/u);
+  // Frontmatter must not leak into the prompt body.
+  assert.doesNotMatch(prompt, /^---/u);
 });
 
 test("blocking reason explanations drop the non-blocking SUPPORTED_RULE code", () => {

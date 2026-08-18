@@ -34,9 +34,10 @@ import {
   buildRuleGuidanceOptions,
   composeRefinedRuleDraft,
   getRuleGuidanceTitle,
+  getLocalGreetingReply,
   getVisibleRuleDifficultyClass,
-  isDeclarativeRuleDraft,
   isExplicitRuleRefinementPatch,
+  isLikelyRuleDraft,
   isRuleRefinementPatch,
   type RuleGuidanceOption,
 } from "../ruleRefinement";
@@ -80,73 +81,6 @@ interface RuleGuidanceState {
   questions: readonly string[];
   terminalRejection: boolean;
   title: string;
-}
-
-const RULE_DECISION_PATTERN =
-  /\b(win|wins|winner|winning|whoever|if|when|qualifies|eligible|ganha|ganhar|vence|vencer|vencedor|quem|se|quando)\b/i;
-
-const RULE_DATA_PATTERN =
-  /\b(guess|guesses|draw|drawn|numbers?|sequence|sum|total|digit|digits|units?|tens?|match|matches|matched|miss|misses|closest|highest|lowest|greater|less|equal|even|odd|prime|palpite|sorteio|numeros?|números?|dezena|dezenas|unidade|unidades|soma|maior|menor|igual|acertar|acerta|errar|erra|pares?|impares?|ímpares?)\b/i;
-
-const RULE_SHAPE_PATTERN =
-  /\b(at least|at most|exactly|closest|highest|lowest|greater than|less than|equal to|more than|fewer than|the most|the fewest|pelo menos|no maximo|no máximo|exatamente|mais|menos|maior|menor|igual)\b/i;
-
-const GREETING_PATTERN =
-  /^(hi|hello|hey|yo|oi|ola|olá|bom dia|boa tarde|boa noite|sup|e ai|e aí)[!.? ]*$/i;
-
-const QUESTION_PATTERN =
-  /^(how|what|why|where|when|can|could|should|do|does|is|are|como|o que|qual|quanto|quantos|quanta|quantas|por que|porque|quando|posso|pode|devo)\b/i;
-
-const COST_TOPIC_PATTERN =
-  /\b(cost|costs|price|fee|fees|payment|pay|paid|submit|submission|quanto|quantos|quanta|quantas|custa|custam|custo|preco|preço|valor|taxa|pagar|pagamento|enviar|submeter)\b/i;
-
-const EXAMPLE_TOPIC_PATTERN =
-  /\b(example|examples|sample|samples|idea|ideas|inspiration|suggestion|suggestions|exemplo|exemplos|ideia|ideias|inspira|sugestao|sugestão|sugestoes|sugestões)\b/i;
-
-const HOW_IT_WORKS_TOPIC_PATTERN =
-  /\b(how does it work|how this works|how rules work|como funciona|como isso funciona|como a regra funciona|funciona)\b/i;
-
-const ALLOWED_TOPIC_PATTERN =
-  /\b(allowed|valid|invalid|can i use|what can|only use|permitido|valido|válido|invalido|inválido|posso usar|pode usar|usar na regra|regras validas|regras válidas)\b/i;
-
-const SECURITY_RULE_DRAFT_PATTERN =
-  /\b(ignore\b.{0,40}\b(app\s+)?rules?|previous instructions?|compile\b.{0,40}\bvalid|secretly|hide\b.{0,40}\b(blocked|invalid|rejected))\b/i;
-
-const RULE_TIPS_TOPIC_PATTERN =
-  /\b(tip|tips|improve|better|strategy|strategies|odds|popular|dica|dicas|melhorar|melhor|estrategia|estratÃ©gia|estrategias|estratÃ©gias|chance|chances|popular)\b/i;
-
-function isLikelyRuleDraft(text: string) {
-  const trimmed = text.trim();
-  if (!trimmed || GREETING_PATTERN.test(trimmed)) {
-    return false;
-  }
-  if (isDeclarativeRuleDraft(trimmed)) {
-    return true;
-  }
-  if (
-    QUESTION_PATTERN.test(trimmed) ||
-    COST_TOPIC_PATTERN.test(trimmed) ||
-    EXAMPLE_TOPIC_PATTERN.test(trimmed) ||
-    HOW_IT_WORKS_TOPIC_PATTERN.test(trimmed) ||
-    ALLOWED_TOPIC_PATTERN.test(trimmed) ||
-    RULE_TIPS_TOPIC_PATTERN.test(trimmed)
-  ) {
-    return false;
-  }
-
-  return (
-    SECURITY_RULE_DRAFT_PATTERN.test(trimmed) ||
-    (RULE_DECISION_PATTERN.test(trimmed) && RULE_DATA_PATTERN.test(trimmed)) ||
-    (RULE_SHAPE_PATTERN.test(trimmed) && RULE_DATA_PATTERN.test(trimmed))
-  );
-}
-
-function getLocalGreetingReply(text: string) {
-  const trimmed = text.trim();
-  if (GREETING_PATTERN.test(trimmed)) {
-    return "Hey. Send me one winner condition based on the guess and the official draw.";
-  }
-  return null;
 }
 
 /**
@@ -896,6 +830,9 @@ function CreateChat({
   // too, and the player needs to know how long this round still runs.
   const [turnH, turnM, turnS] = useCountdownTo(endSeconds);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // The newest dealer bubble, when it is the last message. Used to keep the
+  // first line of a long answer on screen instead of its last line.
+  const lastAnswerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const autoSentRef = useRef(false);
   // Safety net against a clarification loop: after too many consecutive
@@ -906,8 +843,22 @@ function CreateChat({
 
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) {
-      el.scrollTop = el.scrollHeight;
+    if (!el) {
+      return;
+    }
+    el.scrollTop = el.scrollHeight;
+    // Jumping to the absolute bottom lands a long dealer answer on its LAST
+    // line, so the sentence that actually answers the question is scrolled off
+    // the top and the scrollbar is hidden, leaving no cue that it exists. When
+    // the newest answer does not fit the viewport, pin its first line instead.
+    const answer = lastAnswerRef.current;
+    if (!answer) {
+      return;
+    }
+    const answerTop = answer.getBoundingClientRect().top;
+    const viewTop = el.getBoundingClientRect().top;
+    if (answerTop < viewTop) {
+      el.scrollTop += answerTop - viewTop - 12;
     }
   }, [msgs, typing, progress, interpretation, rule, guidance]);
 
@@ -1691,6 +1642,9 @@ function CreateChat({
           <div
             key={i}
             className={mm.who === "ai" ? "ide-bubble-ai" : "ide-bubble-user"}
+            ref={
+              mm.who === "ai" && i === msgs.length - 1 ? lastAnswerRef : null
+            }
             style={{ animation: "ide-rise .3s ease both" }}
           >
             {mm.text}

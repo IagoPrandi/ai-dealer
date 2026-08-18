@@ -352,3 +352,87 @@ export function buildRuleGuidanceOptions(
     })),
   ).slice(0, 4);
 }
+
+const RULE_DECISION_PATTERN =
+  /\b(win|wins|winner|winning|whoever|if|when|qualifies|eligible|ganha|ganhar|vence|vencer|vencedor|quem|se|quando)\b/i;
+
+const RULE_DATA_PATTERN =
+  /\b(guess|guesses|draw|drawn|numbers?|sequence|sum|total|digit|digits|units?|tens?|match|matches|matched|miss|misses|closest|highest|lowest|greater|less|equal|even|odd|prime|palpite|sorteio|numeros?|números?|dezena|dezenas|unidade|unidades|soma|maior|menor|igual|acertar|acerta|errar|erra|pares?|impares?|ímpares?)\b/i;
+
+const RULE_SHAPE_PATTERN =
+  /\b(at least|at most|exactly|closest|highest|lowest|greater than|less than|equal to|more than|fewer than|the most|the fewest|pelo menos|no maximo|no máximo|exatamente|mais|menos|maior|menor|igual)\b/i;
+
+const GREETING_PATTERN =
+  /^(hi|hello|hey|yo|oi|ola|olá|bom dia|boa tarde|boa noite|sup|e ai|e aí)[!.? ]*$/i;
+
+const QUESTION_PATTERN =
+  /^(how|what|why|where|when|can|could|should|do|does|is|are|como|o que|qual|quanto|quantos|quanta|quantas|por que|porque|quando|posso|pode|devo)\b/i;
+
+const COST_TOPIC_PATTERN =
+  /\b(cost|costs|price|fee|fees|payment|pay|paid|submit|submission|quanto|quantos|quanta|quantas|custa|custam|custo|preco|preço|valor|taxa|pagar|pagamento|enviar|submeter)\b/i;
+
+const EXAMPLE_TOPIC_PATTERN =
+  /\b(example|examples|sample|samples|idea|ideas|inspiration|suggestion|suggestions|exemplo|exemplos|ideia|ideias|inspira|sugestao|sugestão|sugestoes|sugestões)\b/i;
+
+const HOW_IT_WORKS_TOPIC_PATTERN =
+  /\b(how does it work|how this works|how rules work|como funciona|como isso funciona|como a regra funciona|funciona)\b/i;
+
+const ALLOWED_TOPIC_PATTERN =
+  /\b(allowed|valid|invalid|can i use|what can|only use|permitido|valido|válido|invalido|inválido|posso usar|pode usar|usar na regra|regras validas|regras válidas)\b/i;
+
+// Rewards, tokenomics and round-flow vocabulary. These words identify a question
+// about the product, never a winner condition: a rule may not reference prizes,
+// votes, or other rounds, so matching them cannot swallow a genuine rule draft.
+// `eliminar` and `rodada` are deliberately absent — "eliminar os dois menores"
+// is an allowed rule operation and "vence a rodada quem..." is a rule draft.
+const GAME_TOPIC_PATTERN =
+  /\b(prize|prizes|reward|rewards|payout|payouts|tokenomics|tokens?|treasury|staking|locked|jackpot|elimination|eliminated|finalist|finalists|shortlist|voting|votes?|phase|phases|epoch|pr[eê]mio|pr[eê]mios|premia[cç][aã]o|recompensa|recompensas|tesouraria|elimina[cç][aã]o|eliminado|finalista|finalistas|vota[cç][aã]o|voto|votos|votar|fase|fases|[eé]poca)\b/i;
+
+const SECURITY_RULE_DRAFT_PATTERN =
+  /\b(ignore\b.{0,40}\b(app\s+)?rules?|previous instructions?|compile\b.{0,40}\bvalid|secretly|hide\b.{0,40}\b(blocked|invalid|rejected))\b/i;
+
+const RULE_TIPS_TOPIC_PATTERN =
+  /\b(tip|tips|improve|better|strategy|strategies|odds|popular|dica|dicas|melhorar|melhor|estrategia|estratégia|estrategias|estratégias|chance|chances|popular)\b/i;
+
+export function isLikelyRuleDraft(text: string) {
+  const trimmed = text.trim();
+  if (!trimmed || GREETING_PATTERN.test(trimmed)) {
+    return false;
+  }
+  if (isDeclarativeRuleDraft(trimmed)) {
+    return true;
+  }
+  if (
+    QUESTION_PATTERN.test(trimmed) ||
+    COST_TOPIC_PATTERN.test(trimmed) ||
+    EXAMPLE_TOPIC_PATTERN.test(trimmed) ||
+    HOW_IT_WORKS_TOPIC_PATTERN.test(trimmed) ||
+    ALLOWED_TOPIC_PATTERN.test(trimmed) ||
+    RULE_TIPS_TOPIC_PATTERN.test(trimmed) ||
+    GAME_TOPIC_PATTERN.test(trimmed)
+  ) {
+    return false;
+  }
+
+  return (
+    SECURITY_RULE_DRAFT_PATTERN.test(trimmed) ||
+    (RULE_DECISION_PATTERN.test(trimmed) && RULE_DATA_PATTERN.test(trimmed)) ||
+    (RULE_SHAPE_PATTERN.test(trimmed) && RULE_DATA_PATTERN.test(trimmed))
+  );
+}
+
+// Portuguese-only greeting tokens. The greeting fast-path answers without calling
+// the dealer, so it has to pick the language itself; replying in English to "oi"
+// contradicts the language contract the dealer prompt enforces everywhere else.
+const PORTUGUESE_GREETING_PATTERN =
+  /^(oi|ola|olá|bom dia|boa tarde|boa noite|e ai|e aí)[!.? ]*$/i;
+
+export function getLocalGreetingReply(text: string) {
+  const trimmed = text.trim();
+  if (!GREETING_PATTERN.test(trimmed)) {
+    return null;
+  }
+  return PORTUGUESE_GREETING_PATTERN.test(trimmed)
+    ? "Oi! Me diga em uma frase como sua regra decide quem vence, comparando os seus números com os do sorteio."
+    : "Hey. Send me one winner condition based on the guess and the official draw.";
+}

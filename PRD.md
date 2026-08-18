@@ -2590,11 +2590,13 @@ The prompt contract must instruct agents to compile, not judge winners.
 
 Dealer interpretation and follow-up chat use separate, versioned prompt assets:
 
-- `tyche_rule_interpret_prompt_v1` in
+- `tyche_rule_interpret_prompt_v4` in
   `apps/api/src/prompts/dealer-interpret/SKILL.md`, with detailed semantics and
   examples in its `references/` directory;
-- `tyche_rule_dealer_chat_prompt_v2` in
-  `apps/api/src/prompts/dealer-chat/SKILL.md`.
+- `tyche_rule_dealer_chat_prompt_v7` in
+  `apps/api/src/prompts/dealer-chat/SKILL.md`, with product knowledge in its
+  `references/` directory (`game-mechanics.md`, `rules-and-limits.md`,
+  `economy.md`).
 
 The API build copies these assets into `dist/prompts` and fails loudly if a
 required prompt file is absent. The interpretation contract remains responsible
@@ -2604,6 +2606,22 @@ instructions, discloses missing diagnostics, and labels `proposedRuleText` as an
 uncompiled suggestion that must pass ordinary preflight. It must also ground the
 answer in the player's own clause rather than restating the reason-code table,
 never print a context field name, and answer in the language of the question.
+
+The chat contract also governs how the answer reads, because an accurate answer
+the player cannot parse is still a failed answer. It must open with a direct
+sentence, stay under 120 words for a general product question (the 700-word
+ceiling applies only to verdict explanations), and emit plain text only: the
+chat bubbles render the answer literally, so markdown appears as raw `**` and
+`#` characters on screen. It must never restate a previous answer — when the
+player signals confusion it goes shorter and more concrete instead — and it
+declines off-topic questions, price speculation, and financial advice.
+
+The `references/` files supply stable conceptual product knowledge (round
+phases, elimination, rule limits with worked examples, prize split and reward
+paths). Every configurable number — fees, token limits, reward rates, the
+free-action window — travels in the per-request server context instead, sourced
+from `@tyche/constants`, so a configuration change can never leave the dealer
+quoting a stale value to players.
 
 Language selection is positional, not only stated: the server repeats the
 player's question, angle brackets stripped, as the last line after the fenced
