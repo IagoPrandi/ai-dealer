@@ -4,6 +4,20 @@ This tracker records milestone status, work logs, and required document confirma
 
 ## Work Log
 
+### 2026-08-18 (HTTPS mobile PWA tunnel published)
+
+- Opened the required `PRD.md`, `AGENTS.md`, and `PROGRESS_TRACKER.md`, inspected `.claude/skills`, and applied the local Cloudflare Tunnel, test-and-verify, and Playwright guidance. The local PWA runbook identifies a Cloudflare Quick Tunnel as the recommended trusted-HTTPS path for phone installation.
+- Started a Cloudflare Quick Tunnel to the existing local public DApp origin at `http://localhost:3000`. Its current public HTTPS URL is `https://operates-colours-meanwhile-nights.trycloudflare.com`; the tunnel process remains running. This is an ephemeral development URL, not a durable production deployment.
+- Verification passed through the public HTTPS origin: browser automation reached `/play`, found rendered mobile controls, detected a secure context, detected no Next.js error overlay, and confirmed one registered service worker. The reviewed capture is `output/playwright/mobile-pwa-https-check.png`.
+- No implementation milestone was completed or checked; milestone confirmation remains reserved for the user. Final consistency review confirmed that no application code, configuration, data, wallets, transactions, or on-chain behavior changed.
+
+### 2026-08-18 (Mobile LAN development server verified)
+
+- Opened the required `PRD.md`, `AGENTS.md`, and `PROGRESS_TRACKER.md`, and inspected `.claude/skills` before working. Applied the local test-and-verify and Playwright guidance plus the dev-server browser verification routine.
+- Confirmed that the existing Tywish public DApp development server is running on `0.0.0.0:3000`; it was left running rather than replaced. It is available to devices on the same Wi-Fi network at `http://192.168.0.68:3000`.
+- Verification passed: `GET /` returned HTTP 200 with the `Tywish` title; browser automation reached `/play`, found meaningful rendered content and the primary mobile controls, detected zero Next.js/Vite/Webpack error overlays, and captured `output/playwright/mobile-server-check.png` for visual review.
+- No implementation milestone was completed or checked; milestone confirmation remains reserved for the user. Final consistency review confirmed that no application code, configuration, data, wallets, transactions, or on-chain behavior changed.
+
 ### 2026-08-18 (Create composer submit button aligned to supplied reference)
 
 - Opened the required `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, and `.claude/skills` directory before working. Applied the local frontend, Tyche design-system, UI-coherence, and test-and-verify guidance; reviewed the canonical token, component, screen, repository-integration, and Create-screen references plus the current Create implementation.

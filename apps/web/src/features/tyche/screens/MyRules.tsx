@@ -57,11 +57,11 @@ export function MyRulesScreen() {
           <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
             <Dealer size={34} />
             <h1
+              className="ide-plate"
               style={{
-                fontSize: 24,
-                fontWeight: 800,
+                fontSize: 22,
+                fontWeight: 400,
                 margin: 0,
-                letterSpacing: "-0.025em",
               }}
             >
               My rules
