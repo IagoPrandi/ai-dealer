@@ -20,6 +20,14 @@ The playable pool is divided in two equal halves:
 
 Within a half, the payout is the half divided by the number of winners in it.
 
+A half can therefore have many winners at once, and it always pays all of them.
+There is no lottery-style step that picks one winner out of the several who
+qualified: extra winners shrink each payout, never each player's chance of being
+paid. Whether other players' guesses can change *who* wins at all depends only on
+the wording of the active rule — a threshold rule ("matched at least three")
+judges each guess alone, while a superlative rule ("the highest matched sum")
+compares them by its own text.
+
 If a half has no winner — nobody matched, no alternative rule was active, or the
 elected rule was invalidated — that half **rolls over** into the same category of the
 next round instead of being redistributed. Rounding remainders and payouts below the

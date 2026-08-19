@@ -6669,6 +6669,24 @@ export function savePreflightDiagnosticsForJob(
   }
 }
 
+const GUESS_NUMBER_COUNT = 6;
+const GUESS_NUMBER_MIN = 1;
+const GUESS_NUMBER_MAX = 100;
+
+/**
+ * Ordered draws of `GUESS_NUMBER_COUNT` distinct numbers from the pool, i.e.
+ * P(100, 6) = 858,277,728,000. The original condition matches exactly one of
+ * them, so this is the "one in N" the dealer may quote.
+ *
+ * It travels with the request because the model cannot be trusted to derive it:
+ * asked for the odds it answered `1/100^6`, which assumes repeated numbers are
+ * allowed and is off by three orders of magnitude.
+ */
+const ORDERED_DRAW_PERMUTATIONS = Array.from(
+  { length: GUESS_NUMBER_COUNT },
+  (_unused, index) => GUESS_NUMBER_MAX - index,
+).reduce((product, factor) => product * factor, 1);
+
 export function buildDealerQuestionContext(args: {
   draft: ConversationDraftRecord;
   message: string;
@@ -6695,7 +6713,7 @@ export function buildDealerQuestionContext(args: {
     .reverse()
     .find((entry) => entry.who === "ai");
   const payload = {
-    contextVersion: 6,
+    contextVersion: 7,
     diagnosticsAvailable: diagnostics !== null,
     fees: {
       chatSol: 0,
@@ -6728,6 +6746,13 @@ export function buildDealerQuestionContext(args: {
         "Proposing an alternative rule and voting are open to every player who has already submitted a guess in the current round; submitting the guess is the only requirement, and it costs the guess fee. Explain it as playing the round first. Never describe this eligibility with implementation vocabulary such as token, game token, round pass, or account.",
       prizeSplit: {
         alternativeSharePercent: 50,
+        // Asked as "what are my chances?", the model invented a lottery-style
+        // single-winner draw: it told a player that with 10 people satisfying
+        // the rule each had a 1 in 10 chance of "being the winner". The game has
+        // no such step, so the fact is stated instead of left to be inferred
+        // from the split.
+        multipleWinners:
+          "Every eligible guess that satisfies a condition wins that condition. There is no selection, ranking, ordering, or tiebreak among winners, and no randomness after the draw. More winners never lowers a player's chance of winning; it only divides that share into smaller equal payouts.",
         originalSharePercent: 50,
         rollover:
           "A share with no winner is not redistributed. It rolls over into the same share of the next round, together with rounding remainders and payouts below the minimum claim threshold.",
@@ -6785,13 +6810,15 @@ export function buildDealerQuestionContext(args: {
           "The active community-created alternative rule is evaluated independently when one exists; a guess may win through it without matching the original rule.",
         original:
           "Match all six official draw numbers in the exact drawn order.",
+        originalChanceOneIn: ORDERED_DRAW_PERMUTATIONS,
+        originalChanceMethod: `The numbers are drawn without repetition, so there are ${GUESS_NUMBER_MAX} x ${GUESS_NUMBER_MAX - 1} x ${GUESS_NUMBER_MAX - 2} x ${GUESS_NUMBER_MAX - 3} x ${GUESS_NUMBER_MAX - 4} x ${GUESS_NUMBER_MAX - 5} = ${ORDERED_DRAW_PERMUTATIONS} equally likely ordered draws and one guess matches exactly one of them. Quote originalChanceOneIn as the odds; never present them as ${GUESS_NUMBER_MAX} to the power of ${GUESS_NUMBER_COUNT}, which would wrongly assume repeated numbers are allowed.`,
       },
     },
     latestPlayerMessage: args.message,
     limits: {
-      guessNumberCount: 6,
-      guessNumberMax: 100,
-      guessNumberMin: 1,
+      guessNumberCount: GUESS_NUMBER_COUNT,
+      guessNumberMax: GUESS_NUMBER_MAX,
+      guessNumberMin: GUESS_NUMBER_MIN,
       maxRemovableNumbers: MAX_REMOVABLE_NUMBERS,
       ruleLanguages:
         "Rule text may be written in Portuguese or English. No keyword such as WIN IF or VENCE SE is required.",

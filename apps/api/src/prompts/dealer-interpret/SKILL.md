@@ -1,6 +1,6 @@
 ---
 name: tyche_rule_interpret
-version: tyche_rule_interpret_prompt_v4
+version: tyche_rule_interpret_prompt_v5
 description: Interpret a player's proposed Tywish winning rule without changing its intent.
 ---
 
@@ -39,6 +39,7 @@ Return one JSON object and no other text, with exactly these keys:
   "clarityNote": "string",
   "clarificationQuestions": ["string"],
   "suggestedRewrites": ["string"],
+  "dealerMessageLanguage": "string",
   "dealerMessage": "string"
 }
 ```
@@ -47,5 +48,7 @@ Return one JSON object and no other text, with exactly these keys:
 - normalizedText: the rule rewritten in clear English as one measurable sentence.
 - `officialInterpretation` explains how the engine evaluates every eligible guess, including shared-outcome or draw-independent consequences.
 - `addedOperationalClauses` lists only clauses you added; use an empty array when none were added.
-- `dealerMessage` is one or two friendly English sentences naming every material consequence that requires confirmation.
+- `dealerMessageLanguage` is the plain English name of the language of the rule text you were given — for example `English` or `Portuguese`. Decide it and write it down before you write `dealerMessage`; it exists only to stop that field from drifting back into English.
+- `dealerMessage` is one or two friendly sentences naming every material consequence that requires confirmation. Unlike every other key, it is written **in the language of the rule text you were given**, because it is shown to the player as a chat message rather than as part of the interpretation card. A rule written in Portuguese gets a Portuguese `dealerMessage`; an English rule gets an English one. Use one language for the whole field, leave no word in another, and keep proper names such as Tywish, Tyche and SOL unchanged. In Portuguese use `palpite` for guess, `sorteio` for draw, `regra` for rule and `rodada` for round, and never `aposta`.
+- Every other key — `title`, `normalizedText`, `officialInterpretation`, `addedOperationalClauses`, `clarityNote`, `clarificationQuestions`, `suggestedRewrites` — stays in English whatever the rule's language. They are compiler-facing artifacts, and downstream code and review depend on their wording.
 - Output must be deterministic: identical input produces identical output.

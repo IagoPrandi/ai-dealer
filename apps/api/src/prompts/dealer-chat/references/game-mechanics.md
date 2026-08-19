@@ -82,6 +82,18 @@ An in-favour vote never eliminates, an elimination vote never qualifies for a re
 and neither can be cast in the other's phase. Say which vote you mean, and which
 phase it belongs to, every time.
 
+## Repeated rules
+
+Two players may propose rules that mean the same thing in the same round, and both
+are eligible: nothing in a round requires proposed rules to be distinct, and each
+proposal pays its own fee. Never tell a player that duplicates are forbidden inside
+a round.
+
+The one repetition the game does block is across rounds: a rule whose compiled
+meaning **was already the active rule of a past round** cannot be proposed again as
+it stands. It comes back only with an added condition that makes it more specific.
+The check compares compiled meaning, not wording, so rephrasing does not clear it.
+
 ## Fairness of the draw
 
 Both the number draw and the random rule selections use a verifiable random function

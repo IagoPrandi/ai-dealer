@@ -1,7 +1,7 @@
 # Dealer chat Q&A test set
 
 Regression corpus for the follow-up chat agent (`POST /rule-dealer/ask`,
-`tyche_rule_dealer_chat_prompt_v8`). Companion to the rule-drafting corpora in
+`tyche_rule_dealer_chat_prompt_v9`). Companion to the rule-drafting corpora in
 `rule-proposal-prompt-test-set*.md`, which exercise `/rule-preflight` instead.
 
 Model output is **not** reproducible run to run (`LLM_SEED` is ignored by `:cloud`
@@ -64,6 +64,7 @@ One question per knowledge area; each may be asked on a fresh draft.
 | `Me dá um exemplo de regra que não vale` | One of the three rejection classes, with the reason. |
 | `Como são escolhidos os finalistas?` | 3 most-voted + 7 random, 10 total, max 5 eliminated. |
 | `O sorteio é confiável?` | Verifiable randomness published on-chain; rule frozen before the draw. |
+| `dentro de uma mesma rodada, pode ser criado mais de uma regra igual?` | Duplicates **are** allowed inside a round; only a rule that already was a past round's active rule is blocked, and only until a condition is added. Must arrive as a chat answer in Portuguese — reaching the interpreter instead is the routing regression this row guards. |
 
 ## Scenario 3 — out of scope
 
@@ -110,3 +111,25 @@ The pre-`_v8` failure to watch for: turn 3 is byte-identical to turn 2.
 
 Any answer that explains eligibility with "token válido", "game token", "round
 pass", "conta on-chain" or an API name is a failure, however accurate it is.
+
+## Scenario 8 — chance of winning (motivated `_v9`)
+
+Ask these **in order against the same draft**, with no preflight diagnostics. The
+point is that the dealer must never invent a pick among the winners.
+
+| Turn | Message | Expected |
+| --- | --- | --- |
+| 1 | `qual a chance de ganhar?` | Two conditions. For the original one, "uma em 858.277.728.000" from `winningConditions.originalChanceOneIn` — never `100^6`, never "100 milhões". For the alternative one, that it depends on the elected rule. |
+| 2 | `se eu quisesse ganhar se acertasse o primeiro número do sorteio, eu poderia criar essa regra? quais seriam as minhas chances de ganhar?` | Yes, the rule is valid in shape (it uses both the guess and the draw). States that **everyone** who matches wins, and that more winners divide the alternative half into smaller equal payouts. Says the exact chance is not measured until the rule is checked, which is free. |
+| 3 | `e se 10 pessoas acertarem também?` | The prize share is divided by 10; the chance of winning is unchanged. |
+
+The pre-`_v9` failure to watch for, reported by a player: "a chance de ganhar com
+essa regra depende de quantos jogadores também acertarem o primeiro número. Se, por
+exemplo, 10 jogadores acertarem, cada um tem 1/10 de chance de ser o vencedor." The
+game has no such selection step — the answer is a fabricated lottery mechanic.
+
+Answers about a **superlative** rule ("vence quem tiver a maior soma acertada") are
+the one case where other players' guesses do decide who wins, because the rule text
+itself compares guesses. That distinction must be stated, not blurred in either
+direction.
+

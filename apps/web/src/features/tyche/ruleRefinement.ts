@@ -36,6 +36,28 @@ export interface RuleGuidanceOption {
   text: string;
 }
 
+/**
+ * Resolve what submitting the guidance card actually sends.
+ *
+ * The selected option is the source of truth, because it is what the card shows
+ * as selected. Words the player typed are only sent while no option is selected
+ * — the "write your own" state, which typing into the composer must switch to.
+ * Without that switch, a player who answers a dealer suggestion with "that
+ * explanation looks wrong" silently sends the suggested rule instead of their
+ * own words, and the chat turns into a rule submission they never wrote.
+ */
+export function resolveGuidanceSubmissionText(input: {
+  options: readonly RuleGuidanceOption[];
+  selectedIndex: number | null;
+  typedText: string;
+}) {
+  const selected =
+    input.selectedIndex === null
+      ? null
+      : (input.options[input.selectedIndex]?.text.trim() ?? null);
+  return selected || input.typedText.trim() || null;
+}
+
 export function getVisibleRuleDifficultyClass(input: {
   ast?: unknown | null;
   decision?: "INVALID" | "VALID";
@@ -220,7 +242,10 @@ const WH_OPENING_PATTERN =
  */
 function isConversationalQuestion(message: string) {
   const normalized = normalizeIntentText(message);
-  if (GAME_TOPIC_PATTERN.test(normalized) || /\?\s*$/u.test(normalized)) {
+  if (
+    GAME_TOPIC_PATTERN.test(normalized) ||
+    QUESTION_MARK_PATTERN.test(normalized)
+  ) {
     return true;
   }
   return (
@@ -407,6 +432,9 @@ const GREETING_PATTERN =
 const QUESTION_PATTERN =
   /^(how|what|why|where|when|can|could|should|do|does|is|are|como|o que|qual|quanto|quantos|quanta|quantas|por que|porque|quando|posso|pode|devo)\b/i;
 
+/** A trailing question mark: asking, not declaring a winner condition. */
+const QUESTION_MARK_PATTERN = /\?\s*$/u;
+
 const COST_TOPIC_PATTERN =
   /\b(cost|costs|price|fee|fees|payment|pay|paid|submit|submission|quanto|quantos|quanta|quantas|custa|custam|custo|preco|preço|valor|taxa|pagar|pagamento|enviar|submeter)\b/i;
 
@@ -438,10 +466,22 @@ export function isLikelyRuleDraft(text: string) {
   if (!trimmed || GREETING_PATTERN.test(trimmed)) {
     return false;
   }
-  if (isDeclarativeRuleDraft(trimmed)) {
+  // A declared winner condition is a rule however it is punctuated, and an
+  // injection attempt must reach the compiler's gates rather than the chat, so
+  // both outrank the question mark below.
+  if (
+    isDeclarativeRuleDraft(trimmed) ||
+    SECURITY_RULE_DRAFT_PATTERN.test(trimmed)
+  ) {
     return true;
   }
   if (
+    // The one marker the player controls deliberately. Without it, a question
+    // about rules as objects — "pode ser criado mais de uma regra igual?" —
+    // matched on `mais` and `igual` alone, went to the rule interpreter, and
+    // came back as an English interpretation card offering to compile the
+    // question as a rule.
+    QUESTION_MARK_PATTERN.test(trimmed) ||
     QUESTION_PATTERN.test(trimmed) ||
     COST_TOPIC_PATTERN.test(trimmed) ||
     EXAMPLE_TOPIC_PATTERN.test(trimmed) ||
@@ -454,7 +494,6 @@ export function isLikelyRuleDraft(text: string) {
   }
 
   return (
-    SECURITY_RULE_DRAFT_PATTERN.test(trimmed) ||
     (RULE_DECISION_PATTERN.test(trimmed) && RULE_DATA_PATTERN.test(trimmed)) ||
     (RULE_SHAPE_PATTERN.test(trimmed) && RULE_DATA_PATTERN.test(trimmed))
   );

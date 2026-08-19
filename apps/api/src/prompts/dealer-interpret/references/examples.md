@@ -18,9 +18,35 @@ Output:
   "clarityNote": "",
   "clarificationQuestions": [],
   "suggestedRewrites": [],
+  "dealerMessageLanguage": "English",
   "dealerMessage": "Got it - the guess matching the most drawn numbers takes the round."
 }
 ```
+
+## Portuguese rule: the card stays English, the chat message does not
+
+Input: `vence quem acertar o primeiro numero do sorteio`
+
+Output:
+
+```json
+{
+  "title": "First Drawn Number Match",
+  "normalizedText": "A guess wins when its first number equals the first number of the official draw.",
+  "officialInterpretation": "For each guess, compare its number in position 1 with the number drawn in position 1; the guess wins when they are equal.",
+  "addedOperationalClauses": [],
+  "needsClarification": false,
+  "clarityNote": "",
+  "clarificationQuestions": [],
+  "suggestedRewrites": [],
+  "dealerMessageLanguage": "Portuguese",
+  "dealerMessage": "Entendi - vence quem tiver o primeiro numero do palpite igual ao primeiro numero sorteado."
+}
+```
+
+Only `dealerMessage` follows the rule's language, because only it is shown as a
+chat message. Every other field is a compiler-facing artifact and stays English
+even here.
 
 ## Valid predicate, not ranking
 

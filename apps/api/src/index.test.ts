@@ -171,7 +171,7 @@ test("dealer question context carries server diagnostics and discloses their abs
   });
   assert.match(withoutDiagnostics, /"diagnosticsAvailable":false/u);
   assert.match(withoutDiagnostics, /"preflight":null/u);
-  assert.match(withoutDiagnostics, /"contextVersion":6/u);
+  assert.match(withoutDiagnostics, /"contextVersion":7/u);
   assert.match(
     withoutDiagnostics,
     /"playerObjective":"Win the round with the submitted six-number guess\. The player does not guess, discover, or get a rule right\."/u,
@@ -283,7 +283,10 @@ test("dealer question context sources every player-facing number from constants"
     context.split("<tyche_server_context>")[1]?.split("</")[0] ?? "{}",
   ) as {
     fees: Record<string, number>;
-    game: { prizeSplit: Record<string, unknown> };
+    game: {
+      prizeSplit: Record<string, unknown>;
+      winningConditions: Record<string, unknown>;
+    };
     limits: Record<string, unknown>;
   };
 
@@ -313,6 +316,28 @@ test("dealer question context sources every player-facing number from constants"
   assert.equal(payload.game.prizeSplit.alternativeSharePercent, 50);
   assert.equal(payload.game.prizeSplit.treasuryFeePercent, TREASURY_FEE_BPS / 100);
   assert.match(String(payload.game.prizeSplit.rollover), /rolls over/u);
+
+  // Asked "what are my chances?", the dealer invented a lottery-style pick among
+  // the matching players ("10 players match, so each has 1 in 10"). Both the
+  // many-winners fact and the real odds of the original condition travel with
+  // the request so the answer has no reason to be derived.
+  assert.match(
+    String(payload.game.prizeSplit.multipleWinners),
+    /no selection, ranking, ordering, or tiebreak among winners/u,
+  );
+  assert.match(
+    String(payload.game.prizeSplit.multipleWinners),
+    /divides that share into smaller equal payouts/u,
+  );
+  // P(100, 6): six distinct numbers in an exact order, not 100^6.
+  assert.equal(
+    payload.game.winningConditions.originalChanceOneIn,
+    858_277_728_000,
+  );
+  assert.match(
+    String(payload.game.winningConditions.originalChanceMethod),
+    /never present them as 100 to the power of 6/u,
+  );
 
   // 22.5%, not the superseded 15% still quoted in docs/product-rule-summary.md.
   assert.match(

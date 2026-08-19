@@ -1923,6 +1923,16 @@ language of their rule, their transcript, or the English compiler fields. The
 compiler and interpretation strings themselves stay in English: they are
 server-authored records of a verdict, not conversation.
 
+The one interpretation field that is conversation is `dealerMessage`, which the
+app renders as a chat bubble. It follows the language of the player's rule text,
+declared first in `dealerMessageLanguage`, while `title`, `normalizedText`,
+`officialInterpretation`, `clarityNote`, `clarificationQuestions` and
+`suggestedRewrites` stay English as compiler-facing artifacts. Server-composed
+`dealerMessage` values — reason-code rejections and clarification prompts built
+in `apps/api/src/index.ts` — are still English templates, so a rejected rule is
+explained in English even to a player writing Portuguese. Localizing those is
+open work and needs API-side message templates, not a prompt change.
+
 This endpoint is intentionally a blocking JSON request: it performs one bounded
 chat completion and does not own a multi-stage compiler job. The model request
 is aborted when the client disconnects. It cannot create a proposal, alter a
@@ -2598,10 +2608,10 @@ The prompt contract must instruct agents to compile, not judge winners.
 
 Dealer interpretation and follow-up chat use separate, versioned prompt assets:
 
-- `tyche_rule_interpret_prompt_v4` in
+- `tyche_rule_interpret_prompt_v5` in
   `apps/api/src/prompts/dealer-interpret/SKILL.md`, with detailed semantics and
   examples in its `references/` directory;
-- `tyche_rule_dealer_chat_prompt_v8` in
+- `tyche_rule_dealer_chat_prompt_v9` in
   `apps/api/src/prompts/dealer-chat/SKILL.md`, with product knowledge in its
   `references/` directory (`game-mechanics.md`, `rules-and-limits.md`,
   `economy.md`).

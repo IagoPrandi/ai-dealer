@@ -39,6 +39,7 @@ import {
   isExplicitRuleRefinementPatch,
   isLikelyRuleDraft,
   isRuleRefinementPatch,
+  resolveGuidanceSubmissionText,
   type RuleGuidanceOption,
 } from "../ruleRefinement";
 import {
@@ -1016,7 +1017,12 @@ function CreateChat({
         title: getRuleGuidanceTitle(context),
       };
       setGuidance(opened);
-      setSelectedGuidanceIndex(options.length > 0 ? 0 : null);
+      // Never preselect an option over words the player is already typing: the
+      // card can open while they answer the previous message, and a
+      // preselection would replace what they wrote on send. Read the live
+      // textarea instead of `val` so this stays free of render-order deps.
+      const typing = textareaRef.current?.value.trim() ?? "";
+      setSelectedGuidanceIndex(options.length > 0 && !typing ? 0 : null);
       return opened;
     },
     [],
@@ -1289,10 +1295,11 @@ function CreateChat({
     if (!guidance || typing) {
       return;
     }
-    const selectedText =
-      selectedGuidanceIndex === null
-        ? val.trim()
-        : guidance.options[selectedGuidanceIndex]?.text.trim();
+    const selectedText = resolveGuidanceSubmissionText({
+      options: guidance.options,
+      selectedIndex: selectedGuidanceIndex,
+      typedText: val,
+    });
     if (!selectedText) {
       textareaRef.current?.focus();
       return;
@@ -2106,7 +2113,16 @@ function CreateChat({
               aria-label="Message"
               ref={textareaRef}
               value={val}
-              onChange={(e) => setVal(e.target.value)}
+              onChange={(e) => {
+                setVal(e.target.value);
+                // Typing is choosing to write your own answer. Move the card's
+                // selection to "write your own" so the card always shows what
+                // sending will actually send, and the player's words are never
+                // swapped for the preselected suggestion.
+                if (guidance && e.target.value.trim()) {
+                  setSelectedGuidanceIndex(null);
+                }
+              }}
               rows={1}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
