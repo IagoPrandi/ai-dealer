@@ -1893,6 +1893,14 @@ and the latest persisted compiler diagnostics. Clients cannot submit or replace
 diagnostics. When no completed preflight exists, the answer must disclose that
 no compiler verdict is available rather than inventing one.
 
+The transcript travels with the roles the prompt names — `player` and `dealer`,
+not the stored `user` / `ai` — and the dealer's own last message is repeated as
+`previousDealerMessage`. Most player replies are not self-contained: a bare
+"sim" accepts whatever offer closed that message, and with the offer buried in a
+large payload the answer was re-sent verbatim. The instruction that resolves the
+continuation sits between the echoed question and the language decision, so the
+model reads what the question refers to, then which language to answer in.
+
 Every compiler reason code has one player-facing explanation covering what
 happened, why it blocks, and what must change. A successful preflight persists
 the compact reason codes, coverage gaps, summary, refinement focus, questions,
@@ -2593,7 +2601,7 @@ Dealer interpretation and follow-up chat use separate, versioned prompt assets:
 - `tyche_rule_interpret_prompt_v4` in
   `apps/api/src/prompts/dealer-interpret/SKILL.md`, with detailed semantics and
   examples in its `references/` directory;
-- `tyche_rule_dealer_chat_prompt_v7` in
+- `tyche_rule_dealer_chat_prompt_v8` in
   `apps/api/src/prompts/dealer-chat/SKILL.md`, with product knowledge in its
   `references/` directory (`game-mechanics.md`, `rules-and-limits.md`,
   `economy.md`).
@@ -2614,7 +2622,17 @@ ceiling applies only to verdict explanations), and emit plain text only: the
 chat bubbles render the answer literally, so markdown appears as raw `**` and
 `#` characters on screen. It must never restate a previous answer — when the
 player signals confusion it goes shorter and more concrete instead — and it
-declines off-topic questions, price speculation, and financial advice.
+declines off-topic questions, price speculation, and financial advice. It also
+resolves a short confirmation against the offer that closed its previous
+message, delivering that next step instead of the answer the player already
+read.
+
+Player-facing eligibility is stated in player-facing words. The right to propose
+a rule or to vote is earned by having submitted a guess in the current round;
+the prompt must say exactly that and may not reach for the implementation
+vocabulary behind it (the on-chain round pass, its account, or the word token,
+which is reserved for the Tyche reward token). Answering "you need a valid
+token" left players believing rule creation was gated on holding one.
 
 The `references/` files supply stable conceptual product knowledge (round
 phases, elimination, rule limits with worked examples, prize split and reward

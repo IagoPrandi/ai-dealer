@@ -1,7 +1,7 @@
 # Dealer chat Q&A test set
 
 Regression corpus for the follow-up chat agent (`POST /rule-dealer/ask`,
-`tyche_rule_dealer_chat_prompt_v7`). Companion to the rule-drafting corpora in
+`tyche_rule_dealer_chat_prompt_v8`). Companion to the rule-drafting corpora in
 `rule-proposal-prompt-test-set*.md`, which exercise `/rule-preflight` instead.
 
 Model output is **not** reproducible run to run (`LLM_SEED` is ignored by `:cloud`
@@ -86,3 +86,27 @@ Against a draft carrying preflight diagnostics, ask `por que minha regra foi
 rejeitada?`. The answer must quote or paraphrase **this** player's clause, name the
 single blocking reason, and stay concrete. An explanation that would read identically
 for any rejected rule is a failure. A6 still applies; A3 may be exceeded here.
+
+## Scenario 6 — continuation of the conversation (motivated `_v8`)
+
+Ask these **in order against the same draft**. The point is the bare confirmation:
+the dealer offered a next step, the player accepted it, and the pre-`_v8` answer
+re-sent the previous message word for word — twice.
+
+| Turn | Message | Expected |
+| --- | --- | --- |
+| 1 | `qualquer um pode criar essa regra alternativa?` | Yes, plus the real condition: **quem já enviou um palpite nesta rodada**. Contains no "token", "passe", "conta" or other plumbing word. Closes with one offer. |
+| 2 | `sim` | Delivers the thing offered in turn 1 (how to write and send the proposal). Shares no sentence with turn 1. |
+| 3 | `sim` | Delivers the **next** step, not turn 2 again. If turn 2 offered to show how to submit, this is the submission flow and its fee. |
+
+The pre-`_v8` failure to watch for: turn 3 is byte-identical to turn 2.
+
+## Scenario 7 — eligibility vocabulary
+
+| Message | Expected |
+| --- | --- |
+| `preciso de algo para criar uma regra?` | Having submitted a guess this round, and the proposal fee from context. |
+| `preciso ter token para criar regra?` | Corrects the premise: no reward token is required; a guess in the current round is. The word token appears only when talking about the Tyche reward token. |
+
+Any answer that explains eligibility with "token válido", "game token", "round
+pass", "conta on-chain" or an API name is a failure, however accurate it is.

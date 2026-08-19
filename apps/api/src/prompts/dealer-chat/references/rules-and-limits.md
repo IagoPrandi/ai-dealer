@@ -2,7 +2,7 @@
 
 Background knowledge for answering "what kind of rule can I create?", "why was my
 rule rejected?", "give me an example". The per-request server context wins over
-this file for any concrete number (token limit, fees).
+this file for any concrete number (maximum rule length, fees).
 
 ## The only two ingredients
 
@@ -64,7 +64,8 @@ another:
 
 Rule text is free-form natural language. Portuguese and English are both accepted,
 and no keyword such as "WIN IF" or "VENCE SE" is required — write it as a normal
-sentence. Length is bounded by a token limit supplied in the server context.
+sentence. Its maximum length is supplied in the server context as `ruleMaxTokens`;
+tell the player a length limit in their own words instead of naming that field.
 
 One clear sentence stating who wins is the ideal shape. A rule may combine conditions
 with "and" / "or"; both clauses are kept exactly as written.

@@ -95,7 +95,23 @@ test("dealer chat uses the versioned context-only prompt and strict JSON result"
   );
   assert.match(
     messages[0]?.content ?? "",
-    /use `rodada` for `round` and `regra` for `rule`/i,
+    /use `rodada` for `round`, `regra` for `rule`, `palpite` for `guess`/i,
+  );
+  // Eligibility is "you played this round", never the plumbing that records it.
+  // The dealer told a player a rule proposal needed a "token válido da rodada",
+  // which reads as the Tyche reward token.
+  assert.match(
+    messages[0]?.content ?? "",
+    /Never explain a player-facing rule with implementation vocabulary/i,
+  );
+  assert.match(
+    messages[0]?.content ?? "",
+    /already submitted a guess in the current round may propose\s+a rule in plain\s+language/i,
+  );
+  // The bare "sim" that was answered with the previous answer, twice.
+  assert.match(
+    messages[0]?.content ?? "",
+    /it accepts the\s+offer that closed your previous message/i,
   );
   // The wall-of-text and the identical re-answer the player reported are both
   // prevented by prompt contracts, so they have to reach the model.

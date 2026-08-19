@@ -816,6 +816,61 @@ test("a resume renders the transcript it was handed, not just the rule text", as
   ]);
 });
 
+test("the whole transcript is persisted before the dealer question is asked", async () => {
+  // The dealer chat context is read from the saved draft, so the save that
+  // precedes the ask is the only thing that gives the model the conversation.
+  // When it lands late or short, a reply such as "sim" arrives with no offer to
+  // continue and the dealer re-answers the previous question.
+  const draftId = "client:106:dealer-context";
+  const events: string[] = [];
+  let transcriptAtAsk: undefined | { text: string; who: string }[];
+  const history = [
+    { text: "qualquer um pode criar essa regra alternativa?", who: "user" },
+    { text: "Sim. Quer que eu explique como fazer a proposta?", who: "ai" },
+    { text: "sim", who: "user" },
+  ] as const;
+  const deps = baseDeps(
+    {
+      askDealer: async () => {
+        events.push("ask");
+        return { answer: "Escreva uma frase dizendo quem vence.", proposedRuleText: null };
+      },
+      consumePreflightJob: async () => {
+        throw new Error("preflight consumption must not run");
+      },
+      postDraft: async (_wallet, body) => {
+        events.push("save");
+        transcriptAtAsk ??= body.messages;
+        return { draft: { draftId: body.draftId ?? draftId } };
+      },
+      startPreflightJob: async () => {
+        throw new Error("preflight must not start");
+      },
+    },
+    draftId,
+  );
+
+  await startConversationRun(
+    {
+      dealerQuestion: "sim",
+      draftId,
+      initialMessages: [...history],
+      lastUserMessage: "sim",
+      localDealerReply: null,
+      phase: "interpret",
+      refinedDraft: null,
+      ruleText: "sim",
+      turnId: 106,
+      wallet: "wallet-106",
+    },
+    deps,
+  );
+
+  assert.equal(events[0], "save", "the transcript is saved before the ask");
+  assert.equal(events[1], "ask");
+  assert.deepEqual(transcriptAtAsk, [...history]);
+});
+
 test("a follow-up question uses dealer chat and never starts preflight", async () => {
   const draftId = "client:105:dealer-question";
   const calls: Array<{ draftId: string; message: string }> = [];

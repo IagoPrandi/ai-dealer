@@ -171,7 +171,7 @@ test("dealer question context carries server diagnostics and discloses their abs
   });
   assert.match(withoutDiagnostics, /"diagnosticsAvailable":false/u);
   assert.match(withoutDiagnostics, /"preflight":null/u);
-  assert.match(withoutDiagnostics, /"contextVersion":5/u);
+  assert.match(withoutDiagnostics, /"contextVersion":6/u);
   assert.match(
     withoutDiagnostics,
     /"playerObjective":"Win the round with the submitted six-number guess\. The player does not guess, discover, or get a rule right\."/u,
@@ -4088,6 +4088,117 @@ test("conversation drafts paginate newest-first without crossing wallets", () =>
   assert.equal(secondPage.drafts.length, 2);
   assert.equal(secondPage.nextCursor, null);
   assert.equal(secondPage.drafts[1]?.prompt, "Rule 0");
+});
+
+test("the dealer chat context carries the conversation so a bare confirmation continues it", () => {
+  // "sim" answered the offer that closed the previous answer, but the transcript
+  // travelled as `user`/`ai` entries buried in a large payload and the model
+  // re-sent its previous answer word for word, twice. The dealer's last message
+  // is lifted out, the roles are named the way the prompt names them, and the
+  // continuation instruction sits next to the echoed question.
+  const context = buildDealerQuestionContext({
+    draft: {
+      createdAt: "2026-08-19T12:00:00.000Z",
+      draftId: "client:61:continuation",
+      lastMessage: "sim",
+      messages: [
+        { text: "qualquer um pode criar essa regra alternativa?", who: "user" },
+        {
+          text: "Sim. Quer que eu explique como fazer a proposta?",
+          who: "ai",
+        },
+        { text: "sim", who: "user" },
+      ],
+      normalizedText: null,
+      officialInterpretation: null,
+      prompt: "qualquer um pode criar essa regra alternativa?",
+      ruleId: null,
+      status: "draft",
+      tokenCount: 7,
+      turnId: 61,
+      updatedAt: "2026-08-19T12:00:00.000Z",
+      wallet,
+    },
+    message: "sim",
+  });
+  const payload = JSON.parse(
+    context.split("<tyche_server_context>")[1]?.split("</")[0] ?? "{}",
+  ) as {
+    game: { participation: string };
+    previousDealerMessage: null | string;
+    transcript: { text: string; who: string }[];
+  };
+
+  assert.deepEqual(
+    payload.transcript.map((entry) => entry.who),
+    ["player", "dealer", "player"],
+    "the transcript uses the roles the prompt talks about",
+  );
+  assert.equal(
+    payload.previousDealerMessage,
+    "Sim. Quer que eu explique como fazer a proposta?",
+  );
+  // Eligibility is having played the round. The reference file used to call the
+  // on-chain round pass a "valid game token", and the dealer told players that
+  // creating a rule required holding a token.
+  assert.match(
+    payload.game.participation,
+    /already submitted a guess in the current round/u,
+  );
+  assert.match(payload.game.participation, /Never describe this eligibility/u);
+
+  // Positional, for the same reason as the question echo: inside the fenced JSON
+  // alone the offer was missed and the previous answer came back verbatim.
+  const previousAt = context.indexOf("<tyche_previous_dealer_message>");
+  const questionAt = context.indexOf("<tyche_player_question>");
+  const continuationAt = context.indexOf("That question replies to");
+  const languageAt = context.indexOf("Decide the answer language now");
+  assert.ok(
+    previousAt > context.indexOf("</tyche_server_context>"),
+    "the dealer's previous message is echoed after the fenced context",
+  );
+  assert.ok(previousAt < questionAt, "the question stays the last echoed text");
+  assert.ok(
+    continuationAt > questionAt && continuationAt < languageAt,
+    "the continuation rule follows the question and precedes the language decision",
+  );
+  assert.match(
+    context,
+    /must not restate <tyche_previous_dealer_message>/u,
+  );
+  // Without a named next topic the following "sim" has no referent, which is how
+  // the improvised, drifting answers appeared.
+  assert.match(
+    context,
+    /End `answer` with one short question offering the next topic by name/u,
+  );
+});
+
+test("a conversation with no dealer turn yet reports no previous dealer message", () => {
+  const context = buildDealerQuestionContext({
+    draft: {
+      createdAt: "2026-08-19T12:00:00.000Z",
+      draftId: "client:61:first-turn",
+      lastMessage: "como funciona?",
+      messages: [{ text: "como funciona?", who: "user" }],
+      normalizedText: null,
+      officialInterpretation: null,
+      prompt: "como funciona?",
+      ruleId: null,
+      status: "draft",
+      tokenCount: 3,
+      turnId: 61,
+      updatedAt: "2026-08-19T12:00:00.000Z",
+      wallet,
+    },
+    message: "como funciona?",
+  });
+
+  assert.match(context, /"previousDealerMessage":null/u);
+  // Nothing to continue on the first turn, so neither the echo nor the
+  // continuation instruction may appear and invent a message.
+  assert.ok(!context.includes("<tyche_previous_dealer_message>"));
+  assert.ok(!context.includes("That question replies to"));
 });
 
 test("the dealer chat context decides the answer language last, from the question alone", () => {

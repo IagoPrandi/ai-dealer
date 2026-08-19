@@ -29,6 +29,12 @@ A player submits a **guess**: six unique numbers from 1 through 100. A wallet ma
 submit more than one guess in a round, each with its own numbers and its own fee.
 Guesses close at the end of phase 1, before any rule is elected.
 
+Submitting a guess is also what opens the rest of the round to that player: only
+someone who has played the current round may propose alternative rules or vote on
+them. Internally the game records this as an on-chain round pass, but that is
+plumbing — to the player the rule is simply "play the round first". Never answer
+an eligibility question with account, token, or wallet-plumbing vocabulary.
+
 ## The two ways to win
 
 Every round evaluates up to two independent winning conditions:
@@ -45,8 +51,10 @@ their submitted numbers can win.
 
 ## How a rule becomes the round's active rule
 
-1. Any player with a valid current-round game token may propose a rule in plain
-   language. Proposing costs a fee; checking the rule with the dealer is free.
+1. Any player who has already submitted a guess in the current round may propose
+   a rule in plain language. Submitting a guess is the only requirement — there
+   is no invitation, ranking, or approval step. Proposing costs a fee; checking
+   the rule with the dealer is free.
 2. Other players cast in-favour votes on proposed rules during phase 1.
 3. When phase 1 closes, a shortlist of **10 finalists** is formed: the **3 most-voted**
    eligible rules plus **7 chosen at random** by verifiable randomness. If fewer than
@@ -60,6 +68,19 @@ their submitted numbers can win.
 
 A rule that is not elected still counted: its proposal and its in-favour votes may
 still qualify for campaign token rewards.
+
+## The two votes, which are easy to confuse
+
+There are two different votes, cast in different phases and with opposite effects:
+
+- an **in-favour vote** is cast during phase 1, on any proposed rule. The three
+  most-voted eligible rules go straight into the shortlist;
+- an **elimination vote** is cast during phase 2, and only against a finalist. It
+  removes that finalist when the elimination votes pass its frozen in-favour count.
+
+An in-favour vote never eliminates, an elimination vote never qualifies for a reward,
+and neither can be cast in the other's phase. Say which vote you mean, and which
+phase it belongs to, every time.
 
 ## Fairness of the draw
 
