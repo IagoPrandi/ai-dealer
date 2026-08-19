@@ -126,6 +126,97 @@ test("does not treat help or cost questions as rule refinements", () => {
   assert.equal(isRuleRefinementPatch("how much does it cost?", context), false);
 });
 
+test("a question about the game is answered, never welded onto the draft", () => {
+  // Regression: with a rule on screen, any message of 8 words or fewer counted
+  // as a patch, so a plain question was appended to the rule text and sent to
+  // the compiler instead of being answered. Both an open clarification and a
+  // valid base have to route these to the dealer.
+  for (const context of [
+    { baseCanBeClarified: true, currentRuleText: "Win if the sums are equal." },
+    { baseWasValid: true, currentRuleText: "Win if the sums are equal." },
+  ]) {
+    for (const question of [
+      "como que joga",
+      "how are the prizes divided between winners?",
+      "quando comeca a votacao",
+      "what happens in the elimination phase",
+      "como funciona a premiacao",
+      "quem recebe a recompensa do criador",
+    ]) {
+      assert.equal(
+        isRuleRefinementPatch(question, context),
+        false,
+        `${question} must reach the dealer`,
+      );
+    }
+  }
+});
+
+test("an answer that opens with a wh-word is still merged into the draft", () => {
+  // The dealer asked and the player answered: that answer belongs in the rule,
+  // even though Portuguese (and English) routinely open such a clause with a
+  // wh-word. What separates it from a question is the rule vocabulary it
+  // carries, so diverting on the wh-word alone stole legitimate answers.
+  const awaitingAnswer = {
+    baseCanBeClarified: true,
+    currentRuleText: "Win if my numbers are 1 2 3 4.",
+    refinementQuestions: [
+      "What condition should apply to the remaining two guessed numbers?",
+    ],
+  };
+  const validBase = {
+    baseWasValid: true,
+    currentRuleText: "Win if the sum is exactly 300.",
+  };
+
+  for (const context of [awaitingAnswer, validBase]) {
+    for (const answer of [
+      "o que importa e a soma",
+      "quando a soma passar de 300 tambem vale",
+      "what matters is the sum",
+      "qual numero sortear nao importa",
+    ]) {
+      assert.equal(
+        isRuleRefinementPatch(answer, context),
+        true,
+        `${answer} must stay a patch`,
+      );
+    }
+  }
+
+  // The question mark is the marker that flips the same shape back to a question.
+  assert.equal(
+    isRuleRefinementPatch("quantos numeros precisam bater?", awaitingAnswer),
+    false,
+  );
+});
+
+test("a clarification answer that opens with an auxiliary is still a patch", () => {
+  // The guard above must not swallow these: they answer the dealer's question
+  // rather than asking one, and routing them to chat gets them judged as if
+  // they were standalone rules.
+  const context = {
+    baseCanBeClarified: true,
+    currentRuleText: "Win if my numbers are 1 2 3 4.",
+    refinementQuestions: ["Should order be ignored completely?"],
+  };
+
+  for (const answer of [
+    "can be any order",
+    "does not matter",
+    "is enough",
+    "are ignored",
+    "posso usar qualquer ordem",
+    "pode ser em qualquer ordem",
+  ]) {
+    assert.equal(
+      isRuleRefinementPatch(answer, context),
+      true,
+      `${answer} must stay a patch`,
+    );
+  }
+});
+
 test("treats sequence reverse threshold as a patch to the previous valid rule", () => {
   const context = {
     baseWasValid: true,

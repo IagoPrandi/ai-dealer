@@ -190,6 +190,44 @@ export function isRuleCreationHelpRequest(message: string) {
   );
 }
 
+/**
+ * Interrogative openings. Deliberately narrower than `QUESTION_PATTERN`, which
+ * serves a different decision: the auxiliaries it also lists (can/could/should/
+ * do/does/is/are/posso/pode/devo) open clarification ANSWERS as often as
+ * questions ("can be any order", "pode ser em qualquer ordem"), so they must
+ * never divert a message away from the draft.
+ */
+const WH_OPENING_PATTERN =
+  /^(how|what|why|which|who|where|when|como|o que|qual|quais|quanto|quantos|quanta|quantas|por que|porque|para que|pra que|quando|onde)\b/iu;
+
+/**
+ * A question about the game is never a patch for the rule draft: appending it
+ * asks the compiler to read "how are the prizes divided?" as part of the winner
+ * condition. Three signals, in falling order of certainty:
+ *
+ * 1. Product vocabulary (`GAME_TOPIC_PATTERN`: prizes, rewards, voting, phases).
+ *    Safe on its own because a rule may not reference any of it.
+ * 2. A literal question mark — the one unambiguous marker the player controls.
+ * 3. A wh-opening AND no rule vocabulary. The second half carries the weight: in
+ *    Portuguese especially, wh-words open declarative clauses just as readily as
+ *    questions ("o que importa e a soma", "quando a soma passar de 300 tambem
+ *    vale"), and those are answers that belong in the draft. With no rule
+ *    vocabulary at all there is nothing to append anyway.
+ *
+ * A wh-question that does carry rule vocabulary and no question mark ("what
+ * happens when two guesses tie") stays a patch. That reading is genuinely
+ * ambiguous mid-clarification, and a question mark resolves it.
+ */
+function isConversationalQuestion(message: string) {
+  const normalized = normalizeIntentText(message);
+  if (GAME_TOPIC_PATTERN.test(normalized) || /\?\s*$/u.test(normalized)) {
+    return true;
+  }
+  return (
+    WH_OPENING_PATTERN.test(normalized) && !RULE_DATA_PATTERN.test(normalized)
+  );
+}
+
 export function isRuleRefinementPatch(
   message: string,
   context: RuleRefinementContext,
@@ -200,6 +238,7 @@ export function isRuleRefinementPatch(
     !base ||
     !trimmed ||
     CHAT_TOPIC_PATTERN.test(trimmed) ||
+    isConversationalQuestion(trimmed) ||
     isNewRuleIntent(trimmed) ||
     isRuleCreationHelpRequest(trimmed)
   ) {

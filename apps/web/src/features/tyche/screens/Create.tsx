@@ -1425,12 +1425,19 @@ function CreateChat({
 
   // Auto-send the seed coming from the home prompt (once).
   useEffect(() => {
-    if (seed && !chatId && !autoSentRef.current) {
-      autoSentRef.current = true;
-      const id = window.setTimeout(() => void send(seed), 350);
-      return () => window.clearTimeout(id);
+    if (!seed || chatId || autoSentRef.current) {
+      return undefined;
     }
-    return undefined;
+    const id = window.setTimeout(() => {
+      // The one-shot is claimed when the send actually happens, never when it is
+      // merely scheduled. Claiming it up front loses the prompt entirely on any
+      // remount that cancels the timer first - which React's development
+      // double-invoke does on every mount, so a prompt typed on Home silently
+      // arrived as an unsent draft in the composer.
+      autoSentRef.current = true;
+      void send(seed);
+    }, 350);
+    return () => window.clearTimeout(id);
   }, []);
 
   async function submit() {
