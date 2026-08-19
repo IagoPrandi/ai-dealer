@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   ApiRequestError,
+  askDealer,
   consumeRulePreflightJob,
   rulePreflightJobEventsPath,
   SseStreamExpiredError,
@@ -203,4 +204,62 @@ test("aborting a preflight stream cancels its active reader", async () => {
     (error: unknown) => error instanceof Error && error.name === "AbortError",
   );
   assert.equal(readerCancelled, true);
+});
+
+test("a dealer question reports answer text as it streams, then the final object", async () => {
+  const deltas: string[] = [];
+  let sentHeaders: HeadersInit | undefined;
+  const fetchImpl = (async (_input: string, init?: RequestInit) => {
+    sentHeaders = init?.headers;
+    return sseResponse([
+      "event: delta\ndata: {\"text\":\"Ties split \"}\n\n",
+      // One frame split across two network chunks: the parser must not emit it
+      // twice or drop the tail.
+      "event: delta\ndata: {\"text\":\"the pool",
+      " equally.\"}\n\nevent: answer\ndata: {\"answer\":\"Ties split the pool equally.\",\"proposedRuleText\":null}\n\n",
+    ]);
+  }) as unknown as typeof fetch;
+
+  const answer = await askDealer({
+    draftId: "client:7:abc",
+    fetchImpl,
+    message: "what happens on a tie?",
+    onDelta: (chunk) => deltas.push(chunk),
+  });
+
+  assert.deepEqual(deltas, ["Ties split ", "the pool equally."]);
+  assert.equal(answer.answer, "Ties split the pool equally.");
+  assert.equal(
+    (sentHeaders as Record<string, string>).accept,
+    "text/event-stream",
+  );
+});
+
+test("a dealer answer that fails mid-stream keeps the status the JSON transport would use", async () => {
+  const fetchImpl = (async () =>
+    sseResponse([
+      "event: delta\ndata: {\"text\":\"Half an ans\"}\n\n",
+      "event: error\ndata: {\"error\":\"rule_agent_unavailable\",\"message\":\"The dealer engine is offline.\",\"status\":503}\n\n",
+    ])) as unknown as typeof fetch;
+
+  const failure = await assert.rejects(
+    askDealer({
+      draftId: "client:7:abc",
+      fetchImpl,
+      message: "explain the draw",
+    }),
+    ApiRequestError,
+  );
+  void failure;
+});
+
+test("a dealer answer stream that ends without a terminal frame is an error", async () => {
+  // Silence here would look like an empty answer from the dealer.
+  const fetchImpl = (async () =>
+    sseResponse(["event: delta\ndata: {\"text\":\"Half an ans\"}\n\n"])) as unknown as typeof fetch;
+
+  await assert.rejects(
+    askDealer({ draftId: "client:7:abc", fetchImpl, message: "hi" }),
+    /ended before the dealer answer was complete/,
+  );
 });

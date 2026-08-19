@@ -69,6 +69,14 @@ import {
   matchesPreflightJobScope,
   readPersistedPreflightJob,
 } from "../preflightJobStore";
+import {
+  buildStreamPlan,
+  StreamLiveDot,
+  StreamText,
+  useStreamReveal,
+  type StreamBlock,
+  type StreamPlan,
+} from "../streamReveal";
 import { Dealer, Ico, SectionLabel, useCountdownTo } from "../shared";
 
 interface ChatMessage {
@@ -135,8 +143,17 @@ const DIFFICULTY_TAG: Record<string, { color: string; label: string }> = {
   TOO_EASY: { color: "var(--yellow)", label: "Too easy" },
 };
 
-function RulePreview({ rule }: { rule: RulePreflightResult }) {
+function RulePreview({
+  rule,
+  stream,
+}: {
+  rule: RulePreflightResult;
+  /** Non-null while this card is being typewriter-revealed (style 1a). */
+  stream: null | StreamBlock;
+}) {
   const valid = rule.decision === "VALID" && !rule.needsClarification;
+  // Stream segment order must match ruleStreamSegments in streamReveal.tsx.
+  const officialSeg = rule.normalizedText ? 1 : 0;
   const terminalRejection = rule.semanticImpact?.triviallyAlwaysTrue ?? false;
   // A valid rule states itself: no badge. Anything short of valid keeps its
   // status visible so a rejection is never silently dressed up as accepted.
@@ -227,12 +244,15 @@ function RulePreview({ rule }: { rule: RulePreflightResult }) {
             margin: "0 0 14px",
           }}
         >
-          {rule.normalizedText}
+          <StreamText block={stream} seg={0} text={rule.normalizedText} />
         </p>
       ) : null}
       {rule.officialInterpretation ? (
         <>
-          <SectionLabel>How it works</SectionLabel>
+          <SectionLabel>
+            <StreamLiveDot block={stream} />
+            How it works
+          </SectionLabel>
           <p
             style={{
               color: "var(--ink-body)",
@@ -241,11 +261,15 @@ function RulePreview({ rule }: { rule: RulePreflightResult }) {
               margin: "7px 0 0",
             }}
           >
-            {rule.officialInterpretation}
+            <StreamText
+              block={stream}
+              seg={officialSeg}
+              text={rule.officialInterpretation}
+            />
           </p>
         </>
       ) : null}
-      {!valid && rule.reasonSummary ? (
+      {stream === null && !valid && rule.reasonSummary ? (
         <p
           style={{
             margin: "12px 0 0",
@@ -262,7 +286,7 @@ function RulePreview({ rule }: { rule: RulePreflightResult }) {
           {rule.reasonSummary}
         </p>
       ) : null}
-      {!valid && rule.refinementFocus?.length ? (
+      {stream === null && !valid && rule.refinementFocus?.length ? (
         <div style={{ display: "grid", gap: 6, marginTop: 12 }}>
           <SectionLabel>What to adjust</SectionLabel>
           {rule.refinementFocus.map((item) => (
@@ -280,7 +304,7 @@ function RulePreview({ rule }: { rule: RulePreflightResult }) {
           ))}
         </div>
       ) : null}
-      {rule.reproposalBlocked ? (
+      {stream === null && rule.reproposalBlocked ? (
         <p
           style={{
             margin: "12px 0 0",
@@ -367,6 +391,7 @@ function ClarificationPrompt({
   options,
   questions,
   selectedIndex,
+  stream,
   terminalRejection,
   title,
 }: {
@@ -379,6 +404,8 @@ function ClarificationPrompt({
   options: readonly RuleGuidanceOption[];
   questions: readonly string[];
   selectedIndex: number | null;
+  /** Non-null while this card is being typewriter-revealed (style 1a). */
+  stream: null | StreamBlock;
   terminalRejection: boolean;
   title: string;
 }) {
@@ -400,18 +427,20 @@ function ClarificationPrompt({
             aria-label="Clarification questions"
             className="ide-clarification-questions"
           >
-            <SectionLabel>Questions to answer</SectionLabel>
-            {questions.map((question) => (
-              <div
-                key={question}
-                className="ide-clarification-question"
-              >
-                {question}
+            <SectionLabel>
+              <StreamLiveDot block={stream} />
+              Questions to answer
+            </SectionLabel>
+            {questions.map((question, index) => (
+              <div key={question} className="ide-clarification-question">
+                <StreamText block={stream} seg={index} text={question} />
               </div>
             ))}
           </div>
         ) : null}
       </div>
+      {stream !== null ? null : (
+      <>
       <div className="ide-clarification-options">
         {options.map((option, index) => {
           const selected = selectedIndex === index;
@@ -480,6 +509,8 @@ function ClarificationPrompt({
           />
         </button>
       </div>
+      </>
+      )}
     </div>
   );
 }
@@ -488,10 +519,13 @@ function InterpretationConfirmation({
   interpretation,
   onConfirm,
   onEdit,
+  stream,
 }: {
   interpretation: RuleInterpretationApiResult;
   onConfirm: () => void;
   onEdit: () => void;
+  /** Non-null while this card is being typewriter-revealed (style 1a). */
+  stream: null | StreamBlock;
 }) {
   return (
     <div
@@ -504,7 +538,10 @@ function InterpretationConfirmation({
       }}
     >
       <div>
-        <SectionLabel>My interpretation</SectionLabel>
+        <SectionLabel>
+          <StreamLiveDot block={stream} />
+          My interpretation
+        </SectionLabel>
         <h2
           style={{
             fontFamily: "Bevan, serif",
@@ -528,7 +565,11 @@ function InterpretationConfirmation({
             margin: 0,
           }}
         >
-          {interpretation.normalizedText}
+          <StreamText
+            block={stream}
+            seg={0}
+            text={interpretation.normalizedText}
+          />
         </p>
       </div>
       <p
@@ -539,48 +580,57 @@ function InterpretationConfirmation({
           margin: 0,
         }}
       >
-        {interpretation.officialInterpretation}
+        <StreamText
+          block={stream}
+          seg={1}
+          text={interpretation.officialInterpretation}
+        />
       </p>
-      <p
-        style={{
-          color: "var(--dim)",
-          fontSize: 13,
-          lineHeight: 1.45,
-          margin: 0,
-        }}
-      >
-        Confirm this interpretation and I will generate the executable rule.
-      </p>
-      <div style={{ display: "flex", gap: 8 }}>
-        <button
-          className="ide-btn-ghost ide-btn"
-          onClick={onEdit}
-          style={{
-            flex: 1,
-            fontSize: 14,
-            lineHeight: 1.2,
-            minHeight: 44,
-            padding: "9px 10px",
-          }}
-          type="button"
-        >
-          Edit wording
-        </button>
-        <button
-          className="ide-btn"
-          onClick={onConfirm}
-          style={{
-            flex: 1,
-            fontSize: 14,
-            lineHeight: 1.2,
-            minHeight: 44,
-            padding: "9px 10px",
-          }}
-          type="button"
-        >
-          Confirm and generate
-        </button>
-      </div>
+      {stream !== null ? null : (
+        <>
+          <p
+            style={{
+              color: "var(--dim)",
+              fontSize: 13,
+              lineHeight: 1.45,
+              margin: 0,
+            }}
+          >
+            Confirm this interpretation and I will generate the executable
+            rule.
+          </p>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              className="ide-btn-ghost ide-btn"
+              onClick={onEdit}
+              style={{
+                flex: 1,
+                fontSize: 14,
+                lineHeight: 1.2,
+                minHeight: 44,
+                padding: "9px 10px",
+              }}
+              type="button"
+            >
+              Edit wording
+            </button>
+            <button
+              className="ide-btn"
+              onClick={onConfirm}
+              style={{
+                flex: 1,
+                fontSize: 14,
+                lineHeight: 1.2,
+                minHeight: 44,
+                padding: "9px 10px",
+              }}
+              type="button"
+            >
+              Confirm and generate
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -826,6 +876,27 @@ function CreateChat({
     useState<ConversationRunSnapshot["connection"]>("closed");
   const [runJob, setRunJob] = useState<ConversationRunJob | null>(null);
   const [resuming, setResuming] = useState(false);
+  // True while the dealer's answer is still arriving token by token.
+  const [streaming, setStreaming] = useState(false);
+  // The typewriter plan for the response being revealed (style 1a). Only a run
+  // this screen watched creates one, so reopened history renders complete
+  // without re-animating. The reveal cursor lives in useStreamReveal; the text
+  // itself stays in the conversation run store.
+  const [streamPlan, setStreamPlan] = useState<null | StreamPlan>(null);
+  const reveal = useStreamReveal(streamPlan);
+  const prevRunRef = useRef<{
+    interpretation: RuleInterpretationApiResult | null;
+    rule: RulePreflightResult | null;
+    status: ConversationRunSnapshot["status"];
+  }>({ interpretation: null, rule: null, status: "done" });
+  // Messages already on screen when the current run started: everything from
+  // here up is what this response added, and only that animates.
+  const baselineRef = useRef(0);
+  // Distinguishes two runs that start from the same transcript ("Run again"),
+  // which would otherwise share a plan id and skip the second animation.
+  const runSeqRef = useRef(0);
+  // Auto-scroll follows the caret only while the player has not scrolled away.
+  const userScrolledRef = useRef(false);
   // The turn countdown the rest of the app shows: the chat is a game surface
   // too, and the player needs to know how long this round still runs.
   const [turnH, turnM, turnS] = useCountdownTo(endSeconds);
@@ -862,6 +933,34 @@ function CreateChat({
     }
   }, [msgs, typing, progress, interpretation, rule, guidance]);
 
+  // The user cancels the stream's auto-scroll by scrolling up; returning to the
+  // bottom re-engages it. Programmatic scrolls land at the bottom, so they
+  // never trip the flag themselves.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) {
+      return undefined;
+    }
+    const onScroll = () => {
+      userScrolledRef.current =
+        el.scrollHeight - el.scrollTop - el.clientHeight > 48;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // Follow the caret: every revealed character pins the scroll to the bottom
+  // (streaming-typewriter.html drain loop), unless the player scrolled away.
+  useEffect(() => {
+    if (reveal.settled || userScrolledRef.current) {
+      return;
+    }
+    const el = scrollRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [reveal.settled, reveal.tick]);
+
   useEffect(() => {
     if (!guidance) {
       return undefined;
@@ -893,7 +992,9 @@ function CreateChat({
   }, [guidance]);
 
   const openGuidance = useCallback(
-    (context: Parameters<typeof buildRuleGuidanceOptions>[0]) => {
+    (
+      context: Parameters<typeof buildRuleGuidanceOptions>[0],
+    ): null | RuleGuidanceState => {
       const options = buildRuleGuidanceOptions(context);
       const questions = context.refinementQuestions ?? [];
       const terminalRejection = Boolean(context.triviallyAlwaysTrue);
@@ -906,21 +1007,37 @@ function CreateChat({
         // empty "Clarify" panel adds a disabled Submit button and falsely tells
         // the player that an answer is missing when the API identified none.
         setGuidance(null);
-        return;
+        return null;
       }
-      setGuidance({
+      const opened: RuleGuidanceState = {
         options,
         questions,
         terminalRejection,
         title: getRuleGuidanceTitle(context),
-      });
+      };
+      setGuidance(opened);
       setSelectedGuidanceIndex(options.length > 0 ? 0 : null);
+      return opened;
     },
     [],
   );
 
   const applyRunSnapshot = useCallback(
     (snapshot: ConversationRunSnapshot) => {
+      const prev = prevRunRef.current;
+      prevRunRef.current = {
+        interpretation: snapshot.interpretation,
+        rule: snapshot.rule,
+        status: snapshot.status,
+      };
+      if (snapshot.status === "pending" && prev.status !== "pending") {
+        // A run starts here: freeze what counts as "already on screen".
+        baselineRef.current = snapshot.messages.length;
+        runSeqRef.current += 1;
+        setStreamPlan(null);
+      }
+      const planId = `${snapshot.draftId}:${runSeqRef.current}`;
+      setStreaming(snapshot.streaming === true);
       setMsgs(snapshot.messages);
       setTyping(snapshot.status === "pending");
       setProgress(snapshot.progress);
@@ -932,59 +1049,100 @@ function CreateChat({
       setRunJob(snapshot.job);
       if (snapshot.status === "pending") {
         setGuidance(null);
+        // A streaming answer animates while it arrives: the plan carries the
+        // growing message as a live block and keeps the same id, so the reveal
+        // continues instead of restarting on every delta.
+        if (snapshot.streaming) {
+          setStreamPlan(
+            buildStreamPlan({
+              baselineMessageCount: baselineRef.current,
+              guidanceQuestions: null,
+              interpretation: null,
+              interpretationIsNew: false,
+              messages: snapshot.messages,
+              planId,
+              rule: null,
+              ruleIsNew: false,
+              streaming: true,
+            }),
+          );
+        }
         return;
       }
       if (snapshot.status === "disconnected" || snapshot.status === "expired") {
         // An interrupted run is not a verdict on the rule: never open guidance.
+        setStreamPlan(null);
         setResuming(false);
         setGuidance(null);
         return;
       }
+
+      let openedGuidance: null | RuleGuidanceState = null;
       if (snapshot.guidanceContext) {
-        openGuidance(snapshot.guidanceContext);
-        return;
-      }
-      if (snapshot.interpretation) {
-        if (!snapshot.interpretation.needsClarification) {
+        openedGuidance = openGuidance(snapshot.guidanceContext);
+      } else if (snapshot.interpretation) {
+        if (snapshot.interpretation.needsClarification) {
+          clarificationAttemptsRef.current += 1;
+          openedGuidance = openGuidance({
+            clarityNote: snapshot.interpretation.clarityNote,
+            currentRuleText: snapshot.interpretation.sanitizedText,
+            needsClarification: true,
+            refinementQuestions: snapshot.interpretation.clarificationQuestions,
+            suggestedRewrites: snapshot.interpretation.suggestedRewrites,
+          });
+        } else {
           setGuidance(null);
-          return;
         }
-        clarificationAttemptsRef.current += 1;
-        openGuidance({
-          clarityNote: snapshot.interpretation.clarityNote,
-          currentRuleText: snapshot.interpretation.sanitizedText,
-          needsClarification: true,
-          refinementQuestions: snapshot.interpretation.clarificationQuestions,
-          suggestedRewrites: snapshot.interpretation.suggestedRewrites,
-        });
-        return;
-      }
-      if (!snapshot.rule) {
+      } else if (snapshot.rule) {
+        const valid =
+          snapshot.rule.decision === "VALID" &&
+          !snapshot.rule.needsClarification;
+        if (valid) {
+          clarificationAttemptsRef.current = 0;
+          setGuidance(null);
+        } else {
+          clarificationAttemptsRef.current += 1;
+          openedGuidance = openGuidance({
+            clarityNote: snapshot.rule.clarityNote,
+            confirmationRequired: snapshot.rule.confirmationRequired,
+            currentRuleText: snapshot.rule.sanitizedText,
+            needsClarification: snapshot.rule.needsClarification,
+            reasonSummary: snapshot.rule.reasonSummary ?? null,
+            refinementQuestions: snapshot.rule.refinementQuestions ?? null,
+            reproposalBlocked: snapshot.rule.reproposalBlocked ?? false,
+            sanitizedText: snapshot.rule.sanitizedText,
+            suggestedRewrite: snapshot.rule.suggestedRewrite ?? null,
+            suggestedRewrites: snapshot.rule.suggestedRewrites ?? null,
+            triviallyAlwaysTrue:
+              snapshot.rule.semanticImpact?.triviallyAlwaysTrue ?? false,
+          });
+        }
+      } else {
         setGuidance(null);
-        return;
       }
-      const valid =
-        snapshot.rule.decision === "VALID" && !snapshot.rule.needsClarification;
-      if (valid) {
-        clarificationAttemptsRef.current = 0;
-        setGuidance(null);
-        return;
+
+      // Only a response the player watched finish gets the typewriter: a
+      // pending -> done transition. Errors and reopened history render at once.
+      // The plan id matches the streaming one, so an answer that was already
+      // being typed keeps its cursor and simply stops being live.
+      if (snapshot.status === "done" && prev.status === "pending") {
+        setStreamPlan(
+          buildStreamPlan({
+            baselineMessageCount: baselineRef.current,
+            guidanceQuestions: openedGuidance ? openedGuidance.questions : null,
+            interpretation: snapshot.interpretation,
+            interpretationIsNew:
+              snapshot.interpretation !== prev.interpretation,
+            messages: snapshot.messages,
+            planId,
+            rule: snapshot.rule,
+            ruleIsNew: snapshot.rule !== prev.rule,
+            streaming: false,
+          }),
+        );
+      } else {
+        setStreamPlan(null);
       }
-      clarificationAttemptsRef.current += 1;
-      openGuidance({
-        clarityNote: snapshot.rule.clarityNote,
-        confirmationRequired: snapshot.rule.confirmationRequired,
-        currentRuleText: snapshot.rule.sanitizedText,
-        needsClarification: snapshot.rule.needsClarification,
-        reasonSummary: snapshot.rule.reasonSummary ?? null,
-        refinementQuestions: snapshot.rule.refinementQuestions ?? null,
-        reproposalBlocked: snapshot.rule.reproposalBlocked ?? false,
-        sanitizedText: snapshot.rule.sanitizedText,
-        suggestedRewrite: snapshot.rule.suggestedRewrite ?? null,
-        suggestedRewrites: snapshot.rule.suggestedRewrites ?? null,
-        triviallyAlwaysTrue:
-          snapshot.rule.semanticImpact?.triviallyAlwaysTrue ?? false,
-      });
     },
     [openGuidance],
   );
@@ -1449,6 +1607,10 @@ function CreateChat({
     setConnection("closed");
     setRunJob(null);
     setResuming(false);
+    setStreamPlan(null);
+    setStreaming(false);
+    prevRunRef.current = { interpretation: null, rule: null, status: "done" };
+    baselineRef.current = 1;
     setMsgs([{ text: message, who: "ai" }]);
   }
 
@@ -1638,19 +1800,35 @@ function CreateChat({
           gap: 12,
         }}
       >
-        {msgs.map((mm, i) => (
-          <div
-            key={i}
-            className={mm.who === "ai" ? "ide-bubble-ai" : "ide-bubble-user"}
-            ref={
-              mm.who === "ai" && i === msgs.length - 1 ? lastAnswerRef : null
-            }
-            style={{ animation: "ide-rise .3s ease both" }}
-          >
-            {mm.text}
-          </div>
-        ))}
-        {typing ? (
+        {msgs.map((mm, i) => {
+          if (mm.who !== "ai") {
+            return (
+              <div
+                key={i}
+                className="ide-bubble-user"
+                style={{ animation: "ide-rise .3s ease both" }}
+              >
+                {mm.text}
+              </div>
+            );
+          }
+          // Style 1a: a dealer bubble streams in DM Mono and only enters the
+          // screen when its first character is written.
+          if (!reveal.isBlockVisible(`msg:${i}`)) {
+            return null;
+          }
+          return (
+            <div
+              key={i}
+              className="ide-bubble-ai"
+              ref={i === msgs.length - 1 ? lastAnswerRef : null}
+              style={{ animation: "ide-rise .3s ease both" }}
+            >
+              <StreamText block={reveal.blockFor(`msg:${i}`)} text={mm.text} />
+            </div>
+          );
+        })}
+        {typing && !streaming ? (
           <AgentProgress connection={connection} progress={progress} />
         ) : null}
         {!typing &&
@@ -1662,17 +1840,23 @@ function CreateChat({
           />
         ) : null}
 
-        {interpretation && !interpretation.needsClarification && !typing ? (
+        {interpretation &&
+        !interpretation.needsClarification &&
+        !typing &&
+        reveal.isBlockVisible("interpretation") ? (
           <InterpretationConfirmation
             interpretation={interpretation}
             onConfirm={confirmInterpretation}
             onEdit={editInterpretation}
+            stream={reveal.blockFor("interpretation")}
           />
         ) : null}
 
-        {rule && !typing ? <RulePreview rule={rule} /> : null}
+        {rule && !typing && reveal.isBlockVisible("rule") ? (
+          <RulePreview rule={rule} stream={reveal.blockFor("rule")} />
+        ) : null}
 
-        {guidance && !typing ? (
+        {guidance && !typing && reveal.isBlockVisible("guidance") ? (
           <ClarificationPrompt
             disabled={typing}
             manualText={val}
@@ -1686,12 +1870,13 @@ function CreateChat({
             options={guidance.options}
             questions={guidance.questions}
             selectedIndex={selectedGuidanceIndex}
+            stream={reveal.blockFor("guidance")}
             terminalRejection={guidance.terminalRejection}
             title={guidance.title}
           />
         ) : null}
 
-        {rule && valid && !typing ? (
+        {rule && valid && !typing && reveal.settled ? (
           submitted ? (
             <div
               style={{

@@ -3,11 +3,13 @@ import { afterEach, test } from "node:test";
 import {
   answerDealerQuestion,
   compileRuleToAst,
+  createJsonStringFieldReader,
   ensureModelLoaded,
   interpretRuleWithAgent,
   resolveEscalationModel,
   resolveRuleAgentConfig,
   resolveTranslateToEnglish,
+  streamDealerQuestionAnswer,
   translateRuleToEnglish,
   type RuleAgentConfig,
 } from "./llm.js";
@@ -777,4 +779,92 @@ test("a compile re-ask lets the model think; first calls keep the fast mode", as
   assert.equal(bodies[1]?.reasoning_effort, "none", "compile retry, attempt 1");
   assert.equal(bodies[2]?.reasoning_effort, undefined, "compile retry, attempt 2");
   assert.equal(bodies[3]?.reasoning_effort, "none", "interpret");
+});
+
+test("the streamed answer reader emits only the answer field, decoded", () => {
+  const reader = createJsonStringFieldReader("answer");
+  const chunks: string[] = [];
+  // Split exactly where a naive reader breaks: mid-key, mid-escape, and mid
+  // unicode escape. `answerLanguage` must not be mistaken for `answer`.
+  for (const chunk of [
+    '<think>the player asks about ties</think>{"answerLan',
+    'guage":"pt","ans',
+    'wer":"Linha 1\\',
+    'nLinha 2 \\"cita',
+    'da\\" e ca\\u00e7',
+    'ada","proposedRuleText":"Win if x."}',
+  ]) {
+    chunks.push(reader.push(chunk));
+  }
+
+  assert.equal(chunks.join(""), 'Linha 1\nLinha 2 "citada" e caçada');
+  assert.equal(reader.closed, true);
+  // Nothing after the closing quote can leak into the answer.
+  assert.equal(reader.push('{"answer":"again"}'), "");
+});
+
+test("the streamed answer reader stays silent until the field opens", () => {
+  const reader = createJsonStringFieldReader("answer");
+
+  assert.equal(reader.push('{"answerLanguage":"en","proposedRuleText":null'), "");
+  assert.equal(reader.closed, false);
+  assert.equal(reader.push(',"answer":"Ready."}'), "Ready.");
+});
+
+test("dealer chat streaming reports deltas and returns the validated answer", async () => {
+  const answer = "Ties split the alternative pool equally.";
+  const payload = JSON.stringify({
+    answer,
+    answerLanguage: "en",
+    proposedRuleText: null,
+  });
+  let requestBody: { stream?: unknown } = {};
+  globalThis.fetch = (async (
+    _input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    requestBody = JSON.parse(String(init?.body)) as { stream?: unknown };
+    // One SSE frame per character, the worst case for a chunk-boundary bug.
+    const frames = [...payload]
+      .map(
+        (char) =>
+          `data: ${JSON.stringify({ choices: [{ delta: { content: char } }] })}\n\n`,
+      )
+      .join("");
+    return new Response(`${frames}data: [DONE]\n\n`, {
+      headers: { "content-type": "text/event-stream" },
+      status: 200,
+    });
+  }) as typeof fetch;
+
+  const deltas: string[] = [];
+  const result = await streamDealerQuestionAnswer(
+    '<tyche_server_context>{"diagnosticsAvailable":true}</tyche_server_context>',
+    (chunk) => deltas.push(chunk),
+    CONFIG,
+  );
+
+  assert.equal(requestBody.stream, true);
+  assert.equal(result.answer, answer);
+  assert.equal(result.proposedRuleText, null);
+  // The player saw the answer arrive in pieces, and only the answer.
+  assert.ok(deltas.length > 1);
+  assert.equal(deltas.join(""), answer);
+});
+
+test("a dealer answer stream cut off at the token limit is rejected", async () => {
+  globalThis.fetch = (async () =>
+    new Response(
+      `data: ${JSON.stringify({
+        choices: [{ delta: { content: '{"answer":"Half of an ans' } }],
+      })}\n\ndata: ${JSON.stringify({
+        choices: [{ delta: {}, finish_reason: "length" }],
+      })}\n\ndata: [DONE]\n\n`,
+      { headers: { "content-type": "text/event-stream" }, status: 200 },
+    )) as typeof fetch;
+
+  await assert.rejects(
+    streamDealerQuestionAnswer("<tyche_server_context>{}</tyche_server_context>", () => {}, CONFIG),
+    /cut off at the 16384-token output limit/,
+  );
 });

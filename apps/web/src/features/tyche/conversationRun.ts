@@ -43,6 +43,8 @@ export interface ConversationRunDeps {
   askDealer: (args: {
     draftId: string;
     message: string;
+    /** Called with answer text as the model writes it. */
+    onDelta?: (chunk: string) => void;
     signal?: AbortSignal;
   }) => Promise<DealerQuestionApiResult>;
   cancelPreflightJob: (jobId: string) => Promise<void>;
@@ -243,6 +245,7 @@ export function startConversationRun(
     },
     rule: args.previousRule ?? null,
     status: "pending",
+    streaming: false,
   });
 
   const controller = new AbortController();
@@ -399,9 +402,27 @@ async function runConversation(
     }
 
     if (args.dealerQuestion) {
+      // The answer streams: each delta grows the dealer bubble in place, so the
+      // player reads it as it is written instead of waiting for the whole reply.
+      // `streaming` tells the screen the last message is still arriving.
+      const questionTranscript = transcript;
+      let streamed = "";
       const dealerAnswer = await deps.askDealer({
         draftId,
         message: args.dealerQuestion,
+        onDelta: (chunk) => {
+          if (signal.aborted) {
+            return;
+          }
+          streamed += chunk;
+          patchConversationRun(args.draftId, {
+            error: null,
+            messages: [...questionTranscript, { text: streamed, who: "ai" }],
+            progress: null,
+            status: "pending",
+            streaming: true,
+          });
+        },
         signal,
       });
       transcript = [...transcript, { text: dealerAnswer.answer, who: "ai" }];
@@ -420,6 +441,7 @@ async function runConversation(
         progress: null,
         rule: args.previousRule ?? null,
         status: "done",
+        streaming: false,
       });
       try {
         await saveConversationDraftSnapshot({

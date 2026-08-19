@@ -689,6 +689,314 @@ function coerceDealerQuestionAnswer(value: unknown): DealerQuestionAnswer {
   return { answer, proposedRuleText };
 }
 
+/**
+ * Incrementally decodes one top-level JSON string field out of a response that
+ * is still being written. Feed it the raw completion as it arrives; it returns
+ * only the newly decoded characters of that field's value.
+ *
+ * This is what lets the dealer's chat answer reach the player token by token
+ * even though the model replies with a JSON object: the reader waits for the
+ * `"answer": "` opening, then emits decoded text until the closing quote. Any
+ * reasoning preamble or `<think>` block before the field is skipped by
+ * construction, so it can never leak into the streamed answer.
+ */
+export function createJsonStringFieldReader(field: string) {
+  // The exact key token, so "answerLanguage" can never be mistaken for
+  // "answer": the closing quote is part of the pattern.
+  const opening = new RegExp(`"${field}"\\s*:\\s*"`, "u");
+  const ESCAPES: Record<string, string> = {
+    '"': '"',
+    "/": "/",
+    "\\": "\\",
+    b: "\b",
+    f: "\f",
+    n: "\n",
+    r: "\r",
+    t: "\t",
+  };
+
+  let raw = "";
+  /** Next index in `raw` to decode; -1 until the field's value starts. */
+  let cursor = -1;
+  let closed = false;
+
+  return {
+    get closed() {
+      return closed;
+    },
+    push(chunk: string): string {
+      if (closed) {
+        return "";
+      }
+      raw += chunk;
+      if (cursor < 0) {
+        const match = opening.exec(raw);
+        if (!match) {
+          return "";
+        }
+        cursor = match.index + match[0].length;
+      }
+
+      let decoded = "";
+      while (cursor < raw.length) {
+        const char = raw[cursor] as string;
+        if (char === '"') {
+          closed = true;
+          cursor += 1;
+          break;
+        }
+        if (char !== "\\") {
+          decoded += char;
+          cursor += 1;
+          continue;
+        }
+        // An escape needs its payload before it can be decoded. Leave the
+        // backslash in place and resume when the rest of it arrives.
+        const next = raw[cursor + 1];
+        if (next === undefined) {
+          break;
+        }
+        if (next === "u") {
+          if (raw.length < cursor + 6) {
+            break;
+          }
+          const hex = raw.slice(cursor + 2, cursor + 6);
+          if (!/^[0-9a-fA-F]{4}$/u.test(hex)) {
+            throw new RuleAgentError(
+              "RULE_AGENT_BAD_RESPONSE",
+              `The streamed ${field} field contained an invalid unicode escape.`,
+            );
+          }
+          decoded += String.fromCharCode(Number.parseInt(hex, 16));
+          cursor += 6;
+          continue;
+        }
+        const mapped = ESCAPES[next];
+        if (mapped === undefined) {
+          throw new RuleAgentError(
+            "RULE_AGENT_BAD_RESPONSE",
+            `The streamed ${field} field contained an invalid escape.`,
+          );
+        }
+        decoded += mapped;
+        cursor += 2;
+      }
+      return decoded;
+    },
+  };
+}
+
+/**
+ * Same transport as `requestAgentJson`, but reads the completion as it is
+ * produced and reports each content delta. Returns the same full text candidate,
+ * so the caller still validates the complete JSON object exactly as the
+ * non-streaming path does — a partial answer is never accepted as final.
+ */
+async function requestAgentJsonStream(
+  systemPrompt: string,
+  userText: string,
+  config: RuleAgentConfig,
+  onContentDelta: (chunk: string) => void,
+  signal?: AbortSignal,
+  allowReasoning = false,
+): Promise<string> {
+  const headers: Record<string, string> = {
+    accept: "text/event-stream",
+    "content-type": "application/json",
+  };
+  if (config.apiKey) {
+    headers.authorization = `Bearer ${config.apiKey}`;
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${config.baseUrl}/chat/completions`, {
+      body: JSON.stringify({
+        keep_alive: "10m",
+        messages: [
+          { content: systemPrompt, role: "system" },
+          { content: userText, role: "user" },
+        ],
+        model: config.model,
+        max_tokens: config.maxOutputTokens,
+        ...(allowReasoning ? {} : ollamaThinkingControl(config)),
+        response_format: { type: "json_object" },
+        seed: config.seed,
+        stream: true,
+        temperature: 0,
+        top_p: 1,
+      }),
+      headers,
+      method: "POST",
+      signal: combineAbortSignals(config.timeoutMs, signal),
+    });
+  } catch (error) {
+    if (signal?.aborted) {
+      throw signal.reason ?? error;
+    }
+    if (error instanceof Error && error.name === "TimeoutError") {
+      throw new RuleAgentError(
+        "RULE_AGENT_TIMEOUT",
+        "The rule agent did not respond in time.",
+      );
+    }
+    throw new RuleAgentError(
+      "RULE_AGENT_UNAVAILABLE",
+      `The rule agent endpoint is unreachable: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new RuleAgentError(
+      "RULE_AGENT_UNAVAILABLE",
+      `The rule agent returned HTTP ${response.status}. ${detail}`.trim(),
+    );
+  }
+  if (!response.body) {
+    throw new RuleAgentError(
+      "RULE_AGENT_BAD_RESPONSE",
+      "The rule agent stream carried no body.",
+    );
+  }
+
+  let content = "";
+  let reasoning = "";
+  let truncated = false;
+  let buffer = "";
+
+  const consumeLine = (line: string) => {
+    if (!line.startsWith("data:")) {
+      return;
+    }
+    const data = line.slice(5).trim();
+    if (!data || data === "[DONE]") {
+      return;
+    }
+    let event: unknown;
+    try {
+      event = JSON.parse(data);
+    } catch {
+      throw new RuleAgentError(
+        "RULE_AGENT_BAD_RESPONSE",
+        "The rule agent stream sent a chunk that was not valid JSON.",
+      );
+    }
+    const choice = (
+      event as {
+        choices?: Array<{
+          delta?: { content?: unknown; reasoning?: unknown };
+          finish_reason?: unknown;
+        }>;
+      }
+    )?.choices?.[0];
+    if (choice?.finish_reason === "length") {
+      truncated = true;
+    }
+    if (typeof choice?.delta?.reasoning === "string") {
+      reasoning += choice.delta.reasoning;
+    }
+    if (typeof choice?.delta?.content === "string" && choice.delta.content) {
+      content += choice.delta.content;
+      onContentDelta(choice.delta.content);
+    }
+  };
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      const lines = buffer.split(/\r\n|\r|\n/u);
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        consumeLine(line);
+      }
+      if (done) {
+        if (buffer) {
+          consumeLine(buffer);
+        }
+        break;
+      }
+    }
+  } catch (error) {
+    if (signal?.aborted) {
+      throw signal.reason ?? error;
+    }
+    if (error instanceof RuleAgentError) {
+      throw error;
+    }
+    if (error instanceof Error && error.name === "TimeoutError") {
+      throw new RuleAgentError(
+        "RULE_AGENT_TIMEOUT",
+        "The rule agent stopped sending the answer in time.",
+      );
+    }
+    throw new RuleAgentError(
+      "RULE_AGENT_UNAVAILABLE",
+      `The rule agent stream failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+
+  // Same budget rule as the non-streaming path: a cut-off object is never a
+  // usable answer, even though some of it already reached the player.
+  if (truncated) {
+    throw new RuleAgentError(
+      "RULE_AGENT_BAD_RESPONSE",
+      `The rule agent response was cut off at the ${config.maxOutputTokens}-token output limit. Raise LLM_MAX_OUTPUT_TOKENS or use a model that does not spend the budget on a hidden reasoning trace.`,
+    );
+  }
+
+  const strippedContent = content
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .trim();
+  const candidate = strippedContent || content.trim() || reasoning.trim();
+  if (candidate.length === 0) {
+    throw new RuleAgentError(
+      "RULE_AGENT_BAD_RESPONSE",
+      "The rule agent response did not contain any content.",
+    );
+  }
+  return candidate;
+}
+
+/**
+ * Streaming twin of `answerDealerQuestion`: reports the answer text as the model
+ * writes it, then returns the same validated object. Used for the conversational
+ * side of the dealer, which carries no AST and no on-chain hash — the compile
+ * path stays on the single-shot request so its decoding stays reproducible.
+ */
+export async function streamDealerQuestionAnswer(
+  context: string,
+  onAnswerDelta: (chunk: string) => void,
+  config: RuleAgentConfig = resolveRuleAgentConfig(),
+  signal?: AbortSignal,
+): Promise<DealerQuestionAnswer> {
+  const reader = createJsonStringFieldReader("answer");
+  const candidate = await requestAgentJsonStream(
+    buildDealerChatPrompt(),
+    context,
+    config,
+    (chunk) => {
+      const text = reader.push(chunk);
+      if (text) {
+        onAnswerDelta(text);
+      }
+    },
+    signal,
+    // Reasoning stays ON for the chat answer, as in answerDealerQuestion.
+    true,
+  );
+  return coerceDealerQuestionAnswer(extractJsonObject(candidate));
+}
+
 export async function answerDealerQuestion(
   context: string,
   config: RuleAgentConfig = resolveRuleAgentConfig(),

@@ -33,6 +33,12 @@ export interface ConversationRunSnapshot {
   progress: RulePreflightProgress | null;
   rule: RulePreflightResult | null;
   status: "disconnected" | "done" | "error" | "expired" | "pending";
+  /**
+   * True while the last dealer message is still arriving over the wire. Kept
+   * apart from `status`, which stays "pending" for the whole run: the screen
+   * needs to tell "still thinking" (spinner) from "already writing" (typewriter).
+   */
+  streaming?: boolean;
 }
 
 type Listener = (snapshot: ConversationRunSnapshot) => void;

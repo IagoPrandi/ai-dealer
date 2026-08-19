@@ -17,7 +17,7 @@ import type {
   TokenomicsPublicApi,
   TokenomicsWalletApi,
 } from "./types";
-import { readSseStream } from "./sseStream";
+import { createSseParser, readSseStream, type SseFrame } from "./sseStream";
 import { getApiBaseUrl } from "../../../lib/apiBase";
 
 export { SseStreamDisconnectedError, SseStreamExpiredError } from "./sseStream";
@@ -394,17 +394,115 @@ export interface DealerQuestionApiResult {
   proposedRuleText: string | null;
 }
 
-export function askDealer(args: {
+/**
+ * Asks the dealer a conversational question and reports the answer as the model
+ * writes it. The reply is a one-shot SSE stream: `delta` frames carry answer
+ * text, and exactly one `answer` or `error` frame ends it.
+ *
+ * Unlike the preflight stream this one never reconnects — there is no job to
+ * reattach to, so a retry would re-run the model and replay text the player has
+ * already read. A drop is reported as the failure it is.
+ */
+export async function askDealer(args: {
   draftId: string;
+  fetchImpl?: typeof fetch;
   message: string;
+  onDelta?: (chunk: string) => void;
   signal?: AbortSignal;
-}) {
-  return postStrictJson<DealerQuestionApiResult>(
-    "/rule-dealer/ask",
-    { draftId: args.draftId, message: args.message },
-    {},
-    args.signal,
-  );
+}): Promise<DealerQuestionApiResult> {
+  const path = "/rule-dealer/ask";
+  const fetchImpl = args.fetchImpl ?? fetch;
+  const response = await fetchImpl(`${getApiBaseUrl()}${path}`, {
+    body: JSON.stringify({ draftId: args.draftId, message: args.message }),
+    cache: "no-store",
+    headers: {
+      accept: "text/event-stream",
+      "content-type": "application/json",
+    },
+    method: "POST",
+    ...(args.signal ? { signal: args.signal } : {}),
+  });
+
+  if (!response.ok) {
+    // Rejections happen before the stream opens, so they are still plain JSON.
+    let detail: unknown;
+    try {
+      detail = await response.json();
+    } catch {
+      detail = undefined;
+    }
+    throw new ApiRequestError({
+      code: apiErrorCode(detail),
+      detail,
+      message: apiErrorMessage(path, response.status, detail),
+      status: response.status,
+    });
+  }
+  if (!response.body) {
+    throw new Error(`POST ${path} returned no readable body.`);
+  }
+
+  let answer: DealerQuestionApiResult | null = null;
+  let failure: null | Record<string, unknown> = null;
+  const parser = createSseParser();
+  const decoder = new TextDecoder();
+  const reader = response.body.getReader();
+
+  const handle = (frames: readonly SseFrame[]) => {
+    for (const frame of frames) {
+      if (frame.event === "delta") {
+        const { text } = JSON.parse(frame.data) as { text?: unknown };
+        if (typeof text === "string" && text) {
+          args.onDelta?.(text);
+        }
+        continue;
+      }
+      if (frame.event === "answer") {
+        answer = JSON.parse(frame.data) as DealerQuestionApiResult;
+        return true;
+      }
+      if (frame.event === "error") {
+        failure = JSON.parse(frame.data) as Record<string, unknown>;
+        return true;
+      }
+    }
+    return false;
+  };
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (handle(parser.push(decoder.decode(value, { stream: !done })))) {
+        break;
+      }
+      if (done) {
+        handle(parser.end());
+        break;
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+
+  if (failure) {
+    const body = failure as { error?: unknown; status?: unknown };
+    throw new ApiRequestError({
+      code: apiErrorCode(failure),
+      detail: failure,
+      message: apiErrorMessage(
+        path,
+        typeof body.status === "number" ? body.status : 502,
+        failure,
+      ),
+      status: typeof body.status === "number" ? body.status : 502,
+    });
+  }
+  if (!answer) {
+    throw new Error(
+      `POST ${path} ended before the dealer answer was complete.`,
+    );
+  }
+  return answer;
 }
 
 export interface ConsumeRulePreflightJobArgs {

@@ -64,6 +64,7 @@ import {
   compileRuleToAst,
   interpretRuleWithAgent,
   RuleAgentError,
+  streamDealerQuestionAnswer,
   translateRuleToEnglish,
   type RuleAgentInterpretation,
 } from "./llm.js";
@@ -10668,24 +10669,76 @@ export function handleApiRequest(
             );
           }
         });
+        // Transport is chosen by `accept`, like /rule-preflight: a player waiting
+        // on a chat answer gets it word by word, while any JSON caller keeps the
+        // single-shot response. Both run the same pipeline once.
+        const streamAnswer = (request.headers.accept ?? "")
+          .toLowerCase()
+          .includes("text/event-stream");
+        let streamStarted = false;
         try {
           const runtime = getDealerRuntime();
           await ensureDealerModelReady(runtime.agent.model, controller.signal);
-          const answer = await answerDealerQuestion(
-            buildDealerQuestionContext({ draft, message }),
+          const context = buildDealerQuestionContext({ draft, message });
+          if (!streamAnswer) {
+            const answer = await answerDealerQuestion(
+              context,
+              runtime.agent,
+              controller.signal,
+            );
+            sendJsonWithoutStatePersistence(request, response, 200, answer);
+            return;
+          }
+          const answer = await streamDealerQuestionAnswer(
+            context,
+            (chunk) => {
+              if (!streamStarted) {
+                startRulePreflightStream(request, response);
+                streamStarted = true;
+              }
+              writeRulePreflightSseFrame(
+                response,
+                `event: delta\ndata: ${JSON.stringify({ text: chunk })}\n\n`,
+              );
+            },
             runtime.agent,
             controller.signal,
           );
-          sendJsonWithoutStatePersistence(request, response, 200, answer);
+          if (!streamStarted) {
+            // The model produced the whole object without a single answer
+            // character reaching us — nothing was shown yet, so open the stream
+            // now and let the terminal frame carry it.
+            startRulePreflightStream(request, response);
+            streamStarted = true;
+          }
+          writeRulePreflightSseFrame(
+            response,
+            `event: answer\ndata: ${JSON.stringify(answer)}\n\n`,
+          );
+          endRulePreflightStream(response);
         } catch (error) {
           if (!response.writableEnded && !response.destroyed) {
             const failure = describeRulePreflightError(error);
-            sendJsonWithoutStatePersistence(
-              request,
-              response,
-              failure.status,
-              failure.body,
-            );
+            if (streamStarted) {
+              // Headers are already out, so the failure has to travel as a
+              // terminal frame. It carries the status the JSON transport would
+              // have used, so the client classifies it the same way.
+              writeRulePreflightSseFrame(
+                response,
+                `event: error\ndata: ${JSON.stringify({
+                  ...failure.body,
+                  status: failure.status,
+                })}\n\n`,
+              );
+              endRulePreflightStream(response);
+            } else {
+              sendJsonWithoutStatePersistence(
+                request,
+                response,
+                failure.status,
+                failure.body,
+              );
+            }
           }
         } finally {
           untrack();
