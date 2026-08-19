@@ -4,6 +4,7 @@ import { createClient } from "redis";
 import {
   ensureModelLoaded,
   resolveEscalationModel,
+  resolveDealerChatConfig,
   resolveRuleAgentConfig,
   resolveTranslateToEnglish,
   type ModelWarmupResult,
@@ -21,6 +22,11 @@ const HEALTH_CHECK_TIMEOUT_MS = 5_000;
 
 export interface DealerRuntime {
   agent: RuleAgentConfig;
+  /**
+   * The conversational chat step, which `LLM_MODEL_CHAT` may point at a faster
+   * model than the rule pipeline. Same object as `agent` when unset.
+   */
+  chat: RuleAgentConfig;
   escalationModel: string;
   guardian: GuardianConfig;
   translateToEnglish: boolean;
@@ -70,6 +76,7 @@ export function getDealerRuntime(): DealerRuntime {
         kind: "ready",
         runtime: {
           agent: resolveRuleAgentConfig(),
+          chat: resolveDealerChatConfig(),
           escalationModel: resolveEscalationModel(),
           guardian: resolveGuardianConfig(),
           translateToEnglish: resolveTranslateToEnglish(),

@@ -4089,3 +4089,47 @@ test("conversation drafts paginate newest-first without crossing wallets", () =>
   assert.equal(secondPage.nextCursor, null);
   assert.equal(secondPage.drafts[1]?.prompt, "Rule 0");
 });
+
+test("the dealer chat context decides the answer language last, from the question alone", () => {
+  // A low-reasoning model reads the bulk of the context and inherits ITS
+  // language: the rule text, transcript and compiler fields are routinely in a
+  // different language from the player's question. gpt-oss:20b answered English
+  // questions in Portuguese 4 of 8 times until this decision procedure named the
+  // trap; with it, 12 of 12. The instruction must stay AFTER the question tag,
+  // because whatever the model reads last is what wins.
+  const context = buildDealerQuestionContext({
+    draft: {
+      createdAt: "2026-08-19T12:00:00.000Z",
+      draftId: "client:61:language",
+      lastMessage: "how are the prizes divided?",
+      messages: [
+        { text: "a soma dos seis numeros tem que ser exatamente 300", who: "user" },
+      ],
+      normalizedText: "Win if the sum of the six guessed numbers equals exactly 300.",
+      officialInterpretation: "The engine adds the six guessed numbers.",
+      prompt: "a soma dos seis numeros tem que ser exatamente 300",
+      ruleId: null,
+      status: "draft",
+      tokenCount: 12,
+      turnId: 61,
+      updatedAt: "2026-08-19T12:00:00.000Z",
+      wallet,
+    },
+    message: "how are the prizes divided?",
+  });
+
+  const questionAt = context.indexOf("<tyche_player_question>");
+  const decisionAt = context.indexOf("Decide the answer language now");
+  assert.ok(questionAt > 0, "the question is echoed outside the untrusted fence");
+  assert.ok(
+    decisionAt > questionAt,
+    "the language decision must be the last thing the model reads",
+  );
+  assert.match(context, /from the words inside <tyche_player_question> alone/u);
+  // The trap is named explicitly rather than left as a preference.
+  assert.match(
+    context,
+    /rule text, transcript, compiler fields.*never decides it/u,
+  );
+  assert.match(context, /If those words are English, every word of `answer` must be English/u);
+});

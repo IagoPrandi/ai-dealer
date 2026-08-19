@@ -7,6 +7,7 @@ import {
   ensureModelLoaded,
   interpretRuleWithAgent,
   resolveEscalationModel,
+  resolveDealerChatConfig,
   resolveRuleAgentConfig,
   resolveTranslateToEnglish,
   streamDealerQuestionAnswer,
@@ -867,4 +868,61 @@ test("a dealer answer stream cut off at the token limit is rejected", async () =
     streamDealerQuestionAnswer("<tyche_server_context>{}</tyche_server_context>", () => {}, CONFIG),
     /cut off at the 16384-token output limit/,
   );
+});
+
+test("the chat step runs on LLM_MODEL_CHAT without touching the rule pipeline", () => {
+  const env = {
+    LLM_API_KEY: "ollama",
+    LLM_BASE_URL: "http://localhost:11434/v1",
+    LLM_MODEL: "nemotron-3-super:cloud",
+    LLM_MODEL_CHAT: "gpt-oss:20b-cloud",
+    LLM_MODEL_INTERPRET: "",
+  } as unknown as NodeJS.ProcessEnv;
+
+  assert.equal(resolveDealerChatConfig(env).model, "gpt-oss:20b-cloud");
+  assert.equal(resolveRuleAgentConfig(env).model, "nemotron-3-super:cloud");
+});
+
+test("chat falls back to LLM_MODEL, and the interpret override never leaks into it", () => {
+  const env = {
+    LLM_API_KEY: "ollama",
+    LLM_BASE_URL: "http://localhost:11434/v1",
+    LLM_MODEL: "nemotron-3-super:cloud",
+    // Set but blank, the shape `firstConfigured` exists for.
+    LLM_MODEL_CHAT: "",
+    // Names the interpret step; a chat answer must not inherit it.
+    LLM_MODEL_INTERPRET: "gemma4:latest",
+  } as unknown as NodeJS.ProcessEnv;
+
+  assert.equal(resolveDealerChatConfig(env).model, "nemotron-3-super:cloud");
+  assert.equal(resolveRuleAgentConfig(env).model, "gemma4:latest");
+});
+
+test("the chat step asks for a low trace, which is the only level gpt-oss honours", async () => {
+  // gpt-oss ignores `reasoning_effort: "none"` (Ollama documents low/medium/high
+  // only), so "none" would leave the trace on and the player waiting. Measured
+  // on gpt-oss:20b-cloud: 26 characters of trace at low against 155 unset.
+  const bodies: Array<Record<string, unknown>> = [];
+  globalThis.fetch = (async (
+    _input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+    return new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({ answer: "Ready.", proposedRuleText: null }),
+            },
+          },
+        ],
+      }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+
+  await answerDealerQuestion("<tyche_server_context>{}</tyche_server_context>", CONFIG);
+
+  assert.equal(bodies[0]?.reasoning_effort, "low");
 });

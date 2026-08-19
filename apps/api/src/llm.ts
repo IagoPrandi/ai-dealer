@@ -92,17 +92,36 @@ function firstConfigured(...values: Array<string | undefined>): string {
   return "";
 }
 
-// Suppresses the hidden reasoning trace on Ollama-served models.
+/**
+ * How much hidden reasoning a step asks for.
+ *
+ * - `suppressed` - every rule step. On models that honour it the trace is off.
+ * - `low` - the conversational chat step. `gpt-oss` IGNORES `"none"` (Ollama
+ *   documents that it accepts only `low`/`medium`/`high`), so `"none"` there
+ *   buys nothing while `"low"` collapses the trace: measured 26 characters at
+ *   `low` against 155 unset, which is the difference between a ~0.4 s and a
+ *   multi-second answer.
+ * - `full` - the compile re-ask, which needs the trace to get its JSON right.
+ */
+type ReasoningTrace = "full" | "low" | "suppressed";
+
+// Controls the hidden reasoning trace on Ollama-served models.
 //
-// Applied to every step, and dropped only on a compile RE-ASK. The compile step
-// is the one that has to emit a large, exactly-nested JSON structure, and on the
-// configured model (`nemotron-3-super:cloud`) suppressing the trace measurably
-// breaks that structure: the same compile prompt returned a complete envelope
-// minus its final closing brace in 3 of 6 calls with the flag (~700 completion
-// tokens, `finish_reason: "stop"`, nowhere near the budget) and parsed 5 of 5
-// times without it (~2700 tokens). Since only structurally large rules hit that
-// wall, the first compile call keeps the saving and the retry buys the trace.
-function ollamaThinkingControl(config: RuleAgentConfig) {
+// Rule steps suppress it, and only a compile RE-ASK restores it. The compile
+// step is the one that has to emit a large, exactly-nested JSON structure, and
+// on `nemotron-3-super:cloud` suppressing the trace measurably breaks that
+// structure: the same compile prompt returned a complete envelope minus its
+// final closing brace in 3 of 6 calls with the flag (~700 completion tokens,
+// `finish_reason: "stop"`, nowhere near the budget) and parsed 5 of 5 times
+// without it (~2700 tokens). Since only structurally large rules hit that wall,
+// the first compile call keeps the saving and the retry buys the trace.
+function ollamaThinkingControl(
+  config: RuleAgentConfig,
+  trace: ReasoningTrace = "suppressed",
+) {
+  if (trace === "full") {
+    return {};
+  }
   const usesOllama =
     config.apiKey.toLowerCase() === "ollama" ||
     (() => {
@@ -112,7 +131,12 @@ function ollamaThinkingControl(config: RuleAgentConfig) {
         return false;
       }
     })();
-  return usesOllama ? { reasoning_effort: "none" as const } : {};
+  if (!usesOllama) {
+    return {};
+  }
+  return {
+    reasoning_effort: trace === "low" ? ("low" as const) : ("none" as const),
+  };
 }
 
 // The stronger model used to re-try a rule when the fast primary model produces
@@ -182,6 +206,31 @@ export function resolveRuleAgentConfig(
     seed,
     timeoutMs,
   };
+}
+
+/**
+ * Config for the conversational chat step, which `LLM_MODEL_CHAT` can point at a
+ * different model from the rule pipeline.
+ *
+ * The two jobs have opposite priorities. Compile and interpret produce the
+ * artifact the on-chain hashes are taken over, so they want the strongest model
+ * available and can afford to think. A chat answer is read once by one player
+ * and must feel instant, so it wants the fastest model that still honours the
+ * JSON and language contracts.
+ *
+ * `LLM_MODEL_INTERPRET` deliberately does not apply here — it names the interpret
+ * step — so chat falls back to `LLM_MODEL` when no chat override is set.
+ */
+export function resolveDealerChatConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): RuleAgentConfig {
+  const base = resolveRuleAgentConfig(env);
+  const model = firstConfigured(
+    env.LLM_MODEL_CHAT,
+    env.LLM_MODEL,
+    env.LLM_PRIMARY_MODEL,
+  );
+  return model ? { ...base, model } : base;
 }
 
 export interface ModelWarmupResult {
@@ -516,9 +565,8 @@ async function requestAgentJson(
   userText: string,
   config: RuleAgentConfig,
   signal?: AbortSignal,
-  // Let the model think before answering. Off everywhere except the compile
-  // step — see the note on `ollamaThinkingControl`.
-  allowReasoning = false,
+  // How much the model may think before answering — see `ollamaThinkingControl`.
+  trace: ReasoningTrace = "suppressed",
 ): Promise<string> {
   const headers: Record<string, string> = {
     "content-type": "application/json",
@@ -543,7 +591,7 @@ async function requestAgentJson(
         // Rule preflight needs the constrained JSON result, not a hidden
         // reasoning trace. Ollama otherwise enables thinking by default for
         // thinking-capable models.
-        ...(allowReasoning ? {} : ollamaThinkingControl(config)),
+        ...ollamaThinkingControl(config, trace),
         response_format: { type: "json_object" },
         seed: config.seed,
         stream: false,
@@ -798,7 +846,7 @@ async function requestAgentJsonStream(
   config: RuleAgentConfig,
   onContentDelta: (chunk: string) => void,
   signal?: AbortSignal,
-  allowReasoning = false,
+  trace: ReasoningTrace = "suppressed",
 ): Promise<string> {
   const headers: Record<string, string> = {
     accept: "text/event-stream",
@@ -819,7 +867,7 @@ async function requestAgentJsonStream(
         ],
         model: config.model,
         max_tokens: config.maxOutputTokens,
-        ...(allowReasoning ? {} : ollamaThinkingControl(config)),
+        ...ollamaThinkingControl(config, trace),
         response_format: { type: "json_object" },
         seed: config.seed,
         stream: true,
@@ -976,7 +1024,7 @@ async function requestAgentJsonStream(
 export async function streamDealerQuestionAnswer(
   context: string,
   onAnswerDelta: (chunk: string) => void,
-  config: RuleAgentConfig = resolveRuleAgentConfig(),
+  config: RuleAgentConfig = resolveDealerChatConfig(),
   signal?: AbortSignal,
 ): Promise<DealerQuestionAnswer> {
   const reader = createJsonStringFieldReader("answer");
@@ -991,15 +1039,31 @@ export async function streamDealerQuestionAnswer(
       }
     },
     signal,
-    // Reasoning stays ON for the chat answer, as in answerDealerQuestion.
-    true,
+    DEALER_CHAT_TRACE,
   );
   return coerceDealerQuestionAnswer(extractJsonObject(candidate));
 }
 
+/**
+ * The trace budget for a chat answer, and why it is `low` rather than off.
+ *
+ * `"none"` is not an option here. On `nemotron-3-super:cloud` it made the model
+ * stop honouring `response_format: json_object` once the chat prompt carried its
+ * product-knowledge references, replying with bare prose that fails
+ * `coerceDealerQuestionAnswer` — measured 0/4 valid JSON with it against 4/4
+ * without. On `gpt-oss` it is simply ignored (Ollama documents that gpt-oss
+ * accepts only `low`/`medium`/`high`).
+ *
+ * `"low"` is what both models honour, and it is the whole latency story for the
+ * chat step: the hidden trace, not the prompt, is what the player waits for.
+ * Unlike interpret and compile, a chat answer feeds no AST and no on-chain hash,
+ * so it needs no reproducible decoding.
+ */
+const DEALER_CHAT_TRACE: ReasoningTrace = "low";
+
 export async function answerDealerQuestion(
   context: string,
-  config: RuleAgentConfig = resolveRuleAgentConfig(),
+  config: RuleAgentConfig = resolveDealerChatConfig(),
   signal?: AbortSignal,
 ): Promise<DealerQuestionAnswer> {
   const candidate = await requestAgentJson(
@@ -1007,14 +1071,7 @@ export async function answerDealerQuestion(
     context,
     config,
     signal,
-    // Reasoning stays ON for the chat answer. With `reasoning_effort: "none"`
-    // the model stops honouring `response_format: json_object` once the chat
-    // prompt carries its product-knowledge references, and replies with bare
-    // prose that fails `coerceDealerQuestionAnswer` — measured 0/4 valid JSON
-    // with it off against 4/4 with it on, same prompt and context. Unlike
-    // interpret and compile, a chat answer feeds no AST and no on-chain hash,
-    // so it needs no reproducible decoding.
-    true,
+    DEALER_CHAT_TRACE,
   );
   return coerceDealerQuestionAnswer(extractJsonObject(candidate));
 }
@@ -1173,7 +1230,7 @@ export async function compileRuleToAst(
       normalizedText,
       config,
       signal,
-      attempt > 1,
+      attempt > 1 ? "full" : "suppressed",
     );
     try {
       return extractJsonObject(candidate);

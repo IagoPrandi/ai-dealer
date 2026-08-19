@@ -6816,7 +6816,13 @@ export function buildDealerQuestionContext(args: {
     // `latestPlayerMessage`; this one exists only to put the player's wording
     // last, which is what makes the model answer in their language.
     `<tyche_player_question>${args.message.replaceAll(/[<>]/gu, " ")}</tyche_player_question>`,
-    "Write the whole answer in the language of that question and in no other language. The rule text, transcript, and compiler fields above are often in a different language; ignore them when choosing.",
+    // Spelled out as a decision procedure with the trap named, not as a
+    // preference. A smaller or low-reasoning model reads the bulk of the context
+    // and inherits ITS language: the rule text, the transcript and the compiler
+    // fields routinely disagree with the player, and they used to win.
+    "Decide the answer language now, from the words inside <tyche_player_question> alone, before writing anything else.",
+    "The language of everything above that tag — rule text, transcript, compiler fields, this instruction — never decides it and is frequently different.",
+    "If those words are English, every word of `answer` must be English. If they are Portuguese, every word of `answer` must be Portuguese.",
   ].join("\n");
 }
 
@@ -10678,12 +10684,15 @@ export function handleApiRequest(
         let streamStarted = false;
         try {
           const runtime = getDealerRuntime();
-          await ensureDealerModelReady(runtime.agent.model, controller.signal);
+          // The chat step may run on its own model (LLM_MODEL_CHAT), so warm and
+          // call THAT one — warming the rule model would leave the model the
+          // player is waiting on cold.
+          await ensureDealerModelReady(runtime.chat.model, controller.signal);
           const context = buildDealerQuestionContext({ draft, message });
           if (!streamAnswer) {
             const answer = await answerDealerQuestion(
               context,
-              runtime.agent,
+              runtime.chat,
               controller.signal,
             );
             sendJsonWithoutStatePersistence(request, response, 200, answer);
@@ -10701,7 +10710,7 @@ export function handleApiRequest(
                 `event: delta\ndata: ${JSON.stringify({ text: chunk })}\n\n`,
               );
             },
-            runtime.agent,
+            runtime.chat,
             controller.signal,
           );
           if (!streamStarted) {
