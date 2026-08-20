@@ -128,6 +128,14 @@ const RULE_PREVENTED_PATTERNS = [
   /\b(secretly|silently)\b.{0,60}\bcompile\b.{0,60}\bvalid\b/i,
   /\bhide\b.{0,60}\b(blocked|invalid|rejected)\b/i,
   /\breveal\b.{0,40}\b(prompt|secret|private key|seed phrase)\b/i,
+  /\b(?:ignore|ignora|ignorar|desconsidere|desconsiderar)\b.{0,60}\b(?:instrucoes?|regras?|prompt|politicas?|seguranca)\b/i,
+  /\b(?:prompt\s+do\s+sistema|mensage(?:m|ns)\s+d[eo]\s+desenvolvedor|instrucoes?\s+d[eo]\s+sistema)\b/i,
+  /\b(?:oculte|ocultar|esconda|esconder)\b.{0,60}\b(?:bloquead[oa]s?|invalid[oa]s?|rejeitad[oa]s?)\b/i,
+  /\b(?:revele|revelar|mostre|mostrar)\b.{0,60}\b(?:prompt|segredo|chave privada|frase semente)\b/i,
+  /\b(?:ignora|ignorar)\b.{0,60}\b(?:instrucciones?|reglas?|prompt|politicas?|seguridad)\b/i,
+  /\b(?:prompt\s+del\s+sistema|mensaje\s+del\s+desarrollador|instrucciones?\s+del\s+sistema)\b/i,
+  /\b(?:oculta|ocultar|esconde|esconder)\b.{0,60}\b(?:bloquead[oa]s?|invalid[oa]s?|rechazad[oa]s?)\b/i,
+  /\b(?:revela|revelar|muestra|mostrar)\b.{0,60}\b(?:prompt|secreto|clave privada|frase semilla)\b/i,
 ] as const;
 const RULE_EXTERNAL_BLOCK_PATTERNS = [
   /\bclosest\b.{0,40}\bamong\s+all\s+players\b/i,
@@ -2253,8 +2261,12 @@ export function resetApiStateForTests() {
   resetTokenomicsProjectionForTests();
 }
 
-function hasPreventedRulePattern(value: string) {
-  return RULE_PREVENTED_PATTERNS.some((pattern) => pattern.test(value));
+export function hasPreventedRulePattern(value: string) {
+  const normalized = value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase();
+  return RULE_PREVENTED_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
 function hasRulePattern(value: string, patterns: readonly RegExp[]) {
@@ -3121,6 +3133,12 @@ export function buildRuleRefinementFeedback(
  */
 type JailbreakScreening = "clear" | "confirmed" | "disputed";
 
+export interface JailbreakScreeningResult {
+  /** The text cleared by the Guardian and safe to pass to downstream agents. */
+  clearedText: string;
+  verdict: JailbreakScreening;
+}
+
 export const JAILBREAK_DISPUTED_LOG =
   "Guardian jailbreak verdict disputed: flagged in the player's own words and cleared in the English the compiler reads. Proceeding on the cleared reading; review this sample when tuning the guard.";
 
@@ -3155,27 +3173,58 @@ function normalizeForJailbreakComparison(value: string) {
  * will actually consume is the reading the guard CLEARED. It is disclosed on the
  * result and logged rather than waved through silently.
  */
-async function screenForJailbreak(input: {
+export async function screenForJailbreak(input: {
   englishText: string;
   guardianConfig: GuardianConfig;
   sanitizedText: string;
   signal?: AbortSignal | undefined;
-}): Promise<JailbreakScreening> {
-  const { englishText, guardianConfig, sanitizedText, signal } = input;
-  if (!(await detectJailbreak(sanitizedText, guardianConfig, signal))) {
-    return "clear";
-  }
-  // Nothing independent to compare against: the compiler reads the same words
-  // the guard just flagged, so the flag stands.
+  /** Supplies an independent English reading when normal compilation is
+   * configured to stay multilingual. Both readings are checked so a false
+   * negative in either language cannot silently clear an injection. */
+  translateForSecondOpinion?: (() => Promise<string>) | undefined;
+}): Promise<JailbreakScreeningResult> {
+  const {
+    englishText,
+    guardianConfig,
+    sanitizedText,
+    signal,
+    translateForSecondOpinion,
+  } = input;
+  const originalFlagged = await detectJailbreak(
+    sanitizedText,
+    guardianConfig,
+    signal,
+  );
+  let comparisonText = englishText;
   if (
-    normalizeForJailbreakComparison(englishText) ===
+    normalizeForJailbreakComparison(comparisonText) ===
+      normalizeForJailbreakComparison(sanitizedText) &&
+    translateForSecondOpinion
+  ) {
+    comparisonText = await translateForSecondOpinion();
+  }
+  // Nothing independent to compare against: the guard just flagged the same
+  // words the compiler would receive, so the flag stands.
+  if (
+    normalizeForJailbreakComparison(comparisonText) ===
     normalizeForJailbreakComparison(sanitizedText)
   ) {
-    return "confirmed";
+    return {
+      clearedText: comparisonText,
+      verdict: originalFlagged ? "confirmed" : "clear",
+    };
   }
-  return (await detectJailbreak(englishText, guardianConfig, signal))
-    ? "confirmed"
-    : "disputed";
+  const comparisonFlagged = await detectJailbreak(
+    comparisonText,
+    guardianConfig,
+    signal,
+  );
+  if (comparisonFlagged) {
+    return { clearedText: comparisonText, verdict: "confirmed" };
+  }
+  return originalFlagged
+    ? { clearedText: comparisonText, verdict: "disputed" }
+    : { clearedText: comparisonText, verdict: "clear" };
 }
 
 async function createRuleInterpretation(
@@ -3236,7 +3285,7 @@ async function createRuleInterpretation(
       stage: "translating",
     });
   }
-  const englishText =
+  let englishText =
     knownInterpretation?.normalizedText ??
     (shouldTranslate
       ? await translateRuleToEnglish(sanitizedText, agentConfig, signal)
@@ -3253,11 +3302,31 @@ async function createRuleInterpretation(
       guardianConfig,
       sanitizedText,
       signal,
+      translateForSecondOpinion:
+        !shouldTranslate && !knownInterpretation
+          ? async () => {
+              reportProgress({
+                message:
+                  "Translating the rule for an independent safety check...",
+                model: agentConfig.model,
+                stage: "translating",
+              });
+              return translateRuleToEnglish(
+                sanitizedText,
+                agentConfig,
+                signal,
+              );
+            }
+          : undefined,
     });
-    if (screening === "confirmed") {
+    if (screening.verdict === "confirmed") {
       throw new Error("RULE_PROMPT_INJECTION");
     }
-    if (screening === "disputed") {
+    // Reuse the independently cleared reading in the interpretation-only flow
+    // as well as in preflight, so both public entry points have identical
+    // multilingual safety and fidelity behavior.
+    englishText = screening.clearedText;
+    if (screening.verdict === "disputed") {
       // Logged, not hidden: this is the signal for tuning the guard.
       console.warn(
         JAILBREAK_DISPUTED_LOG,
@@ -3396,7 +3465,7 @@ async function createRulePreflight(
       stage: "translating",
     });
   }
-  const compileText =
+  let compileText =
     knownInterpretation?.normalizedText ??
     (shouldTranslate
       ? await translateRuleToEnglish(sanitizedText, agentConfig, signal)
@@ -3417,15 +3486,36 @@ async function createRulePreflight(
         guardianConfig,
         sanitizedText,
         signal,
+        translateForSecondOpinion:
+          !shouldTranslate && !knownInterpretation
+            ? async () => {
+                reportProgress({
+                  message:
+                    "Translating the rule for an independent safety check...",
+                  model: agentConfig.model,
+                  stage: "translating",
+                });
+                return translateRuleToEnglish(
+                  sanitizedText,
+                  agentConfig,
+                  signal,
+                );
+              }
+            : undefined,
       });
-      if (screening === "confirmed") {
+      if (screening.verdict === "confirmed") {
         throw new Error("RULE_PROMPT_INJECTION");
       }
+      // Keep an independently cleared English reading for every downstream
+      // model. This also makes groundedness a same-language comparison;
+      // Guardian can reject faithful pairs solely because the source and the
+      // interpretation use different languages.
+      compileText = screening.clearedText;
       // Flagged in one language and cleared in the other. The compile proceeds
       // on the cleared English reading — which is the only text the interpreter
       // and compiler are given — and the disagreement is disclosed on the result
       // and logged so the guard can be tuned against real samples.
-      if (screening === "disputed") {
+      if (screening.verdict === "disputed") {
         console.warn(
           JAILBREAK_DISPUTED_LOG,
           JSON.stringify({ compileText, sanitizedText }),

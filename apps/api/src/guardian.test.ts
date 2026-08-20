@@ -139,8 +139,47 @@ test("the guardrail is decoded greedily, never sampled", async () => {
   );
 
   const options = bodies[0]?.options as Record<string, unknown> | undefined;
+  assert.deepEqual(bodies[0]?.messages, [
+    { content: "jailbreak", role: "system" },
+    { content: "A guess wins if the guessed sum is odd.", role: "user" },
+  ]);
   assert.equal(options?.temperature, 0);
   assert.equal(options?.top_k, 1);
   assert.equal(options?.top_p, 1);
   assert.equal(typeof options?.seed, "number");
+});
+
+test("groundedness uses the Guardian document role and scores the interpretation", async () => {
+  const bodies: Record<string, unknown>[] = [];
+  globalThis.fetch = (async (
+    _input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+    return new Response(
+      JSON.stringify({ message: { content: "<score>no</score>" } }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+
+  const grounded = await checkGroundedness(
+    "A guess wins if its sum is greater than the draw sum.",
+    "The guessed total must be higher than the official drawn total.",
+    GUARDIAN_CONFIG,
+  );
+
+  assert.equal(grounded, true);
+  const messages = bodies[0]?.messages as
+    | Array<{ content: string; role: string }>
+    | undefined;
+  assert.equal(messages?.length, 3);
+  assert.deepEqual(messages?.[0], { content: "groundedness", role: "system" });
+  assert.deepEqual(messages?.[1], {
+    content: "A guess wins if its sum is greater than the draw sum.",
+    role: "document",
+  });
+  assert.deepEqual(messages?.[2], {
+    content: "The guessed total must be higher than the official drawn total.",
+    role: "assistant",
+  });
 });

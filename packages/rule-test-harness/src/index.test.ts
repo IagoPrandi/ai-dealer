@@ -7,6 +7,7 @@ import {
   classifyDifficulty,
   collectWorkedExamples,
   generateAndRunTests,
+  hasLosingWitness,
   hasWinningWitness,
 } from "./index.js";
 
@@ -76,6 +77,81 @@ test("an ALWAYS_TRUE rule is labelled but still allowed (full coverage)", () => 
   const summary = generateAndRunTests(alwaysTrue);
   assert.equal(summary.difficulty.difficultyClass, "ALWAYS_TRUE");
   assert.equal(summary.coverageScore, 1);
+});
+
+test("near-certain rules with constructed losses are TOO_EASY across AST families", () => {
+  const cases: Array<{ ast: RuleAst; name: string }> = [
+    {
+      name: "guess sum versus draw range",
+      ast: {
+        schemaVersion: 2,
+        result: {
+          type: "predicate",
+          predicate: {
+            kind: "compare",
+            op: "gt",
+            left: {
+              kind: "reduce",
+              op: "sum",
+              of: { kind: "source", source: "guess" },
+            },
+            right: {
+              kind: "reduce",
+              op: "range_span",
+              of: { kind: "source", source: "draw" },
+            },
+          },
+        },
+      },
+    },
+    ...[30, 50].map((threshold) => ({
+      name: `guess sum greater than ${threshold}`,
+      ast: {
+        schemaVersion: 2 as const,
+        result: {
+          type: "predicate" as const,
+          predicate: {
+            kind: "compare" as const,
+            op: "gt" as const,
+            left: {
+              kind: "reduce" as const,
+              op: "sum" as const,
+              of: { kind: "source" as const, source: "guess" as const },
+            },
+            right: { kind: "lit" as const, value: threshold },
+          },
+        },
+      },
+    })),
+    {
+      name: "draw sum below 550",
+      ast: {
+        schemaVersion: 2,
+        result: {
+          type: "predicate",
+          predicate: {
+            kind: "compare",
+            op: "lt",
+            left: {
+              kind: "reduce",
+              op: "sum",
+              of: { kind: "source", source: "draw" },
+            },
+            right: { kind: "lit", value: 550 },
+          },
+        },
+      },
+    },
+  ];
+
+  for (const { ast, name } of cases) {
+    assert.equal(hasLosingWitness(ast), true, `${name} needs a losing witness`);
+    assert.equal(
+      classifyDifficulty(ast).difficultyClass,
+      "TOO_EASY",
+      `${name} must not be called ALWAYS_TRUE`,
+    );
+  }
 });
 
 test("an IMPOSSIBLE rule is detected", () => {

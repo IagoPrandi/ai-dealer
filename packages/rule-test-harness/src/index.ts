@@ -13,9 +13,9 @@ import {
 // composite confidence calculation. The harness lives OUTSIDE the runtime
 // sandbox, so it may use a deterministic PRNG; the runtime itself never sees one.
 
-// 2.1.0 — IMPOSSIBLE now requires a failed directed witness search, so a
-// legitimately rare rule is classified EXTREME instead (PRD §6.8).
-export const RULE_TEST_HARNESS_VERSION = "2.2.0";
+// 2.3.0 — ALWAYS_TRUE now requires a failed directed loss-witness search, so a
+// near-certain rule with a real counterexample is classified TOO_EASY.
+export const RULE_TEST_HARNESS_VERSION = "2.3.0";
 
 export type RuleDifficultyClass =
   | "IMPOSSIBLE"
@@ -300,15 +300,43 @@ export function hasWinningWitness(ast: RuleAst): boolean {
   return false;
 }
 
+/**
+ * Directed search for a single losing input. A perfect Monte-Carlo sample is
+ * evidence that a rule is very easy, not proof that it is a tautology. This
+ * bounded witness search keeps a rare but real loss from being mislabeled as
+ * ALWAYS_TRUE.
+ */
+export function hasLosingWitness(ast: RuleAst): boolean {
+  if (isRankingRule(ast)) {
+    return true;
+  }
+  for (const { draw, guess } of directedInputPairs(ast)) {
+    try {
+      if (
+        evaluatePredicate(ast, { guess: [...guess], draw: [...draw] }).result ===
+        "LOSE"
+      ) {
+        return true;
+      }
+    } catch {
+      // An input this AST cannot evaluate is not a witness; keep searching.
+    }
+  }
+  return false;
+}
+
 function classify(
   winRate: number,
   ranking: boolean,
   winnable: boolean,
+  losable: boolean,
 ): RuleDifficultyClass {
   // IMPOSSIBLE means no input can win, not "too rare for this sample size".
   // A rule with zero observed wins but a constructible winner is EXTREME.
   if (!ranking && winRate <= 0 && !winnable) return "IMPOSSIBLE";
-  if (winRate >= 0.999) return "ALWAYS_TRUE";
+  // A high sampled rate is TOO_EASY when a concrete losing input exists.
+  // Sampling alone cannot overrule a deterministic counterexample.
+  if (winRate >= 0.999 && !losable) return "ALWAYS_TRUE";
   if (winRate >= MONTE_CARLO.tooEasyThreshold) return "TOO_EASY";
   if (winRate >= MONTE_CARLO.balancedThreshold) return "BALANCED";
   if (winRate >= MONTE_CARLO.hardThreshold) return "HARD";
@@ -333,7 +361,7 @@ export function classifyDifficulty(ast: RuleAst): RuleDifficultyResult {
     }
     const estimatedWinRate = fractionSum / MONTE_CARLO.rankingDraws;
     return {
-      difficultyClass: classify(estimatedWinRate, true, true),
+      difficultyClass: classify(estimatedWinRate, true, true, true),
       estimatedWinRate,
       samplesRun: MONTE_CARLO.rankingDraws * MONTE_CARLO.rankingFieldSize,
     };
@@ -348,12 +376,15 @@ export function classifyDifficulty(ast: RuleAst): RuleDifficultyResult {
     if (result.result === "WIN") wins += 1;
   }
   const estimatedWinRate = wins / MONTE_CARLO.predicateSamples;
+  const winnable = wins > 0 || hasWinningWitness(ast);
+  const losable = wins < MONTE_CARLO.predicateSamples || hasLosingWitness(ast);
   return {
-    // Only pay for the directed search when uniform sampling found nothing.
+    // Directed search runs only for the outcome the uniform sample did not see.
     difficultyClass: classify(
       estimatedWinRate,
       false,
-      wins > 0 || hasWinningWitness(ast),
+      winnable,
+      losable,
     ),
     estimatedWinRate,
     samplesRun: MONTE_CARLO.predicateSamples,
@@ -437,6 +468,7 @@ export function generateAndRunTests(ast: RuleAst): RuleTestSummary {
   // feasible sample, and we must not reject such a valid rule. We surface it as
   // a difficulty signal instead of failing coverage.
   const winnable = foundWin || hasWinningWitness(ast);
+  const losable = foundLose || hasLosingWitness(ast);
   cases.push({
     name: "has_winning_case",
     passed: winnable,
@@ -449,10 +481,14 @@ export function generateAndRunTests(ast: RuleAst): RuleTestSummary {
   });
   cases.push({
     name: "has_losing_case",
-    passed: foundLose,
+    passed: losable,
     detail: ranking
       ? "found at least one non-winning guess"
-      : "found at least one losing input",
+      : foundLose
+        ? "found at least one losing input"
+        : losable
+          ? "no loss in the uniform sample; a constructed input loses"
+          : "no losing input found by sampling or by directed search",
     counted: false,
   });
 

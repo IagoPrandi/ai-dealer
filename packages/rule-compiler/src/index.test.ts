@@ -168,7 +168,7 @@ test("validates and precompiles a clear match-count rule", () => {
   assert.ok((result.artifact?.evaluatedTestCases.length ?? 0) > 0);
   assert.ok((result.artifact?.harnessCases.length ?? 0) > 0);
   assert.equal(result.artifact?.skillVersion, RULE_COMPILER_SKILL_VERSION);
-  assert.equal(result.artifact?.testHarnessVersion, "2.2.0");
+  assert.equal(result.artifact?.testHarnessVersion, "2.3.0");
 });
 
 test("validates supported sum and exact-order rules", () => {
@@ -2385,6 +2385,41 @@ test("keeps a legitimately rare rule winnable instead of impossible", () => {
   assert.equal(rare.log.difficultyClass, "EXTREME");
   assert.equal(rare.decision, "VALID");
   assert.ok(!rare.log.reasonCodes.includes("DIFFICULTY_IMPOSSIBLE"));
+});
+
+test("does not reject a near-certain rule when a deterministic loss exists", async () => {
+  const text =
+    "A guess wins when the sum of its six numbers is greater than the difference between the largest and smallest drawn numbers.";
+  const result = await compileRuleArtifact(
+    { originalText: text, prompt: text, tokenCount: 23 },
+    {
+      astProvider: async () => ({
+        schemaVersion: 2,
+        result: {
+          type: "predicate",
+          predicate: {
+            kind: "compare",
+            op: "gt",
+            left: {
+              kind: "reduce",
+              op: "sum",
+              of: { kind: "source", source: "guess" },
+            },
+            right: {
+              kind: "reduce",
+              op: "range_span",
+              of: { kind: "source", source: "draw" },
+            },
+          },
+        },
+      }),
+    },
+  );
+
+  assert.equal(result.log.estimatedWinRate, 1);
+  assert.equal(result.log.difficultyClass, "TOO_EASY");
+  assert.equal(result.decision, "VALID");
+  assert.ok(!result.log.reasonCodes.includes("DIFFICULTY_ALWAYS_TRUE"));
 });
 
 // --- Layer 2: a second opinion where no deterministic reading exists ----------
