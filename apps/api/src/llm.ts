@@ -1,4 +1,7 @@
-import { buildRuleCompilerSkillPrompt } from "@tyche/rule-compiler";
+import {
+  buildRuleCompilerSkillPrompt,
+  providerCompilationHasSchemaValidAst,
+} from "@tyche/rule-compiler";
 import {
   buildDealerChatPrompt,
   buildDealerInterpretPrompt,
@@ -1232,8 +1235,9 @@ export async function compileRuleToAst(
       signal,
       attempt > 1 ? "full" : "suppressed",
     );
+    let parsed: unknown;
     try {
-      return extractJsonObject(candidate);
+      parsed = extractJsonObject(candidate);
     } catch (error) {
       const retryable =
         error instanceof RuleAgentError &&
@@ -1247,6 +1251,28 @@ export async function compileRuleToAst(
         `Rule compile attempt ${attempt} returned no usable JSON; retrying.`,
         error instanceof RuleAgentError ? error.detail : "",
       );
+      continue;
     }
+
+    // The trace-suppressed mode degrades this model's nested output in two ways,
+    // not one. A truncated envelope fails to parse and is caught above; a
+    // complete envelope whose AST is simply the wrong shape parses fine and used
+    // to be returned as-is, so it reached the player as SCHEMA_INVALID with the
+    // advice to rewrite a rule that had nothing wrong with it — while the re-ask
+    // built to recover exactly this never ran. Both are the same defect and both
+    // buy the thinking retry.
+    if (
+      providerCompilationHasSchemaValidAst(parsed) ||
+      attempt >= COMPILE_BAD_RESPONSE_ATTEMPTS ||
+      signal?.aborted
+    ) {
+      // The last attempt is returned even when its AST is off-grammar: this
+      // transport never decides validity, so the downstream schema, span,
+      // worked-example and coverage gates still produce the real verdict.
+      return parsed;
+    }
+    console.error(
+      `Rule compile attempt ${attempt} returned an AST outside the rule grammar; retrying with the reasoning trace.`,
+    );
   }
 }

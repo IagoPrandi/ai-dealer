@@ -942,3 +942,127 @@ test("the chat step asks for a low trace, which is the only level gpt-oss honour
 
   assert.equal(bodies[0]?.reasoning_effort, "low");
 });
+
+test("a schema-invalid compile AST is re-asked with the reasoning trace", async () => {
+  // The trace-suppressed mode degrades this model's nested output two ways. A
+  // truncated envelope fails to parse and was already re-asked. A COMPLETE
+  // envelope whose AST is off-grammar parses fine, so it used to be returned
+  // as-is and surfaced to the player as SCHEMA_INVALID telling them to rewrite
+  // a rule that compiles fine — while the re-ask built for this never ran.
+  const text =
+    "A guess wins when it contains exactly the numbers 1, 2, 3, 4, 5, and 7.";
+  const good = {
+    ast: {
+      result: {
+        predicate: {
+          clauses: [1, 2, 3, 4, 5, 7].map((value) => ({
+            array: { kind: "source", source: "guess" },
+            kind: "contains",
+            value: { kind: "lit", value },
+          })),
+          kind: "and",
+        },
+        type: "predicate",
+      },
+      schemaVersion: 3,
+    },
+    consumedSpans: [
+      { text: "contains exactly the numbers 1, 2, 3, 4, 5, and 7" },
+    ],
+    workedExamples: [
+      {
+        draw: [10, 20, 30, 40, 50, 60],
+        guess: [1, 2, 3, 4, 5, 7],
+        outcome: "WIN",
+      },
+      {
+        draw: [10, 20, 30, 40, 50, 60],
+        guess: [1, 2, 3, 4, 5, 8],
+        outcome: "LOSE",
+      },
+    ],
+  };
+  // Valid JSON, and a shape the grammar has no node for: there is no array
+  // literal and no set equality, so this is what a model reaches for.
+  const offGrammar = {
+    ast: {
+      result: {
+        predicate: {
+          kind: "compare",
+          left: { kind: "source", source: "guess" },
+          op: "eq",
+          right: { kind: "set", values: [1, 2, 3, 4, 5, 7] },
+        },
+        type: "predicate",
+      },
+      schemaVersion: 3,
+    },
+    consumedSpans: [],
+    workedExamples: [],
+  };
+
+  const bodies: Record<string, unknown>[] = [];
+  let calls = 0;
+  globalThis.fetch = (async (
+    _input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    calls += 1;
+    bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+    return new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify(calls === 1 ? offGrammar : good),
+            },
+          },
+        ],
+      }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+
+  const ollamaConfig = { ...CONFIG, baseUrl: "http://localhost:11434/v1" };
+  assert.deepEqual(await compileRuleToAst(text, ollamaConfig), good);
+  assert.equal(calls, 2, "the off-grammar AST bought a retry");
+  assert.equal(bodies[0]?.reasoning_effort, "none", "first call stays fast");
+  assert.equal(
+    bodies[1]?.reasoning_effort,
+    undefined,
+    "the re-ask restores the reasoning trace",
+  );
+});
+
+test("a compile that never returns a valid AST is reported, not retried forever", async () => {
+  // The transport does not decide validity: once the retries are spent it hands
+  // the off-grammar artifact downstream, where the schema gate produces the real
+  // SCHEMA_INVALID verdict exactly as before.
+  const offGrammar = {
+    ast: {
+      result: { predicate: { kind: "set_equals" }, type: "predicate" },
+      schemaVersion: 3,
+    },
+    consumedSpans: [],
+    workedExamples: [],
+  };
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return new Response(
+      JSON.stringify({
+        choices: [{ message: { content: JSON.stringify(offGrammar) } }],
+      }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+
+  assert.deepEqual(
+    await compileRuleToAst(
+      "A guess wins if its set equals the draw set.",
+      CONFIG,
+    ),
+    offGrammar,
+  );
+  assert.equal(calls, 3, "bounded by COMPILE_BAD_RESPONSE_ATTEMPTS");
+});

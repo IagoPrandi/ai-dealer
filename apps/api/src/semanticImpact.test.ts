@@ -313,3 +313,109 @@ test("position-specific range confirmation preserves every position and bound", 
   assert.match(rewrite, /official draw does not affect the result/i);
   assert.doesNotMatch(rewrite, /all six guessed numbers are between 1 and 100/i);
 });
+
+test("a single-range rule with other conditions keeps them in the offered rewrite", () => {
+  // Regression: "first number is 10, second is 12, the other four are any
+  // values from 1 to 100" carries exactly ONE textual range, so the synthesized
+  // "all six guessed numbers are between 1 and 100" sentence was offered as an
+  // intent-preserving rewrite. Selecting it replaced the player's rule with an
+  // always-true one, which the next preflight rejected as DIFFICULTY_ALWAYS_TRUE
+  // — a terminal reason that also cannot be patched, so the rule the player
+  // actually wrote became unreachable.
+  const positionalPlusRangeAst = {
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "and",
+        clauses: [
+          {
+            kind: "compare",
+            left: {
+              index: 0,
+              kind: "at",
+              of: { kind: "source", source: "guess" },
+            },
+            op: "eq",
+            right: { kind: "lit", value: 10 },
+          },
+          {
+            kind: "compare",
+            left: {
+              index: 1,
+              kind: "at",
+              of: { kind: "source", source: "guess" },
+            },
+            op: "eq",
+            right: { kind: "lit", value: 12 },
+          },
+          {
+            kind: "forall",
+            of: { kind: "source", source: "guess" },
+            where: {
+              kind: "and",
+              clauses: [
+                {
+                  kind: "compare",
+                  left: { kind: "elem" },
+                  op: "gte",
+                  right: { kind: "lit", value: 1 },
+                },
+                {
+                  kind: "compare",
+                  left: { kind: "elem" },
+                  op: "lte",
+                  right: { kind: "lit", value: 100 },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    },
+  } as unknown as RuleAst;
+
+  const review = analyzeRuleSemanticImpact({
+    ast: positionalPlusRangeAst,
+    normalizedText:
+      "A guess wins if the first number is 10, the second is 12, and the other four are any distinct numbers from 1 to 100 except 10 and 12.",
+    officialInterpretation:
+      "Check whether the first guessed number is 10, the second guessed number is 12, and the remaining four guessed numbers are distinct values from 1 to 100 other than 10 and 12.",
+    sourceText:
+      "A guess wins when its first number is 10, its second number is 12, and the remaining four numbers are any unique values from 1 to 100 not equal to 10 or 12.",
+  });
+
+  assert.equal(review.confirmationRequired, true);
+  assert.equal(review.impact.drawIndependent, true);
+  assert.equal(review.impact.triviallyAlwaysTrue, false);
+  assert.equal(review.suggestedRewrites.length, 1);
+  const rewrite = review.suggestedRewrites[0] ?? "";
+  assert.match(rewrite, /\b10\b/);
+  assert.match(rewrite, /\b12\b/);
+  assert.match(rewrite, /official draw does not affect the result/i);
+  assert.doesNotMatch(
+    rewrite,
+    /all six guessed numbers are between 1 and 100/i,
+  );
+});
+
+test("a rule that is only a whole-source range still gets the compact range rewrite", () => {
+  // The compact template stays available for the rule it is actually true for,
+  // so tightening the guard above does not cost the simple case its two
+  // endpoint-disambiguating options.
+  const review = analyzeRuleSemanticImpact({
+    ast: drawOnlyRangeAst,
+    normalizedText:
+      "A guess wins if all official draw numbers are between 9 and 40.",
+    officialInterpretation:
+      "Check whether all six official draw numbers fall within the range from 9 to 40.",
+    sourceText:
+      "A guess wins if all official draw numbers are between 9 and 40.",
+  });
+
+  assert.equal(review.suggestedRewrites.length, 2);
+  assert.match(
+    review.suggestedRewrites[0] ?? "",
+    /all six official draw numbers are between 9 and 40, inclusive/i,
+  );
+});

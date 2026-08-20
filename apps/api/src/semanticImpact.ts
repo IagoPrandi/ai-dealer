@@ -81,6 +81,64 @@ function collectRuleSources(ast: RuleAst | null) {
   return sources;
 }
 
+const RANGE_BOUND_OPS = new Set(["gt", "gte", "lt", "lte"]);
+
+/** A `compare` of the iterated element against a numeric literal bound. */
+function isElementBoundComparison(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  if (record.kind !== "compare" || typeof record.op !== "string") {
+    return false;
+  }
+  if (!RANGE_BOUND_OPS.has(record.op)) {
+    return false;
+  }
+  const left = record.left as Record<string, unknown> | undefined;
+  const right = record.right as Record<string, unknown> | undefined;
+  return (
+    (left?.kind === "elem" && right?.kind === "lit") ||
+    (left?.kind === "lit" && right?.kind === "elem")
+  );
+}
+
+/**
+ * Whether the whole compiled rule is nothing but "every number of one source
+ * lies inside one bounded range".
+ *
+ * `buildRangeRewrites` may only offer its "all six <source> numbers are between
+ * X and Y" sentence for such a rule, because that sentence is synthesized from
+ * the range bounds alone and silently discards every other condition. A rule
+ * such as "first number is 10, second is 12, and the other four are any values
+ * from 1 to 100" also carries exactly one textual range, and rewriting it from
+ * that range alone replaced the player's rule with an always-true one — which
+ * the very next preflight then rejected as DIFFICULTY_ALWAYS_TRUE, leaving no
+ * way back to the rule they wrote.
+ */
+function isWholeSourceRangeOnly(ast: RuleAst | null) {
+  if (!ast || ast.schemaVersion !== 3 || ast.result.type !== "predicate") {
+    return false;
+  }
+  const predicate = ast.result.predicate as unknown as Record<string, unknown>;
+  if (predicate.kind !== "forall") {
+    return false;
+  }
+  const of = predicate.of as Record<string, unknown> | undefined;
+  if (of?.kind !== "source") {
+    return false;
+  }
+  const where = predicate.where as Record<string, unknown> | undefined;
+  if (!where) {
+    return false;
+  }
+  const clauses =
+    where.kind === "and" && Array.isArray(where.clauses)
+      ? where.clauses
+      : [where];
+  return clauses.length > 0 && clauses.every(isElementBoundComparison);
+}
+
 function hasBoundedRangeComparisons(ast: RuleAst | null) {
   if (!ast || ast.schemaVersion === 1) {
     return false;
@@ -271,6 +329,7 @@ function buildRangeRewrites(
   normalizedText: string,
   officialInterpretation: string,
   rangeCount: number,
+  wholeSourceRangeOnly: boolean,
 ) {
   const sourceLabel = impact.sharedOutcome
     ? "official draw"
@@ -283,11 +342,14 @@ function buildRangeRewrites(
       ? "The official draw does not affect the result."
       : "";
 
-  // A single [low, high] rewrite cannot represent different bounds for several
-  // positions. In that case the AST-derived interpretation is the only safe
-  // rewrite: it names every position and every bound, and the scope sentence
-  // makes the draw/guess independence explicit for the next preflight pass.
-  if (rangeCount > 1) {
+  // A single [low, high] rewrite can only stand in for the whole rule when the
+  // whole rule IS that one range over one source. It cannot represent different
+  // bounds for several positions (rangeCount > 1), and it cannot represent any
+  // condition sitting beside the range (!wholeSourceRangeOnly). In both cases
+  // the AST-derived interpretation is the only safe rewrite: it names every
+  // position, value and bound the compiler actually froze, and the scope
+  // sentence makes the draw/guess independence explicit for the next preflight.
+  if (rangeCount > 1 || !wholeSourceRangeOnly) {
     return [appendSentence(officialInterpretation, scopeSentence)];
   }
 
@@ -416,6 +478,7 @@ export function analyzeRuleSemanticImpact({
         normalizedText,
         officialInterpretation,
         numericRanges.length,
+        isWholeSourceRangeOnly(ast),
       )
     : [];
   if (suggestedRewrites.length === 0 && sharedOutcome) {

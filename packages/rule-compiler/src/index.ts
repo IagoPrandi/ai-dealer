@@ -784,6 +784,23 @@ function unwrapProviderCompilation(value: unknown): {
   };
 }
 
+/**
+ * Whether a provider compile envelope carries an AST the runtime grammar
+ * accepts.
+ *
+ * This exists for the transport's re-ask decision, not to judge the rule: the
+ * transport asks "is this response worth keeping, or should I spend a retry?"
+ * Every validity gate still runs downstream on whatever the last attempt
+ * returned, so a response this rejects is reported exactly as before once the
+ * retries are used up. It lives here because the grammar lives here — a copy of
+ * the unwrap-and-parse logic in the transport would drift from the schema it is
+ * supposed to be checking against.
+ */
+export function providerCompilationHasSchemaValidAst(value: unknown): boolean {
+  const { rawAst } = unwrapProviderCompilation(value);
+  return rawAst != null && ruleAstSchema.safeParse(rawAst).success;
+}
+
 function isSixUniqueDomainNumbers(value: unknown): value is number[] {
   return (
     Array.isArray(value) &&

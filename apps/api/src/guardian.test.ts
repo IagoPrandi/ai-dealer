@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import {
   checkGroundedness,
+  detectJailbreak,
   isClearlyGroundedRuleInterpretation,
   resolveGuardianConfig,
   type GuardianConfig,
@@ -112,4 +113,34 @@ test("guardian config ignores inline comments copied from .env examples", () => 
   assert.equal(config.enabled, true);
   assert.equal(config.model, "granite4.1-guardian:8b");
   assert.equal(config.timeoutMs, 120_000);
+});
+
+test("the guardrail is decoded greedily, never sampled", async () => {
+  // A yes/no risk classifier must not be sampled. Ollama applies the model's own
+  // default temperature when a request carries no `options` at all, which made
+  // the verdict a coin flip in BOTH directions: measured on
+  // granite4.1-guardian:8b, a real injection was caught only 6/10 times and a
+  // legitimate Portuguese rule was blocked 7/10 times.
+  const bodies: Record<string, unknown>[] = [];
+  globalThis.fetch = (async (
+    _input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+    return new Response(
+      JSON.stringify({ message: { content: "<score>no</score>" } }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+
+  await detectJailbreak(
+    "A guess wins if the guessed sum is odd.",
+    GUARDIAN_CONFIG,
+  );
+
+  const options = bodies[0]?.options as Record<string, unknown> | undefined;
+  assert.equal(options?.temperature, 0);
+  assert.equal(options?.top_k, 1);
+  assert.equal(options?.top_p, 1);
+  assert.equal(typeof options?.seed, "number");
 });

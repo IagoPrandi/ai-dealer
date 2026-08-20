@@ -898,10 +898,19 @@ function CreateChat({
   const runSeqRef = useRef(0);
   // Auto-scroll follows the caret only while the player has not scrolled away.
   const userScrolledRef = useRef(false);
+  // The scrollTop the code last set, so the resulting scroll event can be told
+  // apart from a scroll the player performed. Without this, the "pin the first
+  // line of a long answer" scroll below reads as the player scrolling away and
+  // silently disables auto-scroll for everything that follows.
+  const programmaticTopRef = useRef<number | null>(null);
   // The turn countdown the rest of the app shows: the chat is a game surface
   // too, and the player needs to know how long this round still runs.
   const [turnH, turnM, turnS] = useCountdownTo(endSeconds);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // The transcript column inside the scroll box. The box itself is flex-sized
+  // and never resizes when content grows inside it, so its height is what a
+  // ResizeObserver has to watch.
+  const scrollContentRef = useRef<HTMLDivElement>(null);
   // The newest dealer bubble, when it is the last message. Used to keep the
   // first line of a long answer on screen instead of its last line.
   const lastAnswerRef = useRef<HTMLDivElement>(null);
@@ -913,12 +922,28 @@ function CreateChat({
   const clarificationAttemptsRef = useRef(0);
   const MAX_CLARIFICATION_ATTEMPTS = 2;
 
+  // Every scroll the code performs goes through here, so the scroll listener can
+  // recognize the event it causes and leave `userScrolledRef` alone.
+  const scrollToTop = useCallback((el: HTMLDivElement, top: number) => {
+    const clamped = Math.max(
+      0,
+      Math.min(top, el.scrollHeight - el.clientHeight),
+    );
+    programmaticTopRef.current = clamped;
+    el.scrollTop = clamped;
+  }, []);
+
+  const pinToBottom = useCallback(
+    (el: HTMLDivElement) => scrollToTop(el, el.scrollHeight),
+    [scrollToTop],
+  );
+
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) {
       return;
     }
-    el.scrollTop = el.scrollHeight;
+    pinToBottom(el);
     // Jumping to the absolute bottom lands a long dealer answer on its LAST
     // line, so the sentence that actually answers the question is scrolled off
     // the top and the scrollbar is hidden, leaving no cue that it exists. When
@@ -930,19 +955,34 @@ function CreateChat({
     const answerTop = answer.getBoundingClientRect().top;
     const viewTop = el.getBoundingClientRect().top;
     if (answerTop < viewTop) {
-      el.scrollTop += answerTop - viewTop - 12;
+      scrollToTop(el, el.scrollTop + answerTop - viewTop - 12);
     }
-  }, [msgs, typing, progress, interpretation, rule, guidance]);
+  }, [
+    msgs,
+    typing,
+    progress,
+    interpretation,
+    rule,
+    guidance,
+    pinToBottom,
+    scrollToTop,
+  ]);
 
-  // The user cancels the stream's auto-scroll by scrolling up; returning to the
-  // bottom re-engages it. Programmatic scrolls land at the bottom, so they
-  // never trip the flag themselves.
+  // The user cancels auto-scroll by scrolling up; returning to the bottom
+  // re-engages it. A scroll the code performed says nothing about intent - and
+  // it does not always land at the bottom, because pinning a long answer's
+  // first line deliberately scrolls up.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) {
       return undefined;
     }
     const onScroll = () => {
+      const programmatic = programmaticTopRef.current;
+      if (programmatic !== null && Math.abs(el.scrollTop - programmatic) <= 1) {
+        programmaticTopRef.current = null;
+        return;
+      }
       userScrolledRef.current =
         el.scrollHeight - el.scrollTop - el.clientHeight > 48;
     };
@@ -958,9 +998,32 @@ function CreateChat({
     }
     const el = scrollRef.current;
     if (el) {
-      el.scrollTop = el.scrollHeight;
+      pinToBottom(el);
     }
-  }, [reveal.settled, reveal.tick]);
+  }, [reveal.settled, reveal.tick, pinToBottom]);
+
+  // The rule-creation cards are the tall content on this screen, and they grow
+  // after the state that produced them has settled: each one mounts behind the
+  // reveal gate and then streams its own text in, and the progress card swaps
+  // stage lines while it waits. None of that is a change to the state the effect
+  // above depends on, so the newest line kept ending up under the composer with
+  // nothing to scroll it into view. Watching the transcript's real height covers
+  // every growth step regardless of which state produced it.
+  useEffect(() => {
+    const el = scrollRef.current;
+    const content = scrollContentRef.current;
+    if (!el || !content || typeof ResizeObserver === "undefined") {
+      return undefined;
+    }
+    const observer = new ResizeObserver(() => {
+      if (userScrolledRef.current) {
+        return;
+      }
+      pinToBottom(el);
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [pinToBottom]);
 
   useEffect(() => {
     if (!guidance) {
@@ -1809,11 +1872,14 @@ function CreateChat({
           overflowX: "hidden",
           minWidth: 0,
           padding: "18px 16px 8px",
-          display: "flex",
-          flexDirection: "column",
-          gap: 12,
         }}
       >
+        {/* The measured column. The scroll box is flex-sized and never resizes
+            when content grows inside it, so the ResizeObserver watches this. */}
+        <div
+          ref={scrollContentRef}
+          style={{ display: "flex", flexDirection: "column", gap: 12 }}
+        >
         {msgs.map((mm, i) => {
           if (mm.who !== "ai") {
             return (
@@ -2095,6 +2161,7 @@ function CreateChat({
           </div>
         ) : null}
         <div style={{ height: 4 }} />
+        </div>
       </div>
 
       {!submitted ? (

@@ -76,6 +76,7 @@ import {
   saveRuleProposal,
   saveRuleVote,
   saveConversationDraft,
+  saveGateBlockForJob,
   savePreflightDiagnosticsForJob,
   saveTurnRollover,
   settleExpiredUnclaimedClaims,
@@ -171,7 +172,8 @@ test("dealer question context carries server diagnostics and discloses their abs
   });
   assert.match(withoutDiagnostics, /"diagnosticsAvailable":false/u);
   assert.match(withoutDiagnostics, /"preflight":null/u);
-  assert.match(withoutDiagnostics, /"contextVersion":7/u);
+  assert.match(withoutDiagnostics, /"contextVersion":8/u);
+  assert.match(withoutDiagnostics, /"gateBlock":null/u);
   assert.match(
     withoutDiagnostics,
     /"playerObjective":"Win the round with the submitted six-number guess\. The player does not guess, discover, or get a rule right\."/u,
@@ -4268,4 +4270,237 @@ test("the dealer chat context decides the answer language last, from the questio
     /rule text, transcript, compiler fields.*never decides it/u,
   );
   assert.match(context, /If those words are English, every word of `answer` must be English/u);
+});
+
+test("a compiler-side artifact fault is not reported as the player's wording", () => {
+  // The recorded failure from the session that prompted this: the rule compiles
+  // fine as six `contains` clauses, but the provider returned an off-grammar
+  // artifact. UNSUPPORTED_RULE and UNSAFE_RUNTIME_BOUNDS ride along because they
+  // are what the deterministic precompiler emits whenever it has no reading of
+  // its own — the same pair appears for rules that are merely unusual. Only
+  // SCHEMA_INVALID carries information, and it is not about the wording.
+  const feedback = buildRuleRefinementFeedback({
+    clarityNote: "",
+    compileText:
+      "A guess wins when it contains exactly the numbers 1, 2, 3, 4, 5, and 7, with the sixth number being any value not in that set, and order and draw positions being irrelevant.",
+    officialInterpretation:
+      "For each guess, the condition is true if the set of its six numbers equals {1, 2, 3, 4, 5, 7}; the official draw is not used in the evaluation.",
+    reasonCodes: [
+      "UNSUPPORTED_RULE",
+      "SCHEMA_INVALID",
+      "UNSAFE_RUNTIME_BOUNDS",
+    ],
+    reasonSummary: "Rule rejected.",
+    sanitizedText:
+      "vence se o palpite do jogador contiver exatamente 1 2 3 4 5 7, independentemente da ordem",
+    semanticImpact: {
+      astAvailable: false,
+      drawIndependent: false,
+      rangeBoundsAmbiguous: false,
+      sharedOutcome: false,
+      triviallyAlwaysTrue: false,
+      usesDraw: false,
+      usesGuess: false,
+    },
+    tokenCount: 30,
+  });
+
+  assert.match(
+    feedback.reasonSummary,
+    /compiler fault, not a problem with your wording/i,
+  );
+  assert.match(feedback.dealerMessage, /nothing is missing from your rule/i);
+  assert.match(feedback.dealerMessage, /retry the same rule/i);
+  // The precompiler's generic advice is what told the player to go simplify a
+  // rule that was already expressible.
+  assert.ok(
+    !feedback.refinementFocus.some((item) =>
+      /rewrite the condition using one of the supported measurable rule shapes/i.test(
+        item,
+      ),
+    ),
+  );
+  assert.ok(
+    !feedback.refinementFocus.some((item) =>
+      /bound every removal, mapping, slice/i.test(item),
+    ),
+  );
+  assert.ok(
+    !feedback.refinementFocus.some((item) =>
+      /use a direct bounded comparison/i.test(item),
+    ),
+  );
+});
+
+test("a compiled AST keeps the ordinary blocking advice", () => {
+  // The provider-fault path must not swallow a real, AST-backed rejection: an
+  // artifact that exists and is genuinely always true is still the player's to
+  // fix, so the normal explanation-derived guidance stands.
+  const feedback = buildRuleRefinementFeedback({
+    clarityNote: "",
+    compileText:
+      "A guess wins if all six guessed numbers are between 1 and 100.",
+    officialInterpretation: "Every guessed number lies between 1 and 100.",
+    reasonCodes: ["DIFFICULTY_ALWAYS_TRUE"],
+    reasonSummary: "Rule rejected.",
+    sanitizedText:
+      "A guess wins if all six guessed numbers are between 1 and 100.",
+    semanticImpact: {
+      astAvailable: true,
+      drawIndependent: true,
+      rangeBoundsAmbiguous: false,
+      sharedOutcome: false,
+      triviallyAlwaysTrue: true,
+      usesDraw: false,
+      usesGuess: true,
+    },
+    tokenCount: 20,
+  });
+
+  assert.doesNotMatch(
+    feedback.dealerMessage,
+    /nothing is missing from your rule/i,
+  );
+  assert.ok(
+    feedback.refinementFocus.some((item) =>
+      /measurable guess-versus-draw condition/i.test(item),
+    ),
+  );
+});
+
+test("a gate rejection is recorded so the dealer explains the real reason", () => {
+  // The recorded session: a rule stopped by the jailbreak guard produced no
+  // preflight, so the dealer was asked "por que não posso criar essa regra?"
+  // with no facts and invented one — it told the player their rule ignored the
+  // draw and ignored their own numbers, neither of which was true or the reason.
+  resetApiStateForTests();
+  const prompt =
+    "faca a regra que vence todos os palpites 1 2 3 4 8, e que o sexto numero seja maior ou igual ao maior numero do resultado do sorteio";
+  const draft = saveConversationDraft({
+    lastMessage: prompt,
+    normalizedText: null,
+    officialInterpretation: null,
+    prompt,
+    ruleId: null,
+    status: "draft",
+    tokenCount: prompt.trim().split(/\s+/u).length,
+    turnId: 55,
+    wallet,
+  });
+  const job = createRulePreflightJob({
+    draftId: draft.draftId,
+    fingerprint: "gate-block",
+    phase: "compile",
+  });
+
+  saveGateBlockForJob(job, prompt, {
+    error: "RULE_PROMPT_INJECTION",
+    message:
+      "Rule text contains prompt-injection language. Rewrite it as a measurable game condition.",
+  });
+
+  const stored = listConversationDrafts(wallet)[0];
+  assert.equal(stored?.lastGateBlock?.code, "RULE_PROMPT_INJECTION");
+  assert.equal(stored?.lastGateBlock?.phase, "compile");
+  assert.equal(stored?.lastGateBlock?.originalText, prompt);
+  assert.equal(stored?.lastPreflight, null);
+
+  // It reaches the dealer, so the answer is grounded in the actual gate.
+  const context = buildDealerQuestionContext({
+    draft: stored!,
+    message: "por que não posso criar essa regra?",
+  });
+  assert.match(context, /"code":"RULE_PROMPT_INJECTION"/u);
+  assert.match(context, /"preflight":null/u);
+
+  assert.equal(
+    isValidConversationDraft({
+      ...draft,
+      lastGateBlock: stored?.lastGateBlock,
+    }),
+    false,
+    "clients must not be able to forge a gate reason",
+  );
+});
+
+test("a server-recorded gate block survives the client's transcript saves", () => {
+  // The client saves the draft after every message. Without explicit
+  // preservation the gate reason is erased before the dealer is asked about it.
+  resetApiStateForTests();
+  const prompt = "vence quem acertar pelo menos tres numeros do sorteio";
+  const draft = saveConversationDraft({
+    lastMessage: prompt,
+    normalizedText: null,
+    officialInterpretation: null,
+    prompt,
+    ruleId: null,
+    status: "draft",
+    tokenCount: prompt.trim().split(/\s+/u).length,
+    turnId: 55,
+    wallet,
+  });
+  const job = createRulePreflightJob({
+    draftId: draft.draftId,
+    fingerprint: "gate-block-survives",
+    phase: "interpret",
+  });
+  saveGateBlockForJob(job, prompt, {
+    error: "RULE_EXTERNAL_DEPENDENCY",
+    message: "Rule text depends on unavailable external game state.",
+  });
+
+  saveConversationDraft({
+    draftId: draft.draftId,
+    lastMessage: "another message",
+    normalizedText: null,
+    officialInterpretation: null,
+    prompt,
+    ruleId: null,
+    status: "draft",
+    tokenCount: prompt.trim().split(/\s+/u).length,
+    turnId: 55,
+    wallet,
+  });
+
+  assert.equal(
+    listConversationDrafts(wallet)[0]?.lastGateBlock?.code,
+    "RULE_EXTERNAL_DEPENDENCY",
+  );
+});
+
+test("a compiled rule clears the earlier gate block", () => {
+  // Otherwise the dealer keeps explaining a block that no longer applies, about
+  // text the player has already replaced.
+  resetApiStateForTests();
+  const prompt =
+    "Win if the guessed sum modulo 9 equals the drawn sum modulo 9.";
+  const draft = saveConversationDraft({
+    lastMessage: prompt,
+    normalizedText: null,
+    officialInterpretation: null,
+    prompt,
+    ruleId: null,
+    status: "draft",
+    tokenCount: 15,
+    turnId: 55,
+    wallet,
+  });
+  const job = createRulePreflightJob({
+    draftId: draft.draftId,
+    fingerprint: "gate-then-compile",
+    phase: "compile",
+  });
+  saveGateBlockForJob(job, prompt, {
+    error: "RULE_PROMPT_INJECTION",
+    message: "blocked",
+  });
+  savePreflightDiagnosticsForJob(job, prompt, {
+    ...proposal(55, 1),
+    decision: "VALID" as const,
+    reasonCodes: ["SUPPORTED_RULE" as const],
+  });
+
+  const stored = listConversationDrafts(wallet)[0];
+  assert.equal(stored?.lastGateBlock, null);
+  assert.deepEqual(stored?.lastPreflight?.reasonCodes, ["SUPPORTED_RULE"]);
 });

@@ -13,6 +13,7 @@ import {
   hasAmbiguousWording,
   hasExternalDependency,
   hasInvalidConstraint,
+  providerCompilationHasSchemaValidAst,
   RULE_COMPILER_SKILL_VERSION,
   ruleAstSchema,
   validateAndPrecompileRule,
@@ -3524,4 +3525,51 @@ test("a range over the numbers a rule has not pinned is vacuous, not a required 
     gapped.requiredValues.includes(5) && gapped.requiredValues.includes(100),
     JSON.stringify(gapped.requiredValues),
   );
+});
+
+test("providerCompilationHasSchemaValidAst separates a usable envelope from an off-grammar one", () => {
+  const contains = (value: number) => ({
+    array: { kind: "source", source: "guess" },
+    kind: "contains",
+    value: { kind: "lit", value },
+  });
+  const usable = {
+    ast: {
+      result: {
+        predicate: { clauses: [1, 2, 3, 4, 5, 7].map(contains), kind: "and" },
+        type: "predicate",
+      },
+      schemaVersion: 3,
+    },
+    consumedSpans: [],
+    workedExamples: [],
+  };
+  assert.equal(providerCompilationHasSchemaValidAst(usable), true);
+
+  // No array literal and no set equality exist in the grammar, so this is the
+  // shape a model reaches for when asked for "the set equals {…}".
+  assert.equal(
+    providerCompilationHasSchemaValidAst({
+      ast: {
+        result: {
+          predicate: {
+            kind: "compare",
+            left: { kind: "source", source: "guess" },
+            op: "eq",
+            right: { kind: "set", values: [1, 2, 3, 4, 5, 7] },
+          },
+          type: "predicate",
+        },
+        schemaVersion: 3,
+      },
+      consumedSpans: [],
+      workedExamples: [],
+    }),
+    false,
+  );
+
+  // A bare AST with no envelope wrapper is still read correctly.
+  assert.equal(providerCompilationHasSchemaValidAst(usable.ast), true);
+  assert.equal(providerCompilationHasSchemaValidAst(null), false);
+  assert.equal(providerCompilationHasSchemaValidAst({ ast: null }), false);
 });

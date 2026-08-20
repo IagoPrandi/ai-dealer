@@ -68,7 +68,11 @@ import {
   translateRuleToEnglish,
   type RuleAgentInterpretation,
 } from "./llm.js";
-import { checkGroundedness, detectJailbreak } from "./guardian.js";
+import {
+  checkGroundedness,
+  detectJailbreak,
+  type GuardianConfig,
+} from "./guardian.js";
 import {
   checkPostgresHealth,
   checkRedisHealth,
@@ -363,10 +367,14 @@ export const RULE_REASON_EXPLANATIONS: readonly RuleReasonExplanation[] = [
   {
     code: "SCHEMA_INVALID",
     whatHappened:
-      "The proposed artifact does not match the versioned rule schema.",
+      "The compiler emitted an artifact outside the versioned rule grammar.",
     whyItBlocks: "The runtime cannot validate or execute an unknown structure.",
+    // Both paths that raise this code are compiler-side: a provider without
+    // schema-constrained decoding, or a provider that returned a structure the
+    // grammar rejects. Neither is caused by the player's wording, so asking them
+    // to rewrite sends them rewording a rule that was already expressible.
     whatToChange:
-      "Rewrite the condition using one of the supported measurable rule shapes.",
+      "Nothing is missing from your rule. Retry the same rule; if it keeps failing, the compiler is at fault rather than your wording.",
   },
   {
     code: "SECOND_OPINION_UNAVAILABLE",
@@ -1103,9 +1111,29 @@ export interface ConversationLastPreflight {
   suggestedRewrites: string[];
 }
 
+/**
+ * A rule stopped by an input gate before any artifact existed — prompt
+ * injection, external dependency, an impossible constraint, a size limit.
+ *
+ * These rejections produce no `lastPreflight`, so the dealer chat used to be
+ * asked "why was my rule blocked?" with `diagnosticsAvailable: false` and
+ * nothing else. It answered from the transcript alone and invented a reason: a
+ * rule blocked by the jailbreak guard was explained to the player as "ignora o
+ * resultado do sorteio e nao usa os numeros do seu palpite", which was false on
+ * both counts. Server-authored, like `lastPreflight`.
+ */
+export interface ConversationGateBlock {
+  code: string;
+  message: string;
+  originalText: string;
+  phase: RulePreflightPhase;
+}
+
 export interface ConversationDraftRecord {
   createdAt: string;
   draftId: string;
+  /** Server-authored gate rejection. Clients may read but never write it. */
+  lastGateBlock?: ConversationGateBlock | null;
   lastMessage: string;
   /** Server-authored compiler context. Clients may read but never write it. */
   lastPreflight?: ConversationLastPreflight | null;
@@ -2972,15 +3000,37 @@ export function buildRuleRefinementFeedback(
     understoodInterpretation.length > 0;
   const compilerConflictAction =
     "No missing rule detail was identified. Do not repeat the same clarification; retry the exact interpretation once, and edit it only if the interpretation above is not what you meant.";
+  /**
+   * The compiler produced no artifact the grammar accepts. `UNSUPPORTED_RULE`
+   * and `UNSAFE_RUNTIME_BOUNDS` ride along on this path because they are what
+   * the deterministic precompiler emits whenever it has no reading of its own --
+   * they say nothing about this rule. Presenting their advice ("use a direct
+   * bounded comparison", "bound every removal, mapping, slice") told a player
+   * whose rule compiles fine as six `contains` clauses to go simplify it.
+   */
+  const providerArtifactFault =
+    (reasonCodes.has("SCHEMA_INVALID") ||
+      reasonCodes.has("PROVIDER_MALFORMED_RESPONSE")) &&
+    !reasonCodes.has("AMBIGUOUS_RULE") &&
+    input.semanticImpact?.astAvailable !== true;
+  const providerArtifactAction =
+    "Nothing is missing from your rule, and no rewording is needed. Retry the same rule; if it keeps failing, the compiler is at fault rather than your wording.";
   if (compilerConflictWithoutAmbiguity) {
     // A provider conflict is not made repairable by asking the player an
     // invented question. Repeating a clarification that both providers already
     // received sends the conversation into a loop while hiding the real fault.
+    //
+    // `providerArtifactFault` deliberately does NOT clear the questions: those
+    // come from `inferIntentSpecificRefinement`, which reads the player's own
+    // wording, so they are real signal about the text even when the compiler is
+    // the thing that broke. Only the generic blame is dropped, below.
     questions.splice(0, questions.length);
   }
   const explanations = getBlockingRuleReasonExplanations(input.reasonCodes);
   if (compilerConflictWithoutAmbiguity) {
     focus.add(compilerConflictAction);
+  } else if (providerArtifactFault) {
+    focus.add(providerArtifactAction);
   } else {
     explanations.forEach((explanation) => focus.add(explanation.whatToChange));
   }
@@ -3016,16 +3066,27 @@ export function buildRuleRefinementFeedback(
   if (!topExplanation) {
     throw new Error("RULE_REASON_EXPLANATION_MISSING:UNSUPPORTED_RULE");
   }
+  const understoodPrefix =
+    understoodInterpretation.length > 0
+      ? `I understood this as: ${understoodInterpretation}. `
+      : "";
   const reasonSummary = compilerConflictWithoutAmbiguity
     ? `I understood this as: ${understoodInterpretation}. Your wording is clear, but independent compiler attempts produced different executable readings. This is a compiler conflict, not a missing answer from you.`
-    : unsupportedButUnderstood
-      ? `I understood this as: ${understoodInterpretation}. ${topExplanation.whatHappened} ${topExplanation.whyItBlocks}`
-      : `${topExplanation.whatHappened} ${topExplanation.whyItBlocks}`;
+    : providerArtifactFault
+      ? `${understoodPrefix}${topExplanation.whatHappened} ${topExplanation.whyItBlocks} This is a compiler fault, not a problem with your wording.`
+      : unsupportedButUnderstood
+        ? `I understood this as: ${understoodInterpretation}. ${topExplanation.whatHappened} ${topExplanation.whyItBlocks}`
+        : `${topExplanation.whatHappened} ${topExplanation.whyItBlocks}`;
   const rewriteLine =
     suggestedRewrites.length > 0
       ? ` Choose one of the ${suggestedRewrites.length} intent-preserving rewrites or write your own.`
       : "";
-  const dealerMessage = `[${topExplanation.code}] ${reasonSummary} ${compilerConflictWithoutAmbiguity ? compilerConflictAction : topExplanation.whatToChange}${rewriteLine}${
+  const dealerAction = compilerConflictWithoutAmbiguity
+    ? compilerConflictAction
+    : providerArtifactFault
+      ? providerArtifactAction
+      : topExplanation.whatToChange;
+  const dealerMessage = `[${topExplanation.code}] ${reasonSummary} ${dealerAction}${rewriteLine}${
     questions.length > 0
       ? " Answer the clarification questions by sending a revised rule."
       : ""
@@ -3050,6 +3111,71 @@ export function buildRuleRefinementFeedback(
     ...(suggestedRewrite ? { suggestedRewrite } : {}),
     suggestedRewrites,
   };
+}
+
+/**
+ * `clear` -- no jailbreak risk. `confirmed` -- flagged in the player's own words
+ * AND in the English the compiler will read; a hard block. `disputed` -- flagged
+ * in one language and cleared in the other, which in practice means the
+ * classifier reacted to the phrasing rather than to an attempt.
+ */
+type JailbreakScreening = "clear" | "confirmed" | "disputed";
+
+export const JAILBREAK_DISPUTED_LOG =
+  "Guardian jailbreak verdict disputed: flagged in the player's own words and cleared in the English the compiler reads. Proceeding on the cleared reading; review this sample when tuning the guard.";
+
+/** Disclosed on the preflight result so a disputed verdict is never invisible. */
+export const JAILBREAK_DISPUTED_NOTE =
+  "Guardian jailbreak check disputed: the wording was flagged in the language you wrote it in and cleared in the English the compiler reads. Compiled from the cleared reading.";
+
+function normalizeForJailbreakComparison(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/gu, " ");
+}
+
+/**
+ * Second-opinion screening for the jailbreak guard.
+ *
+ * The classifier reads the player's own language poorly. Measured on
+ * `granite4.1-guardian:8b` with greedy decoding: the Portuguese rule "faca a
+ * regra que vence todos os palpites 1 2 3 4 8, e que o sexto numero seja maior
+ * ou igual ao maior numero do resultado do sorteio" is flagged 10/10, while the
+ * same rule in English is cleared 10/10 -- and a real injection is caught 10/10
+ * in both. So a single positive on non-English text is not evidence of an
+ * attempt, and it used to be a dead end on a rule that was legitimate and
+ * expressible.
+ *
+ * Requiring both readings to agree keeps real attempts blocked: a Portuguese
+ * injection still translates to an English injection, which the guard catches
+ * (measured 6/6 in both languages).
+ *
+ * A disagreement lets the rule through, and the reason that is safe is
+ * structural rather than statistical: every LLM downstream of this gate reads
+ * `englishText`, not the player's raw words -- the interpreter and the compiler
+ * are both handed the translation. So "disputed" means the text those models
+ * will actually consume is the reading the guard CLEARED. It is disclosed on the
+ * result and logged rather than waved through silently.
+ */
+async function screenForJailbreak(input: {
+  englishText: string;
+  guardianConfig: GuardianConfig;
+  sanitizedText: string;
+  signal?: AbortSignal | undefined;
+}): Promise<JailbreakScreening> {
+  const { englishText, guardianConfig, sanitizedText, signal } = input;
+  if (!(await detectJailbreak(sanitizedText, guardianConfig, signal))) {
+    return "clear";
+  }
+  // Nothing independent to compare against: the compiler reads the same words
+  // the guard just flagged, so the flag stands.
+  if (
+    normalizeForJailbreakComparison(englishText) ===
+    normalizeForJailbreakComparison(sanitizedText)
+  ) {
+    return "confirmed";
+  }
+  return (await detectJailbreak(englishText, guardianConfig, signal))
+    ? "confirmed"
+    : "disputed";
 }
 
 async function createRuleInterpretation(
@@ -3097,17 +3223,10 @@ async function createRuleInterpretation(
   }
   await ensureDealerModelReady(agentConfig.model, signal);
 
-  if (guardianConfig.enabled) {
-    reportProgress({
-      message: "Checking the rule for unsafe instructions...",
-      model: guardianConfig.model,
-      stage: "checking_safety",
-    });
-    if (await detectJailbreak(sanitizedText, guardianConfig, signal)) {
-      throw new Error("RULE_PROMPT_INJECTION");
-    }
-  }
-
+  // Translation runs BEFORE the guardian so the guard can read both the player's
+  // words and the English the compiler will actually read. The deterministic
+  // pattern gate above already ran, and this adds no call to the normal path --
+  // every rule was being translated anyway.
   const knownInterpretation = createKnownRuleInterpretation(sanitizedText);
   const shouldTranslate = !knownInterpretation && runtime.translateToEnglish;
   if (shouldTranslate) {
@@ -3122,6 +3241,31 @@ async function createRuleInterpretation(
     (shouldTranslate
       ? await translateRuleToEnglish(sanitizedText, agentConfig, signal)
       : sanitizedText);
+
+  if (guardianConfig.enabled) {
+    reportProgress({
+      message: "Checking the rule for unsafe instructions...",
+      model: guardianConfig.model,
+      stage: "checking_safety",
+    });
+    const screening = await screenForJailbreak({
+      englishText,
+      guardianConfig,
+      sanitizedText,
+      signal,
+    });
+    if (screening === "confirmed") {
+      throw new Error("RULE_PROMPT_INJECTION");
+    }
+    if (screening === "disputed") {
+      // Logged, not hidden: this is the signal for tuning the guard.
+      console.warn(
+        JAILBREAK_DISPUTED_LOG,
+        JSON.stringify({ englishText, sanitizedText }),
+      );
+    }
+  }
+
   reportProgress({
     message: "Interpreting your winning condition...",
     model: agentConfig.model,
@@ -3232,37 +3376,17 @@ async function createRulePreflight(
   }
   await ensureDealerModelReady(agentConfig.model, signal);
 
-  // 1. Guardian input gate (Granite Guardian) — an ML jailbreak classifier in
-  // addition to the regex guard. If the guardian is down we keep the regex guard
-  // and surface the outage rather than silently dropping the check.
-  if (guardianConfig.enabled) {
-    reportProgress({
-      message: "Checking the rule for unsafe instructions...",
-      model: guardianConfig.model,
-      stage: "checking_safety",
-    });
-    try {
-      if (await detectJailbreak(sanitizedText, guardianConfig, signal)) {
-        throw new Error("RULE_PROMPT_INJECTION");
-      }
-    } catch (error) {
-      if (signal?.aborted) {
-        throw signal.reason ?? error;
-      }
-      if (error instanceof Error && error.message === "RULE_PROMPT_INJECTION") {
-        throw error;
-      }
-      guardianNote = `Guardian jailbreak check unavailable: ${
-        error instanceof Error ? error.message : String(error)
-      }`;
-    }
-  }
 
-  // 2. Optionally translate to English so the dealer + compiler reason in one
+  // 1. Optionally translate to English so the dealer + compiler reason in one
   // language (removes cross-language ambiguity for small models). A capable
   // multilingual model reads the original directly — and the rule-authoring skill
   // carries a Portuguese trigger glossary — so this step can be turned off
   // (LLM_TRANSLATE_TO_ENGLISH=false) to save a call without losing consistency.
+  //
+  // This now runs BEFORE the guardian so the jailbreak screening can compare the
+  // player's own words against the English the compiler reads. The deterministic
+  // pattern gate above still runs first, and the normal path spends no extra
+  // call — the translation was already happening.
   const knownInterpretation = createKnownRuleInterpretation(sanitizedText);
   const shouldTranslate = !knownInterpretation && runtime.translateToEnglish;
   if (shouldTranslate) {
@@ -3277,6 +3401,49 @@ async function createRulePreflight(
     (shouldTranslate
       ? await translateRuleToEnglish(sanitizedText, agentConfig, signal)
       : sanitizedText);
+
+  // 2. Guardian input gate (Granite Guardian) — an ML jailbreak classifier in
+  // addition to the regex guard. If the guardian is down we keep the regex guard
+  // and surface the outage rather than silently dropping the check.
+  if (guardianConfig.enabled) {
+    reportProgress({
+      message: "Checking the rule for unsafe instructions...",
+      model: guardianConfig.model,
+      stage: "checking_safety",
+    });
+    try {
+      const screening = await screenForJailbreak({
+        englishText: compileText,
+        guardianConfig,
+        sanitizedText,
+        signal,
+      });
+      if (screening === "confirmed") {
+        throw new Error("RULE_PROMPT_INJECTION");
+      }
+      // Flagged in one language and cleared in the other. The compile proceeds
+      // on the cleared English reading — which is the only text the interpreter
+      // and compiler are given — and the disagreement is disclosed on the result
+      // and logged so the guard can be tuned against real samples.
+      if (screening === "disputed") {
+        console.warn(
+          JAILBREAK_DISPUTED_LOG,
+          JSON.stringify({ compileText, sanitizedText }),
+        );
+        guardianNote = JAILBREAK_DISPUTED_NOTE;
+      }
+    } catch (error) {
+      if (signal?.aborted) {
+        throw signal.reason ?? error;
+      }
+      if (error instanceof Error && error.message === "RULE_PROMPT_INJECTION") {
+        throw error;
+      }
+      guardianNote = `Guardian jailbreak check unavailable: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+    }
+  }
   const ruleId = createRuleId();
 
   // A full dealer pass for a given model: interpret (human message), compile the
@@ -4269,7 +4436,7 @@ function isValidConversationMessages(
 
 export function isValidConversationDraft(value: unknown): value is Omit<
   ConversationDraftRecord,
-  "createdAt" | "draftId" | "lastPreflight" | "updatedAt"
+  "createdAt" | "draftId" | "lastGateBlock" | "lastPreflight" | "updatedAt"
 > & {
   createdAt?: string;
   draftId?: string;
@@ -4310,6 +4477,8 @@ export function isValidConversationDraft(value: unknown): value is Omit<
       draft.preflightJobId === null ||
       (typeof draft.preflightJobId === "string" &&
         isRulePreflightJobId(draft.preflightJobId))) &&
+    // Server-authored: a client that sends either one is rejected, not merged.
+    draft.lastGateBlock === undefined &&
     draft.lastPreflight === undefined &&
     typeof draft.lastMessage === "string" &&
     Buffer.byteLength(draft.lastMessage, "utf8") <= MAX_RULE_TEXT_BYTES &&
@@ -4719,6 +4888,11 @@ async function runRulePreflightJob(
       });
     } else {
       const failure = describeRulePreflightError(error);
+      // Give the dealer the real reason before the client is told anything. A
+      // gate rejection creates no artifact, so this is the only record of why
+      // the rule stopped -- without it "why was my rule blocked?" is answered
+      // from the transcript alone.
+      saveGateBlockForJob(job, text, failure.body);
       appendRulePreflightJobEvent(job.id, {
         ...failure.body,
         status: failure.status,
@@ -6557,7 +6731,7 @@ export function listPlayerHistory(args: {
 export function saveConversationDraft(
   draft: Omit<
     ConversationDraftRecord,
-    "createdAt" | "draftId" | "lastPreflight" | "updatedAt"
+    "createdAt" | "draftId" | "lastGateBlock" | "lastPreflight" | "updatedAt"
   > & {
     createdAt?: string;
     draftId?: string;
@@ -6573,6 +6747,12 @@ export function saveConversationDraft(
     ...draft,
     createdAt: existing?.createdAt ?? draft.createdAt ?? updatedAt,
     draftId,
+    // Both are server-authored and survive client writes. The client saves the
+    // transcript after every message, so without this the gate reason would be
+    // erased before the dealer chat is asked to explain it.
+    ...(existing?.lastGateBlock === undefined
+      ? {}
+      : { lastGateBlock: existing.lastGateBlock }),
     ...(existing?.lastPreflight === undefined
       ? {}
       : { lastPreflight: existing.lastPreflight }),
@@ -6663,7 +6843,40 @@ export function savePreflightDiagnosticsForJob(
     }
     conversationDrafts.set(draftId, {
       ...draft,
+      // A rule that reached the compiler supersedes any earlier gate rejection,
+      // so the dealer never explains a stale block.
+      lastGateBlock: null,
       lastPreflight: toConversationLastPreflight(originalText, preflight),
+      updatedAt: new Date().toISOString(),
+    });
+  }
+}
+
+/**
+ * Records an input-gate rejection on the job's drafts so the dealer chat can
+ * explain the real reason instead of guessing one. The paired `lastPreflight` is
+ * cleared: this rule produced no artifact, and the previous rule's diagnostics
+ * describe different text.
+ */
+export function saveGateBlockForJob(
+  job: RulePreflightJobRecord,
+  originalText: string,
+  failure: { error: string; message: string },
+) {
+  for (const draftId of job.draftIds ?? []) {
+    const draft = conversationDrafts.get(draftId);
+    if (!draft) {
+      continue;
+    }
+    conversationDrafts.set(draftId, {
+      ...draft,
+      lastGateBlock: {
+        code: failure.error,
+        message: failure.message,
+        originalText: sanitizeRuleText(originalText),
+        phase: job.phase,
+      },
+      lastPreflight: null,
       updatedAt: new Date().toISOString(),
     });
   }
@@ -6692,6 +6905,7 @@ export function buildDealerQuestionContext(args: {
   message: string;
 }) {
   const diagnostics = args.draft.lastPreflight ?? null;
+  const gateBlock = args.draft.lastGateBlock ?? null;
   const ruleProposalCount = [...ruleProposals.values()].filter(
     (proposal) =>
       proposal.proposer === args.draft.wallet &&
@@ -6713,8 +6927,12 @@ export function buildDealerQuestionContext(args: {
     .reverse()
     .find((entry) => entry.who === "ai");
   const payload = {
-    contextVersion: 7,
+    contextVersion: 8,
     diagnosticsAvailable: diagnostics !== null,
+    // Set when an input gate stopped the rule before anything compiled. It is
+    // the ONLY record of why, so when it is present it is the reason to explain
+    // -- never a guess drawn from the rule's own wording.
+    gateBlock,
     fees: {
       chatSol: 0,
       // Every paid action doubles per repeat within the same round, and the
