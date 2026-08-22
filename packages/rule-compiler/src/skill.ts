@@ -13,12 +13,15 @@ import { fileURLToPath } from "node:url";
 
 export const RULE_COMPILER_SKILL = {
   name: "compile_rule_to_ast",
+  // v12: the ordered-criteria fold (patterns.md 2c) — "A decides it, otherwise
+  // B" is ONE ranking whose primary term is scaled above the secondary's
+  // maximum, so a fallback clause is compiled rather than silently dropped.
   // v11: the negated-unordered-set idiom (`not(or(contains ...))`) and the
   // explicit clause budget, so a rule naming a set on BOTH sides groups each
   // side instead of flattening every value into the top-level `and`.
   // v10: ordered literal prefixes with an explicitly unconstrained remainder,
   // on top of v9's full literal sequences, sets, and their negation.
-  version: "tyche_rule_compiler_skill_v11",
+  version: "tyche_rule_compiler_skill_v12",
   allowedInputs: ["guess", "draw"] as const,
 } as const;
 

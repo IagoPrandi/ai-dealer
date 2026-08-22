@@ -4,6 +4,20 @@ This tracker records milestone status, work logs, and required document confirma
 
 ## Work Log
 
+### 2026-08-20 (HTTPS mobile PWA tunnel renewed)
+
+- Opened the required `PRD.md`, `AGENTS.md`, and `PROGRESS_TRACKER.md`, inspected `.claude/skills`, and applied the local Cloudflare Tunnel, test-and-verify, Playwright, and dev-server browser-verification guidance.
+- Confirmed the existing public DApp listener on `0.0.0.0:3000` and created a new Cloudflare Quick Tunnel. The active temporary HTTPS URL is `https://face-shame-balance-irc.trycloudflare.com`.
+- Verification passed: `GET /play` returned HTTP 200 through the public HTTPS URL; browser automation found a secure context and rendered content, found zero Next.js error overlays, and confirmed one registered service worker for PWA installation.
+- No implementation milestone was completed or checked; milestone confirmation remains reserved for the user. Final inconsistency review confirmed that no application code, configuration, data, wallets, transactions, or on-chain behavior changed.
+
+### 2026-08-20 (HTTPS mobile PWA tunnel republished)
+
+- Opened the required `PRD.md`, `AGENTS.md`, and `PROGRESS_TRACKER.md`, inspected `.claude/skills`, and applied the local Cloudflare Tunnel, test-and-verify, Playwright, and dev-server browser-verification guidance.
+- Confirmed the public DApp was already listening on `0.0.0.0:3000`, then published a new Cloudflare Quick Tunnel to that existing origin. The active temporary HTTPS URL is `https://charming-recovered-commit-station.trycloudflare.com`.
+- Verification passed: `GET /play` through the public HTTPS URL returned HTTP 200; browser automation found a secure context and rendered content, found zero Next.js error overlays, and confirmed one registered service worker for PWA installation.
+- No implementation milestone was completed or checked; milestone confirmation remains reserved for the user. Final consistency review confirmed that no application code, configuration, data, wallets, transactions, or on-chain behavior changed.
+
 ### 2026-08-19 (Guardian false positive and near-tautology classification corrected)
 
 - Opened the required `PRD.md`, `AGENTS.md`, and `PROGRESS_TRACKER.md`; inspected `.claude/skills`; and applied the local best-practices and test-and-verify guidance, including the agent principles, testing, code-quality, checklist, and historical behavior-set references.

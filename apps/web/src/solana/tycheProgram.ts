@@ -124,7 +124,8 @@ export interface RulePreflightResult {
   confirmationRequired: boolean;
   coverage: {
     missingFromAst: number[];
-    missingOperations: Array<"digit" | "mod" | "parity" | "sum">;
+    // Forwarded, never inspected — see the note in features/tyche/data/apiClient.
+    missingOperations: string[];
   } | null;
   // Compile-gate verdict: the rule is only proposable when decision === "VALID".
   compiledArtifactHash?: string | null;

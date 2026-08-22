@@ -282,7 +282,11 @@ export interface RulePreflightApiResult {
   confirmationRequired: boolean;
   coverage: {
     missingFromAst: number[];
-    missingOperations: Array<"digit" | "mod" | "parity" | "sum">;
+    // The compiler owns this vocabulary and it grows (it gained `position`).
+    // The web only forwards the list, so mirroring the literal union here bought
+    // nothing and silently went stale — a member the gate enforces would be
+    // rejected by a type that had not been updated.
+    missingOperations: string[];
   } | null;
   decision?: "INVALID" | "VALID";
   dealerMessage: string;

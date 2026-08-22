@@ -119,10 +119,10 @@ const walletThree = "6bYqf3rJ7m2nQh9sV1xCH8kLpWtD6eZaUg5oNbMcXyTK";
 const base58 = "ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd";
 
 test("every compiler reason code has one actionable player explanation", () => {
-  assert.equal(RULE_REASON_EXPLANATIONS.length, 19);
+  assert.equal(RULE_REASON_EXPLANATIONS.length, 20);
   assert.equal(
     new Set(RULE_REASON_EXPLANATIONS.map((entry) => entry.code)).size,
-    19,
+    20,
   );
   const explanations = getRuleReasonExplanations([
     "INTERPRETATION_MISMATCH",
@@ -149,6 +149,19 @@ test("every compiler reason code has one actionable player explanation", () => {
   assert.ok(spans, "PROVIDER_SPAN_COVERAGE_INCOMPLETE needs an explanation");
   assert.doesNotMatch(spans.whatToChange, /restate every load-bearing/i);
   assert.match(spans.whatToChange, /clause/i);
+
+  // Same principle for the dealer-summary divergence: nothing is missing from
+  // what the player wrote, so the "restate every load-bearing number" advice
+  // would send them fixing wording that was never the fault.
+  const agentStatement = getRuleReasonExplanations([
+    "AGENT_STATEMENT_MISMATCH",
+  ])[0];
+  assert.ok(agentStatement, "AGENT_STATEMENT_MISMATCH needs an explanation");
+  assert.doesNotMatch(
+    agentStatement.whatToChange,
+    /restate every load-bearing/i,
+  );
+  assert.match(agentStatement.whatHappened, /summary/i);
 });
 
 test("the deterministic injection gate is multilingual without blocking rule semantics", () => {

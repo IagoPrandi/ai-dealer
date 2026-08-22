@@ -31,10 +31,31 @@ export interface InterpretationCoverage {
 /**
  * Load-bearing operations a player can name explicitly. Deliberately a small
  * closed set: each one changes which guesses win, each one has an unambiguous
- * signature in the AST, and none of them can be "simplified away" the way a
- * count or a position can.
+ * signature in the AST, and none of them can be "simplified away".
+ *
+ * `position` was added after a rule reading "the guess that most matches wins;
+ * otherwise the smallest difference in the corresponding POSITIONS" compiled to
+ * a bare unordered match count. Every literal survived (the text had none) and
+ * every operation in the old four-item set survived (it named none), so the gate
+ * certified an artifact that had dropped the whole second criterion. An
+ * operation missing from this set is a clause the gate cannot see.
+ *
+ * "difference" is deliberately NOT a member, though the same rule names one.
+ * Membership requires that the operation can never be legitimately simplified
+ * away, and a difference can: "remove up to 2 guessed numbers with the largest
+ * absolute DIFFERENCE from any drawn number, then win if 3 remaining guessed
+ * numbers appear in the draw" compiles — correctly — to a plain match count,
+ * because the removed numbers are by definition not in the draw and so cannot
+ * change the count. Requiring a subtraction node there would reject a faithful
+ * artifact. `position` carries the same rule's intent and has no such escape:
+ * an unordered count can never stand in for a positional comparison.
  */
-export type RuleOperation = "digit" | "mod" | "parity" | "sum";
+export type RuleOperation =
+  | "digit"
+  | "mod"
+  | "parity"
+  | "position"
+  | "sum";
 
 export interface InterpretationCoverageInput {
   ast: RuleAst;
@@ -131,15 +152,33 @@ function stripExampleClauses(value: string) {
     .join(" ");
 }
 
-export function stripVacuousRanges(value: string) {
+/**
+ * Placeholder left where a vacuous range was, so a caller can still tell WHICH
+ * clause the range came from after the text has been split into clauses.
+ * Splitting first is not an option: every clause boundary candidate ("and") also
+ * appears inside a range ("between 1 and 100"), so the split would cut the range
+ * in half and nothing would look vacuous any more.
+ * Tildes on purpose: not a word character (so the token can neither create
+ * nor hide a cue), not a clause boundary, and visible in a debugger — unlike a
+ * control character, which is invisible in source and easy to mangle in transit.
+ */
+const VACUOUS_RANGE_MARK = "~~";
+
+function replaceVacuousRanges(value: string, replacement: string) {
   return value.replace(FULL_DOMAIN_RANGE, (match) => {
     const bounds = readDigits(match);
     if (bounds.length !== 2) {
       return match;
     }
     const [low, high] = bounds as [number, number];
-    return low <= NUMBER_DOMAIN_MIN && high >= NUMBER_DOMAIN_MAX ? " " : match;
+    return low <= NUMBER_DOMAIN_MIN && high >= NUMBER_DOMAIN_MAX
+      ? replacement
+      : match;
   });
+}
+
+export function stripVacuousRanges(value: string) {
+  return replaceVacuousRanges(value, " ");
 }
 
 function readDigits(value: string) {
@@ -303,10 +342,65 @@ const OPERATION_TEXT_CUES: ReadonlyArray<readonly [RuleOperation, RegExp]> = [
   ],
   ["sum", /\b(?:sum|sums|total|totals|soma|somam?)\b/u],
   ["digit", /\b(?:digit|digits|digito|digitos)\b/u],
+  // A rule that names WHERE a number sits is not the same rule as one that only
+  // asks whether the number appears. "same position" is the cue that separates
+  // an ordered comparison from an unordered intersection, and dropping it turns
+  // a hard rule into an easy one.
+  //
+  // Bare "first/last" are deliberately absent: they are ordinary prose ("the
+  // first thing to check", "no numbers in the last draw") far more often than a
+  // positional index, and the ordinal forms below carry the index explicitly.
+  [
+    "position",
+    /\b(?:position|positions|positional|positionally|posicao|posicoes|slot|slots|index|indexes|indices|(?:first|second|third|fourth|fifth|sixth|primeir[oa]|segund[oa]|terceir[oa]|quart[oa]|quint[oa]|sext[oa]|ultim[oa])\s+(?:guessed?|picked|drawn?|pick|number|numero|dezena)|casa|casas)\b/u,
+  ],
 ];
 
+/**
+ * Anything that could still constrain who wins once a vacuous range has been
+ * removed from a clause.
+ *
+ * Deliberately NOT the same vocabulary as the residue gate in index.ts: that one
+ * counts positional words as intent-bearing, which is right when asking "was
+ * this span read?" but wrong here. The question here is narrower — "does this
+ * clause assert anything at all?" — and a positional SUBJECT ("the first drawn
+ * number ...") asserts nothing on its own; only the predicate applied to it can.
+ */
+const CONSTRAINING_RESIDUE =
+  /\d|\b(?:greater|higher|above|over|more|most|larger|less|lower|below|under|fewer|least|smaller|equals?|same|different|differs?|exact|exactly|within|match(?:es|ing)?|appears?|contains?|includes?|hits?|sum|sums|total|totals|count|odd|even|parity|digits?|modulo|mod|remainder|multiples?|maior|menor|igua(?:l|is)|diferentes?|exat[oa]|exatamente|acerta\w*|acertos?|aparece\w*|contem|soma|somam?|impar(?:es)?|pares?|digito|digitos|resto|multiplos?)\b/u;
+
+/**
+ * Drops clauses that assert nothing because their only content was a range
+ * spanning the whole number domain.
+ *
+ * "win if all your numbers are drawn AND the first drawn number is between 1 and
+ * 100" names a POSITION, but the clause naming it is vacuously true of every
+ * draw, so a faithful compile omits it entirely. The value side of this module
+ * already discounts such ranges (`stripVacuousRanges`); without the same
+ * discount here the operation side would demand a positional node for a clause
+ * that constrains nothing, and reject the correct artifact.
+ *
+ * Only clauses that actually contained a full-domain range are candidates — a
+ * clause with no vacuous range is never dropped, whatever else it says.
+ */
+function stripVacuousClauses(value: string) {
+  return replaceVacuousRanges(value, VACUOUS_RANGE_MARK)
+    .split(/(?:\s+\b(?:and|e)\b\s+|[.;,:])/u)
+    .filter(
+      (clause) =>
+        !clause.includes(VACUOUS_RANGE_MARK) ||
+        CONSTRAINING_RESIDUE.test(unmark(clause)),
+    )
+    .map(unmark)
+    .join(" . ");
+}
+
+function unmark(value: string) {
+  return value.split(VACUOUS_RANGE_MARK).join(" ");
+}
+
 export function collectRequiredOperations(text: string): RuleOperation[] {
-  const prepared = stripExampleClauses(normalize(text));
+  const prepared = stripVacuousClauses(stripExampleClauses(normalize(text)));
   return OPERATION_TEXT_CUES.filter(([, pattern]) => pattern.test(prepared)).map(
     ([operation]) => operation,
   );
@@ -331,6 +425,13 @@ export function collectAstOperations(ast: RuleAst): Set<RuleOperation> {
   if (ast.schemaVersion === 1) {
     if (ast.node.kind === "sum_equals") {
       operations.add("sum");
+    }
+    // `ordered_exact` compares the two lists position by position — the v1
+    // grammar spells that in the node name rather than in a node tree, so the
+    // generic visitor below would never see it and a rule that says "in the same
+    // positions" would look like it had lost its positional condition.
+    if (ast.node.kind === "ordered_exact") {
+      operations.add("position");
     }
     return operations;
   }
@@ -372,6 +473,23 @@ export function collectAstOperations(ast: RuleAst): Set<RuleOperation> {
     // a sum, whatever the node is called.
     if (op === "sum" || kind.includes("sum") || kind.includes("total")) {
       operations.add("sum");
+    }
+    // Anything that reads a specific index, walks two arrays in lockstep, or
+    // carries "ordered"/"position" in its name is positional. `slice`/`reverse`
+    // are included because both select by index. Plain `sort` is NOT: it imposes
+    // an order to aggregate over (min/max/span), which is how a rule that never
+    // mentions positions is normally built — counting it would make the cue
+    // satisfiable by almost any AST and the gate meaningless.
+    if (
+      kind === "at" ||
+      kind === "slice" ||
+      kind === "reverse" ||
+      kind.startsWith("pairs_") ||
+      kind.includes("ordered") ||
+      kind.includes("position") ||
+      kind.includes("reversed")
+    ) {
+      operations.add("position");
     }
     Object.values(record).forEach(visit);
   };

@@ -16,6 +16,7 @@ import {
   providerCompilationHasSchemaValidAst,
   RULE_COMPILER_SKILL_VERSION,
   ruleAstSchema,
+  scoreGuess,
   validateAndPrecompileRule,
 } from "./index.js";
 
@@ -71,6 +72,31 @@ function readPromptRowsById(
 
 function tokenCount(prompt: string) {
   return prompt.trim().split(/\s+/).filter(Boolean).length;
+}
+
+/**
+ * A cooperating reviewer for the deterministic path.
+ *
+ * `preferDeterministic` freezes the deterministic AST but no longer skips the
+ * model: the pattern compiler reviews the provider, so the provider must review
+ * the pattern compiler, or a pattern that implements only half of a sentence
+ * certifies itself. These fixtures therefore need a provider that AGREES, and
+ * the cheapest way to guarantee agreement is to hand back the very AST the
+ * offline compiler produced for the same text.
+ */
+function agreeingReviewer(onCall?: () => void) {
+  return async ({ normalizedText }: { normalizedText: string }) => {
+    onCall?.();
+    const offline = validateAndPrecompileRule({
+      prompt: normalizedText,
+      tokenCount: tokenCount(normalizedText),
+    });
+    const ast = offline.artifact?.ast;
+    if (!ast) {
+      throw new Error(`no offline AST to review for: ${normalizedText}`);
+    }
+    return ast;
+  };
 }
 
 test("the compile_rule_to_ast skill prompt is versioned and covers both rule modes", () => {
@@ -318,19 +344,18 @@ test("compiles every literal in an unordered guess-membership list", async () =>
         tokenCount: tokenCount(productionText),
       },
       {
-        astProvider: async () => {
+        astProvider: agreeingReviewer(() => {
           providerCalls += 1;
-          throw new Error(
-            "provider should not be needed for literal membership",
-          );
-        },
+        }),
         preferDeterministic: true,
         requireProviderEvidence: true,
       },
     );
     assert.equal(productionResult.decision, "VALID", productionText);
   }
-  assert.equal(providerCalls, 0);
+  // One review per rule: the deterministic artifact is still what gets frozen,
+  // but it is no longer frozen unreviewed.
+  assert.equal(providerCalls, prompts.length);
 
   const compound =
     "A guess wins if it contains 1, 2, 3, and 4 and the drawn sum is above 100.";
@@ -452,6 +477,121 @@ test("deterministically compiles the canonical most/fewest-matches ranking famil
       portugueseThreshold.node.kind === "match_count_at_least",
     "Portuguese threshold wording must stay predicate, not ranking",
   );
+});
+
+test("compiles 'most matches, then closest by position' as two ordered criteria", () => {
+  // The exact wording a player submitted. It used to compile to the bare match
+  // count: the generic ranking's guard against a position-qualified score was
+  // English-only, so the whole second criterion was dropped and the frozen card
+  // promised a rule the player had not written.
+  const prompts = [
+    "quero criar um regra que vence o palpite que mais acertar numeros, se nao houver nenhum ganhador, entao ganha o palpite que teve a menor diferenca entre os numeros sorteados, nas posicoes correspondentes entre o palpite e o resultado do sorteio",
+    "The guess matching the most drawn numbers wins; if nobody matches any, the winner is the guess with the smallest total difference from the draw in the same positions.",
+    "Whoever matches the most numbers wins. In case of a tie, the smallest distance between each pick and the drawn number in the corresponding positions wins.",
+  ];
+
+  for (const prompt of prompts) {
+    const result = validateAndPrecompileRule({
+      prompt,
+      tokenCount: tokenCount(prompt),
+    });
+    assert.equal(result.decision, "VALID", prompt);
+    const ast = result.artifact?.ast;
+    assert.ok(
+      ast?.schemaVersion === 3 &&
+        ast.result.type === "ranking" &&
+        ast.result.direction === "max",
+      `expected a v3 max ranking for: ${prompt}`,
+    );
+    assert.equal(result.artifact?.ruleMode, "ranking", prompt);
+
+    // Both criteria must reach the player, in order. A card naming only the
+    // match count is the exact defect this test covers.
+    const interpretation = result.artifact?.officialInterpretation ?? "";
+    assert.match(interpretation, /MOST of the official draw's numbers/, prompt);
+    assert.match(interpretation, /position by position/, prompt);
+    assert.match(interpretation, /tie is broken/, prompt);
+
+    // The fold is exact, not a blend: ONE match must outrank ZERO matches even
+    // when the single match is paired with the worst distance an input can have
+    // and the zero-match guess with the best. Those are the two extremes that
+    // decide whether the secondary criterion can ever overturn the primary one.
+    const oneMatchFarthest = scoreGuess(ast, {
+      guess: [1, 100, 99, 98, 97, 96],
+      draw: [1, 2, 3, 4, 5, 6],
+    });
+    const noMatchClosest = scoreGuess(ast, {
+      guess: [10, 20, 30, 40, 50, 60],
+      draw: [11, 21, 31, 41, 51, 61],
+    });
+    assert.ok(
+      oneMatchFarthest > noMatchClosest,
+      `one match must outrank zero matches however far its numbers are: ${prompt}`,
+    );
+
+    const sameMatchesCloser = scoreGuess(ast, {
+      guess: [1, 20, 30, 40, 50, 60],
+      draw: [1, 21, 31, 41, 51, 61],
+    });
+    const sameMatchesFarther = scoreGuess(ast, {
+      guess: [1, 20, 30, 40, 50, 60],
+      draw: [1, 90, 91, 92, 93, 94],
+    });
+    assert.ok(
+      sameMatchesCloser > sameMatchesFarther,
+      `with equal match counts the closer guess must win: ${prompt}`,
+    );
+  }
+
+  // The single-criterion ranking is untouched: the new pattern must not steal
+  // it, and neither must the fallback guard that protects it. Spelling out the
+  // share-the-pool default is a restatement of `tieBreak`, not a second
+  // criterion, so these must still compile to the plain match count.
+  const singleCriterion = [
+    "vence quem mais acertar numeros",
+    // Note: a restatement may not NAME the prize pool — that is an external
+    // reference the preflight blocks on its own — so these say only "split".
+    "vence quem mais acertar numeros, em caso de empate dividem igualmente",
+    "the guess with the most matching numbers wins; in case of a tie they split evenly",
+  ];
+  for (const prompt of singleCriterion) {
+    const plain = validateAndPrecompileRule({
+      prompt,
+      tokenCount: tokenCount(prompt),
+    }).artifact?.ast;
+    assert.ok(
+      plain?.schemaVersion === 2 &&
+        plain.result.type === "ranking" &&
+        plain.result.score.kind === "reduce" &&
+        plain.result.score.op === "count",
+      `a rule with no second criterion must stay the plain match-count ranking: ${prompt}`,
+    );
+  }
+});
+
+test("a second criterion no deterministic pattern implements is never compiled away", () => {
+  // The failure mode is not "this shape is unsupported" — it is claiming the
+  // text and freezing only the half that happened to match. Refusing sends the
+  // rule to the LLM path with the whole sentence intact.
+  const unimplemented = [
+    // Fallback on a quantity outside the guess/draw sandbox.
+    "vence quem mais acertar numeros, se nao houver ganhador entao ganha quem tiver o palpite mais antigo",
+    // A distance between SUMS is a different score with the same wording.
+    "vence quem mais acertar numeros, em caso de empate ganha a menor diferenca entre a soma do palpite e a soma do sorteio",
+    // Tiebreak on the units digit, not on the value distance.
+    "the most matching numbers wins, otherwise the guess with the smallest difference in the units digit of the same positions",
+  ];
+  for (const prompt of unimplemented) {
+    const result = validateAndPrecompileRule({
+      prompt,
+      tokenCount: tokenCount(prompt),
+    });
+    assert.equal(
+      result.artifact,
+      null,
+      `deterministic compile must not claim: ${prompt}`,
+    );
+  }
 });
 
 test("accepts broad Portuguese match-count threshold variations", () => {
@@ -1760,15 +1900,16 @@ test("can prefer deterministic compilation for known preflight patterns", async 
       tokenCount: 16,
     },
     {
-      astProvider: async () => {
+      astProvider: agreeingReviewer(() => {
         providerCalled = true;
-        throw new Error("provider should not be needed for supported grammar");
-      },
+      }),
       preferDeterministic: true,
     },
   );
 
-  assert.equal(providerCalled, false);
+  // `preferDeterministic` decides which AST is FROZEN, not whether the reading
+  // is reviewed.
+  assert.equal(providerCalled, true);
   assert.equal(result.decision, "VALID");
   assert.match(result.artifactHash ?? "", /^[0-9a-f]{64}$/);
   assert.match(
@@ -1783,9 +1924,7 @@ test("can prefer deterministic compilation for known preflight patterns", async 
       tokenCount: 10,
     },
     {
-      astProvider: async () => {
-        throw new Error("provider should not be needed for supported grammar");
-      },
+      astProvider: agreeingReviewer(),
       preferDeterministic: true,
     },
   );
@@ -1794,6 +1933,128 @@ test("can prefer deterministic compilation for known preflight patterns", async 
   assert.match(
     minResult.artifact?.officialInterpretation ?? "",
     /smallest number in the guess is equal to the smallest number in the official draw/i,
+  );
+
+  // A reviewer that cannot be reached is not a licence to freeze the pattern's
+  // reading unreviewed — the same policy the provider path already applies when
+  // a required second opinion is missing.
+  const unreviewed = await compileRuleArtifact(
+    {
+      prompt:
+        "Win if the smallest guessed number equals the smallest drawn number.",
+      tokenCount: 10,
+    },
+    {
+      astProvider: async () => {
+        throw new Error("reviewer offline");
+      },
+      preferDeterministic: true,
+    },
+  );
+  assert.equal(unreviewed.decision, "INVALID");
+  assert.ok(
+    unreviewed.log.reasonCodes.includes("SECOND_OPINION_UNAVAILABLE"),
+    JSON.stringify(unreviewed.log.reasonCodes),
+  );
+
+  // `disableConsensus` is the documented escape hatch for stopping second
+  // opinions, so it stops this one too and the deterministic reading is frozen
+  // on its own.
+  const diagnostic = await compileRuleArtifact(
+    {
+      prompt:
+        "Win if the smallest guessed number equals the smallest drawn number.",
+      tokenCount: 10,
+    },
+    {
+      astProvider: async () => {
+        throw new Error("reviewer must not be called");
+      },
+      disableConsensus: true,
+      preferDeterministic: true,
+    },
+  );
+  assert.equal(diagnostic.decision, "VALID");
+});
+
+test("the dealer's own sentence is a promise the artifact must keep", async () => {
+  // The gap this closes: on the deterministic path the compiler REPLACES the
+  // interpret agent's sentence with the AST-derived description. The player
+  // approved the agent's sentence in chat, so if the artifact does not implement
+  // it, the two diverge with nothing comparing them.
+  const prompt = "vence quem mais acertar numeros";
+  const request = {
+    originalText: prompt,
+    prompt,
+    tokenCount: tokenCount(prompt),
+  };
+
+  // The dealer promised a positional tiebreak the frozen rule does not have.
+  const diverged = await compileRuleArtifact(
+    {
+      ...request,
+      agentInterpretation:
+        "Got it - the guess with the most matching numbers wins; if nobody matches any, the guess closest to the draw in the same positions wins.",
+    },
+    { astProvider: agreeingReviewer(), preferDeterministic: true },
+  );
+  assert.equal(diverged.decision, "INVALID");
+  assert.ok(
+    diverged.log.reasonCodes.includes("AGENT_STATEMENT_MISMATCH"),
+    JSON.stringify(diverged.log.reasonCodes),
+  );
+
+  // A faithful restatement of the same rule is not a divergence: the check is
+  // one-directional, so prose that says less than the artifact is fine.
+  const faithful = await compileRuleArtifact(
+    {
+      ...request,
+      agentInterpretation:
+        "Got it - the guess with the most matching numbers wins.",
+    },
+    { astProvider: agreeingReviewer(), preferDeterministic: true },
+  );
+  assert.equal(faithful.decision, "VALID");
+  assert.equal(
+    faithful.log.reasonCodes.includes("AGENT_STATEMENT_MISMATCH"),
+    false,
+  );
+});
+
+test("a deterministic pattern that disagrees with the model is not frozen", async () => {
+  // The gap this closes: the pattern compiler used to be both author and
+  // reviewer of its own reading, so REVIEWER_MISMATCH could never fire on a
+  // deterministic artifact however wrong the pattern's reading was.
+  const prompt = "vence quem mais acertar numeros";
+  const result = await compileRuleArtifact(
+    { originalText: prompt, prompt, tokenCount: tokenCount(prompt) },
+    {
+      // A different rule entirely: fewest matches instead of most.
+      astProvider: async () => ({
+        schemaVersion: 2,
+        result: {
+          type: "ranking",
+          direction: "min",
+          tieBreak: "share_pool",
+          score: {
+            kind: "reduce",
+            op: "count",
+            of: {
+              kind: "intersection",
+              left: { kind: "source", source: "guess" },
+              right: { kind: "source", source: "draw" },
+            },
+          },
+        },
+      }),
+      preferDeterministic: true,
+    },
+  );
+
+  assert.equal(result.decision, "INVALID");
+  assert.ok(
+    result.log.reasonCodes.includes("REVIEWER_MISMATCH"),
+    JSON.stringify(result.log.reasonCodes),
   );
 });
 
@@ -1813,10 +2074,9 @@ test("compiles direct ticket-sum comparisons without provider evidence", async (
         tokenCount: tokenCount(prompt),
       },
       {
-        astProvider: async () => {
+        astProvider: agreeingReviewer(() => {
           providerCalls += 1;
-          throw new Error("provider should not be needed for direct sum comparisons");
-        },
+        }),
         preferDeterministic: true,
         requireProviderEvidence: true,
       },
@@ -1843,7 +2103,9 @@ test("compiles direct ticket-sum comparisons without provider evidence", async (
     );
   }
 
-  assert.equal(providerCalls, 0);
+  // "without provider evidence" means the frozen artifact needs none of its own
+  // — the deterministic reading is still reviewed once per rule.
+  assert.equal(providerCalls, prompts.length);
 
   const unsupportedCompound = validateAndPrecompileRule({
     originalText:
@@ -2301,6 +2563,130 @@ test("coverage ignores illustrative examples and full-domain ranges", () => {
   });
   assert.deepEqual(vacuousRange.requiredValues, []);
   assert.equal(vacuousRange.covered, true);
+});
+
+test("a position the player named must survive compilation", () => {
+  // The defect this closes: the reported rule's second criterion was positional,
+  // the text carried no literals and none of the four original operations, so
+  // every gate passed an artifact that had dropped it.
+  const dropped = analyzeInterpretationCoverage({
+    ast: {
+      schemaVersion: 2,
+      result: {
+        type: "ranking",
+        direction: "max",
+        tieBreak: "share_pool",
+        score: {
+          kind: "reduce",
+          op: "count",
+          of: {
+            kind: "intersection",
+            left: { kind: "source", source: "guess" },
+            right: { kind: "source", source: "draw" },
+          },
+        },
+      },
+    },
+    officialInterpretation:
+      "The winning guess is the one whose numbers include the MOST of the official draw's numbers.",
+    text: "vence o palpite que mais acertar numeros; se nao houver ganhador, ganha a menor diferenca nas posicoes correspondentes",
+  });
+  assert.equal(dropped.covered, false);
+  assert.deepEqual(dropped.missingOperations, ["position"]);
+
+  // The v1 grammar spells the positional comparison in the node name, so the
+  // generic node visitor cannot see it. It still counts.
+  const orderedExact = analyzeInterpretationCoverage({
+    ast: { schemaVersion: 1, node: { kind: "ordered_exact" } },
+    officialInterpretation:
+      "A guess wins if all six guessed numbers match the official draw in the same positions.",
+    text: "Win if all six of my numbers match the drawn numbers in the same positions.",
+  });
+  assert.equal(orderedExact.covered, true);
+  assert.deepEqual(orderedExact.requiredOperations, ["position"]);
+
+  // Sorting imposes an order to aggregate over; it is not a positional claim.
+  // Counting it would make the cue satisfiable by almost any AST.
+  const sortedIsNotPositional = analyzeInterpretationCoverage({
+    ast: {
+      schemaVersion: 2,
+      result: {
+        type: "predicate",
+        predicate: {
+          kind: "compare",
+          left: {
+            kind: "reduce",
+            op: "min",
+            of: { kind: "source", source: "guess" },
+          },
+          op: "eq",
+          right: {
+            kind: "reduce",
+            op: "min",
+            of: { kind: "source", source: "draw" },
+          },
+        },
+      },
+    },
+    officialInterpretation:
+      "A guess wins if its lowest number equals the lowest drawn number.",
+    text: "Win if the smallest number in the same position as the lowest draw matches.",
+  });
+  assert.equal(sortedIsNotPositional.covered, false);
+});
+
+test("a positional clause that constrains nothing is not a required operation", () => {
+  // "the first drawn number is between 1 and 100" names a POSITION but is true
+  // of every draw, so a faithful compile omits the clause entirely. Requiring a
+  // positional node for it would reject the correct artifact — the same discount
+  // the value side already applies to full-domain ranges.
+  const vacuousPosition = analyzeInterpretationCoverage({
+    ast: {
+      schemaVersion: 1,
+      node: { kind: "match_count_at_least", value: 6 },
+    },
+    officialInterpretation:
+      "A guess wins if all six guessed numbers appear in the official draw.",
+    text: "Win if all your numbers are drawn and the first drawn number is between 1 and 100.",
+  });
+  assert.deepEqual(vacuousPosition.requiredOperations, []);
+  assert.equal(vacuousPosition.covered, true);
+
+  // The discount is scoped to the vacuous clause: a positional clause that
+  // really does constrain still requires a positional node.
+  const constrainingPosition = analyzeInterpretationCoverage({
+    ast: {
+      schemaVersion: 1,
+      node: { kind: "match_count_at_least", value: 6 },
+    },
+    officialInterpretation:
+      "A guess wins if all six guessed numbers appear in the official draw.",
+    text: "Win if all your numbers are drawn and the first drawn number is between 40 and 60.",
+  });
+  assert.deepEqual(constrainingPosition.requiredOperations, ["position"]);
+  assert.equal(constrainingPosition.covered, false);
+});
+
+test("a leading positional scope is an ordered comparison, not a match count", () => {
+  // Prompt #16 of test set 2. It used to compile to
+  // `count(intersection(guess,draw)) == 2` — "exactly two of my numbers were
+  // drawn" — which ignores position and is a different rule. The `position`
+  // coverage operation is what surfaced it.
+  const result = validateAndPrecompileRule({
+    prompt:
+      "Exactly two positions should have my picked number higher than the drawn number there.",
+    tokenCount: 14,
+  });
+  assert.equal(result.decision, "VALID");
+  const ast = result.artifact?.ast;
+  assert.ok(
+    ast?.schemaVersion === 2 &&
+      ast.result.type === "predicate" &&
+      ast.result.predicate.kind === "ordered_position_compare_count_eq" &&
+      ast.result.predicate.op === "gt" &&
+      ast.result.predicate.value === 2,
+    `expected an ordered position comparison, got ${JSON.stringify(ast)}`,
+  );
 });
 
 test("rejects rules that no guess can win and rules every guess wins (PRD 6.8)", async () => {

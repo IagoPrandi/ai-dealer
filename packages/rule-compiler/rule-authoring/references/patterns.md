@@ -77,6 +77,64 @@ When no worked example fits, COMPOSE the core instead of refusing:
 - **Cross-array quantification**: `forall(guess, exists(draw, ... elem(up:1) ...))`
   relates every pick to some drawn number.
 
+## 2c. Ordered criteria — primary, then tiebreak
+
+"A decides it; if A cannot, B decides it" is ONE ranking, not two rules and not a
+dropped clause. A ranking carries a single `score`, so fold the two criteria into
+one number:
+
+    score = SCALE * <primary> - <secondary>      (direction "max")
+
+The fold is exact only when `SCALE` is strictly greater than the LARGEST value
+`<secondary>` can take. Then one unit of the primary outweighs every possible
+secondary advantage, so the secondary can only ever separate guesses whose primary
+values tie — which is what "if A cannot decide it" means. Compute the bound;
+never guess a scale.
+
+Useful bounds (guess and draw are six numbers from 1 to 100). An UPPER bound is
+safe — the fold only needs `SCALE` above the real maximum, so overshooting is
+correct and undershooting is not:
+
+| Secondary quantity | Upper bound |
+| --- | --- |
+| total same-position distance `sum(pairs_map(guess,draw,abs(left-right)))` | 594 (6 x 99) |
+| same-position match count | 6 |
+| \|sum(guess) - sum(draw)\| | 564 (585 - 21) |
+
+Worked example — "the most matching numbers wins; if nobody matches any (or they
+tie), the smallest total distance in the same positions wins":
+
+    {"type":"ranking","direction":"max","tieBreak":"share_pool","score":
+      {"kind":"arith","op":"sub",
+       "left":{"kind":"arith","op":"mul",
+               "left":{"kind":"lit","value":595},
+               "right":{"kind":"reduce","op":"count",
+                        "of":{"kind":"intersection",
+                              "left":{"kind":"source","source":"guess"},
+                              "right":{"kind":"source","source":"draw"}}}},
+       "right":{"kind":"reduce","op":"sum",
+                "of":{"kind":"pairs_map",
+                      "left":{"kind":"source","source":"guess"},
+                      "right":{"kind":"source","source":"draw"},
+                      "expr":{"kind":"abs","of":{"kind":"arith","op":"sub",
+                              "left":{"kind":"pair","side":"left"},
+                              "right":{"kind":"pair","side":"right"}}}}}}}
+
+Rules for this idiom:
+
+- A criterion to be MINIMISED is SUBTRACTED (as above). A criterion to be
+  MAXIMISED is ADDED. Do not flip `direction` to serve the secondary — the
+  direction belongs to the primary criterion.
+- Fold at most two criteria. Three or more need a scale product that outruns two
+  bounds at once; emit nothing and let the rule be refined instead of guessing.
+- The fallback marker is what makes this shape: "otherwise", "if nobody / if no
+  one wins", "in case of a tie", "tiebreaker", "se não houver ganhador", "senão",
+  "em caso de empate", "desempate", "caso ninguém". Never treat the marker as
+  decoration and emit only the primary criterion — that freezes a rule the player
+  did not write.
+- `tieBreak:"share_pool"` still applies: it settles guesses tied after BOTH
+  criteria. It is not a substitute for the fold.
+
 ## 3. Compound rules — keep every clause
 
 - "A and B / A e B" → `{"kind":"and","clauses":[<A>,<B>]}`.
@@ -137,3 +195,8 @@ quotient 10; it is distinct from the isolated tens digit (`floor(n/10) mod 10`).
 | e | and | `and` |
 | ou | or | `or` |
 | mais perto / mais próximo | closest | ranking min over `arith sub` |
+| se não houver ganhador / senão | if nobody wins / otherwise | fallback marker → section 2c |
+| em caso de empate / desempate | in case of a tie / tiebreaker | fallback marker → section 2c |
+| caso ninguém / se ninguém | if no one | fallback marker → section 2c |
+| posições correspondentes | corresponding positions | `pairs_*(guess, draw, ...)` |
+| diferença / distância | difference / distance | `abs(left - right)` per pair |

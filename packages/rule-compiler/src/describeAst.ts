@@ -6,6 +6,7 @@ import type {
   PredicateNode,
   PredicateNodeV3,
   RuleAst,
+  RuleResultV3,
   ScalarExpr,
   ScalarExprV3,
 } from "@tyche/rule-schema";
@@ -574,6 +575,94 @@ function describePositionRangeConjunction(node: PredicateNode): string | null {
  * the closed grammar has a rendering, so this never returns null and never
  * silently omits part of the rule.
  */
+/** Six positions x the widest distance between two numbers in 1..100. */
+const MAX_TOTAL_POSITION_DISTANCE = 6 * 99;
+
+function isSource(node: ArrayExprV3, source: "draw" | "guess") {
+  return node.kind === "source" && node.source === source;
+}
+
+/** `abs(pair.left - pair.right)` — the same-position distance of one pair. */
+function isPairDistance(node: ScalarExprV3) {
+  return (
+    node.kind === "abs" &&
+    node.of.kind === "arith" &&
+    node.of.op === "sub" &&
+    node.of.left.kind === "pair" &&
+    node.of.left.side === "left" &&
+    node.of.right.kind === "pair" &&
+    node.of.right.side === "right"
+  );
+}
+
+/** `count(intersection(guess, draw))` — how many guessed numbers were drawn. */
+function isMatchCount(node: ScalarExprV3) {
+  return (
+    node.kind === "reduce" &&
+    node.op === "count" &&
+    node.of.kind === "intersection" &&
+    isSource(node.of.left, "guess") &&
+    isSource(node.of.right, "draw")
+  );
+}
+
+/**
+ * `scale * matchCount` where the scale provably outruns the distance term, so
+ * the subtraction below really is a tiebreak and not a blended score. Returns
+ * null for any smaller scale: the wording this produces would be a lie about an
+ * artifact where a big enough distance CAN overturn a match, and such a rule
+ * must fall through to the literal formula instead.
+ */
+function isScaledMatchCount(node: ScalarExprV3) {
+  return (
+    node.kind === "arith" &&
+    node.op === "mul" &&
+    node.left.kind === "lit" &&
+    node.left.value > MAX_TOTAL_POSITION_DISTANCE &&
+    isMatchCount(node.right)
+  );
+}
+
+/** `sum(pairs_map(guess, draw, |left - right|))` — total position distance. */
+function isTotalPositionDistance(node: ScalarExprV3) {
+  return (
+    node.kind === "reduce" &&
+    node.op === "sum" &&
+    node.of.kind === "pairs_map" &&
+    isSource(node.of.left, "guess") &&
+    isSource(node.of.right, "draw") &&
+    isPairDistance(node.of.expr)
+  );
+}
+
+/**
+ * The lexicographic fold, read back as the two ordered criteria it encodes.
+ *
+ * Without this the player's card shows the arithmetic verbatim ("1000 times how
+ * many values are in ... minus the sum of ..."), which is accurate and unusable:
+ * nobody can tell from it that the second term only matters when the first ties.
+ * Recognizing the shape is what lets the prose stay a pure function of the AST —
+ * the property this whole renderer exists to guarantee — while still reading like
+ * the sentence the player wrote.
+ */
+function describeLexicographicRanking(
+  result: Extract<RuleResultV3, { type: "ranking" }>,
+): string | null {
+  const { direction, score } = result;
+  if (
+    direction !== "max" ||
+    score.kind !== "arith" ||
+    score.op !== "sub" ||
+    !isScaledMatchCount(score.left) ||
+    !isTotalPositionDistance(score.right)
+  ) {
+    return null;
+  }
+  return sentence(
+    "The winning guess is the one whose numbers include the MOST of the official draw's numbers. When that cannot separate the guesses, the tie is broken in favour of the guess that is closest to the draw position by position — the smallest total distance between each guessed number and the drawn number in the same position. Guesses still tied after both criteria share the pool",
+  );
+}
+
 export function describeRuleAstTotal(ast: RuleAst): string {
   if (ast.schemaVersion === 1) {
     switch (ast.node.kind) {
@@ -598,6 +687,12 @@ export function describeRuleAstTotal(ast: RuleAst): string {
   }
 
   if (ast.result.type === "ranking") {
+    if (ast.schemaVersion === 3) {
+      const lexicographic = describeLexicographicRanking(ast.result);
+      if (lexicographic) {
+        return lexicographic;
+      }
+    }
     const score =
       ast.schemaVersion === 3
         ? describeScalarV3(ast.result.score)

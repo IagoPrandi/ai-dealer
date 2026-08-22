@@ -84,6 +84,7 @@ export {
   analyzeInterpretationCoverage,
   analyzeStatementFidelity,
   type InterpretationCoverage,
+  type RuleOperation,
   type RuleStatementClaim,
   type StatementFidelity,
 } from "./interpretationCoverage.js";
@@ -96,6 +97,7 @@ export {
 export type RuleConfidenceAction = CompilerConfidenceAction;
 export type RuleValidationDecision = "INVALID" | "VALID";
 export type RuleValidationReasonCode =
+  | "AGENT_STATEMENT_MISMATCH"
   | "AMBIGUOUS_RULE"
   | "COMPLEXITY_EXCEEDED"
   | "DIFFICULTY_ALWAYS_TRUE"
@@ -168,6 +170,14 @@ export interface RuleCompileArtifactOptions {
 }
 
 export interface RuleCompilationRequest {
+  /**
+   * The interpret agent's own sentence about the rule — what the player read in
+   * chat and approved. Distinct from `officialInterpretation`, which the
+   * deterministic path overwrites with the AST-derived description: keeping the
+   * agent's reading separate is what lets the compiler notice the two diverging
+   * instead of silently shipping the second one.
+   */
+  agentInterpretation?: string;
   model?: string;
   officialInterpretation?: string;
   originalText?: string;
@@ -1129,16 +1139,18 @@ function validateResolvedAst(
   providerConfig: AgentProviderConfig,
   ctx: AttemptContext,
   rawAst: unknown,
-  // Where `rawAst` came from. The reviewer below re-reads the text with
-  // `compileSupportedRule`, so it is only an INDEPENDENT second opinion when the
-  // AST under review came from somewhere else. On the deterministic path it is
-  // the very same call on the very same text: it always agreed with itself,
-  // which silently disabled both REVIEWER_MISMATCH and — because that gate is
-  // guarded by `!reviewerAst` — the interpretation-coverage check that exists to
-  // stop a stated value from being dropped during compilation.
+  // Where `rawAst` came from. A reviewer must be an INDEPENDENT reading of the
+  // same text, so each path draws it from the other side: a provider AST is
+  // reviewed by `compileSupportedRule`, and a deterministic AST is reviewed by
+  // the provider (passed in as `reviewerAst`). Deriving the reviewer here for
+  // both paths made the deterministic path review itself — it always agreed,
+  // which silently disabled REVIEWER_MISMATCH.
   astSource: "deterministic" | "provider",
   providerEvidence: ProviderCompilationEvidence | null = null,
   requireProviderEvidence = false,
+  // The independent reading, when the caller already has one. Only the
+  // deterministic path supplies it; the provider path derives its own below.
+  suppliedReviewerAst: RuleAst | null = null,
 ): ProviderEvaluation {
   const { forcedFailure, modelIdentity, normalizedText } = ctx;
   const reasonCodes = ctx.reasonCodes;
@@ -1157,13 +1169,15 @@ function validateResolvedAst(
     reasonCodes.add("SCHEMA_INVALID");
     schemaError = summarizeSchemaError(parsed);
   }
-  // An independent deterministic reading of the same text. When it exists it is
-  // the strongest available check: the two ASTs are compared by BEHAVIOR over
-  // the structured battery, so an equivalent-but-differently-shaped compile
-  // passes and a rule that merely looks similar does not.
+  // An independent reading of the same text. When it exists it is the strongest
+  // available check: the two ASTs are compared by BEHAVIOR over the structured
+  // battery, so an equivalent-but-differently-shaped compile passes and a rule
+  // that merely looks similar does not.
   const reviewerAst =
-    ast && !forcedFailure && astSource === "provider"
-      ? compileSupportedRule(normalizedText)
+    ast && !forcedFailure
+      ? astSource === "provider"
+        ? compileSupportedRule(normalizedText)
+        : suppliedReviewerAst
       : null;
   if (ast && reviewerAst && !knownAstSemanticsMatch(reviewerAst, ast)) {
     reasonCodes.add("REVIEWER_MISMATCH");
@@ -1213,15 +1227,24 @@ function validateResolvedAst(
   }
 
   // The frozen AST is what pays the prize; the player only reads prose. Reject
-  // when a numeric constraint the player wrote did not survive compilation, so a
-  // rule can never be elected under a promise its artifact does not keep.
-  // Last line of defence, and only where no INDEPENDENT reference AST exists:
-  // semantics beat literals, so a rule a genuine reviewer already certified is
-  // never second-guessed by literal matching (which cannot tell an equivalent
-  // rewrite from a drop). On the deterministic path there is no such reviewer —
-  // see the `astSource` note above — so this check is the only thing standing
-  // between a dropped literal and an elected rule nobody can win.
-  if (ast && !forcedFailure && !reviewerAst) {
+  // when a numeric constraint or a load-bearing operation the player wrote did
+  // not survive compilation, so a rule can never be elected under a promise its
+  // artifact does not keep.
+  //
+  // Skipped only when an independent READING of the text certified the artifact.
+  // On the provider path the deterministic reviewer plays that role, and literal
+  // matching must then stay out of the way: it cannot tell a terse-but-equivalent
+  // encoding from a drop (turn 55's faithful terse compile never mentions 2..5).
+  //
+  // NEVER skipped for a deterministic artifact, whatever reviews it. That AST
+  // comes from a regex pattern rather than from reading the sentence, so "the
+  // pattern matched" is not evidence that the pattern implements the whole
+  // sentence — precisely the failure that dropped a rule's second criterion
+  // while the pattern reported success. Its reviewer is an additional net, not a
+  // replacement for this one.
+  const certifiedByIndependentReading =
+    astSource === "provider" && reviewerAst !== null;
+  if (ast && !forcedFailure && !certifiedByIndependentReading) {
     const coverage = analyzeInterpretationCoverage({
       ast,
       officialInterpretation: describeRuleAstForPlayers(ast),
@@ -1229,6 +1252,31 @@ function validateResolvedAst(
     });
     if (!coverage.covered) {
       reasonCodes.add("INTERPRETATION_MISMATCH");
+    }
+  }
+
+  // Gap 1: the dealer's own reading is a promise to the player.
+  //
+  // On the deterministic path the compiler REPLACES the interpret agent's
+  // sentence with the AST-derived description, so the chat can say one thing and
+  // the frozen card another with nothing comparing them. The player answered
+  // "yes, generate this rule" to the chat sentence, so anything load-bearing in
+  // it must survive into the artifact too — not just what the player typed.
+  //
+  // Deliberately the same one-directional check as above: the artifact may carry
+  // more than the sentence spells out, never less.
+  const agentStatement = request.agentInterpretation?.trim();
+  if (ast && !forcedFailure && agentStatement) {
+    const agentCoverage = analyzeInterpretationCoverage({
+      ast,
+      officialInterpretation: describeRuleAstForPlayers(ast),
+      text: agentStatement,
+    });
+    if (
+      agentCoverage.missingFromAst.length > 0 ||
+      agentCoverage.missingOperations.length > 0
+    ) {
+      reasonCodes.add("AGENT_STATEMENT_MISMATCH");
     }
   }
 
@@ -1282,6 +1330,7 @@ function validateResolvedAst(
     hasReviewerMismatch:
       reasonCodes.has("REVIEWER_MISMATCH") ||
       reasonCodes.has("INTERPRETATION_MISMATCH") ||
+      reasonCodes.has("AGENT_STATEMENT_MISMATCH") ||
       reasonCodes.has("PROVIDER_EVIDENCE_UNVERIFIED") ||
       reasonCodes.has("PROVIDER_SPAN_COVERAGE_INCOMPLETE"),
     hasSafeRuntimeBounds,
@@ -1398,6 +1447,24 @@ async function evaluateProviderAttemptAsync(
     if (options.preferDeterministic) {
       const deterministicAst = compileSupportedRule(ctx.normalizedText);
       if (deterministicAst) {
+        // The deterministic AST is the one that gets frozen — it is hand-audited
+        // and its shape is stable across runs. But "audited pattern" is not the
+        // same as "audited READING of this text": a pattern claims a sentence it
+        // only partly implements without noticing, which is how a rule's second
+        // criterion was dropped in silence. So buy the independent reading here
+        // too, exactly as the provider path buys the deterministic one, and fail
+        // closed when the two disagree.
+        //
+        // This is what `preferDeterministic` now means: prefer the deterministic
+        // AST as the ARTIFACT, not skip the review. `disableConsensus` is the
+        // documented escape hatch that stops buying second opinions, so it turns
+        // this off too.
+        const reviewerAst = options.disableConsensus
+          ? null
+          : await requestReviewerAst(request, ctx, providerConfig, options);
+        if (!options.disableConsensus && reviewerAst === null) {
+          ctx.reasonCodes.add("SECOND_OPINION_UNAVAILABLE");
+        }
         const deterministicInterpretation = describeRuleAst(deterministicAst);
         return validateResolvedAst(
           deterministicInterpretation
@@ -1408,6 +1475,9 @@ async function evaluateProviderAttemptAsync(
           ctx,
           deterministicAst,
           "deterministic",
+          null,
+          false,
+          reviewerAst,
         );
       }
     }
@@ -1436,6 +1506,36 @@ async function evaluateProviderAttemptAsync(
     providerEvidence,
     options.requireProviderEvidence === true,
   );
+}
+
+/**
+ * Asks the provider for its own reading of the text, to review a deterministic
+ * compile. Returns null when no usable reading came back.
+ *
+ * Deliberately quiet about HOW it failed: this AST is never frozen, so a timeout
+ * or a malformed response is not a fault of the rule — it only means no second
+ * opinion is available, which the caller reports as SECOND_OPINION_UNAVAILABLE.
+ * Adding PROVIDER_MALFORMED_RESPONSE here would blame the player's rule for the
+ * reviewer's outage.
+ */
+async function requestReviewerAst(
+  request: RuleCompilationRequest,
+  ctx: AttemptContext,
+  providerConfig: AgentProviderConfig,
+  options: RuleCompileArtifactOptions,
+): Promise<RuleAst | null> {
+  try {
+    const providerValue = await options.astProvider({
+      normalizedText: ctx.normalizedText,
+      prompt: request.prompt,
+      providerConfig,
+    });
+    const { rawAst } = unwrapProviderCompilation(providerValue);
+    const parsed = rawAst == null ? null : ruleAstSchema.safeParse(rawAst);
+    return parsed?.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
 }
 
 function normalizeProviderRouting(
@@ -1836,6 +1936,15 @@ function compileSupportedRule(text: string): RuleAst | null {
 }
 
 function compileSupportedRulePattern(text: string): RuleAst | null {
+  // Before the single-criterion ranking: "most matches, then closest by
+  // position" carries the same primary wording, and the generic ranking would
+  // read only that half.
+  const matchesThenDistanceRanking =
+    parseMatchCountThenPositionDistanceRankingRule(text);
+  if (matchesThenDistanceRanking) {
+    return matchesThenDistanceRanking;
+  }
+
   // Comparative "most/fewest matching numbers wins" ranking. Guarded to fire only
   // on genuine ranking intent, so it never steals absolute-threshold or
   // guess-vs-draw predicates handled below.
@@ -2723,6 +2832,13 @@ function rankingRule(direction: "max" | "min", score: ScalarExpr): RuleAst {
   };
 }
 
+// A fallback / tiebreak marker: the wording that introduces a SECOND criterion,
+// applied only when the first one does not settle the round. Recognized in both
+// languages the compiler accepts — a marker missed in one language is a clause
+// dropped out of a frozen rule.
+const SECONDARY_CRITERION_MARKER =
+  /\b(?:otherwise|tie[\s-]?break(?:er|ers)?|in case of a tie|failing that|if (?:nobody|no ?one|none|neither|there is no|there's no|no guess|no player)|when (?:nobody|no ?one)|senao|se nao houver|se nao tiver|caso nao haja|caso ninguem|se ninguem|quando ninguem|em caso de empate|no caso de empate|havendo empate|empatar|empate|desempate|desempatar)\b/i;
+
 // The single most common ranking a player asks for: "whoever matches the most
 // (or fewest) drawn numbers wins". The deterministic predicate compiler has no
 // ranking branch, so every phrasing of it — including the app's own suggested
@@ -2761,11 +2877,42 @@ function parseMostMatchesRankingRule(text: string): RuleAst | null {
   // positions, multiples, ...) is NOT plain whole-number match counting — the
   // generic count ranking would misread it. Leave those to the full compiler /
   // LLM path so they compile to their real score (e.g. a units-digit ranking).
+  //
+  // The Portuguese forms are NOT decoration. Every trigger below accepts PT
+  // ("mais", "acertar", "ganha", "vence"), so an English-only guard made this
+  // pattern strictly more permissive in Portuguese than in English: it claimed
+  // "vence o palpite que mais acertar numeros, ... menor diferenca ... nas
+  // posicoes correspondentes" and froze the bare match count, dropping the
+  // position criterion the player wrote. Guard vocabulary must cover exactly the
+  // languages the trigger vocabulary covers.
   if (
-    /\b(digits?|units?|tens?|sums?|totals?|even|odd|parity|multiples?|positions?|reversed?|slots?|places?)\b/i.test(
+    /\b(digits?|units?|tens?|sums?|totals?|even|odd|parity|multiples?|positions?|reversed?|slots?|places?|differences?)\b/i.test(
+      text,
+    ) ||
+    /\b(digitos?|dezenas?|unidades?|somas?|soma|somam|totais?|total|pares?|impares?|paridade|multiplos?|posicoes?|posicao|invertid[oa]s?|inversa|casas?|lugares?|diferencas?|diferenca)\b/i.test(
       text,
     )
   ) {
+    return null;
+  }
+
+  // A rule with a SECOND, ordered criterion ("... and if that cannot decide it,
+  // ...") is not this single-criterion ranking. The specialized composite
+  // patterns run earlier in the dispatch, so anything still carrying a fallback
+  // marker here is a shape no deterministic pattern implements: refuse it and
+  // let the LLM path read the whole sentence, rather than freezing the primary
+  // criterion alone and discarding the rest of what the player asked for.
+  //
+  // "... and if they tie, they split the pool" is NOT such a clause: it restates
+  // `tieBreak: "share_pool"`, which this ranking already does. Strip those
+  // restatements first, so spelling out the default does not push a plain rule
+  // off the deterministic path. A real second criterion never carries a
+  // share/split verb, so only restatements are removed.
+  const fallbackProbe = text.replace(
+    /\b(?:in case of a tie|if (?:there is|there's) a tie|if (?:they )?tie|tie[\s-]?break(?:er)?|em caso de empate|no caso de empate|havendo empate|em empate|se empatar)\b[^.;]{0,60}\b(?:share|shares|shared|sharing|split|splits|divide|divides|divided|dividem|divide[mo]?|dividid[ao]|compartilham|rateio)\b/gi,
+    " ",
+  );
+  if (SECONDARY_CRITERION_MARKER.test(fallbackProbe)) {
     return null;
   }
 
@@ -2833,6 +2980,176 @@ function parseMostMatchesRankingRule(text: string): RuleAst | null {
         : intersection(source("guess"), source("draw")),
     ),
   );
+}
+
+/** Six positions x the widest distance between two numbers in 1..100. */
+const MAX_TOTAL_POSITION_DISTANCE = 6 * 99;
+
+/**
+ * Scale that folds a secondary criterion under a primary one without ever
+ * letting the secondary overturn the primary.
+ *
+ * The runtime ranks ONE number per guess (`resolveRankingWinners` takes the
+ * argmax of a single score), so an ordered pair of criteria has to become a
+ * single score. It folds EXACTLY, not approximately: the secondary term below is
+ * bounded by MAX_TOTAL_POSITION_DISTANCE, and scaling the primary term past that
+ * bound makes one extra match worth more than every distance advantage that can
+ * exist. The secondary term therefore only ever separates guesses whose primary
+ * terms are equal — precisely "primary, then tiebreak".
+ *
+ * Derived from the bound rather than written as a round literal on purpose: the
+ * exactness of the fold IS `scale > bound`, so the two cannot drift apart.
+ */
+const LEXICOGRAPHIC_PRIMARY_SCALE = MAX_TOTAL_POSITION_DISTANCE + 1;
+
+/**
+ * "The guess matching the most drawn numbers wins; if that cannot decide it, the
+ * guess closest to the draw position by position wins."
+ *
+ * Two ordered criteria, one score (see LEXICOGRAPHIC_PRIMARY_SCALE). Compiled
+ * deterministically because the generic match-count ranking above cannot express
+ * the second criterion at all, and a pattern that recognizes only the first half
+ * of this sentence freezes a rule the player did not write.
+ *
+ * The primary term counts guessed numbers present in the draw (order-free); the
+ * secondary term sums |guess[i] - draw[i]| across the six positions, so a lower
+ * total wins — hence subtraction, with the whole score maximized.
+ */
+function parseMatchCountThenPositionDistanceRankingRule(
+  text: string,
+): RuleAst | null {
+  // Both criteria must be present, in order, joined by a fallback marker. Absent
+  // the marker this is a single-criterion rule (handled above); absent either
+  // criterion it is not this shape at all.
+  if (!SECONDARY_CRITERION_MARKER.test(text)) {
+    return null;
+  }
+
+  // Primary: a comparative over MOST matching numbers. Deliberately narrower
+  // than the generic ranking's trigger set — "fewest" as the primary criterion
+  // with a distance tiebreak is not a shape any player has asked for, and
+  // guessing at it would freeze an inverted rule.
+  const primaryMostMatches =
+    /\b(?:most|more|mais)\b[^.]{0,30}\b(?:matching\s+)?(?:numbers?|matches|hits|acertos?|numeros?)\b/i.test(
+      text,
+    ) ||
+    /\b(?:match(?:es|ed|ing)?|hits?|guess(?:es|ed)?|acert\w*)\b[^.]{0,20}\b(?:most|more|mais)\b/i.test(
+      text,
+    ) ||
+    /\b(?:most|more|mais)\b[^.]{0,20}\b(?:match(?:es|ed|ing)?|hits?|guess(?:es|ed)?|acert\w*)\b/i.test(
+      text,
+    );
+  if (!primaryMostMatches) {
+    return null;
+  }
+
+  // Secondary: the SMALLEST difference/distance, measured position by position.
+  // Both halves are required. "smallest difference" alone is ambiguous (between
+  // what and what?), and "same positions" alone is not a distance.
+  const smallestDifference =
+    /\b(?:smallest|least|lowest|closest|nearest|minimum|min)\b[^.]{0,40}\b(?:difference|differences|distance|distances|gap|gaps)\b/i.test(
+      text,
+    ) ||
+    /\b(?:menor(?:es)?|minima?|mais\s+proxim[oa]s?)\b[^.]{0,40}\b(?:diferenca|diferencas|distancia|distancias)\b/i.test(
+      text,
+    ) ||
+    /\b(?:diferenca|diferencas|distancia|distancias)\b[^.]{0,40}\b(?:menor(?:es)?|minima?)\b/i.test(
+      text,
+    );
+  const positionWise =
+    /\b(?:same|corresponding|matching|equivalent|respective)\s+(?:positions?|slots?|places?|indexes|indices)\b/i.test(
+      text,
+    ) ||
+    /\b(?:position\s+by\s+position|positionally)\b/i.test(text) ||
+    /\b(?:posicoes|posicao)\s+(?:correspondentes?|corresponde|iguais|equivalentes?|respectivas?)\b/i.test(
+      text,
+    ) ||
+    /\b(?:nas\s+mesmas\s+posicoes|na\s+mesma\s+posicao|posicao\s+por\s+posicao)\b/i.test(
+      text,
+    );
+  if (!smallestDifference || !positionWise) {
+    return null;
+  }
+
+  // A distance between SUMS, DIGITS or counts is a different score wearing the
+  // same wording ("the smallest difference between the sums"). This pattern only
+  // implements the value-by-value distance, so anything naming another quantity
+  // belongs to the LLM path rather than to a near-enough deterministic reading.
+  //
+  // "total" is checked on a probe with its benign collocations removed first.
+  // "the smallest TOTAL difference ... in the same positions" is this very rule
+  // — the word is an adjective on the summed distance, not a second quantity to
+  // difference — whereas "the difference between the TOTALS" is the score this
+  // guard exists to refuse. Testing the raw text conflated the two and rejected
+  // the most natural English phrasing of the shape.
+  const quantityProbe = text
+    .replace(
+      /\b(?:total|totals|totais)\s+(?:difference|differences|distance|distances)\b/gi,
+      " ",
+    )
+    .replace(
+      /\b(?:diferenca|diferencas|distancia|distancias)\s+total(?:is|ais)?\b/gi,
+      " ",
+    )
+    .replace(/\b(?:in|no|em)\s+total\b/gi, " ");
+  if (
+    /\b(?:sums?|totals?|digits?|units?|tens?|parity|multiples?|somas?|soma|totais?|digitos?|dezenas?|unidades?|paridade|multiplos?)\b/i.test(
+      quantityProbe,
+    )
+  ) {
+    return null;
+  }
+
+  const competition =
+    /\b(?:win|wins|winner|winning|ganha|ganhar|vence|vencer|vencedor)\b/i.test(
+      text,
+    ) || /\bthe\s+(?:most|fewest|least)\b/i.test(text);
+  if (!competition) {
+    return null;
+  }
+
+  const guess = { kind: "source", source: "guess" } as const;
+  const draw = { kind: "source", source: "draw" } as const;
+  return {
+    schemaVersion: 3,
+    result: {
+      type: "ranking",
+      direction: "max",
+      tieBreak: "share_pool",
+      score: {
+        kind: "arith",
+        op: "sub",
+        left: {
+          kind: "arith",
+          op: "mul",
+          left: { kind: "lit", value: LEXICOGRAPHIC_PRIMARY_SCALE },
+          right: {
+            kind: "reduce",
+            op: "count",
+            of: { kind: "intersection", left: guess, right: draw },
+          },
+        },
+        right: {
+          kind: "reduce",
+          op: "sum",
+          of: {
+            kind: "pairs_map",
+            left: guess,
+            right: draw,
+            expr: {
+              kind: "abs",
+              of: {
+                kind: "arith",
+                op: "sub",
+                left: { kind: "pair", side: "left" },
+                right: { kind: "pair", side: "right" },
+              },
+            },
+          },
+        },
+      },
+    },
+  };
 }
 
 function looksLikeAmbiguousReverseRule(text: string) {
@@ -3956,13 +4273,28 @@ function parseOddSumEqualsRule(text: string): PredicateNode | null {
   );
 }
 
+// Both phrasings put the count, the compared sides and the positional scope in
+// the sentence; they differ only in WHERE the positional cue sits. Value is
+// group 1 and the comparator group 2 in both.
+const ORDERED_POSITION_COMPARE_COUNT_PATTERNS = [
+  // Trailing scope: "exactly two guessed numbers are higher than the drawn
+  // number in the same position".
+  /\bexactly\s+([0-6]|one|two|three|four|five|six)\b.{0,80}\b(?:guessed?|picked|ticket|your|my)\s+numbers?\b.{0,80}\b(greater|higher|above|more|lower|less|below|smaller)\b.{0,80}\b(?:drawn?|draw)\s+number\b.{0,80}\b(?:same position|same positions|corresponding position|corresponding positions|same index|same indexes)\b/i,
+  // Leading scope: "exactly two POSITIONS should have my picked number higher
+  // than the drawn number there". Same rule, and without this branch it fell
+  // through to `count(intersection(guess,draw)) == 2` — a plain unordered match
+  // count, which ignores position and is a different rule entirely. The
+  // `position` coverage operation is what surfaced it.
+  /\bexactly\s+([0-6]|one|two|three|four|five|six)\s+positions?\b.{0,80}\b(?:guessed?|picked|ticket|your|my)\s+numbers?\b.{0,80}\b(greater|higher|above|more|lower|less|below|smaller)\b.{0,80}\b(?:drawn?|draw)\s+number\b/i,
+] as const;
+
 function parseOrderedPositionCompareCountRule(text: string): PredicateNode | null {
-  const match = text.match(
-    /\bexactly\s+([0-6]|one|two|three|four|five|six)\b.{0,80}\b(guessed?|picked|ticket|your)\s+numbers?\b.{0,80}\b(greater|higher|above|more|lower|less|below|smaller)\b.{0,80}\b(drawn?|draw)\s+number\b.{0,80}\b(same position|same positions|corresponding position|corresponding positions|same index|same indexes)\b/i,
-  );
+  const match = ORDERED_POSITION_COMPARE_COUNT_PATTERNS.reduce<
+    RegExpMatchArray | null
+  >((found, pattern) => found ?? text.match(pattern), null);
   const rawValue = match?.[1]?.toLowerCase();
   const value = rawValue ? NUMBER_WORDS.get(rawValue) ?? Number(rawValue) : NaN;
-  const op = match?.[3] ? parseComparisonWord(match[3]) : null;
+  const op = match?.[2] ? parseComparisonWord(match[2]) : null;
   if (!Number.isInteger(value) || value < 0 || value > 6 || !op) {
     return null;
   }
@@ -4459,9 +4791,29 @@ function knownAstSemanticsMatch(expected: RuleAst, actual: RuleAst) {
 // harness) so the reviewer verdict is reproducible and auditable.
 const SEMANTIC_MATCH_SAMPLES = 240;
 
+/** The optimisation direction of a ranking rule, or null for a predicate. */
+function rankingDirection(ast: RuleAst): "max" | "min" | null {
+  return ast.schemaVersion !== 1 && ast.result.type === "ranking"
+    ? ast.result.direction
+    : null;
+}
+
 function sampledSemanticsMatch(expected: RuleAst, actual: RuleAst): boolean {
   const expectedRanking = isRankingRule(expected);
   if (expectedRanking !== isRankingRule(actual)) {
+    return false;
+  }
+  // Sampling compares SCORES, and a score says nothing about who wins until the
+  // direction is fixed: "most matches wins" and "fewest matches wins" compute
+  // the identical score on every input and pick opposite winners. Without this
+  // the reviewer certified a polarity flip as an equivalent reading — the very
+  // inversion the compile guidance calls out as the most common way a small
+  // model gets a rule wrong.
+  //
+  // This only ever tightens the check: two rankings that differ in direction AND
+  // are genuinely equivalent (minimise misses vs maximise matches) already
+  // disagree on scores, so they were reported as a mismatch before this too.
+  if (expectedRanking && rankingDirection(expected) !== rankingDirection(actual)) {
     return false;
   }
   let seed = 0x1dea1e7 >>> 0;

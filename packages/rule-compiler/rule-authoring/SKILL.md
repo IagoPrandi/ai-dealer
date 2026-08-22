@@ -68,6 +68,13 @@ the phrasing also says "or more". A comparative ("more than others", "the most")
 a **ranking**. See references/patterns.md for the full decision rules and the
 Portuguese trigger glossary (acertar, errar, mais, menos, pelo menos, dezena, e, ou).
 
+A ranking carries exactly ONE `score`, so a rule with a FALLBACK criterion
+("otherwise", "in case of a tie", "se não houver ganhador", "desempate") is still
+one ranking: fold both criteria into a single score, primary scaled above the
+secondary's maximum. Section 2c of references/patterns.md gives the formula, the
+bounds and a worked example. Emitting only the primary criterion freezes a rule
+the player did not write — the fallback marker is load-bearing, never decoration.
+
 ## Core node grammar (schemaVersion 3)
 
 The grammar is a SMALL COMPOSITIONAL CORE. There are no specialized predicate

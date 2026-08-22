@@ -53,6 +53,7 @@ import {
   type RuleAstProvider,
   type RuleCompiledArtifact,
   type RuleConfidenceAction,
+  type RuleOperation,
   type RuleSourceSpan,
   type RuleValidationDecision,
   type RuleValidationReasonCode,
@@ -244,7 +245,10 @@ export interface RulePreflightResult {
 
 export interface RulePreflightCoverage {
   missingFromAst: number[];
-  missingOperations: Array<"digit" | "mod" | "parity" | "sum">;
+  // Sourced from the compiler rather than spelled out again: this union grew a
+  // member (`position`) and a literal copy here would have gone on reporting the
+  // old four while the gate enforced five.
+  missingOperations: RuleOperation[];
 }
 
 export interface RuleReasonExplanation {
@@ -303,6 +307,19 @@ export const RULE_REASON_EXPLANATIONS: readonly RuleReasonExplanation[] = [
       "The executable rule could pay a different condition from the one you wrote.",
     whatToChange:
       "Restate every load-bearing number and operation in one explicit condition.",
+  },
+  {
+    // Distinct advice from INTERPRETATION_MISMATCH on purpose: nothing is
+    // missing from what the PLAYER wrote. The dealer's summary claimed more than
+    // the executable rule does, so the fix is to confirm which of the two
+    // readings was meant, not to rewrite load-bearing numbers.
+    code: "AGENT_STATEMENT_MISMATCH",
+    whatHappened:
+      "The dealer's summary described a condition the compiled rule does not implement.",
+    whyItBlocks:
+      "You approved the summary, so paying a narrower rule would break that promise.",
+    whatToChange:
+      "State the condition the summary added — or drop it — so both readings agree.",
   },
   {
     code: "PROVIDER_DISAGREEMENT",
@@ -3593,6 +3610,11 @@ async function createRulePreflight(
     );
     const validation = await compileRuleArtifact(
       {
+        // The dealer's own sentence, kept separate from `officialInterpretation`
+        // so the compiler can still see it after the deterministic path replaces
+        // that field with the AST-derived description. The player approved THIS
+        // sentence, so the artifact has to keep it.
+        agentInterpretation: interpretation.officialInterpretation,
         model,
         officialInterpretation: interpretation.officialInterpretation,
         originalText: sanitizedText,
@@ -3624,9 +3646,21 @@ async function createRulePreflight(
         stage: "checking_fidelity",
       });
       try {
+        // Score the FROZEN artifact's own description, not the interpret agent's
+        // prose about the text.
+        //
+        // Those are two different claims, and only one of them decides who gets
+        // paid. Scoring the agent's sentence made this check structurally unable
+        // to see a compile that dropped a clause: the agent's reading could be
+        // perfectly grounded in the player's words while the artifact behind it
+        // implemented something narrower — which is exactly what happened to a
+        // rule whose positional tiebreak the compiler discarded. The artifact
+        // description is a pure function of the frozen AST, so grounding it in
+        // the player's text is the question that actually matters.
         grounded = await checkGroundedness(
           compileText,
-          interpretation.officialInterpretation,
+          validation.artifact?.officialInterpretation ??
+            interpretation.officialInterpretation,
           guardianConfig,
           signal,
         );
@@ -9732,6 +9766,7 @@ function getJobLatencyMs(job: GuessVerificationJobRecord) {
 
 function isGuardrailReason(reason: string) {
   return [
+    "AGENT_STATEMENT_MISMATCH",
     "AMBIGUOUS_RULE",
     "COMPLEXITY_EXCEEDED",
     "DIFFICULTY_ALWAYS_TRUE",
