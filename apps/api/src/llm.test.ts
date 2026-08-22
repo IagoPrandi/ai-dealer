@@ -618,7 +618,97 @@ test("compile harness prompt includes selected prompt-set examples", async () =>
   assert.match(systemPrompt, /sum\(guess\) mod 10/i);
   assert.match(systemPrompt, /consumedSpans/);
   assert.match(systemPrompt, /workedExamples/);
+  assert.match(systemPrompt, /at least TWO valid domain cases/i);
+  assert.match(systemPrompt, /draws without replacement/i);
+  assert.match(systemPrompt, /never use `0`, `101`, or a seventh value/i);
+  assert.match(systemPrompt, /decoder enforces this response schema/i);
   assert.match(systemPrompt, /guessSum - drawSum <= -10/);
+});
+
+test("compile requests schema-constrained tickets and never falls back to JSON mode", async () => {
+  let requestBody: unknown = null;
+  globalThis.fetch = (async (
+    _input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                ast: {
+                  schemaVersion: 3,
+                  result: {
+                    type: "predicate",
+                    predicate: {
+                      kind: "compare",
+                      op: "gt",
+                      left: { kind: "at", index: 0, of: { kind: "source", source: "guess" } },
+                      right: { kind: "lit", value: 1 },
+                    },
+                  },
+                },
+                consumedSpans: [{ text: "first guessed number is greater than 1" }],
+                workedExamples: [
+                  { guess: [2, 3, 4, 5, 6, 7], draw: [10, 20, 30, 40, 50, 60], outcome: "WIN" },
+                  { guess: [1, 3, 4, 5, 6, 7], draw: [10, 20, 30, 40, 50, 60], outcome: "LOSE" },
+                ],
+              }),
+            },
+          },
+        ],
+      }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+
+  await compileRuleToAst("A guess wins if its first number is greater than 1.", CONFIG);
+
+  const responseFormat = (requestBody as Record<string, unknown>).response_format as {
+    type?: string;
+    json_schema?: {
+      name?: string;
+      strict?: boolean;
+      schema?: {
+        properties?: {
+          workedExamples?: {
+            items?: { anyOf?: Array<{ properties?: { guess?: Record<string, unknown> } }> };
+          };
+        };
+      };
+    };
+  };
+  assert.equal(responseFormat.type, "json_schema");
+  assert.equal(responseFormat.json_schema?.name, "tyche_rule_compilation_candidate");
+  assert.equal(responseFormat.json_schema?.strict, true);
+  const ticket = responseFormat.json_schema?.schema?.properties?.workedExamples?.items?.anyOf?.[0]
+    ?.properties?.guess;
+  assert.deepEqual(ticket, {
+    type: "array",
+    minItems: 6,
+    maxItems: 6,
+    uniqueItems: true,
+    items: { type: "integer", minimum: 1, maximum: 100 },
+  });
+});
+
+test("compile fails closed before calling a provider without schema-constrained decoding", async () => {
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    throw new Error("must not be called");
+  }) as typeof fetch;
+
+  await assert.rejects(
+    compileRuleToAst("A guess wins if its sum is greater than the draw sum.", {
+      ...CONFIG,
+      model: "nemotron-3-super:cloud",
+    }),
+    /does not support required schema-constrained decoding/i,
+  );
+  assert.equal(calls, 0);
 });
 
 test("a stray character after the compiled JSON does not discard the compilation", async () => {

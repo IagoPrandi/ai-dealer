@@ -1,5 +1,6 @@
 import {
   buildRuleCompilerSkillPrompt,
+  getRuleCompilationCandidateJsonSchema,
   providerCompilationHasSchemaValidAst,
 } from "@tyche/rule-compiler";
 import {
@@ -38,6 +39,7 @@ export interface RuleAgentConfig {
 export type RuleAgentErrorCode =
   | "RULE_AGENT_BAD_RESPONSE"
   | "RULE_AGENT_NOT_CONFIGURED"
+  | "RULE_AGENT_SCHEMA_UNSUPPORTED"
   | "RULE_AGENT_TIMEOUT"
   | "RULE_AGENT_UNAVAILABLE";
 
@@ -107,6 +109,33 @@ function firstConfigured(...values: Array<string | undefined>): string {
  * - `full` - the compile re-ask, which needs the trace to get its JSON right.
  */
 type ReasoningTrace = "full" | "low" | "suppressed";
+
+interface AgentJsonSchemaConstraint {
+  name: string;
+  schema: unknown;
+}
+
+/**
+ * Compiler evidence must use decoder-enforced schemas. Ollama cloud models do
+ * not implement structured outputs; unknown OpenAI-compatible endpoints are
+ * also treated as unsupported until their capability is made explicit.
+ */
+export function supportsRuleCompilationSchema(
+  config: RuleAgentConfig,
+): boolean {
+  if (/:cloud$/iu.test(config.model.trim())) {
+    return false;
+  }
+  try {
+    const endpoint = new URL(config.baseUrl);
+    return (
+      endpoint.port === "11434" ||
+      endpoint.hostname.toLowerCase() === "api.openai.com"
+    );
+  } catch {
+    return false;
+  }
+}
 
 // Controls the hidden reasoning trace on Ollama-served models.
 //
@@ -570,6 +599,7 @@ async function requestAgentJson(
   signal?: AbortSignal,
   // How much the model may think before answering — see `ollamaThinkingControl`.
   trace: ReasoningTrace = "suppressed",
+  schemaConstraint?: AgentJsonSchemaConstraint,
 ): Promise<string> {
   const headers: Record<string, string> = {
     "content-type": "application/json",
@@ -595,7 +625,16 @@ async function requestAgentJson(
         // reasoning trace. Ollama otherwise enables thinking by default for
         // thinking-capable models.
         ...ollamaThinkingControl(config, trace),
-        response_format: { type: "json_object" },
+        response_format: schemaConstraint
+          ? {
+              type: "json_schema",
+              json_schema: {
+                name: schemaConstraint.name,
+                schema: schemaConstraint.schema,
+                strict: true,
+              },
+            }
+          : { type: "json_object" },
         seed: config.seed,
         stream: false,
         // Greedy decoding (temperature 0, top_p 1) so the same rule text always
@@ -1208,21 +1247,30 @@ const COMPILE_BAD_RESPONSE_ATTEMPTS = 3;
 
 // Compile step (PRD §7.3.1): ask the model to emit an auditable compilation
 // candidate (AST + consumed source spans + source-derived worked examples).
-// json_object response mode is requested (Ollama-compatible). The returned
-// object is raw; @tyche/rule-compiler schema-validates the AST, verifies span
-// coverage, and executes the examples. This transport function never decides
-// validity. Throws a typed RuleAgentError so the caller can escalate.
+// The full candidate schema is passed to the decoder: JSON-object mode alone
+// cannot prohibit repeated, out-of-domain, or wrong-length tickets. The
+// compiler still revalidates every result as the non-bypassable boundary.
 export async function compileRuleToAst(
   normalizedText: string,
   config: RuleAgentConfig = resolveRuleAgentConfig(),
   signal?: AbortSignal,
 ): Promise<unknown> {
+  if (!supportsRuleCompilationSchema(config)) {
+    throw new RuleAgentError(
+      "RULE_AGENT_SCHEMA_UNSUPPORTED",
+      "The configured rule compiler does not support required schema-constrained decoding.",
+    );
+  }
+
   // The compile-step guidance lives in the versioned `compile_rule_to_ast` agent
   // skill (PRD §7.10/§7.12), co-located with the DSL schema in @tyche/rule-compiler.
-  // The full JSON schema is intentionally NOT embedded (it bloats the prompt and
-  // stalls small local models); the skill conveys the grammar compactly and Zod
-  // re-validates the output against the real schema.
+  // The executable schema is sent to the decoder instead of copied into the
+  // prompt, so the transport and server validation share one source of truth.
   const prompt = buildRuleCompilerSkillPrompt();
+  const schemaConstraint: AgentJsonSchemaConstraint = {
+    name: "tyche_rule_compilation_candidate",
+    schema: getRuleCompilationCandidateJsonSchema(),
+  };
   for (let attempt = 1; ; attempt += 1) {
     // First ask in the fast, no-trace mode every other step uses. A rule whose
     // AST is small comes back correct and the player pays no extra latency; the
@@ -1234,6 +1282,7 @@ export async function compileRuleToAst(
       config,
       signal,
       attempt > 1 ? "full" : "suppressed",
+      schemaConstraint,
     );
     let parsed: unknown;
     try {

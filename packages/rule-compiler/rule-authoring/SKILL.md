@@ -29,17 +29,25 @@ The top-level response is:
 
 `{"ast":<rule-ast>,"consumedSpans":[{"text":<exact-source-substring>}],"workedExamples":[<examples>]}`
 
+The decoder enforces this response schema. `workedExamples` accepts no extra
+fields and every `guess`/`draw` is exactly six distinct integer values from 1
+through 100. Do not attempt to bypass that contract: an invalid candidate is
+not repaired or partially accepted.
+
 - `consumedSpans` must quote exact substrings from the normalized input. Together
   they must cover every intent-bearing condition. Report the smallest complete
   condition span(s) actually used; never claim text that the AST did not compile.
   A range such as "strictly greater than 10 and strictly less than 90" may be one
   span even when represented by one quantified AST condition. A compound rule
   with two independent conditions needs coverage for both.
-- For a predicate, `workedExamples` must contain at least one `WIN` and one `LOSE`:
+- For a predicate, `workedExamples` must contain at least TWO valid domain cases:
   `{"guess":[six unique 1-100 numbers],"draw":[six unique 1-100 numbers],"outcome":"WIN"|"LOSE"}`.
   Derive the expected outcomes from the player's text before checking the AST.
-  Include boundary cases for signed differences (for "at least 10 lower", test
-  exactly 10 lower and only 9 lower).
+  They do NOT need to include both outcomes: an impossible or extremely rare rule
+  may legitimately have only `LOSE` examples. Never invent a `WIN` by using a
+  number outside 1 through 100, a repeated number, or a draw/guess with anything
+  other than exactly six values. Include boundary cases for signed differences
+  (for "at least 10 lower", test exactly 10 lower and only 9 lower).
 - For a ranking, provide at least two examples with the exact numeric `score`
   instead of `outcome`.
 
@@ -48,8 +56,11 @@ the AST. Do not generate examples by merely evaluating the AST: their purpose is
 to provide an independent oracle for the source intent.
 
 Every example is also checked for shape before it is executed: each `guess` and
-each `draw` must be six DISTINCT numbers in 1-100. A repeated number (e.g.
-`[2,2,3,4,5,6]`) invalidates the whole candidate, however correct the AST is.
+each `draw` must be exactly six DISTINCT integers in the inclusive 1-100 domain.
+The game draws without replacement: do not repeat a number within either array,
+and never use `0`, `101`, or a seventh value. A repeated or out-of-domain number
+(e.g. `[2,2,3,4,5,6]` or `[1,2,3,4,5,101]`) invalidates the whole candidate,
+however correct the AST is.
 Emit the JSON object and nothing after it — no trailing text and no extra
 brackets.
 

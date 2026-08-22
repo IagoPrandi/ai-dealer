@@ -13,6 +13,12 @@ import { fileURLToPath } from "node:url";
 
 export const RULE_COMPILER_SKILL = {
   name: "compile_rule_to_ast",
+  // v14: the full compilation envelope is now schema-constrained at decoding
+  // time, including each worked-example ticket's exact domain/length/uniqueness.
+  // v13: worked examples are constrained to the real no-replacement game domain
+  // (exactly six distinct integers 1..100). Predicate evidence may be all LOSE
+  // when no valid winning input exists; the model must not fabricate an
+  // out-of-domain WIN just to satisfy a one-WIN/one-LOSE prompt requirement.
   // v12: the ordered-criteria fold (patterns.md 2c) — "A decides it, otherwise
   // B" is ONE ranking whose primary term is scaled above the secondary's
   // maximum, so a fallback clause is compiled rather than silently dropped.
@@ -21,7 +27,7 @@ export const RULE_COMPILER_SKILL = {
   // side instead of flattening every value into the top-level `and`.
   // v10: ordered literal prefixes with an explicitly unconstrained remainder,
   // on top of v9's full literal sequences, sets, and their negation.
-  version: "tyche_rule_compiler_skill_v12",
+  version: "tyche_rule_compiler_skill_v14",
   allowedInputs: ["guess", "draw"] as const,
 } as const;
 

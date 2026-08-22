@@ -111,6 +111,7 @@ import {
   RULE_MAX_TOKENS,
   TREASURY_FEE_BPS,
 } from "@tyche/constants";
+import type { RuleCompilationAttemptDiagnostic } from "@tyche/rule-compiler";
 import { buildDealerChatPrompt } from "./promptSkills.js";
 
 const wallet = "4bYqf3rJ7m2nQh9sV1xCH8kLpWtD6eZaUg5oNbMcXyTH";
@@ -579,6 +580,38 @@ test("completed preflight diagnostics are attached to the server-owned draft", (
     decision: "INVALID" as const,
     reasonCodes: ["INTERPRETATION_MISMATCH" as const],
     reasonSummary: "The modulo operation was omitted from the artifact.",
+    rejectedCompilerAttempts: [
+      {
+        candidate: {
+          ast: { schemaVersion: 3 },
+          consumedSpans: [],
+          workedExamples: [],
+        },
+        decision: "INVALID",
+        providerEvidence: {
+          exampleResults: [
+            {
+              detail: "At least two worked examples are required.",
+              index: 0,
+              status: "failed",
+            },
+          ],
+          sourceSpanDetail: "All intent-bearing source clauses were covered by consumed spans.",
+          sourceSpanStatus: "passed",
+        },
+        reasonCodes: ["PROVIDER_EVIDENCE_UNVERIFIED"],
+        schemaError: null,
+        stages: [
+          {
+            detail: "At least two worked examples are required.",
+            reasonCodes: ["PROVIDER_EVIDENCE_UNVERIFIED"],
+            stage: "provider_evidence",
+            status: "failed",
+          },
+        ],
+        status: "rejected",
+      },
+    ] satisfies RuleCompilationAttemptDiagnostic[],
     refinementFocus: ["Keep modulo 9 on both sums."],
     refinementQuestions: ["Should both sums use modulo 9?"],
   };
@@ -588,6 +621,13 @@ test("completed preflight diagnostics are attached to the server-owned draft", (
   const stored = listConversationDrafts(wallet)[0]?.lastPreflight;
   assert.deepEqual(stored?.reasonCodes, ["INTERPRETATION_MISMATCH"]);
   assert.deepEqual(stored?.coverage?.missingOperations, ["mod"]);
+  assert.deepEqual(stored?.rejectedCompilerAttempts?.[0]?.candidate?.ast, {
+    schemaVersion: 3,
+  });
+  assert.equal(
+    stored?.rejectedCompilerAttempts?.[0]?.stages[0]?.status,
+    "failed",
+  );
   assert.equal(stored?.originalText, prompt);
   assert.equal(
     isValidConversationDraft({ ...draft, lastPreflight: stored }),

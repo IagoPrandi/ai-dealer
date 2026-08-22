@@ -263,11 +263,16 @@ function createProviderConfig(input: {
   serving_engine: string;
 }): AgentProviderConfig {
   const request_shape = selectRequestShape(input);
+  // Never advertise a capability the transport cannot actually enforce:
+  // artifact audit metadata must describe the decoder used, not the desired
+  // decoder. The compiler permits only local Ollama and OpenAI's known API
+  // endpoint until another compatible endpoint has an explicit capability.
+  const supportsSchemaConstrainedDecoding = supportsJsonSchemaDecoding(input);
   return {
     base_url: input.base_url,
     capabilities: {
-      grammar_constrained_decoding: true,
-      json_schema_response: true,
+      grammar_constrained_decoding: supportsSchemaConstrainedDecoding,
+      json_schema_response: supportsSchemaConstrainedDecoding,
       local: input.local,
       openai_compatible: input.base_url !== null || input.provider === "openai",
       supports_ollama_format: request_shape === "ollama_format",
@@ -290,6 +295,24 @@ function createProviderConfig(input: {
     request_shape,
     timeout_ms: DEFAULT_TIMEOUT_MS,
   };
+}
+
+function supportsJsonSchemaDecoding(input: {
+  base_url: string | null;
+  model: string;
+}): boolean {
+  if (/:cloud$/iu.test(input.model.trim()) || input.base_url === null) {
+    return false;
+  }
+  try {
+    const endpoint = new URL(input.base_url);
+    return (
+      endpoint.port === "11434" ||
+      endpoint.hostname.toLowerCase() === "api.openai.com"
+    );
+  } catch {
+    return false;
+  }
 }
 
 function selectRequestShape(input: {

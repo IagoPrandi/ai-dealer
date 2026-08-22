@@ -51,6 +51,7 @@ import {
   type CompilerConfidenceBreakdown,
   type RuleAst,
   type RuleAstProvider,
+  type RuleCompilationAttemptDiagnostic,
   type RuleCompiledArtifact,
   type RuleConfidenceAction,
   type RuleOperation,
@@ -228,6 +229,8 @@ export interface RulePreflightResult {
   preflightResultHash: readonly number[];
   reasonSummary?: string;
   reasonCodes: RuleValidationReasonCode[];
+  /** Candidate envelopes and gate-by-gate diagnostics for rejected compiler attempts. */
+  rejectedCompilerAttempts?: readonly RuleCompilationAttemptDiagnostic[];
   coverage: RulePreflightCoverage | null;
   refinementFocus?: readonly string[];
   refinementQuestions?: readonly string[];
@@ -1127,6 +1130,8 @@ export interface ConversationLastPreflight {
   originalText: string;
   reasonCodes: RuleValidationReasonCode[];
   reasonSummary: string;
+  /** Server-authored rejected compiler candidates and their gate-by-gate trace. */
+  rejectedCompilerAttempts?: RuleCompilationAttemptDiagnostic[];
   refinementFocus: string[];
   refinementQuestions: string[];
   /** How the compiled rule uses the guess and the draw. The most rule-specific
@@ -3646,24 +3651,50 @@ async function createRulePreflight(
         stage: "checking_fidelity",
       });
       try {
-        // Score the FROZEN artifact's own description, not the interpret agent's
-        // prose about the text.
+        // TWO groundedness questions, each asked in the direction the check can
+        // actually answer.
         //
-        // Those are two different claims, and only one of them decides who gets
-        // paid. Scoring the agent's sentence made this check structurally unable
-        // to see a compile that dropped a clause: the agent's reading could be
-        // perfectly grounded in the player's words while the artifact behind it
-        // implemented something narrower — which is exactly what happened to a
-        // rule whose positional tiebreak the compiler discarded. The artifact
-        // description is a pure function of the frozen AST, so grounding it in
-        // the player's text is the question that actually matters.
-        grounded = await checkGroundedness(
+        // Groundedness scores whether every claim in the RESPONSE is supported by
+        // the DOCUMENT. That relation is not symmetric, and getting the direction
+        // wrong turns the guard into a lexical-overlap filter. Scoring the
+        // artifact description against the player's text does exactly that: the
+        // description is fully explicit (tie handling, ordering, exact counts)
+        // while the player's sentence is terse, so the model is asked to find
+        // support for detail the player never wrote. Measured against a corpus of
+        // faithful rules it rejected 4 of 6 novel compositions and 1 of 3 known
+        // ones — including a fluent, curated description — which would have
+        // confined the game to rule shapes that already have hand-written prose.
+        //
+        // 1. Did the dealer's reading drift from the player's words? The agent's
+        //    sentence is generated FROM that text, so it is a subset claim and the
+        //    direction is right.
+        const readingIsFaithful = await checkGroundedness(
           compileText,
-          validation.artifact?.officialInterpretation ??
-            interpretation.officialInterpretation,
+          interpretation.officialInterpretation,
           guardianConfig,
           signal,
         );
+        // 2. Does the FROZEN artifact actually do what the dealer promised? Here
+        //    the artifact description is the complete, authoritative statement and
+        //    the dealer's sentence is the subset claim — so a promise the artifact
+        //    does not implement is an unsupported claim, which is precisely what
+        //    groundedness detects. Same corpus: 6/6 faithful pairs pass, 2/2
+        //    over-promises caught.
+        //
+        //    This is the semantic complement of AGENT_STATEMENT_MISMATCH, which
+        //    catches the same fault deterministically but only through literal
+        //    values and named operations.
+        const artifactStatement = validation.artifact?.officialInterpretation;
+        const promiseIsKept =
+          artifactStatement === undefined
+            ? true
+            : await checkGroundedness(
+                artifactStatement,
+                interpretation.officialInterpretation,
+                guardianConfig,
+                signal,
+              );
+        grounded = readingIsFaithful && promiseIsKept;
       } catch (error) {
         if (signal?.aborted) {
           throw signal.reason ?? error;
@@ -3692,7 +3723,18 @@ async function createRulePreflight(
   if (firstModel !== agentConfig.model) {
     await ensureDealerModelReady(firstModel, signal);
   }
+  const rejectedCompilerAttempts: RuleCompilationAttemptDiagnostic[] = [];
+  const retainRejectedCompilerAttempts = (
+    validation: Awaited<ReturnType<typeof compileRuleArtifact>>,
+  ) => {
+    rejectedCompilerAttempts.push(
+      ...validation.log.attemptDiagnostics.filter(
+        (attempt) => attempt.decision === "INVALID",
+      ),
+    );
+  };
   let pass = await dealerPass(firstModel);
+  retainRejectedCompilerAttempts(pass.validation);
   let escalated = firstModel !== agentConfig.model;
   const needsEscalation =
     pass.validation.decision !== "VALID" || pass.grounded === false;
@@ -3706,6 +3748,7 @@ async function createRulePreflight(
         pass = strong;
         escalated = true;
       }
+      retainRejectedCompilerAttempts(strong.validation);
     } catch (error) {
       if (signal?.aborted) {
         throw signal.reason ?? error;
@@ -3830,6 +3873,8 @@ async function createRulePreflight(
           suggestedRewrites: semanticReview.suggestedRewrites,
         }
       : null;
+  const rejectedAttemptDiagnostics =
+    rejectedCompilerAttempts.length > 0 ? rejectedCompilerAttempts : undefined;
   const refinementFeedback =
     semanticRejectionFeedback ??
     semanticConfirmationFeedback ??
@@ -3863,6 +3908,7 @@ async function createRulePreflight(
     maxTokens: RULE_MAX_TOKENS,
     modelUsed: pass.model,
     reasonCodes,
+    rejectedCompilerAttempts: rejectedAttemptDiagnostics ?? [],
     refinementQuestions: refinementFeedback?.refinementQuestions ?? [],
     reproposalBlocked,
     ruleId,
@@ -3919,6 +3965,9 @@ async function createRulePreflight(
     preflightResultHash: hashBytes(preflightResult),
     reasonCodes,
     reasonSummary: refinementFeedback?.reasonSummary ?? reasonSummary,
+    ...(rejectedAttemptDiagnostics
+      ? { rejectedCompilerAttempts: rejectedAttemptDiagnostics }
+      : {}),
     ...(refinementFeedback
       ? {
           refinementFocus: refinementFeedback.refinementFocus,
@@ -4909,6 +4958,8 @@ function describeRulePreflightError(error: unknown) {
             ? "The rule agent is not configured. Set LLM_BASE_URL and LLM_MODEL."
             : error.code === "RULE_AGENT_TIMEOUT"
               ? "The dealer agent took too long to respond. Try again."
+              : error.code === "RULE_AGENT_SCHEMA_UNSUPPORTED"
+                ? "The configured rule compiler cannot enforce the required rule-output schema. Choose a schema-capable compiler before submitting a rule."
               : error.code === "RULE_AGENT_BAD_RESPONSE"
                 ? "The dealer agent returned an unusable response. Try rephrasing the rule."
                 : "The dealer agent is unavailable. Make sure the model is running and try again.",
@@ -6948,6 +6999,7 @@ function toConversationLastPreflight(
     originalText: sanitizeRuleText(originalText),
     reasonCodes: [...preflight.reasonCodes],
     reasonSummary: preflight.reasonSummary ?? "",
+    rejectedCompilerAttempts: [...(preflight.rejectedCompilerAttempts ?? [])],
     refinementFocus: [...(preflight.refinementFocus ?? [])],
     refinementQuestions: [...(preflight.refinementQuestions ?? [])],
     semanticImpact: preflight.semanticImpact,

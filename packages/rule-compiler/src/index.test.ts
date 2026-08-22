@@ -9,6 +9,7 @@ import {
   createLocalOnlyProviderRoutingPolicy,
   createCompilerPlaceholder,
   evaluatePredicate,
+  getRuleCompilationCandidateJsonSchema,
   getRuleValidationPromptContract,
   hasAmbiguousWording,
   hasExternalDependency,
@@ -129,6 +130,11 @@ test("the compile_rule_to_ast skill prompt is versioned and covers both rule mod
   assert.ok(prompt.includes('"kind":"abs"'));
   assert.ok(prompt.includes("consumedSpans"));
   assert.ok(prompt.includes("workedExamples"));
+  assert.match(prompt, /at least TWO valid domain cases/i);
+  assert.match(prompt, /do NOT need to include both outcomes/i);
+  assert.match(prompt, /draws without replacement/i);
+  assert.match(prompt, /never use `0`, `101`, or a seventh value/i);
+  assert.match(prompt, /decoder enforces this response schema/i);
   assert.ok(prompt.includes("guessSum - drawSum <= -10"));
   assert.ok(prompt.includes('"up":1'));
   assert.ok(prompt.includes("first pick only needs to be higher"));
@@ -138,6 +144,42 @@ test("the compile_rule_to_ast skill prompt is versioned and covers both rule mod
   assert.ok(prompt.includes("Never\nreplace the rule with a stock match-count example"));
   // And forbid external/unverifiable inputs.
   assert.ok(/wallets|votes|oracle|external/i.test(prompt));
+});
+
+test("the compiler candidate schema makes every worked ticket a valid game input", () => {
+  const schema = getRuleCompilationCandidateJsonSchema() as {
+    additionalProperties?: boolean;
+    definitions?: Record<string, unknown>;
+    properties?: {
+      workedExamples?: {
+        items?: {
+          anyOf?: Array<{
+            properties?: {
+              draw?: Record<string, unknown>;
+              guess?: Record<string, unknown>;
+            };
+          }>;
+        };
+      };
+    };
+    required?: string[];
+  };
+  assert.equal(schema.additionalProperties, false);
+  assert.ok(schema.definitions && Object.keys(schema.definitions).length > 0);
+  assert.deepEqual(schema.required, ["ast", "consumedSpans", "workedExamples"]);
+  const examples = schema.properties?.workedExamples?.items?.anyOf ?? [];
+  assert.equal(examples.length, 2);
+  for (const example of examples) {
+    for (const ticket of [example.properties?.guess, example.properties?.draw]) {
+      assert.deepEqual(ticket, {
+        type: "array",
+        minItems: 6,
+        maxItems: 6,
+        uniqueItems: true,
+        items: { type: "integer", minimum: 1, maximum: 100 },
+      });
+    }
+  }
 });
 
 test("every worked example in the skill validates against the rule AST schema", () => {
@@ -1889,6 +1931,44 @@ test("provider worked examples catch an inverted signed bound", async () => {
     JSON.stringify(result.log.reasonCodes),
   );
   assert.equal(result.log.reasonCodes.includes("INTERPRETATION_MISMATCH"), false);
+  const rejected = result.log.attemptDiagnostics.find(
+    (attempt) => attempt.candidate !== null,
+  );
+  assert.deepEqual(rejected?.candidate?.ast, wrongSignAst);
+  assert.deepEqual(rejected?.candidate?.workedExamples, [
+    {
+      draw: [10, 20, 30, 40, 50, 60],
+      guess: [5, 15, 25, 35, 55, 65],
+      outcome: "WIN",
+    },
+    {
+      draw: [10, 20, 30, 40, 50, 60],
+      guess: [5, 15, 25, 35, 56, 65],
+      outcome: "LOSE",
+    },
+  ]);
+  const evidenceStage = rejected?.stages.find(
+    (stage) => stage.stage === "provider_evidence",
+  );
+  assert.equal(evidenceStage?.status, "failed");
+  assert.match(evidenceStage?.detail ?? "", /Declared outcome does not match/i);
+  assert.equal(rejected?.providerEvidence?.exampleResults[1]?.status, "failed");
+  assert.equal(
+    rejected?.providerEvidence?.exampleResults[1]?.declaredOutcome,
+    "LOSE",
+  );
+  assert.equal(
+    rejected?.providerEvidence?.exampleResults[1]?.actualOutcome,
+    "WIN",
+  );
+  assert.ok(
+    rejected?.stages.some(
+      (stage) =>
+        stage.stage === "decision" &&
+        stage.status === "failed" &&
+        stage.reasonCodes.includes("PROVIDER_EVIDENCE_UNVERIFIED"),
+    ),
+  );
 });
 
 test("can prefer deterministic compilation for known preflight patterns", async () => {

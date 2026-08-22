@@ -17,6 +17,7 @@ import {
   type CompilerConfidenceWeights,
 } from "@tyche/agent-core";
 import {
+  getRuleAstJsonSchema,
   isRankingRule,
   MAX_AST_DEPTH,
   ruleAstSchema,
@@ -153,6 +154,89 @@ export interface RuleCompilationCandidate {
   workedExamples: RuleProviderWorkedExample[];
 }
 
+/**
+ * Transport schema for the whole LLM compilation envelope.  The AST schema on
+ * its own cannot constrain the provider's evidence arrays, which is how a
+ * syntactically valid response used to carry impossible ticket examples.
+ *
+ * This schema is intentionally separate from the runtime Zod checks: a
+ * constrained decoder prevents invalid tokens from being emitted when the
+ * provider supports it, while the runtime checks remain the non-bypassable
+ * enforcement boundary.
+ */
+export function getRuleCompilationCandidateJsonSchema(): unknown {
+  const astSchema = getRuleAstJsonSchema();
+  const astRecord =
+    astSchema && typeof astSchema === "object"
+      ? (astSchema as Record<string, unknown>)
+      : {};
+  // `$schema` is a document-level declaration. The AST is nested inside this
+  // envelope, so retain its definitions but omit that nested declaration.
+  const nestedAstSchema = { ...astRecord };
+  delete nestedAstSchema.$schema;
+  // Zod's draft-7 conversion makes recursive AST nodes refer to
+  // `#/definitions/...`. Those references are absolute to the response-schema
+  // document, so definitions must live at this envelope's root rather than
+  // inside its `ast` property.
+  const definitions = nestedAstSchema.definitions;
+  delete nestedAstSchema.definitions;
+  const ticketSchema = {
+    type: "array",
+    minItems: 6,
+    maxItems: 6,
+    uniqueItems: true,
+    items: { type: "integer", minimum: 1, maximum: 100 },
+  };
+  const predicateExample = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      draw: ticketSchema,
+      guess: ticketSchema,
+      outcome: { enum: ["WIN", "LOSE"] },
+    },
+    required: ["draw", "guess", "outcome"],
+  };
+  const rankingExample = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      draw: ticketSchema,
+      guess: ticketSchema,
+      score: { type: "number" },
+    },
+    required: ["draw", "guess", "score"],
+  };
+
+  return {
+    $schema: "http://json-schema.org/draft-07/schema#",
+    ...(definitions ? { definitions } : {}),
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      ast: nestedAstSchema,
+      consumedSpans: {
+        type: "array",
+        minItems: 1,
+        maxItems: 12,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: { text: { type: "string", minLength: 1, maxLength: 6000 } },
+          required: ["text"],
+        },
+      },
+      workedExamples: {
+        type: "array",
+        minItems: 2,
+        maxItems: 8,
+        items: { anyOf: [predicateExample, rankingExample] },
+      },
+    },
+    required: ["ast", "consumedSpans", "workedExamples"],
+  };
+}
+
 export interface RuleCompileArtifactOptions {
   astProvider: RuleAstProvider;
   preferDeterministic?: boolean;
@@ -212,7 +296,63 @@ export interface RuleValidationTestResult extends RuleValidationTestCase {
   passed: boolean;
 }
 
+export type RuleCompilerStageName =
+  | "schema_validation"
+  | "independent_review"
+  | "provider_evidence"
+  | "runtime_bounds"
+  | "interpretation_coverage"
+  | "agent_statement_coverage"
+  | "runtime_harness"
+  | "decision";
+
+export interface RuleCompilerStageResult {
+  detail: string;
+  reasonCodes: RuleValidationReasonCode[];
+  stage: RuleCompilerStageName;
+  status: "passed" | "failed" | "skipped";
+}
+
+export interface RuleProviderWorkedExampleDiagnostic {
+  actualOutcome?: "WIN" | "LOSE";
+  actualScore?: number;
+  declaredOutcome?: "WIN" | "LOSE";
+  declaredScore?: number;
+  detail: string;
+  index: number;
+  status: "passed" | "failed";
+}
+
+export interface RuleProviderEvidenceStageDiagnostic {
+  exampleResults: RuleProviderWorkedExampleDiagnostic[];
+  sourceSpanDetail: string;
+  sourceSpanStatus: "passed" | "failed";
+}
+
+/**
+ * The provider candidate retained after a failed preflight. It deliberately
+ * contains only the structured compiler envelope, never the provider prompt,
+ * transport response, or model reasoning trace.
+ */
+export interface RuleRejectedCompilationCandidate {
+  ast: unknown;
+  consumedSpans: unknown;
+  workedExamples: unknown;
+}
+
+export interface RuleCompilationAttemptDiagnostic {
+  candidate: RuleRejectedCompilationCandidate | null;
+  decision: RuleValidationDecision;
+  providerEvidence: RuleProviderEvidenceStageDiagnostic | null;
+  reasonCodes: RuleValidationReasonCode[];
+  schemaError: string | null;
+  stages: RuleCompilerStageResult[];
+  status: AgentProviderAttemptStatus;
+}
+
 export interface RuleValidationLog {
+  /** Detailed, structured trace for every compiler attempt. */
+  attemptDiagnostics: RuleCompilationAttemptDiagnostic[];
   compiledArtifactHash: string | null;
   confidence: CompilerConfidenceBreakdown;
   confidenceAction: RuleConfidenceAction;
@@ -612,6 +752,7 @@ function finalizeValidation(
     artifactHash,
     decision: selectedAttempt.decision,
     log: {
+      attemptDiagnostics: attempts.map((attempt) => attempt.diagnostics),
       compiledArtifactHash: artifactHash,
       confidence: selectedAttempt.confidence,
       confidenceAction: selectedAttempt.confidenceAction,
@@ -747,6 +888,7 @@ interface ProviderEvaluation {
   difficultyClass: RuleDifficultyClass;
   /** False when no harness ran, so `difficultyClass` is the unmeasured default. */
   difficultyMeasured: boolean;
+  diagnostics: RuleCompilationAttemptDiagnostic;
   estimatedWinRate: number;
   evaluatedTestCases: RuleValidationTestResult[];
   generatedTestCases: RuleValidationTestCase[];
@@ -964,8 +1106,16 @@ type ProviderEvidenceFailure =
   | "span_coverage_incomplete";
 
 type ProviderEvidenceVerification =
-  | { evidence: VerifiedProviderEvidence; ok: true }
-  | { failure: ProviderEvidenceFailure; ok: false };
+  | {
+      diagnostic: RuleProviderEvidenceStageDiagnostic;
+      evidence: VerifiedProviderEvidence;
+      ok: true;
+    }
+  | {
+      diagnostic: RuleProviderEvidenceStageDiagnostic;
+      failure: ProviderEvidenceFailure;
+      ok: false;
+    };
 
 function verifyProviderEvidence(
   ast: RuleAst,
@@ -977,58 +1127,121 @@ function verifyProviderEvidence(
     evidence.consumedSpans,
     collectAstValues(ast),
   );
-  if (!sourceSpans) {
-    return { failure: "span_coverage_incomplete", ok: false };
-  }
+  const diagnostic: RuleProviderEvidenceStageDiagnostic = {
+    exampleResults: [],
+    sourceSpanDetail: sourceSpans
+      ? "All intent-bearing source clauses were covered by consumed spans."
+      : "At least one intent-bearing source clause was not covered by the provider's consumed spans.",
+    sourceSpanStatus: sourceSpans ? "passed" : "failed",
+  };
+  let firstExampleFailure: ProviderEvidenceFailure | null = null;
   if (
     !Array.isArray(evidence.workedExamples) ||
     evidence.workedExamples.length < 2
   ) {
-    return { failure: "examples_malformed", ok: false };
+    diagnostic.exampleResults.push({
+      detail: "At least two worked examples are required.",
+      index: 0,
+      status: "failed",
+    });
+    firstExampleFailure = "examples_malformed";
   }
 
   const predicateExamples: RuleWorkedExample[] = [];
-  for (const rawExample of evidence.workedExamples) {
-    if (!rawExample || typeof rawExample !== "object") {
-      return { failure: "examples_malformed", ok: false };
-    }
-    const example = rawExample as Record<string, unknown>;
-    if (
-      !isSixUniqueDomainNumbers(example.guess) ||
-      !isSixUniqueDomainNumbers(example.draw)
-    ) {
-      return { failure: "examples_malformed", ok: false };
-    }
-    try {
-      if (isRankingRule(ast)) {
-        if (typeof example.score !== "number" || !Number.isFinite(example.score)) {
-          return { failure: "examples_malformed", ok: false };
-        }
-        if (
-          scoreGuess(ast, { draw: example.draw, guess: example.guess }) !==
-          example.score
-        ) {
-          return { failure: "examples_disagree", ok: false };
-        }
-      } else {
-        if (example.outcome !== "WIN" && example.outcome !== "LOSE") {
-          return { failure: "examples_malformed", ok: false };
-        }
-        const actual = evaluatePredicate(ast, {
-          draw: example.draw,
-          guess: example.guess,
-        }).result;
-        if (actual !== example.outcome) {
-          return { failure: "examples_disagree", ok: false };
-        }
-        predicateExamples.push({
-          draw: example.draw,
-          guess: example.guess,
-          outcome: example.outcome,
+  if (Array.isArray(evidence.workedExamples)) {
+    for (const [index, rawExample] of evidence.workedExamples.entries()) {
+      if (!rawExample || typeof rawExample !== "object") {
+        diagnostic.exampleResults.push({
+          detail: "Example must be an object with draw and guess arrays.",
+          index,
+          status: "failed",
         });
+        firstExampleFailure ??= "examples_malformed";
+        continue;
       }
-    } catch {
-      return { failure: "examples_malformed", ok: false };
+      const example = rawExample as Record<string, unknown>;
+      if (
+        !isSixUniqueDomainNumbers(example.guess) ||
+        !isSixUniqueDomainNumbers(example.draw)
+      ) {
+        diagnostic.exampleResults.push({
+          detail: "Draw and guess must each contain six unique integers from 1 through 100.",
+          index,
+          status: "failed",
+        });
+        firstExampleFailure ??= "examples_malformed";
+        continue;
+      }
+      try {
+        if (isRankingRule(ast)) {
+          if (typeof example.score !== "number" || !Number.isFinite(example.score)) {
+            diagnostic.exampleResults.push({
+              detail: "Ranking examples must declare a finite numeric score.",
+              index,
+              status: "failed",
+            });
+            firstExampleFailure ??= "examples_malformed";
+            continue;
+          }
+          const actualScore = scoreGuess(ast, {
+            draw: example.draw,
+            guess: example.guess,
+          });
+          const passed = actualScore === example.score;
+          diagnostic.exampleResults.push({
+            actualScore,
+            declaredScore: example.score,
+            detail: passed
+              ? "Declared score matches the candidate AST."
+              : "Declared score does not match the candidate AST.",
+            index,
+            status: passed ? "passed" : "failed",
+          });
+          if (!passed) {
+            firstExampleFailure ??= "examples_disagree";
+          }
+        } else {
+          if (example.outcome !== "WIN" && example.outcome !== "LOSE") {
+            diagnostic.exampleResults.push({
+              detail: "Predicate examples must declare outcome WIN or LOSE.",
+              index,
+              status: "failed",
+            });
+            firstExampleFailure ??= "examples_malformed";
+            continue;
+          }
+          const actualOutcome = evaluatePredicate(ast, {
+            draw: example.draw,
+            guess: example.guess,
+          }).result;
+          const passed = actualOutcome === example.outcome;
+          diagnostic.exampleResults.push({
+            actualOutcome,
+            declaredOutcome: example.outcome,
+            detail: passed
+              ? "Declared outcome matches the candidate AST."
+              : "Declared outcome does not match the candidate AST.",
+            index,
+            status: passed ? "passed" : "failed",
+          });
+          if (!passed) {
+            firstExampleFailure ??= "examples_disagree";
+          } else {
+            predicateExamples.push({
+              draw: example.draw,
+              guess: example.guess,
+              outcome: example.outcome,
+            });
+          }
+        }
+      } catch {
+        diagnostic.exampleResults.push({
+          detail: "The candidate AST could not evaluate this example.",
+          index,
+          status: "failed",
+        });
+        firstExampleFailure ??= "examples_malformed";
+      }
     }
   }
   // Deliberately NOT "the provider must supply one WIN and one LOSE example".
@@ -1044,9 +1257,16 @@ function verifyProviderEvidence(
   // is that the model did not contradict its own artifact, and every example
   // above had to agree with the AST for us to get here.
   if (!isRankingRule(ast) && predicateExamples.length < 2) {
-    return { failure: "examples_malformed", ok: false };
+    firstExampleFailure ??= "examples_malformed";
+  }
+  if (!sourceSpans) {
+    return { diagnostic, failure: "span_coverage_incomplete", ok: false };
+  }
+  if (firstExampleFailure) {
+    return { diagnostic, failure: firstExampleFailure, ok: false };
   }
   return {
+    diagnostic,
     evidence: { sourceSpans, workedExamples: predicateExamples },
     ok: true,
   };
@@ -1154,6 +1374,15 @@ function validateResolvedAst(
 ): ProviderEvaluation {
   const { forcedFailure, modelIdentity, normalizedText } = ctx;
   const reasonCodes = ctx.reasonCodes;
+  const stages: RuleCompilerStageResult[] = [];
+  const candidate =
+    astSource === "provider" && (rawAst !== null || providerEvidence !== null)
+      ? {
+          ast: rawAst,
+          consumedSpans: providerEvidence?.consumedSpans ?? null,
+          workedExamples: providerEvidence?.workedExamples ?? null,
+        }
+      : null;
 
   const parsed =
     rawAst != null && !forcedFailure ? ruleAstSchema.safeParse(rawAst) : null;
@@ -1169,6 +1398,14 @@ function validateResolvedAst(
     reasonCodes.add("SCHEMA_INVALID");
     schemaError = summarizeSchemaError(parsed);
   }
+  stages.push({
+    detail: ast
+      ? "Candidate AST matches the supported rule schema."
+      : schemaError ?? "No usable candidate AST was returned.",
+    reasonCodes: ast ? [] : [...reasonCodes].filter((code) => code === "SCHEMA_INVALID" || code === "UNSUPPORTED_RULE"),
+    stage: "schema_validation",
+    status: ast ? "passed" : "failed",
+  });
   // An independent reading of the same text. When it exists it is the strongest
   // available check: the two ASTs are compared by BEHAVIOR over the structured
   // battery, so an equivalent-but-differently-shaped compile passes and a rule
@@ -1182,6 +1419,22 @@ function validateResolvedAst(
   if (ast && reviewerAst && !knownAstSemanticsMatch(reviewerAst, ast)) {
     reasonCodes.add("REVIEWER_MISMATCH");
   }
+  stages.push({
+    detail: !ast
+      ? "Skipped because no schema-valid AST was available."
+      : !reviewerAst
+        ? "No independent reviewer AST was available."
+        : reasonCodes.has("REVIEWER_MISMATCH")
+          ? "The independent reviewer AST differs behaviorally from the candidate."
+          : "The independent reviewer AST agrees with the candidate.",
+    reasonCodes: reasonCodes.has("REVIEWER_MISMATCH") ? ["REVIEWER_MISMATCH"] : [],
+    stage: "independent_review",
+    status: !ast || !reviewerAst
+      ? "skipped"
+      : reasonCodes.has("REVIEWER_MISMATCH")
+        ? "failed"
+        : "passed",
+  });
 
   const evidenceVerification =
     ast && astSource === "provider" && providerEvidence
@@ -1216,6 +1469,35 @@ function validateResolvedAst(
       reasonCodes.add("PROVIDER_EVIDENCE_UNVERIFIED");
     }
   }
+  stages.push({
+    detail: astSource === "deterministic"
+      ? "Skipped for the deterministic compiler path."
+      : !ast
+        ? "Skipped because no schema-valid provider AST was available."
+        : evidenceVerification?.ok
+          ? "Provider spans and worked examples agree with the candidate AST."
+          : evidenceVerification
+            ? evidenceVerification.failure === "span_coverage_incomplete"
+              ? evidenceVerification.diagnostic.sourceSpanDetail
+              : evidenceVerification.diagnostic.exampleResults
+                  .filter((example) => example.status === "failed")
+                  .map((example) => `Example ${example.index}: ${example.detail}`)
+                  .join(" ") || "Provider evidence is malformed."
+            : requireProviderEvidence
+              ? "Provider evidence was required but not returned."
+              : "Provider evidence was not requested.",
+    reasonCodes: [...reasonCodes].filter(
+      (code) =>
+        code === "PROVIDER_EVIDENCE_UNVERIFIED" ||
+        code === "PROVIDER_SPAN_COVERAGE_INCOMPLETE",
+    ),
+    stage: "provider_evidence",
+    status: astSource === "deterministic" || !ast || (!evidenceVerification && !requireProviderEvidence)
+      ? "skipped"
+      : evidenceVerification?.ok
+        ? "passed"
+        : "failed",
+  });
 
   const bounds = ast && !forcedFailure ? validateRuntimeBounds(ast) : null;
   const hasSafeRuntimeBounds = bounds?.safe === true;
@@ -1225,6 +1507,18 @@ function validateResolvedAst(
   if (bounds && !bounds.withinComplexity) {
     reasonCodes.add("COMPLEXITY_EXCEEDED");
   }
+  stages.push({
+    detail: !ast
+      ? "Skipped because no schema-valid AST was available."
+      : hasSafeRuntimeBounds
+        ? "Candidate AST stays within runtime safety and complexity bounds."
+        : "Candidate AST exceeds runtime safety or complexity bounds.",
+    reasonCodes: [...reasonCodes].filter(
+      (code) => code === "UNSAFE_RUNTIME_BOUNDS" || code === "COMPLEXITY_EXCEEDED",
+    ),
+    stage: "runtime_bounds",
+    status: !ast ? "skipped" : hasSafeRuntimeBounds ? "passed" : "failed",
+  });
 
   // The frozen AST is what pays the prize; the player only reads prose. Reject
   // when a numeric constraint or a load-bearing operation the player wrote did
@@ -1244,6 +1538,7 @@ function validateResolvedAst(
   // replacement for this one.
   const certifiedByIndependentReading =
     astSource === "provider" && reviewerAst !== null;
+  let interpretationCoverageFailed = false;
   if (ast && !forcedFailure && !certifiedByIndependentReading) {
     const coverage = analyzeInterpretationCoverage({
       ast,
@@ -1252,8 +1547,25 @@ function validateResolvedAst(
     });
     if (!coverage.covered) {
       reasonCodes.add("INTERPRETATION_MISMATCH");
+      interpretationCoverageFailed = true;
     }
   }
+  stages.push({
+    detail: !ast
+      ? "Skipped because no schema-valid AST was available."
+      : certifiedByIndependentReading
+        ? "Skipped because an independent reviewer AST certified the provider reading."
+        : interpretationCoverageFailed
+          ? "The candidate AST does not cover every intent-bearing part of the rule text."
+          : "The candidate AST covers the intent-bearing parts of the rule text.",
+    reasonCodes: interpretationCoverageFailed ? ["INTERPRETATION_MISMATCH"] : [],
+    stage: "interpretation_coverage",
+    status: !ast || certifiedByIndependentReading
+      ? "skipped"
+      : interpretationCoverageFailed
+        ? "failed"
+        : "passed",
+  });
 
   // Gap 1: the dealer's own reading is a promise to the player.
   //
@@ -1266,6 +1578,7 @@ function validateResolvedAst(
   // Deliberately the same one-directional check as above: the artifact may carry
   // more than the sentence spells out, never less.
   const agentStatement = request.agentInterpretation?.trim();
+  let agentStatementCoverageFailed = false;
   if (ast && !forcedFailure && agentStatement) {
     const agentCoverage = analyzeInterpretationCoverage({
       ast,
@@ -1277,8 +1590,25 @@ function validateResolvedAst(
       agentCoverage.missingOperations.length > 0
     ) {
       reasonCodes.add("AGENT_STATEMENT_MISMATCH");
+      agentStatementCoverageFailed = true;
     }
   }
+  stages.push({
+    detail: !ast
+      ? "Skipped because no schema-valid AST was available."
+      : !agentStatement
+        ? "Skipped because no agent interpretation was supplied."
+        : agentStatementCoverageFailed
+          ? "The candidate AST does not keep every load-bearing claim in the agent interpretation."
+          : "The candidate AST keeps the load-bearing claims in the agent interpretation.",
+    reasonCodes: agentStatementCoverageFailed ? ["AGENT_STATEMENT_MISMATCH"] : [],
+    stage: "agent_statement_coverage",
+    status: !ast || !agentStatement
+      ? "skipped"
+      : agentStatementCoverageFailed
+        ? "failed"
+        : "passed",
+  });
 
   // Deterministic test harness + bounded Monte-Carlo difficulty (PRD §6.8, §7.8).
   const harness = ast && hasSafeRuntimeBounds ? generateAndRunTests(ast) : null;
@@ -1303,6 +1633,25 @@ function validateResolvedAst(
   if (harness && harness.coverageScore < 1) {
     reasonCodes.add("RUNTIME_TEST_FAILED");
   }
+  stages.push({
+    detail: !harness
+      ? "Skipped because the candidate did not pass schema and runtime-bound checks."
+      : `Harness coverage ${harness.coverageScore}; difficulty ${difficultyClass}; estimated win rate ${estimatedWinRate}.`,
+    reasonCodes: [...reasonCodes].filter(
+      (code) =>
+        code === "DIFFICULTY_IMPOSSIBLE" ||
+        code === "DIFFICULTY_ALWAYS_TRUE" ||
+        code === "RUNTIME_TEST_FAILED",
+    ),
+    stage: "runtime_harness",
+    status: !harness
+      ? "skipped"
+      : reasonCodes.has("DIFFICULTY_IMPOSSIBLE") ||
+          reasonCodes.has("DIFFICULTY_ALWAYS_TRUE") ||
+          reasonCodes.has("RUNTIME_TEST_FAILED")
+        ? "failed"
+        : "passed",
+  });
 
   // Represent harness checks in the existing test-case log shape (draw/guess are
   // exercised internally by the harness over many Monte-Carlo samples).
@@ -1349,6 +1698,18 @@ function validateResolvedAst(
     blockingReasons.length === 0 && confidenceAction === "ACCEPT"
       ? "VALID"
       : "INVALID";
+  const status = determineAttemptStatus(forcedFailure, confidenceAction, decision);
+  stages.push({
+    detail:
+      decision === "VALID"
+        ? "Candidate passed all required validation gates."
+        : `Candidate rejected: ${[...reasonCodes]
+            .filter((code) => code !== "SUPPORTED_RULE")
+            .join(", ") || "confidence threshold not met"}.`,
+    reasonCodes: [...reasonCodes].filter((code) => code !== "SUPPORTED_RULE"),
+    stage: "decision",
+    status: decision === "VALID" ? "passed" : "failed",
+  });
 
   const constrainedDecodingUsed =
     providerConfig.capabilities.grammar_constrained_decoding === true &&
@@ -1399,6 +1760,17 @@ function validateResolvedAst(
     decision,
     difficultyClass,
     difficultyMeasured: harness !== null,
+    diagnostics: {
+      // A valid candidate is frozen in the artifact; retain raw provider output
+      // only for rejected attempts, where it is needed to explain the block.
+      candidate: decision === "INVALID" ? candidate : null,
+      decision,
+      providerEvidence: evidenceVerification?.diagnostic ?? null,
+      reasonCodes: [...reasonCodes],
+      schemaError,
+      stages,
+      status,
+    },
     estimatedWinRate,
     evaluatedTestCases,
     generatedTestCases,
@@ -1408,7 +1780,7 @@ function validateResolvedAst(
     reasonCodes: [...reasonCodes],
     requestShape: providerConfig.request_shape,
     schemaError,
-    status: determineAttemptStatus(forcedFailure, confidenceAction, decision),
+    status,
   };
 }
 
