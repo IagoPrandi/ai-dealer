@@ -395,7 +395,10 @@ test("the LLM reviewer performs a separate source-only reasoning pass", async ()
     role: string;
   }>;
   assert.match(messages[0]?.content ?? "", /independent semantic review/i);
-  assert.match(messages[0]?.content ?? "", /have not seen the draft candidate/i);
+  assert.match(
+    messages[0]?.content ?? "",
+    /have not seen the draft candidate/i,
+  );
   assert.equal(messages[1]?.content, text);
   assert.equal(requestBody.reasoning_effort, "none");
 });
@@ -822,6 +825,127 @@ test("compile requests schema-constrained tickets and never falls back to JSON m
     messages[1]?.content,
     "A guess wins if its first number is greater than 1.",
   );
+});
+
+test("direct positional rules constrain the LLM to indexed access", async () => {
+  const requestBodies: Array<Record<string, unknown>> = [];
+  const text =
+    "A guess wins when its first number is greater than the first drawn number and its second number is greater than the last drawn number.";
+  const at = (source: "draw" | "guess", index: number) => ({
+    kind: "at",
+    index,
+    of: { kind: "source", source },
+  });
+  const candidate = {
+    ast: {
+      schemaVersion: 3,
+      result: {
+        type: "predicate",
+        predicate: {
+          kind: "and",
+          clauses: [
+            {
+              kind: "compare",
+              op: "gt",
+              left: at("guess", 0),
+              right: at("draw", 0),
+            },
+            {
+              kind: "compare",
+              op: "gt",
+              left: at("guess", 1),
+              right: at("draw", 5),
+            },
+          ],
+        },
+      },
+    },
+    consumedSpans: [
+      {
+        text: "its first number is greater than the first drawn number and its second number is greater than the last drawn number",
+      },
+    ],
+    workedExamples: [
+      {
+        draw: [10, 20, 30, 40, 50, 60],
+        guess: [11, 61, 70, 80, 90, 100],
+        outcome: "WIN",
+      },
+      {
+        draw: [10, 20, 30, 40, 50, 60],
+        guess: [11, 59, 70, 80, 90, 100],
+        outcome: "LOSE",
+      },
+    ],
+  };
+  globalThis.fetch = (async (
+    _input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    requestBodies.push(
+      JSON.parse(String(init?.body)) as Record<string, unknown>,
+    );
+    return new Response(
+      JSON.stringify({
+        choices: [{ message: { content: JSON.stringify(candidate) } }],
+      }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+
+  assert.deepEqual(await compileRuleToAst(text, CONFIG), candidate);
+  assert.deepEqual(
+    await compileRuleToAst(
+      "For each guess, compare guess[0] with draw[0] and guess[1] with draw[5]; both comparisons must be true.",
+      CONFIG,
+    ),
+    candidate,
+  );
+  const requestBody = requestBodies[0] ?? {};
+  const responseFormat = requestBody.response_format as {
+    json_schema?: {
+      schema?: { definitions?: Record<string, { anyOf?: unknown[] }> };
+    };
+  };
+  const kinds = Object.values(
+    responseFormat.json_schema?.schema?.definitions ?? {},
+  ).flatMap((definition) =>
+    (definition.anyOf ?? []).flatMap((variant) => {
+      const kind = (variant as { properties?: { kind?: { const?: unknown } } })
+        .properties?.kind?.const;
+      return typeof kind === "string" ? [kind] : [];
+    }),
+  );
+  assert.ok(kinds.includes("at"));
+  assert.ok(!kinds.includes("elem"));
+  assert.ok(!kinds.includes("pair"));
+  const messages = requestBody.messages as Array<{ content?: string }>;
+  assert.match(
+    messages[0]?.content ?? "",
+    /direct-position decoder constraint/i,
+  );
+  assert.match(
+    messages[0]?.content ?? "",
+    /1-based ordinal to a 0-based index/i,
+  );
+  assert.match(messages[0]?.content ?? "", /server-verified semantic plan/i);
+  assert.match(messages[0]?.content ?? "", /"index":5/);
+  const indexedResponseFormat = requestBodies[1]?.response_format as {
+    json_schema?: {
+      schema?: { definitions?: Record<string, { anyOf?: unknown[] }> };
+    };
+  };
+  const indexedKinds = Object.values(
+    indexedResponseFormat.json_schema?.schema?.definitions ?? {},
+  ).flatMap((definition) =>
+    (definition.anyOf ?? []).flatMap((variant) => {
+      const kind = (variant as { properties?: { kind?: { const?: unknown } } })
+        .properties?.kind?.const;
+      return typeof kind === "string" ? [kind] : [];
+    }),
+  );
+  assert.ok(indexedKinds.includes("at"));
+  assert.ok(!indexedKinds.includes("elem"));
 });
 
 test("compile fails closed before calling a provider without schema-constrained decoding", async () => {

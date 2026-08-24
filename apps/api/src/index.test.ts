@@ -187,8 +187,21 @@ test("only compiler-generation faults offer retry without reinterpretation", () 
       "PROVIDER_MALFORMED_RESPONSE",
       "DIFFICULTY_ALWAYS_TRUE",
     ]),
-    false,
+    true,
   );
+  assert.equal(
+    isRuleGenerationRetryable([
+      "SUPPORTED_RULE",
+      "REVIEWER_MISMATCH",
+      "DIFFICULTY_IMPOSSIBLE",
+    ]),
+    true,
+  );
+  // A difficulty verdict alone describes the player's rule. It is only
+  // candidate-dependent when an independent generation fault proves that the
+  // verdict was measured against a bad artifact.
+  assert.equal(isRuleGenerationRetryable(["DIFFICULTY_ALWAYS_TRUE"]), false);
+  assert.equal(isRuleGenerationRetryable(["DIFFICULTY_IMPOSSIBLE"]), false);
   assert.equal(isRuleGenerationRetryable(["SUPPORTED_RULE"]), false);
 });
 

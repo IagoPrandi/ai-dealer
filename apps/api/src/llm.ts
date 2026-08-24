@@ -1,5 +1,6 @@
 import {
   buildRuleCompilerSkillPrompt,
+  getDeterministicRuleCompilerPlan,
   getRuleCompilationCandidateJsonSchema,
   providerCompilationHasSchemaValidAst,
 } from "@tyche/rule-compiler";
@@ -1293,6 +1294,23 @@ export async function compileRuleToAst(
     );
   }
 
+  const normalizedConstraintText = normalizedText
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase();
+  const namesDirectPosition =
+    /\b(?:first|second|third|fourth|fifth|sixth|last|1st|2nd|3rd|4th|5th|6th|primeir[oa]|segund[oa]|terceir[oa]|quart[oa]|quint[oa]|sext[oa]|ultim[oa])\s+(?:guessed?\s+|picked\s+|drawn?\s+)?(?:number|pick|numero)\b/u.test(
+      normalizedConstraintText,
+    ) || /\b(?:guess|draw)\s*\[\s*[0-5]\s*\]/u.test(normalizedConstraintText);
+  const namesQuantifiedCollection =
+    /\b(?:all|every|each|any|for each|todos?|todas?|cada|qualquer)\s+(?:of\s+the\s+)?(?:(?:guessed?|picked?|drawn?|sorteados?|seus?|suas?)\s+)?(?:numbers?|picks?|values?|items?|pairs?|numeros?|valores?|elementos?|pares?)\b/u.test(
+      normalizedConstraintText,
+    );
+  const constrainDirectPositions =
+    namesDirectPosition &&
+    !namesQuantifiedCollection &&
+    /\b(?:draw|drawn|sorteio)\b/u.test(normalizedConstraintText);
+
   // The compile-step guidance lives in the versioned `compile_rule_to_ast` agent
   // skill (PRD §7.10/§7.12), co-located with the DSL schema in @tyche/rule-compiler.
   // The executable schema is sent to the decoder instead of copied into the
@@ -1301,12 +1319,25 @@ export async function compileRuleToAst(
     role === "review"
       ? "\n\n## Independent semantic review\nCompile the exact player rule from scratch as an independent auditor. You have not seen the draft candidate. Re-derive every condition, comparator, source, position, threshold, conjunction, and negation before emitting the candidate. Do not copy a familiar example unless it expresses the complete rule."
       : "";
+  const decoderGuidance = constrainDirectPositions
+    ? "\n\n## Direct-position decoder constraint\nThis rule names individual positions and does not quantify over a collection. Represent every named position with `at(index, source)`, converting the player's 1-based ordinal to a 0-based index. Binder-only `elem` and `pair` nodes are unavailable for this request because no binder would define them. Preserve every positional clause and connector."
+    : "";
+  const deterministicPlan =
+    role === "generate"
+      ? getDeterministicRuleCompilerPlan(normalizedText)
+      : null;
+  const semanticPlanGuidance = deterministicPlan
+    ? `\n\n## Server-verified semantic plan\nAn independent source parser proved that the following plan preserves every load-bearing value and operation in this rule. Encode this exact semantic structure; do not simplify, swap sources, change indices, or drop clauses. You still must derive consumedSpans from the source and calculate workedExamples independently.\nInterpretation: ${deterministicPlan.interpretation}\nAST plan: ${JSON.stringify(deterministicPlan.ast)}`
+    : "";
+  const basePrompt = `${buildRuleCompilerSkillPrompt()}${roleGuidance}${decoderGuidance}${semanticPlanGuidance}`;
   const prompt = validationFeedback?.trim()
-    ? `${buildRuleCompilerSkillPrompt()}\n\n## Validation-guided re-ask\nThe previous candidate was rejected by deterministic validation. Produce a completely fresh candidate from the exact player rule. Do not weaken, omit, or reinterpret any condition merely to pass validation. Correct all of these server-authored findings:\n${validationFeedback.trim().slice(0, 2_000)}`
-    : `${buildRuleCompilerSkillPrompt()}${roleGuidance}`;
+    ? `${basePrompt}\n\n## Validation-guided re-ask\nThe previous candidate was rejected by deterministic validation. Produce a completely fresh candidate from the exact player rule. Do not weaken, omit, or reinterpret any condition merely to pass validation. Correct all of these server-authored findings:\n${validationFeedback.trim().slice(0, 2_000)}`
+    : basePrompt;
   const schemaConstraint: AgentJsonSchemaConstraint = {
     name: "tyche_rule_compilation_candidate",
-    schema: getRuleCompilationCandidateJsonSchema(),
+    schema: getRuleCompilationCandidateJsonSchema({
+      forbidBinderScopedScalars: constrainDirectPositions,
+    }),
   };
   for (let attempt = 1; ; attempt += 1) {
     // First ask in the fast, no-trace mode every other step uses. A rule whose
@@ -1373,11 +1404,5 @@ export function reviewRuleToAst(
   config: RuleAgentConfig = resolveRuleReviewerConfig(),
   signal?: AbortSignal,
 ): Promise<unknown> {
-  return compileRuleToAst(
-    normalizedText,
-    config,
-    signal,
-    undefined,
-    "review",
-  );
+  return compileRuleToAst(normalizedText, config, signal, undefined, "review");
 }

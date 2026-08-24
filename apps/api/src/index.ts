@@ -526,6 +526,29 @@ const RULE_GENERATION_FAILURE_TRIGGER_CODES = new Set<RuleValidationReasonCode>(
   ],
 );
 
+const CANDIDATE_DEPENDENT_DIFFICULTY_CODES = new Set<RuleValidationReasonCode>([
+  "DIFFICULTY_ALWAYS_TRUE",
+  "DIFFICULTY_IMPOSSIBLE",
+]);
+
+function getGenerationFaultBlockers(
+  reasonCodes: readonly RuleValidationReasonCode[],
+) {
+  const blockers = reasonCodes.filter((code) => code !== "SUPPORTED_RULE");
+  const hasIndependentGenerationFailure = blockers.some((code) =>
+    RULE_GENERATION_FAILURE_TRIGGER_CODES.has(code),
+  );
+  return {
+    blockers,
+    effectiveBlockers: hasIndependentGenerationFailure
+      ? blockers.filter(
+          (code) => !CANDIDATE_DEPENDENT_DIFFICULTY_CODES.has(code),
+        )
+      : blockers,
+    hasIndependentGenerationFailure,
+  };
+}
+
 /**
  * Separates a failed artifact-generation attempt from a rule the player must
  * actually change. This flag is the API contract used by the chat's Retry
@@ -534,11 +557,12 @@ const RULE_GENERATION_FAILURE_TRIGGER_CODES = new Set<RuleValidationReasonCode>(
 export function isRuleGenerationRetryable(
   reasonCodes: readonly RuleValidationReasonCode[],
 ) {
-  const blockers = reasonCodes.filter((code) => code !== "SUPPORTED_RULE");
+  const { blockers, effectiveBlockers, hasIndependentGenerationFailure } =
+    getGenerationFaultBlockers(reasonCodes);
   return (
     blockers.length > 0 &&
-    blockers.some((code) => RULE_GENERATION_FAILURE_TRIGGER_CODES.has(code)) &&
-    blockers.every((code) => RULE_GENERATION_RETRYABLE_CODES.has(code))
+    hasIndependentGenerationFailure &&
+    effectiveBlockers.every((code) => RULE_GENERATION_RETRYABLE_CODES.has(code))
   );
 }
 
@@ -546,11 +570,14 @@ function buildCompilerRepairFeedback(
   validation: Awaited<ReturnType<typeof compileRuleArtifact>>,
 ) {
   const reasonCodes = validation.log.reasonCodes;
-  const blockers = reasonCodes.filter((code) => code !== "SUPPORTED_RULE");
+  const { blockers, effectiveBlockers, hasIndependentGenerationFailure } =
+    getGenerationFaultBlockers(reasonCodes);
   if (
     blockers.length === 0 ||
-    !blockers.some((code) => RULE_GENERATION_FAILURE_TRIGGER_CODES.has(code)) ||
-    !blockers.every((code) => RULE_GENERATION_AUTO_REPAIR_CODES.has(code))
+    !hasIndependentGenerationFailure ||
+    !effectiveBlockers.every((code) =>
+      RULE_GENERATION_AUTO_REPAIR_CODES.has(code),
+    )
   ) {
     return null;
   }
@@ -565,7 +592,9 @@ function buildCompilerRepairFeedback(
           .map((stage) => `${stage.stage}: ${stage.detail}`),
         ...(latestAttempt.providerEvidence?.exampleResults ?? [])
           .filter((example) => example.status === "failed")
-          .map((example) => `workedExample[${example.index}]: ${example.detail}`),
+          .map(
+            (example) => `workedExample[${example.index}]: ${example.detail}`,
+          ),
       ]
     : [];
   return [
@@ -3845,7 +3874,8 @@ async function createRulePreflight(
           throw error;
         }
       };
-    const createAstReviewer = (): RuleAstProvider =>
+    const createAstReviewer =
+      (): RuleAstProvider =>
       async ({ normalizedText }) => {
         try {
           return await reviewRuleToAst(

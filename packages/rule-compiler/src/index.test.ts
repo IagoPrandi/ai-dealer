@@ -10,6 +10,7 @@ import {
   createLocalOnlyProviderRoutingPolicy,
   createCompilerPlaceholder,
   evaluatePredicate,
+  getDeterministicRuleCompilerPlan,
   getRuleCompilationCandidateJsonSchema,
   getRuleValidationPromptContract,
   hasAmbiguousWording,
@@ -213,6 +214,57 @@ test("the compiler candidate schema makes every worked ticket a valid game input
       });
     }
   }
+});
+
+test("direct-position decoder schemas exclude binder-only scalar references", () => {
+  const unconstrained = getRuleCompilationCandidateJsonSchema() as {
+    definitions?: Record<string, { anyOf?: unknown[] }>;
+  };
+  const constrained = getRuleCompilationCandidateJsonSchema({
+    forbidBinderScopedScalars: true,
+  }) as {
+    definitions?: Record<string, { anyOf?: unknown[] }>;
+  };
+  const kinds = (schema: typeof constrained) =>
+    Object.values(schema.definitions ?? {}).flatMap((definition) =>
+      (definition.anyOf ?? []).flatMap((variant) => {
+        const kind = (
+          variant as {
+            properties?: { kind?: { const?: unknown } };
+          }
+        ).properties?.kind?.const;
+        return typeof kind === "string" ? [kind] : [];
+      }),
+    );
+
+  assert.ok(kinds(unconstrained).includes("elem"));
+  assert.ok(kinds(unconstrained).includes("pair"));
+  assert.ok(kinds(constrained).includes("at"));
+  assert.ok(!kinds(constrained).includes("elem"));
+  assert.ok(!kinds(constrained).includes("pair"));
+  // Building the constrained schema must not mutate the shared base schema.
+  assert.ok(
+    kinds(
+      getRuleCompilationCandidateJsonSchema() as typeof constrained,
+    ).includes("elem"),
+  );
+});
+
+test("deterministic compiler plans are exposed only after full source coverage", () => {
+  const plan = getDeterministicRuleCompilerPlan(
+    "ganha o jogador que o o primeiro n\u00famero seja maior que o primeiro n\u00famero do sorteio e o segundo n\u00famero dele seja maior que o \u00faltimo n\u00famero do sorteio",
+  );
+  assert.equal(plan?.ast.schemaVersion, 2);
+  assert.match(plan?.interpretation ?? "", /1st value of your numbers/iu);
+  assert.match(plan?.interpretation ?? "", /2nd value of your numbers/iu);
+  assert.match(plan?.interpretation ?? "", /6th value of the drawn numbers/iu);
+
+  assert.equal(
+    getDeterministicRuleCompilerPlan(
+      "Win when the ticket has an unprecedented harmonic relationship with the draw.",
+    ),
+    null,
+  );
 });
 
 test("every worked example in the skill validates against the rule AST schema", () => {
@@ -3139,7 +3191,10 @@ test("a novel rule with reviewer consensus binds the complete approved source", 
   const evidenceStage = result.log.attemptDiagnostics[0]?.stages.find(
     (stage) => stage.stage === "provider_evidence",
   );
-  assert.match(evidenceStage?.detail ?? "", /server bound the complete approved source/i);
+  assert.match(
+    evidenceStage?.detail ?? "",
+    /server bound the complete approved source/i,
+  );
 });
 
 test("a novel-rule LLM disagreement reports a behavioral counterexample", async () => {
@@ -3452,6 +3507,7 @@ function countWords(text: string) {
 test("positional comparisons preserve every compound clause", () => {
   for (const text of [
     "A guess wins when its first number is greater than the first drawn number and its second number is greater than the last drawn number.",
+    "ganha o jogador que o o primeiro n\u00famero seja maior que o primeiro n\u00famero do sorteio e o segundo n\u00famero dele seja maior que o \u00faltimo n\u00famero do sorteio",
     "Ganha o jogador cujo primeiro número seja maior que o primeiro número do sorteio e cujo segundo número seja maior que o último número do sorteio.",
   ]) {
     const result = validateAndPrecompileRule({

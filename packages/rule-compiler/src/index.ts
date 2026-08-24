@@ -172,11 +172,23 @@ export interface RuleCompilationCandidate {
  * provider supports it, while the runtime checks remain the non-bypassable
  * enforcement boundary.
  */
-export function getRuleCompilationCandidateJsonSchema(): unknown {
+export interface RuleCompilationSchemaOptions {
+  /**
+   * Remove binder-scoped scalar references (`elem` and `pair`) from this
+   * decoder request. Use only when the source names direct scalar positions and
+   * contains no quantified collection. This prevents a small model from
+   * emitting references that are invalid outside map/filter/pairs binders.
+   */
+  forbidBinderScopedScalars?: boolean;
+}
+
+export function getRuleCompilationCandidateJsonSchema(
+  options: RuleCompilationSchemaOptions = {},
+): unknown {
   const astSchema = getRuleAstJsonSchema();
   const astRecord =
     astSchema && typeof astSchema === "object"
-      ? (astSchema as Record<string, unknown>)
+      ? structuredClone(astSchema as Record<string, unknown>)
       : {};
   // `$schema` is a document-level declaration. The AST is nested inside this
   // envelope, so retain its definitions but omit that nested declaration.
@@ -186,8 +198,32 @@ export function getRuleCompilationCandidateJsonSchema(): unknown {
   // `#/definitions/...`. Those references are absolute to the response-schema
   // document, so definitions must live at this envelope's root rather than
   // inside its `ast` property.
-  const definitions = nestedAstSchema.definitions;
+  const definitions = nestedAstSchema.definitions as
+    | Record<string, Record<string, unknown>>
+    | undefined;
   delete nestedAstSchema.definitions;
+  if (options.forbidBinderScopedScalars && definitions) {
+    for (const definition of Object.values(definitions)) {
+      if (!Array.isArray(definition.anyOf)) {
+        continue;
+      }
+      definition.anyOf = definition.anyOf.filter((variant) => {
+        if (!variant || typeof variant !== "object") {
+          return true;
+        }
+        const properties = (variant as Record<string, unknown>).properties;
+        if (!properties || typeof properties !== "object") {
+          return true;
+        }
+        const kind = (properties as Record<string, unknown>).kind;
+        const value =
+          kind && typeof kind === "object"
+            ? (kind as Record<string, unknown>).const
+            : null;
+        return value !== "elem" && value !== "pair";
+      });
+    }
+  }
   const ticketSchema = {
     type: "array",
     minItems: 6,
@@ -1152,16 +1188,14 @@ function verifyProviderEvidence(
   // diagnostic records that server binding replaced incomplete provider spans.
   const sourceSpans =
     providerSourceSpans ??
-    (sourceCertifiedByIndependentReviewer
-      ? [{ text: normalizedText }]
-      : null);
+    (sourceCertifiedByIndependentReviewer ? [{ text: normalizedText }] : null);
   const diagnostic: RuleProviderEvidenceStageDiagnostic = {
     exampleResults: [],
     sourceSpanDetail: providerSourceSpans
       ? "All intent-bearing source clauses were covered by consumed spans."
       : sourceCertifiedByIndependentReviewer
         ? "The server bound the complete approved source after an independent reviewer certified the draft behavior."
-      : "At least one intent-bearing source clause was not covered by the provider's consumed spans.",
+        : "At least one intent-bearing source clause was not covered by the provider's consumed spans.",
     sourceSpanStatus: sourceSpans ? "passed" : "failed",
   };
   let firstExampleFailure: ProviderEvidenceFailure | null = null;
@@ -1451,7 +1485,7 @@ function validateResolvedAst(
   const reviewerAst =
     ast && !forcedFailure
       ? astSource === "provider"
-        ? suppliedReviewerAst ?? compileSupportedRule(normalizedText)
+        ? (suppliedReviewerAst ?? compileSupportedRule(normalizedText))
         : suppliedReviewerAst
       : null;
   const reviewerMismatch =
@@ -2471,7 +2505,44 @@ function compileSupportedRule(text: string): RuleAst | null {
   return ast && deterministicPatternPreservesText(ast, text) ? ast : null;
 }
 
+export interface DeterministicRuleCompilerPlan {
+  ast: RuleAst;
+  interpretation: string;
+}
+
+/**
+ * Exposes a semantic plan only after the deterministic parser has proved that
+ * it preserves every value and operation in the source. The LLM may use this
+ * plan to avoid losing structure while it still owns the auditable envelope
+ * (source spans and independently-derived examples). Unsupported/new shapes
+ * return null and continue through the ordinary LLM + independent-review path.
+ */
+export function getDeterministicRuleCompilerPlan(
+  text: string,
+): DeterministicRuleCompilerPlan | null {
+  const ast = compileSupportedRule(normalizeRuleText(text));
+  if (!ast) {
+    return null;
+  }
+  return {
+    ast,
+    interpretation: describeRuleAstForPlayers(ast),
+  };
+}
+
 function compileSupportedRulePattern(text: string): RuleAst | null {
+  // Direct scalar positions must run before broad ranking/count patterns. A
+  // conversational subject such as Portuguese "ganha o jogador que o primeiro
+  // numero..." carries comparative words (maior/menor) that broad patterns can
+  // claim before this parser sees both positional clauses. Returning that
+  // partial reading and rejecting it later prevents the dispatcher from trying
+  // the correct parser. This family is syntax-general: any of the six guess
+  // positions can compare against any draw position with eq/gt/lt.
+  const directPositionComparison = parsePositionComparisonRule(text);
+  if (directPositionComparison) {
+    return predicateRule(directPositionComparison);
+  }
+
   // Before the single-criterion ranking: "most matches, then closest by
   // position" carries the same primary wording, and the generic ranking would
   // read only that half.
@@ -2745,11 +2816,6 @@ function compileSupportedRulePattern(text: string): RuleAst | null {
         lit(0),
       ),
     );
-  }
-
-  const positionComparison = parsePositionComparisonRule(text);
-  if (positionComparison) {
-    return predicateRule(positionComparison);
   }
 
   if (
