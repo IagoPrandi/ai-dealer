@@ -4,7 +4,12 @@ export type AgentProviderRequestShape =
   | "deterministic_json_schema"
   | "ollama_format"
   | "openai_response_format";
-export type AgentProviderRole = "compile" | "explain" | "interpret" | "normalize" | "review";
+export type AgentProviderRole =
+  | "compile"
+  | "explain"
+  | "interpret"
+  | "normalize"
+  | "review";
 export type AgentProviderAttemptStatus =
   | "accepted"
   | "escalated"
@@ -117,14 +122,24 @@ export const COMPILER_CONFIDENCE_WEIGHTS: CompilerConfidenceWeights = {
 const DEFAULT_LOCAL_BASE_URL = "http://localhost:11434/v1";
 const DEFAULT_TIMEOUT_MS = 12_000;
 
+function firstNonBlank(...values: Array<string | undefined>) {
+  return values.find((value) => value?.trim())?.trim() ?? "";
+}
+
 export function createDefaultProviderRoutingPolicy(
   env: Record<string, string | undefined> = process.env,
 ): AgentProviderRoutingPolicy {
   const primaryProvider =
-    env.LLM_PRIMARY_PROVIDER ?? (env.LLM_MODE === "cloud" ? "openai" : "local-openai-compatible");
-  const primaryBaseUrl = env.LLM_PRIMARY_BASE_URL ?? env.LLM_BASE_URL ?? DEFAULT_LOCAL_BASE_URL;
-  const primaryModel =
-    env.LLM_PRIMARY_MODEL ?? env.LLM_MODEL_COMPILE ?? env.LLM_MODEL ?? "qwen2.5:14b-instruct-q4_K_M";
+    env.LLM_PRIMARY_PROVIDER ??
+    (env.LLM_MODE === "cloud" ? "openai" : "local-openai-compatible");
+  const primaryBaseUrl =
+    env.LLM_PRIMARY_BASE_URL ?? env.LLM_BASE_URL ?? DEFAULT_LOCAL_BASE_URL;
+  const primaryModel = firstNonBlank(
+    env.LLM_MODEL_COMPILE,
+    env.LLM_PRIMARY_MODEL,
+    env.LLM_MODEL,
+    "qwen2.5:14b-instruct-q4_K_M",
+  );
 
   return {
     providers: [
@@ -135,8 +150,10 @@ export function createDefaultProviderRoutingPolicy(
         model: primaryModel,
         priority: "primary",
         provider: primaryProvider,
-        quantization: env.LLM_PRIMARY_MODEL_QUANTIZATION ?? inferQuantization(primaryModel),
-        serving_engine: env.LLM_PRIMARY_SERVING_ENGINE ?? inferServingEngine(primaryBaseUrl),
+        quantization:
+          env.LLM_PRIMARY_MODEL_QUANTIZATION ?? inferQuantization(primaryModel),
+        serving_engine:
+          env.LLM_PRIMARY_SERVING_ENGINE ?? inferServingEngine(primaryBaseUrl),
       }),
       createProviderConfig({
         base_url: env.LLM_SECONDARY_BASE_URL ?? null,
@@ -175,7 +192,9 @@ export function createLocalOnlyProviderRoutingPolicy(
         model: models.primary ?? "qwen2.5:14b-instruct-q4_K_M",
         priority: "primary",
         provider: "local-primary",
-        quantization: inferQuantization(models.primary ?? "qwen2.5:14b-instruct-q4_K_M"),
+        quantization: inferQuantization(
+          models.primary ?? "qwen2.5:14b-instruct-q4_K_M",
+        ),
         serving_engine: inferServingEngine(base_url),
       }),
       createProviderConfig({
@@ -208,7 +227,9 @@ export function calculateCompilerConfidence(
 ): CompilerConfidenceBreakdown {
   const compiler_confidence = clampConfidence(input.compiler_confidence);
   const model_confidence = clampConfidence(input.model_confidence);
-  const reviewer_agreement_score = clampConfidence(input.reviewer_agreement_score);
+  const reviewer_agreement_score = clampConfidence(
+    input.reviewer_agreement_score,
+  );
   const rule_clarity_score = clampConfidence(input.rule_clarity_score);
   const runtime_safety_score = clampConfidence(input.runtime_safety_score);
   const schema_score = clampConfidence(input.schema_score);
@@ -267,7 +288,10 @@ function createProviderConfig(input: {
   // artifact audit metadata must describe the decoder used, not the desired
   // decoder. The compiler permits only local Ollama and OpenAI's known API
   // endpoint until another compatible endpoint has an explicit capability.
-  const supportsSchemaConstrainedDecoding = supportsJsonSchemaDecoding(input);
+  const supportsSchemaConstrainedDecoding = supportsJsonSchemaDecoding(
+    input,
+    request_shape,
+  );
   return {
     base_url: input.base_url,
     capabilities: {
@@ -297,11 +321,23 @@ function createProviderConfig(input: {
   };
 }
 
-function supportsJsonSchemaDecoding(input: {
-  base_url: string | null;
-  model: string;
-}): boolean {
-  if (/:cloud$/iu.test(input.model.trim()) || input.base_url === null) {
+function supportsJsonSchemaDecoding(
+  input: {
+    base_url: string | null;
+    model: string;
+  },
+  requestShape: AgentProviderRequestShape,
+): boolean {
+  if (/:cloud$/iu.test(input.model.trim())) {
+    return false;
+  }
+  // This shape is the compiler's in-process deterministic provider. It emits
+  // only schema-valid values and does not represent an unverified network
+  // endpoint, so it remains a valid capability in offline evaluation/tests.
+  if (requestShape === "deterministic_json_schema") {
+    return true;
+  }
+  if (input.base_url === null) {
     return false;
   }
   try {
@@ -321,7 +357,8 @@ function selectRequestShape(input: {
   provider: string;
   serving_engine: string;
 }): AgentProviderRequestShape {
-  const marker = `${input.base_url ?? ""} ${input.provider} ${input.serving_engine}`.toLowerCase();
+  const marker =
+    `${input.base_url ?? ""} ${input.provider} ${input.serving_engine}`.toLowerCase();
   if (marker.includes("ollama") || marker.includes("11434")) {
     return "ollama_format";
   }

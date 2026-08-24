@@ -97,6 +97,7 @@ function baseDeps(
 
 test("conversation run continues while no screen is subscribed", async () => {
   const draftId = "client:87:background-run";
+  let approvedSeen: RuleInterpretationApiResult | undefined;
   let releaseJob!: () => void;
   const jobFinished = new Promise<void>((resolve) => {
     releaseJob = resolve;
@@ -105,19 +106,23 @@ test("conversation run continues while no screen is subscribed", async () => {
     {
       consumePreflightJob: async (args: ConsumeRulePreflightJobArgs) => {
         args.onProgress?.({
-          message: "Interpreting your winning condition...",
-          stage: "interpreting",
+          message: "Using your approved interpretation...",
+          stage: "compiling",
         });
         await jobFinished;
         return { preflight: PREFLIGHT };
       },
-      startPreflightJob: async () => ({ jobId: "job-87" }),
+      startPreflightJob: async (args) => {
+        approvedSeen = args.approvedInterpretation;
+        return { jobId: "job-87" };
+      },
     },
     draftId,
   );
 
   const task = startConversationRun(
     {
+      approvedInterpretation: INTERPRETATION,
       draftId,
       initialMessages: [
         { text: "Win if exactly 2 numbers match.", who: "user" },
@@ -139,8 +144,9 @@ test("conversation run continues while no screen is subscribed", async () => {
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
-  assert.equal(getConversationRun(draftId)?.progress?.stage, "interpreting");
+  assert.equal(getConversationRun(draftId)?.progress?.stage, "compiling");
   assert.equal(getConversationRun(draftId)?.job?.jobId, "job-87");
+  assert.equal(approvedSeen, INTERPRETATION);
 
   releaseJob();
   await task;
@@ -833,7 +839,10 @@ test("the whole transcript is persisted before the dealer question is asked", as
     {
       askDealer: async () => {
         events.push("ask");
-        return { answer: "Escreva uma frase dizendo quem vence.", proposedRuleText: null };
+        return {
+          answer: "Escreva uma frase dizendo quem vence.",
+          proposedRuleText: null,
+        };
       },
       consumePreflightJob: async () => {
         throw new Error("preflight consumption must not run");

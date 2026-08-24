@@ -9,6 +9,9 @@ import {
   resolveEscalationModel,
   resolveDealerChatConfig,
   resolveRuleAgentConfig,
+  resolveRuleCompilerConfig,
+  resolveRuleReviewerConfig,
+  reviewRuleToAst,
   resolveTranslateToEnglish,
   streamDealerQuestionAnswer,
   translateRuleToEnglish,
@@ -69,10 +72,7 @@ test("dealer chat uses the versioned context-only prompt and strict JSON result"
     messages[0]?.content ?? "",
     /three separate paths: a game prize in SOL, campaign-based Tyche-token rewards/i,
   );
-  assert.match(
-    messages[0]?.content ?? "",
-    /merely holding tokens earns fees/i,
-  );
+  assert.match(messages[0]?.content ?? "", /merely holding tokens earns fees/i);
   assert.match(
     messages[0]?.content ?? "",
     /keep action, active-rule, and referral rewards separate/i,
@@ -129,7 +129,10 @@ test("dealer chat uses the versioned context-only prompt and strict JSON result"
     /Never speculate about price and never give financial advice/i,
   );
   // Grounding for mechanics, limits and tokenomics questions.
-  assert.match(messages[0]?.content ?? "", /Reference — Tywish game mechanics/i);
+  assert.match(
+    messages[0]?.content ?? "",
+    /Reference — Tywish game mechanics/i,
+  );
   assert.match(
     messages[0]?.content ?? "",
     /Reference — prizes, fees and token economy/i,
@@ -308,6 +311,93 @@ test("rule agent config ignores inline comments copied from .env examples", () =
   assert.equal(config.timeoutMs, 300_000);
   assert.equal(resolveEscalationModel(env), "gemma4:e2b");
   assert.equal(resolveTranslateToEnglish(env), false);
+});
+
+test("the compile role honors its explicit schema-capable model override", () => {
+  const env = {
+    LLM_BASE_URL: "http://localhost:11434/v1",
+    LLM_MODEL: "nemotron-3-super:cloud",
+    LLM_MODEL_COMPILE: "qwen3.5:9b",
+  } as unknown as NodeJS.ProcessEnv;
+
+  assert.equal(resolveRuleAgentConfig(env).model, "nemotron-3-super:cloud");
+  assert.equal(resolveRuleCompilerConfig(env).model, "qwen3.5:9b");
+  assert.equal(resolveRuleReviewerConfig(env).model, "qwen3.5:9b");
+  assert.equal(
+    resolveRuleReviewerConfig({
+      ...env,
+      LLM_MODEL_REVIEW: "qwen3.5:27b",
+    }).model,
+    "qwen3.5:27b",
+  );
+
+  // Blank values from `.env` do not shadow the general model.
+  assert.equal(
+    resolveRuleCompilerConfig({ ...env, LLM_MODEL_COMPILE: "" }).model,
+    "nemotron-3-super:cloud",
+  );
+});
+
+test("the LLM reviewer performs a separate source-only reasoning pass", async () => {
+  let requestBody: Record<string, unknown> = {};
+  const candidate = {
+    ast: {
+      schemaVersion: 3,
+      result: {
+        type: "predicate",
+        predicate: {
+          kind: "compare",
+          op: "gt",
+          left: {
+            kind: "reduce",
+            op: "sum",
+            of: { kind: "source", source: "guess" },
+          },
+          right: {
+            kind: "reduce",
+            op: "sum",
+            of: { kind: "source", source: "draw" },
+          },
+        },
+      },
+    },
+    consumedSpans: [{ text: "guess sum is greater than the draw sum" }],
+    workedExamples: [
+      {
+        draw: [1, 2, 3, 4, 5, 6],
+        guess: [95, 96, 97, 98, 99, 100],
+        outcome: "WIN",
+      },
+      {
+        draw: [95, 96, 97, 98, 99, 100],
+        guess: [1, 2, 3, 4, 5, 6],
+        outcome: "LOSE",
+      },
+    ],
+  };
+  globalThis.fetch = (async (
+    _input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(
+      JSON.stringify({
+        choices: [{ message: { content: JSON.stringify(candidate) } }],
+      }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+
+  const text = "A guess wins if its guess sum is greater than the draw sum.";
+  assert.deepEqual(await reviewRuleToAst(text, CONFIG), candidate);
+  const messages = requestBody.messages as Array<{
+    content: string;
+    role: string;
+  }>;
+  assert.match(messages[0]?.content ?? "", /independent semantic review/i);
+  assert.match(messages[0]?.content ?? "", /have not seen the draft candidate/i);
+  assert.equal(messages[1]?.content, text);
+  assert.equal(requestBody.reasoning_effort, "none");
 });
 
 test("rule agent config enforces a five-minute minimum timeout", () => {
@@ -645,15 +735,29 @@ test("compile requests schema-constrained tickets and never falls back to JSON m
                     predicate: {
                       kind: "compare",
                       op: "gt",
-                      left: { kind: "at", index: 0, of: { kind: "source", source: "guess" } },
+                      left: {
+                        kind: "at",
+                        index: 0,
+                        of: { kind: "source", source: "guess" },
+                      },
                       right: { kind: "lit", value: 1 },
                     },
                   },
                 },
-                consumedSpans: [{ text: "first guessed number is greater than 1" }],
+                consumedSpans: [
+                  { text: "first guessed number is greater than 1" },
+                ],
                 workedExamples: [
-                  { guess: [2, 3, 4, 5, 6, 7], draw: [10, 20, 30, 40, 50, 60], outcome: "WIN" },
-                  { guess: [1, 3, 4, 5, 6, 7], draw: [10, 20, 30, 40, 50, 60], outcome: "LOSE" },
+                  {
+                    guess: [2, 3, 4, 5, 6, 7],
+                    draw: [10, 20, 30, 40, 50, 60],
+                    outcome: "WIN",
+                  },
+                  {
+                    guess: [1, 3, 4, 5, 6, 7],
+                    draw: [10, 20, 30, 40, 50, 60],
+                    outcome: "LOSE",
+                  },
                 ],
               }),
             },
@@ -664,9 +768,15 @@ test("compile requests schema-constrained tickets and never falls back to JSON m
     );
   }) as typeof fetch;
 
-  await compileRuleToAst("A guess wins if its first number is greater than 1.", CONFIG);
+  await compileRuleToAst(
+    "A guess wins if its first number is greater than 1.",
+    CONFIG,
+    undefined,
+    "Rejected validation codes: PROVIDER_EVIDENCE_UNVERIFIED.",
+  );
 
-  const responseFormat = (requestBody as Record<string, unknown>).response_format as {
+  const responseFormat = (requestBody as Record<string, unknown>)
+    .response_format as {
     type?: string;
     json_schema?: {
       name?: string;
@@ -674,17 +784,25 @@ test("compile requests schema-constrained tickets and never falls back to JSON m
       schema?: {
         properties?: {
           workedExamples?: {
-            items?: { anyOf?: Array<{ properties?: { guess?: Record<string, unknown> } }> };
+            items?: {
+              anyOf?: Array<{
+                properties?: { guess?: Record<string, unknown> };
+              }>;
+            };
           };
         };
       };
     };
   };
   assert.equal(responseFormat.type, "json_schema");
-  assert.equal(responseFormat.json_schema?.name, "tyche_rule_compilation_candidate");
+  assert.equal(
+    responseFormat.json_schema?.name,
+    "tyche_rule_compilation_candidate",
+  );
   assert.equal(responseFormat.json_schema?.strict, true);
-  const ticket = responseFormat.json_schema?.schema?.properties?.workedExamples?.items?.anyOf?.[0]
-    ?.properties?.guess;
+  const ticket =
+    responseFormat.json_schema?.schema?.properties?.workedExamples?.items
+      ?.anyOf?.[0]?.properties?.guess;
   assert.deepEqual(ticket, {
     type: "array",
     minItems: 6,
@@ -692,6 +810,18 @@ test("compile requests schema-constrained tickets and never falls back to JSON m
     uniqueItems: true,
     items: { type: "integer", minimum: 1, maximum: 100 },
   });
+  const messages =
+    (
+      requestBody as {
+        messages?: Array<{ content?: string; role?: string }>;
+      }
+    ).messages ?? [];
+  assert.match(messages[0]?.content ?? "", /validation-guided re-ask/i);
+  assert.match(messages[0]?.content ?? "", /PROVIDER_EVIDENCE_UNVERIFIED/);
+  assert.equal(
+    messages[1]?.content,
+    "A guess wins if its first number is greater than 1.",
+  );
 });
 
 test("compile fails closed before calling a provider without schema-constrained decoding", async () => {
@@ -722,7 +852,11 @@ test("a stray character after the compiled JSON does not discard the compilation
       result: {
         predicate: {
           kind: "compare",
-          left: { kind: "at", index: 0, of: { kind: "source", source: "guess" } },
+          left: {
+            kind: "at",
+            index: 0,
+            of: { kind: "source", source: "guess" },
+          },
           op: "eq",
           right: { kind: "lit", value: 1 },
         },
@@ -732,8 +866,16 @@ test("a stray character after the compiled JSON does not discard the compilation
     },
     consumedSpans: [{ text: "the first guessed number is 1" }],
     workedExamples: [
-      { draw: [10, 20, 30, 40, 50, 60], guess: [1, 2, 3, 4, 5, 6], outcome: "WIN" },
-      { draw: [10, 20, 30, 40, 50, 60], guess: [2, 3, 4, 5, 6, 7], outcome: "LOSE" },
+      {
+        draw: [10, 20, 30, 40, 50, 60],
+        guess: [1, 2, 3, 4, 5, 6],
+        outcome: "WIN",
+      },
+      {
+        draw: [10, 20, 30, 40, 50, 60],
+        guess: [2, 3, 4, 5, 6, 7],
+        outcome: "LOSE",
+      },
     ],
   };
 
@@ -749,7 +891,10 @@ test("a stray character after the compiled JSON does not discard the compilation
       )) as typeof fetch;
 
     assert.deepEqual(
-      await compileRuleToAst("A guess wins if the first guessed number is 1.", CONFIG),
+      await compileRuleToAst(
+        "A guess wins if the first guessed number is 1.",
+        CONFIG,
+      ),
       candidate,
       suffix,
     );
@@ -773,9 +918,17 @@ test("an unparseable compile response is re-asked before it blocks the rule", as
       result: {
         predicate: {
           kind: "compare",
-          left: { kind: "reduce", op: "sum", of: { kind: "source", source: "guess" } },
+          left: {
+            kind: "reduce",
+            op: "sum",
+            of: { kind: "source", source: "guess" },
+          },
           op: "gt",
-          right: { kind: "reduce", op: "sum", of: { kind: "source", source: "draw" } },
+          right: {
+            kind: "reduce",
+            op: "sum",
+            of: { kind: "source", source: "draw" },
+          },
         },
         type: "predicate",
       },
@@ -783,8 +936,16 @@ test("an unparseable compile response is re-asked before it blocks the rule", as
     },
     consumedSpans: [{ text: "the guessed sum is greater than the drawn sum" }],
     workedExamples: [
-      { draw: [1, 2, 3, 4, 5, 6], guess: [95, 96, 97, 98, 99, 100], outcome: "WIN" },
-      { draw: [95, 96, 97, 98, 99, 100], guess: [1, 2, 3, 4, 5, 6], outcome: "LOSE" },
+      {
+        draw: [1, 2, 3, 4, 5, 6],
+        guess: [95, 96, 97, 98, 99, 100],
+        outcome: "WIN",
+      },
+      {
+        draw: [95, 96, 97, 98, 99, 100],
+        guess: [1, 2, 3, 4, 5, 6],
+        outcome: "LOSE",
+      },
     ],
   };
   const text = "A guess wins if the guessed sum is greater than the drawn sum.";
@@ -796,7 +957,9 @@ test("an unparseable compile response is re-asked before it blocks the rule", as
     });
   globalThis.fetch = (async () => {
     calls += 1;
-    return respond(calls === 1 ? "{not json at all,}" : JSON.stringify(candidate));
+    return respond(
+      calls === 1 ? "{not json at all,}" : JSON.stringify(candidate),
+    );
   }) as typeof fetch;
 
   assert.deepEqual(await compileRuleToAst(text, CONFIG), candidate);
@@ -884,7 +1047,11 @@ test("a compile re-ask lets the model think; first calls keep the fast mode", as
   // suppressed trace causes. The interpret step always keeps the saving.
   assert.equal(bodies[0]?.reasoning_effort, "none", "first compile call");
   assert.equal(bodies[1]?.reasoning_effort, "none", "compile retry, attempt 1");
-  assert.equal(bodies[2]?.reasoning_effort, undefined, "compile retry, attempt 2");
+  assert.equal(
+    bodies[2]?.reasoning_effort,
+    undefined,
+    "compile retry, attempt 2",
+  );
   assert.equal(bodies[3]?.reasoning_effort, "none", "interpret");
 });
 
@@ -913,7 +1080,10 @@ test("the streamed answer reader emits only the answer field, decoded", () => {
 test("the streamed answer reader stays silent until the field opens", () => {
   const reader = createJsonStringFieldReader("answer");
 
-  assert.equal(reader.push('{"answerLanguage":"en","proposedRuleText":null'), "");
+  assert.equal(
+    reader.push('{"answerLanguage":"en","proposedRuleText":null'),
+    "",
+  );
   assert.equal(reader.closed, false);
   assert.equal(reader.push(',"answer":"Ready."}'), "Ready.");
 });
@@ -971,7 +1141,11 @@ test("a dealer answer stream cut off at the token limit is rejected", async () =
     )) as typeof fetch;
 
   await assert.rejects(
-    streamDealerQuestionAnswer("<tyche_server_context>{}</tyche_server_context>", () => {}, CONFIG),
+    streamDealerQuestionAnswer(
+      "<tyche_server_context>{}</tyche_server_context>",
+      () => {},
+      CONFIG,
+    ),
     /cut off at the 16384-token output limit/,
   );
 });
@@ -1019,7 +1193,10 @@ test("the chat step asks for a low trace, which is the only level gpt-oss honour
         choices: [
           {
             message: {
-              content: JSON.stringify({ answer: "Ready.", proposedRuleText: null }),
+              content: JSON.stringify({
+                answer: "Ready.",
+                proposedRuleText: null,
+              }),
             },
           },
         ],
@@ -1028,7 +1205,10 @@ test("the chat step asks for a low trace, which is the only level gpt-oss honour
     );
   }) as typeof fetch;
 
-  await answerDealerQuestion("<tyche_server_context>{}</tyche_server_context>", CONFIG);
+  await answerDealerQuestion(
+    "<tyche_server_context>{}</tyche_server_context>",
+    CONFIG,
+  );
 
   assert.equal(bodies[0]?.reasoning_effort, "low");
 });

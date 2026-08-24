@@ -16,6 +16,7 @@ import {
   startRulePreflightJob,
   type ConsumeRulePreflightJobArgs,
   type DealerQuestionApiResult,
+  type RuleInterpretationApiResult,
   type RulePreflightJobOutcome,
 } from "./data/apiClient";
 import type { ConversationMessage } from "./data/types";
@@ -59,6 +60,7 @@ export interface ConversationRunDeps {
   ) => Promise<DraftResponse>;
   readStorage: () => null | Storage;
   startPreflightJob: (args: {
+    approvedInterpretation?: RuleInterpretationApiResult;
     draftId?: null | string;
     phase: "compile" | "interpret";
     signal?: AbortSignal;
@@ -67,6 +69,8 @@ export interface ConversationRunDeps {
 }
 
 export interface StartConversationRunArgs {
+  /** Exact interpretation the player confirmed. Compile retries must reuse it. */
+  approvedInterpretation?: RuleInterpretationApiResult;
   dealerQuestion?: null | string;
   draftId: string;
   initialMessages: ConversationMessage[];
@@ -480,6 +484,9 @@ async function runConversation(
     }
 
     const { jobId } = await deps.startPreflightJob({
+      ...(args.approvedInterpretation
+        ? { approvedInterpretation: args.approvedInterpretation }
+        : {}),
       draftId,
       phase: args.phase,
       signal,

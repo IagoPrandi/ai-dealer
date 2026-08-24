@@ -145,9 +145,11 @@ const DIFFICULTY_TAG: Record<string, { color: string; label: string }> = {
 };
 
 function RulePreview({
+  onRetryGeneration,
   rule,
   stream,
 }: {
+  onRetryGeneration: () => void;
   rule: RulePreflightResult;
   /** Non-null while this card is being typewriter-revealed (style 1a). */
   stream: null | StreamBlock;
@@ -323,6 +325,23 @@ function RulePreview({
           re-proposed.
         </p>
       ) : null}
+      {stream === null && rule.generationRetryable ? (
+        <button
+          className="ide-btn-ghost ide-btn"
+          onClick={onRetryGeneration}
+          style={{
+            fontSize: 13,
+            marginTop: 14,
+            minHeight: 44,
+            padding: "10px 14px",
+            width: "100%",
+          }}
+          type="button"
+        >
+          <Ico.bolt style={{ color: "var(--cyan)", height: 17, width: 17 }} />
+          Retry generation
+        </button>
+      ) : null}
       {/* Token meter: the label + square rail + DM Mono value row from
           screens-html/07-create.html, carrying the PRD §6.3 "Tokens used"
           wording. Cyan fill with its glow — yellow stays the primary action. */}
@@ -441,76 +460,80 @@ function ClarificationPrompt({
         ) : null}
       </div>
       {stream !== null ? null : (
-      <>
-      <div className="ide-clarification-options">
-        {options.map((option, index) => {
-          const selected = selectedIndex === index;
-          return (
+        <>
+          <div className="ide-clarification-options">
+            {options.map((option, index) => {
+              const selected = selectedIndex === index;
+              return (
+                <button
+                  aria-pressed={selected}
+                  className={`ide-clarification-option${selected ? " is-selected" : ""}`}
+                  key={option.text}
+                  onClick={() => onSelect(index)}
+                  type="button"
+                >
+                  <span className="ide-num ide-clarification-option-index">
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
+                  <span className="ide-clarification-option-text">
+                    {option.text}
+                  </span>
+                </button>
+              );
+            })}
             <button
-              aria-pressed={selected}
-              className={`ide-clarification-option${selected ? " is-selected" : ""}`}
-              key={option.text}
-              onClick={() => onSelect(index)}
+              aria-pressed={selectedIndex === null}
+              className={`ide-clarification-option ide-clarification-manual${selectedIndex === null ? " is-selected" : ""}`}
+              onClick={onManualSelect}
               type="button"
             >
-              <span className="ide-num ide-clarification-option-index">
-                {String(index + 1).padStart(2, "0")}
+              <span className="ide-clarification-manual-icon">
+                <Ico.edit
+                  style={{
+                    color:
+                      selectedIndex === null
+                        ? "var(--on-cyan)"
+                        : "var(--muted)",
+                    height: 17,
+                    width: 17,
+                  }}
+                />
               </span>
-              <span className="ide-clarification-option-text">{option.text}</span>
+              <span className="ide-clarification-option-text">
+                {manualText.trim()
+                  ? manualText
+                  : terminalRejection
+                    ? "Write a different valid rule..."
+                    : "Write your own clarification..."}
+              </span>
             </button>
-          );
-        })}
-        <button
-          aria-pressed={selectedIndex === null}
-          className={`ide-clarification-option ide-clarification-manual${selectedIndex === null ? " is-selected" : ""}`}
-          onClick={onManualSelect}
-          type="button"
-        >
-          <span className="ide-clarification-manual-icon">
-            <Ico.edit
-              style={{
-                color:
-                  selectedIndex === null ? "var(--on-cyan)" : "var(--muted)",
-                height: 17,
-                width: 17,
-              }}
-            />
-          </span>
-          <span className="ide-clarification-option-text">
-            {manualText.trim()
-              ? manualText
-              : terminalRejection
-                ? "Write a different valid rule..."
-                : "Write your own clarification..."}
-          </span>
-        </button>
-      </div>
-      <div className="ide-clarification-actions">
-        <button
-          className="ide-clarification-dismiss"
-          onClick={onDismiss}
-          type="button"
-        >
-          Dismiss
-        </button>
-        <button
-          className="ide-btn ide-clarification-submit"
-          disabled={disabled || !canSubmit}
-          onClick={onSubmit}
-          type="button"
-        >
-          {terminalRejection ? "Use rule" : "Submit"}{" "}
-          <Ico.back
-            style={{
-              color: "var(--on-accent)",
-              height: 18,
-              transform: "rotate(180deg)",
-              width: 18,
-            }}
-          />
-        </button>
-      </div>
-      </>
+          </div>
+          <div className="ide-clarification-actions">
+            <button
+              className="ide-clarification-dismiss"
+              onClick={onDismiss}
+              type="button"
+            >
+              Dismiss
+            </button>
+            <button
+              className="ide-btn ide-clarification-submit"
+              disabled={disabled || !canSubmit}
+              onClick={onSubmit}
+              type="button"
+            >
+              {terminalRejection ? "Use rule" : "Submit"}{" "}
+              <Ico.back
+                style={{
+                  color: "var(--on-accent)",
+                  height: 18,
+                  transform: "rotate(180deg)",
+                  width: 18,
+                }}
+              />
+            </button>
+          </div>
+        </>
       )}
     </div>
   );
@@ -597,8 +620,7 @@ function InterpretationConfirmation({
               margin: 0,
             }}
           >
-            Confirm this interpretation and I will generate the executable
-            rule.
+            Confirm this interpretation and I will generate the executable rule.
           </p>
           <div style={{ display: "flex", gap: 8 }}>
             <button
@@ -1391,6 +1413,7 @@ function CreateChat({
       setActiveDraftId(draftIdForThisSend);
     }
     startConversationRun({
+      approvedInterpretation: interpretation,
       draftId: draftIdForThisSend,
       initialMessages: transcript,
       lastUserMessage: confirmation,
@@ -1410,6 +1433,56 @@ function CreateChat({
     setVal(interpretation.sanitizedText);
     setInterpretation(null);
     window.setTimeout(() => textareaRef.current?.focus(), 0);
+  }
+
+  /**
+   * Re-runs only the artifact-generation phase. The transcript is intentionally
+   * unchanged: the player's earlier confirmation remains the approval record,
+   * and clicking Retry must not manufacture a second confirmation bubble or send
+   * the rule back through interpretation.
+   */
+  function retryRuleGeneration() {
+    if (!rule?.generationRetryable || typing) {
+      return;
+    }
+    cancelConversationRun(activeDraftId);
+    const ruleText = rule.sanitizedText;
+    setTyping(true);
+    setError(null);
+    setGuidance(null);
+    setRule(null);
+    let draftIdForThisRun = activeDraftId;
+    if (!draftIdForThisRun) {
+      draftIdForThisRun = createClientDraftId(turnId);
+      setActiveDraftId(draftIdForThisRun);
+    }
+    const approvedInterpretation: RuleInterpretationApiResult = {
+      addedOperationalClauses: [...rule.addedOperationalClauses],
+      clarificationQuestions: [],
+      clarityNote: rule.clarityNote,
+      dealerMessage: rule.dealerMessage,
+      englishText: rule.normalizedText,
+      guardianChecked: false,
+      needsClarification: false,
+      normalizedText: rule.normalizedText,
+      officialInterpretation: rule.officialInterpretation,
+      sanitizedText: rule.sanitizedText,
+      suggestedRewrites: [...(rule.suggestedRewrites ?? [])],
+      title: rule.title,
+      tokenCount: rule.tokenCount,
+    };
+    startConversationRun({
+      approvedInterpretation,
+      draftId: draftIdForThisRun,
+      initialMessages: msgs,
+      lastUserMessage: msgs.at(-1)?.text ?? ruleText,
+      localDealerReply: null,
+      phase: "compile",
+      refinedDraft: null,
+      ruleText,
+      turnId,
+      wallet: walletAddress,
+    });
   }
 
   function send(text?: string) {
@@ -1436,7 +1509,9 @@ function CreateChat({
       baseWasValid: pendingRule?.decision === "VALID",
       baseCanBeClarified: Boolean(pendingInterpretation?.needsClarification),
       currentRuleText:
-        pendingRule?.sanitizedText ?? pendingInterpretation?.sanitizedText ?? null,
+        pendingRule?.sanitizedText ??
+        pendingInterpretation?.sanitizedText ??
+        null,
       refinementQuestions:
         pendingRule?.refinementQuestions ??
         pendingInterpretation?.clarificationQuestions ??
@@ -1880,287 +1955,300 @@ function CreateChat({
           ref={scrollContentRef}
           style={{ display: "flex", flexDirection: "column", gap: 12 }}
         >
-        {msgs.map((mm, i) => {
-          if (mm.who !== "ai") {
+          {msgs.map((mm, i) => {
+            if (mm.who !== "ai") {
+              return (
+                <div
+                  key={i}
+                  className="ide-bubble-user"
+                  style={{ animation: "ide-rise .3s ease both" }}
+                >
+                  {mm.text}
+                </div>
+              );
+            }
+            // Style 1a: a dealer bubble streams in DM Mono and only enters the
+            // screen when its first character is written.
+            if (!reveal.isBlockVisible(`msg:${i}`)) {
+              return null;
+            }
             return (
               <div
                 key={i}
-                className="ide-bubble-user"
+                className="ide-bubble-ai"
+                ref={i === msgs.length - 1 ? lastAnswerRef : null}
                 style={{ animation: "ide-rise .3s ease both" }}
               >
-                {mm.text}
+                <StreamText
+                  block={reveal.blockFor(`msg:${i}`)}
+                  text={mm.text}
+                />
               </div>
             );
-          }
-          // Style 1a: a dealer bubble streams in DM Mono and only enters the
-          // screen when its first character is written.
-          if (!reveal.isBlockVisible(`msg:${i}`)) {
-            return null;
-          }
-          return (
-            <div
-              key={i}
-              className="ide-bubble-ai"
-              ref={i === msgs.length - 1 ? lastAnswerRef : null}
-              style={{ animation: "ide-rise .3s ease both" }}
-            >
-              <StreamText block={reveal.blockFor(`msg:${i}`)} text={mm.text} />
-            </div>
-          );
-        })}
-        {typing && !streaming ? (
-          <AgentProgress connection={connection} progress={progress} />
-        ) : null}
-        {!typing &&
-        (runStatus === "disconnected" || runStatus === "expired") ? (
-          <RunInterruptedCard
-            busy={resuming}
-            kind={runStatus}
-            onRetry={resumeOrRerun}
-          />
-        ) : null}
+          })}
+          {typing && !streaming ? (
+            <AgentProgress connection={connection} progress={progress} />
+          ) : null}
+          {!typing &&
+          (runStatus === "disconnected" || runStatus === "expired") ? (
+            <RunInterruptedCard
+              busy={resuming}
+              kind={runStatus}
+              onRetry={resumeOrRerun}
+            />
+          ) : null}
 
-        {interpretation &&
-        !interpretation.needsClarification &&
-        !typing &&
-        reveal.isBlockVisible("interpretation") ? (
-          <InterpretationConfirmation
-            interpretation={interpretation}
-            onConfirm={confirmInterpretation}
-            onEdit={editInterpretation}
-            stream={reveal.blockFor("interpretation")}
-          />
-        ) : null}
+          {interpretation &&
+          !interpretation.needsClarification &&
+          !typing &&
+          reveal.isBlockVisible("interpretation") ? (
+            <InterpretationConfirmation
+              interpretation={interpretation}
+              onConfirm={confirmInterpretation}
+              onEdit={editInterpretation}
+              stream={reveal.blockFor("interpretation")}
+            />
+          ) : null}
 
-        {rule && !typing && reveal.isBlockVisible("rule") ? (
-          <RulePreview rule={rule} stream={reveal.blockFor("rule")} />
-        ) : null}
+          {rule && !typing && reveal.isBlockVisible("rule") ? (
+            <RulePreview
+              onRetryGeneration={retryRuleGeneration}
+              rule={rule}
+              stream={reveal.blockFor("rule")}
+            />
+          ) : null}
 
-        {guidance && !typing && reveal.isBlockVisible("guidance") ? (
-          <ClarificationPrompt
-            disabled={typing}
-            manualText={val}
-            onDismiss={() => setGuidance(null)}
-            onManualSelect={() => {
-              setSelectedGuidanceIndex(null);
-              textareaRef.current?.focus();
-            }}
-            onSelect={(index) => setSelectedGuidanceIndex(index)}
-            onSubmit={submitGuidance}
-            options={guidance.options}
-            questions={guidance.questions}
-            selectedIndex={selectedGuidanceIndex}
-            stream={reveal.blockFor("guidance")}
-            terminalRejection={guidance.terminalRejection}
-            title={guidance.title}
-          />
-        ) : null}
-
-        {rule && valid && !typing && reveal.settled ? (
-          submitted ? (
-            <div
-              style={{
-                padding: "16px 2px",
-                borderTop: "1px solid rgba(124,246,184,0.3)",
-                borderBottom: "1px solid var(--line)",
-                animation: "ide-rise .3s ease both",
+          {guidance && !typing && reveal.isBlockVisible("guidance") ? (
+            <ClarificationPrompt
+              disabled={typing}
+              manualText={val}
+              onDismiss={() => setGuidance(null)}
+              onManualSelect={() => {
+                setSelectedGuidanceIndex(null);
+                textareaRef.current?.focus();
               }}
-            >
+              onSelect={(index) => setSelectedGuidanceIndex(index)}
+              onSubmit={submitGuidance}
+              options={guidance.options}
+              questions={guidance.questions}
+              selectedIndex={selectedGuidanceIndex}
+              stream={reveal.blockFor("guidance")}
+              terminalRejection={guidance.terminalRejection}
+              title={guidance.title}
+            />
+          ) : null}
+
+          {rule && valid && !typing && reveal.settled ? (
+            submitted ? (
               <div
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  marginBottom: 8,
+                  padding: "16px 2px",
+                  borderTop: "1px solid rgba(124,246,184,0.3)",
+                  borderBottom: "1px solid var(--line)",
+                  animation: "ide-rise .3s ease both",
                 }}
               >
-                <span
+                <div
                   style={{
-                    width: 28,
-                    height: 28,
-                    borderRadius: 9,
-                    background: "var(--green)",
-                    color: "var(--on-accent)",
-                    display: "grid",
-                    placeItems: "center",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    marginBottom: 8,
                   }}
                 >
-                  <Ico.check />
-                </span>
-                <b style={{ fontSize: 15.5 }}>Rule in the round</b>
+                  <span
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: 9,
+                      background: "var(--green)",
+                      color: "var(--on-accent)",
+                      display: "grid",
+                      placeItems: "center",
+                    }}
+                  >
+                    <Ico.check />
+                  </span>
+                  <b style={{ fontSize: 15.5 }}>Rule in the round</b>
+                </div>
+                <p
+                  style={{
+                    margin: "0 0 14px",
+                    color: "var(--muted)",
+                    fontSize: 14,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  In voting for round {fmtTurnId(turnId)}. If elected and
+                  winners exist, you earn{" "}
+                  <b style={{ color: "var(--text)" }}>15%</b> of one winner's
+                  payout.
+                </p>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    onClick={() => reset()}
+                    className="ide-btn-ghost ide-btn"
+                    style={{ flex: 1, padding: 13 }}
+                    type="button"
+                  >
+                    Create another
+                  </button>
+                  <button
+                    onClick={() => go("vote")}
+                    className="ide-btn"
+                    style={{ flex: 1, padding: 13 }}
+                    type="button"
+                  >
+                    See in voting
+                  </button>
+                </div>
               </div>
-              <p
+            ) : ruleCreationClosed ? (
+              <div
                 style={{
-                  margin: "0 0 14px",
-                  color: "var(--muted)",
-                  fontSize: 14,
-                  lineHeight: 1.5,
+                  padding: "16px 2px",
+                  borderTop: "1px solid rgba(255,210,63,0.3)",
+                  borderBottom: "1px solid var(--line)",
+                  animation: "ide-rise .3s ease both",
                 }}
               >
-                In voting for round {fmtTurnId(turnId)}. If elected and winners
-                exist, you earn <b style={{ color: "var(--text)" }}>15%</b> of
-                one winner's payout.
-              </p>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button
-                  onClick={() => reset()}
-                  className="ide-btn-ghost ide-btn"
-                  style={{ flex: 1, padding: 13 }}
-                  type="button"
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 9,
+                    marginBottom: 7,
+                  }}
                 >
-                  Create another
-                </button>
+                  <Ico.lock
+                    style={{ color: "var(--yellow)", width: 16, height: 16 }}
+                  />
+                  <b style={{ fontSize: 15 }}>Rule creation closed</b>
+                </div>
+                <p
+                  style={{
+                    margin: "0 0 13px",
+                    color: "var(--muted)",
+                    fontSize: 13.5,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  The create phase for round {fmtTurnId(turnId)} has ended, so
+                  new rules can&apos;t be submitted. Your draft is saved and you
+                  can submit it when the next round opens.
+                </p>
                 <button
-                  onClick={() => go("vote")}
+                  onClick={() => go("home")}
                   className="ide-btn"
-                  style={{ flex: 1, padding: 13 }}
+                  style={{ width: "100%", padding: 13 }}
                   type="button"
                 >
-                  See in voting
+                  <Ico.back
+                    style={{
+                      color: "var(--on-accent)",
+                      transform: "rotate(180deg)",
+                    }}
+                  />{" "}
+                  Back to the round
                 </button>
               </div>
-            </div>
-          ) : ruleCreationClosed ? (
-            <div
-              style={{
-                padding: "16px 2px",
-                borderTop: "1px solid rgba(255,210,63,0.3)",
-                borderBottom: "1px solid var(--line)",
-                animation: "ide-rise .3s ease both",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 9,
-                  marginBottom: 7,
-                }}
-              >
-                <Ico.lock
-                  style={{ color: "var(--yellow)", width: 16, height: 16 }}
-                />
-                <b style={{ fontSize: 15 }}>Rule creation closed</b>
-              </div>
-              <p
-                style={{
-                  margin: "0 0 13px",
-                  color: "var(--muted)",
-                  fontSize: 13.5,
-                  lineHeight: 1.5,
-                }}
-              >
-                The create phase for round {fmtTurnId(turnId)} has ended, so new
-                rules can&apos;t be submitted. Your draft is saved and you can
-                submit it when the next round opens.
-              </p>
+            ) : played ? (
               <button
-                onClick={() => go("home")}
+                onClick={submit}
+                disabled={busy}
                 className="ide-btn"
-                style={{ width: "100%", padding: 13 }}
+                style={{
+                  padding: 15,
+                  fontSize: 15.5,
+                  animation: "ide-rise .3s ease both",
+                  opacity: busy ? 0.7 : 1,
+                }}
                 type="button"
               >
-                <Ico.back
-                  style={{ color: "var(--on-accent)", transform: "rotate(180deg)" }}
-                />{" "}
-                Back to the round
+                <Ico.check style={{ color: "var(--on-accent)" }} />{" "}
+                {busy
+                  ? "Submitting..."
+                  : `Submit to the round · ${fees.ruleNext === 0 ? "Free" : `${fmtSol(fees.ruleNext)} SOL`}`}
               </button>
-            </div>
-          ) : played ? (
-            <button
-              onClick={submit}
-              disabled={busy}
-              className="ide-btn"
-              style={{
-                padding: 15,
-                fontSize: 15.5,
-                animation: "ide-rise .3s ease both",
-                opacity: busy ? 0.7 : 1,
-              }}
-              type="button"
-            >
-              <Ico.check style={{ color: "var(--on-accent)" }} />{" "}
-              {busy
-                ? "Submitting..."
-                : `Submit to the round · ${fees.ruleNext === 0 ? "Free" : `${fmtSol(fees.ruleNext)} SOL`}`}
-            </button>
-          ) : (
-            <div
-              style={{
-                padding: "16px 2px",
-                borderTop: "1px solid rgba(255,210,63,0.3)",
-                borderBottom: "1px solid var(--line)",
-                animation: "ide-rise .3s ease both",
-              }}
-            >
+            ) : (
               <div
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 9,
-                  marginBottom: 7,
+                  padding: "16px 2px",
+                  borderTop: "1px solid rgba(255,210,63,0.3)",
+                  borderBottom: "1px solid var(--line)",
+                  animation: "ide-rise .3s ease both",
                 }}
               >
-                <Ico.lock
-                  style={{ color: "var(--yellow)", width: 16, height: 16 }}
-                />
-                <b style={{ fontSize: 15 }}>Play to submit</b>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 9,
+                    marginBottom: 7,
+                  }}
+                >
+                  <Ico.lock
+                    style={{ color: "var(--yellow)", width: 16, height: 16 }}
+                  />
+                  <b style={{ fontSize: 15 }}>Play to submit</b>
+                </div>
+                <p
+                  style={{
+                    margin: "0 0 13px",
+                    color: "var(--muted)",
+                    fontSize: 13.5,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  Make a guess this round to unlock submitting. Your draft stays
+                  here.
+                </p>
+                <button
+                  onClick={() => go("play")}
+                  className="ide-btn"
+                  style={{ width: "100%", padding: 13 }}
+                  type="button"
+                >
+                  <Ico.bolt style={{ color: "var(--on-accent)" }} /> Play now ·{" "}
+                  {fees.playNext === 0
+                    ? "Free"
+                    : `${fmtSol(fees.playNext)} SOL`}
+                </button>
               </div>
-              <p
-                style={{
-                  margin: "0 0 13px",
-                  color: "var(--muted)",
-                  fontSize: 13.5,
-                  lineHeight: 1.5,
-                }}
-              >
-                Make a guess this round to unlock submitting. Your draft stays
-                here.
-              </p>
-              <button
-                onClick={() => go("play")}
-                className="ide-btn"
-                style={{ width: "100%", padding: 13 }}
-                type="button"
-              >
-                <Ico.bolt style={{ color: "var(--on-accent)" }} /> Play now ·{" "}
-                {fees.playNext === 0 ? "Free" : `${fmtSol(fees.playNext)} SOL`}
-              </button>
-            </div>
-          )
-        ) : null}
+            )
+          ) : null}
 
-        {error ? (
-          <div
-            className="ide-card"
-            style={{
-              borderColor: "rgba(255,59,47,0.3)",
-              color: "var(--red)",
-              display: "grid",
-              fontSize: 13,
-              gap: 10,
-              padding: "11px 14px",
-            }}
-          >
-            <span>{error}</span>
-            {isConversationDraftSaveError(error) ? (
-              <button
-                className="ide-votebtn"
-                disabled={retryingDraftSave}
-                onClick={() => void retryDraftSave()}
-                style={{
-                  justifySelf: "start",
-                  opacity: retryingDraftSave ? 0.7 : 1,
-                  padding: "8px 12px",
-                }}
-                type="button"
-              >
-                {retryingDraftSave ? "Saving..." : "Retry saving"}
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-        <div style={{ height: 4 }} />
+          {error ? (
+            <div
+              className="ide-card"
+              style={{
+                borderColor: "rgba(255,59,47,0.3)",
+                color: "var(--red)",
+                display: "grid",
+                fontSize: 13,
+                gap: 10,
+                padding: "11px 14px",
+              }}
+            >
+              <span>{error}</span>
+              {isConversationDraftSaveError(error) ? (
+                <button
+                  className="ide-votebtn"
+                  disabled={retryingDraftSave}
+                  onClick={() => void retryDraftSave()}
+                  style={{
+                    justifySelf: "start",
+                    opacity: retryingDraftSave ? 0.7 : 1,
+                    padding: "8px 12px",
+                  }}
+                  type="button"
+                >
+                  {retryingDraftSave ? "Saving..." : "Retry saving"}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+          <div style={{ height: 4 }} />
         </div>
       </div>
 

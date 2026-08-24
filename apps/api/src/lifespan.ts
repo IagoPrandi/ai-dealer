@@ -6,14 +6,13 @@ import {
   resolveEscalationModel,
   resolveDealerChatConfig,
   resolveRuleAgentConfig,
+  resolveRuleCompilerConfig,
+  resolveRuleReviewerConfig,
   resolveTranslateToEnglish,
   type ModelWarmupResult,
   type RuleAgentConfig,
 } from "./llm.js";
-import {
-  resolveGuardianConfig,
-  type GuardianConfig,
-} from "./guardian.js";
+import { resolveGuardianConfig, type GuardianConfig } from "./guardian.js";
 
 const { Pool } = pg;
 
@@ -27,6 +26,11 @@ export interface DealerRuntime {
    * model than the rule pipeline. Same object as `agent` when unset.
    */
   chat: RuleAgentConfig;
+  /** Schema-constrained artifact emitter. May intentionally differ from the
+   * interpretation/chat model even when every role shares one endpoint. */
+  compiler: RuleAgentConfig;
+  /** Independent schema-constrained source-to-AST semantic reviewer. */
+  reviewer: RuleAgentConfig;
   escalationModel: string;
   guardian: GuardianConfig;
   translateToEnglish: boolean;
@@ -77,6 +81,8 @@ export function getDealerRuntime(): DealerRuntime {
         runtime: {
           agent: resolveRuleAgentConfig(),
           chat: resolveDealerChatConfig(),
+          compiler: resolveRuleCompilerConfig(),
+          reviewer: resolveRuleReviewerConfig(),
           escalationModel: resolveEscalationModel(),
           guardian: resolveGuardianConfig(),
           translateToEnglish: resolveTranslateToEnglish(),
@@ -106,6 +112,10 @@ export async function ensureDealerModelReady(
   nowMs = Date.now(),
 ): Promise<ModelWarmupResult> {
   const runtime = getDealerRuntime();
+  const config =
+    [runtime.compiler, runtime.reviewer, runtime.agent, runtime.chat].find(
+      (candidate) => candidate.model === model,
+    ) ?? runtime.agent;
   const current = modelReadiness.get(model);
   if (current?.promise) {
     return current.promise;
@@ -123,12 +133,7 @@ export async function ensureDealerModelReady(
     promise: null,
     result: null,
   };
-  const promise = ensureModelLoaded(
-    model,
-    runtime.agent,
-    180_000,
-    signal,
-  )
+  const promise = ensureModelLoaded(model, config, 180_000, signal)
     .then((result) => {
       entry.checkedAt = nowMs;
       entry.result = result;
@@ -280,7 +285,9 @@ export async function checkRedisHealth(
   try {
     if (!resource.client.isOpen) {
       if (!resource.connectPromise) {
-        resource.connectPromise = resource.client.connect().then(() => undefined);
+        resource.connectPromise = resource.client
+          .connect()
+          .then(() => undefined);
       }
       const connection = resource.connectPromise;
       try {

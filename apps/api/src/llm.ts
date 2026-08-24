@@ -241,6 +241,35 @@ export function resolveRuleAgentConfig(
 }
 
 /**
+ * The compile role has a stricter capability contract than interpretation or
+ * chat: its provider must enforce the complete candidate JSON Schema while it
+ * decodes. Keep its model routing explicit so a fast conversational cloud model
+ * cannot silently become the artifact emitter merely because `LLM_MODEL` names
+ * it. An empty override deliberately falls back to the rule-agent model and is
+ * then rejected by `compileRuleToAst` if that model lacks the capability.
+ */
+export function resolveRuleCompilerConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): RuleAgentConfig {
+  const base = resolveRuleAgentConfig(env);
+  const model = firstConfigured(env.LLM_MODEL_COMPILE, base.model);
+  return model === base.model ? base : { ...base, model };
+}
+
+/**
+ * Independent source-to-AST review role. It may use a different model from the
+ * draft generator; when no override is configured it still runs as a separate,
+ * differently prompted reasoning pass on the schema-capable compile model.
+ */
+export function resolveRuleReviewerConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): RuleAgentConfig {
+  const compiler = resolveRuleCompilerConfig(env);
+  const model = firstConfigured(env.LLM_MODEL_REVIEW, compiler.model);
+  return model === compiler.model ? compiler : { ...compiler, model };
+}
+
+/**
  * Config for the conversational chat step, which `LLM_MODEL_CHAT` can point at a
  * different model from the rule pipeline.
  *
@@ -1252,8 +1281,10 @@ const COMPILE_BAD_RESPONSE_ATTEMPTS = 3;
 // compiler still revalidates every result as the non-bypassable boundary.
 export async function compileRuleToAst(
   normalizedText: string,
-  config: RuleAgentConfig = resolveRuleAgentConfig(),
+  config: RuleAgentConfig = resolveRuleCompilerConfig(),
   signal?: AbortSignal,
+  validationFeedback?: string,
+  role: "generate" | "review" = "generate",
 ): Promise<unknown> {
   if (!supportsRuleCompilationSchema(config)) {
     throw new RuleAgentError(
@@ -1266,7 +1297,13 @@ export async function compileRuleToAst(
   // skill (PRD §7.10/§7.12), co-located with the DSL schema in @tyche/rule-compiler.
   // The executable schema is sent to the decoder instead of copied into the
   // prompt, so the transport and server validation share one source of truth.
-  const prompt = buildRuleCompilerSkillPrompt();
+  const roleGuidance =
+    role === "review"
+      ? "\n\n## Independent semantic review\nCompile the exact player rule from scratch as an independent auditor. You have not seen the draft candidate. Re-derive every condition, comparator, source, position, threshold, conjunction, and negation before emitting the candidate. Do not copy a familiar example unless it expresses the complete rule."
+      : "";
+  const prompt = validationFeedback?.trim()
+    ? `${buildRuleCompilerSkillPrompt()}\n\n## Validation-guided re-ask\nThe previous candidate was rejected by deterministic validation. Produce a completely fresh candidate from the exact player rule. Do not weaken, omit, or reinterpret any condition merely to pass validation. Correct all of these server-authored findings:\n${validationFeedback.trim().slice(0, 2_000)}`
+    : `${buildRuleCompilerSkillPrompt()}${roleGuidance}`;
   const schemaConstraint: AgentJsonSchemaConstraint = {
     name: "tyche_rule_compilation_candidate",
     schema: getRuleCompilationCandidateJsonSchema(),
@@ -1281,6 +1318,11 @@ export async function compileRuleToAst(
       normalizedText,
       config,
       signal,
+      // The reviewer is independent because it has a different source-only
+      // prompt, not because it must spend an unbounded hidden trace. On local
+      // 9B models that trace can exceed the entire five-minute request window.
+      // As with generation, only an unusable structured response earns the
+      // slower full-reasoning retry.
       attempt > 1 ? "full" : "suppressed",
       schemaConstraint,
     );
@@ -1324,4 +1366,18 @@ export async function compileRuleToAst(
       `Rule compile attempt ${attempt} returned an AST outside the rule grammar; retrying with the reasoning trace.`,
     );
   }
+}
+
+export function reviewRuleToAst(
+  normalizedText: string,
+  config: RuleAgentConfig = resolveRuleReviewerConfig(),
+  signal?: AbortSignal,
+): Promise<unknown> {
+  return compileRuleToAst(
+    normalizedText,
+    config,
+    signal,
+    undefined,
+    "review",
+  );
 }

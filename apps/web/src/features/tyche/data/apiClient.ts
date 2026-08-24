@@ -290,6 +290,7 @@ export interface RulePreflightApiResult {
   } | null;
   decision?: "INVALID" | "VALID";
   dealerMessage: string;
+  generationRetryable?: boolean;
   needsClarification: boolean;
   normalizedText: string;
   reasonCodes: string[];
@@ -371,6 +372,7 @@ export async function cancelRulePreflightJob(jobId: string) {
  * ApiRequestError, so the caller's blocked-rule handling is unchanged.
  */
 export function startRulePreflightJob(args: {
+  approvedInterpretation?: RuleInterpretationApiResult;
   draftId?: null | string;
   phase: RulePreflightPhase;
   signal?: AbortSignal;
@@ -384,6 +386,9 @@ export function startRulePreflightJob(args: {
   }>(
     "/rule-preflight",
     {
+      ...(args.approvedInterpretation
+        ? { approvedInterpretation: args.approvedInterpretation }
+        : {}),
       ...(args.draftId ? { draftId: args.draftId } : {}),
       phase: args.phase,
       text: args.text,

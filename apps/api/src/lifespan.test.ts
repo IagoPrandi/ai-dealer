@@ -29,13 +29,19 @@ afterEach(async () => {
 
 test("dealer runtime configuration is resolved once per process", () => {
   configureDealer("dealer:first");
+  process.env.LLM_MODEL_COMPILE = "compiler:first";
+  process.env.LLM_MODEL_REVIEW = "reviewer:first";
 
   const first = getDealerRuntime();
   process.env.LLM_MODEL = "dealer:changed";
+  process.env.LLM_MODEL_COMPILE = "compiler:changed";
+  process.env.LLM_MODEL_REVIEW = "reviewer:changed";
   const second = getDealerRuntime();
 
   assert.equal(first, second);
   assert.equal(second.agent.model, "dealer:first");
+  assert.equal(second.compiler.model, "compiler:first");
+  assert.equal(second.reviewer.model, "reviewer:first");
   assert.equal(second.translateToEnglish, false);
 });
 
@@ -46,14 +52,17 @@ test("dealer runtime memoizes configuration errors without failing module startu
   resetDealerRuntimeForTests();
 
   let firstError: unknown;
-  assert.throws(() => getDealerRuntime(), (error: unknown) => {
-    firstError = error;
-    return (
-      error instanceof Error &&
-      "code" in error &&
-      error.code === "RULE_AGENT_NOT_CONFIGURED"
-    );
-  });
+  assert.throws(
+    () => getDealerRuntime(),
+    (error: unknown) => {
+      firstError = error;
+      return (
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "RULE_AGENT_NOT_CONFIGURED"
+      );
+    },
+  );
 
   configureDealer();
   assert.throws(

@@ -128,6 +128,14 @@ export type RuleAstProvider = (params: {
   providerConfig: AgentProviderConfig;
 }) => Promise<unknown>;
 
+/**
+ * A second, independent LLM reading of the rule. The reviewer receives the
+ * source text but never the draft candidate, which avoids anchoring it to the
+ * generator's AST. Its result is used only for behavioral agreement and is
+ * never frozen directly into an artifact.
+ */
+export type RuleAstReviewer = RuleAstProvider;
+
 export interface RuleSourceSpan {
   /** Exact substring of the normalized rule that produced an AST condition. */
   text: string;
@@ -222,7 +230,9 @@ export function getRuleCompilationCandidateJsonSchema(): unknown {
         items: {
           type: "object",
           additionalProperties: false,
-          properties: { text: { type: "string", minLength: 1, maxLength: 6000 } },
+          properties: {
+            text: { type: "string", minLength: 1, maxLength: 6000 },
+          },
           required: ["text"],
         },
       },
@@ -239,6 +249,8 @@ export function getRuleCompilationCandidateJsonSchema(): unknown {
 
 export interface RuleCompileArtifactOptions {
   astProvider: RuleAstProvider;
+  /** Independent source-to-AST pass used when no deterministic reading exists. */
+  astReviewer?: RuleAstReviewer;
   preferDeterministic?: boolean;
   /** Fail closed unless an LLM response includes verified source evidence. */
   requireProviderEvidence?: boolean;
@@ -602,7 +614,10 @@ export function externalDependencyGateText(text: string): string {
  * is intentionally the single source of truth for "external dependency".
  */
 export function hasExternalDependency(text: string): boolean {
-  return hasPattern(externalDependencyGateText(text), EXTERNAL_DEPENDENCY_PATTERNS);
+  return hasPattern(
+    externalDependencyGateText(text),
+    EXTERNAL_DEPENDENCY_PATTERNS,
+  );
 }
 
 /**
@@ -840,7 +855,9 @@ export async function compileRuleArtifact(
 
   const consensusDisabled = options.disableConsensus === true;
   const requireSecondOpinion =
-    !consensusDisabled && lacksDeterministicReference(request);
+    !consensusDisabled &&
+    lacksDeterministicReference(request) &&
+    options.astReviewer === undefined;
 
   for (const providerConfig of providerRouting.providers) {
     const evaluation = await evaluateProviderAttemptAsync(
@@ -1121,16 +1138,29 @@ function verifyProviderEvidence(
   ast: RuleAst,
   normalizedText: string,
   evidence: ProviderCompilationEvidence,
+  sourceCertifiedByIndependentReviewer = false,
 ): ProviderEvidenceVerification {
-  const sourceSpans = verifySourceSpanCoverage(
+  const providerSourceSpans = verifySourceSpanCoverage(
     normalizedText,
     evidence.consumedSpans,
     collectAstValues(ast),
   );
+  // For a novel rule, two independently prompted LLM passes agreeing by
+  // behavior is stronger source-fidelity evidence than the generator quoting
+  // its own spans. Bind the whole approved normalized source on the server when
+  // that independent review succeeded. This is not a silent fallback: the
+  // diagnostic records that server binding replaced incomplete provider spans.
+  const sourceSpans =
+    providerSourceSpans ??
+    (sourceCertifiedByIndependentReviewer
+      ? [{ text: normalizedText }]
+      : null);
   const diagnostic: RuleProviderEvidenceStageDiagnostic = {
     exampleResults: [],
-    sourceSpanDetail: sourceSpans
+    sourceSpanDetail: providerSourceSpans
       ? "All intent-bearing source clauses were covered by consumed spans."
+      : sourceCertifiedByIndependentReviewer
+        ? "The server bound the complete approved source after an independent reviewer certified the draft behavior."
       : "At least one intent-bearing source clause was not covered by the provider's consumed spans.",
     sourceSpanStatus: sourceSpans ? "passed" : "failed",
   };
@@ -1165,7 +1195,8 @@ function verifyProviderEvidence(
         !isSixUniqueDomainNumbers(example.draw)
       ) {
         diagnostic.exampleResults.push({
-          detail: "Draw and guess must each contain six unique integers from 1 through 100.",
+          detail:
+            "Draw and guess must each contain six unique integers from 1 through 100.",
           index,
           status: "failed",
         });
@@ -1174,7 +1205,10 @@ function verifyProviderEvidence(
       }
       try {
         if (isRankingRule(ast)) {
-          if (typeof example.score !== "number" || !Number.isFinite(example.score)) {
+          if (
+            typeof example.score !== "number" ||
+            !Number.isFinite(example.score)
+          ) {
             diagnostic.exampleResults.push({
               detail: "Ranking examples must declare a finite numeric score.",
               index,
@@ -1401,8 +1435,12 @@ function validateResolvedAst(
   stages.push({
     detail: ast
       ? "Candidate AST matches the supported rule schema."
-      : schemaError ?? "No usable candidate AST was returned.",
-    reasonCodes: ast ? [] : [...reasonCodes].filter((code) => code === "SCHEMA_INVALID" || code === "UNSUPPORTED_RULE"),
+      : (schemaError ?? "No usable candidate AST was returned."),
+    reasonCodes: ast
+      ? []
+      : [...reasonCodes].filter(
+          (code) => code === "SCHEMA_INVALID" || code === "UNSUPPORTED_RULE",
+        ),
     stage: "schema_validation",
     status: ast ? "passed" : "failed",
   });
@@ -1413,10 +1451,12 @@ function validateResolvedAst(
   const reviewerAst =
     ast && !forcedFailure
       ? astSource === "provider"
-        ? compileSupportedRule(normalizedText)
+        ? suppliedReviewerAst ?? compileSupportedRule(normalizedText)
         : suppliedReviewerAst
       : null;
-  if (ast && reviewerAst && !knownAstSemanticsMatch(reviewerAst, ast)) {
+  const reviewerMismatch =
+    ast && reviewerAst && !knownAstSemanticsMatch(reviewerAst, ast);
+  if (reviewerMismatch) {
     reasonCodes.add("REVIEWER_MISMATCH");
   }
   stages.push({
@@ -1424,21 +1464,29 @@ function validateResolvedAst(
       ? "Skipped because no schema-valid AST was available."
       : !reviewerAst
         ? "No independent reviewer AST was available."
-        : reasonCodes.has("REVIEWER_MISMATCH")
-          ? "The independent reviewer AST differs behaviorally from the candidate."
+        : reviewerMismatch
+          ? describeSemanticDisagreement(reviewerAst, ast)
           : "The independent reviewer AST agrees with the candidate.",
-    reasonCodes: reasonCodes.has("REVIEWER_MISMATCH") ? ["REVIEWER_MISMATCH"] : [],
+    reasonCodes: reasonCodes.has("REVIEWER_MISMATCH")
+      ? ["REVIEWER_MISMATCH"]
+      : [],
     stage: "independent_review",
-    status: !ast || !reviewerAst
-      ? "skipped"
-      : reasonCodes.has("REVIEWER_MISMATCH")
-        ? "failed"
-        : "passed",
+    status:
+      !ast || !reviewerAst
+        ? "skipped"
+        : reasonCodes.has("REVIEWER_MISMATCH")
+          ? "failed"
+          : "passed",
   });
 
   const evidenceVerification =
     ast && astSource === "provider" && providerEvidence
-      ? verifyProviderEvidence(ast, normalizedText, providerEvidence)
+      ? verifyProviderEvidence(
+          ast,
+          normalizedText,
+          providerEvidence,
+          suppliedReviewerAst !== null && !reviewerMismatch,
+        )
       : null;
   const verifiedProviderEvidence = evidenceVerification?.ok
     ? evidenceVerification.evidence
@@ -1470,33 +1518,40 @@ function validateResolvedAst(
     }
   }
   stages.push({
-    detail: astSource === "deterministic"
-      ? "Skipped for the deterministic compiler path."
-      : !ast
-        ? "Skipped because no schema-valid provider AST was available."
-        : evidenceVerification?.ok
-          ? "Provider spans and worked examples agree with the candidate AST."
-          : evidenceVerification
-            ? evidenceVerification.failure === "span_coverage_incomplete"
-              ? evidenceVerification.diagnostic.sourceSpanDetail
-              : evidenceVerification.diagnostic.exampleResults
-                  .filter((example) => example.status === "failed")
-                  .map((example) => `Example ${example.index}: ${example.detail}`)
-                  .join(" ") || "Provider evidence is malformed."
-            : requireProviderEvidence
-              ? "Provider evidence was required but not returned."
-              : "Provider evidence was not requested.",
+    detail:
+      astSource === "deterministic"
+        ? "Skipped for the deterministic compiler path."
+        : !ast
+          ? "Skipped because no schema-valid provider AST was available."
+          : evidenceVerification?.ok
+            ? `${evidenceVerification.diagnostic.sourceSpanDetail} Worked examples agree with the candidate AST.`
+            : evidenceVerification
+              ? evidenceVerification.failure === "span_coverage_incomplete"
+                ? evidenceVerification.diagnostic.sourceSpanDetail
+                : evidenceVerification.diagnostic.exampleResults
+                    .filter((example) => example.status === "failed")
+                    .map(
+                      (example) =>
+                        `Example ${example.index}: ${example.detail}`,
+                    )
+                    .join(" ") || "Provider evidence is malformed."
+              : requireProviderEvidence
+                ? "Provider evidence was required but not returned."
+                : "Provider evidence was not requested.",
     reasonCodes: [...reasonCodes].filter(
       (code) =>
         code === "PROVIDER_EVIDENCE_UNVERIFIED" ||
         code === "PROVIDER_SPAN_COVERAGE_INCOMPLETE",
     ),
     stage: "provider_evidence",
-    status: astSource === "deterministic" || !ast || (!evidenceVerification && !requireProviderEvidence)
-      ? "skipped"
-      : evidenceVerification?.ok
-        ? "passed"
-        : "failed",
+    status:
+      astSource === "deterministic" ||
+      !ast ||
+      (!evidenceVerification && !requireProviderEvidence)
+        ? "skipped"
+        : evidenceVerification?.ok
+          ? "passed"
+          : "failed",
   });
 
   const bounds = ast && !forcedFailure ? validateRuntimeBounds(ast) : null;
@@ -1514,7 +1569,8 @@ function validateResolvedAst(
         ? "Candidate AST stays within runtime safety and complexity bounds."
         : "Candidate AST exceeds runtime safety or complexity bounds.",
     reasonCodes: [...reasonCodes].filter(
-      (code) => code === "UNSAFE_RUNTIME_BOUNDS" || code === "COMPLEXITY_EXCEEDED",
+      (code) =>
+        code === "UNSAFE_RUNTIME_BOUNDS" || code === "COMPLEXITY_EXCEEDED",
     ),
     stage: "runtime_bounds",
     status: !ast ? "skipped" : hasSafeRuntimeBounds ? "passed" : "failed",
@@ -1558,13 +1614,16 @@ function validateResolvedAst(
         : interpretationCoverageFailed
           ? "The candidate AST does not cover every intent-bearing part of the rule text."
           : "The candidate AST covers the intent-bearing parts of the rule text.",
-    reasonCodes: interpretationCoverageFailed ? ["INTERPRETATION_MISMATCH"] : [],
+    reasonCodes: interpretationCoverageFailed
+      ? ["INTERPRETATION_MISMATCH"]
+      : [],
     stage: "interpretation_coverage",
-    status: !ast || certifiedByIndependentReading
-      ? "skipped"
-      : interpretationCoverageFailed
-        ? "failed"
-        : "passed",
+    status:
+      !ast || certifiedByIndependentReading
+        ? "skipped"
+        : interpretationCoverageFailed
+          ? "failed"
+          : "passed",
   });
 
   // Gap 1: the dealer's own reading is a promise to the player.
@@ -1601,13 +1660,16 @@ function validateResolvedAst(
         : agentStatementCoverageFailed
           ? "The candidate AST does not keep every load-bearing claim in the agent interpretation."
           : "The candidate AST keeps the load-bearing claims in the agent interpretation.",
-    reasonCodes: agentStatementCoverageFailed ? ["AGENT_STATEMENT_MISMATCH"] : [],
+    reasonCodes: agentStatementCoverageFailed
+      ? ["AGENT_STATEMENT_MISMATCH"]
+      : [],
     stage: "agent_statement_coverage",
-    status: !ast || !agentStatement
-      ? "skipped"
-      : agentStatementCoverageFailed
-        ? "failed"
-        : "passed",
+    status:
+      !ast || !agentStatement
+        ? "skipped"
+        : agentStatementCoverageFailed
+          ? "failed"
+          : "passed",
   });
 
   // Deterministic test harness + bounded Monte-Carlo difficulty (PRD §6.8, §7.8).
@@ -1698,14 +1760,20 @@ function validateResolvedAst(
     blockingReasons.length === 0 && confidenceAction === "ACCEPT"
       ? "VALID"
       : "INVALID";
-  const status = determineAttemptStatus(forcedFailure, confidenceAction, decision);
+  const status = determineAttemptStatus(
+    forcedFailure,
+    confidenceAction,
+    decision,
+  );
   stages.push({
     detail:
       decision === "VALID"
         ? "Candidate passed all required validation gates."
-        : `Candidate rejected: ${[...reasonCodes]
-            .filter((code) => code !== "SUPPORTED_RULE")
-            .join(", ") || "confidence threshold not met"}.`,
+        : `Candidate rejected: ${
+            [...reasonCodes]
+              .filter((code) => code !== "SUPPORTED_RULE")
+              .join(", ") || "confidence threshold not met"
+          }.`,
     reasonCodes: [...reasonCodes].filter((code) => code !== "SUPPORTED_RULE"),
     stage: "decision",
     status: decision === "VALID" ? "passed" : "failed",
@@ -1740,12 +1808,14 @@ function validateResolvedAst(
           ruleMode,
           schemaVersion: ast.schemaVersion,
           skillVersion: RULE_COMPILER_SKILL_VERSION,
-          sourceSpans:
-            verifiedProviderEvidence?.sourceSpans ?? [{ text: normalizedText }],
+          sourceSpans: verifiedProviderEvidence?.sourceSpans ?? [
+            { text: normalizedText },
+          ],
           testCoverageScore: harness?.coverageScore ?? 0,
           testHarnessVersion: RULE_TEST_HARNESS_VERSION,
           workedExamples:
-            verifiedProviderEvidence?.workedExamples ?? collectWorkedExamples(ast),
+            verifiedProviderEvidence?.workedExamples ??
+            collectWorkedExamples(ast),
         }
       : null;
   const artifactHash = artifact ? hashJson(artifact) : null;
@@ -1815,6 +1885,7 @@ async function evaluateProviderAttemptAsync(
   const ctx = buildAttemptContext(request, providerConfig);
   let rawAst: unknown = null;
   let providerEvidence: ProviderCompilationEvidence | null = null;
+  let reviewerAst: RuleAst | null = null;
   if (!ctx.forcedFailure) {
     if (options.preferDeterministic) {
       const deterministicAst = compileSupportedRule(ctx.normalizedText);
@@ -1840,7 +1911,10 @@ async function evaluateProviderAttemptAsync(
         const deterministicInterpretation = describeRuleAst(deterministicAst);
         return validateResolvedAst(
           deterministicInterpretation
-            ? { ...request, officialInterpretation: deterministicInterpretation }
+            ? {
+                ...request,
+                officialInterpretation: deterministicInterpretation,
+              }
             : request,
           timestamp,
           providerConfig,
@@ -1863,6 +1937,29 @@ async function evaluateProviderAttemptAsync(
       const unwrapped = unwrapProviderCompilation(providerValue);
       rawAst = unwrapped.rawAst;
       providerEvidence = unwrapped.evidence;
+
+      // Novel rules have no deterministic reference implementation. Ask a
+      // separately prompted LLM pass to compile the source from scratch, then
+      // compare both programs by behavior. The reviewer never sees the draft,
+      // so agreement is evidence about the source meaning rather than prompt
+      // anchoring. A missing review fails closed instead of silently accepting
+      // one unchecked generation.
+      if (
+        options.astReviewer &&
+        !options.disableConsensus &&
+        providerCompilationHasSchemaValidAst(providerValue) &&
+        compileSupportedRule(ctx.normalizedText) === null
+      ) {
+        reviewerAst = await requestProviderReviewerAst(
+          request,
+          ctx,
+          providerConfig,
+          options.astReviewer,
+        );
+        if (reviewerAst === null) {
+          ctx.reasonCodes.add("SECOND_OPINION_UNAVAILABLE");
+        }
+      }
     } catch {
       ctx.reasonCodes.add("PROVIDER_MALFORMED_RESPONSE");
       rawAst = null;
@@ -1877,7 +1974,28 @@ async function evaluateProviderAttemptAsync(
     "provider",
     providerEvidence,
     options.requireProviderEvidence === true,
+    reviewerAst,
   );
+}
+
+async function requestProviderReviewerAst(
+  request: RuleCompilationRequest,
+  ctx: AttemptContext,
+  providerConfig: AgentProviderConfig,
+  reviewer: RuleAstReviewer,
+): Promise<RuleAst | null> {
+  try {
+    const providerValue = await reviewer({
+      normalizedText: ctx.normalizedText,
+      prompt: request.prompt,
+      providerConfig,
+    });
+    const { rawAst } = unwrapProviderCompilation(providerValue);
+    const parsed = rawAst == null ? null : ruleAstSchema.safeParse(rawAst);
+    return parsed?.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -2075,7 +2193,10 @@ function resolveProviderDisagreement(attempts: ProviderEvaluation[]) {
   // any non-trivial rule — two models practically never emit the same JSON shape
   // — so every genuine divergence was a permanent dead end with a message that
   // told the player there was nothing to fix.
-  if (!providerOpinionsAgree(secondary, tertiary) || tertiary.decision !== "VALID") {
+  if (
+    !providerOpinionsAgree(secondary, tertiary) ||
+    tertiary.decision !== "VALID"
+  ) {
     return null;
   }
 
@@ -2114,10 +2235,12 @@ function normalizeRuleText(value: string) {
 }
 
 function extractNumberRuns(value: string): number[][] {
-  return [...value.matchAll(/\b(?:100|[1-9]?\d)(?:[\s,;/|-]+(?:100|[1-9]?\d)){1,5}\b/g)]
-    .map((match) =>
-      (match[0].match(/\b(?:100|[1-9]?\d)\b/g) ?? []).map(Number),
-    )
+  return [
+    ...value.matchAll(
+      /\b(?:100|[1-9]?\d)(?:[\s,;/|-]+(?:100|[1-9]?\d)){1,5}\b/g,
+    ),
+  ]
+    .map((match) => (match[0].match(/\b(?:100|[1-9]?\d)\b/g) ?? []).map(Number))
     .filter(
       (run) =>
         run.length >= 2 &&
@@ -2129,15 +2252,17 @@ function extractNumberRuns(value: string): number[][] {
 function hasTensProjectionExample(value: string): boolean {
   const runs = extractNumberRuns(value);
   return runs.some((left, leftIndex) =>
-    runs.slice(leftIndex + 1).some(
-      (right) =>
-        left.length === right.length &&
-        left.some((number, index) => number !== right[index]) &&
-        left.every(
-          (number, index) =>
-            Math.floor(number / 10) === Math.floor((right[index] ?? -1) / 10),
-        ),
-    ),
+    runs
+      .slice(leftIndex + 1)
+      .some(
+        (right) =>
+          left.length === right.length &&
+          left.some((number, index) => number !== right[index]) &&
+          left.every(
+            (number, index) =>
+              Math.floor(number / 10) === Math.floor((right[index] ?? -1) / 10),
+          ),
+      ),
   );
 }
 
@@ -2152,14 +2277,23 @@ export function looksLikeOrderedTensRangeRule(value: string): boolean {
   const hasAllPositions =
     /\b(all(?: six)?|every|each|todas?|todos?|seis)\b/.test(text);
   const hasPositionRelation =
-    /\b(same|matching|corresponding)\s+(order|position|positions|slot|slots)\b/.test(text) ||
-    /\b(mesma\s+ordem|na\s+mesma\s+ordem|posicoes?\s+correspondentes?)\b/.test(text);
+    /\b(same|matching|corresponding)\s+(order|position|positions|slot|slots)\b/.test(
+      text,
+    ) ||
+    /\b(mesma\s+ordem|na\s+mesma\s+ordem|posicoes?\s+correspondentes?)\b/.test(
+      text,
+    );
   const hasExplicitRange =
-    /\b(tens|ten-number|decade)\s+(range|ranges|group|groups|bucket|buckets)\b/.test(text) ||
-    /\b(faixas?|grupos?)\s+(?:de|das?)\s+dezenas?\b/.test(text);
+    /\b(tens|ten-number|decade)\s+(range|ranges|group|groups|bucket|buckets)\b/.test(
+      text,
+    ) || /\b(faixas?|grupos?)\s+(?:de|das?)\s+dezenas?\b/.test(text);
   const hasPortugueseExample =
     /\bdezenas?\b/.test(text) && hasTensProjectionExample(text);
-  return hasAllPositions && hasPositionRelation && (hasExplicitRange || hasPortugueseExample);
+  return (
+    hasAllPositions &&
+    hasPositionRelation &&
+    (hasExplicitRange || hasPortugueseExample)
+  );
 }
 
 function parseOrderedTensRangeRule(text: string): RuleAst | null {
@@ -2255,8 +2389,18 @@ function parseExactGuessSetRule(text: string): RuleAst | null {
         where: {
           kind: "and",
           clauses: [
-            { kind: "compare", left: { kind: "elem" }, op: "gte", right: { kind: "lit", value: low } },
-            { kind: "compare", left: { kind: "elem" }, op: "lte", right: { kind: "lit", value: high } },
+            {
+              kind: "compare",
+              left: { kind: "elem" },
+              op: "gte",
+              right: { kind: "lit", value: low },
+            },
+            {
+              kind: "compare",
+              left: { kind: "elem" },
+              op: "lte",
+              right: { kind: "lit", value: high },
+            },
           ],
         },
       });
@@ -2297,8 +2441,28 @@ function deterministicPatternPreservesText(ast: RuleAst, text: string) {
     return false;
   }
   const astOperations = collectAstOperations(ast);
-  return collectRequiredOperations(text).every((operation) =>
-    astOperations.has(operation),
+  if (
+    !collectRequiredOperations(text).every((operation) =>
+      astOperations.has(operation),
+    )
+  ) {
+    return false;
+  }
+
+  // Reuse the final semantic-coverage audit here so every deterministic shortcut
+  // is held to the same value/operation contract as a provider result before it
+  // can become the preferred artifact. Parsers for compositional families (for
+  // example positional comparisons) separately collect every clause instead of
+  // allowing a single regex match to stand in for a whole compound sentence.
+  const coverage = analyzeInterpretationCoverage({
+    ast,
+    officialInterpretation: describeRuleAstForPlayers(ast),
+    text,
+  });
+  return (
+    coverage.covered &&
+    coverage.missingFromAst.length === 0 &&
+    coverage.missingOperations.length === 0
   );
 }
 
@@ -2470,7 +2634,8 @@ function compileSupportedRulePattern(text: string): RuleAst | null {
     return predicateRule(oddSumRule);
   }
 
-  const orderedPositionCompareCount = parseOrderedPositionCompareCountRule(text);
+  const orderedPositionCompareCount =
+    parseOrderedPositionCompareCountRule(text);
   if (orderedPositionCompareCount) {
     return predicateRule(orderedPositionCompareCount);
   }
@@ -2490,7 +2655,8 @@ function compileSupportedRulePattern(text: string): RuleAst | null {
     return predicateRule(sortedPairSumComparison);
   }
 
-  const casualSortedPairSumComparison = parseCasualSortedPairSumComparisonRule(text);
+  const casualSortedPairSumComparison =
+    parseCasualSortedPairSumComparisonRule(text);
   if (casualSortedPairSumComparison) {
     return predicateRule(casualSortedPairSumComparison);
   }
@@ -2505,7 +2671,8 @@ function compileSupportedRulePattern(text: string): RuleAst | null {
     return predicateRule(evenCountEquality);
   }
 
-  const compoundMatchAndSumComparison = parseCompoundMatchAndSumComparisonRule(text);
+  const compoundMatchAndSumComparison =
+    parseCompoundMatchAndSumComparisonRule(text);
   if (compoundMatchAndSumComparison) {
     return predicateRule(compoundMatchAndSumComparison);
   }
@@ -2516,8 +2683,12 @@ function compileSupportedRulePattern(text: string): RuleAst | null {
   }
 
   if (
-    /\b(guessed?|picked|ticket|your)(?:\s+sum|\s+total)?\b.{0,30}\b(greater|higher|above|more|bigger|larger)\b.{0,60}\b(draw|drawn)(?:\s+sum|\s+total)?\b/i.test(text) &&
-    /\bat least\s+([1-6]|one|two|three|four|five|six)\b.{0,80}\b(numbers?\s+)?(match|matches|appear|appears|hits?)\b/i.test(text)
+    /\b(guessed?|picked|ticket|your)(?:\s+sum|\s+total)?\b.{0,30}\b(greater|higher|above|more|bigger|larger)\b.{0,60}\b(draw|drawn)(?:\s+sum|\s+total)?\b/i.test(
+      text,
+    ) &&
+    /\bat least\s+([1-6]|one|two|three|four|five|six)\b.{0,80}\b(numbers?\s+)?(match|matches|appear|appears|hits?)\b/i.test(
+      text,
+    )
   ) {
     const threshold = parseMatchCountRule(text) ?? 1;
     return predicateRule({
@@ -2536,7 +2707,11 @@ function compileSupportedRulePattern(text: string): RuleAst | null {
   const exactMatchCount = parseExactMatchCountRule(text);
   if (exactMatchCount !== null) {
     return predicateRule(
-      compare(count(intersection(source("guess"), source("draw"))), "eq", lit(exactMatchCount)),
+      compare(
+        count(intersection(source("guess"), source("draw"))),
+        "eq",
+        lit(exactMatchCount),
+      ),
     );
   }
 
@@ -2549,18 +2724,26 @@ function compileSupportedRulePattern(text: string): RuleAst | null {
   }
 
   if (
-    /\bno\b.{0,40}\b(guessed?|picked|ticket|your)\s+numbers?\b.{0,60}\b(appear|appears|match|matches|drawn|in the draw)\b/i.test(text) ||
+    /\bno\b.{0,40}\b(guessed?|picked|ticket|your)\s+numbers?\b.{0,60}\b(appear|appears|match|matches|drawn|in the draw)\b/i.test(
+      text,
+    ) ||
     // "none of its six numbers appear in the draw". The determiner and the
     // cardinality phrase are both optional: "its"/"their" were missing from the
     // original alternation, and an intervening "six" pushed the sentence into
     // the match-count parser instead. A qualifier between the determiner and
     // "numbers" (e.g. "none of its EVEN numbers") is deliberately not accepted —
     // that is a different rule about a subset, not zero overlap.
-    /\b(?:none\s+of|not\s+one\s+of)\s+(?:my|your|the|its|their)?\s*(?:six\s+|6\s+)?(?:guessed?|picked|chosen|ticket)?\s*numbers?\b.{0,60}\b(appear|appears|match|matches|drawn|in the draw)\b/i.test(text) ||
+    /\b(?:none\s+of|not\s+one\s+of)\s+(?:my|your|the|its|their)?\s*(?:six\s+|6\s+)?(?:guessed?|picked|chosen|ticket)?\s*numbers?\b.{0,60}\b(appear|appears|match|matches|drawn|in the draw)\b/i.test(
+      text,
+    ) ||
     /\b(ticket|picks?|numbers?)\b.{0,40}\bdodges?\s+the\s+draw\b/i.test(text)
   ) {
     return predicateRule(
-      compare(count(intersection(source("guess"), source("draw"))), "eq", lit(0)),
+      compare(
+        count(intersection(source("guess"), source("draw"))),
+        "eq",
+        lit(0),
+      ),
     );
   }
 
@@ -2570,10 +2753,16 @@ function compileSupportedRulePattern(text: string): RuleAst | null {
   }
 
   if (
-    /\bevery\b.{0,40}\b(guessed?|picked|ticket|your)\s+numbers?\b.{0,30}\b(lower|less|below|greater|higher|above|sit below|sits below)\b.{0,60}\b(draw|drawn)\b/i.test(text) &&
-    /\b(same position|corresponding position|same index|matching position|same slot)\b/i.test(text)
+    /\bevery\b.{0,40}\b(guessed?|picked|ticket|your)\s+numbers?\b.{0,30}\b(lower|less|below|greater|higher|above|sit below|sits below)\b.{0,60}\b(draw|drawn)\b/i.test(
+      text,
+    ) &&
+    /\b(same position|corresponding position|same index|matching position|same slot)\b/i.test(
+      text,
+    )
   ) {
-    const op = /\b(lower|less|below|sit below|sits below)\b/i.test(text) ? "lt" : "gt";
+    const op = /\b(lower|less|below|sit below|sits below)\b/i.test(text)
+      ? "lt"
+      : "gt";
     return predicateRule({
       kind: "all_ordered_compare",
       left: source("guess"),
@@ -2583,16 +2772,26 @@ function compileSupportedRulePattern(text: string): RuleAst | null {
   }
 
   if (
-    /\b(same set|same numbers?|same six numbers?|contain the same set)\b/i.test(text) &&
-    /\b(regardless of order|any order|unordered|order does not matter|different order)\b/i.test(text)
+    /\b(same set|same numbers?|same six numbers?|contain the same set)\b/i.test(
+      text,
+    ) &&
+    /\b(regardless of order|any order|unordered|order does not matter|different order)\b/i.test(
+      text,
+    )
   ) {
     return predicateRule(
-      compare(count(intersection(source("guess"), source("draw"))), "eq", lit(6)),
+      compare(
+        count(intersection(source("guess"), source("draw"))),
+        "eq",
+        lit(6),
+      ),
     );
   }
 
   if (
-    /\b(number|count|amount)\b.{0,40}\beven\b.{0,80}\b(equal|equals|same|match|matches|amount)\b.{0,80}\beven\b/i.test(text) ||
+    /\b(number|count|amount)\b.{0,40}\beven\b.{0,80}\b(equal|equals|same|match|matches|amount)\b.{0,80}\beven\b/i.test(
+      text,
+    ) ||
     /\bsame\s+amount\s+of\s+even\s+numbers?\b/i.test(text)
   ) {
     return predicateRule(
@@ -2613,7 +2812,9 @@ function compileSupportedRulePattern(text: string): RuleAst | null {
     /\bsum\b/.test(text) &&
     /\b(equal|equals|same|match|matches)\b/.test(text) &&
     /\b(draw|drawn)\b/.test(text) &&
-    /\b(guess|guessed|submitted|your numbers|your|my six numbers|ticket|picks?)\b/.test(text)
+    /\b(guess|guessed|submitted|your numbers|your|my six numbers|ticket|picks?)\b/.test(
+      text,
+    )
   ) {
     return { schemaVersion: 1, node: { kind: "sum_equals" } };
   }
@@ -2703,9 +2904,7 @@ function parseOrderedGuessPrefixRule(text: string): RuleAst | null {
   }
 
   const literalSpan = text.slice(cue.index + cue[0].length, remainder.index);
-  const values = (literalSpan.match(/\b(?:100|[1-9]?\d)\b/g) ?? []).map(
-    Number,
-  );
+  const values = (literalSpan.match(/\b(?:100|[1-9]?\d)\b/g) ?? []).map(Number);
   const statedPrefixCount = prefix ? readSmallCount(prefix[1]) : values.length;
   if (
     !statedPrefixCount ||
@@ -2739,10 +2938,7 @@ function parseOrderedGuessPrefixRule(text: string): RuleAst | null {
     schemaVersion: 3,
     result: {
       type: "predicate",
-      predicate:
-        clauses.length === 1
-          ? clauses[0]!
-          : { kind: "and", clauses },
+      predicate: clauses.length === 1 ? clauses[0]! : { kind: "and", clauses },
     },
   };
 }
@@ -2775,7 +2971,11 @@ function at(of: ArrayExpr, index: number): ScalarExpr {
   return { kind: "at", index, of };
 }
 
-function arith(op: "add" | "sub" | "mul" | "div" | "mod", left: ScalarExpr, right: ScalarExpr): ScalarExpr {
+function arith(
+  op: "add" | "sub" | "mul" | "div" | "mod",
+  left: ScalarExpr,
+  right: ScalarExpr,
+): ScalarExpr {
   return { kind: "arith", left, op, right };
 }
 
@@ -2795,19 +2995,11 @@ function sliceArray(of: ArrayExpr, start: number, end?: number): ArrayExpr {
   return { kind: "slice", of, start, ...(end === undefined ? {} : { end }) };
 }
 
-function filterMod(
-  of: ArrayExpr,
-  modulus: number,
-  equals: number,
-): ArrayExpr {
+function filterMod(of: ArrayExpr, modulus: number, equals: number): ArrayExpr {
   return { kind: "filter_mod", equals, modulus, of };
 }
 
-function filterCompare(
-  of: ArrayExpr,
-  op: CompareOp,
-  value: number,
-): ArrayExpr {
+function filterCompare(of: ArrayExpr, op: CompareOp, value: number): ArrayExpr {
   return { kind: "filter_compare", of, op, value };
 }
 
@@ -2862,10 +3054,16 @@ function parseWordOrDigit(value: string): number | null {
   return Number.isInteger(parsed) ? parsed : null;
 }
 
-function parseRemovedHighestSumComparisonRule(text: string): PredicateNode | null {
+function parseRemovedHighestSumComparisonRule(
+  text: string,
+): PredicateNode | null {
   if (
-    !/\b(ignore|drop|remove)\b[^.]{0,35}\b(highest|largest|biggest)\b[^.]{0,35}\b(picked|pick|guess|guessed|ticket|my)\b/i.test(text) ||
-    !/\b(rest|remaining|after that)\b[^.]{0,80}\b(total|sum|add up)\b[^.]{0,80}\b(same|equal|equals|match|matches)\b[^.]{0,80}\b(full\s+)?draw\b/i.test(text)
+    !/\b(ignore|drop|remove)\b[^.]{0,35}\b(highest|largest|biggest)\b[^.]{0,35}\b(picked|pick|guess|guessed|ticket|my)\b/i.test(
+      text,
+    ) ||
+    !/\b(rest|remaining|after that)\b[^.]{0,80}\b(total|sum|add up)\b[^.]{0,80}\b(same|equal|equals|match|matches)\b[^.]{0,80}\b(full\s+)?draw\b/i.test(
+      text,
+    )
   ) {
     return null;
   }
@@ -2896,7 +3094,10 @@ function parseRemovedLowestMatchRule(text: string): PredicateNode | null {
     return null;
   }
   return countAtLeast(
-    intersection(removeUpToN(source("guess"), removeCount, "lowest"), source("draw")),
+    intersection(
+      removeUpToN(source("guess"), removeCount, "lowest"),
+      source("draw"),
+    ),
     threshold,
   );
 }
@@ -3003,14 +3204,17 @@ function parseFilteredCountComparisonRule(text: string): PredicateNode | null {
   const match =
     splitMatch ??
     text.match(
-    /\bcount\b[^.]{0,30}\b(guessed?|picked|ticket|your)\b[^.]{0,25}\b(below|under|less than|fewer than|above|over|greater than|more than)\s+(\d+)\b[^.]{0,50}\b(equal|equals|same|matches?|is)\b[^.]{0,50}\b(drawn?|draw)\b[^.]{0,25}\b(below|under|less than|fewer than|above|over|greater than|more than)\s+(\d+)\b/i,
+      /\bcount\b[^.]{0,30}\b(guessed?|picked|ticket|your)\b[^.]{0,25}\b(below|under|less than|fewer than|above|over|greater than|more than)\s+(\d+)\b[^.]{0,50}\b(equal|equals|same|matches?|is)\b[^.]{0,50}\b(drawn?|draw)\b[^.]{0,25}\b(below|under|less than|fewer than|above|over|greater than|more than)\s+(\d+)\b/i,
     );
   if (!match) {
     return null;
   }
   const opFor = (word: string): CompareOp =>
     /below|under|less|fewer/i.test(word) ? "lt" : "gt";
-  const splitOpWord = splitMatch?.[0]?.match(/\b(below|under|less than|above|over|greater than)\b/i)?.[1] ?? "";
+  const splitOpWord =
+    splitMatch?.[0]?.match(
+      /\b(below|under|less than|above|over|greater than)\b/i,
+    )?.[1] ?? "";
   const guessValue = splitMatch ? Number(match[1]) : Number(match[3]);
   const drawValue = splitMatch ? Number(match[1]) : Number(match[7]);
   const guessOpWord = splitMatch ? splitOpWord : (match[2] ?? "");
@@ -3054,11 +3258,20 @@ function parseSlicedSumComparisonRule(text: string): PredicateNode | null {
   const otherN = parseWordOrDigit(
     explicitMatch ? (casualMatch[6] ?? "") : (casualMatch[5] ?? ""),
   );
-  if (n === null || otherN === null || n !== otherN || n < 1 || n > 6 || side !== otherSide) {
+  if (
+    n === null ||
+    otherN === null ||
+    n !== otherN ||
+    n < 1 ||
+    n > 6 ||
+    side !== otherSide
+  ) {
     return null;
   }
   const sliceFor = (name: "draw" | "guess"): ArrayExpr =>
-    side === "first" ? sliceArray(source(name), 0, n) : sliceArray(source(name), 6 - n);
+    side === "first"
+      ? sliceArray(source(name), 0, n)
+      : sliceArray(source(name), 6 - n);
   return compare(sum(sliceFor("guess")), "eq", sum(sliceFor("draw")));
 }
 
@@ -3128,8 +3341,8 @@ function parseOrderedParityMatchRule(text: string): PredicateNode | null {
         text,
       ) ||
       /\bposition\s+by\s+position\b[^.]{0,80}\beach\s+(pick|picked|guess|guessed)\b[^.]{0,60}\bsame\s+(odd-or-even|odd\s+or\s+even|parity)\s+type\b[^.]{0,60}\b(drawn?|draw)\s+number\b/i.test(
-      text,
-    )
+        text,
+      )
     )
   ) {
     return null;
@@ -3289,8 +3502,9 @@ function parseMostMatchesRankingRule(text: string): RuleAst | null {
   }
 
   // Direction: "fewest / least / menos" minimize; "most / more / mais" maximize.
-  const minimize =
-    /\b(fewest|least|smallest\s+number\s+of|menos)\b/i.test(text);
+  const minimize = /\b(fewest|least|smallest\s+number\s+of|menos)\b/i.test(
+    text,
+  );
   const maximize =
     /\b(most|more|mais|greatest\s+number\s+of|largest\s+number\s+of)\b/i.test(
       text,
@@ -3307,8 +3521,10 @@ function parseMostMatchesRankingRule(text: string): RuleAst | null {
   const comparative = "(?:most|more|fewest|least|mais|menos)";
   const scoreNoun =
     "(?:matching\\s+)?(?:numbers?|matches|hits|misses|wrong|acertos?|erros?|numeros?)";
-  const matchVerb = "(?:match(?:es|ed|ing)?|hits?|guess(?:es|ed)?|acert\\w*|correct)";
-  const missVerb = "(?:miss(?:es|ed|ing)?|wrong|errar|erra|errou|errad\\w*|fora)";
+  const matchVerb =
+    "(?:match(?:es|ed|ing)?|hits?|guess(?:es|ed)?|acert\\w*|correct)";
+  const missVerb =
+    "(?:miss(?:es|ed|ing)?|wrong|errar|erra|errou|errad\\w*|fora)";
   const hasMissIntent = new RegExp(`\\b${missVerb}\\b`, "i").test(text);
   const scoreConcept =
     new RegExp(`\\b${comparative}\\b[^.]{0,30}\\b${scoreNoun}\\b`, "i").test(
@@ -3528,7 +3744,9 @@ function looksLikeAmbiguousReverseRule(text: string) {
   return (
     /\bmatch(?:es)?\b.{0,40}\b(draw|drawn)\b.{0,40}\breverse\b/i.test(text) &&
     !/\bposition\s*1\b.{0,80}\bposition\s*6\b/i.test(text) &&
-    !/\bat least\s+([1-6]|one|two|three|four|five|six)\b.{0,80}\breversed?\s+positions?\b/i.test(text) &&
+    !/\bat least\s+([1-6]|one|two|three|four|five|six)\b.{0,80}\breversed?\s+positions?\b/i.test(
+      text,
+    ) &&
     // "all six reversed positions should match" is fully explicit, not vague.
     !/\ball\s+(six|6)\b.{0,40}\breversed?\s+(positions?|slots?)\b/i.test(text)
   );
@@ -3537,7 +3755,9 @@ function looksLikeAmbiguousReverseRule(text: string) {
 function looksLikeObjectiveStartComparison(text: string) {
   return (
     /\bstart\s+stronger\b/i.test(text) &&
-    /\bfirst\s+pick\b.{0,80}\b(higher|greater|above|more)\b.{0,80}\bfirst\s+drawn\s+number\b/i.test(text)
+    /\bfirst\s+pick\b.{0,80}\b(higher|greater|above|more)\b.{0,80}\bfirst\s+drawn\s+number\b/i.test(
+      text,
+    )
   );
 }
 
@@ -3572,7 +3792,9 @@ function looksLikeDefinedObjectiveRule(text: string): boolean {
 
 function looksLikeObjectiveEvenCountComparison(text: string) {
   return (
-    /\b(same\s+number\s+of\s+evens|number\s+of\s+even\b.{0,80}\b(equal|equals|same|match|matches))\b/i.test(text) &&
+    /\b(same\s+number\s+of\s+evens|number\s+of\s+even\b.{0,80}\b(equal|equals|same|match|matches))\b/i.test(
+      text,
+    ) &&
     /\b(guess|guessed|picked|ticket|picks?)\b/i.test(text) &&
     /\b(draw|drawn)\b/i.test(text)
   );
@@ -3750,7 +3972,8 @@ function describePredicate(predicate: PredicateNode): string | null {
       predicate.right.kind === "source" &&
       predicate.right.source === "draw"
     ) {
-      const digitName = predicate.place === "units" ? "last digit" : "tens digit";
+      const digitName =
+        predicate.place === "units" ? "last digit" : "tens digit";
       return `at least ${predicate.value} guessed numbers have the same ${digitName} as any drawn number`;
     }
     return null;
@@ -3832,7 +4055,10 @@ function describeScalar(scalar: ScalarExpr): string | null {
     return String(scalar.value);
   }
   if (scalar.kind === "reduce") {
-    if (scalar.op === "count" && isIntersectionOfSources(scalar.of, "guess", "draw")) {
+    if (
+      scalar.op === "count" &&
+      isIntersectionOfSources(scalar.of, "guess", "draw")
+    ) {
       return "the count of guessed numbers that appear in the official draw";
     }
     if (scalar.of.kind === "source") {
@@ -3981,7 +4207,10 @@ function parseExactMatchCountRule(text: string): number | null {
 }
 
 function parseOrdinal(value: string): number | null {
-  const normalized = value.toLowerCase();
+  const normalized = value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "");
   const ordinals = new Map<string, number>([
     ["first", 0],
     ["1st", 0],
@@ -3995,6 +4224,7 @@ function parseOrdinal(value: string): number | null {
     ["5th", 4],
     ["sixth", 5],
     ["6th", 5],
+    ["last", 5],
     ["primeiro", 0],
     ["primeira", 0],
     ["segundo", 1],
@@ -4007,6 +4237,8 @@ function parseOrdinal(value: string): number | null {
     ["quinta", 4],
     ["sexto", 5],
     ["sexta", 5],
+    ["ultimo", 5],
+    ["ultima", 5],
   ]);
   return ordinals.get(normalized) ?? null;
 }
@@ -4047,7 +4279,10 @@ function parsePositionSpecificRangeRule(text: string): RuleAst | null {
     }
     seenPositions.add(positionKey);
     const value = at(source(sourceName), index);
-    clauses.push(compare(value, "gte", lit(low)), compare(value, "lte", lit(high)));
+    clauses.push(
+      compare(value, "gte", lit(low)),
+      compare(value, "lte", lit(high)),
+    );
   }
 
   return predicateRule({ kind: "and", clauses });
@@ -4071,23 +4306,47 @@ function parseComparisonWord(value: string): CompareOp | null {
 }
 
 function parsePositionComparisonRule(text: string): PredicateNode | null {
-  const match =
-    text.match(
-      /\b(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|sixth|6th)\s+(?:(?:guessed?|picked|drawn?|draw|ticket)\s+)?(?:number|pick)\b.{0,50}(?:\b(?:is|be|are)\b\s+)?\b(equal|equals|same|matches?|match|greater|higher|above|more|bigger|larger|beats?|exceeds?|lower|less|below|smaller)\b.{0,60}\b(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|sixth|6th)\s+(?:(?:drawn?|draw)\s+number|number\s+that\s+gets\s+drawn)\b/i,
-    ) ??
-    text.match(
-      /\b(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|sixth|6th)\s+(?:number|pick)\b.{0,30}\b(?:ticket|guess)\b.{0,40}\b(equal|equals|same|matches?|match|greater|higher|above|more|bigger|larger|beats?|exceeds?|lower|less|below|smaller)\b.{0,60}\b(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|sixth|6th)\s+(?:(?:drawn?|draw)\s+number|number\s+that\s+gets\s+drawn)\b/i,
+  const ordinal =
+    "first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|sixth|6th|last|primeir[oa]|segund[oa]|terceir[oa]|quart[oa]|quint[oa]|sext[oa]|[uú]ltim[oa]";
+  const comparison =
+    "equal|equals|same|matches?|match|greater|higher|above|more|bigger|larger|beats?|exceeds?|lower|less|below|smaller|igual|maior|superior|excede|menor|inferior";
+  const clausePattern = new RegExp(
+    `\\b(${ordinal})\\s+(?:(?:guessed?|picked|ticket|guess)\\s+)?(?:number|pick|n[uú]mero)\\b.{0,40}?\\b(${comparison})\\b.{0,55}?\\b(${ordinal})\\s+(?:(?:(?:drawn?|draw)\\s+(?:number|pick))|(?:number\\s+that\\s+gets\\s+drawn)|(?:n[uú]mero\\s+(?:do|de)\\s+sorteio))\\b`,
+    "giu",
+  );
+
+  const clauses: PredicateNode[] = [];
+  const signatures = new Set<string>();
+  for (const match of text.matchAll(clausePattern)) {
+    const leftIndex = match[1] ? parseOrdinal(match[1]) : null;
+    const op = match[2] ? parseComparisonWord(match[2]) : null;
+    const rightIndex = match[3] ? parseOrdinal(match[3]) : null;
+    if (leftIndex === null || rightIndex === null || op === null) {
+      continue;
+    }
+    const signature = `${leftIndex}:${op}:${rightIndex}`;
+    if (signatures.has(signature)) {
+      continue;
+    }
+    signatures.add(signature);
+    clauses.push(
+      compare(
+        at(source("guess"), leftIndex),
+        op,
+        at(source("draw"), rightIndex),
+      ),
     );
-  const leftIndex = match?.[1] ? parseOrdinal(match[1]) : null;
-  const op = match?.[2] ? parseComparisonWord(match[2]) : null;
-  const rightIndex = match?.[3] ? parseOrdinal(match[3]) : null;
-  if (leftIndex === null || rightIndex === null || op === null) {
+  }
+
+  if (clauses.length === 0) {
     return null;
   }
-  return compare(at(source("guess"), leftIndex), op, at(source("draw"), rightIndex));
+  return clauses.length === 1 ? clauses[0]! : { kind: "and", clauses };
 }
 
-function parseOrderedAbsoluteDifferenceRule(text: string): PredicateNode | null {
+function parseOrderedAbsoluteDifferenceRule(
+  text: string,
+): PredicateNode | null {
   const match = text.match(
     /\babsolute\s+difference\b.{0,80}\beach\s+(?:guessed?|picked|ticket|your)\s+number\b.{0,80}\b(draw|drawn)\s+number\b.{0,80}\b(same position|corresponding position|same index|same slot)\b.{0,80}\b(at most|no more than|less than or equal to|<=)\s+([0-9]+)\b/i,
   );
@@ -4190,7 +4449,13 @@ function parseStrictGuessRangeRule(text: string): RuleAst | null {
   }
   const low = Number(match[1]);
   const high = Number(match[2]);
-  if (!Number.isInteger(low) || !Number.isInteger(high) || low < 0 || high > 101 || low >= high) {
+  if (
+    !Number.isInteger(low) ||
+    !Number.isInteger(high) ||
+    low < 0 ||
+    high > 101 ||
+    low >= high
+  ) {
     return null;
   }
   return {
@@ -4445,9 +4710,7 @@ function parseCompoundWithinAndExactPositionRule(text: string): RuleAst | null {
   const exactMatch = text.match(
     /\b(?:and|e)\s+at\s+least\s+(one|two|three|four|five|six|[1-6])\b[^.]{0,60}\b(?:guessed?|picked|ticket|your)?\s*numbers?\b[^.]{0,60}\b(?:exactly\s+)?(?:equals?|matches?)\b[^.]{0,60}\b(?:their\s+)?(?:drawn?|draw)(?:\s+numbers?)?\b[^.]{0,60}\b(?:same|corresponding|that|those)\s+positions?\b/i,
   );
-  const minimumExact = exactMatch?.[1]
-    ? parseWordOrDigit(exactMatch[1])
-    : null;
+  const minimumExact = exactMatch?.[1] ? parseWordOrDigit(exactMatch[1]) : null;
   if (minimumExact === null || minimumExact < 1 || minimumExact > 6) {
     return null;
   }
@@ -4553,7 +4816,11 @@ function parseExactParityCountRule(text: string): PredicateNode | null {
     !/\b(guess|guessed|picked|ticket)\b/i.test(text);
   const src = source(drawOnly ? "draw" : "guess");
   const clauseFor = (parity: string, value: number): PredicateNode =>
-    compare(count(filterMod(src, 2, parity === "odd" ? 1 : 0)), "eq", lit(value));
+    compare(
+      count(filterMod(src, 2, parity === "odd" ? 1 : 0)),
+      "eq",
+      lit(value),
+    );
   return {
     kind: "and",
     clauses: [
@@ -4563,11 +4830,17 @@ function parseExactParityCountRule(text: string): PredicateNode | null {
   };
 }
 
-function parseTotalOrderedAbsoluteDifferenceRule(text: string): PredicateNode | null {
+function parseTotalOrderedAbsoluteDifferenceRule(
+  text: string,
+): PredicateNode | null {
   const match = text.match(
     /\btotal\s+absolute\b.{0,80}\b(position-by-position|same-position|same position|corresponding position|corresponding-position)\s+difference\b.{0,80}\b(guess|guessed|ticket|your)\b.{0,80}\b(draw|drawn)\b.{0,80}(?:(?:\b(is\s+)?(at most|no more than|less than or equal to|<=)\s+([0-9]+)\b)|(?:\b(is\s+)?([0-9]+)\s+or\s+less\b))/i,
   );
-  const value = match?.[6] ? Number(match[6]) : match?.[8] ? Number(match[8]) : NaN;
+  const value = match?.[6]
+    ? Number(match[6])
+    : match?.[8]
+      ? Number(match[8])
+      : NaN;
   if (!Number.isInteger(value) || value < 0 || value > 600) {
     return null;
   }
@@ -4579,7 +4852,9 @@ function parseTotalOrderedAbsoluteDifferenceRule(text: string): PredicateNode | 
   };
 }
 
-function parseOrderedPositionMatchCountRule(text: string): PredicateNode | null {
+function parseOrderedPositionMatchCountRule(
+  text: string,
+): PredicateNode | null {
   const match =
     text.match(
       /\b(exactly|at least|at most)\s+([0-6]|one|two|three|four|five|six)\b.{0,80}\b(guessed?|picked|ticket|your)?\s*numbers?\b.{0,80}\b(match|matches|equal|equals)\b.{0,80}\b(same position|same positions|corresponding position|corresponding positions|same index|same indexes)\b/i,
@@ -4612,7 +4887,9 @@ function parseDigitMatchCountRule(text: string): PredicateNode | null {
     /\bat least\s+([1-6]|one|two|three|four|five|six)\b.{0,80}\b(?:(?:guessed?|picked|ticket|your)\s+numbers?|picks?)\b.{0,80}\b(?:same\s+)?(?:last|units?)\s+digit\b.{0,80}\b(?:any\s+)?drawn?\s+number\b/i,
   );
   const rawValue = match?.[1]?.toLowerCase();
-  const value = rawValue ? NUMBER_WORDS.get(rawValue) ?? Number(rawValue) : NaN;
+  const value = rawValue
+    ? (NUMBER_WORDS.get(rawValue) ?? Number(rawValue))
+    : NaN;
   if (!Number.isInteger(value) || value < 1 || value > 6) {
     return null;
   }
@@ -4628,12 +4905,17 @@ function parseDigitMatchCountRule(text: string): PredicateNode | null {
 function parseOddSumEqualsRule(text: string): PredicateNode | null {
   if (
     !(
-      /\bsum\b.{0,40}\bodd\s+(guessed?|picked|ticket|your)\s+numbers?\b/i.test(text) ||
-      /\bodd\s+(picks?|guessed?|picked|ticket|your)\b.{0,40}\b(add up|sum|total)\b/i.test(text)
+      /\bsum\b.{0,40}\bodd\s+(guessed?|picked|ticket|your)\s+numbers?\b/i.test(
+        text,
+      ) ||
+      /\bodd\s+(picks?|guessed?|picked|ticket|your)\b.{0,40}\b(add up|sum|total)\b/i.test(
+        text,
+      )
     ) ||
     !(
-      /\b(equal|equals|same|match|matches)\b.{0,40}\bsum\b.{0,40}\bodd\s+(drawn?|draw)\s+numbers?\b/i.test(text) ||
-      /\bsame\s+odd-number\s+total\s+in\s+the\s+draw\b/i.test(text)
+      /\b(equal|equals|same|match|matches)\b.{0,40}\bsum\b.{0,40}\bodd\s+(drawn?|draw)\s+numbers?\b/i.test(
+        text,
+      ) || /\bsame\s+odd-number\s+total\s+in\s+the\s+draw\b/i.test(text)
     )
   ) {
     return null;
@@ -4660,12 +4942,18 @@ const ORDERED_POSITION_COMPARE_COUNT_PATTERNS = [
   /\bexactly\s+([0-6]|one|two|three|four|five|six)\s+positions?\b.{0,80}\b(?:guessed?|picked|ticket|your|my)\s+numbers?\b.{0,80}\b(greater|higher|above|more|lower|less|below|smaller)\b.{0,80}\b(?:drawn?|draw)\s+number\b/i,
 ] as const;
 
-function parseOrderedPositionCompareCountRule(text: string): PredicateNode | null {
-  const match = ORDERED_POSITION_COMPARE_COUNT_PATTERNS.reduce<
-    RegExpMatchArray | null
-  >((found, pattern) => found ?? text.match(pattern), null);
+function parseOrderedPositionCompareCountRule(
+  text: string,
+): PredicateNode | null {
+  const match =
+    ORDERED_POSITION_COMPARE_COUNT_PATTERNS.reduce<RegExpMatchArray | null>(
+      (found, pattern) => found ?? text.match(pattern),
+      null,
+    );
   const rawValue = match?.[1]?.toLowerCase();
-  const value = rawValue ? NUMBER_WORDS.get(rawValue) ?? Number(rawValue) : NaN;
+  const value = rawValue
+    ? (NUMBER_WORDS.get(rawValue) ?? Number(rawValue))
+    : NaN;
   const op = match?.[2] ? parseComparisonWord(match[2]) : null;
   if (!Number.isInteger(value) || value < 0 || value > 6 || !op) {
     return null;
@@ -4681,9 +4969,13 @@ function parseOrderedPositionCompareCountRule(text: string): PredicateNode | nul
 
 function parseAllValuesBetweenMinMaxRule(text: string): PredicateNode | null {
   if (
-    !/\b(all\s+)?(guessed?|picked|ticket|my|your)\s+(numbers?|picks?)\b/i.test(text) ||
+    !/\b(all\s+)?(guessed?|picked|ticket|my|your)\s+(numbers?|picks?)\b/i.test(
+      text,
+    ) ||
     !(
-      /\bbetween\b.{0,80}\bsmallest\b.{0,40}\blargest\b.{0,40}\bdrawn?\s+number\b/i.test(text) ||
+      /\bbetween\b.{0,80}\bsmallest\b.{0,40}\blargest\b.{0,40}\bdrawn?\s+number\b/i.test(
+        text,
+      ) ||
       /\binside\b.{0,80}\bdraw'?s\s+lowest-to-highest\s+range\b/i.test(text) ||
       /\binside\b.{0,80}\bdraw'?s\s+lowest\s+to\s+highest\s+range\b/i.test(text)
     )
@@ -4738,7 +5030,9 @@ function parseSortedPairSumComparisonRule(text: string): PredicateNode | null {
   );
 }
 
-function parseCasualSortedPairSumComparisonRule(text: string): PredicateNode | null {
+function parseCasualSortedPairSumComparisonRule(
+  text: string,
+): PredicateNode | null {
   const sideMatch = text.match(
     /\btwo\s+(smallest|lowest|biggest|largest|highest)\s+numbers?\b/i,
   );
@@ -4748,7 +5042,11 @@ function parseCasualSortedPairSumComparisonRule(text: string): PredicateNode | n
   if (!sideMatch?.[1] || !compareMatch?.[2]) {
     return null;
   }
-  if (!/\b(each side|ticket'?s pair|my ticket|my picks?|draw'?s pair|drawn?)\b/i.test(text)) {
+  if (
+    !/\b(each side|ticket'?s pair|my ticket|my picks?|draw'?s pair|drawn?)\b/i.test(
+      text,
+    )
+  ) {
     return null;
   }
   const order = /smallest|lowest/i.test(sideMatch[1]) ? "asc" : "desc";
@@ -4765,12 +5063,19 @@ function parseCasualSortedPairSumComparisonRule(text: string): PredicateNode | n
 
 function parseEvenCountEqualityRule(text: string): PredicateNode | null {
   if (
-    !/\b(same\s+(number|amount)\s+of\s+evens?|number\s+of\s+even\b.{0,80}\b(equal|equals|same|match|matches))\b/i.test(text) &&
-    !/\bnumber\b.{0,40}\beven\b.{0,80}\b(equal|equals|same|match|matches)\b.{0,80}\beven\b/i.test(text)
+    !/\b(same\s+(number|amount)\s+of\s+evens?|number\s+of\s+even\b.{0,80}\b(equal|equals|same|match|matches))\b/i.test(
+      text,
+    ) &&
+    !/\bnumber\b.{0,40}\beven\b.{0,80}\b(equal|equals|same|match|matches)\b.{0,80}\beven\b/i.test(
+      text,
+    )
   ) {
     return null;
   }
-  if (!/\b(guess|guessed|picked|ticket|picks?)\b/i.test(text) || !/\b(draw|drawn)\b/i.test(text)) {
+  if (
+    !/\b(guess|guessed|picked|ticket|picks?)\b/i.test(text) ||
+    !/\b(draw|drawn)\b/i.test(text)
+  ) {
     return null;
   }
   return compare(
@@ -4780,7 +5085,9 @@ function parseEvenCountEqualityRule(text: string): PredicateNode | null {
   );
 }
 
-function parseCompoundMatchAndSumComparisonRule(text: string): PredicateNode | null {
+function parseCompoundMatchAndSumComparisonRule(
+  text: string,
+): PredicateNode | null {
   const matchThreshold = parseMatchCountRule(text);
   if (!matchThreshold) {
     return null;
@@ -4816,10 +5123,10 @@ function parseDirectSumComparisonRule(text: string): PredicateNode | null {
   }
 
   const english = text.match(
-    /\b(?:(?:sum|total(?:\s+sum)?)\s+of\s+(?:(?:the\s+)?(?:guess|ticket)(?:'s)?|(?:the\s+)?(?:guessed|picked)|your|my|its)(?:\s+(?:six|6))?\s+numbers?|(?:(?:your|my)\s+)?(?:guess|ticket|guessed|picked)(?:'s)?\s+(?:total\s+sum|sum|total)|its\s+(?:total\s+sum|sum|total))\s+(?:is|be|are)\s+(greater|higher|above|more|bigger|larger|lower|less|below|smaller)(?:\s+than)?\s+(?:(?:the\s+)?(?:sum|total(?:\s+sum)?)\s+of\s+(?:the\s+)?(?:official\s+)?(?:draw|drawn)(?:'s)?(?:\s+(?:six|6))?\s+numbers?|(?:the\s+)?(?:official\s+)?(?:draw|drawn)(?:'s)?\s+(?:total\s+sum|sum|total))\b/iu,
+    /\b(?:(?:sum|total(?:\s+sum)?)\s+of\s+(?:(?:the\s+)?(?:guess|ticket)(?:'s)?|(?:the\s+)?(?:guessed|picked)|your|my|its)(?:\s+(?:six|6))?\s+numbers?|(?:(?:your|my)\s+)?(?:guess|ticket|guessed|picked)(?:'s)?\s+(?:total\s+sum|sum|total)|its\s+(?:total\s+sum|sum|total))\s+(?:is|be|are)\s+(?:strictly\s+)?(greater|higher|above|more|bigger|larger|lower|less|below|smaller)(?:\s+than)?\s+(?:(?:the\s+)?(?:sum|total(?:\s+sum)?)\s+of\s+(?:the\s+)?(?:official\s+)?(?:draw|drawn)(?:'s)?(?:\s+(?:six|6))?\s+numbers?|(?:the\s+)?(?:official\s+)?(?:draw|drawn)(?:'s)?\s+(?:total\s+sum|sum|total))\b/iu,
   );
   const portuguese = text.match(
-    /\b(?:a\s+)?soma(?:\s+total)?\s+d(?:os|as)\s+(?:seus?|suas?|meus?|minhas?)\s+(?:(?:seis|6)\s+)?numeros?\s+(?:e|for|seja)\s+(maior|superior|menor|inferior)(?:\s+(?:que|do\s+que))?\s+(?:a\s+)?soma(?:\s+total)?\s+d(?:os|as)\s+(?:(?:seis|6)\s+)?numeros?\s+d(?:o|a)\s+sorteio(?:\s+oficial)?\b/iu,
+    /\b(?:a\s+)?soma(?:\s+total)?\s+d(?:os|as)\s+(?:seus?|suas?|meus?|minhas?)\s+(?:(?:seis|6)\s+)?numeros?\s+(?:e|for|seja)\s+(?:estritamente\s+)?(maior|superior|menor|inferior)(?:\s+(?:que|do\s+que))?\s+(?:a\s+)?soma(?:\s+total)?\s+d(?:os|as)\s+(?:(?:seis|6)\s+)?numeros?\s+d(?:o|a)\s+sorteio(?:\s+oficial)?\b/iu,
   );
   const comparison = english?.[1] ?? portuguese?.[1];
   const op = comparison ? parseComparisonWord(comparison) : null;
@@ -4839,7 +5146,11 @@ function parseDefinedDivisionRule(text: string): PredicateNode | null {
     kind: "and",
     clauses: [
       compare(evenDrawCount, "gt", lit(0)),
-      compare(arith("div", sum(source("guess")), evenDrawCount), "eq", lit(value)),
+      compare(
+        arith("div", sum(source("guess")), evenDrawCount),
+        "eq",
+        lit(value),
+      ),
     ],
   };
 }
@@ -4862,7 +5173,9 @@ function parseReversePositionMatchRule(text: string): PredicateNode | null {
   }
 
   if (
-    /\b(guessed?|picked)\s+position\s*1\b.{0,80}\bdrawn?\s+position\s*6\b/i.test(text) &&
+    /\b(guessed?|picked)\s+position\s*1\b.{0,80}\bdrawn?\s+position\s*6\b/i.test(
+      text,
+    ) &&
     /\bposition\s*2\b.{0,80}\bposition\s*5\b/i.test(text) &&
     /\b(and so on|reverse|reversed)\b/i.test(text)
   ) {
@@ -5185,7 +5498,10 @@ function sampledSemanticsMatch(expected: RuleAst, actual: RuleAst): boolean {
   // This only ever tightens the check: two rankings that differ in direction AND
   // are genuinely equivalent (minimise misses vs maximise matches) already
   // disagree on scores, so they were reported as a mismatch before this too.
-  if (expectedRanking && rankingDirection(expected) !== rankingDirection(actual)) {
+  if (
+    expectedRanking &&
+    rankingDirection(expected) !== rankingDirection(actual)
+  ) {
     return false;
   }
   let seed = 0x1dea1e7 >>> 0;
@@ -5238,7 +5554,65 @@ function sampledSemanticsMatch(expected: RuleAst, actual: RuleAst): boolean {
   }
 }
 
-function knownAstSignature(ast: Exclude<RuleAst, { schemaVersion: 3 }>): string {
+function describeSemanticDisagreement(expected: RuleAst, actual: RuleAst) {
+  const expectedRanking = isRankingRule(expected);
+  if (expectedRanking !== isRankingRule(actual)) {
+    return `The independent reviewer compiled a ${expectedRanking ? "ranking" : "predicate"}, while the draft compiled a ${isRankingRule(actual) ? "ranking" : "predicate"}.`;
+  }
+  if (
+    expectedRanking &&
+    rankingDirection(expected) !== rankingDirection(actual)
+  ) {
+    return `The independent reviewer selected ranking direction ${rankingDirection(expected)}, while the draft selected ${rankingDirection(actual)}.`;
+  }
+
+  let seed = 0x1dea1e7 >>> 0;
+  const rng = () => {
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let value = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    value = (value + Math.imul(value ^ (value >>> 7), 61 | value)) ^ value;
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+  const sixUnique = () => {
+    const pool = new Set<number>();
+    while (pool.size < 6) {
+      pool.add(1 + Math.floor(rng() * 100));
+    }
+    return [...pool];
+  };
+  const inputs = [
+    ...structuredInputPairs().map((pair) => ({
+      draw: [...pair.draw],
+      guess: [...pair.guess],
+    })),
+    ...Array.from({ length: SEMANTIC_MATCH_SAMPLES }, () => ({
+      draw: sixUnique(),
+      guess: sixUnique(),
+    })),
+  ];
+
+  try {
+    for (const input of inputs) {
+      const reviewerResult = expectedRanking
+        ? scoreGuess(expected, input)
+        : evaluatePredicate(expected, input).result;
+      const draftResult = expectedRanking
+        ? scoreGuess(actual, input)
+        : evaluatePredicate(actual, input).result;
+      if (reviewerResult !== draftResult) {
+        return `The independent reviewer and draft disagree for guess ${JSON.stringify(input.guess)} and draw ${JSON.stringify(input.draw)}: reviewer=${String(reviewerResult)}, draft=${String(draftResult)}.`;
+      }
+    }
+  } catch {
+    return "The independent reviewer AST and draft could not be compared safely at runtime.";
+  }
+  return "The independent reviewer AST differs behaviorally from the draft.";
+}
+
+function knownAstSignature(
+  ast: Exclude<RuleAst, { schemaVersion: 3 }>,
+): string {
   if (ast.schemaVersion === 1) {
     if (ast.node.kind === "match_count_at_least") {
       return `predicate:count_at_least:${ast.node.value}:intersection(source:draw,source:guess)`;
@@ -5280,7 +5654,10 @@ function arraySignature(node: ArrayExpr): string {
         arraySignature(node.of),
       ].join(":");
     case "intersection": {
-      const sides = [arraySignature(node.left), arraySignature(node.right)].sort();
+      const sides = [
+        arraySignature(node.left),
+        arraySignature(node.right),
+      ].sort();
       return `intersection(${sides.join(",")})`;
     }
     case "difference":

@@ -65,6 +65,7 @@ import {
   answerDealerQuestion,
   compileRuleToAst,
   interpretRuleWithAgent,
+  reviewRuleToAst,
   RuleAgentError,
   streamDealerQuestionAnswer,
   translateRuleToEnglish,
@@ -219,6 +220,9 @@ export interface RulePreflightResult {
   guardianChecked?: boolean;
   guardianGrounded?: boolean | undefined;
   guardianNote?: string | undefined;
+  /** True only for compiler-generation faults that can be re-run against the
+   * already approved interpretation. Player wording/policy failures stay false. */
+  generationRetryable: boolean;
   maxTokens: number;
   modelUsed?: string;
   needsClarification: boolean;
@@ -475,6 +479,103 @@ export function getBlockingRuleReasonExplanations(
   );
 }
 
+const RULE_GENERATION_RETRYABLE_CODES = new Set<RuleValidationReasonCode>([
+  "AGENT_STATEMENT_MISMATCH",
+  "INTERPRETATION_MISMATCH",
+  "PROVIDER_DISAGREEMENT",
+  "PROVIDER_EVIDENCE_UNVERIFIED",
+  "PROVIDER_MALFORMED_RESPONSE",
+  "PROVIDER_SCHEMA_UNCONSTRAINED",
+  "PROVIDER_SPAN_COVERAGE_INCOMPLETE",
+  "PROVIDER_TIMEOUT",
+  "REVIEWER_MISMATCH",
+  "RUNTIME_TEST_FAILED",
+  "SCHEMA_INVALID",
+  "SECOND_OPINION_UNAVAILABLE",
+  "UNSUPPORTED_RULE",
+  "UNSAFE_RUNTIME_BOUNDS",
+]);
+
+const RULE_GENERATION_AUTO_REPAIR_CODES = new Set<RuleValidationReasonCode>([
+  "AGENT_STATEMENT_MISMATCH",
+  "INTERPRETATION_MISMATCH",
+  "PROVIDER_EVIDENCE_UNVERIFIED",
+  "PROVIDER_MALFORMED_RESPONSE",
+  "PROVIDER_SPAN_COVERAGE_INCOMPLETE",
+  "REVIEWER_MISMATCH",
+  "RUNTIME_TEST_FAILED",
+  "SCHEMA_INVALID",
+  "UNSUPPORTED_RULE",
+  "UNSAFE_RUNTIME_BOUNDS",
+]);
+
+const RULE_GENERATION_FAILURE_TRIGGER_CODES = new Set<RuleValidationReasonCode>(
+  [
+    "AGENT_STATEMENT_MISMATCH",
+    "INTERPRETATION_MISMATCH",
+    "PROVIDER_DISAGREEMENT",
+    "PROVIDER_EVIDENCE_UNVERIFIED",
+    "PROVIDER_MALFORMED_RESPONSE",
+    "PROVIDER_SCHEMA_UNCONSTRAINED",
+    "PROVIDER_SPAN_COVERAGE_INCOMPLETE",
+    "PROVIDER_TIMEOUT",
+    "REVIEWER_MISMATCH",
+    "RUNTIME_TEST_FAILED",
+    "SCHEMA_INVALID",
+    "SECOND_OPINION_UNAVAILABLE",
+  ],
+);
+
+/**
+ * Separates a failed artifact-generation attempt from a rule the player must
+ * actually change. This flag is the API contract used by the chat's Retry
+ * action; the web never guesses from human-facing copy.
+ */
+export function isRuleGenerationRetryable(
+  reasonCodes: readonly RuleValidationReasonCode[],
+) {
+  const blockers = reasonCodes.filter((code) => code !== "SUPPORTED_RULE");
+  return (
+    blockers.length > 0 &&
+    blockers.some((code) => RULE_GENERATION_FAILURE_TRIGGER_CODES.has(code)) &&
+    blockers.every((code) => RULE_GENERATION_RETRYABLE_CODES.has(code))
+  );
+}
+
+function buildCompilerRepairFeedback(
+  validation: Awaited<ReturnType<typeof compileRuleArtifact>>,
+) {
+  const reasonCodes = validation.log.reasonCodes;
+  const blockers = reasonCodes.filter((code) => code !== "SUPPORTED_RULE");
+  if (
+    blockers.length === 0 ||
+    !blockers.some((code) => RULE_GENERATION_FAILURE_TRIGGER_CODES.has(code)) ||
+    !blockers.every((code) => RULE_GENERATION_AUTO_REPAIR_CODES.has(code))
+  ) {
+    return null;
+  }
+  const latestAttempt = validation.log.attemptDiagnostics.at(-1);
+  const findings = latestAttempt
+    ? [
+        ...(latestAttempt.schemaError
+          ? [`Schema: ${latestAttempt.schemaError}`]
+          : []),
+        ...latestAttempt.stages
+          .filter((stage) => stage.status === "failed")
+          .map((stage) => `${stage.stage}: ${stage.detail}`),
+        ...(latestAttempt.providerEvidence?.exampleResults ?? [])
+          .filter((example) => example.status === "failed")
+          .map((example) => `workedExample[${example.index}]: ${example.detail}`),
+      ]
+    : [];
+  return [
+    `Rejected validation codes: ${blockers.join(", ")}.`,
+    ...findings,
+    "Re-read the exact rule as a whole and preserve every condition, comparator, source, position, threshold, conjunction, and negation.",
+    "Make consumedSpans cover every intent-bearing clause and derive workedExamples independently from the source before checking them against the fresh AST.",
+  ].join("\n");
+}
+
 /**
  * The first, non-executable step of rule authoring.  It intentionally contains
  * no AST, artifact hash, or rule id: the player must approve this explanation
@@ -494,6 +595,95 @@ export interface RuleInterpretationResult {
   suggestedRewrites: string[];
   title: string;
   tokenCount: number;
+}
+
+interface ApprovedRuleInterpretation extends RuleAgentInterpretation {
+  sanitizedText: string;
+}
+
+function isBoundedStringArray(
+  value: unknown,
+  maxItems: number,
+  maxItemBytes: number,
+): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= maxItems &&
+    value.every(
+      (item) =>
+        typeof item === "string" &&
+        Buffer.byteLength(item, "utf8") <= maxItemBytes,
+    )
+  );
+}
+
+/**
+ * Validates the interpretation that the player already approved. Compile jobs
+ * use this exact reading instead of asking a model to reinterpret the source
+ * after confirmation. The source text is bound too, so an approval for one rule
+ * cannot be replayed against another.
+ */
+export function readApprovedRuleInterpretation(
+  value: unknown,
+  sourceText: string,
+): ApprovedRuleInterpretation | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const candidate = value as Record<string, unknown>;
+  const boundedString = (field: string, maxBytes: number, required = false) => {
+    const fieldValue = candidate[field];
+    return typeof fieldValue === "string" &&
+      Buffer.byteLength(fieldValue, "utf8") <= maxBytes &&
+      (!required || fieldValue.trim())
+      ? fieldValue
+      : null;
+  };
+  const sanitizedText = boundedString(
+    "sanitizedText",
+    MAX_RULE_TEXT_BYTES,
+    true,
+  );
+  const normalizedText = boundedString(
+    "normalizedText",
+    MAX_RULE_TEXT_BYTES,
+    true,
+  );
+  const officialInterpretation = boundedString(
+    "officialInterpretation",
+    MAX_RULE_TEXT_BYTES,
+    true,
+  );
+  const title = boundedString("title", 200, true);
+  const clarityNote = boundedString("clarityNote", 2_000);
+  const dealerMessage = boundedString("dealerMessage", 4_000);
+  if (
+    !sanitizedText ||
+    sanitizeRuleText(sanitizedText) !== sanitizeRuleText(sourceText) ||
+    !normalizedText ||
+    !officialInterpretation ||
+    !title ||
+    clarityNote === null ||
+    dealerMessage === null ||
+    candidate.needsClarification !== false ||
+    !isBoundedStringArray(candidate.addedOperationalClauses, 20, 1_000) ||
+    !isBoundedStringArray(candidate.clarificationQuestions, 20, 1_000) ||
+    !isBoundedStringArray(candidate.suggestedRewrites, 20, 4_000)
+  ) {
+    return null;
+  }
+  return {
+    addedOperationalClauses: candidate.addedOperationalClauses,
+    clarificationQuestions: candidate.clarificationQuestions,
+    clarityNote,
+    dealerMessage,
+    needsClarification: false,
+    normalizedText,
+    officialInterpretation,
+    sanitizedText,
+    suggestedRewrites: candidate.suggestedRewrites,
+    title,
+  };
 }
 
 export type RulePreflightProgressStage =
@@ -555,7 +745,8 @@ export interface RulePreflightJobRecord {
   /** Saved drafts whose server-authoritative diagnostics receive this result. */
   draftIds?: string[];
   events: RulePreflightJobEventEnvelope[];
-  /** hashJson({ phase, sanitizedText }) — the dedupe key, never the id. */
+  /** Hash of phase, source text, and any approved interpretation; the dedupe
+   * key, never the externally visible job id. */
   fingerprint: string;
   id: string;
   lastSeq: number;
@@ -1625,8 +1816,18 @@ export function isRulePreflightJobId(value: string) {
 export function getRulePreflightJobFingerprint(
   phase: RulePreflightPhase,
   text: string,
+  approvedInterpretation?: ApprovedRuleInterpretation,
 ) {
-  return hashJson({ phase, sanitizedText: sanitizeRuleText(text) });
+  return hashJson({
+    approvedInterpretation: approvedInterpretation
+      ? {
+          normalizedText: approvedInterpretation.normalizedText,
+          officialInterpretation: approvedInterpretation.officialInterpretation,
+        }
+      : null,
+    phase,
+    sanitizedText: sanitizeRuleText(text),
+  });
 }
 
 export function createRulePreflightJob(args: {
@@ -2462,8 +2663,7 @@ interface IncompleteTicketAssignment {
   values: readonly number[];
 }
 
-const NUMBER_ASSIGNMENT_SEQUENCE =
-  String.raw`(\d{1,3}(?:(?:\s*[,;]\s*(?:(?:and|or|e|ou)\s+)?|\s+(?:and|or|e|ou)\s+|\s+)\d{1,3}){0,5})`;
+const NUMBER_ASSIGNMENT_SEQUENCE = String.raw`(\d{1,3}(?:(?:\s*[,;]\s*(?:(?:and|or|e|ou)\s+)?|\s+(?:and|or|e|ou)\s+|\s+)\d{1,3}){0,5})`;
 
 const TICKET_ASSIGNMENT_PATTERNS: ReadonlyArray<{
   pattern: RegExp;
@@ -2706,10 +2906,7 @@ export function enforceIncompleteTicketClarity(
   interpretation: RuleAgentInterpretation,
 ): RuleAgentInterpretation {
   const assignment = findIncompleteTicketAssignment(sourceText);
-  if (
-    assignment &&
-    hasExplicitUnconstrainedRemainder(sourceText, assignment)
-  ) {
+  if (assignment && hasExplicitUnconstrainedRemainder(sourceText, assignment)) {
     return applyResolvedRemainder(interpretation, assignment);
   }
   const detail = describeIncompleteTicketAssignment(sourceText);
@@ -3333,11 +3530,7 @@ async function createRuleInterpretation(
                 model: agentConfig.model,
                 stage: "translating",
               });
-              return translateRuleToEnglish(
-                sanitizedText,
-                agentConfig,
-                signal,
-              );
+              return translateRuleToEnglish(sanitizedText, agentConfig, signal);
             }
           : undefined,
     });
@@ -3395,6 +3588,7 @@ async function createRulePreflight(
   text: string,
   reportProgress: RulePreflightProgressReporter = () => undefined,
   signal?: AbortSignal,
+  approvedInterpretation?: ApprovedRuleInterpretation,
 ): Promise<RulePreflightResult> {
   reportProgress({
     message: "Checking rule limits and allowed inputs...",
@@ -3450,7 +3644,11 @@ async function createRulePreflight(
   }
 
   const runtime = getDealerRuntime();
-  const { agent: agentConfig, guardian: guardianConfig } = runtime;
+  const {
+    agent: agentConfig,
+    compiler: compilerConfig,
+    guardian: guardianConfig,
+  } = runtime;
   let guardianNote = "";
 
   // 0. Make sure the models are actually loaded before any time-boxed call. A
@@ -3459,14 +3657,24 @@ async function createRulePreflight(
   // a best-effort no-op for non-Ollama endpoints.
   reportProgress({
     message: "Preparing the local rule agents...",
-    model: agentConfig.model,
+    model: approvedInterpretation ? compilerConfig.model : agentConfig.model,
     stage: "loading_models",
   });
   if (guardianConfig.enabled) {
     await ensureDealerModelReady(guardianConfig.model, signal);
   }
-  await ensureDealerModelReady(agentConfig.model, signal);
-
+  if (!approvedInterpretation) {
+    await ensureDealerModelReady(agentConfig.model, signal);
+  }
+  if (approvedInterpretation || compilerConfig.model !== agentConfig.model) {
+    await ensureDealerModelReady(compilerConfig.model, signal);
+  }
+  if (
+    runtime.reviewer.model !== compilerConfig.model &&
+    runtime.reviewer.model !== agentConfig.model
+  ) {
+    await ensureDealerModelReady(runtime.reviewer.model, signal);
+  }
 
   // 1. Optionally translate to English so the dealer + compiler reason in one
   // language (removes cross-language ambiguity for small models). A capable
@@ -3478,7 +3686,8 @@ async function createRulePreflight(
   // player's own words against the English the compiler reads. The deterministic
   // pattern gate above still runs first, and the normal path spends no extra
   // call — the translation was already happening.
-  const knownInterpretation = createKnownRuleInterpretation(sanitizedText);
+  const knownInterpretation =
+    approvedInterpretation ?? createKnownRuleInterpretation(sanitizedText);
   const shouldTranslate = !knownInterpretation && runtime.translateToEnglish;
   if (shouldTranslate) {
     reportProgress({
@@ -3562,87 +3771,179 @@ async function createRulePreflight(
   // AST from the rule text (skill-guided), and check groundedness.
   const dealerPass = async (model: string) => {
     const passConfig = { ...agentConfig, model };
+    // Escalation changes the interpretation/reasoning model only. Artifact
+    // emission remains on the dedicated schema-capable compile role.
+    const passCompilerConfig = compilerConfig;
+    const passReviewerConfig = runtime.reviewer;
     reportProgress({
-      message:
-        model === agentConfig.model
+      message: approvedInterpretation
+        ? "Using your approved interpretation..."
+        : model === agentConfig.model
           ? "Interpreting your winning condition..."
           : "Retrying with the stronger rule model...",
-      model,
-      stage: model === agentConfig.model ? "interpreting" : "escalating",
+      model: approvedInterpretation ? passCompilerConfig.model : model,
+      stage: approvedInterpretation
+        ? "compiling"
+        : model === agentConfig.model
+          ? "interpreting"
+          : "escalating",
     });
-    const interpretation = enforceIncompleteTicketClarity(
-      `${compileText} ${sanitizedText}`,
-      reconcileSourceClarity(
-        sanitizedText,
-        knownInterpretation ??
-          enforceKnownRuleInterpretation(
-            `${compileText} ${sanitizedText}`,
-            await interpretRuleWithAgent(compileText, passConfig, signal),
+    const interpretation = approvedInterpretation
+      ? approvedInterpretation
+      : enforceIncompleteTicketClarity(
+          `${compileText} ${sanitizedText}`,
+          reconcileSourceClarity(
+            sanitizedText,
+            knownInterpretation ??
+              enforceKnownRuleInterpretation(
+                `${compileText} ${sanitizedText}`,
+                await interpretRuleWithAgent(compileText, passConfig, signal),
+              ),
           ),
-      ),
-    );
+        );
     reportProgress({
       message: "Building and testing the executable rule...",
-      model,
+      model: passCompilerConfig.model,
       stage: "compiling",
     });
-    const astProvider: RuleAstProvider = async ({ normalizedText }) => {
-      try {
-        return await compileRuleToAst(normalizedText, passConfig, signal);
-      } catch (error) {
-        if (signal?.aborted) {
-          throw signal.reason ?? error;
+    const createAstProvider =
+      (validationFeedback?: string): RuleAstProvider =>
+      async ({ normalizedText, providerConfig }) => {
+        const providerModel =
+          providerConfig.model_by_role.compile ?? providerConfig.identity.model;
+        const providerAgentConfig = {
+          ...passCompilerConfig,
+          ...(providerConfig.base_url
+            ? { baseUrl: providerConfig.base_url }
+            : {}),
+          model: providerModel || passCompilerConfig.model,
+        };
+        try {
+          return await compileRuleToAst(
+            normalizedText,
+            providerAgentConfig,
+            signal,
+            validationFeedback,
+          );
+        } catch (error) {
+          if (signal?.aborted) {
+            throw signal.reason ?? error;
+          }
+          // The compiler collapses any provider throw into the single reason code
+          // PROVIDER_MALFORMED_RESPONSE and keeps nothing else, so without this an
+          // operator investigating a blocked rule cannot tell a timeout from
+          // unparseable output from a model that refused to answer.
+          const detail =
+            error instanceof RuleAgentError && error.detail
+              ? ` ${error.detail}`
+              : "";
+          console.error(
+            `Rule compile provider failed (rule ${ruleId}, model ${providerAgentConfig.model}):`,
+            error instanceof Error ? error.message : String(error),
+            detail,
+          );
+          throw error;
         }
-        // The compiler collapses any provider throw into the single reason code
-        // PROVIDER_MALFORMED_RESPONSE and keeps nothing else, so without this an
-        // operator investigating a blocked rule cannot tell a timeout from
-        // unparseable output from a model that refused to answer.
-        const detail =
-          error instanceof RuleAgentError && error.detail
-            ? ` ${error.detail}`
-            : "";
-        console.error(
-          `Rule compile provider failed (rule ${ruleId}, model ${model}):`,
-          error instanceof Error ? error.message : String(error),
-          detail,
-        );
-        throw error;
-      }
-    };
+      };
+    const createAstReviewer = (): RuleAstProvider =>
+      async ({ normalizedText }) => {
+        try {
+          return await reviewRuleToAst(
+            normalizedText,
+            passReviewerConfig,
+            signal,
+          );
+        } catch (error) {
+          if (signal?.aborted) {
+            throw signal.reason ?? error;
+          }
+          const detail =
+            error instanceof RuleAgentError && error.detail
+              ? ` ${error.detail}`
+              : "";
+          console.error(
+            `Rule review provider failed (rule ${ruleId}, model ${passReviewerConfig.model}):`,
+            error instanceof Error ? error.message : String(error),
+            detail,
+          );
+          throw error;
+        }
+      };
     const compilationText = selectCompilationText(
       sanitizedText,
       interpretation.normalizedText,
     );
-    const validation = await compileRuleArtifact(
-      {
-        // The dealer's own sentence, kept separate from `officialInterpretation`
-        // so the compiler can still see it after the deterministic path replaces
-        // that field with the AST-derived description. The player approved THIS
-        // sentence, so the artifact has to keep it.
-        agentInterpretation: interpretation.officialInterpretation,
-        model,
-        officialInterpretation: interpretation.officialInterpretation,
-        originalText: sanitizedText,
-        // Compile the normalized interpretation. This avoids a second model
-        // call whenever the deterministic compiler already supports the
-        // normalized rule, while groundedness below still compares it with the
-        // player's source meaning.
-        prompt: compilationText,
-        ruleId,
-        tokenCount,
-      },
-      {
-        astProvider,
-        // Diagnostic only: lifts the cross-provider consensus gate so a rule
-        // that keeps hitting PROVIDER_DISAGREEMENT can be compiled and
-        // inspected. The divergence is still recorded in the validation log.
-        disableConsensus: envFlag(
-          process.env.TYCHE_RULE_COMPILER_CONSENSUS_DISABLED,
-        ),
-        preferDeterministic: true,
-        requireProviderEvidence: true,
-      },
+    const compilationRequest = {
+      // The dealer's own sentence, kept separate from `officialInterpretation`
+      // so the compiler can still see it after the deterministic path replaces
+      // that field with the AST-derived description. The player approved THIS
+      // sentence, so the artifact has to keep it.
+      agentInterpretation: interpretation.officialInterpretation,
+      model: passCompilerConfig.model,
+      officialInterpretation: interpretation.officialInterpretation,
+      originalText: sanitizedText,
+      // Compile the normalized interpretation. This avoids a second model
+      // call whenever the deterministic compiler already supports the
+      // normalized rule, while groundedness below still compares it with the
+      // player's source meaning.
+      prompt: compilationText,
+      ruleId,
+      tokenCount,
+    };
+    const compilerOptions = {
+      astProvider: createAstProvider(),
+      astReviewer: createAstReviewer(),
+      // Diagnostic only: lifts the cross-provider consensus gate so a rule
+      // that keeps hitting PROVIDER_DISAGREEMENT can be compiled and
+      // inspected. The divergence is still recorded in the validation log.
+      disableConsensus: envFlag(
+        process.env.TYCHE_RULE_COMPILER_CONSENSUS_DISABLED,
+      ),
+      // The LLM is the authoring engine for every rule. Known deterministic
+      // patterns remain an independent reference implementation, never the
+      // artifact generator, so unfamiliar compositions follow the same path.
+      preferDeterministic: false,
+      requireProviderEvidence: true,
+    };
+    let validation = await compileRuleArtifact(
+      compilationRequest,
+      compilerOptions,
     );
+    const rejectedAttempts = validation.log.attemptDiagnostics.filter(
+      (attempt) => attempt.decision === "INVALID",
+    );
+    let repairFeedback = buildCompilerRepairFeedback(validation);
+    const MAX_VALIDATION_REPAIRS = 2;
+    for (
+      let repairAttempt = 1;
+      validation.decision !== "VALID" &&
+      repairFeedback &&
+      repairAttempt <= MAX_VALIDATION_REPAIRS;
+      repairAttempt += 1
+    ) {
+      reportProgress({
+        message: `Rebuilding the rule from validation findings (${repairAttempt}/${MAX_VALIDATION_REPAIRS})...`,
+        model: passCompilerConfig.model,
+        stage: "compiling",
+      });
+      const repaired = await compileRuleArtifact(compilationRequest, {
+        ...compilerOptions,
+        astProvider: createAstProvider(repairFeedback),
+        // A deterministic candidate that already failed fidelity must not be
+        // selected again. The repair is a fresh schema-constrained generation;
+        // the deterministic parser remains its independent reviewer when it has
+        // a complete reading of the text.
+        preferDeterministic: false,
+        requireProviderEvidence: true,
+      });
+      validation = repaired;
+      rejectedAttempts.push(
+        ...repaired.log.attemptDiagnostics.filter(
+          (attempt) => attempt.decision === "INVALID",
+        ),
+      );
+      repairFeedback = buildCompilerRepairFeedback(validation);
+    }
     let grounded: boolean | undefined;
     if (guardianConfig.enabled && validation.decision === "VALID") {
       reportProgress({
@@ -3704,7 +4005,14 @@ async function createRulePreflight(
         }`;
       }
     }
-    return { grounded, interpretation, model, validation };
+    return {
+      compilerModel: passCompilerConfig.model,
+      grounded,
+      interpretation,
+      model,
+      rejectedAttempts,
+      validation,
+    };
   };
 
   // 3-5. Fast pass on the primary model. Escalate to the stronger model only when
@@ -3724,20 +4032,12 @@ async function createRulePreflight(
     await ensureDealerModelReady(firstModel, signal);
   }
   const rejectedCompilerAttempts: RuleCompilationAttemptDiagnostic[] = [];
-  const retainRejectedCompilerAttempts = (
-    validation: Awaited<ReturnType<typeof compileRuleArtifact>>,
-  ) => {
-    rejectedCompilerAttempts.push(
-      ...validation.log.attemptDiagnostics.filter(
-        (attempt) => attempt.decision === "INVALID",
-      ),
-    );
-  };
   let pass = await dealerPass(firstModel);
-  retainRejectedCompilerAttempts(pass.validation);
+  rejectedCompilerAttempts.push(...pass.rejectedAttempts);
   let escalated = firstModel !== agentConfig.model;
   const needsEscalation =
-    pass.validation.decision !== "VALID" || pass.grounded === false;
+    !approvedInterpretation &&
+    (pass.validation.decision !== "VALID" || pass.grounded === false);
   if (needsEscalation && escalationModel && pass.model !== escalationModel) {
     // The escalation attempt must never break the preflight: if the stronger
     // model is unavailable/slow, keep the primary result and surface the note.
@@ -3748,7 +4048,7 @@ async function createRulePreflight(
         pass = strong;
         escalated = true;
       }
-      retainRejectedCompilerAttempts(strong.validation);
+      rejectedCompilerAttempts.push(...strong.rejectedAttempts);
     } catch (error) {
       if (signal?.aborted) {
         throw signal.reason ?? error;
@@ -3824,6 +4124,13 @@ async function createRulePreflight(
       })()
     : null;
   const reasonCodes = [...validation.log.reasonCodes];
+  const generationRetryable =
+    validation.decision !== "VALID" &&
+    !guardianBlocked &&
+    !reproposalBlocked &&
+    !semanticReview.impact.triviallyAlwaysTrue &&
+    !semanticReview.confirmationRequired &&
+    isRuleGenerationRetryable(reasonCodes);
 
   const needsClarification =
     interpretation.needsClarification ||
@@ -3905,8 +4212,9 @@ async function createRulePreflight(
     coverage,
     decision,
     guardianGrounded: guardianGrounded ?? null,
+    generationRetryable,
     maxTokens: RULE_MAX_TOKENS,
-    modelUsed: pass.model,
+    modelUsed: pass.compilerModel,
     reasonCodes,
     rejectedCompilerAttempts: rejectedAttemptDiagnostics ?? [],
     refinementQuestions: refinementFeedback?.refinementQuestions ?? [],
@@ -3940,7 +4248,10 @@ async function createRulePreflight(
     coverage,
     decision,
     dealerMessage:
-      refinementFeedback?.dealerMessage ?? interpretation.dealerMessage,
+      refinementFeedback?.dealerMessage ??
+      (approvedInterpretation && decision === "VALID"
+        ? "Done! I compiled your approved rule. Review it before submitting."
+        : interpretation.dealerMessage),
     // Not gated on `ruleAst` (which is the *artifact* AST, so null on every
     // rejection): the difficulty measurement is exactly what a blocked player
     // needs explained. `difficultyMeasured` is what tells a consumer whether
@@ -3955,8 +4266,9 @@ async function createRulePreflight(
     guardianChecked: guardianConfig.enabled,
     guardianGrounded,
     guardianNote: guardianNote || undefined,
+    generationRetryable,
     maxTokens: RULE_MAX_TOKENS,
-    modelUsed: pass.model,
+    modelUsed: pass.compilerModel,
     needsClarification,
     normalizedText,
     normalizedTextHash: hashBytes(normalizedText),
@@ -4960,9 +5272,9 @@ function describeRulePreflightError(error: unknown) {
               ? "The dealer agent took too long to respond. Try again."
               : error.code === "RULE_AGENT_SCHEMA_UNSUPPORTED"
                 ? "The configured rule compiler cannot enforce the required rule-output schema. Choose a schema-capable compiler before submitting a rule."
-              : error.code === "RULE_AGENT_BAD_RESPONSE"
-                ? "The dealer agent returned an unusable response. Try rephrasing the rule."
-                : "The dealer agent is unavailable. Make sure the model is running and try again.",
+                : error.code === "RULE_AGENT_BAD_RESPONSE"
+                  ? "The dealer agent returned an unusable response. Try rephrasing the rule."
+                  : "The dealer agent is unavailable. Make sure the model is running and try again.",
       },
       status: 502,
     };
@@ -5026,6 +5338,7 @@ async function runRulePreflightJob(
   job: RulePreflightJobRecord,
   text: string,
   signal?: AbortSignal,
+  approvedInterpretation?: ApprovedRuleInterpretation,
 ) {
   try {
     const reportProgress: RulePreflightProgressReporter = (progress) => {
@@ -5042,7 +5355,12 @@ async function runRulePreflightJob(
         type: "interpretation",
       });
     } else {
-      const preflight = await createRulePreflight(text, reportProgress, signal);
+      const preflight = await createRulePreflight(
+        text,
+        reportProgress,
+        signal,
+        approvedInterpretation,
+      );
       savePreflightDiagnosticsForJob(job, text, preflight);
       appendRulePreflightJobEvent(job.id, { preflight, type: "result" });
     }
@@ -5095,11 +5413,17 @@ async function runRulePreflightJob(
 function startDetachedRulePreflightJob(
   job: RulePreflightJobRecord,
   text: string,
+  approvedInterpretation?: ApprovedRuleInterpretation,
 ) {
   const controller = new AbortController();
   rulePreflightJobControllers.set(job.id, controller);
   const untrack = trackRequest(controller);
-  const task = runRulePreflightJob(job, text, controller.signal)
+  const task = runRulePreflightJob(
+    job,
+    text,
+    controller.signal,
+    approvedInterpretation,
+  )
     .catch((error: unknown) => {
       // A fuse. runRulePreflightJob is written not to reject, but without this an
       // unexpected throw would leave the job running forever and every attached
@@ -5145,6 +5469,7 @@ export function cancelRulePreflightJob(jobId: string) {
  * event loop cannot both create a job.
  */
 function ensureRulePreflightJob(args: {
+  approvedInterpretation?: ApprovedRuleInterpretation;
   draftId?: string | null;
   phase: RulePreflightPhase;
   text: string;
@@ -5152,7 +5477,11 @@ function ensureRulePreflightJob(args: {
   const now = new Date().toISOString();
   sweepRulePreflightJobs(now);
 
-  const fingerprint = getRulePreflightJobFingerprint(args.phase, args.text);
+  const fingerprint = getRulePreflightJobFingerprint(
+    args.phase,
+    args.text,
+    args.approvedInterpretation,
+  );
   const existing = findRunningRulePreflightJobByFingerprint(fingerprint);
   if (existing) {
     if (
@@ -5178,7 +5507,7 @@ function ensureRulePreflightJob(args: {
     fingerprint,
     phase: args.phase,
   });
-  startDetachedRulePreflightJob(job, args.text);
+  startDetachedRulePreflightJob(job, args.text, args.approvedInterpretation);
   return { idempotent: false, job, rejection: null } as const;
 }
 
@@ -11246,6 +11575,11 @@ export function handleApiRequest(
           body && typeof body === "object" && "draftId" in body
             ? (body as { draftId?: unknown }).draftId
             : null;
+        const approvedInterpretationValue =
+          body && typeof body === "object" && "approvedInterpretation" in body
+            ? (body as { approvedInterpretation?: unknown })
+                .approvedInterpretation
+            : undefined;
 
         if (typeof text !== "string") {
           sendJson(request, response, 400, { error: "invalid_rule_text" });
@@ -11254,6 +11588,20 @@ export function handleApiRequest(
         if (phase !== "compile" && phase !== "interpret") {
           sendJson(request, response, 400, {
             error: "invalid_preflight_phase",
+          });
+          return;
+        }
+        const approvedInterpretation =
+          approvedInterpretationValue === undefined
+            ? undefined
+            : readApprovedRuleInterpretation(approvedInterpretationValue, text);
+        if (
+          (phase === "interpret" &&
+            approvedInterpretationValue !== undefined) ||
+          (approvedInterpretationValue !== undefined && !approvedInterpretation)
+        ) {
+          sendJson(request, response, 400, {
+            error: "invalid_approved_interpretation",
           });
           return;
         }
@@ -11275,6 +11623,7 @@ export function handleApiRequest(
         const acceptsEventStream = accept.includes("text/event-stream");
 
         const outcome = ensureRulePreflightJob({
+          ...(approvedInterpretation ? { approvedInterpretation } : {}),
           ...(typeof draftId === "string" ? { draftId } : {}),
           phase,
           text,
@@ -13020,11 +13369,13 @@ async function warmDealerModels() {
 
   const {
     agent: agentConfig,
+    compiler: compilerConfig,
     escalationModel,
     guardian: guardianConfig,
   } = runtime;
   const targets = [
     agentConfig.model,
+    compilerConfig.model,
     escalationModel,
     guardianConfig.enabled ? guardianConfig.model : "",
   ].filter((model, index, all) => model && all.indexOf(model) === index);

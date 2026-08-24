@@ -6,6 +6,7 @@ import {
   analyzeStatementFidelity,
   buildRuleCompilerSkillPrompt,
   compileRuleArtifact,
+  createDefaultProviderRoutingPolicy,
   createLocalOnlyProviderRoutingPolicy,
   createCompilerPlaceholder,
   evaluatePredicate,
@@ -25,7 +26,28 @@ type PromptTestSetFile =
   | "rule-proposal-prompt-test-set-2.md"
   | "rule-proposal-prompt-test-set.md";
 
-function readPromptRows(expected: "BLOCK" | "CLARIFY" | "VALID", limit: number) {
+test("compile provider routing prefers the per-role model and ignores blank overrides", () => {
+  const dedicated = createDefaultProviderRoutingPolicy({
+    LLM_BASE_URL: "http://localhost:11434/v1",
+    LLM_MODEL: "nemotron-3-super:cloud",
+    LLM_MODEL_COMPILE: "qwen3.5:9b",
+    LLM_PRIMARY_MODEL: "nemotron-3-super:cloud",
+  });
+  assert.equal(dedicated.providers[0]?.identity.model, "qwen3.5:9b");
+  assert.equal(dedicated.providers[0]?.capabilities.json_schema_response, true);
+
+  const blank = createDefaultProviderRoutingPolicy({
+    LLM_BASE_URL: "http://localhost:11434/v1",
+    LLM_MODEL_COMPILE: "",
+    LLM_PRIMARY_MODEL: "gemma4:latest",
+  });
+  assert.equal(blank.providers[0]?.identity.model, "gemma4:latest");
+});
+
+function readPromptRows(
+  expected: "BLOCK" | "CLARIFY" | "VALID",
+  limit: number,
+) {
   const markdown = readFileSync(
     new URL("../../../docs/rule-proposal-prompt-test-set.md", import.meta.url),
     "utf8",
@@ -56,8 +78,12 @@ function readPromptRowsById(
     new URL(`../../../docs/${fileName}`, import.meta.url),
     "utf8",
   );
-  const rows = new Map<number, { expected: "BLOCK" | "CLARIFY" | "VALID"; prompt: string }>();
-  const pattern = /^\|\s*(\d+)\s*\|\s*(BLOCK|CLARIFY|VALID)\s*\|\s*(.*?)\s*\|$/gm;
+  const rows = new Map<
+    number,
+    { expected: "BLOCK" | "CLARIFY" | "VALID"; prompt: string }
+  >();
+  const pattern =
+    /^\|\s*(\d+)\s*\|\s*(BLOCK|CLARIFY|VALID)\s*\|\s*(.*?)\s*\|$/gm;
   for (const match of markdown.matchAll(pattern)) {
     const id = Number(match[1]);
     if (ids.includes(id)) {
@@ -119,7 +145,9 @@ test("the compile_rule_to_ast skill prompt is versioned and covers both rule mod
   assert.ok(prompt.includes("four or more of my picked numbers show up"));
   // It must teach prompt 12/13/103 and sequence 10 reverse-order cases via the
   // core grammar (pairwise zips, quantifiers, filters).
-  assert.ok(prompt.includes("second guessed number equals second drawn number"));
+  assert.ok(
+    prompt.includes("second guessed number equals second drawn number"),
+  );
   assert.ok(prompt.includes("pairs_forall"));
   assert.ok(prompt.includes("pairs_exists"));
   assert.ok(prompt.includes('"kind":"reverse"'));
@@ -141,7 +169,9 @@ test("the compile_rule_to_ast skill prompt is versioned and covers both rule mod
   assert.ok(prompt.includes("sum(guess) mod 10"));
   assert.ok(prompt.includes("same tens range"));
   assert.ok(prompt.includes("pair.left div 10 == pair.right div 10"));
-  assert.ok(prompt.includes("Never\nreplace the rule with a stock match-count example"));
+  assert.ok(
+    prompt.includes("Never\nreplace the rule with a stock match-count example"),
+  );
   // And forbid external/unverifiable inputs.
   assert.ok(/wallets|votes|oracle|external/i.test(prompt));
 });
@@ -170,7 +200,10 @@ test("the compiler candidate schema makes every worked ticket a valid game input
   const examples = schema.properties?.workedExamples?.items?.anyOf ?? [];
   assert.equal(examples.length, 2);
   for (const example of examples) {
-    for (const ticket of [example.properties?.guess, example.properties?.draw]) {
+    for (const ticket of [
+      example.properties?.guess,
+      example.properties?.draw,
+    ]) {
       assert.deepEqual(ticket, {
         type: "array",
         minItems: 6,
@@ -457,7 +490,11 @@ test("deterministically compiles the canonical most/fewest-matches ranking famil
     );
     assert.equal(result.artifact?.ruleMode, "ranking", prompt);
     assert.match(result.artifactHash ?? "", /^[0-9a-f]{64}$/, prompt);
-    assert.equal(result.log.reasonCodes.includes("UNSUPPORTED_RULE"), false, prompt);
+    assert.equal(
+      result.log.reasonCodes.includes("UNSUPPORTED_RULE"),
+      false,
+      prompt,
+    );
   }
 
   const minimizing = validateAndPrecompileRule({
@@ -496,18 +533,22 @@ test("deterministically compiles the canonical most/fewest-matches ranking famil
   // Absolute thresholds and guess-vs-draw comparatives stay predicates, never a
   // ranking; a specific score qualifier (digits) is left to the LLM path.
   const threshold = validateAndPrecompileRule({
-    prompt: "Win if at least 4 guessed numbers appear in the draw, regardless of order.",
+    prompt:
+      "Win if at least 4 guessed numbers appear in the draw, regardless of order.",
     tokenCount: 12,
   }).artifact?.ast;
-  assert.ok(threshold?.schemaVersion === 1 && threshold.node.kind === "match_count_at_least");
+  assert.ok(
+    threshold?.schemaVersion === 1 &&
+      threshold.node.kind === "match_count_at_least",
+  );
 
   const versusDraw = validateAndPrecompileRule({
-    prompt: "Win if the guessed numbers contain more multiples of 5 than the drawn numbers.",
+    prompt:
+      "Win if the guessed numbers contain more multiples of 5 than the drawn numbers.",
     tokenCount: 13,
   }).artifact?.ast;
   assert.ok(
-    versusDraw?.schemaVersion === 2 &&
-      versusDraw.result.type === "predicate",
+    versusDraw?.schemaVersion === 2 && versusDraw.result.type === "predicate",
     "guess-vs-draw comparative must remain a predicate",
   );
   const portugueseThreshold = validateAndPrecompileRule({
@@ -662,10 +703,17 @@ test("accepts broad Portuguese match-count threshold variations", () => {
 
     assert.equal(result.decision, "VALID", prompt);
     assert.equal(result.artifact?.ruleMode, "predicate", prompt);
-    assert.equal(result.log.reasonCodes.includes("UNSUPPORTED_RULE"), false, prompt);
+    assert.equal(
+      result.log.reasonCodes.includes("UNSUPPORTED_RULE"),
+      false,
+      prompt,
+    );
     assert.match(result.artifactHash ?? "", /^[0-9a-f]{64}$/, prompt);
     const ast = result.artifact?.ast;
-    assert.ok(ast?.schemaVersion === 1 && ast.node.kind === "match_count_at_least", prompt);
+    assert.ok(
+      ast?.schemaVersion === 1 && ast.node.kind === "match_count_at_least",
+      prompt,
+    );
     assert.equal(ast.node.value, expectedValue, prompt);
   }
 });
@@ -707,7 +755,11 @@ test("handles the first 10 VALID prompts from the rule proposal test set", () =>
     });
 
     assert.equal(result.decision, "VALID", prompt);
-    assert.equal(result.log.reasonCodes.includes("UNSUPPORTED_RULE"), false, prompt);
+    assert.equal(
+      result.log.reasonCodes.includes("UNSUPPORTED_RULE"),
+      false,
+      prompt,
+    );
     assert.match(result.artifactHash ?? "", /^[0-9a-f]{64}$/, prompt);
   }
 });
@@ -841,7 +893,9 @@ test("preserves selected prompt-test semantics for rule proposal agent prompts",
     tokenCount: tokenCount(prompts.get(101) ?? ""),
   });
   const ast = casualThreshold.artifact?.ast;
-  assert.ok(ast?.schemaVersion === 1 && ast.node.kind === "match_count_at_least");
+  assert.ok(
+    ast?.schemaVersion === 1 && ast.node.kind === "match_count_at_least",
+  );
   assert.equal(ast.node.value, 4);
 });
 
@@ -1184,7 +1238,10 @@ test("detects provider / AI-subjectivity / meta / social external dependencies",
   }
 
   // Sanity: the exported ambiguity helper still recognizes vague wording.
-  assert.equal(hasAmbiguousWording("Win if my numbers are close to the draw."), true);
+  assert.equal(
+    hasAmbiguousWording("Win if my numbers are close to the draw."),
+    true,
+  );
   assert.equal(
     hasAmbiguousWording(
       "Win if exactly one guessed number matches the drawn number in the same position.",
@@ -1237,11 +1294,17 @@ test("deterministically compiles filtered-count, sliced-sum, parity, sum-diff an
     tokenCount: 16,
   }).artifact!.ast;
   assert.equal(
-    evaluatePredicate(parityAst, { guess: [1, 4, 5, 8, 9, 12], draw: [3, 2, 7, 6, 11, 20] }).result,
+    evaluatePredicate(parityAst, {
+      guess: [1, 4, 5, 8, 9, 12],
+      draw: [3, 2, 7, 6, 11, 20],
+    }).result,
     "WIN",
   );
   assert.equal(
-    evaluatePredicate(parityAst, { guess: [2, 4, 5, 8, 9, 12], draw: [3, 2, 7, 6, 11, 20] }).result,
+    evaluatePredicate(parityAst, {
+      guess: [2, 4, 5, 8, 9, 12],
+      draw: [3, 2, 7, 6, 11, 20],
+    }).result,
     "LOSE",
   );
 
@@ -1251,11 +1314,17 @@ test("deterministically compiles filtered-count, sliced-sum, parity, sum-diff an
     tokenCount: 26,
   }).artifact!.ast;
   assert.equal(
-    evaluatePredicate(removalAst, { guess: [1, 2, 3, 40, 50, 60], draw: [1, 2, 3, 70, 80, 90] }).result,
+    evaluatePredicate(removalAst, {
+      guess: [1, 2, 3, 40, 50, 60],
+      draw: [1, 2, 3, 70, 80, 90],
+    }).result,
     "WIN",
   );
   assert.equal(
-    evaluatePredicate(removalAst, { guess: [1, 2, 40, 41, 50, 60], draw: [1, 2, 3, 70, 80, 90] }).result,
+    evaluatePredicate(removalAst, {
+      guess: [1, 2, 40, 41, 50, 60],
+      draw: [1, 2, 3, 70, 80, 90],
+    }).result,
     "LOSE",
   );
 });
@@ -1276,7 +1345,10 @@ test("deterministically compiles prompt-test-set-2 prompts 21 through 30", () =>
     30: "ordered_position_match_count_eq",
   };
 
-  const compiled = new Map<number, ReturnType<typeof validateAndPrecompileRule>>();
+  const compiled = new Map<
+    number,
+    ReturnType<typeof validateAndPrecompileRule>
+  >();
   for (const [ruleId, row] of prompts) {
     assert.equal(row.expected, "VALID", `#${ruleId}: ${row.prompt}`);
     const result = validateAndPrecompileRule({
@@ -1419,11 +1491,17 @@ test("compiles defined vague terms (sequences 1 & 2) while keeping bare vague ru
     tokenCount: 12,
   }).artifact!.ast;
   assert.equal(
-    evaluatePredicate(balancedAst, { guess: [1, 3, 5, 2, 4, 6], draw: [9, 9, 9, 9, 9, 9] }).result,
+    evaluatePredicate(balancedAst, {
+      guess: [1, 3, 5, 2, 4, 6],
+      draw: [9, 9, 9, 9, 9, 9],
+    }).result,
     "WIN",
   );
   assert.equal(
-    evaluatePredicate(balancedAst, { guess: [1, 3, 2, 2, 4, 6], draw: [9, 9, 9, 9, 9, 9] }).result,
+    evaluatePredicate(balancedAst, {
+      guess: [1, 3, 2, 2, 4, 6],
+      draw: [9, 9, 9, 9, 9, 9],
+    }).result,
     "LOSE",
   );
 });
@@ -1892,9 +1970,17 @@ test("provider worked examples catch an inverted signed bound", async () => {
         kind: "compare",
         left: {
           kind: "arith",
-          left: { kind: "reduce", of: { kind: "source", source: "guess" }, op: "sum" },
+          left: {
+            kind: "reduce",
+            of: { kind: "source", source: "guess" },
+            op: "sum",
+          },
           op: "sub",
-          right: { kind: "reduce", of: { kind: "source", source: "draw" }, op: "sum" },
+          right: {
+            kind: "reduce",
+            of: { kind: "source", source: "draw" },
+            op: "sum",
+          },
         },
         op: "lte",
         right: { kind: "lit", value: 10 },
@@ -1930,7 +2016,10 @@ test("provider worked examples catch an inverted signed bound", async () => {
     result.log.reasonCodes.includes("PROVIDER_EVIDENCE_UNVERIFIED"),
     JSON.stringify(result.log.reasonCodes),
   );
-  assert.equal(result.log.reasonCodes.includes("INTERPRETATION_MISMATCH"), false);
+  assert.equal(
+    result.log.reasonCodes.includes("INTERPRETATION_MISMATCH"),
+    false,
+  );
   const rejected = result.log.attemptDiagnostics.find(
     (attempt) => attempt.candidate !== null,
   );
@@ -2143,6 +2232,7 @@ test("compiles direct ticket-sum comparisons without provider evidence", async (
   const prompts = [
     "Got it - your guess wins when its total sum is higher than the draw's total sum.",
     "A guess wins if the sum of your six numbers is greater than the sum of the official draw's six numbers.",
+    "For each guess, compute the sum of its six numbers; compute the sum of the official draw's six numbers; the guess wins when its sum is strictly greater than the draw's sum.",
     "Você vence se a soma dos seus seis números for maior que a soma dos números do sorteio oficial.",
   ];
 
@@ -2219,7 +2309,11 @@ test("a provider that returned no AST is not reported as a fidelity failure", as
     async () => {
       throw new Error("provider unreachable");
     },
-    async () => ({ ast: { totally: "not an ast" }, consumedSpans: [], workedExamples: [] }),
+    async () => ({
+      ast: { totally: "not an ast" },
+      consumedSpans: [],
+      workedExamples: [],
+    }),
   ]) {
     const result = await compileRuleArtifact(
       { originalText: text, prompt: text, tokenCount: countWords(text) },
@@ -2503,8 +2597,18 @@ test("elects the same rule when the provider compiles it faithfully", async () =
     where: {
       kind: "and",
       clauses: [
-        { kind: "compare", left: { kind: "elem" }, op: "gte", right: { kind: "lit", value: 1 } },
-        { kind: "compare", left: { kind: "elem" }, op: "lte", right: { kind: "lit", value: 99 } },
+        {
+          kind: "compare",
+          left: { kind: "elem" },
+          op: "gte",
+          right: { kind: "lit", value: 1 },
+        },
+        {
+          kind: "compare",
+          left: { kind: "elem" },
+          op: "lte",
+          right: { kind: "lit", value: 99 },
+        },
       ],
     },
   };
@@ -2515,7 +2619,12 @@ test("elects the same rule when the provider compiles it faithfully", async () =
         {
           kind: "forall",
           of: { kind: "source", source: "guess" },
-          where: { kind: "compare", left: { kind: "elem" }, op: "lte", right: { kind: "lit", value: 6 } },
+          where: {
+            kind: "compare",
+            left: { kind: "elem" },
+            op: "lte",
+            right: { kind: "lit", value: 6 },
+          },
         },
         drawInRange,
       ],
@@ -2932,7 +3041,10 @@ test("buys a second opinion only when no deterministic reading exists", async ()
     {
       astProvider: async () => {
         calls += 1;
-        return { schemaVersion: 1, node: { kind: "match_count_at_least", value: 4 } };
+        return {
+          schemaVersion: 1,
+          node: { kind: "match_count_at_least", value: 4 },
+        };
       },
     },
   );
@@ -2945,7 +3057,11 @@ test("buys a second opinion only when no deterministic reading exists", async ()
 
   calls = 0;
   const withoutReference = await compileRuleArtifact(
-    { originalText: NO_REFERENCE_PROMPT, prompt: NO_REFERENCE_PROMPT, tokenCount: 14 },
+    {
+      originalText: NO_REFERENCE_PROMPT,
+      prompt: NO_REFERENCE_PROMPT,
+      tokenCount: 14,
+    },
     {
       astProvider: async () => {
         calls += 1;
@@ -2958,11 +3074,126 @@ test("buys a second opinion only when no deterministic reading exists", async ()
   assert.equal(withoutReference.log.providerDisagreementRateSample, 0);
 });
 
+test("a dedicated LLM reviewer certifies a novel rule without provider fallbacks", async () => {
+  let generationCalls = 0;
+  let reviewCalls = 0;
+  const result = await compileRuleArtifact(
+    {
+      originalText: NO_REFERENCE_PROMPT,
+      prompt: NO_REFERENCE_PROMPT,
+      tokenCount: 14,
+    },
+    {
+      astProvider: async () => {
+        generationCalls += 1;
+        return sumCompareAst("lt", 10);
+      },
+      astReviewer: async () => {
+        reviewCalls += 1;
+        return sumCompareAst("lt", 10);
+      },
+    },
+  );
+
+  assert.equal(result.decision, "VALID");
+  assert.equal(generationCalls, 1);
+  assert.equal(reviewCalls, 1);
+  assert.ok(!result.log.reasonCodes.includes("SECOND_OPINION_UNAVAILABLE"));
+  assert.equal(result.log.providerPath.length, 1);
+});
+
+test("a novel rule with reviewer consensus binds the complete approved source", async () => {
+  const ast = sumCompareAst("lt", 10);
+  const result = await compileRuleArtifact(
+    {
+      originalText: NO_REFERENCE_PROMPT,
+      prompt: NO_REFERENCE_PROMPT,
+      tokenCount: 14,
+    },
+    {
+      astProvider: async () => ({
+        ast,
+        consumedSpans: [{ text: "my ticket total" }],
+        workedExamples: [
+          {
+            draw: [95, 96, 97, 98, 99, 100],
+            guess: [1, 2, 3, 4, 5, 6],
+            outcome: "WIN",
+          },
+          {
+            draw: [1, 2, 3, 4, 5, 6],
+            guess: [95, 96, 97, 98, 99, 100],
+            outcome: "LOSE",
+          },
+        ],
+      }),
+      astReviewer: async () => ast,
+      requireProviderEvidence: true,
+    },
+  );
+
+  assert.equal(result.decision, "VALID");
+  assert.deepEqual(result.artifact?.sourceSpans, [
+    { text: result.log.normalizedText },
+  ]);
+  const evidenceStage = result.log.attemptDiagnostics[0]?.stages.find(
+    (stage) => stage.stage === "provider_evidence",
+  );
+  assert.match(evidenceStage?.detail ?? "", /server bound the complete approved source/i);
+});
+
+test("a novel-rule LLM disagreement reports a behavioral counterexample", async () => {
+  const result = await compileRuleArtifact(
+    {
+      originalText: NO_REFERENCE_PROMPT,
+      prompt: NO_REFERENCE_PROMPT,
+      tokenCount: 14,
+    },
+    {
+      astProvider: async () => sumCompareAst("lt", 10),
+      astReviewer: async () => sumCompareAst("gt", 10),
+    },
+  );
+
+  assert.equal(result.decision, "INVALID");
+  assert.ok(result.log.reasonCodes.includes("REVIEWER_MISMATCH"));
+  const reviewStage = result.log.attemptDiagnostics[0]?.stages.find(
+    (stage) => stage.stage === "independent_review",
+  );
+  assert.match(reviewStage?.detail ?? "", /guess \[/u);
+  assert.match(reviewStage?.detail ?? "", /draw \[/u);
+  assert.match(reviewStage?.detail ?? "", /reviewer=/u);
+  assert.match(reviewStage?.detail ?? "", /draft=/u);
+});
+
+test("a missing dedicated reviewer fails a novel generation closed", async () => {
+  const result = await compileRuleArtifact(
+    {
+      originalText: NO_REFERENCE_PROMPT,
+      prompt: NO_REFERENCE_PROMPT,
+      tokenCount: 14,
+    },
+    {
+      astProvider: async () => sumCompareAst("lt", 10),
+      astReviewer: async () => {
+        throw new Error("review model unavailable");
+      },
+    },
+  );
+
+  assert.equal(result.decision, "INVALID");
+  assert.ok(result.log.reasonCodes.includes("SECOND_OPINION_UNAVAILABLE"));
+});
+
 test("fails closed when two providers compile the same text differently", async () => {
   const answers = [sumCompareAst("lt", 10), sumCompareAst("gt", 10)];
   let index = 0;
   const result = await compileRuleArtifact(
-    { originalText: NO_REFERENCE_PROMPT, prompt: NO_REFERENCE_PROMPT, tokenCount: 14 },
+    {
+      originalText: NO_REFERENCE_PROMPT,
+      prompt: NO_REFERENCE_PROMPT,
+      tokenCount: 14,
+    },
     {
       astProvider: async () => answers[index++] ?? answers[0],
     },
@@ -2979,7 +3210,11 @@ test("disableConsensus lifts the rejection but still records the divergence", as
   let index = 0;
   let calls = 0;
   const result = await compileRuleArtifact(
-    { originalText: NO_REFERENCE_PROMPT, prompt: NO_REFERENCE_PROMPT, tokenCount: 14 },
+    {
+      originalText: NO_REFERENCE_PROMPT,
+      prompt: NO_REFERENCE_PROMPT,
+      tokenCount: 14,
+    },
     {
       astProvider: async () => {
         calls += 1;
@@ -3040,10 +3275,18 @@ test("the tertiary resolves a real disagreement by behaviour, not byte equality"
         left: {
           kind: "arith",
           op: "add",
-          left: { kind: "reduce", op: "sum", of: { kind: "source", source: "guess" } },
+          left: {
+            kind: "reduce",
+            op: "sum",
+            of: { kind: "source", source: "guess" },
+          },
           right: { kind: "lit", value: 10 },
         },
-        right: { kind: "reduce", op: "sum", of: { kind: "source", source: "draw" } },
+        right: {
+          kind: "reduce",
+          op: "sum",
+          of: { kind: "source", source: "draw" },
+        },
       },
     },
   };
@@ -3054,7 +3297,11 @@ test("the tertiary resolves a real disagreement by behaviour, not byte equality"
   ];
   let index = 0;
   const result = await compileRuleArtifact(
-    { originalText: NO_REFERENCE_PROMPT, prompt: NO_REFERENCE_PROMPT, tokenCount: 14 },
+    {
+      originalText: NO_REFERENCE_PROMPT,
+      prompt: NO_REFERENCE_PROMPT,
+      tokenCount: 14,
+    },
     { astProvider: async () => answers[index++] ?? answers[0] },
   );
 
@@ -3134,17 +3381,29 @@ test("treats an equivalent rewrite as agreement, not disagreement", async () => 
         left: {
           kind: "arith",
           op: "add",
-          left: { kind: "reduce", op: "sum", of: { kind: "source", source: "guess" } },
+          left: {
+            kind: "reduce",
+            op: "sum",
+            of: { kind: "source", source: "guess" },
+          },
           right: { kind: "lit", value: 10 },
         },
-        right: { kind: "reduce", op: "sum", of: { kind: "source", source: "draw" } },
+        right: {
+          kind: "reduce",
+          op: "sum",
+          of: { kind: "source", source: "draw" },
+        },
       },
     },
   };
   const answers = [sumCompareAst("lt", 10), shifted];
   let index = 0;
   const result = await compileRuleArtifact(
-    { originalText: NO_REFERENCE_PROMPT, prompt: NO_REFERENCE_PROMPT, tokenCount: 14 },
+    {
+      originalText: NO_REFERENCE_PROMPT,
+      prompt: NO_REFERENCE_PROMPT,
+      tokenCount: 14,
+    },
     { astProvider: async () => answers[index++] ?? answers[0] },
   );
 
@@ -3155,7 +3414,11 @@ test("treats an equivalent rewrite as agreement, not disagreement", async () => 
 test("records that a required second opinion could not be obtained", async () => {
   let calls = 0;
   const result = await compileRuleArtifact(
-    { originalText: NO_REFERENCE_PROMPT, prompt: NO_REFERENCE_PROMPT, tokenCount: 14 },
+    {
+      originalText: NO_REFERENCE_PROMPT,
+      prompt: NO_REFERENCE_PROMPT,
+      tokenCount: 14,
+    },
     {
       astProvider: async () => {
         calls += 1;
@@ -3185,6 +3448,49 @@ function compile(text: string) {
 function countWords(text: string) {
   return text.trim().split(/\s+/u).filter(Boolean).length;
 }
+
+test("positional comparisons preserve every compound clause", () => {
+  for (const text of [
+    "A guess wins when its first number is greater than the first drawn number and its second number is greater than the last drawn number.",
+    "Ganha o jogador cujo primeiro número seja maior que o primeiro número do sorteio e cujo segundo número seja maior que o último número do sorteio.",
+  ]) {
+    const result = validateAndPrecompileRule({
+      agentInterpretation:
+        "A guess wins when its first number is greater than the first drawn number and its second number is greater than the last drawn number.",
+      originalText: text,
+      prompt: text,
+      tokenCount: countWords(text),
+    });
+
+    assert.equal(
+      result.decision,
+      "VALID",
+      `${text}: ${result.log.reasonCodes.join(",")}`,
+    );
+    const ast = result.artifact?.ast;
+    assert.equal(ast?.schemaVersion, 2);
+    assert.equal(
+      ast?.schemaVersion === 2 && ast.result.type === "predicate"
+        ? ast.result.predicate.kind
+        : null,
+      "and",
+    );
+    assert.equal(
+      evaluatePredicate(ast!, {
+        draw: [10, 20, 30, 40, 50, 60],
+        guess: [11, 61, 70, 80, 90, 100],
+      }).result,
+      "WIN",
+    );
+    assert.equal(
+      evaluatePredicate(ast!, {
+        draw: [10, 20, 30, 40, 50, 60],
+        guess: [11, 59, 70, 80, 90, 100],
+      }).result,
+      "LOSE",
+    );
+  }
+});
 
 test("a cardinality phrase is not a match threshold", () => {
   // Every guess and every draw always has exactly six numbers, so "its six
@@ -3366,8 +3672,16 @@ test("framing words outside the consumed spans do not block a faithful compile",
   const condition = {
     kind: "compare",
     op: "gt",
-    left: { kind: "reduce", op: "sum", of: { kind: "source", source: "guess" } },
-    right: { kind: "reduce", op: "sum", of: { kind: "source", source: "draw" } },
+    left: {
+      kind: "reduce",
+      op: "sum",
+      of: { kind: "source", source: "guess" },
+    },
+    right: {
+      kind: "reduce",
+      op: "sum",
+      of: { kind: "source", source: "draw" },
+    },
   };
   const workedExamples = [
     {
@@ -3385,7 +3699,10 @@ test("framing words outside the consumed spans do not block a faithful compile",
     { originalText: text, prompt: text, tokenCount: countWords(text) },
     {
       astProvider: async () => ({
-        ast: { schemaVersion: 3, result: { type: "predicate", predicate: condition } },
+        ast: {
+          schemaVersion: 3,
+          result: { type: "predicate", predicate: condition },
+        },
         consumedSpans: [
           {
             text: "the sum of the guessed numbers is greater than the sum of the drawn numbers",
@@ -3409,7 +3726,10 @@ test("framing words outside the consumed spans do not block a faithful compile",
     },
     {
       astProvider: async () => ({
-        ast: { schemaVersion: 3, result: { type: "predicate", predicate: condition } },
+        ast: {
+          schemaVersion: 3,
+          result: { type: "predicate", predicate: condition },
+        },
         consumedSpans: [
           {
             text: "the sum of the guessed numbers is greater than the sum of the drawn numbers",
@@ -3577,95 +3897,211 @@ test("position-specific inclusive ranges compile in English and Portuguese", () 
       }).result;
 
     assert.equal(evaluate([1, 2, 3, 40, 50, 60]), "WIN", "lower endpoints win");
-    assert.equal(evaluate([100, 99, 98, 40, 50, 60]), "WIN", "upper endpoints win");
-    assert.equal(evaluate([1, 1, 3, 40, 50, 60]), "LOSE", "second position below range loses");
-    assert.equal(evaluate([1, 2, 99, 40, 50, 60]), "LOSE", "third position above range loses");
+    assert.equal(
+      evaluate([100, 99, 98, 40, 50, 60]),
+      "WIN",
+      "upper endpoints win",
+    );
+    assert.equal(
+      evaluate([1, 1, 3, 40, 50, 60]),
+      "LOSE",
+      "second position below range loses",
+    );
+    assert.equal(
+      evaluate([1, 2, 99, 40, 50, 60]),
+      "LOSE",
+      "third position above range loses",
+    );
   }
 });
 
 test("stress set 4 objective rules compile to their stated boundary behaviour", () => {
   const cases: Array<{
     text: string;
-    fixtures: Array<{ draw: number[]; guess: number[]; expected: "WIN" | "LOSE" }>;
+    fixtures: Array<{
+      draw: number[];
+      guess: number[];
+      expected: "WIN" | "LOSE";
+    }>;
   }> = [
     {
       text: "Every guessed number must be within 4 of the drawn number in the same position, and at least two guessed numbers must exactly equal their drawn numbers in those positions.",
       fixtures: [
-        { guess: [10, 20, 34, 44, 54, 64], draw: [10, 20, 30, 40, 50, 60], expected: "WIN" },
-        { guess: [14, 24, 34, 44, 54, 64], draw: [10, 20, 30, 40, 50, 60], expected: "LOSE" },
+        {
+          guess: [10, 20, 34, 44, 54, 64],
+          draw: [10, 20, 30, 40, 50, 60],
+          expected: "WIN",
+        },
+        {
+          guess: [14, 24, 34, 44, 54, 64],
+          draw: [10, 20, 30, 40, 50, 60],
+          expected: "LOSE",
+        },
       ],
     },
     {
       text: "A guess wins if the sum of its numbers is at least 12 higher than the sum of the drawn numbers.",
       fixtures: [
-        { guess: [10, 20, 30, 40, 50, 72], draw: [10, 20, 30, 40, 50, 60], expected: "WIN" },
-        { guess: [10, 20, 30, 40, 50, 71], draw: [10, 20, 30, 40, 50, 60], expected: "LOSE" },
+        {
+          guess: [10, 20, 30, 40, 50, 72],
+          draw: [10, 20, 30, 40, 50, 60],
+          expected: "WIN",
+        },
+        {
+          guess: [10, 20, 30, 40, 50, 71],
+          draw: [10, 20, 30, 40, 50, 60],
+          expected: "LOSE",
+        },
       ],
     },
     {
       text: "A guess wins if the sum of its three smallest numbers is greater than the sum of the three smallest drawn numbers.",
       fixtures: [
-        { guess: [11, 21, 31, 70, 80, 90], draw: [10, 20, 30, 80, 90, 100], expected: "WIN" },
-        { guess: [9, 20, 30, 70, 80, 90], draw: [10, 20, 30, 80, 90, 100], expected: "LOSE" },
+        {
+          guess: [11, 21, 31, 70, 80, 90],
+          draw: [10, 20, 30, 80, 90, 100],
+          expected: "WIN",
+        },
+        {
+          guess: [9, 20, 30, 70, 80, 90],
+          draw: [10, 20, 30, 80, 90, 100],
+          expected: "LOSE",
+        },
       ],
     },
     {
       text: "A guess wins if none of its even guessed numbers appear anywhere in the official draw.",
       fixtures: [
-        { guess: [4, 6, 13, 15, 17, 19], draw: [2, 3, 5, 7, 9, 11], expected: "WIN" },
-        { guess: [2, 4, 13, 15, 17, 19], draw: [2, 3, 5, 7, 9, 11], expected: "LOSE" },
+        {
+          guess: [4, 6, 13, 15, 17, 19],
+          draw: [2, 3, 5, 7, 9, 11],
+          expected: "WIN",
+        },
+        {
+          guess: [2, 4, 13, 15, 17, 19],
+          draw: [2, 3, 5, 7, 9, 11],
+          expected: "LOSE",
+        },
       ],
     },
     {
       text: "A guess wins if its number sum modulo 7 equals the official draw's number sum modulo 7.",
       fixtures: [
-        { guess: [5, 15, 25, 35, 55, 75], draw: [10, 20, 30, 40, 50, 60], expected: "WIN" },
-        { guess: [5, 15, 25, 35, 55, 76], draw: [10, 20, 30, 40, 50, 60], expected: "LOSE" },
+        {
+          guess: [5, 15, 25, 35, 55, 75],
+          draw: [10, 20, 30, 40, 50, 60],
+          expected: "WIN",
+        },
+        {
+          guess: [5, 15, 25, 35, 55, 76],
+          draw: [10, 20, 30, 40, 50, 60],
+          expected: "LOSE",
+        },
       ],
     },
     {
       text: "A guess wins if it contains 42 and the sum of the six drawn numbers is below 150.",
       fixtures: [
-        { guess: [1, 2, 3, 4, 5, 42], draw: [1, 2, 3, 4, 5, 100], expected: "WIN" },
-        { guess: [1, 2, 3, 4, 5, 41], draw: [1, 2, 3, 4, 5, 100], expected: "LOSE" },
-        { guess: [1, 2, 3, 4, 5, 42], draw: [10, 20, 30, 40, 50, 60], expected: "LOSE" },
+        {
+          guess: [1, 2, 3, 4, 5, 42],
+          draw: [1, 2, 3, 4, 5, 100],
+          expected: "WIN",
+        },
+        {
+          guess: [1, 2, 3, 4, 5, 41],
+          draw: [1, 2, 3, 4, 5, 100],
+          expected: "LOSE",
+        },
+        {
+          guess: [1, 2, 3, 4, 5, 42],
+          draw: [10, 20, 30, 40, 50, 60],
+          expected: "LOSE",
+        },
       ],
     },
     {
       text: "A guess wins if all six guessed numbers are strictly greater than 10 and strictly less than 90.",
       fixtures: [
-        { guess: [11, 20, 30, 40, 50, 89], draw: [10, 20, 30, 40, 50, 60], expected: "WIN" },
-        { guess: [10, 20, 30, 40, 50, 89], draw: [10, 20, 30, 40, 50, 60], expected: "LOSE" },
-        { guess: [11, 20, 30, 40, 50, 90], draw: [10, 20, 30, 40, 50, 60], expected: "LOSE" },
+        {
+          guess: [11, 20, 30, 40, 50, 89],
+          draw: [10, 20, 30, 40, 50, 60],
+          expected: "WIN",
+        },
+        {
+          guess: [10, 20, 30, 40, 50, 89],
+          draw: [10, 20, 30, 40, 50, 60],
+          expected: "LOSE",
+        },
+        {
+          guess: [11, 20, 30, 40, 50, 90],
+          draw: [10, 20, 30, 40, 50, 60],
+          expected: "LOSE",
+        },
       ],
     },
     {
       text: "A guess wins if its total is at least ten lower than the official draw total.",
       fixtures: [
-        { guess: [5, 15, 25, 35, 55, 65], draw: [10, 20, 30, 40, 50, 60], expected: "WIN" },
-        { guess: [5, 15, 25, 35, 56, 65], draw: [10, 20, 30, 40, 50, 60], expected: "LOSE" },
+        {
+          guess: [5, 15, 25, 35, 55, 65],
+          draw: [10, 20, 30, 40, 50, 60],
+          expected: "WIN",
+        },
+        {
+          guess: [5, 15, 25, 35, 56, 65],
+          draw: [10, 20, 30, 40, 50, 60],
+          expected: "LOSE",
+        },
       ],
     },
     {
       text: "A guess wins if its six numbers are exactly 1, 2, 3, 4, 5 and 6 in any order and at least one drawn number is between 40 and 60, inclusive.",
       fixtures: [
-        { guess: [1, 2, 3, 4, 5, 6], draw: [10, 20, 30, 40, 70, 80], expected: "WIN" },
-        { guess: [1, 2, 3, 4, 5, 7], draw: [10, 20, 30, 40, 70, 80], expected: "LOSE" },
-        { guess: [1, 2, 3, 4, 5, 6], draw: [1, 2, 3, 98, 99, 100], expected: "LOSE" },
+        {
+          guess: [1, 2, 3, 4, 5, 6],
+          draw: [10, 20, 30, 40, 70, 80],
+          expected: "WIN",
+        },
+        {
+          guess: [1, 2, 3, 4, 5, 7],
+          draw: [10, 20, 30, 40, 70, 80],
+          expected: "LOSE",
+        },
+        {
+          guess: [1, 2, 3, 4, 5, 6],
+          draw: [1, 2, 3, 98, 99, 100],
+          expected: "LOSE",
+        },
       ],
     },
     {
       text: "A guess wins if all six drawn numbers are below 40. The player's guessed numbers do not affect the result.",
       fixtures: [
-        { guess: [50, 60, 70, 80, 90, 100], draw: [1, 2, 3, 4, 5, 39], expected: "WIN" },
-        { guess: [1, 2, 3, 4, 5, 6], draw: [1, 2, 3, 4, 5, 40], expected: "LOSE" },
+        {
+          guess: [50, 60, 70, 80, 90, 100],
+          draw: [1, 2, 3, 4, 5, 39],
+          expected: "WIN",
+        },
+        {
+          guess: [1, 2, 3, 4, 5, 6],
+          draw: [1, 2, 3, 4, 5, 40],
+          expected: "LOSE",
+        },
       ],
     },
     {
       text: "A guess wins if it contains the number 77. The official draw does not affect the result.",
       fixtures: [
-        { guess: [1, 2, 3, 4, 5, 77], draw: [10, 20, 30, 40, 50, 60], expected: "WIN" },
-        { guess: [1, 2, 3, 4, 5, 76], draw: [10, 20, 30, 40, 50, 60], expected: "LOSE" },
+        {
+          guess: [1, 2, 3, 4, 5, 77],
+          draw: [10, 20, 30, 40, 50, 60],
+          expected: "WIN",
+        },
+        {
+          guess: [1, 2, 3, 4, 5, 76],
+          draw: [10, 20, 30, 40, 50, 60],
+          expected: "LOSE",
+        },
       ],
     },
   ];
@@ -3761,7 +4197,8 @@ test("a headline that claims exclusivity the artifact does not implement is not 
   assert.equal(
     analyzeStatementFidelity({
       ast,
-      statement: "a guess wins if only the sum of its numbers is greater than 200.",
+      statement:
+        "a guess wins if only the sum of its numbers is greater than 200.",
     }).faithful,
     true,
   );
@@ -3818,8 +4255,16 @@ test("provider evidence does not have to include a winning example", async () =>
     schemaVersion: 3,
   };
   const losingOnly = [
-    { draw: [1, 20, 30, 40, 50, 60], guess: [1, 2, 3, 4, 57, 88], outcome: "LOSE" },
-    { draw: [9, 20, 30, 40, 50, 60], guess: [5, 6, 7, 8, 57, 88], outcome: "LOSE" },
+    {
+      draw: [1, 20, 30, 40, 50, 60],
+      guess: [1, 2, 3, 4, 57, 88],
+      outcome: "LOSE",
+    },
+    {
+      draw: [9, 20, 30, 40, 50, 60],
+      guess: [5, 6, 7, 8, 57, 88],
+      outcome: "LOSE",
+    },
   ];
   const accepted = await compileRuleArtifact(
     { originalText: text, prompt: text, tokenCount: countWords(text) },
@@ -3848,7 +4293,11 @@ test("provider evidence does not have to include a winning example", async () =>
         consumedSpans: [{ text: text.toLowerCase() }],
         workedExamples: [
           losingOnly[0],
-          { draw: [1, 20, 30, 40, 50, 60], guess: [1, 2, 3, 4, 57, 88], outcome: "WIN" },
+          {
+            draw: [1, 20, 30, 40, 50, 60],
+            guess: [1, 2, 3, 4, 57, 88],
+            outcome: "WIN",
+          },
         ],
       }),
       requireProviderEvidence: true,
@@ -3914,8 +4363,16 @@ test("a vacuously true remainder clause is not an unread condition", async () =>
     },
   ];
   const workedExamples = [
-    { draw: [1, 20, 30, 40, 50, 60], guess: [1, 2, 3, 4, 57, 88], outcome: "LOSE" },
-    { draw: [9, 20, 30, 40, 50, 60], guess: [1, 2, 3, 4, 57, 88], outcome: "WIN" },
+    {
+      draw: [1, 20, 30, 40, 50, 60],
+      guess: [1, 2, 3, 4, 57, 88],
+      outcome: "LOSE",
+    },
+    {
+      draw: [9, 20, 30, 40, 50, 60],
+      guess: [1, 2, 3, 4, 57, 88],
+      outcome: "WIN",
+    },
   ];
   const result = await compileRuleArtifact(
     { originalText: text, prompt: text, tokenCount: countWords(text) },
@@ -3924,7 +4381,11 @@ test("a vacuously true remainder clause is not an unread condition", async () =>
       requireProviderEvidence: true,
     },
   );
-  assert.equal(result.decision, "VALID", JSON.stringify(result.log.reasonCodes));
+  assert.equal(
+    result.decision,
+    "VALID",
+    JSON.stringify(result.log.reasonCodes),
+  );
 
   // The narrowing is about vacuous text, not about leniency: a leftover clause
   // that can still change who wins keeps blocking, digits or no digits.
@@ -4006,8 +4467,7 @@ test("a range over the numbers a rule has not pinned is vacuous, not a required 
     ast: parsedAst,
     officialInterpretation:
       "The guess contains 1, 2, 3 and 4, and the official draw contains none of them.",
-    text:
-      "I win if my guess contains 1, 2, 3, 4 and all six guessed numbers are between 5 and 100.",
+    text: "I win if my guess contains 1, 2, 3, 4 and all six guessed numbers are between 5 and 100.",
   });
   assert.deepEqual(wholeGuess.requiredValues, [1, 2, 3, 4, 5, 100]);
   assert.deepEqual(wholeGuess.missingFromAst, [5, 100]);
@@ -4019,8 +4479,7 @@ test("a range over the numbers a rule has not pinned is vacuous, not a required 
     ast: parsedAst,
     officialInterpretation:
       "The guess contains 1, 2, 3 and 4, and the official draw contains none of them.",
-    text:
-      "I win if my guess contains 2 and 4 and the remaining four numbers are between 5 and 100.",
+    text: "I win if my guess contains 2 and 4 and the remaining four numbers are between 5 and 100.",
   });
   assert.ok(
     gapped.requiredValues.includes(5) && gapped.requiredValues.includes(100),

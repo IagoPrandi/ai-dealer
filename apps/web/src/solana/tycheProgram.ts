@@ -133,6 +133,9 @@ export interface RulePreflightResult {
   dealerMessage: string;
   difficultyClass?: string;
   finalConfidence?: number;
+  /** Server-authored recovery hint for compiler-generation faults. Missing on
+   * drafts persisted before retry support was introduced. */
+  generationRetryable?: boolean;
   maxTokens: number;
   needsClarification: boolean;
   normalizedText: string;
