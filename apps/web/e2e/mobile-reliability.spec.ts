@@ -34,7 +34,7 @@ async function openWithPendingAction(page: Page, status: Status) {
           numbers: [1, 2, 3, 4, 5, 6],
           signature: pendingStatus === "pending_confirmation" ? "5sigPending" : undefined,
           status: pendingStatus,
-          turnId: 7,
+          turnId: 42,
           updatedAt: timestamp,
           version: 1,
         }),
@@ -116,7 +116,7 @@ test("mobile play flow shows delayed, rejected, duplicate, and turn-changed outc
   }, PENDING_ACTION_KEY);
 
   await expect(page.getByTestId("wallet-action-status")).toContainText(
-    "Guess already recorded",
+    "Guess sequence already recorded",
   );
 
   await page.evaluate((key) => {

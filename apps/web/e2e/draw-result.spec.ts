@@ -22,7 +22,7 @@ test("claims panel prompts wallet connection and links to next round and history
   ).toHaveAttribute("href", "/play/rewards");
 });
 
-test("reward history page prompts wallet connection and links back to claims", async ({
+test("reward history page prompts wallet connection at the canonical wallet URL", async ({
   page,
 }) => {
   await page.goto("/play/rewards");
@@ -30,7 +30,9 @@ test("reward history page prompts wallet connection and links back to claims", a
   await expect(
     page.getByRole("heading", { name: "Connect your wallet" }),
   ).toBeVisible();
+  await page.getByRole("button", { name: "Connect wallet" }).click();
+  await expect(page).toHaveURL(/\/play\/wallet$/u);
   await expect(
-    page.getByRole("link", { name: "Connect wallet" }),
-  ).toHaveAttribute("href", "/play/wallet");
+    page.getByRole("heading", { name: "Connect your wallet" }).first(),
+  ).toBeVisible();
 });

@@ -33,8 +33,11 @@ export function ConnectOverlay({
       }}
     >
       <div
+        aria-labelledby="wallet-dialog-title"
+        aria-modal="true"
         onClick={(e) => e.stopPropagation()}
         className="ide-scroll"
+        role="dialog"
         style={{
           width: "100%", maxHeight: "90%", overflowY: "auto",
           background: "var(--bg-2)", borderTopLeftRadius: 28, borderTopRightRadius: 28,
@@ -46,10 +49,10 @@ export function ConnectOverlay({
         <div style={{ display: "flex", alignItems: "center", gap: 11, marginBottom: 8 }}>
           <Dealer size={34} />
           <div style={{ flex: 1 }}>
-            <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>Connect your wallet</h2>
+            <h2 id="wallet-dialog-title" style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>Connect your wallet</h2>
             <p style={{ margin: "2px 0 0", fontSize: 13, color: "var(--muted)" }}>Solana devnet · approval happens in your wallet.</p>
           </div>
-          <button onClick={onClose} style={{ background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--muted)", borderRadius: 12, padding: 7, display: "grid", placeItems: "center", cursor: "pointer" }}>
+          <button aria-label="Close wallet dialog" onClick={onClose} style={{ background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--muted)", borderRadius: 12, padding: 7, display: "grid", placeItems: "center", cursor: "pointer" }} type="button">
             <Ico.close />
           </button>
         </div>

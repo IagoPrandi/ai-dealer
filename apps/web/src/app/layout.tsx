@@ -1,10 +1,41 @@
 import type { Metadata, Viewport } from "next";
+import { Archivo, Bevan, DM_Mono, Oswald } from "next/font/google";
 import { BRAND_NAME } from "@tyche/config";
 import { PwaRegistrar } from "./PwaRegistrar";
 import "./globals.css";
+import "../features/public-site/public.css";
+
+const archivo = Archivo({
+  subsets: ["latin"],
+  variable: "--font-archivo",
+  weight: ["400", "600", "700"],
+});
+const bevan = Bevan({ subsets: ["latin"], variable: "--font-bevan", weight: "400" });
+const dmMono = DM_Mono({
+  subsets: ["latin"],
+  variable: "--font-dm-mono",
+  weight: ["400", "500"],
+});
+const oswald = Oswald({
+  subsets: ["latin"],
+  variable: "--font-oswald",
+  weight: ["400", "500", "600", "700"],
+});
+
+function getMetadataBase() {
+  const configured = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  if (configured) {
+    return new URL(configured);
+  }
+  if (process.env.VERCEL_ENV === "production") {
+    throw new Error("NEXT_PUBLIC_SITE_URL is required in production.");
+  }
+  return new URL("http://localhost:3000");
+}
 
 export const metadata: Metadata = {
   applicationName: BRAND_NAME,
+  metadataBase: getMetadataBase(),
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
@@ -12,6 +43,12 @@ export const metadata: Metadata = {
   },
   title: BRAND_NAME,
   description: "Mobile-first Solana DApp for community-elected lottery rules.",
+  openGraph: {
+    description: "Play, inspect community rules, and verify every Tywish round.",
+    siteName: BRAND_NAME,
+    title: BRAND_NAME,
+    type: "website",
+  },
   icons: {
     apple: "/icons/apple-touch-icon.png?v=goddess-magenta-v1",
     icon: [
@@ -32,15 +69,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link crossOrigin="anonymous" rel="preconnect" href="https://fonts.gstatic.com" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Bevan&family=Oswald:wght@400;500;600;700&family=DM+Mono:wght@400;500&family=Archivo:wght@400;600;700&display=swap"
-          rel="stylesheet"
-        />
-      </head>
+    <html className={`${archivo.variable} ${bevan.variable} ${dmMono.variable} ${oswald.variable}`} lang="en">
       <body>
         <PwaRegistrar />
         {children}

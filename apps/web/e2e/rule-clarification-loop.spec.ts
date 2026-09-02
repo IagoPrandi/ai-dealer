@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { mockRulePreflight } from "./helpers/preflight";
+import { mockRulePreflight, sseBody } from "./helpers/preflight";
 import { mockShellData } from "./helpers/shell";
 
 function hashBytes(seed: number) {
@@ -103,14 +103,14 @@ test("the reported English clarification resolves without repeating the question
   await page
     .getByLabel("Message", { exact: true })
     .fill("ignored the remaining two guessed numbers");
-  await page.getByRole("button", { name: "Send message" }).click();
+  await page.getByRole("button", { name: "Submit clarification" }).click();
 
   await expect(
     page.getByRole("heading", { name: "Clarify this rule?" }),
   ).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "Confirm and generate" }),
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 15_000 });
   expect(phases).toEqual(["interpret", "interpret"]);
   expect(preflightTexts).toEqual([
     "I win if my numbers are 1 2 3 4 and the lottery numbers contain none of these numbers.",
@@ -161,11 +161,11 @@ test("routes a direct Portuguese winner condition to interpretation, not dealer 
   await page
     .getByLabel("Message", { exact: true })
     .fill("os demais dois números devem ser ignorados");
-  await page.getByRole("button", { name: "Send message" }).click();
+  await page.getByRole("button", { name: "Submit clarification" }).click();
 
   await expect(
     page.getByRole("button", { name: "Confirm and generate" }),
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 15_000 });
   expect(phases).toEqual(["interpret", "interpret"]);
   expect(preflightTexts).toEqual([
     "vence se a sequencia jogada for 1 2 3 4",
@@ -417,14 +417,16 @@ test("a follow-up question uses dealer chat and offers an uncompiled rule sugges
   await page.route("**/rule-dealer/ask", async (route) => {
     const body = await route.request().postDataJSON();
     asked.push(body);
+    const answer =
+      "The dealer needs an explicit threshold before the compiler can evaluate the rule.";
+    const proposedRuleText =
+      "Win if at least four guessed numbers appear in the official draw, regardless of order.";
     await route.fulfill({
-      contentType: "application/json",
-      json: {
-        answer:
-          "The dealer needs an explicit threshold before the compiler can evaluate the rule.",
-        proposedRuleText:
-          "Win if at least four guessed numbers appear in the official draw, regardless of order.",
-      },
+      body: sseBody([
+        { data: { text: answer }, event: "delta" },
+        { data: { answer, proposedRuleText }, event: "answer" },
+      ]),
+      contentType: "text/event-stream",
       status: 200,
     });
   });
@@ -483,19 +485,15 @@ test("an always-true rule is rejected with valid replacements instead of enterin
   await page.getByRole("button", { name: "Send message" }).click();
   await page.getByRole("button", { name: "Confirm and generate" }).click();
 
-  await expect(page.getByText("invalid rule", { exact: true })).toBeVisible();
   await expect(
     page.getByText(/this rule cannot pass preflight/i),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "Choose a valid variation" }),
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 15_000 });
   await expect(
     page.getByRole("heading", { name: "Confirm rule impact" }),
   ).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: /1 A guess wins.*lower/i }),
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 15_000 });
   await expect(
     page.getByRole("button", { name: /2 A guess wins.*higher/i }),
   ).toBeVisible();

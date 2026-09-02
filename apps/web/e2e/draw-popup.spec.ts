@@ -106,7 +106,7 @@ async function mockBackend(page: Page, drawSettled: boolean) {
   // is not explicitly mocked below answers 404. Later routes win, so the
   // specific mocks registered after this catch-all take precedence.
   await page.route(
-    /\/(rounds\/\d+|rule-proposals\?|rule-votes\?|rule-elimination-votes\?|guess-receipts\?|winner-records\?|players\/)/,
+    /\/api\/proxy\/(rounds\/\d+|rule-proposals\?|rule-votes\?|rule-elimination-votes\?|guess-receipts\?|winner-records\?|players\/)/,
     (route) => route.fulfill({ json: { error: "not_mocked" }, status: 404 }),
   );
   await page.route(new RegExp(`/rounds/${TURN_ID}(?:\\?activeTurnId=${TURN_ID})?$`), (route) =>
@@ -157,10 +157,10 @@ async function mockCanonicalRoundNavigation(page: Page) {
     }),
   );
   await page.route(
-    /\/(rounds\/\d+|rule-proposals\?|rule-votes\?|rule-elimination-votes\?|guess-receipts\?|winner-records\?|players\/)/,
+    /\/api\/proxy\/(rounds\/\d+|rule-proposals\?|rule-votes\?|rule-elimination-votes\?|guess-receipts\?|winner-records\?|players\/)/,
     (route) => route.fulfill({ json: { error: "not_mocked" }, status: 404 }),
   );
-  await page.route(/\/rounds\/(24|30|31)(?:\?activeTurnId=31)?$/, (route) => {
+  await page.route(/\/api\/proxy\/rounds\/(24|30|31)(?:\?activeTurnId=31)?$/, (route) => {
     const turnId = Number(new URL(route.request().url()).pathname.split("/").at(-1));
     return route.fulfill({
       json: { round: roundFor(turnId, turnId !== activeTurnId) },
@@ -222,10 +222,10 @@ test("historical round and live round keep canonical URLs across navigation and 
   await mockCanonicalRoundNavigation(page);
   await page.goto("/round/24");
 
-  await expect(page).toHaveURL(/\/round\/24$/);
-  await expect(page.getByText("#0024", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/rounds\/24$/);
+  await expect(page.getByRole("heading", { name: "Round settled" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Back to the current round" }).click();
+  await page.getByRole("link", { name: "Play", exact: true }).click();
   await expect(page).toHaveURL(/\/play$/);
   // Back on the live round the app resolves the latest settled turn (#0030),
   // which is what the result pop-up announces.
@@ -237,18 +237,18 @@ test("historical round and live round keep canonical URLs across navigation and 
   await expect(page.getByText("#0024", { exact: true })).toHaveCount(0);
 
   await page.getByRole("button", { name: "See the full result" }).click();
-  await expect(page).toHaveURL(/\/round\/30$/);
-  await expect(page.getByText("#0030", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/rounds\/30$/);
+  await expect(page.getByText(/Turn 30/).first()).toBeVisible();
 
   await page.goBack();
   await expect(page).toHaveURL(/\/play$/);
   await expect(page.getByText("Accumulated prize")).toBeVisible();
 
   await page.goForward();
-  await expect(page).toHaveURL(/\/round\/30$/);
-  await expect(page.getByText("#0030", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/rounds\/30$/);
+  await expect(page.getByText(/Turn 30/).first()).toBeVisible();
 
   await page.reload();
-  await expect(page).toHaveURL(/\/round\/30$/);
-  await expect(page.getByText("#0030", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/rounds\/30$/);
+  await expect(page.getByText(/Turn 30/).first()).toBeVisible();
 });

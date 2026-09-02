@@ -9,6 +9,9 @@ function cleanEnvValue(value: string | undefined): string {
 
 export function getApiProxyTarget(env: EnvLike = process.env) {
   const target = cleanEnvValue(env.TYCHE_API_PROXY_TARGET);
+  if (!target && cleanEnvValue(env.VERCEL_ENV) === "production") {
+    throw new Error("TYCHE_API_PROXY_TARGET is required in production.");
+  }
   return (target || DEFAULT_API_PROXY_TARGET).replace(/\/+$/u, "");
 }
 

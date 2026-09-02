@@ -94,7 +94,7 @@ function ClaimRow({
         </div>
         <div style={{ textAlign: "right", flexShrink: 0 }}>
           <div className="ide-num" style={{ fontWeight: 800, fontSize: 15.5 }}>{fmtClaimSol(lamportsToSol(record.amountLamports))} SOL</div>
-          <a href={`/round/${record.turnId}`} style={{ color: "var(--purple-soft)", fontSize: 12.5, textDecoration: "none" }}>Round detail</a>
+          <a href={`/rounds/${record.turnId}`} style={{ color: "var(--purple-soft)", fontSize: 12.5, textDecoration: "none" }}>Round detail</a>
         </div>
       </div>
       {claimable ? (

@@ -8,7 +8,7 @@
   "display": "standalone",
   "background_color": "#170B22",
   "theme_color": "#170B22",
-  "orientation": "portrait",
+  "orientation": "any",
   "categories": ["games", "finance"],
   "icons": [
     {

@@ -12,7 +12,7 @@ export function ShareScreen() {
   const [feedback, setFeedback] = useState<null | string>(null);
 
   const currentUrl = typeof window === "undefined" ? "" : window.location.origin;
-  const publicRoundUrl = `${currentUrl}/round/${turnId}`;
+  const publicRoundUrl = `${currentUrl}/rounds/${turnId}`;
   const draw = round?.draw?.drawResult ?? [];
   const electedRuleId = round?.election?.activeRuleId ?? null;
   const electedRule = round?.rules.find((rule) => rule.ruleId === electedRuleId) ?? null;

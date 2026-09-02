@@ -79,6 +79,7 @@ import { ResultScreen } from "./screens/Result";
 import { ShareScreen } from "./screens/Share";
 import { ConnectOverlay } from "./screens/Connect";
 import { DrawResultPopup } from "./screens/DrawResult";
+import { getPlayScreenPath, getScreenForPlayPath } from "./navigation";
 
 function PhoneChrome() {
   return (
@@ -165,10 +166,12 @@ function repeatedActionFeeSol(
 }
 
 export function TycheApp({
+  devicePreview = false,
   initialConnect = false,
   initialResultTurnId,
   initialScreen = "home",
 }: {
+  devicePreview?: boolean;
   initialConnect?: boolean;
   initialResultTurnId?: number;
   initialScreen?: Screen;
@@ -256,21 +259,13 @@ export function TycheApp({
 
   const go = useCallback(
     (next: Screen, params?: NavParams) => {
-      if (
-        next === "home" &&
-        pathname !== "/play" &&
-        !pathname.startsWith("/dev/gallery")
-      ) {
-        router.push("/play");
-        return;
-      }
       if (next === "result" && !pathname.startsWith("/dev/gallery")) {
         const requestedResultTurnId = params?.resultTurnId ?? resultTurnId;
         if (
           Number.isInteger(requestedResultTurnId) &&
           requestedResultTurnId > 0
         ) {
-          const resultPath = `/round/${requestedResultTurnId}`;
+          const resultPath = `/rounds/${requestedResultTurnId}`;
           if (pathname !== resultPath) {
             router.push(resultPath);
             return;
@@ -294,9 +289,38 @@ export function TycheApp({
       }
       setDetail(null);
       setScreen(next);
+      const nextPath = getPlayScreenPath(next);
+      if (
+        nextPath &&
+        !pathname.startsWith("/dev/gallery") &&
+        window.location.pathname !== nextPath
+      ) {
+        window.history.pushState(null, "", nextPath);
+      }
     },
     [pathname, reloadAll, resultTurnId, router, screen],
   );
+
+  useEffect(() => {
+    if (pathname.startsWith("/dev/gallery")) {
+      return;
+    }
+    const handlePopState = () => {
+      if (window.location.pathname === "/play/wallet") {
+        setShowConnect(true);
+        return;
+      }
+      setShowConnect(false);
+      const nextScreen = getScreenForPlayPath(window.location.pathname);
+      if (nextScreen) {
+        setDetail(null);
+        setScreen(nextScreen);
+        reloadAll();
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [pathname, reloadAll]);
 
   const openDetail = useCallback(
     (ruleId: number, opts?: { canAgainst?: boolean; rank?: number | null }) => {
@@ -312,7 +336,25 @@ export function TycheApp({
   const requestConnect = useCallback(() => {
     setConnectError(null);
     setShowConnect(true);
-  }, []);
+    if (
+      !pathname.startsWith("/dev/gallery") &&
+      window.location.pathname !== "/play/wallet"
+    ) {
+      window.history.pushState(null, "", "/play/wallet");
+    }
+  }, [pathname]);
+
+  const closeConnect = useCallback(() => {
+    setConnectError(null);
+    setShowConnect(false);
+    if (window.location.pathname === "/play/wallet") {
+      window.history.pushState(
+        null,
+        "",
+        getPlayScreenPath(screen) ?? "/play",
+      );
+    }
+  }, [screen]);
 
   // An invite link (`/play?ref=<inviter>`) is captured once, before any wallet
   // exists, and kept until the invitee registers their attribution. The query
@@ -656,11 +698,11 @@ export function TycheApp({
 
   return (
     <TycheContext.Provider value={value}>
-      <main className={`ide-stage${standalone ? " ide-standalone" : ""}`}>
+      <main className={`ide-stage${standalone ? " ide-standalone" : ""}${devicePreview ? " ide-device-stage" : ""}`}>
         <div
-          className={`ide-phone-shell ide-app${standalone ? " ide-standalone" : ""}`}
+          className={`${devicePreview ? "ide-phone-shell ide-device-preview" : "ide-web-shell"} ide-app ide-screen-${screen}${standalone ? " ide-standalone" : ""}${showNav ? " ide-has-nav" : ""}`}
         >
-          <PhoneChrome />
+          {devicePreview ? <PhoneChrome /> : null}
           <div className="ide-root">
             {screen === "home" ? <HomeScreen /> : null}
             {screen === "guesses" ? <GuessesScreen /> : null}
@@ -743,12 +785,12 @@ export function TycheApp({
                 connecting={connecting}
                 connectors={connectors}
                 error={connectError}
-                onClose={() => setShowConnect(false)}
+                onClose={closeConnect}
                 onConnect={async (id) => {
                   setConnectError(null);
                   try {
                     await connect(id);
-                    setShowConnect(false);
+                    closeConnect();
                     reloadAll();
                   } catch (error) {
                     setConnectError(describeWalletConnectError(error));

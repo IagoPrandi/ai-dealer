@@ -1,29 +1,20 @@
 import { expect, test } from "@playwright/test";
 
-test("play route reproduces the Plataforma app flow", async ({ page }) => {
+test("play route renders the responsive live-round flow", async ({ page }) => {
   await page.goto("/play");
 
-  await expect(page.getByRole("heading", { name: "Result" })).toBeVisible();
-  await expect(page.getByText("You won!")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "+0.92 SOL" })).toBeVisible();
-  await expect(page.getByText("Drawn numbers")).toBeVisible();
+  await expect(page.getByText("Tywish").first()).toBeVisible();
+  await expect(page.getByText("Accumulated prize")).toBeVisible();
+  await expect(page.getByText("The rules", { exact: true })).toBeVisible();
+  await expect(page.locator(".ide-phone-shell, .ide-di, .ide-statusbar")).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Back to current round" }).first().click();
-  await expect(page.getByText("Tywish")).toBeVisible();
-  await expect(page.locator(".platform-prize-hero h1")).toHaveText("24.86SOL");
-  await expect(
-    page
-      .getByRole("link", { name: /Play now/ })
-      .or(page.getByRole("button", { name: /Checking turn|Waiting for next turn/ })),
-  ).toBeVisible();
-  await expect(page.getByRole("heading", { name: "The rules" })).toBeVisible();
+  await page.getByRole("button", { name: /Play now/u }).click();
+  await expect(page).toHaveURL(/\/play\/pick$/u);
+  await expect(page.getByRole("heading", { name: "Make a guess" })).toBeVisible();
 
-  await page.getByRole("button", { name: /^1 Closest even sum/ }).click();
-  await expect(page.getByRole("dialog")).toBeVisible();
-  await expect(page.getByText("15% reserve-funded")).toBeVisible();
-  await page.getByRole("button", { name: "Close rule details" }).click();
-  await expect(page.getByRole("dialog")).toBeHidden();
-
+  await page.getByRole("button", { name: "Back" }).click();
+  await expect(page).toHaveURL(/\/play$/u);
   await page.getByRole("button", { name: "Account" }).click();
-  await expect(page.getByRole("heading", { name: "My account" })).toBeVisible();
+  await expect(page).toHaveURL(/\/play\/account$/u);
+  await expect(page.getByRole("heading", { name: "Your wallet" })).toBeVisible();
 });

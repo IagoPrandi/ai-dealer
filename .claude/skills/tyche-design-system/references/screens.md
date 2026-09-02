@@ -131,6 +131,25 @@ Comportamentos já definidos:
 - `rewards`: `jdrClaimable`, `epoch`, `distributable`, `claimableNow`, `lockAmount`.
 - `referral`: `code`, `link`, `rewardYou`, `rewardThem`, `invitedBy`.
 
+## Responsive public web extension
+
+The 402 x 868 device canvas remains the canonical art-direction reference and
+is rendered with simulated device chrome only in `/dev/gallery`. Public web
+routes never render the bezel, notch, clock, status bar, or home indicator.
+
+- Below 768px, the DApp is full-bleed with bottom navigation and CSS safe-area
+  insets.
+- From 768px to 1199px, content is centered at a maximum width of 960px and
+  uses two columns where the content is comparative rather than transactional.
+- At 1200px and above, primary game navigation becomes a 224px side rail and
+  the dashboard is capped at 1280px.
+- Guess, proposal, claim, invite, and share flows remain a single column capped
+  at 720px on every breakpoint.
+- Public archive, rule, player, leaderboard, and audit pages reuse the Tinta
+  Neon color, type, square-surface, inset-ring, and solid-shadow tokens.
+- Every actionable target is at least 44px, focus remains visible, and reduced
+  motion disables non-essential animation.
+
 ## Microcopy
 
 Inglês, minúsculas em rótulos utilitários (`vote →`, `edit`, `clear`, `connect`, `free`),

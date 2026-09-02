@@ -4,6 +4,27 @@ This tracker records milestone status, work logs, and required document confirma
 
 ## Work Log
 
+### 2026-09-01 (Responsive public web frontend)
+
+- Opened the required `PRD.md`, `AGENTS.md`, and `PROGRESS_TRACKER.md`; inspected `.claude/skills`; and applied the local frontend-development, Tyche design-system, UI-coherence, Playwright, test-and-verify, Next.js App Router, React review, and browser-verification guidance. The required design-system token, component, screen, and repository-integration references were reviewed before implementation.
+- Replaced the public simulated-phone shell with a responsive mobile/tablet/desktop DApp while retaining device chrome only in the mock gallery. Added real URL/history synchronization for the game surfaces, canonical plural round/result routing, safe areas, 44px targets, focus and reduced-motion behavior, responsive desktop navigation, `next/font` loading for all four brand fonts, and accessible wallet-dialog semantics.
+- Added server-rendered public archives for rounds and rules, rule detail, player profiles, leaderboard, and audit records, with validated identifiers, explicit not-found/error/loading states, dynamic metadata and Open Graph data, robots and sitemap output, and no administrative navigation. Added the two minimal public API contracts for rule detail and aggregate player profiles without exposing private prompts, telemetry, or administrative fields.
+- Prepared production operation with standalone Next.js output, a web health endpoint, explicit public/API/worker environment variables, fail-clear production target validation, and responsive PWA orientation. No deployment, domain binding, Solana network change, contract change, transaction, or administrative-console exposure was performed.
+- Verification passed: `@tyche/api` typecheck, `199/199` tests, zero-warning lint, and build; `@tyche/web` typecheck, `289/289` tests, zero-warning lint, and production build; Playwright `51/51` scenarios, including 320, 390, 768, 1024, and 1440px overflow checks, game/public deep links, browser history, wallet, proposal, voting, metadata, PWA, and public records; `git diff --check`; and standalone HTTP checks returning `200` for `/api/health` and `/play`. Reviewed mobile/desktop captures under `apps/web/output/responsive-web/` for the play, round, and leaderboard surfaces.
+- Final consistency review found no fabricated public-data fallback, private-field leak, public admin link, phone bezel outside development gallery, hidden production localhost target, responsive overflow, stale singular result link, or milestone-status mutation. No milestone checkbox was changed because explicit user confirmation is still required.
+
+### 2026-09-01 (Web repository architecture consultation)
+
+- Opened the required `PRD.md`, `AGENTS.md`, and `PROGRESS_TRACKER.md`; inspected `.claude/skills` and the frontend guidance before answering the repository-architecture question.
+- Confirmed that the PRD already specifies a mobile-first Next.js Web DApp in a monorepo, and the repository already provides `apps/web` alongside API, worker, admin, shared packages, and Solana contracts. Recommended retaining the web application in this repository rather than creating a second repository at this stage.
+- No source, configuration, infrastructure, deployment, runtime behavior, or milestone status changed. Final consistency review confirms that no milestone checkbox was ticked; confirmation remains reserved for the user.
+
+### 2026-08-24 (Ollama Cloud schema-constrained compilation analysis)
+
+- Opened the required `PRD.md`, `AGENTS.md`, and this tracker; inspected `.claude/skills` and the rule-compilation implementation before answering the reported Ollama Cloud behavior.
+- Confirmed that the compiler deliberately rejects models suffixed `:cloud` for AST emission because Ollama Cloud does not provide decoder-enforced structured outputs. Local Ollama and the explicitly supported OpenAI endpoint can emit the required JSON Schema-constrained compilation candidate; all outputs still pass deterministic schema and semantic gates.
+- No source, configuration, runtime behavior, or milestone status changed. Final consistency review confirms this was a read-only diagnosis.
+
 ### 2026-08-24 (Web server restart)
 
 - Opened the required `PRD.md`, `AGENTS.md`, and this tracker; inspected `.claude/skills` and the relevant automation guidance before restarting the local web server.

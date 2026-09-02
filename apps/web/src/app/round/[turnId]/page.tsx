@@ -1,7 +1,4 @@
-import { notFound } from "next/navigation";
-
-import { TycheApp } from "../../../features/tyche/TycheApp";
-import { SolanaProviders } from "../../../solana/SolanaProviders";
+import { notFound, permanentRedirect } from "next/navigation";
 
 export default async function Round({
   params,
@@ -15,9 +12,5 @@ export default async function Round({
     notFound();
   }
 
-  return (
-    <SolanaProviders>
-      <TycheApp initialScreen="result" initialResultTurnId={parsedTurnId} />
-    </SolanaProviders>
-  );
+  permanentRedirect(`/rounds/${parsedTurnId}`);
 }

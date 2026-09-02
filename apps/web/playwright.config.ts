@@ -19,11 +19,24 @@ export default defineConfig({
   ...(externalBaseUrl
     ? {}
     : {
-        webServer: {
-          command: "pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3005",
-          reuseExistingServer: true,
-          timeout: 60_000,
-          url: "http://127.0.0.1:3005/play/pick",
-        },
+        webServer: [
+          {
+            command: "node scripts/public-api-fixture.mjs",
+            reuseExistingServer: true,
+            timeout: 30_000,
+            url: "http://127.0.0.1:3092/health",
+          },
+          {
+            command: "pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3005",
+            env: {
+              ...process.env,
+              TYCHE_API_PROXY_TARGET: "http://127.0.0.1:3092",
+              TYCHE_WORKER_PROXY_TARGET: "http://127.0.0.1:3092",
+            },
+            reuseExistingServer: true,
+            timeout: 60_000,
+            url: "http://127.0.0.1:3005/play/pick",
+          },
+        ],
       }),
 });

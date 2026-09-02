@@ -95,7 +95,7 @@ export default function GalleryPage() {
               </div>
               <div className="gx-frame">
                 <CardBoundary>
-                  <TycheApp initialScreen={card.screen} />
+                  <TycheApp devicePreview initialScreen={card.screen} />
                 </CardBoundary>
               </div>
             </section>

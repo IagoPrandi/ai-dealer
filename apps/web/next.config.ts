@@ -22,9 +22,15 @@ const mockEnabled =
 // served on — notably an HTTPS Cloudflare tunnel used to install the PWA on a
 // phone — without mixed-content or CORS problems.
 const workerProxyTarget =
-  process.env.TYCHE_WORKER_PROXY_TARGET ?? "http://localhost:3003";
+  process.env.TYCHE_WORKER_PROXY_TARGET?.trim() ||
+  (process.env.VERCEL_ENV === "production"
+    ? (() => {
+        throw new Error("TYCHE_WORKER_PROXY_TARGET is required in production.");
+      })()
+    : "http://localhost:3003");
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   // Quick Tunnels use a random trusted hostname on every run. Allow that
   // development-only origin so React assets and the HMR WebSocket can hydrate
   // an installed PWA reached through `pnpm --filter @tyche/web dev:tunnel`.

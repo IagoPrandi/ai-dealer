@@ -1,10 +1,5 @@
-import { TycheApp } from "../../../features/tyche/TycheApp";
-import { SolanaProviders } from "../../../solana/SolanaProviders";
+import { permanentRedirect } from "next/navigation";
 
 export default function PlayResultsPage() {
-  return (
-    <SolanaProviders>
-      <TycheApp initialScreen="claims" />
-    </SolanaProviders>
-  );
+  permanentRedirect("/play/claims");
 }

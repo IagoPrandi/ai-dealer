@@ -21,6 +21,13 @@ test("api proxy strips trailing slashes from configured target", () => {
   );
 });
 
+test("api proxy fails clearly when production target is missing", () => {
+  assert.throws(
+    () => getApiProxyTarget({ VERCEL_ENV: "production" }),
+    /TYCHE_API_PROXY_TARGET is required/u,
+  );
+});
+
 test("api proxy builds encoded upstream URLs with query strings", () => {
   assert.equal(
     buildApiProxyUrl({

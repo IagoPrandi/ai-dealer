@@ -1330,6 +1330,20 @@ export interface PlayerHistoryPage {
   wallet: string;
 }
 
+export interface PlayerPublicProfile {
+  stats: {
+    eliminationVotesCast: number;
+    guessesSubmitted: number;
+    rulesElected: number;
+    rulesProposed: number;
+    totalEarnedLamports: number;
+    votesCast: number;
+    votesReceived: number;
+    winnerProducingRules: number;
+  };
+  wallet: string;
+}
+
 export type ConversationDraftStatus = "draft" | "submitted";
 
 export type ConversationMessageAuthor = "ai" | "user";
@@ -2264,6 +2278,12 @@ function getConversationDraftKey(
 function isBase58Like(value: unknown) {
   return (
     typeof value === "string" && /^[1-9A-HJ-NP-Za-km-z]{32,88}$/.test(value)
+  );
+}
+
+function isPublicWalletAddress(value: unknown) {
+  return (
+    typeof value === "string" && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value)
   );
 }
 
@@ -5581,6 +5601,26 @@ export function matchRulePreflightJobPath(pathname: string) {
   return !jobId.includes("/") && isRulePreflightJobId(jobId) ? jobId : null;
 }
 
+export function matchPublicRuleDetailPath(pathname: string) {
+  const match = /^\/api\/v1\/turns\/(\d+)\/rules\/(\d+)$/.exec(pathname);
+  if (!match) {
+    return null;
+  }
+  const turnId = Number(match[1]);
+  const ruleId = Number(match[2]);
+  return Number.isSafeInteger(turnId) &&
+    turnId > 0 &&
+    Number.isSafeInteger(ruleId) &&
+    ruleId > 0
+    ? { ruleId, turnId }
+    : null;
+}
+
+export function matchPlayerProfilePath(pathname: string) {
+  const match = /^\/players\/([^/]+)\/profile$/.exec(pathname);
+  return match?.[1] ?? null;
+}
+
 /**
  * The header wins over the query fallback: browsers set Last-Event-ID
  * automatically on reconnect, so it is always the freshest position. Anything
@@ -7262,6 +7302,51 @@ export function listPlayerHistory(args: {
   };
 }
 
+export function getPlayerPublicProfile(wallet: string): PlayerPublicProfile | null {
+  const proposals = [...ruleProposals.values()].filter(
+    (proposal) => proposal.proposer === wallet,
+  );
+  const proposalKeys = new Set(
+    proposals.map((proposal) =>
+      getRuleProposalKey(proposal.turnId, proposal.ruleId),
+    ),
+  );
+  const rulesElected = proposals.filter(
+    (proposal) =>
+      getRuleElection(proposal.turnId)?.activeRuleId === proposal.ruleId,
+  );
+  const winnerProducingRules = rulesElected.filter(
+    (proposal) =>
+      getWinnerSummary(proposal.turnId).alternative.winnerCount > 0,
+  );
+  const claims = getPlayerClaimsSummary(wallet);
+
+  const profile: PlayerPublicProfile = {
+    stats: {
+      eliminationVotesCast: [...ruleEliminationVotes.values()].filter(
+        (vote) => vote.voter === wallet,
+      ).length,
+      guessesSubmitted: [...guessReceipts.values()].filter(
+        (receipt) => receipt.player === wallet,
+      ).length,
+      rulesElected: rulesElected.length,
+      rulesProposed: proposals.length,
+      totalEarnedLamports: claims.totalLamports,
+      votesCast: [...ruleVotes.values()].filter(
+        (vote) => vote.voter === wallet,
+      ).length,
+      votesReceived: [...ruleVotes.values()].filter((vote) =>
+        proposalKeys.has(getRuleProposalKey(vote.turnId, vote.ruleId)),
+      ).length,
+      winnerProducingRules: winnerProducingRules.length,
+    },
+    wallet,
+  };
+  return Object.values(profile.stats).some((value) => value > 0)
+    ? profile
+    : null;
+}
+
 export function saveConversationDraft(
   draft: Omit<
     ConversationDraftRecord,
@@ -8485,6 +8570,7 @@ export function getDraw(turnId: number) {
 
 export interface RoundRuleSummary {
   compiledArtifactHash: string | null;
+  officialInterpretation: string | null;
   precompilationStatus: "failed" | "passed" | "pending";
   proposer: string;
   ruleId: number;
@@ -8495,6 +8581,23 @@ export interface RoundRuleSummary {
   tokenCount: number;
   validation: RuleValidationSummary | null;
   votes: number;
+  workedExamples: ReturnType<typeof getRuleWorkedExamples>;
+}
+
+export interface PublicRuleDetail {
+  audit: Array<{
+    kind: AuditLogKind;
+    logHash: string;
+  }>;
+  election: {
+    active: boolean;
+    finalist: boolean;
+    source: "random" | "top_voted" | null;
+  };
+  elimination: RuleEliminationFinalistState | null;
+  rule: RoundRuleSummary;
+  status: RoundSummary["status"];
+  turnId: number;
 }
 
 export interface RoundSummary {
@@ -9608,6 +9711,43 @@ export function getRoundSummary(
     verification: getVerificationSummary(turnId),
     rewards: getRewardSummary(turnId),
     winners: getWinnerSummary(turnId),
+  };
+}
+
+export function getPublicRuleDetail(
+  turnId: number,
+  ruleId: number,
+): PublicRuleDetail | null {
+  const round = getRoundSummary(turnId);
+  const rule = round.rules.find((candidate) => candidate.ruleId === ruleId);
+  if (!rule) {
+    return null;
+  }
+
+  const election = round.election;
+  const finalist = election?.finalistRuleIds.includes(ruleId) ?? false;
+  const source = election?.topVotedRuleIds.includes(ruleId)
+    ? ("top_voted" as const)
+    : election?.randomRuleIds.includes(ruleId)
+      ? ("random" as const)
+      : null;
+
+  return {
+    audit: listAuditLogs({ turnId })
+      .filter((record) => record.ruleId === ruleId)
+      .map((record) => ({ kind: record.kind, logHash: record.logHash })),
+    election: {
+      active: election?.activeRuleId === ruleId,
+      finalist,
+      source,
+    },
+    elimination:
+      round.elimination.finalists.find(
+        (candidate) => candidate.ruleId === ruleId,
+      ) ?? null,
+    rule,
+    status: round.status,
+    turnId,
   };
 }
 
@@ -11423,6 +11563,25 @@ export function handleApiRequest(
     return;
   }
 
+  if (
+    request.method === "GET" &&
+    /^\/api\/v1\/turns\/[^/]+\/rules\/[^/]+$/.test(url.pathname)
+  ) {
+    const identity = matchPublicRuleDetailPath(url.pathname);
+    if (!identity) {
+      sendJson(request, response, 400, { error: "invalid_rule_identity" });
+      return;
+    }
+    const detail = getPublicRuleDetail(identity.turnId, identity.ruleId);
+    sendJson(
+      request,
+      response,
+      detail ? 200 : 404,
+      detail ? { rule: detail } : { error: "not_found" },
+    );
+    return;
+  }
+
   if (request.method === "POST" && url.pathname === "/rule-dealer/ask") {
     void readJsonBody(request, 16 * 1024)
       .then(async (body) => {
@@ -12742,6 +12901,25 @@ export function handleApiRequest(
           message: error instanceof Error ? error.message : String(error),
         });
       });
+    return;
+  }
+
+  if (
+    request.method === "GET" &&
+    matchPlayerProfilePath(url.pathname) !== null
+  ) {
+    const wallet = matchPlayerProfilePath(url.pathname) ?? "";
+    if (!isPublicWalletAddress(wallet)) {
+      sendJson(request, response, 400, { error: "invalid_wallet" });
+      return;
+    }
+    const profile = getPlayerPublicProfile(wallet);
+    sendJson(
+      request,
+      response,
+      profile ? 200 : 404,
+      profile ? { profile } : { error: "not_found" },
+    );
     return;
   }
 

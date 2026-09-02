@@ -6,27 +6,25 @@ test("number picker requires a connected wallet before devnet submission", async
   await page.goto("/play/pick");
 
   await expect(
-    page.getByRole("heading", { name: "Choose six unique numbers." }),
+    page.getByRole("heading", { name: "Make a guess" }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Review guess" }),
+    page.getByRole("button", { name: "6 numbers left" }),
   ).toBeDisabled();
 
-  for (const label of ["01", "02", "03", "04", "05", "06"]) {
-    await page.getByRole("button", { name: label }).click();
+  for (const label of ["1", "2", "3", "4", "5", "6"]) {
+    await page.getByRole("button", { name: label, exact: true }).click();
   }
 
-  await expect(page.getByText("Ready to review your guess.")).toBeVisible();
   await page.getByRole("button", { name: "Review guess" }).click();
 
   await expect(
-    page.getByRole("heading", {
-      name: "Confirm these numbers before devnet submission.",
-    }),
+    page.getByRole("heading", { name: "Review guess" }),
   ).toBeVisible();
-  await expect(page.getByText("Not connected")).toBeVisible();
-
-  await page.getByRole("link", { name: "Connect wallet" }).click();
+  await page.getByRole("button", { name: "Connect and submit" }).click();
 
   await expect(page).toHaveURL(/\/play\/wallet$/);
+  await expect(
+    page.getByRole("heading", { name: "Connect your wallet" }),
+  ).toBeVisible();
 });

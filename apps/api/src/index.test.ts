@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync, sign } from "node:crypto";
+import { createServer } from "node:http";
 import { test } from "node:test";
 import {
   API_STATE_POSTGRES_SCHEMA,
@@ -25,6 +26,7 @@ import {
   getAllowedMethodsForPath,
   getConsoleReadOnlyMethodRejection,
   getPlayerClaimsSummary,
+  getPlayerPublicProfile,
   listConversationDrafts,
   listConversationDraftsPage,
   listPlayerHistory,
@@ -39,6 +41,7 @@ import {
   listPlayerGuessReceipts,
   getRolloverActivityEvents,
   getRoundSummary,
+  getPublicRuleDetail,
   getRuleRemovalActivityEvents,
   getRuleReasonExplanations,
   getRuleValidation,
@@ -46,6 +49,7 @@ import {
   getTransparencySnapshot,
   getConsoleSafetyBoundary,
   hasPreventedRulePattern,
+  handleApiRequest,
   isRuleRemoved,
   isRuleGenerationRetryable,
   isValidConversationDraft,
@@ -61,6 +65,8 @@ import {
   listVoterRewardRecords,
   listWinnerRecords,
   listAuditLogs,
+  matchPlayerProfilePath,
+  matchPublicRuleDetailPath,
   recordSettlementTransition,
   listSettlementTransitions,
   removeRule,
@@ -3462,6 +3468,133 @@ test("player history event ids include repeated vote sequence", () => {
   assert.ok(ids.includes(`vote:244:7:2:${wallet}`));
   assert.ok(ids.includes(`elimination:244:7:1:${wallet}`));
   assert.ok(ids.includes(`elimination:244:7:2:${wallet}`));
+});
+
+test("public player profile exposes only aggregate public activity", () => {
+  resetApiStateForTests();
+  saveReceiptForWallet(245, wallet, [1, 2, 3, 4, 5, 6]);
+  saveRuleProposal({
+    ...proposal(245, 8),
+    proposer: wallet,
+  });
+  saveRuleVote({
+    ruleId: 8,
+    ruleProposal: base58,
+    ruleVote: base58,
+    sequence: 1,
+    signature: base58,
+    submittedAt: "2026-06-12T12:02:00.000Z",
+    turnId: 245,
+    voter: walletTwo,
+  });
+  saveRuleVote({
+    ruleId: 8,
+    ruleProposal: base58,
+    ruleVote: walletTwo,
+    sequence: 1,
+    signature: walletTwo,
+    submittedAt: "2026-06-12T12:03:00.000Z",
+    turnId: 245,
+    voter: wallet,
+  });
+  saveRuleEliminationVote({
+    eliminationVote: base58,
+    ruleId: 8,
+    ruleProposal: base58,
+    sequence: 1,
+    signature: walletThree,
+    submittedAt: "2026-06-12T12:04:00.000Z",
+    turnId: 245,
+    voter: wallet,
+  });
+  saveRuleElection(settledElection(245, 8));
+
+  const profile = getPlayerPublicProfile(wallet);
+  assert.ok(profile);
+
+  assert.deepEqual(profile, {
+    stats: {
+      eliminationVotesCast: 1,
+      guessesSubmitted: 1,
+      rulesElected: 1,
+      rulesProposed: 1,
+      totalEarnedLamports: 0,
+      votesCast: 1,
+      votesReceived: 2,
+      winnerProducingRules: 0,
+    },
+    wallet,
+  });
+  assert.equal("records" in profile, false);
+});
+
+test("public player profile is absent when a wallet has no public activity", () => {
+  resetApiStateForTests();
+  assert.equal(getPlayerPublicProfile(wallet), null);
+});
+
+test("public rule detail uses turn and rule as a composite identity", () => {
+  resetApiStateForTests();
+  saveRuleProposal(proposal(246, 9));
+  saveRuleVote({
+    ruleId: 9,
+    ruleProposal: base58,
+    ruleVote: base58,
+    signature: base58,
+    submittedAt: "2026-06-12T12:02:00.000Z",
+    turnId: 246,
+    voter: wallet,
+  });
+  saveRuleElection(settledElection(246, 9));
+
+  const detail = getPublicRuleDetail(246, 9);
+
+  assert.equal(detail?.turnId, 246);
+  assert.equal(detail?.rule.ruleId, 9);
+  assert.equal(detail?.rule.votes, 1);
+  assert.equal(detail?.election.active, true);
+  const publicPayload = JSON.stringify(detail);
+  for (const privateField of ["rawPrompt", "rawCompletion", "input", "output", "telemetry"]) {
+    assert.equal(publicPayload.includes(privateField), false);
+  }
+  assert.equal(getPublicRuleDetail(246, 10), null);
+  assert.deepEqual(matchPublicRuleDetailPath("/api/v1/turns/246/rules/9"), {
+    ruleId: 9,
+    turnId: 246,
+  });
+  assert.equal(
+    matchPublicRuleDetailPath("/api/v1/turns/not-a-turn/rules/9"),
+    null,
+  );
+  assert.equal(matchPlayerProfilePath(`/players/${wallet}/profile`), wallet);
+});
+
+test("public detail endpoints return validated 400 and absent 404 responses", async (t) => {
+  resetApiStateForTests();
+  const server = createServer(handleApiRequest);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise<void>((resolve, reject) => {
+    server.close((error) => error ? reject(error) : resolve());
+  }));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  const invalidRule = await fetch(`${baseUrl}/api/v1/turns/nope/rules/1`);
+  assert.equal(invalidRule.status, 400);
+  assert.deepEqual(await invalidRule.json(), { error: "invalid_rule_identity" });
+
+  const missingRule = await fetch(`${baseUrl}/api/v1/turns/999/rules/1`);
+  assert.equal(missingRule.status, 404);
+  assert.deepEqual(await missingRule.json(), { error: "not_found" });
+
+  const invalidWallet = await fetch(`${baseUrl}/players/not-a-wallet/profile`);
+  assert.equal(invalidWallet.status, 400);
+  assert.deepEqual(await invalidWallet.json(), { error: "invalid_wallet" });
+
+  const missingProfile = await fetch(`${baseUrl}/players/${wallet}/profile`);
+  assert.equal(missingProfile.status, 404);
+  assert.deepEqual(await missingProfile.json(), { error: "not_found" });
 });
 
 test("conversation drafts are saved per wallet and newest draft is listed first", () => {
