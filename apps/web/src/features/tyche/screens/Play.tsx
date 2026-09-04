@@ -475,7 +475,7 @@ function PlayFlow() {
             </div>
           )}
         </div>
-        <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 30, padding: "16px 20px calc(20px + env(safe-area-inset-bottom,0px))", background: "linear-gradient(180deg, transparent, var(--bg) 36%)" }}>
+        <div className="ide-fixed-cta" style={{ position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 30, padding: "16px 20px calc(20px + env(safe-area-inset-bottom,0px))", background: "linear-gradient(180deg, transparent, var(--bg) 36%)" }}>
           <button onClick={confirm} disabled={busy || submitBlocked} className="ide-btn" style={{ width: "100%", padding: 17, fontSize: 17, opacity: busy || submitBlocked ? 0.7 : 1 }} type="button">
             {busy ? <><span className="ide-spin" style={{ width: 18, height: 18, border: "2px solid #08110C", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block" }} /> Submitting…</>
               : submitBlocked ? <><Ico.clock style={{ color: "var(--on-accent)" }} /> Wallet action pending</>
@@ -524,7 +524,7 @@ function PlayFlow() {
         </div>
       </div>
 
-      <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 30, padding: "16px 20px calc(20px + env(safe-area-inset-bottom,0px))", background: "linear-gradient(180deg, transparent, var(--bg) 36%)" }}>
+      <div className="ide-fixed-cta" style={{ position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 30, padding: "16px 20px calc(20px + env(safe-area-inset-bottom,0px))", background: "linear-gradient(180deg, transparent, var(--bg) 36%)" }}>
         <button onClick={() => complete && setStep("review")} disabled={!complete || !turnReadyToPlay} className="ide-btn" style={{ width: "100%", padding: 17, fontSize: 17, opacity: complete && turnReadyToPlay ? 1 : 0.4 }} type="button">
           {complete ? <>Review guess <Ico.arrow style={{ color: "var(--on-accent)" }} /></> : `${PICK - sel.length} number${PICK - sel.length === 1 ? "" : "s"} left`}
         </button>

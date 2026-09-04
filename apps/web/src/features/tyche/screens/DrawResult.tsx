@@ -59,15 +59,16 @@ export function DrawResultPopup() {
   return (
     <div
       onClick={dismiss}
+      className="ide-overlay"
       style={{
-        position: "absolute", inset: 0, zIndex: 70, display: "flex", alignItems: "center",
-        padding: 18, background: "rgba(6,4,10,0.62)", backdropFilter: "blur(6px)",
+        position: "absolute", inset: 0, zIndex: 70, display: "flex",
+        background: "rgba(6,4,10,0.62)", backdropFilter: "blur(6px)",
         animation: "ide-rise .2s ease both",
       }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="ide-scroll"
+        className="ide-scroll ide-overlay-card"
         style={{
           width: "100%", maxHeight: "90%", overflowY: "auto", WebkitOverflowScrolling: "touch", overscrollBehavior: "contain",
           background: "var(--surface)", border: "none", borderRadius: 0,

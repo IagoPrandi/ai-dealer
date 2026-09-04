@@ -252,12 +252,12 @@ export function RuleDetail({
     padding: "14px 20px 28px", animation: "ide-rise .32s cubic-bezier(.2,.8,.3,1) both",
   };
   return (
-    <div onClick={onClose} style={{
-      position: "absolute", inset: 0, zIndex: 60, display: "flex", alignItems: "flex-end",
+    <div onClick={onClose} className="ide-overlay is-sheet" style={{
+      position: "absolute", inset: 0, zIndex: 60, display: "flex",
       background: "rgba(6,4,10,0.62)", backdropFilter: "blur(6px)",
       animation: "ide-rise .2s ease both",
     }}>
-      <div onClick={(e) => e.stopPropagation()} className="ide-scroll" style={cardStyle}>
+      <div onClick={(e) => e.stopPropagation()} className="ide-scroll ide-overlay-card" style={cardStyle}>
         <div style={{ width: 40, height: 5, borderRadius: 3, background: "var(--line-2)", margin: "0 auto 18px" }} />
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

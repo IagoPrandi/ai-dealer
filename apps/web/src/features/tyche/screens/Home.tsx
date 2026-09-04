@@ -191,6 +191,7 @@ export function HomeScreen() {
         }}
       >
         <div
+          className="ide-screen-head"
           style={{
             display: "flex",
             alignItems: "center",
@@ -198,7 +199,10 @@ export function HomeScreen() {
             marginBottom: 22,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+          <div
+            className="ide-brandlock"
+            style={{ display: "flex", alignItems: "center", gap: 9 }}
+          >
             <Dealer size={34} />
             <span className="ide-plate" style={{ fontSize: 22 }}>
               {BRAND_NAME}
@@ -259,6 +263,12 @@ export function HomeScreen() {
           </button>
         ) : null}
 
+        {/* On desktop the round state and the rule activity sit side by
+            side; `.ide-deck` is `display: contents` below 1024px, so the
+            mobile flow below is unchanged. */}
+        <div className="ide-deck">
+        <div>
+
         {/* HERO */}
         <div
           style={{
@@ -269,25 +279,8 @@ export function HomeScreen() {
         >
           {/* Prize rays + halo. Both are decoration: pointer-events off and
               behind the content, so they never intercept a tap. */}
-          <div
-            aria-hidden="true"
-            className="ide-sunburst"
-            style={{ inset: "-14px -18px auto", height: 250, zIndex: 0 }}
-          />
-          <div
-            aria-hidden="true"
-            style={{
-              position: "absolute",
-              inset: "34px 30px auto",
-              height: 120,
-              pointerEvents: "none",
-              background:
-                "radial-gradient(50% 50% at 50% 50%, rgba(255,46,136,0.75), rgba(53,240,224,0.35) 55%, transparent 78%)",
-              filter: "blur(26px)",
-              animation: "ide-pulse 3.6s ease-in-out infinite",
-              zIndex: 0,
-            }}
-          />
+          <div aria-hidden="true" className="ide-sunburst ide-prize-rays" />
+          <div aria-hidden="true" className="ide-prize-halo" />
           <div style={{ position: "relative", zIndex: 1 }}>
             <div
               style={{
@@ -431,47 +424,10 @@ export function HomeScreen() {
             </div>
             {/* The integer carries the plate, the decimals drop to gold and the
                 unit to DM Mono cyan — one weight per line, per screens.md. */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "flex-start",
-                justifyContent: "center",
-                gap: 3,
-              }}
-            >
-              <span
-                style={{
-                  fontFamily: "Bevan, serif",
-                  fontSize: 70,
-                  lineHeight: 0.92,
-                  color: "var(--text)",
-                  textShadow: "var(--plate-num)",
-                }}
-              >
-                {intStr}
-              </span>
-              <span
-                style={{
-                  fontFamily: "Bevan, serif",
-                  fontSize: 34,
-                  marginTop: 16,
-                  color: "var(--yellow)",
-                  textShadow: "0 0 22px rgba(255,210,63,0.9)",
-                }}
-              >
-                {decStr}
-              </span>
-              <span
-                className="ide-num"
-                style={{
-                  fontSize: 13,
-                  letterSpacing: "0.16em",
-                  color: "var(--cyan)",
-                  margin: "22px 0 0 6px",
-                }}
-              >
-                SOL
-              </span>
+            <div className="ide-prize">
+              <span className="ide-prize-int">{intStr}</span>
+              <span className="ide-prize-dec">{decStr}</span>
+              <span className="ide-num ide-prize-unit">SOL</span>
             </div>
             <div
               aria-hidden="true"
@@ -793,6 +749,9 @@ export function HomeScreen() {
           </button>
         )}
 
+        </div>
+        <div>
+
         {/* CREATE RULE — prompt entry, no box (only the input has a border) */}
         <div style={{ marginBottom: 28 }}>
           <PromptInput />
@@ -927,6 +886,8 @@ export function HomeScreen() {
           />{" "}
           View and vote on {rules.rules.length} rules
         </button>
+        </div>
+        </div>
       </div>
     </div>
   );

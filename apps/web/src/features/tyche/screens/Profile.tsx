@@ -192,6 +192,11 @@ export function ProfileScreen() {
           <WalletButton />
         </div>
 
+        {/* Desktop splits the wallet side from the activity side; the deck
+            is `display: contents` below 1024px. */}
+        <div className="ide-deck">
+        <div>
+
         {/* CLAIM HERO — sits directly on the page surface: no fill and no solid
             offset, so the yellow CTA is the only weight in the block. */}
         <div style={{ borderRadius: 0, padding: "18px 0", marginBottom: 14 }}>
@@ -237,6 +242,9 @@ export function ProfileScreen() {
             <Ico.arrow style={{ color: "var(--yellow)", flexShrink: 0, width: 18, height: 18 }} />
           </button>
         ) : null}
+
+        </div>
+        <div>
 
         {/* accumulated metrics — 2x2 grid divided by hairlines (no boxes) */}
         <div className="ide-metrics" style={{ marginBottom: 18 }}>
@@ -315,6 +323,8 @@ export function ProfileScreen() {
             </div>
           )
         ) : null}
+        </div>
+        </div>
       </div>
     </div>
   );

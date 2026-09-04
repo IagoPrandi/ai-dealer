@@ -866,6 +866,11 @@ export function RewardsScreen() {
           title="Stake & earn"
         />
 
+        {/* Desktop keeps the claim block beside the detail panels; the deck
+            is `display: contents` below 1024px. */}
+        <div className="ide-deck">
+        <div>
+
         <p className="ide-rewards-status">Live {TOKEN_SYMBOL} rewards on devnet</p>
 
         <section
@@ -927,6 +932,9 @@ export function RewardsScreen() {
             {claimMessage ? <p role="status">{claimMessage}</p> : null}
           </div>
         </section>
+
+        </div>
+        <div>
 
         <div
           className="ide-tabs ide-rewards-tabs"
@@ -1202,6 +1210,8 @@ export function RewardsScreen() {
               : null}
           </div>
         )}
+        </div>
+        </div>
       </div>
 
       {notificationsOpen ? (

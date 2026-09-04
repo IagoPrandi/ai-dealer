@@ -215,6 +215,28 @@
   background: repeating-conic-gradient(from 0deg at 50% 50%, rgba(53,240,224,0.28) 0deg 4deg, transparent 4deg 14deg);
 }
 
+/* Home prize hero. Ported verbatim from the handoff's inline styles so the
+   desktop layer can scale the whole lockup in one place - a 70px number is
+   tuned for a 402px phone and reads as a footnote on a 1080p screen. */
+.ide-prize { display: flex; align-items: flex-start; justify-content: center; gap: 3px; }
+.ide-prize-int {
+  font-family: var(--font-display); font-size: 70px; line-height: 0.92;
+  color: var(--text); text-shadow: var(--plate-num);
+}
+.ide-prize-dec {
+  font-family: var(--font-display); font-size: 34px; margin-top: 16px;
+  color: var(--yellow); text-shadow: 0 0 22px rgba(255,210,63,0.9);
+}
+.ide-prize-unit { font-size: 13px; letter-spacing: 0.16em; color: var(--cyan); margin: 22px 0 0 6px; }
+.ide-prize-rays { inset: -14px -18px auto; height: 250px; z-index: 0; }
+.ide-prize-halo {
+  position: absolute; inset: 34px 30px auto; height: 120px; z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(50% 50% at 50% 50%, rgba(255,46,136,0.75), rgba(53,240,224,0.35) 55%, transparent 78%);
+  filter: blur(26px);
+  animation: ide-pulse 3.6s ease-in-out infinite;
+}
+
 /* prize glow pulse */
 @keyframes ide-pulse {
   0%,100% { opacity: 0.55; transform: scale(1); }
@@ -350,6 +372,8 @@
   background: var(--bg-2);
   box-shadow: inset 0 1px 0 rgba(241,232,214,0.22), 0 -40px 80px -30px rgba(255,46,136,0.5);
 }
+/* Desktop-only: the tab bar has no room for a brand, the rail does. */
+.ide-nav-brand { display: none; }
 .ide-nav-btn {
   background: none; border: none; cursor: pointer; color: var(--dim);
   display: flex; flex-direction: column; align-items: center; gap: 4px;
@@ -1344,35 +1368,145 @@
 .ide-app [style*="font-family: Oswald"] { font-family: var(--font-label) !important; }
 .ide-app [style*="font-family: Archivo"] { font-family: var(--font-body) !important; }
 
+/* Full-shell overlays. The centred pop-up and the bottom sheet share one
+   scrim; only the alignment differs, and on desktop both become a centred
+   dialog (see the desktop layer below). */
+.ide-overlay { align-items: center; padding: 18px; }
+.ide-overlay.is-sheet { align-items: flex-end; padding: 0; }
+
+/* ============================================================
+   DESKTOP LAYER - a browser window is not a tall phone.
+   Three moves, in order:
+     1. the shell stops being a 1280px slab and fills the viewport;
+     2. the bottom tab bar becomes a left rail anchored to the top;
+     3. every screen declares a measure, so mobile components keep
+        their proportions instead of stretching a metre wide.
+   --ide-measure is declared on .ide-web-shell only. The inner screen root
+   also carries .ide-app, so declaring it there would shadow the per-screen
+   value before .ide-scroll ever reads it.
+
+   Several rules below need !important or max-width: the screens were
+   ported from the design handoff with their inline styles intact, and an
+   inline display/width cannot be overridden by a plain declaration.
+   ============================================================ */
 @media (min-width: 768px) {
+  .ide-web-shell {
+    --ide-measure: 720px;
+    --ide-rail-w: 248px;
+  }
+
   .ide-web-shell .ide-scroll {
-    width: min(100%, 960px);
+    width: min(100%, var(--ide-measure));
     margin-inline: auto;
-    padding-inline: 32px !important;
+    padding-inline: 28px !important;
+  }
+
+  /* 1-100 in six columns is seventeen rows of scrolling on a desktop
+     screen. Ten columns puts the whole grid in one view. */
+  .ide-web-shell .ide-numgrid {
+    grid-template-columns: repeat(10, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  /* Fixed action bars span the screen box, which is wider than the content
+     column: centre the button on the same measure. */
+  .ide-web-shell .ide-fixed-cta {
+    display: flex;
+    justify-content: center;
+  }
+
+  .ide-web-shell .ide-fixed-cta > * {
+    max-width: calc(var(--ide-measure) - 56px);
+  }
+
+  /* The chat header and composer sit outside .ide-scroll, so they need the
+     measure applied to their own content. */
+  .ide-web-shell .ide-chat-bar > * {
+    width: min(100%, calc(var(--ide-measure) - 56px));
+    margin-inline: auto;
+  }
+
+  /* Overlays sit on the shell, not on the content column. A sheet dragged
+     up from the bottom edge of a 1080px-tall window reads as a broken page,
+     so on desktop both variants become a centred dialog. */
+  .ide-web-shell .ide-overlay,
+  .ide-web-shell .ide-overlay.is-sheet,
+  .ide-web-shell .ide-rewards-sheet-backdrop {
+    align-items: center;
+    justify-content: center;
+    padding: 32px;
+  }
+
+  .ide-web-shell .ide-overlay-card,
+  .ide-web-shell .ide-rewards-sheet {
+    max-width: 560px;
   }
 }
 
-@media (min-width: 1200px) {
-  .ide-web-shell.ide-has-nav .ide-screen {
-    width: calc(100% - 224px);
-    margin-left: 224px;
+@media (min-width: 1024px) {
+  .ide-web-shell {
+    max-width: none;
+    box-shadow: none;
   }
 
-  .ide-web-shell.ide-has-nav .ide-scroll {
-    width: min(100%, 1056px);
+  /* Screens with a rail: the content box starts after it. Screens without
+     one (play, create, result, ...) stay full-bleed and are centred by
+     their own measure. */
+  .ide-web-shell.ide-has-nav .ide-screen {
+    width: calc(100% - var(--ide-rail-w));
+    margin-left: var(--ide-rail-w);
+  }
+
+  .ide-web-shell .ide-scroll {
     padding-inline: 40px !important;
   }
 
+  /* Wider measures where the screen has a second column to fill. */
+  .ide-web-shell.ide-screen-home { --ide-measure: 1160px; }
+  .ide-web-shell.ide-screen-profile,
+  .ide-web-shell.ide-screen-rewards { --ide-measure: 1060px; }
+  .ide-web-shell.ide-screen-vote,
+  .ide-web-shell.ide-screen-myrules,
+  .ide-web-shell.ide-screen-result { --ide-measure: 900px; }
+  .ide-web-shell.ide-screen-create { --ide-measure: 860px; }
+  .ide-web-shell.ide-screen-play { --ide-measure: 700px; }
+
+  /* --- LEFT RAIL --------------------------------------------------
+     The same buttons as the tab bar, turned on their side and pinned to the
+     top so the brand, the sections and the screen title read as one band
+     instead of floating mid-viewport. */
   .ide-web-shell .ide-nav {
     inset: 0 auto 0 0;
-    width: 224px;
+    width: var(--ide-rail-w);
     height: 100%;
     flex-direction: column;
-    justify-content: center;
+    justify-content: flex-start;
     align-items: stretch;
-    gap: 8px;
-    padding: 32px 18px;
+    gap: 6px;
+    padding: 26px 16px calc(22px + env(safe-area-inset-bottom, 0px));
     box-shadow: inset -1px 0 0 rgba(241,232,214,0.18), 36px 0 80px -55px rgba(255,46,136,0.8);
+  }
+
+  .ide-web-shell .ide-nav-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 10px;
+    margin-bottom: 26px;
+  }
+
+  .ide-web-shell .ide-nav-brand .ide-plate {
+    font-size: 19px;
+  }
+
+  /* The brand lives in the rail on desktop; the screen header keeps only
+     what is specific to the screen, right-aligned on its own. */
+  .ide-web-shell .ide-brandlock {
+    display: none !important;
+  }
+
+  .ide-web-shell .ide-screen-head {
+    justify-content: flex-end !important;
   }
 
   .ide-web-shell .ide-nav-btn {
@@ -1399,6 +1533,47 @@
     border-radius: var(--radius-btn-xs);
     box-shadow: var(--solid-3);
   }
+
+  /* The hero keeps its share of the column instead of shrinking into it,
+     and the rays gain a horizontal fade: inside a 520px column their hard
+     vertical cut is visible, where on a phone the screen edge hid it. */
+  .ide-web-shell .ide-prize-int { font-size: 92px; }
+  .ide-web-shell .ide-prize-dec { font-size: 44px; margin-top: 22px; }
+  .ide-web-shell .ide-prize-unit { font-size: 15px; margin-top: 30px; }
+  .ide-web-shell .ide-prize-rays { inset: -18px -24px auto; height: 278px; }
+  .ide-web-shell .ide-prize-halo { inset: 40px 40px auto; height: 148px; }
+
+  .ide-web-shell .ide-sunburst {
+    mask-image:
+      linear-gradient(180deg, transparent 0, #000 16%, #000 82%, transparent 100%),
+      linear-gradient(90deg, transparent 0, #000 14%, #000 86%, transparent 100%);
+    mask-composite: intersect;
+    -webkit-mask-image:
+      linear-gradient(180deg, transparent 0, #000 16%, #000 82%, transparent 100%),
+      linear-gradient(90deg, transparent 0, #000 14%, #000 86%, transparent 100%);
+    -webkit-mask-composite: source-in;
+  }
+
+  /* --- TWO-COLUMN DECK -------------------------------------------
+     Screens that stack a hero over a list get the list beside it. */
+  .ide-web-shell .ide-deck {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+    gap: 30px;
+  }
+
+  .ide-web-shell .ide-deck > * {
+    display: block;
+    min-width: 0;
+  }
+}
+
+/* The deck is a desktop-only regrouping: below 1024px it must not exist as a
+   box at all, so the mobile document flow is exactly what it was. */
+.ide-deck,
+.ide-deck > * {
+  display: contents;
 }
 
 @media (max-width: 767px) {

@@ -1838,6 +1838,7 @@ function CreateChat({
     >
       <div className="ide-ambient" />
       <div
+        className="ide-chat-bar"
         style={{
           position: "relative",
           zIndex: 2,
@@ -2254,6 +2255,7 @@ function CreateChat({
 
       {!submitted ? (
         <div
+          className="ide-chat-bar"
           style={{
             position: "relative",
             zIndex: 2,

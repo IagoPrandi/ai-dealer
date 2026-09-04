@@ -12,6 +12,15 @@ import type { ReactNode } from "react";
 
 import { mockSolanaClient } from "./mockClient";
 import { MOCK_WALLET_ADDRESS } from "./mockData";
+import { installMockFetch } from "./mockFetch";
+
+// Este módulo só existe quando o alias de mock está ativo, então instalar aqui
+// dá dados canned a QUALQUER rota (/play, /rounds, ...), não só /dev/gallery —
+// que é o que permite validar o shell web real sem backend. installMockFetch é
+// idempotente, logo a instalação explícita da galeria continua válida.
+if (typeof window !== "undefined") {
+  installMockFetch();
+}
 
 const mockWallet = {
   account: {

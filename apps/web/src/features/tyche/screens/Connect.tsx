@@ -27,8 +27,9 @@ export function ConnectOverlay({
   return (
     <div
       onClick={onClose}
+      className="ide-overlay is-sheet"
       style={{
-        position: "absolute", inset: 0, zIndex: 70, display: "flex", alignItems: "flex-end",
+        position: "absolute", inset: 0, zIndex: 70, display: "flex",
         background: "rgba(6,4,10,0.62)", backdropFilter: "blur(6px)", animation: "ide-rise .2s ease both",
       }}
     >
@@ -36,7 +37,7 @@ export function ConnectOverlay({
         aria-labelledby="wallet-dialog-title"
         aria-modal="true"
         onClick={(e) => e.stopPropagation()}
-        className="ide-scroll"
+        className="ide-scroll ide-overlay-card"
         role="dialog"
         style={{
           width: "100%", maxHeight: "90%", overflowY: "auto",

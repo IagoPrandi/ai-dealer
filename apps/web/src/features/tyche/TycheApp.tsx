@@ -12,6 +12,7 @@ import { usePathname, useRouter } from "next/navigation";
 
 import "./tyche.css";
 
+import { BRAND_NAME } from "@tyche/config";
 import {
   MVP_FEES_SOL,
   REPEATED_ACTION_FEE_MULTIPLIER,
@@ -55,6 +56,7 @@ import {
 } from "./data/tx";
 import {
   canShowRuleRemovalAction,
+  Dealer,
   Ico,
   RuleDetail,
   type RuleDetailVote,
@@ -719,6 +721,12 @@ export function TycheApp({
 
             {showNav ? (
               <div className="ide-nav">
+                {/* Desktop only (see tyche.css): on a rail the brand sits at
+                    the top, where the screen header cannot carry it. */}
+                <div className="ide-nav-brand">
+                  <Dealer size={30} />
+                  <span className="ide-plate">{BRAND_NAME}</span>
+                </div>
                 <button
                   className={"ide-nav-btn" + (screen === "home" ? " on" : "")}
                   onClick={() => go("home")}
