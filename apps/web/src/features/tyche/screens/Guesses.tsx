@@ -260,7 +260,7 @@ export function GuessesScreen() {
             </button>
           </div>
         ) : receipts.length > 0 ? (
-          <div style={{ display: "grid", gap: 10 }}>
+          <div className="ide-guess-grid" style={{ display: "grid", gap: 10 }}>
             {receipts.map((receipt, index) => (
               <GuessCard
                 index={receipts.length - index - 1}

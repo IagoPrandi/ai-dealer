@@ -297,7 +297,7 @@ export function InviteScreen() {
       >
         <ScreenHead onBack={() => go("profile")} title="Invite friends" />
 
-        <div className="ide-card" style={{ padding: "18px 18px 12px", marginBottom: 14 }}>
+        <div className="ide-card ide-invite-rewards" style={{ padding: "18px 18px 12px", marginBottom: 14 }}>
           <SectionLabel>Referral rewards</SectionLabel>
           <div
             style={{
@@ -321,7 +321,7 @@ export function InviteScreen() {
         </div>
 
         {walletAddress ? (
-          <div className="ide-card" style={{ padding: 18, marginBottom: 14 }}>
+          <div className="ide-card ide-invite-link" style={{ padding: 18, marginBottom: 14 }}>
             <SectionLabel>Your invite link</SectionLabel>
             <div
               className="ide-num"
@@ -380,7 +380,7 @@ export function InviteScreen() {
             ) : null}
           </div>
         ) : (
-          <div className="ide-card" style={{ padding: 18, marginBottom: 14, textAlign: "center" }}>
+          <div className="ide-card ide-invite-link" style={{ padding: 18, marginBottom: 14, textAlign: "center" }}>
             <div style={{ display: "grid", placeItems: "center", marginBottom: 10 }}>
               <Dealer size={54} />
             </div>
@@ -397,7 +397,7 @@ export function InviteScreen() {
           </div>
         )}
 
-        <div className="ide-card" style={{ padding: 18, marginBottom: 14 }}>
+        <div className="ide-card ide-invite-attribution" style={{ padding: 18, marginBottom: 14 }}>
           <SectionLabel>Invited by</SectionLabel>
 
           {attribution.loading && walletAddress ? (
@@ -534,7 +534,7 @@ export function InviteScreen() {
           ) : null}
         </div>
 
-        <div className="ide-notice" role="note" style={{ display: "flex", gap: 9, alignItems: "flex-start" }}>
+        <div className="ide-notice ide-invite-note" role="note" style={{ display: "flex", gap: 9, alignItems: "flex-start" }}>
           <Ico.info style={{ color: "var(--dim)", flexShrink: 0, marginTop: 3 }} />
           <div>
             <p style={{ margin: 0, color: "var(--dim)", fontSize: 12.5, lineHeight: 1.6 }}>

@@ -179,7 +179,7 @@ function PlayDone({ sel, turnId }: { sel: number[]; turnId: number }) {
     <div className="ide-app ide-screen" style={{ height: "100%", position: "relative", overflow: "hidden" }}>
       <div className="ide-ambient" />
       <Confetti />
-      <div style={{ position: "relative", zIndex: 1, height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "0 28px", textAlign: "center" }}>
+      <div className="ide-play-done-card ide-overlay-card" style={{ position: "relative", zIndex: 1, height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "0 28px", textAlign: "center" }}>
         <div style={{ animation: "ide-pop .5s cubic-bezier(.2,.8,.3,1) both" }}><Dealer size={72} /></div>
         <h2 className="ide-plate ide-plate-lg" style={{ fontSize: 32, lineHeight: 1.05, margin: "20px 0 8px" }}>Guess confirmed!</h2>
         <p style={{ color: "var(--muted)", fontSize: 15.5, lineHeight: 1.5, margin: "0 0 22px" }}>You&apos;re in round <b style={{ color: "var(--text)" }}>{fmtTurnId(turnId)}</b>. You can now vote and create rules.</p>
@@ -495,6 +495,9 @@ function PlayFlow() {
         <ScreenHead onBack={() => go("home")} title="Make a guess"
           right={sel.length > 0 ? <button onClick={() => setSel([])} style={{ background: "none", border: "none", color: "var(--dim)", fontFamily: "Oswald, sans-serif", fontSize: 12, fontWeight: 600, letterSpacing: "0.14em", textTransform: "uppercase", cursor: "pointer" }} type="button">clear</button> : undefined} />
 
+        <div className="ide-deck is-play">
+          <div>
+
         <div style={{ textAlign: "center", margin: "4px 0 16px" }}>
           <div style={{ fontFamily: "Oswald, sans-serif", fontSize: 14.5, letterSpacing: "0.04em", color: "var(--muted)" }}>Pick <b style={{ color: "var(--text)", fontWeight: 500 }}>{PICK} numbers</b> from 1 to {MAXN}</div>
           <div className="ide-num" style={{ marginTop: 6, fontSize: 13, color: complete ? "var(--green)" : "var(--yellow)" }}>{sel.length}/{PICK} selected</div>
@@ -521,6 +524,55 @@ function PlayFlow() {
           {Array.from({ length: MAXN }, (_, i) => i + 1).map((n) => (
             <button key={n} onClick={() => toggle(n)} className={"ide-numcell" + (sel.includes(n) ? " sel" : "")} type="button">{n}</button>
           ))}
+        </div>
+          </div>
+
+          <aside className="ide-desktop-only ide-card has-solid ide-play-summary">
+            <div className="ide-section-label-row">
+              <span>Your numbers</span>
+              <i />
+            </div>
+            <div className="ide-play-summary-chips">
+              {Array.from({ length: PICK }).map((_, index) => {
+                const number = sel[index];
+                return number == null ? (
+                  <span className="ide-chip is-empty" key={index}>·</span>
+                ) : (
+                  <span className="ide-chip" key={number}>{number}</span>
+                );
+              })}
+            </div>
+            <div className="ide-play-review-list">
+              <ReviewRow label="Round" value={fmtTurnId(turnId)} mono />
+              <ReviewRow label="Numbers chosen" value={`${sel.length} of ${PICK}`} mono />
+              <ReviewRow label="Entry fee" value={fees.playNext === 0 ? "Free" : `${fmtSol(fees.playNext)} SOL`} mono />
+              <ReviewRow label="Account rent + network fee" value="shown by wallet" last />
+            </div>
+            {visiblePendingAction ? (
+              <WalletActionStatus action={visiblePendingAction} onClear={clearAction} />
+            ) : null}
+            {error ? <div className="ide-desktop-form-error">{error}</div> : null}
+            <p className="ide-play-pass-note">
+              <Ico.info style={{ color: "var(--cyan)", flexShrink: 0 }} />
+              Playing issues your round pass and unlocks rules and voting.
+            </p>
+            <button
+              className="ide-btn"
+              disabled={!complete || !turnReadyToPlay || busy || submitBlocked}
+              onClick={() => void confirm()}
+              type="button"
+            >
+              {busy
+                ? "Submitting…"
+                : submitBlocked
+                  ? "Wallet action pending"
+                  : !complete
+                    ? `${PICK - sel.length} number${PICK - sel.length === 1 ? "" : "s"} left`
+                    : connected
+                      ? "Confirm and submit"
+                      : "Connect and submit"}
+            </button>
+          </aside>
         </div>
       </div>
 

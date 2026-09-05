@@ -7,6 +7,19 @@ path:   apps/web/src/features/tyche
 stack:  Next 16 (webpack) + React 19, CSS global, sem Tailwind, sem CSS-in-JS
 ```
 
+## Responsive implementation contract
+
+- Read `desktop.md` before changing the play app at desktop widths.
+- The desktop shell starts at `min-width: 1024px`: 260px navigation rail, 70px context bar,
+  and a content canvas capped at 1120px.
+- Keep the mobile JSX and state transitions canonical. Use `.ide-deck` as `display: contents`
+  below the breakpoint and `.ide-desktop-only` for desktop companion panels.
+- Do not branch on `window.innerWidth` in React or maintain separate mobile and desktop state.
+- `TycheApp.tsx` owns the shared desktop rail and context bar. Screen files own only their
+  content grids and screen-specific desktop summaries.
+- The source handoff is `design_handoff_desktop/Tyche Desktop.dc.html`; its generated
+  `support.js` is reference runtime code and is not copied into the application bundle.
+
 ## Como o styling funciona hoje
 
 - `apps/web/src/features/tyche/tyche.css` — folha única da feature (~34 KB). Define as

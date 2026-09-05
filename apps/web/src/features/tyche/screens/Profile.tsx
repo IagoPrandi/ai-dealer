@@ -184,7 +184,7 @@ export function ProfileScreen() {
       <div className="ide-scroll" onScroll={loadMoreOnScroll} style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", overflowX: "hidden", padding: "var(--ide-shell-content-top) 18px 96px" }}>
 
         {/* screen head — brand mark, plate title, the round's wallet pill */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 16 }}>
+        <div className="ide-screen-head" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
             <Dealer size={34} />
             <h1 className="ide-plate" style={{ fontSize: "clamp(18px, 5.4vw, 22px)", fontWeight: 400, margin: 0, whiteSpace: "nowrap" }}>Account</h1>
@@ -194,7 +194,7 @@ export function ProfileScreen() {
 
         {/* Desktop splits the wallet side from the activity side; the deck
             is `display: contents` below 1024px. */}
-        <div className="ide-deck">
+        <div className="ide-deck is-account">
         <div>
 
         {/* CLAIM HERO — sits directly on the page surface: no fill and no solid

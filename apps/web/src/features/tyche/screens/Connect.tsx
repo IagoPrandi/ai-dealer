@@ -37,7 +37,7 @@ export function ConnectOverlay({
         aria-labelledby="wallet-dialog-title"
         aria-modal="true"
         onClick={(e) => e.stopPropagation()}
-        className="ide-scroll ide-overlay-card"
+        className="ide-scroll ide-overlay-card is-connect"
         role="dialog"
         style={{
           width: "100%", maxHeight: "90%", overflowY: "auto",

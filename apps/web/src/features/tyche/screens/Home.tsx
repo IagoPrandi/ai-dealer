@@ -9,6 +9,7 @@ import {
   fmtClaimSol,
   fmtInt,
   fmtSol,
+  fmtTurnId,
   lamportsToSol,
 } from "../data/format";
 import { usePlayerClaims } from "../data/hooks";
@@ -263,10 +264,148 @@ export function HomeScreen() {
           </button>
         ) : null}
 
-        {/* On desktop the round state and the rule activity sit side by
-            side; `.ide-deck` is `display: contents` below 1024px, so the
-            mobile flow below is unchanged. */}
-        <div className="ide-deck">
+        <div className="ide-desktop-only ide-home-dashboard">
+          <section className="ide-roundbar ide-deck-full">
+            <div>
+              <div className="ide-eyebrow">Accumulated prize</div>
+              <div className="ide-prize">
+                <span className="ide-prize-int">{intStr}</span>
+                <span className="ide-prize-dec">{decStr}</span>
+                <span className="ide-num ide-prize-unit">SOL</span>
+              </div>
+            </div>
+            <div className="ide-roundbar-timer">
+              <span className="ide-live">
+                <span className="ide-live-dot" />
+                <span>Live</span>
+              </span>
+              <div className="ide-roundbar-clock">
+                {h}:{m}:{s}
+              </div>
+              <div className="ide-roundbar-caption">until the draw</div>
+            </div>
+            <div className="ide-roundbar-cta">
+              <button
+                className="ide-btn"
+                disabled={!turnReadyToPlay}
+                onClick={() => go("play")}
+                type="button"
+              >
+                {turnReadyToPlay
+                  ? `Play now · ${fees.playNext === 0 ? "Free" : fmtSol(fees.playNext)}`
+                  : turnStatusUnavailable
+                    ? "Checking round"
+                    : "Round closed"}
+              </button>
+              <button
+                className="ide-btn ide-btn-ghost"
+                onClick={() => go(played ? "guesses" : "play")}
+                type="button"
+              >
+                {played ? "My guesses" : "How to play"}
+              </button>
+            </div>
+          </section>
+
+          <div className="ide-home-rules-column">
+            <div className="ide-metrics is-three">
+              <div className="ide-metric">
+                <div className="ide-metric-value">{fmtInt(players)}</div>
+                <div className="ide-metric-label">playing</div>
+              </div>
+              <div className="ide-metric">
+                <div className="ide-metric-value is-yellow">{rules.rules.length}</div>
+                <div className="ide-metric-label">rules in voting</div>
+              </div>
+              <div className="ide-metric">
+                <div className="ide-metric-value is-green">
+                  {fees.playNext === 0 ? "Free" : fmtSol(fees.playNext)}
+                  {fees.playNext === 0 ? null : <span> SOL</span>}
+                </div>
+                <div className="ide-metric-label">entry fee</div>
+              </div>
+            </div>
+
+            <section className="ide-card has-solid-cyan ide-home-rules-card">
+              <div className="ide-section-head">
+                <h2 className="ide-plate">The rules</h2>
+                <span />
+                <button onClick={() => go("vote")} type="button">vote →</button>
+              </div>
+              {top.length === 0 ? (
+                <div className="ide-desktop-empty">
+                  {rules.loading ? "Loading rules…" : "No rules proposed yet."}
+                </div>
+              ) : (
+                <div className="ide-rule-stack">
+                  {top.map((rule, index) => (
+                    <button
+                      className="ide-rulerow"
+                      key={rule.id}
+                      onClick={() => openDetail(rule.ruleId, { rank: index + 1 })}
+                      type="button"
+                    >
+                      <Medal pos={index + 1} />
+                      <span className="ide-home-rule-copy">
+                        <b>{rule.title}</b>
+                        <VoteTally approve={rule.approve} against={rule.against} size="sm" />
+                      </span>
+                      <span className="ide-votebtn for">▲ in favor</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <button className="ide-btn ide-btn-ghost" onClick={() => go("vote")} type="button">
+                View and vote on {rules.rules.length} rules
+              </button>
+            </section>
+          </div>
+
+          <aside className="ide-home-activity-column">
+            <div className="ide-section-label-row">
+              <span>Round activity</span>
+              <i />
+              <b />
+            </div>
+            <div className="ide-activity-list">
+              {top.map((rule, index) => (
+                <button
+                  key={rule.id}
+                  onClick={() => openDetail(rule.ruleId, { rank: index + 1 })}
+                  type="button"
+                >
+                  <i className={`tone-${index + 1}`} />
+                  <span>{rule.title} is in the live vote</span>
+                  <time>{rule.created}</time>
+                </button>
+              ))}
+              <div>
+                <i className="tone-green" />
+                <span>{fmtInt(players)} guesses are in this round</span>
+                <time>live</time>
+              </div>
+              <div>
+                <i className="tone-yellow" />
+                <span>Prize pool is {fmtSol(prizeSol)} SOL</span>
+                <time>{fmtTurnId(round?.turnId ?? 0)}</time>
+              </div>
+            </div>
+            <section className="ide-card ide-last-round-card">
+              <div className="ide-section-label-row">
+                <span>Previous round</span>
+                <button onClick={() => go("result")} type="button">see result →</button>
+              </div>
+              <p>The latest settled draw, winning rule, and proof are ready in the round result.</p>
+              <button className="ide-btn ide-btn-ghost" onClick={() => go("result")} type="button">
+                Open result
+              </button>
+            </section>
+          </aside>
+        </div>
+
+        {/* The original mobile flow remains byte-for-byte in place and is only
+            hidden by the desktop layer at 1024px and above. */}
+        <div className="ide-deck ide-home-mobile">
         <div>
 
         {/* HERO */}

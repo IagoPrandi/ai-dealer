@@ -133,18 +133,23 @@ Comportamentos já definidos:
 
 ## Responsive public web extension
 
-The 402 x 868 device canvas remains the canonical art-direction reference and
-is rendered with simulated device chrome only in `/dev/gallery`. Public web
-routes never render the bezel, notch, clock, status bar, or home indicator.
+The 402 x 868 device canvas remains the canonical mobile art-direction reference and is
+rendered with simulated device chrome only in `/dev/gallery`. Public routes never render the
+bezel, notch, clock, status bar, or home indicator.
 
-- Below 768px, the DApp is full-bleed with bottom navigation and CSS safe-area
-  insets.
-- From 768px to 1199px, content is centered at a maximum width of 960px and
-  uses two columns where the content is comparative rather than transactional.
-- At 1200px and above, primary game navigation becomes a 224px side rail and
-  the dashboard is capped at 1280px.
-- Guess, proposal, claim, invite, and share flows remain a single column capped
-  at 720px on every breakpoint.
+- Below 768px, the DApp is full-bleed with bottom navigation and CSS safe-area insets.
+- From 768px through 1023px, the existing tablet/mobile flow remains centered and does not
+  receive desktop-only navigation or content regrouping.
+- At 1024px and above, use the 260px rail, 70px context bar, 1120px content measure, and
+  screen-specific dashboard grids in `desktop.md`.
+- Preserve the mobile document order with `.ide-deck { display: contents }` and hide new
+  desktop companions with `.ide-desktop-only` below 1024px. Do not use viewport-driven React
+  branches that remount flows or discard user state.
+- Guessing combines the picker and review summary only on desktop; mobile retains the
+  separate pick → review → confirmed sequence.
+- Rules use master/detail only on desktop; mobile retains the rule-detail sheet.
+- Share, wallet connection, guess confirmation, and draw result become centered dialogs on
+  desktop while retaining their mobile modal/sheet behavior.
 - Public archive, rule, player, leaderboard, and audit pages reuse the Tinta
   Neon color, type, square-surface, inset-ring, and solid-shadow tokens.
 - Every actionable target is at least 44px, focus remains visible, and reduced

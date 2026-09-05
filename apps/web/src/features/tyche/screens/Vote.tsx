@@ -1,6 +1,7 @@
 "use client";
 
 /** Rules: two-phase voting hub. Ported from app-vote.jsx, wired to live data. */
+import { useState } from "react";
 import { useTyche } from "../context";
 import { fmtSol, fmtTurnId } from "../data/format";
 import type { UiRule } from "../data/types";
@@ -99,7 +100,7 @@ function VoteGate() {
     </div>
   );
 }
-function RuleVoteRow({ rank, rule, votingOpen }: { rank: number; rule: UiRule; votingOpen: boolean }) {
+function RuleVoteRow({ onSelect, rank, rule, selected, votingOpen }: { onSelect: () => void; rank: number; rule: UiRule; selected: boolean; votingOpen: boolean }) {
   const { approvedIds, openDetail, played, voteApprove, voteBusyRuleId } = useTyche();
   const approved = approvedIds.includes(rule.ruleId);
   const isTop = rank <= 3;
@@ -107,8 +108,8 @@ function RuleVoteRow({ rank, rule, votingOpen }: { rank: number; rule: UiRule; v
   const feeLabel =
     rule.nextApproveFeeSol === 0 ? "Free" : `${fmtSol(rule.nextApproveFeeSol)} SOL`;
   return (
-    <div className="ide-rulerow ide-tap" style={{ boxShadow: isTop ? "inset 0 0 0 1.5px rgba(255,46,136,0.5)" : "var(--ring)" }}>
-      <div onClick={() => openDetail(rule.ruleId, { canAgainst: false, rank })} style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
+    <div className={`ide-rulerow ide-tap${selected ? " is-selected" : ""}`} style={{ boxShadow: isTop ? "inset 0 0 0 1.5px rgba(255,46,136,0.5)" : "var(--ring)" }}>
+      <div onClick={() => { onSelect(); openDetail(rule.ruleId, { canAgainst: false, rank }); }} style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
         <Medal pos={rank} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontFamily: "Oswald, sans-serif", fontWeight: 500, fontSize: 15, letterSpacing: "0.04em", textTransform: "uppercase", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rule.title}</div>
@@ -128,7 +129,7 @@ function RuleVoteRow({ rank, rule, votingOpen }: { rank: number; rule: UiRule; v
     </div>
   );
 }
-function FinalistRow({ rule, votingOpen }: { rule: UiRule; votingOpen: boolean }) {
+function FinalistRow({ onSelect, rule, selected, votingOpen }: { onSelect: () => void; rule: UiRule; selected: boolean; votingOpen: boolean }) {
   const { approvedIds, eliminatedIds, openDetail, played, voteApprove, voteBusyRuleId, voteEliminate } = useTyche();
   const approved = approvedIds.includes(rule.ruleId);
   const eliminated = eliminatedIds.includes(rule.ruleId);
@@ -142,7 +143,7 @@ function FinalistRow({ rule, votingOpen }: { rule: UiRule; votingOpen: boolean }
   const againstFeeLabel =
     rule.nextAgainstFeeSol === 0 ? "Free" : `${fmtSol(rule.nextAgainstFeeSol)} SOL`;
   return (
-    <div className="ide-card" style={{
+    <div className={`ide-card${selected ? " is-selected" : ""}`} style={{
       padding: "13px 15px",
       boxShadow: dead
         ? "var(--ring-red)"
@@ -152,7 +153,7 @@ function FinalistRow({ rule, votingOpen }: { rule: UiRule; votingOpen: boolean }
       marginRight: dead ? 0 : 5,
       opacity: dead ? 0.65 : 1,
     }}>
-      <div onClick={() => openDetail(rule.ruleId, { canAgainst: true })} className="ide-tap" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 11 }}>
+      <div onClick={() => { onSelect(); openDetail(rule.ruleId, { canAgainst: true }); }} className="ide-tap" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 11 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontWeight: 700, fontSize: 15.5, lineHeight: 1.2, textDecoration: dead ? "line-through" : "none", color: dead ? "var(--muted)" : "var(--text)" }}>{rule.title}</span>
@@ -195,6 +196,86 @@ function FinalistRow({ rule, votingOpen }: { rule: UiRule; votingOpen: boolean }
   );
 }
 
+function RuleDesktopDetail({
+  canAgainst,
+  rank,
+  rule,
+  votingOpen,
+}: {
+  canAgainst: boolean;
+  rank: number | null;
+  rule: UiRule | null;
+  votingOpen: boolean;
+}) {
+  const { go, played, voteApprove, voteBusyRuleId, voteEliminate } = useTyche();
+
+  if (!rule) {
+    return (
+      <aside className="ide-desktop-only ide-detail ide-rule-detail-empty">
+        Select a rule to inspect its interpretation and vote totals.
+      </aside>
+    );
+  }
+
+  const busy = voteBusyRuleId === rule.ruleId;
+  const total = rule.approve + rule.against;
+  const inFavor = total === 0 ? 50 : Math.round((rule.approve / total) * 100);
+
+  return (
+    <aside className="ide-desktop-only ide-detail ide-rule-desktop-detail">
+      <div className="ide-rule-detail-kicker">
+        {rank ? <Medal pos={rank} /> : null}
+        <span>{rule.finalist ? "Finalist rule" : "Rule in voting"}</span>
+      </div>
+      <h2 className="ide-plate">{rule.title}</h2>
+      <p>{rule.summary}</p>
+      <div className="ide-rule-detail-tally">
+        <VoteTally approve={rule.approve} against={rule.against} />
+        <span className="ide-num">{inFavor}% in favor</span>
+      </div>
+      <div className="ide-balance"><span style={{ width: `${inFavor}%` }} /></div>
+      <div className="ide-rule-detail-section">
+        <span>How it works</span>
+        <p>{rule.how}</p>
+      </div>
+      {rule.seed ? (
+        <div className="ide-rule-detail-section">
+          <span>Original prompt</span>
+          <p>“{rule.seed}”</p>
+        </div>
+      ) : null}
+      <div className="ide-rule-detail-meta">
+        <span>Created by</span>
+        <b className="ide-num">{rule.handle}</b>
+      </div>
+      {played ? (
+        <div className="ide-rule-detail-actions">
+          <button
+            className="ide-votebtn for"
+            disabled={busy || !votingOpen}
+            onClick={() => voteApprove(rule.ruleId)}
+            type="button"
+          >
+            <Ico.up style={{ color: "currentColor" }} /> In favor · {rule.nextApproveFeeSol === 0 ? "Free" : `${fmtSol(rule.nextApproveFeeSol)} SOL`}
+          </button>
+          {canAgainst ? (
+            <button
+              className="ide-votebtn against"
+              disabled={busy || !votingOpen}
+              onClick={() => voteEliminate(rule.ruleId)}
+              type="button"
+            >
+              <Ico.down style={{ color: "currentColor" }} /> Against · {rule.nextAgainstFeeSol === 0 ? "Free" : `${fmtSol(rule.nextAgainstFeeSol)} SOL`}
+            </button>
+          ) : null}
+        </div>
+      ) : (
+        <button className="ide-btn" onClick={() => go("play")} type="button">Play to vote</button>
+      )}
+    </aside>
+  );
+}
+
 export function VoteScreen() {
   const {
     actionError,
@@ -234,13 +315,22 @@ export function VoteScreen() {
     shortlistPending,
   });
   const gated = !played;
+  const [selectedRuleId, setSelectedRuleId] = useState<number | null>(null);
+  const visibleRules = tab === "abertas" ? all : finalists;
+  const selectedRule =
+    visibleRules.find((rule) => rule.ruleId === selectedRuleId) ??
+    visibleRules[0] ??
+    null;
+  const selectedRank = selectedRule
+    ? all.findIndex((rule) => rule.ruleId === selectedRule.ruleId) + 1
+    : null;
 
   return (
     <div className="ide-app ide-screen" style={{ height: "100%", position: "relative", overflow: "hidden" }}>
       <div className="ide-ambient" />
       <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", padding: "var(--ide-shell-content-top) 20px 96px" }}>
 
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 18 }}>
+        <div className="ide-screen-head" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 18 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
             <Dealer size={34} />
             <h1 className="ide-plate" style={{ fontSize: 22, margin: 0 }}>Rules</h1>
@@ -260,6 +350,8 @@ export function VoteScreen() {
           <button className={tab === "finalistas" ? "on" : ""} onClick={() => setTab("finalistas")} type="button">Finalists · {finalists.length}</button>
         </div>
 
+        <div className="ide-deck is-rules">
+          <div>
         {gated ? <VoteGate /> : null}
         {phase === "unavailable" ? (
           <div className="ide-notice" style={{ marginBottom: 18, borderTopColor: "rgba(255,59,47,0.28)" }}>
@@ -277,7 +369,7 @@ export function VoteScreen() {
             ) : (
               <div className="ide-rule-group">
                 <div className="ide-rule-stack">
-                  {all.map((r, i) => <RuleVoteRow key={r.id} rule={r} rank={i + 1} votingOpen />)}
+                  {all.map((r, i) => <RuleVoteRow key={r.id} onSelect={() => setSelectedRuleId(r.ruleId)} rule={r} rank={i + 1} selected={selectedRule?.ruleId === r.ruleId} votingOpen />)}
                 </div>
               </div>
             )}
@@ -311,12 +403,20 @@ export function VoteScreen() {
             ) : (
               <div className="ide-rule-group">
                 <div className="ide-rule-stack">
-                  {finalists.map((r) => <FinalistRow key={r.id} rule={r} votingOpen={finalistVotingOpen} />)}
+                  {finalists.map((r) => <FinalistRow key={r.id} onSelect={() => setSelectedRuleId(r.ruleId)} rule={r} selected={selectedRule?.ruleId === r.ruleId} votingOpen={finalistVotingOpen} />)}
                 </div>
               </div>
             )}
           </>
         )}
+          </div>
+          <RuleDesktopDetail
+            canAgainst={tab === "finalistas"}
+            rank={selectedRank && selectedRank > 0 ? selectedRank : null}
+            rule={selectedRule}
+            votingOpen={tab === "abertas" ? phase1Open : finalistVotingOpen}
+          />
+        </div>
       </div>
     </div>
   );

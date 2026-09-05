@@ -252,36 +252,37 @@ export function RuleDetail({
     padding: "14px 20px 28px", animation: "ide-rise .32s cubic-bezier(.2,.8,.3,1) both",
   };
   return (
-    <div onClick={onClose} className="ide-overlay is-sheet" style={{
+    <div onClick={onClose} className="ide-overlay is-sheet ide-rule-detail-overlay" style={{
       position: "absolute", inset: 0, zIndex: 60, display: "flex",
       background: "rgba(6,4,10,0.62)", backdropFilter: "blur(6px)",
       animation: "ide-rise .2s ease both",
     }}>
-      <div onClick={(e) => e.stopPropagation()} className="ide-scroll ide-overlay-card" style={cardStyle}>
-        <div style={{ width: 40, height: 5, borderRadius: 3, background: "var(--line-2)", margin: "0 auto 18px" }} />
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+      <div onClick={(e) => e.stopPropagation()} className="ide-scroll ide-overlay-card ide-rule-detail-dialog" style={cardStyle}>
+        <div className="ide-rule-detail-handle" style={{ width: 40, height: 5, borderRadius: 3, background: "var(--line-2)", margin: "0 auto 18px" }} />
+        <div className="ide-rule-detail-dialog-head" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span className="ide-desktop-only ide-rule-detail-dialog-label">Rule detail</span>
             {rank && rank <= 3 ? <Medal pos={rank} /> : null}
             {rule.finalist ? <span className="ide-pill" style={{ color: "var(--purple-soft)", borderColor: "rgba(255,122,184,0.3)" }}><Ico.shield style={{ color: "var(--purple-soft)", width: 13, height: 13 }} /> finalist</span> : null}
             {rule.removed ? <span className="ide-pill" style={{ color: "var(--red)", borderColor: "rgba(255,59,47,0.3)" }}><Ico.close style={{ color: "var(--red)", width: 13, height: 13 }} /> Removed</span> : null}
             {st === "eliminada" ? <span className="ide-pill" style={{ color: "var(--red)", borderColor: "rgba(255,59,47,0.3)" }}>eliminated</span> : null}
             {st === "risco" ? <span className="ide-pill" style={{ color: "var(--yellow)", borderColor: "rgba(255,210,63,0.3)" }}><Ico.flame style={{ color: "var(--yellow)", width: 12, height: 12 }} /> at risk</span> : null}
           </div>
-          <button onClick={onClose} style={{ background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--muted)", borderRadius: 12, padding: 7, display: "grid", placeItems: "center", cursor: "pointer" }}>
+          <button className="ide-rule-detail-close" aria-label="Close rule detail" onClick={onClose} style={{ background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--muted)", borderRadius: 12, padding: 7, display: "grid", placeItems: "center", cursor: "pointer" }}>
             <Ico.close />
           </button>
         </div>
-        <h2 style={{ margin: "0 0 6px", fontSize: 26, fontWeight: 800, letterSpacing: "-0.02em" }}>{rule.title}</h2>
-        <p style={{ margin: "0 0 16px", color: "var(--muted)", fontSize: 16, lineHeight: 1.5 }}>{rule.summary}</p>
+        <h2 className="ide-rule-detail-dialog-title" style={{ margin: "0 0 6px", fontSize: 26, fontWeight: 800, letterSpacing: "-0.02em" }}>{rule.title}</h2>
+        <p className="ide-rule-detail-dialog-summary" style={{ margin: "0 0 16px", color: "var(--muted)", fontSize: 16, lineHeight: 1.5 }}>{rule.summary}</p>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 16, padding: "14px 0", borderTop: "1px solid var(--line)", borderBottom: "1px solid var(--line)", marginBottom: 18 }}>
+        <div className="ide-rule-detail-dialog-tally" style={{ display: "flex", alignItems: "center", gap: 16, padding: "14px 0", borderTop: "1px solid var(--line)", borderBottom: "1px solid var(--line)", marginBottom: 18 }}>
           <VoteTally approve={rule.approve} against={rule.against} />
           {rule.finalist ? <span style={{ marginLeft: "auto", fontSize: 12, color: st === "eliminada" ? "var(--red)" : "var(--dim)" }}>{st === "eliminada" ? "down-votes overtook" : "balance " + (balance >= 0 ? "+" : "") + balance}</span> : null}
         </div>
 
         {vote?.played ? (
           <>
-            <div style={{ display: "flex", gap: 10, marginBottom: vote.canAgainst ? 22 : 8 }}>
+            <div className="ide-rule-detail-dialog-actions" style={{ display: "flex", gap: 10, marginBottom: vote.canAgainst ? 22 : 8 }}>
               <button onClick={() => vote.onApprove()} disabled={vote.busy} className={"ide-votebtn for" + (approved ? " on" : "")} style={{ flex: 1, justifyContent: "center", padding: "13px", fontSize: 14.5, opacity: vote.busy ? 0.6 : 1 }}>
                 {approved ? <><Ico.check style={{ color: "currentColor" }} /> in favor</> : <><Ico.up style={{ color: "currentColor" }} /> vote in favor</>}
               </button>
@@ -289,7 +290,7 @@ export function RuleDetail({
                 {eliminated ? <><Ico.check style={{ color: "currentColor" }} /> against</> : <><Ico.down style={{ color: "currentColor" }} /> vote against</>}
               </button>
             </div>
-            {!vote.canAgainst ? <p style={{ margin: "0 0 20px", fontSize: 12, color: "var(--dim)", display: "flex", alignItems: "center", gap: 6 }}><Ico.info style={{ color: "var(--dim)" }} /> Voting against is only allowed in the finalist phase.</p> : null}
+            {!vote.canAgainst ? <p className="ide-rule-detail-dialog-hint" style={{ margin: "0 0 20px", fontSize: 12, color: "var(--dim)", display: "flex", alignItems: "center", gap: 6 }}><Ico.info style={{ color: "var(--dim)" }} /> Voting against is only allowed in the finalist phase.</p> : null}
           </>
         ) : null}
 
@@ -329,19 +330,19 @@ export function RuleDetail({
         ) : null}
 
         <SectionLabel>How it works</SectionLabel>
-        <p style={{ margin: "8px 0 22px", fontSize: 16, lineHeight: 1.6, color: "var(--text)" }}>{rule.how}</p>
+        <p className="ide-rule-detail-dialog-how" style={{ margin: "8px 0 22px", fontSize: 16, lineHeight: 1.6, color: "var(--text)" }}>{rule.how}</p>
 
         {rule.seed ? (
           <>
             <SectionLabel>Prompt seed</SectionLabel>
-            <div style={{ margin: "10px 0 24px", fontSize: 16, lineHeight: 1.6, color: "var(--purple-soft)", fontStyle: "italic" }}>
+            <div className="ide-rule-detail-dialog-seed" style={{ margin: "10px 0 24px", fontSize: 16, lineHeight: 1.6, color: "var(--purple-soft)", fontStyle: "italic" }}>
               “{rule.seed}”
             </div>
           </>
         ) : null}
 
         <SectionLabel>Details</SectionLabel>
-        <div style={{ display: "grid", gap: 10, margin: "10px 0 22px" }}>
+        <div className="ide-rule-detail-dialog-meta" style={{ display: "grid", gap: 10, margin: "10px 0 22px" }}>
           <div style={{ alignItems: "baseline", display: "flex", gap: 8, minWidth: 0 }}>
             <span style={{ color: "var(--dim)", flexShrink: 0, fontSize: 11.5, letterSpacing: "0.03em" }}>Created by</span>
             <span className="ide-num" style={{ color: "var(--text)", fontSize: 13, fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rule.handle}</span>
@@ -379,7 +380,7 @@ export function Confetti() {
  */
 export function ScreenHead({ onBack, right, title }: { onBack?: () => void; right?: React.ReactNode; title: string }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 16 }}>
+    <div className="ide-screen-head" style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 16 }}>
       {onBack ? (
         <button aria-label="Back" className="ide-iconbtn" onClick={onBack} type="button">
           <Ico.back style={{ width: 18, height: 18 }} />

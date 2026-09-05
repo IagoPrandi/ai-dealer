@@ -1,0 +1,345 @@
+/* ============================================================
+   TYCHE — CAMADA DESKTOP (redesenho, "Tyche Desktop.dc.html")
+   Cole este arquivo depois de tyche.css (ou substitua o bloco
+   "DESKTOP LAYER" existente, linhas ~1378-1580 de tyche.css).
+
+   Regras do sistema 3a valem aqui também: cantos retos, sombras
+   sólidas laranja/ciano, contornos por `inset box-shadow`,
+   Bevan/Oswald/DM Mono/Archivo nos papéis fixos.
+
+   Geometria do desktop (medida no arquivo de design):
+     rail        260px   fundo #0C0512, hairline à direita
+     top bar      70px   hairline embaixo, padding-inline 32px
+     conteúdo    1120px  max-width, padding 26px 32px 30px
+     colunas     1fr/400px (home, result) · 1fr/440px (rules)
+                 1fr/360px (play) · 400px/1fr (account)
+   ============================================================ */
+
+@media (min-width: 1024px) {
+
+  /* ---------- SHELL ---------- */
+  .ide-web-shell {
+    --ide-rail-w: 260px;
+    --ide-measure: 1120px;
+    max-width: none;
+    box-shadow: none;
+  }
+
+  .ide-web-shell.ide-has-nav .ide-screen {
+    width: calc(100% - var(--ide-rail-w));
+    margin-left: var(--ide-rail-w);
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ---------- RAIL ---------- */
+  .ide-web-shell .ide-nav {
+    inset: 0 auto 0 0;
+    width: var(--ide-rail-w);
+    height: 100%;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: stretch;
+    gap: 4px;
+    padding: 26px 18px calc(20px + env(safe-area-inset-bottom, 0px));
+    background: var(--bg-2);
+    box-shadow: inset -1px 0 0 rgba(241,232,214,0.18), 36px 0 80px -60px rgba(255,46,136,0.9);
+  }
+
+  .ide-web-shell .ide-nav-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 10px;
+    margin-bottom: 26px;
+  }
+  .ide-web-shell .ide-nav-brand .ide-plate { font-size: 22px; }
+  /* "devnet" à direita da marca */
+  .ide-web-shell .ide-nav-brand .ide-nav-env {
+    margin-left: auto;
+    font-family: var(--num-font, 'DM Mono'), ui-monospace, monospace;
+    font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  .ide-web-shell .ide-nav-btn {
+    min-width: 0;
+    width: 100%;
+    min-height: 48px;
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 12px;
+    padding: 12px;
+    font-family: var(--font-label);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--dim);
+    text-align: left;
+  }
+  .ide-web-shell .ide-nav-btn:hover { color: var(--text); background: rgba(241,232,214,0.05); }
+  .ide-web-shell .ide-nav-btn.on {
+    color: var(--text);
+    background: rgba(255,46,136,0.10);
+    box-shadow: inset 3px 0 0 var(--purple);
+  }
+  /* contador opcional ao fim do item (ex.: Rules · 12) */
+  .ide-web-shell .ide-nav-btn > .ide-nav-count {
+    margin-left: auto;
+    font-family: var(--num-font, 'DM Mono'), ui-monospace, monospace;
+    font-size: 11px; letter-spacing: 0.08em; color: var(--yellow);
+  }
+
+  /* O FAB vira o botão primário do rail */
+  .ide-web-shell .ide-nav-fabslot { display: contents; }
+  .ide-web-shell .ide-nav-fab {
+    width: auto; height: auto;
+    margin: 20px 3px 0 0;
+    padding: 12px;
+    border-radius: var(--radius-btn-sm);
+    display: block;
+    font-family: var(--font-display);
+    font-size: 15px; letter-spacing: 0.06em; text-transform: uppercase;
+    box-shadow: var(--solid-4);
+  }
+  .ide-web-shell .ide-nav-fab:hover { transform: translate(1px,1px); box-shadow: var(--solid-3); }
+
+  /* O rail é um só componente: marca + devnet, quatro itens (Rules com
+     contador), botão "Create a rule" e o bloco de estado da rodada. Só o item
+     ativo muda, mais a sub-lista opcional da tela (drafts, sub-nav de conta).
+     Telas de diálogo puro (share, connect, sorteio) podem usar o rail reduzido
+     com a marca apenas. */
+
+  /* Bloco de estado da rodada, fixo no pé do rail */
+  .ide-rail-state {
+    margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .ide-rail-round {
+    padding: 14px 13px;
+    background: var(--surface);
+    box-shadow: inset 0 0 0 1.5px rgba(241,232,214,0.14);
+  }
+  .ide-rail-round-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .ide-rail-round-head .ide-num { margin-left: auto; font-size: 12px; color: var(--yellow); }
+  .ide-rail-round-label {
+    font-family: var(--num-font, 'DM Mono'), ui-monospace, monospace;
+    font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim);
+  }
+  .ide-rail-round-value {
+    margin-top: 3px;
+    font-family: var(--font-display); font-size: 22px; color: var(--text);
+  }
+  .ide-rail-round-value span { font-family: var(--num-font, 'DM Mono'), ui-monospace, monospace; font-size: 11px; color: var(--cyan); }
+  .ide-rail-round-meta {
+    display: flex; gap: 14px; margin-top: 10px;
+    font-family: var(--num-font, 'DM Mono'), ui-monospace, monospace;
+    font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim);
+  }
+  .ide-rail-round-meta b { font-weight: 400; color: var(--muted); }
+  .ide-rail-wallet {
+    display: flex; align-items: center; gap: 10px;
+    padding: 11px 12px; cursor: pointer;
+    background: var(--surface-2);
+    box-shadow: inset 0 0 0 1.5px rgba(53,240,224,0.35);
+    font-family: var(--num-font, 'DM Mono'), ui-monospace, monospace;
+    font-size: 11.5px; color: var(--text);
+  }
+  .ide-rail-wallet:hover { box-shadow: inset 0 0 0 1.5px rgba(53,240,224,0.8); }
+  .ide-rail-wallet i { width: 8px; height: 8px; background: var(--green); }
+  .ide-rail-wallet b { margin-left: auto; font-weight: 400; color: var(--cyan); }
+
+  /* ---------- BARRA DE CONTEXTO ---------- */
+  .ide-topbar {
+    height: 70px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 0 32px;
+    box-shadow: inset 0 -1px 0 rgba(241,232,214,0.14);
+  }
+  .ide-topbar > .ide-plate { font-size: 21px; }
+  .ide-topbar .ide-num { font-size: 12px; letter-spacing: 0.1em; color: var(--cyan); }
+  .ide-topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+  /* abas dentro da barra (Rules: in voting / finalists) */
+  .ide-topbar .ide-tabs { align-self: stretch; gap: 22px; box-shadow: none; }
+  .ide-topbar .ide-tabs button { padding: 0 2px; }
+
+  /* ---------- CONTEÚDO ---------- */
+  .ide-web-shell .ide-scroll {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    padding: 26px 32px 30px !important;
+    margin-inline: 0;
+  }
+  .ide-content { max-width: var(--ide-measure); }
+
+  /* Duas colunas: o mobile continua empilhando (ver .ide-deck em tyche.css) */
+  .ide-web-shell .ide-deck {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 400px;
+    align-items: start;
+    gap: 30px;
+  }
+  .ide-web-shell .ide-deck.is-rules { grid-template-columns: minmax(0, 1fr) 440px; }
+  .ide-web-shell .ide-deck.is-play  { grid-template-columns: minmax(0, 1fr) 360px; }
+  .ide-web-shell .ide-deck.is-create { grid-template-columns: minmax(0, 1fr) 420px; gap: 0; }
+  .ide-web-shell .ide-deck.is-account { grid-template-columns: 400px minmax(0, 1fr); }
+  .ide-web-shell .ide-deck > * { display: block; min-width: 0; }
+  .ide-deck-full { grid-column: 1 / -1; }
+
+  /* ---------- FAIXA DA RODADA (home) ---------- */
+  .ide-roundbar {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 36px;
+    padding: 22px 26px;
+    margin-right: 6px;
+    overflow: hidden;
+    background: var(--surface);
+    box-shadow: 6px 6px 0 var(--orange), 0 0 70px -18px rgba(255,46,136,0.6);
+  }
+  .ide-roundbar::before {
+    content: "";
+    position: absolute; inset: -160px -60px auto auto;
+    width: 620px; height: 620px; pointer-events: none; opacity: 0.8;
+    background: repeating-conic-gradient(from 0deg at 50% 50%, rgba(255,46,136,0.4) 0deg 5deg, transparent 5deg 12deg);
+    mask-image: radial-gradient(closest-side, #000 25%, transparent 72%);
+    -webkit-mask-image: radial-gradient(closest-side, #000 25%, transparent 72%);
+  }
+  .ide-roundbar > * { position: relative; }
+  .ide-roundbar .ide-prize-int { font-size: 84px; }
+  .ide-roundbar .ide-prize-dec { font-size: 42px; margin-top: 16px; }
+  .ide-roundbar .ide-prize-unit { font-size: 14px; margin-top: 26px; }
+  .ide-roundbar-timer {
+    display: flex; flex-direction: column; gap: 10px;
+    padding-left: 34px;
+    box-shadow: inset 1px 0 0 rgba(241,232,214,0.16);
+  }
+  .ide-roundbar-timer .ide-live { align-self: flex-start; }
+  .ide-roundbar-clock { font-family: var(--font-display); font-size: 36px; line-height: 1; color: var(--yellow); }
+  .ide-roundbar-caption {
+    font-family: var(--num-font, 'DM Mono'), ui-monospace, monospace;
+    font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim);
+  }
+  .ide-roundbar-cta { margin-left: auto; display: flex; flex-direction: column; gap: 10px; width: 260px; }
+  .ide-roundbar-cta .ide-btn { width: 100%; padding: 15px; font-size: 18px; white-space: nowrap; box-shadow: var(--solid-5); }
+  .ide-roundbar-cta .ide-btn-ghost { width: 100%; padding: 12px; font-size: 12.5px; }
+
+  /* ---------- MÉTRICAS EM CRUZ ---------- */
+  .ide-metrics.is-three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ide-metrics > .ide-metric { padding: 14px 16px; }
+  .ide-metric-value { font-family: var(--font-display); font-size: 24px; color: var(--text); }
+  .ide-metric-value.is-yellow { color: var(--yellow); }
+  .ide-metric-value.is-green  { color: var(--green); }
+  .ide-metric-label {
+    margin-top: 4px;
+    font-family: var(--num-font, 'DM Mono'), ui-monospace, monospace;
+    font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim);
+  }
+
+  /* ---------- GRADE DE NÚMEROS ---------- */
+  .ide-web-shell .ide-numgrid { grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 7px; }
+  .ide-web-shell .ide-numcell { font-size: 14px; }
+  .ide-web-shell .ide-numcell:hover:not(.sel) {
+    color: var(--yellow);
+    box-shadow: inset 0 0 0 1.5px rgba(255,210,63,0.7);
+  }
+
+  /* ---------- LISTA MESTRE-DETALHE ---------- */
+  .ide-web-shell .ide-rulerow:hover { background: rgba(241,232,214,0.05); }
+  .ide-rulerow.is-selected { background: var(--surface); box-shadow: inset 3px 0 0 var(--yellow); }
+  .ide-detail {
+    padding: 22px;
+    margin-right: 5px;
+    background: var(--surface-2);
+    box-shadow: var(--ring), var(--solid-cyan-5);
+  }
+
+  /* ---------- TABELA DENSA ---------- */
+  .ide-table { display: flex; flex-direction: column; }
+  .ide-table-head,
+  .ide-table-row {
+    display: grid;
+    gap: 14px;
+    align-items: center;
+    grid-template-columns: var(--ide-cols, minmax(0,1fr) 120px 140px 110px);
+  }
+  .ide-table-head {
+    padding: 10px 8px;
+    border-bottom: 1px solid var(--line-2);
+    font-family: var(--num-font, 'DM Mono'), ui-monospace, monospace;
+    font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim);
+  }
+  .ide-table-row {
+    padding: 13px 8px;
+    border-bottom: 1px solid var(--line);
+    cursor: pointer;
+  }
+  .ide-table-row:last-child { border-bottom: none; }
+  .ide-table-row:hover { background: rgba(241,232,214,0.04); }
+  .ide-table-row .is-title {
+    font-family: var(--font-label); font-size: 14.5px; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .ide-table-row .is-num,
+  .ide-table-head .is-num { text-align: right; }
+  .ide-table-row .is-state {
+    justify-self: end;
+    padding: 4px 9px;
+    font-family: var(--font-label); font-weight: 600; font-size: 10px;
+    letter-spacing: 0.14em; text-transform: uppercase;
+  }
+  .ide-table-row .is-state.is-ok      { color: var(--on-accent); background: var(--green); }
+  .ide-table-row .is-state.is-pending { color: var(--on-accent); background: var(--yellow); }
+  .ide-table-row .is-state.is-done    { color: var(--muted); background: transparent; }
+
+  /* ---------- CHAT DA IA COM PAINEL ---------- */
+  .ide-create-chat { display: flex; flex-direction: column; padding: 26px 30px 22px; overflow: hidden; }
+  .ide-create-chat > * { max-width: 720px; width: 100%; margin-inline: auto; }
+  .ide-create-panel {
+    padding: 26px 28px;
+    display: flex; flex-direction: column; gap: 16px;
+    background: var(--surface-2);
+    box-shadow: inset 1px 0 0 rgba(241,232,214,0.16);
+  }
+  .ide-create-panel .ide-btn { width: calc(100% - 3px); }
+}
+
+/* Diálogos centrados já a partir de 768px (mantido de tyche.css):
+   .ide-overlay, .ide-overlay.is-sheet e .ide-rewards-sheet-backdrop
+   passam a align-items/justify-content: center. Larguras do redesenho: */
+@media (min-width: 1024px) {
+  .ide-web-shell .ide-overlay-card { max-width: 620px; }          /* aposta confirmada */
+  .ide-web-shell .ide-overlay-card.is-draw { max-width: 760px; }  /* resultado do sorteio */
+  .ide-web-shell .ide-overlay-card.is-share { max-width: 680px; } /* share */
+  .ide-web-shell .ide-overlay-card.is-connect { max-width: 540px; } /* connect wallet */
+  .ide-web-shell .ide-rewards-sheet { max-width: 620px; }
+}
+
+/* ============================================================
+   BORDAS — política do redesenho
+   Todo card tem contorno: anel `inset 0 0 0 1.5px rgba(241,232,214,.16)`,
+   somado à sombra sólida quando ela existir (o anel vem primeiro na lista).
+   EXCEÇÃO: células internas de grades de hairline (`gap: 1px` sobre
+   `background: var(--line)`) não levam anel — o padding horizontal delas é
+   0–2px e o anel cairia sobre o texto. A separação ali é o próprio gap.
+   ============================================================ */
+@media (min-width: 1024px) {
+  .ide-card,
+  .ide-detail,
+  .ide-roundbar,
+  .ide-panel {
+    box-shadow: var(--ring);
+  }
+  .ide-card.has-solid      { box-shadow: var(--ring), var(--solid-5); }
+  .ide-card.has-solid-cyan { box-shadow: var(--ring), var(--solid-cyan-5); }
+  .ide-metrics > .ide-metric { box-shadow: none; }
+}

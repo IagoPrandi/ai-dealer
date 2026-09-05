@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 test("claims panel prompts wallet connection and links to next round and history", async ({
   page,
 }) => {
-  await page.goto("/play/results");
+  await page.goto("/play/claims");
 
   // Without a connected wallet the panel asks the player to connect first.
   await expect(

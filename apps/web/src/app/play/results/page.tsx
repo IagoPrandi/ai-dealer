@@ -1,5 +1,5 @@
-import { permanentRedirect } from "next/navigation";
+import { PlayRoute } from "../../../features/tyche/PlayRoute";
 
 export default function PlayResultsPage() {
-  permanentRedirect("/play/claims");
+  return <PlayRoute screen="result" />;
 }

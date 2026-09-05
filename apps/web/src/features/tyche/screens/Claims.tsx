@@ -76,7 +76,7 @@ function ClaimRow({
         ? "Retry claim"
         : "Claim to wallet";
   return (
-    <div className="ide-card" style={{ padding: "14px 15px" }}>
+    <div className="ide-card ide-claim-row" style={{ padding: "14px 15px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
         <span style={{ width: 36, height: 36, borderRadius: 12, background: "var(--surface-2)", color: record.kind === "winner_payout" ? "var(--gold)" : "var(--green)", display: "grid", placeItems: "center", flexShrink: 0 }}>
           {record.kind === "winner_payout" ? <Ico.trophy style={{ color: "currentColor" }} /> : <Ico.gift style={{ color: "currentColor" }} />}
@@ -184,12 +184,12 @@ export function ClaimsScreen() {
       <div className="ide-scroll" style={{ position: "relative", zIndex: 1, height: "100%", overflowY: "auto", overflowX: "hidden", padding: "var(--ide-shell-content-top) 18px 96px" }}>
         <ScreenHead onBack={() => go("home")} title="Claims" />
 
-        <div className="ide-card" style={{ padding: 18, marginBottom: 14, borderColor: "var(--line-2)", background: "linear-gradient(150deg, var(--surface-2), var(--surface))" }}>
+        <div className="ide-card ide-claims-summary" style={{ padding: 18, marginBottom: 14, borderColor: "var(--line-2)", background: "linear-gradient(150deg, var(--surface-2), var(--surface))" }}>
           <SectionLabel>Available to claim</SectionLabel>
           <div className="ide-num" style={{ fontSize: 36, fontWeight: 800, marginTop: 6 }}>{fmtClaimSol(lamportsToSol(actionableLamports))} <span style={{ color: "var(--purple-soft)", fontSize: 16 }}>SOL</span></div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 9, marginBottom: 14 }}>
+        <div className="ide-claims-metrics" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 9, marginBottom: 14 }}>
           <div className="ide-card" style={{ padding: 12 }}>
             <div className="ide-num" style={{ fontSize: 22, fontWeight: 800 }}>{claimableCount}</div>
             <div style={{ color: "var(--dim)", fontSize: 12 }}>claimable</div>
@@ -234,7 +234,7 @@ export function ClaimsScreen() {
         ) : null}
 
         {!loading && !error && records.length > 0 ? (
-          <div style={{ display: "grid", gap: 10 }}>
+          <div className="ide-claims-list" style={{ display: "grid", gap: 10 }}>
             {records.map((record) => (
               <ClaimRow
                 key={record.claimId}

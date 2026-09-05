@@ -37,7 +37,13 @@ import {
   type NavParams,
   type Screen,
 } from "./context";
-import { lamportsToSol } from "./data/format";
+import {
+  fmtInt,
+  fmtSol,
+  fmtTurnId,
+  lamportsToSol,
+  truncateAddress,
+} from "./data/format";
 import {
   usePlayerGuess,
   useActiveTurn,
@@ -60,6 +66,8 @@ import {
   Ico,
   RuleDetail,
   type RuleDetailVote,
+  useCountdownTo,
+  WalletButton,
 } from "./shared";
 import {
   canVoteForRule,
@@ -81,7 +89,11 @@ import { ResultScreen } from "./screens/Result";
 import { ShareScreen } from "./screens/Share";
 import { ConnectOverlay } from "./screens/Connect";
 import { DrawResultPopup } from "./screens/DrawResult";
-import { getPlayScreenPath, getScreenForPlayPath } from "./navigation";
+import {
+  getPlayResultPath,
+  getPlayScreenPath,
+  getScreenForPlayPath,
+} from "./navigation";
 
 function PhoneChrome() {
   return (
@@ -150,6 +162,146 @@ function useStandaloneDisplayMode() {
   }, []);
 
   return standalone;
+}
+
+const DESKTOP_SCREEN_TITLES: Record<Screen, string> = {
+  claims: "Claims",
+  create: "Create with AI",
+  guesses: "My guesses",
+  home: "The round",
+  invite: "Invite friends",
+  myrules: "My rules",
+  play: "Make a guess",
+  profile: "Account",
+  result: "Round result",
+  rewards: "Rewards",
+  share: "Share",
+  vote: "Rules",
+};
+
+function DesktopRail({
+  connected,
+  endSeconds,
+  go,
+  onConnect,
+  players,
+  prizeSol,
+  rulesCount,
+  screen,
+  turnId,
+  walletAddress,
+}: {
+  connected: boolean;
+  endSeconds: number | null;
+  go: TycheContextValue["go"];
+  onConnect: () => void;
+  players: number;
+  prizeSol: number;
+  rulesCount: number;
+  screen: Screen;
+  turnId: number;
+  walletAddress: string | undefined;
+}) {
+  const [hours, minutes, seconds] = useCountdownTo(endSeconds);
+
+  return (
+    <aside className="ide-desktop-rail" aria-label="Primary navigation">
+      <div className="ide-nav-brand">
+        <Dealer size={30} />
+        <span className="ide-plate">{BRAND_NAME}</span>
+        <span className="ide-nav-env">devnet</span>
+      </div>
+
+      <nav className="ide-desktop-nav">
+        <button
+          className={`ide-nav-btn${screen === "home" ? " on" : ""}`}
+          onClick={() => go("home")}
+          type="button"
+        >
+          <Ico.home style={{ color: "currentColor" }} /> Round
+        </button>
+        <button
+          className={`ide-nav-btn${screen === "vote" ? " on" : ""}`}
+          onClick={() => go("vote")}
+          type="button"
+        >
+          <Ico.vote style={{ color: "currentColor" }} /> Rules
+          <span className="ide-nav-count">{rulesCount}</span>
+        </button>
+        <button
+          className={`ide-nav-btn${screen === "rewards" ? " on" : ""}`}
+          onClick={() => go("rewards")}
+          type="button"
+        >
+          <Ico.coin style={{ color: "currentColor" }} /> Rewards
+        </button>
+        <button
+          className={`ide-nav-btn${screen === "profile" ? " on" : ""}`}
+          onClick={() => go("profile")}
+          type="button"
+        >
+          <Ico.user style={{ color: "currentColor" }} /> Account
+        </button>
+      </nav>
+
+      <button
+        className="ide-nav-fab ide-desktop-create"
+        onClick={() => go("create", { newConversation: true })}
+        type="button"
+      >
+        Create a rule
+      </button>
+
+      <div className="ide-rail-state">
+        <section className="ide-rail-round" aria-label="Live round status">
+          <div className="ide-rail-round-head">
+            <span className="ide-live">
+              <i className="ide-live-dot" />
+              <span>Live</span>
+            </span>
+            <span className="ide-num">
+              {hours}:{minutes}:{seconds}
+            </span>
+          </div>
+          <div className="ide-rail-round-label">
+            Round {fmtTurnId(turnId)} · prize
+          </div>
+          <div className="ide-rail-round-value">
+            {fmtSol(prizeSol)} <span>SOL</span>
+          </div>
+          <div className="ide-rail-round-meta">
+            <span>
+              <b>{fmtInt(players)}</b> playing
+            </span>
+            <span>
+              <b>{rulesCount}</b> rules
+            </span>
+          </div>
+        </section>
+        <button
+          className="ide-rail-wallet"
+          onClick={() => (connected ? go("profile") : onConnect())}
+          type="button"
+        >
+          <i />
+          {walletAddress ? truncateAddress(walletAddress) : "Connect wallet"}
+          <b>{connected ? "Connected" : "Connect"}</b>
+        </button>
+      </div>
+    </aside>
+  );
+}
+
+function DesktopTopbar({ screen, turnId }: { screen: Screen; turnId: number }) {
+  return (
+    <header className="ide-desktop-topbar">
+      <span className="ide-plate">{DESKTOP_SCREEN_TITLES[screen]}</span>
+      <span className="ide-num">{fmtTurnId(turnId)}</span>
+      <div className="ide-topbar-actions">
+        <WalletButton />
+      </div>
+    </header>
+  );
 }
 
 function repeatedActionFeeSol(
@@ -267,7 +419,7 @@ export function TycheApp({
           Number.isInteger(requestedResultTurnId) &&
           requestedResultTurnId > 0
         ) {
-          const resultPath = `/rounds/${requestedResultTurnId}`;
+          const resultPath = getPlayResultPath(requestedResultTurnId);
           if (pathname !== resultPath) {
             router.push(resultPath);
             return;
@@ -702,10 +854,27 @@ export function TycheApp({
     <TycheContext.Provider value={value}>
       <main className={`ide-stage${standalone ? " ide-standalone" : ""}${devicePreview ? " ide-device-stage" : ""}`}>
         <div
-          className={`${devicePreview ? "ide-phone-shell ide-device-preview" : "ide-web-shell"} ide-app ide-screen-${screen}${standalone ? " ide-standalone" : ""}${showNav ? " ide-has-nav" : ""}`}
+          className={`${devicePreview ? "ide-phone-shell ide-device-preview" : "ide-web-shell"} ide-app ide-screen-${screen}${standalone ? " ide-standalone" : ""}${showNav ? " ide-has-nav" : ""}${devicePreview ? "" : " ide-has-desktop-rail"}`}
         >
           {devicePreview ? <PhoneChrome /> : null}
           <div className="ide-root">
+            {!devicePreview ? (
+              <>
+                <DesktopRail
+                  connected={connected}
+                  endSeconds={value.endSeconds}
+                  go={go}
+                  onConnect={requestConnect}
+                  players={value.players}
+                  prizeSol={value.prizeSol}
+                  rulesCount={rules.rules.length}
+                  screen={screen}
+                  turnId={turnId}
+                  walletAddress={walletAddress}
+                />
+                <DesktopTopbar screen={screen} turnId={turnId} />
+              </>
+            ) : null}
             {screen === "home" ? <HomeScreen /> : null}
             {screen === "guesses" ? <GuessesScreen /> : null}
             {screen === "play" ? <PlayScreen /> : null}

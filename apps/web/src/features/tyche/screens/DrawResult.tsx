@@ -68,7 +68,7 @@ export function DrawResultPopup() {
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="ide-scroll ide-overlay-card"
+        className="ide-scroll ide-overlay-card is-draw"
         style={{
           width: "100%", maxHeight: "90%", overflowY: "auto", WebkitOverflowScrolling: "touch", overscrollBehavior: "contain",
           background: "var(--surface)", border: "none", borderRadius: 0,

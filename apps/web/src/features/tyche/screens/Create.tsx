@@ -1838,7 +1838,7 @@ function CreateChat({
     >
       <div className="ide-ambient" />
       <div
-        className="ide-chat-bar"
+        className="ide-chat-bar ide-create-mobile-head"
         style={{
           position: "relative",
           zIndex: 2,
@@ -2157,7 +2157,7 @@ function CreateChat({
               <button
                 onClick={submit}
                 disabled={busy}
-                className="ide-btn"
+                className="ide-btn ide-create-mobile-submit"
                 style={{
                   padding: 15,
                   fontSize: 15.5,
@@ -2253,9 +2253,53 @@ function CreateChat({
         </div>
       </div>
 
+      <aside className="ide-desktop-only ide-create-panel">
+        <div className="ide-section-label-row">
+          <span>My interpretation</span>
+          <i />
+        </div>
+        {rule ? (
+          <>
+            <h2 className="ide-plate">{rule.title}</h2>
+            <p>{rule.officialInterpretation || rule.sanitizedText}</p>
+            <div className="ide-rule-detail-meta">
+              <span>Tokens</span>
+              <b className="ide-num">{rule.tokenCount} / 80</b>
+            </div>
+          </>
+        ) : interpretation && !interpretation.needsClarification ? (
+          <>
+            <h2 className="ide-plate">{interpretation.title}</h2>
+            <p>{interpretation.officialInterpretation}</p>
+          </>
+        ) : (
+          <div className="ide-create-panel-empty">
+            Describe the rule in the chat. The checked interpretation appears here before submission.
+          </div>
+        )}
+
+        <div className="ide-create-panel-footer">
+          {rule && valid && !typing && reveal.settled && !submitted ? (
+            ruleCreationClosed ? (
+              <button className="ide-btn" onClick={() => go("home")} type="button">Back to the round</button>
+            ) : played ? (
+              <button className="ide-btn" disabled={busy} onClick={submit} type="button">
+                {busy ? "Submitting…" : `Submit to the round · ${fees.ruleNext === 0 ? "Free" : `${fmtSol(fees.ruleNext)} SOL`}`}
+              </button>
+            ) : (
+              <button className="ide-btn" onClick={() => go("play")} type="button">Play to submit</button>
+            )
+          ) : submitted ? (
+            <button className="ide-btn ide-btn-ghost" onClick={() => go("vote")} type="button">See in voting</button>
+          ) : (
+            <span className="ide-num">Preflight is free · submission {fees.ruleNext === 0 ? "free" : `${fmtSol(fees.ruleNext)} SOL`}</span>
+          )}
+        </div>
+      </aside>
+
       {!submitted ? (
         <div
-          className="ide-chat-bar"
+          className="ide-chat-bar ide-create-composer"
           style={{
             position: "relative",
             zIndex: 2,

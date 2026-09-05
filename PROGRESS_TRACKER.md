@@ -910,6 +910,23 @@ Opened before starting `M0.1`:
 
 ## Maintenance Work Log
 
+### 2026-09-05 (Desktop rule-detail coherence correction)
+
+- Opened the required `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, `tyche-design-system`, `tyche-ui-coherence`, and Playwright instructions before editing; re-read the desktop handoff and the real `RuleDetail`, shell, and CSS implementation.
+- Corrected the rule detail shown outside the Rules master/detail screen. At `min-width: 1024px` it is now a centered 680px square dialog using the canonical inset ring, cyan solid shadow, Bevan plate title, compact Archivo copy, Oswald vote actions, square 44px close control, and viewport-safe scrolling instead of a stretched mobile bottom sheet.
+- Preserved the existing mobile component and behavior. Rendered CSS inspection confirmed the desktop card at exactly 680px for both 1440px and 1024px viewports, while 390px retains the full-width sheet, drag handle, orange top shadow, and rounded mobile close control.
+- Updated the desktop design-system reference so rule details opened outside Rules cannot regress to a stretched mobile sheet. Verification passed: `@tyche/web` typecheck, `289/289` node tests, ESLint with zero warnings, webpack production build, UTF-8 design-skill validation, rendered desktop/mobile computed-style inspection, and `git diff --check`. No milestone checkbox or milestone status was changed.
+
+### 2026-09-05 (Retro-cyberpunk desktop handoff implementation)
+
+- Opened the required `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `.claude/skills`, and the relevant `tyche-design-system`, `tyche-ui-coherence`, `develop-frontend`, `tyche-test-and-verify`, Playwright, and `skill-creator` instructions before editing. Also read the extracted handoff `README.md`, `markup.md`, `desktop.css`, `support.js`, and `Tyche Desktop.dc.html`.
+- Safely extracted `Rebranding retro-cyberpunk Tyche.zip` to `design_handoff_desktop/` and treated `Tyche Desktop.dc.html` as the desktop visual source. The generated `support.js` was inspected as reference runtime code and was not imported into the application.
+- Rebuilt the play app desktop presentation at `min-width: 1024px` with a 260px navigation rail, 70px context bar, real round/wallet metrics, screen-specific dashboard grids, inline Play review, Rules master/detail, desktop Create interpretation panel, account/reward layouts, and centered overlay cards. All data and actions continue to use the existing context, API, wallet, and transaction paths.
+- Preserved the canonical mobile UI and state flow: desktop additions use `.ide-desktop-only`, while `.ide-deck` remains `display: contents` below the breakpoint. The existing bottom navigation, pick-to-review sequence, rule-detail sheet, and mobile overlays were not replaced or viewport-branched in React.
+- Updated `.claude/skills/tyche-design-system` with the desktop handoff source, responsive breakpoint contract, shell geometry, per-screen layouts, reusable primitives, integration rules, and verification checklist.
+- Browser review covered the desktop routes at 1440x880, the exact 1024px breakpoint, and mobile at 390px and 320px. The inspected pages had no horizontal overflow; the only console message was the development server's HMR WebSocket handshake failure in headless automation, not an application runtime error.
+- Final verification passed: `@tyche/web` typecheck, `289/289` node tests, ESLint with zero warnings, webpack production build, UTF-8 design-skill validation (`Skill is valid!`), and `git diff --check`. No transaction was signed or broadcast, no SOL/JDR moved, and no milestone checkbox or milestone status was changed because explicit user confirmation is still required.
+
 ### 2026-09-02 (Desktop-browser layout for the play app)
 
 - Opened the required `PRD.md` (mobile-first primary surface, desktop web secondary, "Desktop may show a wider dashboard layout"), `.claude/CLAUDE.md`, and `.claude/skills` — the `tyche-ui-coherence` and `tyche-design-system` skills — before editing, plus the real `tyche.css`, `TycheApp.tsx`, `shared.tsx`, and every screen touched.

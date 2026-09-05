@@ -43,8 +43,21 @@ test("game navigation keeps the URL and browser history in sync", async ({ page 
   await page.goBack();
   await expect(page).toHaveURL(/\/play$/u);
   await page.goto("/play/results");
-  await expect(page).toHaveURL(/\/play\/claims$/u);
+  await expect(page).toHaveURL(/\/play\/results$/u);
+  await expect(page.getByRole("heading", { name: "Result" })).toBeVisible();
   expect(consoleErrors).toEqual([]);
+});
+
+test("desktop Open result stays inside the current game shell", async ({ page }) => {
+  await page.setViewportSize({ height: 880, width: 1440 });
+  await page.goto("/play");
+
+  await page.getByRole("button", { name: "Open result" }).click();
+
+  await expect(page).toHaveURL(/\/play\/results\/41$/u);
+  await expect(page.locator(".ide-web-shell.ide-screen-result")).toBeVisible();
+  await expect(page.locator(".ide-desktop-topbar")).toContainText("Round result");
+  await expect(page.locator(".public-shell")).toHaveCount(0);
 });
 
 test("game deep links render the guess, vote, proposal, wallet, and account surfaces", async ({
@@ -57,6 +70,7 @@ test("game deep links render the guess, vote, proposal, wallet, and account surf
     ["/play/wallet", "Connect your wallet"],
     ["/play/account", "Your wallet"],
     ["/play/claims", "Connect your wallet to see claims"],
+    ["/play/results/42", "Result"],
     ["/play/share", "Share"],
   ] as const;
 

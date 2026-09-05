@@ -1,13 +1,24 @@
 ---
 name: tyche-design-system
-description: Design system da interface mobile do Tyche na linguagem visual "3a — Tinta Neon" (cartaz retro-cyberpunk: tipografia de chapa deslocada, blocos de cantos retos com sombra sólida, halo neon). Use sempre que criar, alterar ou revisar qualquer tela, componente, estado ou fluxo do app Tyche — inclusive telas novas que não existem no handoff original. Contém tokens, receitas de componentes com valores literais, anatomia de tela e as regras que definem o estilo.
+description: >-
+  Design system responsivo do Tyche na linguagem visual "3a — Tinta Neon"
+  (cartaz retro-cyberpunk: tipografia de chapa deslocada, blocos de cantos retos
+  com sombra sólida, halo neon). Use sempre que criar, alterar ou revisar qualquer
+  tela, componente, estado ou fluxo mobile ou desktop do app Tyche — inclusive
+  telas novas que não existem nos handoffs. Contém tokens, receitas de componentes,
+  anatomia mobile, shell desktop, layouts mestre-detalhe e as regras que definem o estilo.
 ---
 
-# Tyche — Design System "3a · Tinta Neon"
+# Tyche — Responsive Design System "3a · Tinta Neon"
 
-Linguagem visual do app mobile do Tyche (loteria on-chain na Solana). Referência: 16 telas
+Linguagem visual responsiva do Tyche (loteria on-chain na Solana). Referência mobile: 16 telas
 implementadas em `references/screens-html/` — **HTML autônomo, CSS literal inline**. Quando
 esta skill e um arquivo de `screens-html/` divergirem, **o HTML manda**.
+
+Referência desktop: `design_handoff_desktop/Tyche Desktop.dc.html` na raiz do repo, com
+geometria e integração resumidas em `references/desktop.md`. O desktop começa em 1024 px;
+abaixo disso, o fluxo e o documento mobile continuam canônicos e não podem ser alterados por
+uma tarefa declarada como desktop-only.
 
 Repo de destino: `IagoPrandi/ai-dealer`, `apps/web/src/features/tyche` (Next 16 + React 19,
 CSS global em `features/tyche/tyche.css`, classes `.ide-*`, sem Tailwind).
@@ -68,6 +79,10 @@ Escala em uso: 9.5 10 10.5 11 11.5 12 12.5 13 13.5 14 14.5 15 15.5 16 17 18 19 2
    invente um tratamento novo.
 4. Rode o checklist abaixo.
 
+Para desktop (≥1024 px), leia também `references/desktop.md`. Preserve o markup mobile com
+agrupamentos `.ide-deck` (`display: contents` abaixo do breakpoint) e elementos
+`.ide-desktop-only`. Não introduza lógica de viewport que remonte a tela ou apague estado.
+
 Mapa rápido do que copiar por tipo de tela:
 
 | Vai construir | Comece de |
@@ -106,5 +121,7 @@ Mapa rápido do que copiar por tipo de tela:
 - `references/screens.md` — anatomia de tela, inventário das 16 telas, estados,
   comportamento e o modelo de estado do app.
 - `references/repo-integration.md` — como isso vira TSX no `ai-dealer` sem quebrar o padrão.
+- `references/desktop.md` — shell de 260/70 px, grades por tela, primitivas e contrato
+  desktop-only.
 - `references/screens-html/NN-*.html` — **fonte da verdade**. 16 telas, CSS literal inline.
 - `references/screenshots/NN-*.png` — referência visual 2x.

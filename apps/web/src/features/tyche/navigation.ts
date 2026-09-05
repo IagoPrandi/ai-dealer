@@ -9,6 +9,7 @@ export const PLAY_SCREEN_PATHS: Readonly<Partial<Record<Screen, string>>> = {
   myrules: "/play/my-rules",
   play: "/play/pick",
   profile: "/play/account",
+  result: "/play/results",
   rewards: "/play/rewards",
   share: "/play/share",
   vote: "/play/rules",
@@ -20,6 +21,10 @@ const PATH_PLAY_SCREENS = new Map(
 
 export function getPlayScreenPath(screen: Screen) {
   return PLAY_SCREEN_PATHS[screen] ?? null;
+}
+
+export function getPlayResultPath(turnId: number) {
+  return `/play/results/${turnId}`;
 }
 
 export function getScreenForPlayPath(pathname: string) {

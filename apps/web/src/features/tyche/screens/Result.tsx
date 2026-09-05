@@ -175,13 +175,16 @@ export function ResultScreen() {
           }
         />
 
+        <div className="ide-deck ide-result-deck">
+          <div>
+
         {!walletAddress ? (
-          <div style={{ textAlign: "center", padding: "18px 0 24px", borderBottom: "1px solid var(--line)", marginBottom: 22 }}>
+          <div className="ide-result-mobile-summary" style={{ textAlign: "center", padding: "18px 0 24px", borderBottom: "1px solid var(--line)", marginBottom: 22 }}>
             <div style={{ fontFamily: "Bevan, serif", fontSize: 17, textTransform: "uppercase" }}>Round settled</div>
             <div style={{ fontSize: 13.5, color: "var(--muted)", marginTop: 5 }}>Draw, rule, and payout results are available on-chain.</div>
           </div>
         ) : youWon ? (
-          <div style={{ position: "relative", textAlign: "center", marginBottom: 28, paddingTop: 6 }}>
+          <div className="ide-result-mobile-summary" style={{ position: "relative", textAlign: "center", marginBottom: 28, paddingTop: 6 }}>
             <div style={{ position: "absolute", inset: "-10px 40px auto", height: 160, background: "radial-gradient(circle, rgba(255,210,63,0.2), transparent 68%)", filter: "blur(14px)", zIndex: 0 }} />
             <div style={{ position: "relative", zIndex: 1 }}>
               <div style={{ fontSize: 40, marginBottom: 4 }}>🏆</div>
@@ -192,7 +195,7 @@ export function ResultScreen() {
             </div>
           </div>
         ) : (
-          <div style={{ textAlign: "center", padding: "18px 0 24px", borderBottom: "1px solid var(--line)", marginBottom: 22 }}>
+          <div className="ide-result-mobile-summary" style={{ textAlign: "center", padding: "18px 0 24px", borderBottom: "1px solid var(--line)", marginBottom: 22 }}>
             <div style={{ fontFamily: "Bevan, serif", fontSize: 17, textTransform: "uppercase" }}>Not this time</div>
             <div style={{ fontSize: 13.5, color: "var(--muted)", marginTop: 5 }}>The next round is already live — good luck!</div>
           </div>
@@ -324,6 +327,34 @@ export function ResultScreen() {
         <button onClick={() => go("home")} className="ide-btn-ghost ide-btn" style={{ width: "100%", marginTop: 18, padding: 14 }} type="button">
           <Ico.bolt style={{ color: "var(--green)" }} /> Back to the current round
         </button>
+          </div>
+
+          <aside className="ide-desktop-only ide-card has-solid ide-result-summary">
+            <div className="ide-eyebrow">{youWon ? "Winning entry" : "Round settled"}</div>
+            <h2 className="ide-plate">{youWon ? "You won!" : "Draw complete"}</h2>
+            {youWon ? (
+              <div className="ide-result-summary-value">
+                +{fmtSol(lamportsToSol(youWonLamports))} <span>SOL</span>
+              </div>
+            ) : (
+              <p>The draw and rule result are recorded on-chain.</p>
+            )}
+            <div className="ide-metrics">
+              <div className="ide-metric">
+                <div className="ide-metric-value">{fmtSol(originalPoolSol)}</div>
+                <div className="ide-metric-label">original pool · SOL</div>
+              </div>
+              <div className="ide-metric">
+                <div className="ide-metric-value is-yellow">{fmtSol(alternativePoolSol)}</div>
+                <div className="ide-metric-label">rule pool · SOL</div>
+              </div>
+            </div>
+            {youWon ? (
+              <button className="ide-btn" onClick={() => go("claims")} type="button">Go to claims</button>
+            ) : null}
+            <button className="ide-btn ide-btn-ghost" onClick={() => go("share")} type="button">Share result</button>
+          </aside>
+        </div>
       </div>
     </div>
   );
