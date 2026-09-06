@@ -520,6 +520,74 @@
   font-family: var(--font-body); font-size: 13px; line-height: 1.5;
   color: var(--ink-body); white-space: pre-line;
 }
+/* The dealer's reasoning trace — a subordinate disclosure inside its bubble.
+   It is deliberately quieter than the answer (label type, --dim ink, inset ring
+   instead of the orange solid offset) so the answer stays the thing being read;
+   the trace is the dealer thinking, never part of what it said. */
+.ide-reasoning {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+.ide-reasoning-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+  box-shadow: var(--ring);
+  color: var(--muted);
+  font-family: var(--font-label);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+}
+.ide-reasoning-toggle:hover { color: var(--text); }
+.ide-reasoning-toggle:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+/* The caret is the open/closed state; it rotates rather than swapping glyphs. */
+.ide-reasoning-caret {
+  flex-shrink: 0;
+  width: 0;
+  height: 0;
+  margin-left: auto;
+  border-top: 5px solid currentColor;
+  border-right: 4px solid transparent;
+  border-left: 4px solid transparent;
+  transition: transform 0.15s ease;
+}
+.ide-reasoning-toggle[aria-expanded="true"] .ide-reasoning-caret {
+  transform: rotate(180deg);
+}
+.ide-reasoning-body {
+  max-height: 220px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  box-shadow: var(--ring);
+  border-radius: var(--radius-card);
+  color: var(--dim);
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-style: italic;
+  line-height: 1.55;
+  white-space: pre-line;
+  word-break: break-word;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ide-reasoning-caret { transition: none; }
+}
+
 .ide-bubble-user {
   max-width: 78%; align-self: flex-end; overflow-wrap: anywhere; word-break: break-word;
   background: var(--yellow); box-shadow: var(--solid-4);

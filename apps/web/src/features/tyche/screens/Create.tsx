@@ -27,7 +27,10 @@ import {
   type RuleInterpretationApiResult,
   type RulePreflightProgress,
 } from "../data/apiClient";
-import type { ConversationDraftApi } from "../data/types";
+import type {
+  ConversationDraftApi,
+  ConversationMessage,
+} from "../data/types";
 import { fmtSol, fmtTurnId } from "../data/format";
 import { describeTxError, sendInstruction } from "../data/tx";
 import {
@@ -80,10 +83,12 @@ import {
 } from "../streamReveal";
 import { Dealer, Ico, SectionLabel, useCountdownTo } from "../shared";
 
-interface ChatMessage {
-  text: string;
-  who: "ai" | "user";
-}
+/**
+ * The transcript entry this screen renders. It is the same record the run store
+ * and the saved draft carry — kept as one type so a field added for the stream
+ * (the dealer's reasoning) cannot reach the store and stop at the screen.
+ */
+type ChatMessage = ConversationMessage;
 
 interface RuleGuidanceState {
   options: RuleGuidanceOption[];
@@ -654,6 +659,58 @@ function InterpretationConfirmation({
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * The dealer's reasoning trace, shown above the answer inside the same bubble.
+ *
+ * It opens by itself only while the dealer is still thinking and has not written
+ * a single answer character — that is the moment the trace IS the content, and
+ * watching it beats watching a spinner. Once the answer starts, it folds away so
+ * the reply is what the player reads, unless they have opened it themselves; a
+ * deliberate choice is never overridden.
+ */
+function DealerReasoning({
+  reasoning,
+  thinking,
+}: {
+  reasoning: string;
+  thinking: boolean;
+}) {
+  const [openedByPlayer, setOpenedByPlayer] = useState<boolean | null>(null);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const expanded = openedByPlayer ?? thinking;
+
+  // While the trace is being written, keep its tail in view — a fixed-height box
+  // that silently fills from the top would look frozen after the first lines.
+  useEffect(() => {
+    if (!expanded || !thinking) {
+      return;
+    }
+    const body = bodyRef.current;
+    if (body) {
+      body.scrollTop = body.scrollHeight;
+    }
+  }, [expanded, reasoning, thinking]);
+
+  return (
+    <div className="ide-reasoning">
+      <button
+        aria-expanded={expanded}
+        className="ide-reasoning-toggle"
+        onClick={() => setOpenedByPlayer(!expanded)}
+        type="button"
+      >
+        {thinking ? "Thinking" : "Reasoning"}
+        <span aria-hidden="true" className="ide-reasoning-caret" />
+      </button>
+      {expanded ? (
+        <div className="ide-reasoning-body" ref={bodyRef}>
+          {reasoning}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1980,6 +2037,14 @@ function CreateChat({
                 ref={i === msgs.length - 1 ? lastAnswerRef : null}
                 style={{ animation: "ide-rise .3s ease both" }}
               >
+                {mm.reasoning ? (
+                  <DealerReasoning
+                    reasoning={mm.reasoning}
+                    thinking={
+                      streaming && i === msgs.length - 1 && mm.text.length === 0
+                    }
+                  />
+                ) : null}
                 <StreamText
                   block={reveal.blockFor(`msg:${i}`)}
                   text={mm.text}

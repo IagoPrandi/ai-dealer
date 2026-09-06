@@ -235,6 +235,41 @@ test("a dealer question reports answer text as it streams, then the final object
   );
 });
 
+test("reasoning frames reach the caller apart from the answer text", async () => {
+  // The trace and the answer are different content on the same stream. Merging
+  // them would put the dealer thinking into what the player is told it said.
+  const frame = (event: string, data: unknown) =>
+    `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  const answered = frame("answer", {
+    answer: "Ties split.",
+    proposedRuleText: null,
+    reasoning: "The player asks about ties.",
+  });
+  const deltas: string[] = [];
+  const reasoning: string[] = [];
+  const fetchImpl = (async () =>
+    sseResponse([
+      frame("reasoning", { text: "The player asks " }),
+      // A reasoning frame split across two network chunks, so the parser has
+      // to reassemble it exactly as it does for answer deltas.
+      `event: reasoning\ndata: {"text":"about ties.`,
+      `"}\n\n${frame("delta", { text: "Ties split." })}${answered}`,
+    ])) as unknown as typeof fetch;
+
+  const answer = await askDealer({
+    draftId: "client:7:abc",
+    fetchImpl,
+    message: "what happens on a tie?",
+    onDelta: (chunk) => deltas.push(chunk),
+    onReasoning: (chunk) => reasoning.push(chunk),
+  });
+
+  assert.deepEqual(reasoning, ["The player asks ", "about ties."]);
+  assert.deepEqual(deltas, ["Ties split."]);
+  assert.equal(answer.answer, "Ties split.");
+  assert.equal(answer.reasoning, "The player asks about ties.");
+});
+
 test("a dealer answer that fails mid-stream keeps the status the JSON transport would use", async () => {
   const fetchImpl = (async () =>
     sseResponse([

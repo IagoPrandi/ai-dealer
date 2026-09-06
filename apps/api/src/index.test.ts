@@ -4801,6 +4801,7 @@ test("Guardian second opinions are language-general and keep real injections blo
   const guardianConfig = {
     apiKey: "",
     chatUrl: "http://guardian.test/api/chat",
+    dialect: "granite" as const,
     enabled: true,
     model: "guardian-test",
     timeoutMs: 1_000,

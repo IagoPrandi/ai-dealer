@@ -401,12 +401,16 @@ export function startRulePreflightJob(args: {
 export interface DealerQuestionApiResult {
   answer: string;
   proposedRuleText: string | null;
+  /** The model's reasoning trace, when the provider reports one. */
+  reasoning?: string;
 }
 
 /**
  * Asks the dealer a conversational question and reports the answer as the model
- * writes it. The reply is a one-shot SSE stream: `delta` frames carry answer
- * text, and exactly one `answer` or `error` frame ends it.
+ * writes it. The reply is a one-shot SSE stream: `reasoning` frames carry the
+ * model's thinking, `delta` frames carry answer text, and exactly one `answer`
+ * or `error` frame ends it. Reasoning is a separate frame type on purpose — it
+ * must never be concatenated into the answer the player is given.
  *
  * Unlike the preflight stream this one never reconnects — there is no job to
  * reattach to, so a retry would re-run the model and replay text the player has
@@ -417,6 +421,7 @@ export async function askDealer(args: {
   fetchImpl?: typeof fetch;
   message: string;
   onDelta?: (chunk: string) => void;
+  onReasoning?: (chunk: string) => void;
   signal?: AbortSignal;
 }): Promise<DealerQuestionApiResult> {
   const path = "/rule-dealer/ask";
@@ -463,6 +468,13 @@ export async function askDealer(args: {
         const { text } = JSON.parse(frame.data) as { text?: unknown };
         if (typeof text === "string" && text) {
           args.onDelta?.(text);
+        }
+        continue;
+      }
+      if (frame.event === "reasoning") {
+        const { text } = JSON.parse(frame.data) as { text?: unknown };
+        if (typeof text === "string" && text) {
+          args.onReasoning?.(text);
         }
         continue;
       }

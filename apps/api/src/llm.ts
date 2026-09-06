@@ -73,7 +73,15 @@ const DEFAULT_TIMEOUT_MS = MIN_TIMEOUT_MS;
 // response off before the JSON even starts. The budget must comfortably cover the
 // trace plus the answer; it is an upper bound, so a non-reasoning model that stops
 // at the closing brace never pays for it.
-const MIN_MAX_OUTPUT_TOKENS = 4_096;
+// The floor is low because a hosted provider can cap the budget from its side.
+// Groq's on-demand tier enforces an output-tokens-per-minute limit and rejects a
+// request UP FRONT when `max_tokens` implies more than the cap — measured on
+// `qwen/qwen3.8-27b`, anything at or above 4096 is refused with HTTP 429 before
+// the model runs, while 2048 answers in ~0.6 s. A floor above that would make
+// the provider unusable, so the operator is allowed to configure the budget
+// their tier actually permits. Too small a value is not hidden: the response is
+// cut off and reported as the budget error it is.
+const MIN_MAX_OUTPUT_TOKENS = 1_024;
 const DEFAULT_MAX_OUTPUT_TOKENS = 16_384;
 // Fixed seed + temperature 0 make the dealer deterministic: the same rule text
 // always compiles to the same normalized rule, which the on-chain hashes depend
@@ -117,6 +125,80 @@ interface AgentJsonSchemaConstraint {
 }
 
 /**
+ * Which vendor dialect an endpoint speaks on top of `/v1/chat/completions`.
+ *
+ * "OpenAI-compatible" only ever covered the happy path. The three dialects here
+ * disagree on things that make a request fail outright rather than degrade:
+ * Ollama accepts a non-standard `keep_alive` that Groq rejects with HTTP 400
+ * (`property 'keep_alive' is unsupported`), and the hidden reasoning trace is
+ * controlled by a different parameter on each.
+ */
+export type ProviderDialect =
+  | "groq"
+  | "ollama"
+  | "openai-compatible"
+  | "openrouter";
+
+const GROQ_HOSTNAME = "api.groq.com";
+const OPENROUTER_HOSTNAME = "openrouter.ai";
+
+/**
+ * Hosted endpoints whose credential is configured under its own name rather than
+ * `LLM_API_KEY`. Each provider's secret then has exactly one home, which matters
+ * once roles are split across endpoints: the key has to follow the endpoint, and
+ * a second copy in `LLM_API_KEY` is a copy that can drift.
+ */
+const HOSTED_API_KEY_ENV: ReadonlyArray<{ envVar: string; hostname: string }> = [
+  { envVar: "API_KEY_GROQ", hostname: GROQ_HOSTNAME },
+  { envVar: "API_KEY_OPENROUTER", hostname: OPENROUTER_HOSTNAME },
+];
+
+function endpointHostname(baseUrl: string): null | string {
+  try {
+    return new URL(baseUrl).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function endpointPort(baseUrl: string): null | string {
+  try {
+    return new URL(baseUrl).port;
+  } catch {
+    return null;
+  }
+}
+
+export function resolveProviderDialect(
+  config: Pick<RuleAgentConfig, "apiKey" | "baseUrl">,
+): ProviderDialect {
+  const hostname = endpointHostname(config.baseUrl);
+  if (hostname === GROQ_HOSTNAME) {
+    return "groq";
+  }
+  if (hostname === OPENROUTER_HOSTNAME) {
+    return "openrouter";
+  }
+  if (
+    config.apiKey.toLowerCase() === "ollama" ||
+    endpointPort(config.baseUrl) === "11434"
+  ) {
+    return "ollama";
+  }
+  return "openai-compatible";
+}
+
+/**
+ * Groq model families differ in what `reasoning_effort` they accept: the Qwen
+ * models take `none`, the gpt-oss family documents only `low`/`medium`/`high`
+ * and errors on anything else. Sending an unsupported value is a hard 400, so
+ * the floor is raised per family instead of hoping the server is lenient.
+ */
+function isGptOssFamily(model: string): boolean {
+  return /gpt-oss/iu.test(model);
+}
+
+/**
  * Compiler evidence must use decoder-enforced schemas. Ollama cloud models do
  * not implement structured outputs; unknown OpenAI-compatible endpoints are
  * also treated as unsupported until their capability is made explicit.
@@ -124,52 +206,131 @@ interface AgentJsonSchemaConstraint {
 export function supportsRuleCompilationSchema(
   config: RuleAgentConfig,
 ): boolean {
-  if (/:cloud$/iu.test(config.model.trim())) {
+  const model = config.model.trim();
+  if (/:cloud$/iu.test(model)) {
     return false;
   }
-  try {
-    const endpoint = new URL(config.baseUrl);
-    return (
-      endpoint.port === "11434" ||
-      endpoint.hostname.toLowerCase() === "api.openai.com"
-    );
-  } catch {
+  const hostname = endpointHostname(config.baseUrl);
+  if (hostname === null) {
     return false;
   }
+  if (hostname === OPENROUTER_HOSTNAME) {
+    // OpenRouter routes to whichever backend can honour the request, and
+    // `transportControls` pins that with `require_parameters`, so the schema is
+    // enforced by a backend that actually implements it. Verified against the
+    // real candidate schema: `openai/gpt-oss-120b` and
+    // `mistralai/mistral-small-24b-instruct-2501` both returned a schema-valid
+    // AST. Backends still fail individually — `nvidia/nemotron-3-super-120b`
+    // answers 502 every time — but that surfaces as a provider error the
+    // compiler can retry or escalate, not as a silently unconstrained decode.
+    return true;
+  }
+  if (hostname === GROQ_HOSTNAME) {
+    // Groq documents strict constrained decoding, and it works on small
+    // schemas — but NOT on the one this compiler actually emits. Measured
+    // against the live API with `getRuleCompilationCandidateJsonSchema()`
+    // (8288 bytes, 3 `definitions`): every call hangs ~33 s and dies with
+    // "upstream connect error ... connection termination", 6/6 across
+    // `qwen/qwen3.8-27b` and `openai/gpt-oss-120b`, while a flat schema on the
+    // same models answers in ~0.6 s. Groq evidently cannot build the decoder
+    // grammar for it. Removing `$schema` and dropping to `strict: false` change
+    // nothing. Advertising the capability here would let the compile role pick
+    // a provider that cannot emit the artifact, so the compile step fails
+    // closed instead (RULE_AGENT_SCHEMA_UNSUPPORTED) and the operator points
+    // `LLM_COMPILE_BASE_URL` at an endpoint that can — Ollama or OpenRouter.
+    return false;
+  }
+  return endpointPort(config.baseUrl) === "11434" || hostname === "api.openai.com";
 }
 
-// Controls the hidden reasoning trace on Ollama-served models.
-//
-// Rule steps suppress it, and only a compile RE-ASK restores it. The compile
-// step is the one that has to emit a large, exactly-nested JSON structure, and
-// on `nemotron-3-super:cloud` suppressing the trace measurably breaks that
-// structure: the same compile prompt returned a complete envelope minus its
-// final closing brace in 3 of 6 calls with the flag (~700 completion tokens,
-// `finish_reason: "stop"`, nowhere near the budget) and parsed 5 of 5 times
-// without it (~2700 tokens). Since only structurally large rules hit that wall,
-// the first compile call keeps the saving and the retry buys the trace.
-function ollamaThinkingControl(
+/**
+ * The provider-specific request fragment: how the model is kept warm, and how
+ * much hidden reasoning it may spend before answering.
+ *
+ * Rule steps suppress the trace, and only a compile RE-ASK restores it. The
+ * compile step is the one that has to emit a large, exactly-nested JSON
+ * structure, and on `nemotron-3-super:cloud` suppressing the trace measurably
+ * breaks that structure: the same compile prompt returned a complete envelope
+ * minus its final closing brace in 3 of 6 calls with the flag (~700 completion
+ * tokens, `finish_reason: "stop"`, nowhere near the budget) and parsed 5 of 5
+ * times without it (~2700 tokens). Since only structurally large rules hit that
+ * wall, the first compile call keeps the saving and the retry buys the trace.
+ */
+function transportControls(
   config: RuleAgentConfig,
   trace: ReasoningTrace = "suppressed",
-) {
+  // True when the request carries a JSON Schema the decoder must enforce. On a
+  // router this changes what the request may ask for at all — see below.
+  schemaConstrained = false,
+): Record<string, unknown> {
+  const dialect = resolveProviderDialect(config);
+
+  if (dialect === "groq") {
+    // `parsed` splits the trace into `message.reasoning` / `delta.reasoning`
+    // instead of burying it in `<think>` tags inside the answer, which is what
+    // lets the dealer chat show the reasoning as its own block.
+    const controls: Record<string, unknown> = { reasoning_format: "parsed" };
+    if (trace === "full") {
+      return controls;
+    }
+    if (trace === "low") {
+      controls.reasoning_effort = "low";
+      return controls;
+    }
+    // gpt-oss rejects "none"; "low" is the least it will do.
+    controls.reasoning_effort = isGptOssFamily(config.model) ? "low" : "none";
+    return controls;
+  }
+
+  if (dialect === "openrouter") {
+    // OpenRouter is a router, and `require_parameters` filters the backends to
+    // those honouring EVERY parameter in the request — it cannot be scoped to
+    // one of them. So the two concerns are kept in separate requests:
+    //
+    //   schema-constrained (compile/review): require the backend to implement
+    //   the schema, and send no reasoning parameter. Asking for both filters
+    //   out every endpoint for a model that has no reasoning support at all —
+    //   `mistralai/mistral-small-24b` returned HTTP 404 "No endpoints found
+    //   that can handle the requested parameters" — and the schema is the part
+    //   the artifact depends on. These steps are allowed to think.
+    //
+    //   unconstrained (interpret/chat): no routing filter, but do control the
+    //   trace, because that is where its cost shows up.
+    if (schemaConstrained) {
+      return { provider: { require_parameters: true } };
+    }
+    const controls: Record<string, unknown> = {};
+    if (trace === "full") {
+      return controls;
+    }
+    // The trace is ON by default here, and on a reasoning model that is the
+    // whole latency story: the interpret step on `qwen/qwen3.8-27b` took 50-107 s
+    // while it deliberated, against ~3-8 s once the trace is turned off.
+    // `enabled: false` is OpenRouter's own switch — but the gpt-oss family
+    // refuses it ("Reasoning is mandatory for this endpoint and cannot be
+    // disabled", HTTP 400), exactly as it refuses `reasoning_effort: "none"` on
+    // Groq, so its floor is the shortest trace it will accept.
+    controls.reasoning =
+      trace === "low" || isGptOssFamily(config.model)
+        ? { effort: "low" }
+        : { enabled: false };
+    return controls;
+  }
+
+  if (dialect !== "ollama") {
+    // An unknown OpenAI-compatible endpoint gets the plain OpenAI request. A
+    // vendor extension it does not implement is a 400, not a no-op.
+    return {};
+  }
+
+  // Keep the model resident between the sequential preflight calls so we don't
+  // pay a cold reload on each step (Ollama honors keep_alive; Groq 400s on it).
+  const controls: Record<string, unknown> = { keep_alive: "10m" };
   if (trace === "full") {
-    return {};
+    return controls;
   }
-  const usesOllama =
-    config.apiKey.toLowerCase() === "ollama" ||
-    (() => {
-      try {
-        return new URL(config.baseUrl).port === "11434";
-      } catch {
-        return false;
-      }
-    })();
-  if (!usesOllama) {
-    return {};
-  }
-  return {
-    reasoning_effort: trace === "low" ? ("low" as const) : ("none" as const),
-  };
+  controls.reasoning_effort = trace === "low" ? "low" : "none";
+  return controls;
 }
 
 // The stronger model used to re-try a rule when the fast primary model produces
@@ -192,6 +353,37 @@ export function resolveTranslateToEnglish(
     cleanEnvValue(env.LLM_TRANSLATE_TO_ENGLISH ?? "true").toLowerCase() !==
     "false"
   );
+}
+
+/**
+ * The credential for an endpoint, from the one place that endpoint's secret is
+ * configured.
+ *
+ * Groq's key lives under `API_KEY_GROQ` because that is where the operator sets
+ * it for every Groq-backed role at once (rule agent, chat, guardian). Copying it
+ * into `LLM_API_KEY` as well would create a second source of truth that can
+ * drift. A Groq endpoint configured without that key is a hard configuration
+ * error, not something to attempt unauthenticated.
+ */
+export function resolveApiKeyForEndpoint(
+  baseUrl: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const hostname = endpointHostname(baseUrl);
+  const hosted = HOSTED_API_KEY_ENV.find(
+    (candidate) => candidate.hostname === hostname,
+  );
+  if (!hosted) {
+    return cleanEnvValue(env.LLM_API_KEY);
+  }
+  const key = cleanEnvValue(env[hosted.envVar]);
+  if (!key) {
+    throw new RuleAgentError(
+      "RULE_AGENT_NOT_CONFIGURED",
+      `A ${hosted.hostname} endpoint is configured but ${hosted.envVar} is not set.`,
+    );
+  }
+  return key;
 }
 
 export function resolveRuleAgentConfig(
@@ -232,7 +424,7 @@ export function resolveRuleAgentConfig(
       : MIN_MAX_OUTPUT_TOKENS;
 
   return {
-    apiKey: cleanEnvValue(env.LLM_API_KEY),
+    apiKey: resolveApiKeyForEndpoint(baseUrl, env),
     baseUrl: baseUrl.replace(/\/+$/, ""),
     maxOutputTokens,
     model,
@@ -254,7 +446,38 @@ export function resolveRuleCompilerConfig(
 ): RuleAgentConfig {
   const base = resolveRuleAgentConfig(env);
   const model = firstConfigured(env.LLM_MODEL_COMPILE, base.model);
-  return model === base.model ? base : { ...base, model };
+  const config = model === base.model ? { ...base } : { ...base, model };
+  // `LLM_COMPILE_BASE_URL` moves the artifact-emitting steps to their own
+  // endpoint. Constrained decoding on THIS schema is a much narrower capability
+  // than "supports structured outputs" — hosted providers that decode a flat
+  // schema in under a second cannot build a grammar for the candidate schema at
+  // all — so the compile role frequently belongs somewhere other than the
+  // provider serving interpretation and chat.
+  applyRoleEndpoint(config, env.LLM_COMPILE_BASE_URL, env.LLM_COMPILE_MAX_OUTPUT_TOKENS, env);
+  return config;
+}
+
+/**
+ * Points one role at its own endpoint and output budget. The credential follows
+ * the endpoint — a Groq key sent to a local server, or an "ollama" dummy sent to
+ * Groq, is a 401 either way — and the budget follows it too, because a hosted
+ * tier caps it from above while a local thinking model needs room for its trace.
+ */
+function applyRoleEndpoint(
+  config: RuleAgentConfig,
+  baseUrlValue: string | undefined,
+  budgetValue: string | undefined,
+  env: NodeJS.ProcessEnv,
+): void {
+  const budget = Number(cleanEnvValue(budgetValue));
+  if (Number.isInteger(budget) && budget >= MIN_MAX_OUTPUT_TOKENS) {
+    config.maxOutputTokens = budget;
+  }
+  const baseUrl = firstConfigured(baseUrlValue);
+  if (baseUrl) {
+    config.baseUrl = baseUrl.replace(/\/+$/, "");
+    config.apiKey = resolveApiKeyForEndpoint(config.baseUrl, env);
+  }
 }
 
 /**
@@ -267,6 +490,8 @@ export function resolveRuleReviewerConfig(
 ): RuleAgentConfig {
   const compiler = resolveRuleCompilerConfig(env);
   const model = firstConfigured(env.LLM_MODEL_REVIEW, compiler.model);
+  // The reviewer reads the same schema the compiler emits, so it inherits the
+  // compile endpoint; only the model may differ.
   return model === compiler.model ? compiler : { ...compiler, model };
 }
 
@@ -282,6 +507,13 @@ export function resolveRuleReviewerConfig(
  *
  * `LLM_MODEL_INTERPRET` deliberately does not apply here — it names the interpret
  * step — so chat falls back to `LLM_MODEL` when no chat override is set.
+ *
+ * `LLM_CHAT_BASE_URL` can also move the step to a different ENDPOINT, not just a
+ * different model. The chat prompt is by far the largest in the system (it
+ * carries the whole product context), so it is the first thing a hosted tier's
+ * per-minute input allowance refuses while the much smaller rule and guardrail
+ * prompts still fit. Pointing chat at a local endpoint keeps the dealer talking
+ * without moving the artifact-emitting steps off the schema-capable provider.
  */
 export function resolveDealerChatConfig(
   env: NodeJS.ProcessEnv = process.env,
@@ -292,7 +524,9 @@ export function resolveDealerChatConfig(
     env.LLM_MODEL,
     env.LLM_PRIMARY_MODEL,
   );
-  return model ? { ...base, model } : base;
+  const config = model ? { ...base, model } : { ...base };
+  applyRoleEndpoint(config, env.LLM_CHAT_BASE_URL, env.LLM_CHAT_MAX_OUTPUT_TOKENS, env);
+  return config;
 }
 
 export interface ModelWarmupResult {
@@ -371,6 +605,14 @@ export async function ensureModelLoaded(
 ): Promise<ModelWarmupResult> {
   if (!model) {
     return { loaded: false, model, note: "no model", skipped: true };
+  }
+
+  // /api/ps and /api/generate are Ollama-native. A hosted provider has no model
+  // to pre-load, so probing it just spends a round trip per player question
+  // before the answer can even start.
+  const dialect = resolveProviderDialect(config);
+  if (dialect !== "ollama") {
+    return { loaded: false, model, note: `${dialect} endpoint`, skipped: true };
   }
 
   const nativeBase = deriveOllamaNativeBase(config.baseUrl);
@@ -622,12 +864,61 @@ function coerceInterpretation(value: unknown): RuleAgentInterpretation {
 // JSON text from the response (stripping <think> blocks / falling back to the
 // `reasoning` field for local thinking models). Returns the raw text candidate;
 // callers extract/validate the JSON object themselves.
+/**
+ * Turns a non-200 from the chat endpoint into an error an operator can act on.
+ *
+ * A hosted provider's quota rejection is not "the endpoint is unreachable" — the
+ * endpoint answered, and it named the fix. Groq in particular refuses a request
+ * whose `max_tokens` exceeds the tier's output-tokens-per-minute cap BEFORE
+ * running the model, so the message has to point at the budget rather than at
+ * the network.
+ */
+async function describeChatHttpFailure(
+  response: Response,
+  config: RuleAgentConfig,
+  role: string,
+): Promise<RuleAgentError> {
+  const detail = (await response.text().catch(() => "")).slice(0, 400);
+  // Groq reports the input cap as 413 and the output cap as 429; both are the
+  // same class of problem — the tier, not the request, is what is wrong.
+  if (response.status === 413) {
+    return new RuleAgentError(
+      "RULE_AGENT_UNAVAILABLE",
+      /input tokens per minute|ITPM/iu.test(detail)
+        ? `The provider refused the request: this prompt is larger than the tier's per-minute input-token allowance for ${config.model}. Raise the provider tier or route this step to another provider.`
+        : `The provider rejected the request as too large for ${config.model}.`,
+      detail,
+    );
+  }
+  if (response.status === 429) {
+    const capped = /output tokens per minute|OTPM/iu.test(detail);
+    return new RuleAgentError(
+      "RULE_AGENT_UNAVAILABLE",
+      capped
+        ? `The provider refused the request: its per-minute output-token limit is below the configured ${config.maxOutputTokens}-token budget for ${config.model}. Lower LLM_MAX_OUTPUT_TOKENS or raise the provider tier.`
+        : `The provider rate-limited ${role} on ${config.model}.`,
+      detail,
+    );
+  }
+  if (response.status === 401 || response.status === 403) {
+    return new RuleAgentError(
+      "RULE_AGENT_NOT_CONFIGURED",
+      `The provider rejected the credentials or blocked ${config.model} (HTTP ${response.status}).`,
+      detail,
+    );
+  }
+  return new RuleAgentError(
+    "RULE_AGENT_UNAVAILABLE",
+    `The rule agent returned HTTP ${response.status}. ${detail}`.trim(),
+  );
+}
+
 async function requestAgentJson(
   systemPrompt: string,
   userText: string,
   config: RuleAgentConfig,
   signal?: AbortSignal,
-  // How much the model may think before answering — see `ollamaThinkingControl`.
+  // How much the model may think before answering — see `transportControls`.
   trace: ReasoningTrace = "suppressed",
   schemaConstraint?: AgentJsonSchemaConstraint,
 ): Promise<string> {
@@ -642,9 +933,6 @@ async function requestAgentJson(
   try {
     response = await fetch(`${config.baseUrl}/chat/completions`, {
       body: JSON.stringify({
-        // Keep the model resident between the sequential preflight calls so we
-        // don't pay a cold reload on each step (Ollama honors keep_alive).
-        keep_alive: "10m",
         messages: [
           { content: systemPrompt, role: "system" },
           { content: userText, role: "user" },
@@ -653,8 +941,8 @@ async function requestAgentJson(
         max_tokens: config.maxOutputTokens,
         // Rule preflight needs the constrained JSON result, not a hidden
         // reasoning trace. Ollama otherwise enables thinking by default for
-        // thinking-capable models.
-        ...ollamaThinkingControl(config, trace),
+        // thinking-capable models. Also carries the provider's keep-warm flag.
+        ...transportControls(config, trace, schemaConstraint !== undefined),
         response_format: schemaConstraint
           ? {
               type: "json_schema",
@@ -695,11 +983,7 @@ async function requestAgentJson(
   }
 
   if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw new RuleAgentError(
-      "RULE_AGENT_UNAVAILABLE",
-      `The rule agent returned HTTP ${response.status}. ${detail}`.trim(),
-    );
+    throw await describeChatHttpFailure(response, config, "the rule agent");
   }
 
   let payload: unknown;
@@ -770,6 +1054,12 @@ export async function interpretRuleWithAgent(
 export interface DealerQuestionAnswer {
   answer: string;
   proposedRuleText: string | null;
+  /**
+   * The model's hidden reasoning trace for this answer, when the provider
+   * returns it as a separate field (Groq `reasoning_format: "parsed"`). It is
+   * shown to the player as a subordinate block, never mixed into the answer.
+   */
+  reasoning?: string;
 }
 
 function coerceDealerQuestionAnswer(value: unknown): DealerQuestionAnswer {
@@ -919,6 +1209,10 @@ async function requestAgentJsonStream(
   onContentDelta: (chunk: string) => void,
   signal?: AbortSignal,
   trace: ReasoningTrace = "suppressed",
+  // Reports the hidden reasoning trace as it arrives, for providers that return
+  // it as its own field. Never merged into the answer: the trace is the model
+  // thinking aloud, not the reply, and the JSON contract covers only the reply.
+  onReasoningDelta?: (chunk: string) => void,
 ): Promise<string> {
   const headers: Record<string, string> = {
     accept: "text/event-stream",
@@ -932,14 +1226,13 @@ async function requestAgentJsonStream(
   try {
     response = await fetch(`${config.baseUrl}/chat/completions`, {
       body: JSON.stringify({
-        keep_alive: "10m",
         messages: [
           { content: systemPrompt, role: "system" },
           { content: userText, role: "user" },
         ],
         model: config.model,
         max_tokens: config.maxOutputTokens,
-        ...ollamaThinkingControl(config, trace),
+        ...transportControls(config, trace),
         response_format: { type: "json_object" },
         seed: config.seed,
         stream: true,
@@ -969,11 +1262,7 @@ async function requestAgentJsonStream(
   }
 
   if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw new RuleAgentError(
-      "RULE_AGENT_UNAVAILABLE",
-      `The rule agent returned HTTP ${response.status}. ${detail}`.trim(),
-    );
+    throw await describeChatHttpFailure(response, config, "the dealer chat");
   }
   if (!response.body) {
     throw new RuleAgentError(
@@ -1015,8 +1304,9 @@ async function requestAgentJsonStream(
     if (choice?.finish_reason === "length") {
       truncated = true;
     }
-    if (typeof choice?.delta?.reasoning === "string") {
+    if (typeof choice?.delta?.reasoning === "string" && choice.delta.reasoning) {
       reasoning += choice.delta.reasoning;
+      onReasoningDelta?.(choice.delta.reasoning);
     }
     if (typeof choice?.delta?.content === "string" && choice.delta.content) {
       content += choice.delta.content;
@@ -1098,8 +1388,12 @@ export async function streamDealerQuestionAnswer(
   onAnswerDelta: (chunk: string) => void,
   config: RuleAgentConfig = resolveDealerChatConfig(),
   signal?: AbortSignal,
+  // Optional: the model's own reasoning, streamed as it is produced. Providers
+  // that do not separate the trace simply never call this.
+  onReasoningDelta?: (chunk: string) => void,
 ): Promise<DealerQuestionAnswer> {
   const reader = createJsonStringFieldReader("answer");
+  let reasoning = "";
   const candidate = await requestAgentJsonStream(
     buildDealerChatPrompt(),
     context,
@@ -1111,9 +1405,16 @@ export async function streamDealerQuestionAnswer(
       }
     },
     signal,
-    DEALER_CHAT_TRACE,
+    resolveDealerChatTrace(),
+    (chunk) => {
+      reasoning += chunk;
+      onReasoningDelta?.(chunk);
+    },
   );
-  return coerceDealerQuestionAnswer(extractJsonObject(candidate));
+  const answer = coerceDealerQuestionAnswer(extractJsonObject(candidate));
+  // The trace rides on the answer so a non-streaming consumer, a reconnecting
+  // client, and the saved transcript all see the same thing the stream showed.
+  return reasoning.trim() ? { ...answer, reasoning: reasoning.trim() } : answer;
 }
 
 /**
@@ -1133,6 +1434,42 @@ export async function streamDealerQuestionAnswer(
  */
 const DEALER_CHAT_TRACE: ReasoningTrace = "low";
 
+/**
+ * How much the chat step is allowed to think. `LLM_CHAT_REASONING` names it:
+ *
+ * - `low` (default) — the balance described above: a trace short enough to keep
+ *   the answer fast, long enough to be worth showing the player.
+ * - `full` — the provider's own default depth. Slower, but the trace the player
+ *   reads is the model's unabridged one.
+ * - `off` — suppress the trace where the provider honours it. The reasoning
+ *   block then has nothing to show and does not render.
+ *
+ * An unrecognised value is a configuration error and is rejected rather than
+ * silently treated as the default: a typo here would quietly change what the
+ * player is shown.
+ */
+export function resolveDealerChatTrace(
+  env: NodeJS.ProcessEnv = process.env,
+): ReasoningTrace {
+  const configured = cleanEnvValue(env.LLM_CHAT_REASONING).toLowerCase();
+  if (!configured) {
+    return DEALER_CHAT_TRACE;
+  }
+  if (configured === "low") {
+    return "low";
+  }
+  if (configured === "full") {
+    return "full";
+  }
+  if (configured === "off") {
+    return "suppressed";
+  }
+  throw new RuleAgentError(
+    "RULE_AGENT_NOT_CONFIGURED",
+    "LLM_CHAT_REASONING must be one of: low, full, off.",
+  );
+}
+
 export async function answerDealerQuestion(
   context: string,
   config: RuleAgentConfig = resolveDealerChatConfig(),
@@ -1143,7 +1480,7 @@ export async function answerDealerQuestion(
     context,
     config,
     signal,
-    DEALER_CHAT_TRACE,
+    resolveDealerChatTrace(),
   );
   return coerceDealerQuestionAnswer(extractJsonObject(candidate));
 }
@@ -1184,7 +1521,6 @@ export async function translateRuleToEnglish(
   try {
     response = await fetch(`${config.baseUrl}/chat/completions`, {
       body: JSON.stringify({
-        keep_alive: "10m",
         messages: [
           { content: TRANSLATE_SYSTEM_PROMPT, role: "system" },
           { content: text, role: "user" },
@@ -1194,7 +1530,7 @@ export async function translateRuleToEnglish(
         // is not: a tight ceiling here truncated the response before the sentence
         // was emitted and surfaced as "the translator returned no text".
         max_tokens: config.maxOutputTokens,
-        ...ollamaThinkingControl(config),
+        ...transportControls(config),
         seed: config.seed,
         stream: false,
         temperature: 0,
@@ -1220,10 +1556,7 @@ export async function translateRuleToEnglish(
     );
   }
   if (!response.ok) {
-    throw new RuleAgentError(
-      "RULE_AGENT_UNAVAILABLE",
-      `The translator returned HTTP ${response.status}.`,
-    );
+    throw await describeChatHttpFailure(response, config, "the translator");
   }
   const payload = (await response.json().catch(() => null)) as {
     choices?: Array<{

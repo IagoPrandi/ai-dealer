@@ -11682,13 +11682,20 @@ export function handleApiRequest(
             sendJsonWithoutStatePersistence(request, response, 200, answer);
             return;
           }
+          // Reasoning arrives BEFORE the answer on every provider that reports
+          // it separately, so opening the stream on the first reasoning chunk is
+          // what lets the player watch the dealer think instead of staring at a
+          // spinner until the first answer character lands.
+          const openStream = () => {
+            if (!streamStarted) {
+              startRulePreflightStream(request, response);
+              streamStarted = true;
+            }
+          };
           const answer = await streamDealerQuestionAnswer(
             context,
             (chunk) => {
-              if (!streamStarted) {
-                startRulePreflightStream(request, response);
-                streamStarted = true;
-              }
+              openStream();
               writeRulePreflightSseFrame(
                 response,
                 `event: delta\ndata: ${JSON.stringify({ text: chunk })}\n\n`,
@@ -11696,6 +11703,13 @@ export function handleApiRequest(
             },
             runtime.chat,
             controller.signal,
+            (chunk) => {
+              openStream();
+              writeRulePreflightSseFrame(
+                response,
+                `event: reasoning\ndata: ${JSON.stringify({ text: chunk })}\n\n`,
+              );
+            },
           );
           if (!streamStarted) {
             // The model produced the whole object without a single answer

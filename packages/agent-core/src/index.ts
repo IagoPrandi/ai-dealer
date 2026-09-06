@@ -132,8 +132,16 @@ export function createDefaultProviderRoutingPolicy(
   const primaryProvider =
     env.LLM_PRIMARY_PROVIDER ??
     (env.LLM_MODE === "cloud" ? "openai" : "local-openai-compatible");
-  const primaryBaseUrl =
-    env.LLM_PRIMARY_BASE_URL ?? env.LLM_BASE_URL ?? DEFAULT_LOCAL_BASE_URL;
+  // The primary slot describes the ARTIFACT EMITTER — its model already prefers
+  // LLM_MODEL_COMPILE — so its endpoint must be the compile endpoint too.
+  // Otherwise the capability flags recorded in the artifact describe a provider
+  // that never ran the compile call, and the compiler gates on those flags.
+  const primaryBaseUrl = firstNonBlank(
+    env.LLM_COMPILE_BASE_URL,
+    env.LLM_PRIMARY_BASE_URL,
+    env.LLM_BASE_URL,
+    DEFAULT_LOCAL_BASE_URL,
+  );
   const primaryModel = firstNonBlank(
     env.LLM_MODEL_COMPILE,
     env.LLM_PRIMARY_MODEL,
@@ -152,8 +160,9 @@ export function createDefaultProviderRoutingPolicy(
         provider: primaryProvider,
         quantization:
           env.LLM_PRIMARY_MODEL_QUANTIZATION ?? inferQuantization(primaryModel),
-        serving_engine:
-          env.LLM_PRIMARY_SERVING_ENGINE ?? inferServingEngine(primaryBaseUrl),
+        // Inferred from the endpoint actually used, so an explicit
+        // LLM_PRIMARY_SERVING_ENGINE cannot mislabel a redirected compile role.
+        serving_engine: inferServingEngine(primaryBaseUrl),
       }),
       createProviderConfig({
         base_url: env.LLM_SECONDARY_BASE_URL ?? null,
@@ -321,6 +330,9 @@ function createProviderConfig(input: {
   };
 }
 
+const GROQ_HOSTNAME = "api.groq.com";
+const OPENROUTER_HOSTNAME = "openrouter.ai";
+
 function supportsJsonSchemaDecoding(
   input: {
     base_url: string | null;
@@ -328,7 +340,8 @@ function supportsJsonSchemaDecoding(
   },
   requestShape: AgentProviderRequestShape,
 ): boolean {
-  if (/:cloud$/iu.test(input.model.trim())) {
+  const model = input.model.trim();
+  if (/:cloud$/iu.test(model)) {
     return false;
   }
   // This shape is the compiler's in-process deterministic provider. It emits
@@ -342,10 +355,23 @@ function supportsJsonSchemaDecoding(
   }
   try {
     const endpoint = new URL(input.base_url);
-    return (
-      endpoint.port === "11434" ||
-      endpoint.hostname.toLowerCase() === "api.openai.com"
-    );
+    const hostname = endpoint.hostname.toLowerCase();
+    if (hostname === OPENROUTER_HOSTNAME) {
+      // Requests carry `provider: { require_parameters: true }`, so OpenRouter
+      // routes only to backends that honour the requested structured output.
+      // Verified emitting a schema-valid AST for the real candidate schema.
+      return true;
+    }
+    if (hostname === GROQ_HOSTNAME) {
+      // Groq's strict mode does not survive this compiler's schema: the real
+      // candidate schema (8288 bytes, 3 `definitions`) makes every Groq model
+      // hang ~33 s and drop the connection, while a flat schema answers in
+      // ~0.6 s. The artifact records the decoder that was actually used, so
+      // this stays false rather than claiming a guarantee the provider cannot
+      // deliver for the schema in question.
+      return false;
+    }
+    return endpoint.port === "11434" || hostname === "api.openai.com";
   } catch {
     return false;
   }
@@ -369,7 +395,17 @@ function selectRequestShape(input: {
 }
 
 function inferServingEngine(baseUrl: string | null) {
-  return baseUrl?.includes("11434") ? "ollama" : "openai-compatible";
+  if (baseUrl?.includes("11434")) {
+    return "ollama";
+  }
+  // The artifact records which engine produced it, so a hosted provider is named
+  // rather than filed under the generic compatible-endpoint label.
+  if (baseUrl?.includes(GROQ_HOSTNAME)) {
+    return "groq";
+  }
+  return baseUrl?.includes(OPENROUTER_HOSTNAME)
+    ? "openrouter"
+    : "openai-compatible";
 }
 
 function inferQuantization(model: string) {

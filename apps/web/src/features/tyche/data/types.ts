@@ -274,6 +274,12 @@ export interface PlayerHistoryApi {
 export type ConversationDraftStatus = "draft" | "submitted";
 
 export interface ConversationMessage {
+  /**
+   * The model's reasoning trace for this message, when the provider reported
+   * one. Dealer messages only, and always kept apart from `text`: it is the
+   * dealer thinking aloud, not part of the answer.
+   */
+  reasoning?: string;
   text: string;
   who: "ai" | "user";
 }

@@ -7,13 +7,17 @@ import {
   ensureModelLoaded,
   interpretRuleWithAgent,
   resolveEscalationModel,
+  resolveApiKeyForEndpoint,
   resolveDealerChatConfig,
+  resolveDealerChatTrace,
+  resolveProviderDialect,
   resolveRuleAgentConfig,
   resolveRuleCompilerConfig,
   resolveRuleReviewerConfig,
   reviewRuleToAst,
   resolveTranslateToEnglish,
   streamDealerQuestionAnswer,
+  supportsRuleCompilationSchema,
   translateRuleToEnglish,
   type RuleAgentConfig,
 } from "./llm.js";
@@ -427,13 +431,24 @@ test("rule agent config keeps an output budget a reasoning trace cannot exhaust"
   });
   assert.equal(raised.maxOutputTokens, 32_768);
 
-  // A stale/too-small override must not reintroduce the truncation window.
+  // A hosted tier can cap the budget from its side — Groq refuses a request
+  // whose max_tokens exceeds its per-minute output limit — so a deliberately
+  // small budget is honoured rather than raised back into a 429.
+  const capped = resolveRuleAgentConfig({
+    LLM_BASE_URL: "https://api.groq.com/openai/v1",
+    API_KEY_GROQ: "gsk-test",
+    LLM_MAX_OUTPUT_TOKENS: "2048",
+    LLM_MODEL: "qwen/qwen3.8-27b",
+  });
+  assert.equal(capped.maxOutputTokens, 2_048);
+
+  // A nonsense value still cannot open a truncation window silently.
   const clamped = resolveRuleAgentConfig({
     LLM_BASE_URL: "http://localhost:11434/v1",
-    LLM_MAX_OUTPUT_TOKENS: "2048",
+    LLM_MAX_OUTPUT_TOKENS: "16",
     LLM_MODEL: "minimax-m3:cloud",
   });
-  assert.equal(clamped.maxOutputTokens, 4_096);
+  assert.equal(clamped.maxOutputTokens, 1_024);
 });
 
 test("a response cut off at the output limit fails as a budget error", async () => {
@@ -1459,4 +1474,318 @@ test("a compile that never returns a valid AST is reported, not retried forever"
     offGrammar,
   );
   assert.equal(calls, 3, "bounded by COMPILE_BAD_RESPONSE_ATTEMPTS");
+});
+
+// --------------------------------------------------------------------------
+// Provider dialects. "OpenAI-compatible" is not one protocol: the parameters
+// below are the ones that make a request fail outright on the wrong endpoint.
+// --------------------------------------------------------------------------
+
+const GROQ_CONFIG: RuleAgentConfig = {
+  apiKey: "gsk-test",
+  baseUrl: "https://api.groq.com/openai/v1",
+  maxOutputTokens: 16_384,
+  model: "qwen/qwen3.8-27b",
+  seed: 7,
+  timeoutMs: 30_000,
+};
+
+function captureRequestBody() {
+  const bodies: Array<Record<string, unknown>> = [];
+  globalThis.fetch = (async (
+    _input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+    return new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                answer: "Ties split the pool.",
+                proposedRuleText: null,
+              }),
+            },
+          },
+        ],
+      }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+  return bodies;
+}
+
+test("the chat step can move to its own endpoint, key and all", () => {
+  // The chat prompt is the largest in the system, so a hosted tier's per-minute
+  // input allowance refuses it first. Moving just that step keeps the dealer
+  // talking without taking the artifact steps off the schema-capable provider.
+  const config = resolveDealerChatConfig({
+    API_KEY_GROQ: "gsk-real",
+    LLM_API_KEY: "ollama",
+    LLM_BASE_URL: "https://api.groq.com/openai/v1",
+    LLM_CHAT_BASE_URL: "http://localhost:11434/v1/",
+    LLM_MODEL: "qwen/qwen3.8-27b",
+    LLM_MODEL_CHAT: "gemma3:4b",
+  } as NodeJS.ProcessEnv);
+
+  assert.equal(config.baseUrl, "http://localhost:11434/v1");
+  assert.equal(config.model, "gemma3:4b");
+  // The credential follows the endpoint; the Groq key never leaves Groq.
+  assert.equal(config.apiKey, "ollama");
+  assert.equal(resolveProviderDialect(config), "ollama");
+
+  // Without the override the chat stays exactly where the rule agent is.
+  const shared = resolveDealerChatConfig({
+    API_KEY_GROQ: "gsk-real",
+    LLM_BASE_URL: "https://api.groq.com/openai/v1",
+    LLM_MODEL: "qwen/qwen3.8-27b",
+  } as NodeJS.ProcessEnv);
+  assert.equal(shared.baseUrl, "https://api.groq.com/openai/v1");
+  assert.equal(shared.apiKey, "gsk-real");
+});
+
+test("the endpoint decides the dialect, not the model name", () => {
+  assert.equal(resolveProviderDialect(GROQ_CONFIG), "groq");
+  assert.equal(resolveProviderDialect(CONFIG), "ollama");
+  assert.equal(
+    resolveProviderDialect({ apiKey: "ollama", baseUrl: "http://gpu:8000/v1" }),
+    "ollama",
+  );
+  assert.equal(
+    resolveProviderDialect({ apiKey: "sk-x", baseUrl: "http://vllm:8000/v1" }),
+    "openai-compatible",
+  );
+});
+
+const OPENROUTER_CONFIG: RuleAgentConfig = {
+  apiKey: "sk-or-test",
+  baseUrl: "https://openrouter.ai/api/v1",
+  maxOutputTokens: 16_384,
+  model: "qwen/qwen3.8-27b",
+  seed: 7,
+  timeoutMs: 30_000,
+};
+
+test("OpenRouter routing and reasoning never travel in the same request", async () => {
+  // `require_parameters` filters backends on EVERY parameter in the request and
+  // cannot be scoped to one, so asking for a schema AND a reasoning setting
+  // leaves no endpoint for a model with no reasoning support at all — measured
+  // as HTTP 404 "No endpoints found that can handle the requested parameters"
+  // on mistral-small-24b. The schema is what the artifact depends on, so a
+  // schema-constrained call pins routing and stays silent about reasoning.
+  const bodies = captureRequestBody();
+  await translateRuleToEnglish("Ganha com 3 acertos.", OPENROUTER_CONFIG);
+
+  // Unconstrained step: control the trace, do not filter the routing.
+  assert.equal("provider" in bodies[0]!, false);
+  assert.deepEqual(bodies[0]?.reasoning, { enabled: false });
+
+  // gpt-oss refuses to have reasoning turned off here exactly as it refuses
+  // `reasoning_effort: "none"` on Groq, so its floor is the shortest trace.
+  await translateRuleToEnglish("Ganha com 3 acertos.", {
+    ...OPENROUTER_CONFIG,
+    model: "openai/gpt-oss-120b",
+  });
+  assert.deepEqual(bodies[1]?.reasoning, { effort: "low" });
+
+  // The chat step wants a short trace to show the player.
+  await answerDealerQuestion("<tyche_server_context>{}</tyche_server_context>", OPENROUTER_CONFIG);
+  assert.deepEqual(bodies[2]?.reasoning, { effort: "low" });
+
+  // And no keep_alive anywhere — that is Ollama's field alone.
+  assert.equal(bodies.some((body) => "keep_alive" in body), false);
+});
+
+test("OpenRouter is accepted as the artifact emitter, unlike Groq", () => {
+  // Verified against the real candidate schema: openai/gpt-oss-120b and
+  // mistralai/mistral-small-24b both returned schema-valid ASTs through
+  // compileRuleToAst, where Groq cannot build the grammar at all.
+  assert.equal(supportsRuleCompilationSchema(OPENROUTER_CONFIG), true);
+  assert.equal(resolveProviderDialect(OPENROUTER_CONFIG), "openrouter");
+});
+
+test("a Groq request never carries Ollama's keep_alive, which Groq rejects", async () => {
+  // Measured against the live API: `keep_alive` returns HTTP 400
+  // "property 'keep_alive' is unsupported". Sending it makes EVERY call fail,
+  // so this is the difference between a working provider and a dead one.
+  const bodies = captureRequestBody();
+  await answerDealerQuestion("<tyche_server_context>{}</tyche_server_context>", GROQ_CONFIG);
+
+  assert.equal("keep_alive" in bodies[0]!, false);
+  // The trace is split into its own field so the chat can show it separately.
+  assert.equal(bodies[0]?.reasoning_format, "parsed");
+});
+
+test("an Ollama request keeps keep_alive so the model stays resident", async () => {
+  const bodies = captureRequestBody();
+  await answerDealerQuestion("<tyche_server_context>{}</tyche_server_context>", CONFIG);
+
+  assert.equal(bodies[0]?.keep_alive, "10m");
+  assert.equal("reasoning_format" in bodies[0]!, false);
+});
+
+test("gpt-oss on Groq is never asked for a trace level it rejects", async () => {
+  // The gpt-oss family documents only low/medium/high; "none" is a 400. Qwen
+  // accepts "none", so the suppressed rule steps still get the cheap path there.
+  // Translation is a rule step, so it asks for the suppressed trace: the level
+  // the two families disagree about.
+  const bodies = captureRequestBody();
+  await translateRuleToEnglish("Ganha com 3 acertos.", {
+    ...GROQ_CONFIG,
+    model: "openai/gpt-oss-120b",
+  });
+  assert.equal(bodies[0]?.reasoning_effort, "low");
+
+  await translateRuleToEnglish("Ganha com 3 acertos.", GROQ_CONFIG);
+  assert.equal(bodies[1]?.reasoning_effort, "none");
+});
+
+test("Groq is not accepted as the artifact emitter, whatever it advertises", () => {
+  // PRD 7.3.1 needs constrained decoding on the schema this compiler actually
+  // emits, not on schemas in general. Groq decodes a flat schema in ~0.6 s but
+  // hangs ~33 s and drops the connection on the real 8288-byte candidate schema,
+  // measured 6/6 across qwen3.8-27b and gpt-oss-120b. So the compile role must
+  // fail closed here rather than pick a provider that cannot emit the artifact.
+  assert.equal(supportsRuleCompilationSchema(GROQ_CONFIG), false);
+  assert.equal(
+    supportsRuleCompilationSchema({ ...GROQ_CONFIG, model: "openai/gpt-oss-120b" }),
+    false,
+  );
+  // A local Ollama endpoint remains the capable one.
+  assert.equal(supportsRuleCompilationSchema(CONFIG), true);
+});
+
+test("the compile role can be pinned to the endpoint that can decode the schema", () => {
+  // The provider serving interpretation and chat is frequently NOT the one that
+  // can build a decoder grammar for the candidate schema, so the artifact steps
+  // get their own endpoint, credential and budget.
+  const compiler = resolveRuleCompilerConfig({
+    API_KEY_GROQ: "gsk-real",
+    LLM_API_KEY: "ollama",
+    LLM_BASE_URL: "https://api.groq.com/openai/v1",
+    LLM_COMPILE_BASE_URL: "http://localhost:11434/v1/",
+    LLM_COMPILE_MAX_OUTPUT_TOKENS: "16384",
+    LLM_MODEL: "qwen/qwen3.8-27b",
+    LLM_MODEL_COMPILE: "gemma4:latest",
+  } as NodeJS.ProcessEnv);
+
+  assert.equal(compiler.baseUrl, "http://localhost:11434/v1");
+  assert.equal(compiler.model, "gemma4:latest");
+  assert.equal(compiler.apiKey, "ollama");
+  assert.equal(compiler.maxOutputTokens, 16_384);
+  // ...and that endpoint IS accepted as the artifact emitter.
+  assert.equal(supportsRuleCompilationSchema(compiler), true);
+
+  // The reviewer follows the compiler's endpoint; only its model may differ.
+  const reviewer = resolveRuleReviewerConfig({
+    API_KEY_GROQ: "gsk-real",
+    LLM_API_KEY: "ollama",
+    LLM_BASE_URL: "https://api.groq.com/openai/v1",
+    LLM_COMPILE_BASE_URL: "http://localhost:11434/v1",
+    LLM_MODEL: "qwen/qwen3.8-27b",
+    LLM_MODEL_COMPILE: "gemma4:latest",
+    LLM_MODEL_REVIEW: "gemma4:e2b",
+  } as NodeJS.ProcessEnv);
+  assert.equal(reviewer.baseUrl, "http://localhost:11434/v1");
+  assert.equal(reviewer.model, "gemma4:e2b");
+});
+
+test("the Groq secret has one home and a missing one is not silently ignored", () => {
+  assert.equal(
+    resolveApiKeyForEndpoint("https://api.groq.com/openai/v1", {
+      API_KEY_GROQ: "gsk-real",
+      LLM_API_KEY: "ollama",
+    } as NodeJS.ProcessEnv),
+    "gsk-real",
+  );
+  // A local endpoint is unaffected by the Groq key.
+  assert.equal(
+    resolveApiKeyForEndpoint("http://localhost:11434/v1", {
+      LLM_API_KEY: "ollama",
+    } as NodeJS.ProcessEnv),
+    "ollama",
+  );
+  assert.throws(
+    () =>
+      resolveApiKeyForEndpoint("https://api.groq.com/openai/v1", {
+        LLM_API_KEY: "ollama",
+      } as NodeJS.ProcessEnv),
+    /API_KEY_GROQ is not set/,
+  );
+
+  // OpenRouter follows the same rule, so a role moved there picks up the right
+  // credential instead of sending the local dummy key.
+  assert.equal(
+    resolveApiKeyForEndpoint("https://openrouter.ai/api/v1", {
+      API_KEY_OPENROUTER: "sk-or-real",
+      LLM_API_KEY: "ollama",
+    } as NodeJS.ProcessEnv),
+    "sk-or-real",
+  );
+  assert.throws(
+    () =>
+      resolveApiKeyForEndpoint("https://openrouter.ai/api/v1", {
+        LLM_API_KEY: "ollama",
+      } as NodeJS.ProcessEnv),
+    /API_KEY_OPENROUTER is not set/,
+  );
+});
+
+test("an unreadable chat reasoning setting fails instead of guessing", () => {
+  assert.equal(resolveDealerChatTrace({} as NodeJS.ProcessEnv), "low");
+  assert.equal(
+    resolveDealerChatTrace({ LLM_CHAT_REASONING: "off" } as NodeJS.ProcessEnv),
+    "suppressed",
+  );
+  assert.equal(
+    resolveDealerChatTrace({ LLM_CHAT_REASONING: "full" } as NodeJS.ProcessEnv),
+    "full",
+  );
+  // A typo here would quietly change what the player is shown.
+  assert.throws(
+    () =>
+      resolveDealerChatTrace({
+        LLM_CHAT_REASONING: "medium",
+      } as NodeJS.ProcessEnv),
+    /LLM_CHAT_REASONING must be one of/,
+  );
+});
+
+test("the dealer's reasoning streams separately and never joins the answer", async () => {
+  const answer = "Ties split the pool.";
+  const trace = "The player asks about ties. The rule splits.";
+  globalThis.fetch = (async () => {
+    const frames = [
+      ...[...trace].map((char) => ({ choices: [{ delta: { reasoning: char } }] })),
+      ...[...JSON.stringify({ answer, proposedRuleText: null })].map((char) => ({
+        choices: [{ delta: { content: char } }],
+      })),
+    ]
+      .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+      .join("");
+    return new Response(`${frames}data: [DONE]\n\n`, {
+      headers: { "content-type": "text/event-stream" },
+      status: 200,
+    });
+  }) as typeof fetch;
+
+  const deltas: string[] = [];
+  const reasoning: string[] = [];
+  const result = await streamDealerQuestionAnswer(
+    "<tyche_server_context>{}</tyche_server_context>",
+    (chunk) => deltas.push(chunk),
+    GROQ_CONFIG,
+    undefined,
+    (chunk) => reasoning.push(chunk),
+  );
+
+  // The trace is reported as it is produced, ahead of the answer.
+  assert.equal(reasoning.join(""), trace);
+  assert.ok(reasoning.length > 1);
+  // ...and the answer the player is given contains none of it.
+  assert.equal(deltas.join(""), answer);
+  assert.equal(result.answer, answer);
+  // It also rides on the result, so a reconnect or the JSON transport sees it.
+  assert.equal(result.reasoning, trace);
 });

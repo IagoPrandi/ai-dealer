@@ -46,6 +46,8 @@ export interface ConversationRunDeps {
     message: string;
     /** Called with answer text as the model writes it. */
     onDelta?: (chunk: string) => void;
+    /** Called with the model's reasoning as it thinks, before the answer. */
+    onReasoning?: (chunk: string) => void;
     signal?: AbortSignal;
   }) => Promise<DealerQuestionApiResult>;
   cancelPreflightJob: (jobId: string) => Promise<void>;
@@ -411,6 +413,26 @@ async function runConversation(
       // `streaming` tells the screen the last message is still arriving.
       const questionTranscript = transcript;
       let streamed = "";
+      let reasoned = "";
+      // One patch shape for both streams: reasoning lands ahead of the answer,
+      // so the bubble exists (and shows the dealer thinking) before the first
+      // answer character arrives.
+      const patchStreamingMessage = () => {
+        patchConversationRun(args.draftId, {
+          error: null,
+          messages: [
+            ...questionTranscript,
+            {
+              ...(reasoned ? { reasoning: reasoned } : {}),
+              text: streamed,
+              who: "ai" as const,
+            },
+          ],
+          progress: null,
+          status: "pending",
+          streaming: true,
+        });
+      };
       const dealerAnswer = await deps.askDealer({
         draftId,
         message: args.dealerQuestion,
@@ -419,17 +441,30 @@ async function runConversation(
             return;
           }
           streamed += chunk;
-          patchConversationRun(args.draftId, {
-            error: null,
-            messages: [...questionTranscript, { text: streamed, who: "ai" }],
-            progress: null,
-            status: "pending",
-            streaming: true,
-          });
+          patchStreamingMessage();
+        },
+        onReasoning: (chunk) => {
+          if (signal.aborted) {
+            return;
+          }
+          reasoned += chunk;
+          patchStreamingMessage();
         },
         signal,
       });
-      transcript = [...transcript, { text: dealerAnswer.answer, who: "ai" }];
+      transcript = [
+        ...transcript,
+        {
+          // The server's copy is authoritative — a reconnect or a non-streaming
+          // transport still produces it — so the streamed accumulation is only
+          // the fallback for a provider that streamed without repeating it.
+          ...(dealerAnswer.reasoning || reasoned
+            ? { reasoning: dealerAnswer.reasoning || reasoned }
+            : {}),
+          text: dealerAnswer.answer,
+          who: "ai",
+        },
+      ];
       patchConversationRun(args.draftId, {
         connection: "closed",
         error: null,
