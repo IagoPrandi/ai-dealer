@@ -4,6 +4,13 @@ This tracker records milestone status, work logs, and required document confirma
 
 ## Work Log
 
+### 2026-09-07 (Dealer-chat conversation-reference diagnosis)
+
+- Opened the required `PRD.md`, `AGENTS.md`, and `PROGRESS_TRACKER.md`; inspected `.claude/skills` and reviewed the local frontend and test-and-verify guidance before tracing the reported conversation.
+- Confirmed the browser saves the full transcript before it calls `POST /rule-dealer/ask`; the API reads that saved draft, retains the 12 most recent entries, relabels them as `player`/`dealer`, and also supplies the last dealer message separately. The screenshot therefore does not show an absent or truncated history for this short conversation.
+- Diagnosed the failure as model-side temporal-reference handling: the dealer-chat prompt says only that the transcript is ordered oldest-first. It does not define whether “two/five messages ago” means all chat entries or player turns, nor require an explicit count from the immediately preceding entry. The replies shown count inconsistently and then invent a result, despite the relevant transcript being present.
+- No source, configuration, runtime behavior, or milestone status changed during this read-only diagnosis. No milestone checkbox was ticked because user confirmation remains required. Final consistency review found no evidence that the displayed short transcript was dropped between the UI and the dealer endpoint.
+
 ### 2026-09-07 (Gallery rule-preflight pipeline)
 
 - Opened the required `PRD.md`, `AGENTS.md`, and `PROGRESS_TRACKER.md`; inspected `.claude/skills`; and applied the local Tyche UI-coherence, design-system, test-and-verify, and Playwright guidance before editing.

@@ -7,7 +7,12 @@ const PROMPTS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "prompts");
 // Bumped when the prompt body changes. The `tyche_` prefix is the internal
 // codename and stays; the persona the player sees is the commercial name.
 export const DEALER_INTERPRET_PROMPT_VERSION = "tyche_rule_interpret_prompt_v5";
-export const DEALER_CHAT_PROMPT_VERSION = "tyche_rule_dealer_chat_prompt_v9";
+// v10: a social turn ("tudo bem?", "obrigado") is answered as one, and
+// `proposedRuleText` stays null until the player has actually expressed a
+// winning condition. Measured before the change: a bare greeting produced an
+// invented rule and its submit panel in 3 of 16 runs, and the answer skipped the
+// greeting entirely.
+export const DEALER_CHAT_PROMPT_VERSION = "tyche_rule_dealer_chat_prompt_v10";
 
 function readPromptFile(relativePath: string): string {
   // Prompt assets are runtime code. A missing file must stop the request rather

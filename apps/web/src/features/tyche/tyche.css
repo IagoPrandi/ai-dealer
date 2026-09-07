@@ -2218,6 +2218,13 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+
+  /* A static loader looks like a failed request. This is essential status
+     feedback while the dealer or a live action is in progress, so keep only
+     this indicator moving at a slower, less intense cadence. */
+  .ide-app .ide-spin {
+    animation: ide-spin 1.8s linear infinite !important;
+  }
 }
 
 /* Border policy: content is grouped by surface, spacing, and hierarchy.
