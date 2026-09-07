@@ -553,8 +553,27 @@ export function resolveRuleReviewerConfig(
   const compiler = resolveRuleCompilerConfig(env);
   const model = firstConfigured(env.LLM_MODEL_REVIEW, compiler.model);
   // The reviewer reads the same schema the compiler emits, so it inherits the
-  // compile endpoint; only the model may differ.
-  return model === compiler.model ? compiler : { ...compiler, model };
+  // compile endpoint and budget by default; only the model normally differs.
+  const config = model === compiler.model ? { ...compiler } : { ...compiler, model };
+  // ...but its budget is worth setting apart, because the reviewer is the step
+  // where an over-large budget costs the most. It emits one AST candidate and
+  // nothing else: measured on `mistralai/mistral-small-24b-instruct-2501`, a
+  // successful review is ~450 output tokens. When that model instead loops, it
+  // runs to the full 16384-token ceiling and returns nothing usable — measured
+  // at 12927 output tokens and ~240 s per call, three times in one rule, which
+  // was 38% of that rule's total spend bought for no result. The review is also
+  // the one step whose failure is not fatal (a missing second opinion is
+  // reported as SECOND_OPINION_UNAVAILABLE), so capping it trades nothing.
+  //
+  // Left inheriting the compile budget by default: a reasoning reviewer needs
+  // headroom for its hidden trace, and a floor chosen here would truncate it.
+  applyRoleEndpoint(
+    config,
+    env.LLM_REVIEW_BASE_URL,
+    env.LLM_REVIEW_MAX_OUTPUT_TOKENS,
+    env,
+  );
+  return config;
 }
 
 /**
@@ -935,6 +954,22 @@ function coerceInterpretation(value: unknown): RuleAgentInterpretation {
  * running the model, so the message has to point at the budget rather than at
  * the network.
  */
+/**
+ * True when a 400 body blames the JSON Schema itself rather than the request.
+ *
+ * Deliberately narrow: it must name the schema/response-format surface, so an
+ * ordinary bad-parameter 400 keeps being reported as the transport failure it
+ * is. A guard that guessed here would relabel real outages as configuration.
+ */
+export function isSchemaRejection(detail: string): boolean {
+  return (
+    /response_format|json_schema|structured output/iu.test(detail) &&
+    /schema|uniqueItems|minContains|maxContains|not supported|unsupported|format error/iu.test(
+      detail,
+    )
+  );
+}
+
 async function describeChatHttpFailure(
   response: Response,
   config: RuleAgentConfig,
@@ -966,6 +1001,26 @@ async function describeChatHttpFailure(
     return new RuleAgentError(
       "RULE_AGENT_NOT_CONFIGURED",
       `The provider rejected the credentials or blocked ${config.model} (HTTP ${response.status}).`,
+      detail,
+    );
+  }
+  // A backend that refuses the compile SCHEMA rather than the request. This is a
+  // permanent property of that endpoint, not an outage: measured on
+  // `qwen/qwen3.8-flash` via OpenRouter, which answers
+  // "When the schema contains the fields uniqueItems, contains, minContains, or
+  // maxContains, the type should not be array" — and the candidate schema
+  // constrains worked-example tickets to six DISTINCT numbers, so `uniqueItems`
+  // on an array is not something the request can give up.
+  //
+  // `supportsRuleCompilationSchema` cannot catch this in advance, because on a
+  // router the capability belongs to whichever backend serves the call, not to
+  // the model id. Reporting it as UNAVAILABLE hid a dead configuration behind
+  // what looked like a transient provider error, and every complex rule paid a
+  // full round-trip to rediscover it.
+  if (response.status === 400 && isSchemaRejection(detail)) {
+    return new RuleAgentError(
+      "RULE_AGENT_SCHEMA_UNSUPPORTED",
+      `The provider serving ${config.model} cannot decode the rule compilation schema. Point this role at an endpoint that can, or remove the model from the routing tier.`,
       detail,
     );
   }
@@ -1763,14 +1818,30 @@ export async function compileRuleToAst(
     /\b(?:first|second|third|fourth|fifth|sixth|last|1st|2nd|3rd|4th|5th|6th|primeir[oa]|segund[oa]|terceir[oa]|quart[oa]|quint[oa]|sext[oa]|ultim[oa])\s+(?:guessed?\s+|picked\s+|drawn?\s+)?(?:number|pick|numero)\b/u.test(
       normalizedConstraintText,
     ) || /\b(?:guess|draw)\s*\[\s*[0-5]\s*\]/u.test(normalizedConstraintText);
+  // Quantifiers include the NEGATIVE ones. "none of its even numbers appear in
+  // the draw" quantifies over the whole guess exactly as "every ... number"
+  // does, and it needs the same binder. Missing them made a compound rule
+  // ("none of its even numbers appear in the draw AND the first drawn number is
+  // odd") look purely positional, so the decoder below was told to forbid the
+  // one node that half of the rule requires — an unsatisfiable grammar. Measured
+  // on that rule: with the restriction both `mistral-small-24b` and
+  // `gpt-oss-20b` run to the full output ceiling and return no AST; without it
+  // both answer in under a second with a valid one.
+  //
+  // An adjective may sit between the quantifier and the noun ("its EVEN
+  // numbers"), so the optional middle group allows one.
   const namesQuantifiedCollection =
-    /\b(?:all|every|each|any|for each|todos?|todas?|cada|qualquer)\s+(?:of\s+the\s+)?(?:(?:guessed?|picked?|drawn?|sorteados?|seus?|suas?)\s+)?(?:numbers?|picks?|values?|items?|pairs?|numeros?|valores?|elementos?|pares?)\b/u.test(
+    /\b(?:all|every|each|any|none|no|neither|for each|todos?|todas?|cada|qualquer|nenhum[oa]?|nem)\s+(?:of\s+)?(?:the\s+|its\s+|his\s+|her\s+|their\s+|my\s+)?(?:(?:guessed?|picked?|drawn?|sorteados?|seus?|suas?)\s+)?(?:\w+\s+)?(?:numbers?|picks?|values?|items?|pairs?|numeros?|valores?|elementos?|pares?)\b/u.test(
       normalizedConstraintText,
     );
-  const constrainDirectPositions =
+  const positionalOnly =
     namesDirectPosition &&
     !namesQuantifiedCollection &&
     /\b(?:draw|drawn|sorteio)\b/u.test(normalizedConstraintText);
+  // Not const: an unsatisfiable grammar is recovered from below by dropping the
+  // restriction and re-asking. The whitelist above will keep missing phrasings —
+  // this is what stops the next miss from costing a full output budget.
+  let constrainDirectPositions = positionalOnly;
 
   // The compile-step guidance lives in the versioned `compile_rule_to_ast` agent
   // skill (PRD §7.10/§7.12), co-located with the DSL schema in @tyche/rule-compiler.
@@ -1780,9 +1851,6 @@ export async function compileRuleToAst(
     role === "review"
       ? "\n\n## Independent semantic review\nCompile the exact player rule from scratch as an independent auditor. You have not seen the draft candidate. Re-derive every condition, comparator, source, position, threshold, conjunction, and negation before emitting the candidate. Do not copy a familiar example unless it expresses the complete rule."
       : "";
-  const decoderGuidance = constrainDirectPositions
-    ? "\n\n## Direct-position decoder constraint\nThis rule names individual positions and does not quantify over a collection. Represent every named position with `at(index, source)`, converting the player's 1-based ordinal to a 0-based index. Binder-only `elem` and `pair` nodes are unavailable for this request because no binder would define them. Preserve every positional clause and connector."
-    : "";
   const deterministicPlan =
     role === "generate"
       ? getDeterministicRuleCompilerPlan(normalizedText)
@@ -1790,37 +1858,81 @@ export async function compileRuleToAst(
   const semanticPlanGuidance = deterministicPlan
     ? `\n\n## Server-verified semantic plan\nAn independent source parser proved that the following plan preserves every load-bearing value and operation in this rule. Encode this exact semantic structure; do not simplify, swap sources, change indices, or drop clauses. You still must derive consumedSpans from the source and calculate workedExamples independently.\nInterpretation: ${deterministicPlan.interpretation}\nAST plan: ${JSON.stringify(deterministicPlan.ast)}`
     : "";
-  const basePrompt = `${buildRuleCompilerSkillPrompt()}${roleGuidance}${decoderGuidance}${semanticPlanGuidance}`;
-  const prompt = validationFeedback?.trim()
-    ? `${basePrompt}\n\n## Validation-guided re-ask\nThe previous candidate was rejected by deterministic validation. Produce a completely fresh candidate from the exact player rule. Do not weaken, omit, or reinterpret any condition merely to pass validation. Correct all of these server-authored findings:\n${validationFeedback.trim().slice(0, 2_000)}`
-    : basePrompt;
-  const schemaConstraint: AgentJsonSchemaConstraint = {
-    name: "tyche_rule_compilation_candidate",
-    schema: getRuleCompilationCandidateJsonSchema({
-      forbidBinderScopedScalars: constrainDirectPositions,
-    }),
+  // Rebuilt when the positional restriction is dropped below: the guidance
+  // paragraph and the schema both encode it and must never disagree.
+  const buildRequest = () => {
+    const decoderGuidance = constrainDirectPositions
+      ? "\n\n## Direct-position decoder constraint\nThis rule names individual positions and does not quantify over a collection. Represent every named position with `at(index, source)`, converting the player's 1-based ordinal to a 0-based index. Binder-only `elem` and `pair` nodes are unavailable for this request because no binder would define them. Preserve every positional clause and connector."
+      : "";
+    const basePrompt = `${buildRuleCompilerSkillPrompt()}${roleGuidance}${decoderGuidance}${semanticPlanGuidance}`;
+    return {
+      prompt: validationFeedback?.trim()
+        ? `${basePrompt}\n\n## Validation-guided re-ask\nThe previous candidate was rejected by deterministic validation. Produce a completely fresh candidate from the exact player rule. Do not weaken, omit, or reinterpret any condition merely to pass validation. Correct all of these server-authored findings:\n${validationFeedback.trim().slice(0, 2_000)}`
+        : basePrompt,
+      schemaConstraint: {
+        name: "tyche_rule_compilation_candidate",
+        schema: getRuleCompilationCandidateJsonSchema({
+          forbidBinderScopedScalars: constrainDirectPositions,
+        }),
+      } satisfies AgentJsonSchemaConstraint,
+    };
   };
+  let { prompt, schemaConstraint } = buildRequest();
+  // The positional restriction gets exactly one chance to be wrong per call.
+  let mayRelaxPositions = constrainDirectPositions;
+  // Set only by the two paths the trace actually recovers: an unparseable
+  // envelope and an off-grammar AST. Relaxing the positional restriction is a
+  // different fault with a different fix, and it must not silently buy a
+  // reasoning trace that can cost more than the call it is retrying.
+  let useFullTrace = false;
   for (let attempt = 1; ; attempt += 1) {
     // First ask in the fast, no-trace mode every other step uses. A rule whose
     // AST is small comes back correct and the player pays no extra latency; the
     // shapes that break it are the large nested ones, and those get the thinking
     // re-ask below rather than making every rule wait for a reasoning trace.
-    const candidate = await requestAgentJson(
-      // Generation and independent review are separately billed steps against
-      // the same ~15k-token prompt, so they are never merged in the accounting.
-      role === "review" ? "review" : "compile",
-      prompt,
-      normalizedText,
-      config,
-      signal,
+    let candidate: string;
+    try {
+      candidate = await requestAgentJson(
+        // Generation and independent review are separately billed steps against
+        // the same ~15k-token prompt, so they are never merged in the accounting.
+        role === "review" ? "review" : "compile",
+        prompt,
+        normalizedText,
+        config,
+        signal,
       // The reviewer is independent because it has a different source-only
       // prompt, not because it must spend an unbounded hidden trace. On local
       // 9B models that trace can exceed the entire five-minute request window.
       // As with generation, only an unusable structured response earns the
       // slower full-reasoning retry.
-      attempt > 1 ? "full" : "suppressed",
-      schemaConstraint,
-    );
+        useFullTrace ? "full" : "suppressed",
+        schemaConstraint,
+      );
+    } catch (error) {
+      // An output budget spent in full under the positional restriction is the
+      // signature of an UNSATISFIABLE grammar, not of a hard rule: the decoder
+      // was forbidden the `elem`/`pair` nodes and the rule needs one, so no
+      // token sequence can close the JSON and the model generates to the
+      // ceiling. Measured on "none of its even numbers appear in the draw and
+      // the first drawn number is odd": restricted, `mistral-small-24b` and
+      // `gpt-oss-20b` both run out with no AST; unrestricted, both answer in
+      // under a second. `namesQuantifiedCollection` is a whitelist and will miss
+      // other phrasings, so the recovery is here rather than only in the regex.
+      const exhaustedBudget =
+        error instanceof RuleAgentError &&
+        error.code === "RULE_AGENT_BAD_RESPONSE" &&
+        error.message.includes("cut off");
+      if (!mayRelaxPositions || !exhaustedBudget || signal?.aborted) {
+        throw error;
+      }
+      mayRelaxPositions = false;
+      constrainDirectPositions = false;
+      ({ prompt, schemaConstraint } = buildRequest());
+      console.error(
+        `Rule compile attempt ${attempt} exhausted the output budget under the direct-position decoder constraint; re-asking without it.`,
+      );
+      continue;
+    }
     let parsed: unknown;
     try {
       parsed = extractJsonObject(candidate);
@@ -1833,6 +1945,7 @@ export async function compileRuleToAst(
       if (!retryable) {
         throw error;
       }
+      useFullTrace = true;
       console.error(
         `Rule compile attempt ${attempt} returned no usable JSON; retrying.`,
         error instanceof RuleAgentError ? error.detail : "",
@@ -1857,6 +1970,7 @@ export async function compileRuleToAst(
       // worked-example and coverage gates still produce the real verdict.
       return parsed;
     }
+    useFullTrace = true;
     console.error(
       `Rule compile attempt ${attempt} returned an AST outside the rule grammar; retrying with the reasoning trace.`,
     );

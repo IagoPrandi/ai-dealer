@@ -12,6 +12,7 @@ import {
   resolveDealerChatTrace,
   resolveProviderDialect,
   resolveRuleAgentConfig,
+  isSchemaRejection,
   resolveRuleCompilerConfig,
   resolveRuleReviewerConfig,
   reviewRuleToAst,
@@ -842,6 +843,110 @@ test("compile requests schema-constrained tickets and never falls back to JSON m
   );
 });
 
+interface CompileRequestBody {
+  messages?: Array<{ content?: string }>;
+  reasoning_effort?: unknown;
+  response_format?: {
+    json_schema?: {
+      schema?: {
+        definitions?: Record<
+          string,
+          {
+            anyOf?: Array<{ properties?: { kind?: { const?: unknown } } }>;
+          }
+        >;
+      };
+    };
+  };
+}
+
+// A schema-valid candidate, so the transport's off-grammar re-ask does not
+// fire and each test counts only the calls it is actually about.
+const VALID_CANDIDATE = {
+  "ast": {
+    "schemaVersion": 3,
+    "result": {
+      "type": "predicate",
+      "predicate": {
+        "kind": "compare",
+        "op": "gt",
+        "left": {
+          "kind": "at",
+          "index": 0,
+          "of": {
+            "kind": "source",
+            "source": "guess"
+          }
+        },
+        "right": {
+          "kind": "at",
+          "index": 0,
+          "of": {
+            "kind": "source",
+            "source": "draw"
+          }
+        }
+      }
+    }
+  },
+  "consumedSpans": [
+    {
+      "text": "its first number is greater than the first drawn number"
+    }
+  ],
+  "workedExamples": [
+    {
+      "draw": [
+        10,
+        20,
+        30,
+        40,
+        50,
+        60
+      ],
+      "guess": [
+        11,
+        21,
+        31,
+        41,
+        51,
+        61
+      ],
+      "outcome": "WIN"
+    },
+    {
+      "draw": [
+        10,
+        20,
+        30,
+        40,
+        50,
+        60
+      ],
+      "guess": [
+        9,
+        21,
+        31,
+        41,
+        51,
+        61
+      ],
+      "outcome": "LOSE"
+    }
+  ]
+} as const;
+
+function collectSchemaKinds(body: CompileRequestBody | undefined) {
+  const definitions =
+    body?.response_format?.json_schema?.schema?.definitions ?? {};
+  return Object.values(definitions).flatMap((definition) =>
+    (definition.anyOf ?? []).flatMap((variant) => {
+      const kind = variant.properties?.kind?.const;
+      return typeof kind === "string" ? [kind] : [];
+    }),
+  );
+}
+
 test("direct positional rules constrain the LLM to indexed access", async () => {
   const requestBodies: Array<Record<string, unknown>> = [];
   const text =
@@ -961,6 +1066,122 @@ test("direct positional rules constrain the LLM to indexed access", async () => 
   );
   assert.ok(indexedKinds.includes("at"));
   assert.ok(!indexedKinds.includes("elem"));
+});
+
+test("a negative quantifier is a quantifier, so the binder nodes stay available", async () => {
+  // Regression: "none of its even numbers appear in the draw" quantifies over
+  // the whole guess exactly as "every ... number" does, but "none" was missing
+  // from the quantifier list. The rule ALSO names a position ("the first drawn
+  // number"), so the decoder was told to forbid `elem` / `pair` while half the
+  // rule required one. Measured against the real provider, that unsatisfiable
+  // grammar made both mistral-small-24b and gpt-oss-20b run to the full output
+  // ceiling and return no AST at all.
+  const bodies: CompileRequestBody[] = [];
+  globalThis.fetch = (async (
+    _input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    bodies.push(JSON.parse(String(init?.body)) as CompileRequestBody);
+    return new Response(
+      JSON.stringify({
+        choices: [
+          { message: { content: JSON.stringify(VALID_CANDIDATE) } },
+        ],
+      }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+
+  await compileRuleToAst(
+    "A guess wins if none of its even numbers appear in the draw and the first drawn number is odd.",
+    CONFIG,
+  );
+
+  const kinds = collectSchemaKinds(bodies[0]);
+  assert.ok(kinds.includes("elem"), "the binder node the rule needs must exist");
+  assert.ok(kinds.includes("at"), "positional access stays available too");
+  assert.doesNotMatch(
+    String(bodies[0]?.messages?.[0]?.content ?? ""),
+    /direct-position decoder constraint/i,
+  );
+});
+
+test("an output budget spent under the positional constraint re-asks without it", async () => {
+  // The whitelist above will keep missing phrasings. When it does, the decoder
+  // is handed a grammar no token sequence can close and the provider bills the
+  // whole output budget for nothing. One relaxed re-ask turns that dead end into
+  // a compile instead of surfacing it as the player's bad rule.
+  const bodies: CompileRequestBody[] = [];
+  globalThis.fetch = (async (
+    _input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    bodies.push(JSON.parse(String(init?.body)) as CompileRequestBody);
+    if (bodies.length === 1) {
+      return new Response(
+        JSON.stringify({
+          choices: [{ finish_reason: "length", message: { content: "" } }],
+          usage: { completion_tokens: 16384, prompt_tokens: 14000 },
+        }),
+        { status: 200 },
+      );
+    }
+    return new Response(
+      JSON.stringify({
+        choices: [
+          { message: { content: JSON.stringify(VALID_CANDIDATE) } },
+        ],
+      }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+
+  const result = await compileRuleToAst(
+    "A guess wins when its first number is greater than the first drawn number.",
+    CONFIG,
+  );
+  assert.deepEqual(result, VALID_CANDIDATE);
+  assert.equal(bodies.length, 2);
+
+  // First ask carried the restriction; the re-ask dropped it, in BOTH the
+  // schema and the guidance paragraph, which must never disagree.
+  assert.ok(!collectSchemaKinds(bodies[0]).includes("elem"));
+  assert.ok(collectSchemaKinds(bodies[1]).includes("elem"));
+  assert.match(
+    String(bodies[0]?.messages?.[0]?.content ?? ""),
+    /direct-position decoder constraint/i,
+  );
+  assert.doesNotMatch(
+    String(bodies[1]?.messages?.[0]?.content ?? ""),
+    /direct-position decoder constraint/i,
+  );
+  // Relaxing is a different fault from an unparseable envelope, so it must not
+  // also buy the reasoning trace.
+  assert.equal(bodies[1]?.reasoning_effort, bodies[0]?.reasoning_effort);
+});
+
+test("a budget exhausted WITHOUT the positional constraint is still reported", async () => {
+  // Only the unsatisfiable-grammar case is recoverable. A genuine budget
+  // exhaustion must keep surfacing, or the relaxation would hide a real limit.
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return new Response(
+      JSON.stringify({
+        choices: [{ finish_reason: "length", message: { content: "" } }],
+      }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+
+  await assert.rejects(
+    compileRuleToAst(
+      "A guess wins if the sum of its numbers is greater than the sum of the drawn numbers.",
+      CONFIG,
+    ),
+    /cut off/,
+  );
+  assert.equal(calls, 1);
 });
 
 test("compile fails closed before calling a provider without schema-constrained decoding", async () => {
@@ -1689,6 +1910,80 @@ test("the compile role can be pinned to the endpoint that can decode the schema"
   } as NodeJS.ProcessEnv);
   assert.equal(reviewer.baseUrl, "http://localhost:11434/v1");
   assert.equal(reviewer.model, "gemma4:e2b");
+});
+
+test("the reviewer can be budgeted apart from the compiler that shares its endpoint", () => {
+  const shared = {
+    LLM_API_KEY: "ollama",
+    LLM_BASE_URL: "http://localhost:11434/v1",
+    LLM_COMPILE_MAX_OUTPUT_TOKENS: "16384",
+    LLM_MODEL: "gemma4:latest",
+    LLM_MODEL_REVIEW: "mistralai/mistral-small-24b-instruct-2501",
+  } as NodeJS.ProcessEnv;
+
+  // Unset, the reviewer inherits the compile budget: a reasoning reviewer needs
+  // room for its hidden trace, so no floor is imposed here.
+  assert.equal(resolveRuleReviewerConfig(shared).maxOutputTokens, 16_384);
+  assert.equal(resolveRuleCompilerConfig(shared).maxOutputTokens, 16_384);
+
+  // Set, it bounds the reviewer WITHOUT touching the compiler. A review that
+  // loops otherwise runs to the compile ceiling and returns nothing.
+  const capped = {
+    ...shared,
+    LLM_REVIEW_MAX_OUTPUT_TOKENS: "2048",
+  } as NodeJS.ProcessEnv;
+  assert.equal(resolveRuleReviewerConfig(capped).maxOutputTokens, 2_048);
+  assert.equal(resolveRuleCompilerConfig(capped).maxOutputTokens, 16_384);
+
+  // The reviewer may also move to its own endpoint, which carries its own key.
+  const routed = resolveRuleReviewerConfig({
+    ...shared,
+    API_KEY_OPENROUTER: "sk-or-real",
+    LLM_REVIEW_BASE_URL: "https://openrouter.ai/api/v1/",
+  } as NodeJS.ProcessEnv);
+  assert.equal(routed.baseUrl, "https://openrouter.ai/api/v1");
+  assert.equal(routed.apiKey, "sk-or-real");
+  // ...and moving it must not drag the compiler along.
+  assert.equal(
+    resolveRuleCompilerConfig({
+      ...shared,
+      API_KEY_OPENROUTER: "sk-or-real",
+      LLM_REVIEW_BASE_URL: "https://openrouter.ai/api/v1/",
+    } as NodeJS.ProcessEnv).baseUrl,
+    "http://localhost:11434/v1",
+  );
+});
+
+test("a backend refusing the compile schema is a configuration fault, not an outage", () => {
+  // Measured from OpenRouter serving `qwen/qwen3.8-flash`: the router wraps the
+  // backend's own message, so the text this guard reads is deeply escaped.
+  const observed = [
+    '{"error":{"message":"Provider returned error","code":400,"metadata":',
+    '{"raw":"data: {\\"error\\":{\\"code\\":\\"invalid_parameter_error\\",',
+    '\\"message\\":\\"Format error : \'response_format.json_schema.schema\'. ',
+    "the specific reason is as follows: When the schema contains the fields ",
+    '\\\\\\"uniqueItems\\\\\\", \\\\\\"contains\\\\\\", \\\\\\"minContains\\\\\\", or ',
+    '\\\\\\"maxContains\\\\\\", the type should not be \\\\\\"array\\\\\\"',
+  ].join("");
+  assert.equal(isSchemaRejection(observed), true);
+
+  assert.equal(
+    isSchemaRejection(
+      '{"error":{"message":"response_format json_schema is not supported by this model"}}',
+    ),
+    true,
+  );
+
+  // An ordinary bad-parameter 400 keeps being reported as the transport failure
+  // it is; relabelling one of those as configuration would hide a real outage.
+  assert.equal(
+    isSchemaRejection(
+      '{"error":{"message":"property keep_alive is unsupported"}}',
+    ),
+    false,
+  );
+  assert.equal(isSchemaRejection('{"error":{"message":"model not found"}}'), false);
+  assert.equal(isSchemaRejection(""), false);
 });
 
 test("the Groq secret has one home and a missing one is not silently ignored", () => {
