@@ -3666,6 +3666,13 @@ async function runRuleInterpretationPipeline(
 }
 
 /**
+ * Exported so the pipeline can be measured without an HTTP server, a database or
+ * an operator wallet — see `scripts/rule-usage-report.mts`. Measuring the real
+ * entry point matters: a script that called interpret and compile by hand would
+ * miss the compiler's own consensus, repair and escalation calls and report a
+ * cost well below the truth, which is the kind of figure this accounting exists
+ * to remove.
+ *
  * Wraps the pipeline in a resource-measurement scope (apps/api/src/usage.ts).
  *
  * Everything the run spends — the translate, guardian, interpret, compile,
@@ -3675,7 +3682,7 @@ async function runRuleInterpretationPipeline(
  * A run that throws still publishes its report: the rules that fail are the
  * expensive ones.
  */
-async function createRulePreflight(
+export async function createRulePreflight(
   text: string,
   reportProgress: RulePreflightProgressReporter = () => undefined,
   signal?: AbortSignal,

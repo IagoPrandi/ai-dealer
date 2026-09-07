@@ -1,0 +1,8 @@
+{
+  "//": "Operator scripts live outside `rootDir: src`, so the build tsconfig cannot include them. Without this they would run untypechecked and rot silently against the source they import.",
+  "extends": "../../packages/config/tsconfig/node.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["scripts/**/*.mts"]
+}
