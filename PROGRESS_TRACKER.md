@@ -4,6 +4,15 @@ This tracker records milestone status, work logs, and required document confirma
 
 ## Work Log
 
+### 2026-09-07 (Gallery rule-preflight pipeline)
+
+- Opened the required `PRD.md`, `AGENTS.md`, and `PROGRESS_TRACKER.md`; inspected `.claude/skills`; and applied the local Tyche UI-coherence, design-system, test-and-verify, and Playwright guidance before editing.
+- Diagnosed the reported behaviour in `NEXT_PUBLIC_UI_MOCK=1`: the gallery intercepted both `/rule-preflight` and its event stream, then returned a fixed four-match rule even for the `interpret` phase. The real interpretation, confirmation, compilation, review, and validation pipeline was therefore never entered.
+- Removed only the rule-preflight fixture and its SSE stream from the gallery interceptor. Wallet, turn, and presentation data remain mocked, while conversation drafts, dealer chat, and both rule-authoring phases now use the real API. The obsolete canned preflight payload was removed.
+- Added a regression that verifies the gallery forwards the exact `interpret` request and a subsequent `compile` request carrying an approved interpretation. Verification passed: `@tyche/web` test suite (`294/294`), typecheck, zero-warning lint, production build, and `git diff --check`. A live local request through the Next proxy emitted `interpretation` (not `result`) for the reported sum rule, confirming that compilation does not run before user confirmation.
+- Browser CLI verification was attempted through the required Playwright workflow, but the local WSL Bash launcher has no installed Linux distribution. The automated web suite and live HTTP/SSE verification completed successfully. No milestone checkbox was changed because explicit user confirmation is still required.
+- Final consistency review confirms that no static preflight response remains, API errors remain visible rather than being replaced with a canned result, the confirmed-interpretation boundary remains server-enforced, and no wallet, fee, transaction, or on-chain behaviour changed.
+
 ### 2026-09-01 (Responsive public web frontend)
 
 - Opened the required `PRD.md`, `AGENTS.md`, and `PROGRESS_TRACKER.md`; inspected `.claude/skills`; and applied the local frontend-development, Tyche design-system, UI-coherence, Playwright, test-and-verify, Next.js App Router, React review, and browser-verification guidance. The required design-system token, component, screen, and repository-integration references were reviewed before implementation.
@@ -6040,3 +6049,11 @@ Passed:
 - Fixed repair/retry classification: `DIFFICULTY_IMPOSSIBLE` or `DIFFICULTY_ALWAYS_TRUE` measured against an artifact that independently failed generation no longer prevents automatic regeneration or the existing Retry action. A difficulty verdict without an independent generation fault still describes the player's rule and remains non-retryable, so genuinely impossible/always-true rules are not weakened.
 - Real-model verification passed with the exact reported UTF-8 sentence. `gemma3:4b` emitted a schema-v3 conjunction with indices `0`, `0`, `1`, and `5`, a complete consumed source span, coherent WIN/LOSE examples, and the compiler returned `VALID` with only `SUPPORTED_RULE`. Automated verification passed: rule compiler typecheck, `96/96` tests, ESLint, build; API typecheck, `195/195` tests, ESLint, build; Prettier; repository-wide tests (`29/29` tasks); and `git diff --check`.
 - No milestone checkbox was changed because milestone completion still requires explicit user confirmation. Final inconsistency review confirms that quantified/binder rules retain their schema nodes, novel compositions retain independent LLM review, genuine difficulty blocks remain intact, Retry cannot bypass interpretation approval, UI copy remains English UTF-8, and no fee, transaction, or on-chain state changed.
+
+### 2026-09-07 (Live dealer chat in UI mock mode)
+
+- Opened the required `PRD.md`, `AGENTS.md`, and this `PROGRESS_TRACKER.md`; inspected `.claude/skills`; and applied the local frontend, Tyche UI coherence, design-system, and test-and-verify guidance before editing.
+- Corrected the UI-mock boundary: the visual gallery still supplies mock wallet, round, and presentation data, but conversation-draft and dealer-chat requests now pass through to the real API. This retains the saved server context and invokes the configured LLM instead of returning an echo response.
+- Made dealer reasoning strictly transient. It appears only while SSE reasoning or answer chunks are arriving and is removed from the stored transcript as soon as the terminal answer lands.
+- Added regression coverage for API/LLM pass-through, the real SSE shape, and the removal of completed reasoning. Verification passed: web TypeScript typecheck, `293/293` tests, ESLint with zero warnings, production build, and `git diff --check`.
+- No milestone checkbox was changed because milestone completion still requires explicit user confirmation. Final consistency review confirms that production routes remain unmocked, failed API/LLM calls remain visible, UI copy remains English UTF-8, and no fee, transaction, or on-chain state changed.

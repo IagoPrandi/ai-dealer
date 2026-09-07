@@ -455,12 +455,10 @@ async function runConversation(
       transcript = [
         ...transcript,
         {
-          // The server's copy is authoritative — a reconnect or a non-streaming
-          // transport still produces it — so the streamed accumulation is only
-          // the fallback for a provider that streamed without repeating it.
-          ...(dealerAnswer.reasoning || reasoned
-            ? { reasoning: dealerAnswer.reasoning || reasoned }
-            : {}),
+          // Reasoning is transient status, not part of the conversation record.
+          // The streaming patch above exposes it while the model is working;
+          // replacing that temporary message with the completed answer removes
+          // it as soon as generation ends.
           text: dealerAnswer.answer,
           who: "ai",
         },

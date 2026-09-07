@@ -124,41 +124,6 @@ export const MOCK_PLAYER_CLAIMS = {
   },
 };
 
-// Resposta de POST /rule-preflight (veredito VALID => proposável).
-export const MOCK_RULE_PREFLIGHT = {
-  preflight: {
-    addedOperationalClauses: [],
-    clarityNote: "",
-    compiledArtifactHash: "9f8e7d6c5b4a39281706f5e4d3c2b1a09f8e7d6c",
-    decision: "VALID" as const,
-    dealerMessage:
-      "Clear and verifiable. Players win when at least four guessed numbers are drawn.",
-    // Must be a real compiler class (PRD §6.8) — "Medium" is not one, and a
-    // fixture the compiler can never produce makes the gallery lie about the UI.
-    difficultyClass: "EXTREME",
-    finalConfidence: 0.92,
-    maxTokens: 1024,
-    needsClarification: false,
-    normalizedText:
-      "Win if at least 4 of your guess numbers appear in the drawn numbers.",
-    normalizedTextHash: Array.from({ length: 32 }, (_, i) => (i * 7) % 256),
-    officialInterpretation:
-      "A guess wins if at least 4 of its numbers appear in the official draw, regardless of order.",
-    officialInterpretationHash: Array.from(
-      { length: 32 },
-      (_, i) => (i * 5) % 256,
-    ),
-    preflightResultHash: Array.from({ length: 32 }, (_, i) => (i * 3) % 256),
-    reasonSummary: "Rule is measurable and unambiguous.",
-    reproposalBlocked: false,
-    ruleId: 4,
-    ruleMode: "predicate" as const,
-    sanitizedText: "Win if at least 4 of your numbers appear in the draw.",
-    sanitizedTextHash: Array.from({ length: 32 }, (_, i) => (i * 2) % 256),
-    tokenCount: 12,
-  },
-};
-
 // Resposta de GET /guess-receipts?turnId=...&player=...
 export const MOCK_GUESS_RECEIPT = {
   receipt: {

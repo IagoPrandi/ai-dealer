@@ -930,3 +930,54 @@ test("a follow-up question uses dealer chat and never starts preflight", async (
   ]);
   assert.equal(run?.guidanceContext?.dealerSuggestion, true);
 });
+
+test("dealer reasoning is removed when the streamed answer completes", async () => {
+  const draftId = "client:107:transient-reasoning";
+  let reasoningVisibleWhileStreaming = false;
+  const deps = baseDeps(
+    {
+      askDealer: async ({ onDelta, onReasoning }) => {
+        onReasoning?.("Checking the rule context.");
+        reasoningVisibleWhileStreaming =
+          getConversationRun(draftId)?.messages.at(-1)?.reasoning ===
+            "Checking the rule context." &&
+          getConversationRun(draftId)?.streaming === true;
+        onDelta?.("Ties split the alternative pool equally.");
+        return {
+          answer: "Ties split the alternative pool equally.",
+          proposedRuleText: null,
+          reasoning: "Checking the rule context.",
+        };
+      },
+      consumePreflightJob: async () => {
+        throw new Error("preflight consumption must not run");
+      },
+      startPreflightJob: async () => {
+        throw new Error("preflight must not start");
+      },
+    },
+    draftId,
+  );
+
+  await startConversationRun(
+    {
+      dealerQuestion: "How are ties decided?",
+      draftId,
+      initialMessages: [{ text: "How are ties decided?", who: "user" }],
+      lastUserMessage: "How are ties decided?",
+      localDealerReply: null,
+      phase: "interpret",
+      refinedDraft: null,
+      ruleText: "How are ties decided?",
+      turnId: 107,
+      wallet: "wallet-107",
+    },
+    deps,
+  );
+
+  const run = getConversationRun(draftId);
+  assert.equal(reasoningVisibleWhileStreaming, true);
+  assert.equal(run?.streaming, false);
+  assert.equal(run?.messages.at(-1)?.reasoning, undefined);
+  assert.equal(run?.messages.at(-1)?.text, "Ties split the alternative pool equally.");
+});
