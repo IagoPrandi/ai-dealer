@@ -8,6 +8,12 @@ import {
   buildDealerChatPrompt,
   buildDealerInterpretPrompt,
 } from "./promptSkills.js";
+import {
+  readProviderUsage,
+  recordAiCall,
+  type AiUsageOutcome,
+  type AiUsageStep,
+} from "./usage.js";
 
 // Real AI Rule Compiler bridge. Talks to an OpenAI-compatible chat-completions
 // endpoint (local Ollama / vLLM / llama.cpp, or a cloud provider) so the dealer
@@ -243,6 +249,49 @@ export function supportsRuleCompilationSchema(
   return endpointPort(config.baseUrl) === "11434" || hostname === "api.openai.com";
 }
 
+function openRouterUsageAccounting(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return cleanEnvValue(env.LLM_USAGE_ACCOUNTING).toLowerCase() !== "off";
+}
+
+/**
+ * Records one transport call against the ambient measurement scope (./usage.ts).
+ *
+ * Every rule-pipeline request funnels through here, so the token, cost and
+ * outcome accounting cannot drift from what was actually sent. Outside a
+ * `captureAiRun` scope this is a counted no-op — see `unscopedCallCount`.
+ *
+ * `payload` is the parsed response body when there is one. A call that never got
+ * a body (timeout, unreachable endpoint, HTTP error) is still recorded, with
+ * `outcome: "error"` and null token counts: a failed call has a latency and a
+ * cost of its own, and dropping it would make the failure look free.
+ */
+function recordTransportCall(args: {
+  config: RuleAgentConfig;
+  outcome: AiUsageOutcome;
+  payload: unknown;
+  startedAt: string;
+  startedAtMs: number;
+  step: AiUsageStep;
+}): void {
+  const usage = readProviderUsage(args.payload);
+  recordAiCall({
+    cachedPromptTokens: usage?.cachedPromptTokens ?? null,
+    completionTokens: usage?.completionTokens ?? null,
+    durationMs: performance.now() - args.startedAtMs,
+    model: args.config.model,
+    outcome: args.outcome,
+    promptTokens: usage?.promptTokens ?? null,
+    provider: resolveProviderDialect(args.config),
+    providerCostUsd: usage?.costUsd ?? null,
+    reasoningTokens: usage?.reasoningTokens ?? null,
+    startedAt: args.startedAt,
+    step: args.step,
+    totalTokens: usage?.totalTokens ?? null,
+  });
+}
+
 /**
  * The provider-specific request fragment: how the model is kept warm, and how
  * much hidden reasoning it may spend before answering.
@@ -283,6 +332,19 @@ function transportControls(
   }
 
   if (dialect === "openrouter") {
+    // Ask the router to return what the call actually cost. `prompt_tokens` /
+    // `completion_tokens` come back either way; this flag adds `usage.cost` in
+    // USD for the backend that was really routed to, which is strictly better
+    // than multiplying our own token counts by a price table that does not know
+    // which backend served the request.
+    //
+    // It is NOT a model parameter, so `require_parameters` below does not filter
+    // on it. LLM_USAGE_ACCOUNTING=off drops it if a router change ever makes it
+    // interact with routing; token accounting keeps working without it, only the
+    // provider-reported cost is lost.
+    const accounting: Record<string, unknown> = openRouterUsageAccounting()
+      ? { usage: { include: true } }
+      : {};
     // OpenRouter is a router, and `require_parameters` filters the backends to
     // those honouring EVERY parameter in the request — it cannot be scoped to
     // one of them. So the two concerns are kept in separate requests:
@@ -297,9 +359,9 @@ function transportControls(
     //   unconstrained (interpret/chat): no routing filter, but do control the
     //   trace, because that is where its cost shows up.
     if (schemaConstrained) {
-      return { provider: { require_parameters: true } };
+      return { ...accounting, provider: { require_parameters: true } };
     }
-    const controls: Record<string, unknown> = {};
+    const controls: Record<string, unknown> = { ...accounting };
     if (trace === "full") {
       return controls;
     }
@@ -914,6 +976,9 @@ async function describeChatHttpFailure(
 }
 
 async function requestAgentJson(
+  // Which pipeline step this request belongs to, for resource accounting. First
+  // so the optional trailing parameters keep their positions.
+  step: AiUsageStep,
   systemPrompt: string,
   userText: string,
   config: RuleAgentConfig,
@@ -928,6 +993,10 @@ async function requestAgentJson(
   if (config.apiKey) {
     headers.authorization = `Bearer ${config.apiKey}`;
   }
+  const startedAt = new Date().toISOString();
+  const startedAtMs = performance.now();
+  const record = (outcome: AiUsageOutcome, payload: unknown) =>
+    recordTransportCall({ config, outcome, payload, startedAt, startedAtMs, step });
 
   let response: Response;
   try {
@@ -968,6 +1037,7 @@ async function requestAgentJson(
     if (signal?.aborted) {
       throw signal.reason ?? error;
     }
+    record("error", null);
     if (error instanceof Error && error.name === "TimeoutError") {
       throw new RuleAgentError(
         "RULE_AGENT_TIMEOUT",
@@ -983,6 +1053,7 @@ async function requestAgentJson(
   }
 
   if (!response.ok) {
+    record("error", null);
     throw await describeChatHttpFailure(response, config, "the rule agent");
   }
 
@@ -990,6 +1061,7 @@ async function requestAgentJson(
   try {
     payload = await response.json();
   } catch {
+    record("error", null);
     throw new RuleAgentError(
       "RULE_AGENT_BAD_RESPONSE",
       "The rule agent response was not valid JSON.",
@@ -1012,6 +1084,10 @@ async function requestAgentJson(
   // it as the budget failure it is instead of parsing a fragment, and never let
   // the `reasoning` fallback below hand a truncated trace to the JSON extractor.
   if (choice?.finish_reason === "length") {
+    // Recorded BEFORE the throw: the provider billed the whole output budget for
+    // this one, so it is the most expensive call in the pipeline and the one an
+    // operator most needs to see. `truncated` keeps it out of the error bucket.
+    record("truncated", payload);
     throw new RuleAgentError(
       "RULE_AGENT_BAD_RESPONSE",
       `The rule agent response was cut off at the ${config.maxOutputTokens}-token output limit. Raise LLM_MAX_OUTPUT_TOKENS or use a model that does not spend the budget on a hidden reasoning trace.`,
@@ -1028,12 +1104,14 @@ async function requestAgentJson(
   const candidate = strippedContent || rawContent.trim() || reasoning.trim();
 
   if (candidate.length === 0) {
+    record("error", payload);
     throw new RuleAgentError(
       "RULE_AGENT_BAD_RESPONSE",
       "The rule agent response did not contain any content.",
     );
   }
 
+  record("ok", payload);
   return candidate;
 }
 
@@ -1043,6 +1121,7 @@ export async function interpretRuleWithAgent(
   signal?: AbortSignal,
 ): Promise<RuleAgentInterpretation> {
   const candidate = await requestAgentJson(
+    "interpret",
     buildDealerInterpretPrompt(),
     sanitizedText,
     config,
@@ -1221,6 +1300,20 @@ async function requestAgentJsonStream(
   if (config.apiKey) {
     headers.authorization = `Bearer ${config.apiKey}`;
   }
+  const startedAt = new Date().toISOString();
+  const startedAtMs = performance.now();
+  // A stream reports its token counts in a trailing chunk, not in the response
+  // body, so the accounting has to be picked up while the SSE is consumed.
+  let streamUsagePayload: unknown = null;
+  const record = (outcome: AiUsageOutcome) =>
+    recordTransportCall({
+      config,
+      outcome,
+      payload: streamUsagePayload,
+      startedAt,
+      startedAtMs,
+      step: "chat",
+    });
 
   let response: Response;
   try {
@@ -1236,6 +1329,11 @@ async function requestAgentJsonStream(
         response_format: { type: "json_object" },
         seed: config.seed,
         stream: true,
+        // Without this an OpenAI-compatible stream never reports token counts at
+        // all, and the streamed dealer answers would be the one step missing from
+        // the resource account. Providers that do not implement it simply never
+        // send the trailing usage chunk, which is recorded as `not_reported`.
+        stream_options: { include_usage: true },
         temperature: 0,
         top_p: 1,
       }),
@@ -1247,6 +1345,7 @@ async function requestAgentJsonStream(
     if (signal?.aborted) {
       throw signal.reason ?? error;
     }
+    record("error");
     if (error instanceof Error && error.name === "TimeoutError") {
       throw new RuleAgentError(
         "RULE_AGENT_TIMEOUT",
@@ -1262,9 +1361,11 @@ async function requestAgentJsonStream(
   }
 
   if (!response.ok) {
+    record("error");
     throw await describeChatHttpFailure(response, config, "the dealer chat");
   }
   if (!response.body) {
+    record("error");
     throw new RuleAgentError(
       "RULE_AGENT_BAD_RESPONSE",
       "The rule agent stream carried no body.",
@@ -1292,6 +1393,12 @@ async function requestAgentJsonStream(
         "RULE_AGENT_BAD_RESPONSE",
         "The rule agent stream sent a chunk that was not valid JSON.",
       );
+    }
+    // The trailing chunk carries `usage` and an empty `choices` array. Kept as
+    // the whole event so `readProviderUsage` sees the same shape it reads from a
+    // non-streamed body.
+    if ((event as { usage?: unknown })?.usage) {
+      streamUsagePayload = event;
     }
     const choice = (
       event as {
@@ -1336,6 +1443,7 @@ async function requestAgentJsonStream(
     if (signal?.aborted) {
       throw signal.reason ?? error;
     }
+    record("error");
     if (error instanceof RuleAgentError) {
       throw error;
     }
@@ -1358,6 +1466,7 @@ async function requestAgentJsonStream(
   // Same budget rule as the non-streaming path: a cut-off object is never a
   // usable answer, even though some of it already reached the player.
   if (truncated) {
+    record("truncated");
     throw new RuleAgentError(
       "RULE_AGENT_BAD_RESPONSE",
       `The rule agent response was cut off at the ${config.maxOutputTokens}-token output limit. Raise LLM_MAX_OUTPUT_TOKENS or use a model that does not spend the budget on a hidden reasoning trace.`,
@@ -1369,11 +1478,13 @@ async function requestAgentJsonStream(
     .trim();
   const candidate = strippedContent || content.trim() || reasoning.trim();
   if (candidate.length === 0) {
+    record("error");
     throw new RuleAgentError(
       "RULE_AGENT_BAD_RESPONSE",
       "The rule agent response did not contain any content.",
     );
   }
+  record("ok");
   return candidate;
 }
 
@@ -1476,6 +1587,7 @@ export async function answerDealerQuestion(
   signal?: AbortSignal,
 ): Promise<DealerQuestionAnswer> {
   const candidate = await requestAgentJson(
+    "chat",
     buildDealerChatPrompt(),
     context,
     config,
@@ -1517,6 +1629,17 @@ export async function translateRuleToEnglish(
   if (config.apiKey) {
     headers.authorization = `Bearer ${config.apiKey}`;
   }
+  const startedAt = new Date().toISOString();
+  const startedAtMs = performance.now();
+  const record = (outcome: AiUsageOutcome, payload: unknown) =>
+    recordTransportCall({
+      config,
+      outcome,
+      payload,
+      startedAt,
+      startedAtMs,
+      step: "translate",
+    });
   let response: Response;
   try {
     response = await fetch(`${config.baseUrl}/chat/completions`, {
@@ -1544,6 +1667,7 @@ export async function translateRuleToEnglish(
     if (signal?.aborted) {
       throw signal.reason ?? error;
     }
+    record("error", null);
     if (error instanceof Error && error.name === "TimeoutError") {
       throw new RuleAgentError(
         "RULE_AGENT_TIMEOUT",
@@ -1556,6 +1680,7 @@ export async function translateRuleToEnglish(
     );
   }
   if (!response.ok) {
+    record("error", null);
     throw await describeChatHttpFailure(response, config, "the translator");
   }
   const payload = (await response.json().catch(() => null)) as {
@@ -1566,6 +1691,7 @@ export async function translateRuleToEnglish(
   } | null;
   const choice = payload?.choices?.[0];
   if (choice?.finish_reason === "length") {
+    record("truncated", payload);
     throw new RuleAgentError(
       "RULE_AGENT_BAD_RESPONSE",
       `The translator response was cut off at the ${config.maxOutputTokens}-token output limit. Raise LLM_MAX_OUTPUT_TOKENS.`,
@@ -1580,11 +1706,13 @@ export async function translateRuleToEnglish(
   // Strip wrapping quotes the model sometimes adds.
   const englishText = cleaned.replace(/^["'`]+|["'`]+$/g, "").trim();
   if (!englishText) {
+    record("error", payload);
     throw new RuleAgentError(
       "RULE_AGENT_BAD_RESPONSE",
       "The translator returned no text.",
     );
   }
+  record("ok", payload);
   return englishText;
 }
 
@@ -1678,6 +1806,9 @@ export async function compileRuleToAst(
     // shapes that break it are the large nested ones, and those get the thinking
     // re-ask below rather than making every rule wait for a reasoning trace.
     const candidate = await requestAgentJson(
+      // Generation and independent review are separately billed steps against
+      // the same ~15k-token prompt, so they are never merged in the accounting.
+      role === "review" ? "review" : "compile",
       prompt,
       normalizedText,
       config,

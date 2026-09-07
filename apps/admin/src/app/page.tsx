@@ -238,8 +238,10 @@ interface OperatorAiOperationsSnapshot {
     modelConfidenceBuckets: Record<string, number>;
   };
   estimatedCost: {
+    basis: "rule_text_token_projection";
     costPerThousandTokensUsd: number;
     estimatedUsd: number;
+    measuredUsd: number | null;
     source: "configured_rate" | "not_configured";
     totalTokens: number;
   };
@@ -269,6 +271,90 @@ interface OperatorAiOperationsSnapshot {
     quantization: string | null;
     servingEngine: string;
   }>;
+  // Measured at the transport, not projected from rule text — see
+  // apps/api/src/usage.ts.
+  measuredResourceUsage: {
+    byProvider: Array<{
+      cachedPromptTokens: number;
+      calls: number;
+      completionTokens: number;
+      costUsd: number | null;
+      errorCalls: number;
+      model: string;
+      promptTokens: number;
+      provider: string;
+      reasoningTokens: number;
+      totalDurationMs: number;
+      totalTokens: number;
+      truncatedCalls: number;
+      unpricedCalls: number;
+    }>;
+    byStep: Array<{
+      calls: number;
+      completionTokens: number;
+      costUsd: number | null;
+      errorCalls: number;
+      promptTokens: number;
+      reasoningTokens: number;
+      step: string;
+      totalDurationMs: number;
+      totalTokens: number;
+      truncatedCalls: number;
+    }>;
+    compute: {
+      averageCpuMsPerRun: number;
+      averageWallClockMsPerRun: number;
+      cpuCores: number;
+      hostTotalMemoryBytes: number;
+      peakConcurrentRuns: number;
+      peakRssBytes: number;
+      totalCpuMs: number;
+      totalWallClockMs: number;
+    };
+    coverage: {
+      detailedRunCount: number;
+      retainedRunCount: number;
+      runsWithUnpricedCalls: number;
+      runsWithUntokenizedCalls: number;
+    };
+    perRunAverages: {
+      completionTokens: number;
+      costUsd: number | null;
+      llmCalls: number;
+      promptTokens: number;
+      totalTokens: number;
+      wallClockMs: number;
+    };
+    pricing: {
+      configurationError: string | null;
+      flatRatePerThousandTokensUsd: number;
+      pricedModels: string[];
+      unscopedCallCount: number;
+    };
+    recentRuns: Array<{
+      completedAt: string;
+      costUsd: number | null;
+      cpuTotalMs: number;
+      label: string;
+      llmCalls: number;
+      peakRssBytes: number;
+      subject: string | null;
+      totalTokens: number;
+      wallClockMs: number;
+    }>;
+    source: "measured_provider_usage";
+    totals: {
+      completionTokens: number;
+      costUsd: number | null;
+      errorCalls: number;
+      llmCalls: number;
+      promptTokens: number;
+      reasoningTokens: number;
+      runs: number;
+      totalTokens: number;
+      truncatedCalls: number;
+    };
+  };
   modelRouting: Array<{
     escalationCount: number;
     fallbackTriggered: number;
@@ -416,6 +502,23 @@ function usdLabel(value: number) {
   });
 }
 
+// A cost the pipeline could not establish reads as unknown. Rendering it as
+// $0.0000 would say the run was free, which is the one thing it was not.
+function optionalUsdLabel(value: number | null) {
+  return value === null ? "Not priced" : usdLabel(value);
+}
+
+function bytesLabel(value: number) {
+  if (value >= 1_073_741_824) {
+    return `${(value / 1_073_741_824).toLocaleString("en-US", {
+      maximumFractionDigits: 2,
+    })} GB`;
+  }
+  return `${(value / 1_048_576).toLocaleString("en-US", {
+    maximumFractionDigits: 0,
+  })} MB`;
+}
+
 function bucketLabel(value: string) {
   return value.replace("_", "-");
 }
@@ -461,6 +564,201 @@ function StatCard({
       <strong className="numeric">{value}</strong>
       <small>{source}</small>
     </article>
+  );
+}
+
+/**
+ * What the AI pipeline actually spent. Kept apart from the rule-text projection
+ * above it because the two count different things: the projection counts the
+ * players' ~80-token sentences, this counts the ~15k-token prompts the compiler
+ * and reviewer send on every call.
+ */
+function MeasuredResourceUsagePanel({
+  usage,
+}: {
+  usage: OperatorAiOperationsSnapshot["measuredResourceUsage"];
+}) {
+  const {
+    byProvider,
+    byStep,
+    compute,
+    coverage,
+    perRunAverages,
+    pricing,
+    recentRuns,
+    totals,
+  } = usage;
+  return (
+    <section className="operator-grid">
+      <div>
+        <h3>Measured tokens by provider</h3>
+        <ul className="stack-list">
+          {byProvider.length === 0 ? (
+            <li>
+              <span>No measured calls retained</span>
+              <strong>0 tokens</strong>
+            </li>
+          ) : (
+            byProvider.map((row) => (
+              <li key={`${row.provider}:${row.model}`}>
+                <span>
+                  {row.provider} / {row.model} / {row.calls} calls
+                </span>
+                <strong>
+                  {metricLabel(row.promptTokens)} in /{" "}
+                  {metricLabel(row.completionTokens)} out /{" "}
+                  {metricLabel(row.totalTokens)} total
+                  {/* Token counts are complete for every OpenAI-compatible
+                      endpoint; only the USD conversion depends on a price. */}
+                  {row.unpricedCalls === row.calls
+                    ? " / tokens only"
+                    : ` / ${optionalUsdLabel(row.costUsd)}`}
+                </strong>
+              </li>
+            ))
+          )}
+        </ul>
+      </div>
+      <div>
+        <h3>Measured spend by pipeline step</h3>
+        <ul className="stack-list">
+          {byStep.length === 0 ? (
+            <li>
+              <span>No measured calls retained</span>
+              <strong>0 tokens</strong>
+            </li>
+          ) : (
+            byStep.map((step) => (
+              <li key={step.step}>
+                <span>
+                  {formatScope(step.step)} / {step.calls} calls
+                  {step.truncatedCalls > 0
+                    ? ` / ${step.truncatedCalls} truncated`
+                    : ""}
+                </span>
+                <strong>
+                  {metricLabel(step.promptTokens)} in /{" "}
+                  {metricLabel(step.completionTokens)} out /{" "}
+                  {optionalUsdLabel(step.costUsd)}
+                </strong>
+              </li>
+            ))
+          )}
+        </ul>
+      </div>
+      <div>
+        <h3>Compute per run</h3>
+        <ul className="stack-list">
+          <li>
+            <span>LLM calls</span>
+            <strong className="numeric">
+              {perRunAverages.llmCalls.toLocaleString("en-US", {
+                maximumFractionDigits: 1,
+              })}
+            </strong>
+          </li>
+          <li>
+            <span>Tokens</span>
+            <strong className="numeric">
+              {metricLabel(Math.round(perRunAverages.totalTokens))}
+            </strong>
+          </li>
+          <li>
+            <span>Wall clock</span>
+            <strong className="numeric">
+              {millisecondsLabel(perRunAverages.wallClockMs)}
+            </strong>
+          </li>
+          <li>
+            <span>API CPU time</span>
+            <strong className="numeric">
+              {millisecondsLabel(compute.averageCpuMsPerRun)}
+            </strong>
+          </li>
+          <li>
+            <span>Host RAM</span>
+            <strong className="numeric">
+              {bytesLabel(compute.peakRssBytes)} peak /{" "}
+              {bytesLabel(compute.hostTotalMemoryBytes)} total
+            </strong>
+          </li>
+          <li>
+            {/* Above 1, CPU and RSS are shared across overlapping runs:
+                process.cpuUsage() is process-wide. */}
+            <span>Peak concurrent runs</span>
+            <strong className="numeric">{compute.peakConcurrentRuns}</strong>
+          </li>
+        </ul>
+      </div>
+      <div>
+        <h3>Account coverage</h3>
+        <ul className="stack-list">
+          <li>
+            <span>Runs retained / with per-call detail</span>
+            <strong className="numeric">
+              {coverage.retainedRunCount} / {coverage.detailedRunCount}
+            </strong>
+          </li>
+          <li>
+            <span>Runs with unpriced calls</span>
+            <strong className="numeric">{coverage.runsWithUnpricedCalls}</strong>
+          </li>
+          <li>
+            <span>Runs with untokenized calls</span>
+            <strong className="numeric">
+              {coverage.runsWithUntokenizedCalls}
+            </strong>
+          </li>
+          <li>
+            <span>Truncated / failed calls</span>
+            <strong className="numeric">
+              {totals.truncatedCalls} / {totals.errorCalls}
+            </strong>
+          </li>
+          <li>
+            <span>Calls recorded outside a run</span>
+            <strong className="numeric">{pricing.unscopedCallCount}</strong>
+          </li>
+          <li>
+            <span>Price source</span>
+            <strong>
+              {pricing.configurationError
+                ? pricing.configurationError
+                : pricing.pricedModels.length > 0
+                  ? `${pricing.pricedModels.length} models priced locally`
+                  : pricing.flatRatePerThousandTokensUsd > 0
+                    ? "Flat configured rate"
+                    : "Provider-reported only"}
+            </strong>
+          </li>
+        </ul>
+      </div>
+      <div>
+        <h3>Recent runs</h3>
+        <ul className="stack-list">
+          {recentRuns.length === 0 ? (
+            <li>
+              <span>No runs recorded</span>
+              <strong>0 calls</strong>
+            </li>
+          ) : (
+            recentRuns.map((run) => (
+              <li key={`${run.completedAt}:${run.subject ?? run.label}`}>
+                <span>
+                  {formatScope(run.label)}
+                  {run.subject ? ` / ${run.subject}` : ""}
+                </span>
+                <strong>
+                  {run.llmCalls} calls / {metricLabel(run.totalTokens)} tokens /{" "}
+                  {optionalUsdLabel(run.costUsd)} /{" "}
+                  {millisecondsLabel(run.wallClockMs)}
+                </strong>
+              </li>
+            ))
+          )}
+        </ul>
+      </div>
+    </section>
   );
 }
 
@@ -686,16 +984,48 @@ export function OperatorAiOperationsPage() {
                   value={metricLabel(operatorSnapshot.queue.deadLetterJobs)}
                 />
                 <StatCard
-                  label="Token volume"
-                  source="Rule proposal tokens"
+                  label="Rule text tokens"
+                  source="Player rule sentences, not inference"
                   value={metricLabel(operatorSnapshot.estimatedCost.totalTokens)}
                 />
                 <StatCard
-                  label="Estimated cost"
-                  source={formatScope(operatorSnapshot.estimatedCost.source)}
-                  value={usdLabel(operatorSnapshot.estimatedCost.estimatedUsd)}
+                  label="Measured tokens"
+                  source={`Provider usage over ${operatorSnapshot.measuredResourceUsage.totals.runs} runs`}
+                  value={metricLabel(
+                    operatorSnapshot.measuredResourceUsage.totals.totalTokens,
+                  )}
+                />
+                <StatCard
+                  label="Measured cost"
+                  source={
+                    operatorSnapshot.measuredResourceUsage.coverage
+                      .runsWithUnpricedCalls > 0
+                      ? `Floor: ${operatorSnapshot.measuredResourceUsage.coverage.runsWithUnpricedCalls} runs have unpriced calls`
+                      : "Every call priced"
+                  }
+                  value={optionalUsdLabel(
+                    operatorSnapshot.measuredResourceUsage.totals.costUsd,
+                  )}
+                />
+                <StatCard
+                  label="Cost per run"
+                  source="Measured average"
+                  value={optionalUsdLabel(
+                    operatorSnapshot.measuredResourceUsage.perRunAverages.costUsd,
+                  )}
+                />
+                <StatCard
+                  label="API CPU time"
+                  source={`${operatorSnapshot.measuredResourceUsage.compute.cpuCores} cores / peak RSS ${bytesLabel(operatorSnapshot.measuredResourceUsage.compute.peakRssBytes)}`}
+                  value={millisecondsLabel(
+                    operatorSnapshot.measuredResourceUsage.compute.totalCpuMs,
+                  )}
                 />
               </div>
+
+              <MeasuredResourceUsagePanel
+                usage={operatorSnapshot.measuredResourceUsage}
+              />
 
               <div className="operator-grid">
                 <div>

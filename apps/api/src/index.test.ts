@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { generateKeyPairSync, sign } from "node:crypto";
 import { createServer } from "node:http";
 import { test } from "node:test";
+import { captureAiRun, recordAiCall, setAiRunSubject } from "./usage.js";
 import {
   API_STATE_POSTGRES_SCHEMA,
   M3_7_POSTGRES_AUDIT_SCHEMA,
@@ -4928,4 +4929,154 @@ test("a compiled rule clears the earlier gate block", () => {
   const stored = listConversationDrafts(wallet)[0];
   assert.equal(stored?.lastGateBlock, null);
   assert.deepEqual(stored?.lastPreflight?.reasonCodes, ["SUPPORTED_RULE"]);
+});
+
+test("the operator console reports measured AI spend apart from the rule-text projection", async () => {
+  resetApiStateForTests();
+  delete process.env.LLM_PRICE_TABLE_JSON;
+  process.env.LLM_ESTIMATED_COST_PER_1K_TOKENS_USD = "0.001";
+
+  await captureAiRun("rule_preflight", async () => {
+    setAiRunSubject("1757203200000042");
+    recordAiCall({
+      completionTokens: 40,
+      durationMs: 900,
+      model: "openai/gpt-oss-120b",
+      outcome: "ok",
+      promptTokens: 300,
+      provider: "openrouter",
+      startedAt: "2026-09-07T00:00:00.000Z",
+      step: "translate",
+    });
+    recordAiCall({
+      completionTokens: 2_048,
+      durationMs: 41_000,
+      model: "openai/gpt-oss-120b",
+      outcome: "ok",
+      promptTokens: 15_300,
+      provider: "openrouter",
+      startedAt: "2026-09-07T00:00:01.000Z",
+      step: "compile",
+    });
+  });
+
+  const snapshot = getOperatorAiOperationsSnapshot();
+  const measured = snapshot.measuredResourceUsage;
+
+  assert.equal(measured.source, "measured_provider_usage");
+  assert.equal(measured.totals.runs, 1);
+  assert.equal(measured.totals.llmCalls, 2);
+  assert.equal(measured.totals.promptTokens, 15_600);
+  assert.equal(measured.totals.completionTokens, 2_088);
+  assert.equal(measured.totals.totalTokens, 17_688);
+  assert.equal(measured.totals.costUsd, (17_688 / 1_000) * 0.001);
+  assert.equal(measured.coverage.retainedRunCount, 1);
+  assert.equal(measured.coverage.runsWithUnpricedCalls, 0);
+
+  // Compute is measured, not projected.
+  assert.equal(measured.compute.cpuCores > 0, true);
+  assert.equal(measured.compute.totalWallClockMs > 0, true);
+  assert.equal(measured.compute.peakRssBytes > 0, true);
+  assert.equal(measured.compute.hostTotalMemoryBytes > 0, true);
+
+  // The compile step must be visible as the dominant token consumer.
+  const compile = measured.byStep.find((row) => row.step === "compile");
+  assert.equal(compile?.promptTokens, 15_300);
+  assert.equal(measured.byStep[0]?.step, "compile");
+
+  assert.equal(measured.recentRuns[0]?.subject, "1757203200000042");
+  assert.equal(measured.recentRuns[0]?.label, "rule_preflight");
+
+  // The legacy projection stays, and now says what it is measuring.
+  assert.equal(snapshot.estimatedCost.basis, "rule_text_token_projection");
+  assert.equal(snapshot.estimatedCost.measuredUsd, measured.totals.costUsd);
+
+  assert.equal(
+    snapshot.sourceReferences.some(
+      (reference) =>
+        reference.label ===
+          "Measured AI token, cost, CPU and RAM usage per pipeline run" &&
+        reference.status === "available",
+    ),
+    true,
+  );
+
+  // Per-endpoint tokens: the answer to "how much did we spend at Groq", which
+  // stays complete even where the provider reports no price.
+  const openrouter = measured.byProvider.find(
+    (row) => row.provider === "openrouter",
+  );
+  assert.equal(measured.byProvider.length, 1);
+  assert.equal(openrouter?.model, "openai/gpt-oss-120b");
+  assert.equal(openrouter?.calls, 2);
+  assert.equal(openrouter?.promptTokens, 15_600);
+  assert.equal(openrouter?.completionTokens, 2_088);
+  assert.equal(openrouter?.totalTokens, 17_688);
+  assert.equal(openrouter?.unpricedCalls, 0);
+
+  const csv = exportOperatorAiOperationsCsv(snapshot);
+  assert.match(csv, /measured_total_tokens/);
+  assert.match(csv, /measured_peak_rss_bytes/);
+  assert.match(csv, /provider_measured_total_tokens/);
+  assert.match(csv, /17688/);
+
+  // Every row must line up with the header: the export mixes two row scopes and
+  // a miscounted placeholder would silently shift a value into a column that
+  // means something else.
+  const parseCsvRow = (line: string) => {
+    const cells: string[] = [];
+    let cell = "";
+    let quoted = false;
+    for (let index = 0; index < line.length; index += 1) {
+      const character = line[index];
+      if (quoted) {
+        if (character === '"' && line[index + 1] === '"') {
+          cell += '"';
+          index += 1;
+        } else if (character === '"') {
+          quoted = false;
+        } else {
+          cell += character;
+        }
+      } else if (character === '"') {
+        quoted = true;
+      } else if (character === ",") {
+        cells.push(cell);
+        cell = "";
+      } else {
+        cell += character;
+      }
+    }
+    cells.push(cell);
+    return cells;
+  };
+  const csvRows = csv.split("\n").map(parseCsvRow);
+  const header = csvRows[0] ?? [];
+  assert.equal(header[0], "row_scope");
+  for (const row of csvRows) {
+    assert.equal(row.length, header.length);
+  }
+  const scopeIndex = header.indexOf("row_scope");
+  const providerRow = csvRows.find(
+    (row) => row[scopeIndex] === "measured_provider_model",
+  );
+  assert.equal(providerRow?.[header.indexOf("provider")], "openrouter");
+  assert.equal(providerRow?.[header.indexOf("model")], "openai/gpt-oss-120b");
+  assert.equal(
+    providerRow?.[header.indexOf("provider_measured_total_tokens")],
+    "17688",
+  );
+  assert.equal(
+    providerRow?.[header.indexOf("provider_measured_prompt_tokens")],
+    "15600",
+  );
+  // The p95 column belongs to the role rows; the per-endpoint mean has its own.
+  assert.equal(providerRow?.[header.indexOf("p95_latency_ms")], "");
+  assert.equal(
+    Number(providerRow?.[header.indexOf("provider_measured_mean_duration_ms")]),
+    (900 + 41_000) / 2,
+  );
+
+  delete process.env.LLM_ESTIMATED_COST_PER_1K_TOKENS_USD;
+  resetApiStateForTests();
 });

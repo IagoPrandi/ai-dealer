@@ -21,6 +21,13 @@
 // configuration. Both are scored greedily and both surface transport failures as
 // typed errors — a guardrail that silently answers "safe" is worse than none.
 
+import {
+  readProviderUsage,
+  recordAiCall,
+  type AiUsageOutcome,
+  type AiUsageStep,
+} from "./usage.js";
+
 export type GuardianDialect = "granite" | "safeguard";
 
 export interface GuardianConfig {
@@ -218,8 +225,63 @@ interface SafeguardVerdict {
   violation: boolean;
 }
 
+/**
+ * How the guardian endpoint is labelled in the resource account. Derived from
+ * the configured URL rather than from a separate setting, so the label can never
+ * disagree with where the request actually went.
+ */
+function guardianProvider(config: GuardianConfig): string {
+  try {
+    const { hostname } = new URL(config.chatUrl);
+    if (hostname.endsWith("openrouter.ai")) {
+      return "openrouter";
+    }
+    if (hostname.endsWith("groq.com")) {
+      return "groq";
+    }
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      return "ollama";
+    }
+    return hostname;
+  } catch {
+    return "not_recorded";
+  }
+}
+
+/**
+ * Records one guardian call against the ambient measurement scope (./usage.ts).
+ * The guardian is a separate model on a separate endpoint and it runs up to four
+ * times per preflight (two jailbreak screenings, two groundedness questions), so
+ * leaving it out would understate the run by every safety call it made.
+ */
+function recordGuardianCall(args: {
+  config: GuardianConfig;
+  outcome: AiUsageOutcome;
+  payload: unknown;
+  startedAt: string;
+  startedAtMs: number;
+  step: AiUsageStep;
+}): void {
+  const usage = readProviderUsage(args.payload);
+  recordAiCall({
+    cachedPromptTokens: usage?.cachedPromptTokens ?? null,
+    completionTokens: usage?.completionTokens ?? null,
+    durationMs: performance.now() - args.startedAtMs,
+    model: args.config.model,
+    outcome: args.outcome,
+    promptTokens: usage?.promptTokens ?? null,
+    provider: guardianProvider(args.config),
+    providerCostUsd: usage?.costUsd ?? null,
+    reasoningTokens: usage?.reasoningTokens ?? null,
+    startedAt: args.startedAt,
+    step: args.step,
+    totalTokens: usage?.totalTokens ?? null,
+  });
+}
+
 // Scores one safeguard policy. Returns true when the policy IS violated.
 async function scoreSafeguard(
+  step: AiUsageStep,
   policy: string,
   content: string,
   config: GuardianConfig,
@@ -229,6 +291,10 @@ async function scoreSafeguard(
   if (config.apiKey) {
     headers.authorization = `Bearer ${config.apiKey}`;
   }
+  const startedAt = new Date().toISOString();
+  const startedAtMs = performance.now();
+  const record = (outcome: AiUsageOutcome, payload: unknown) =>
+    recordGuardianCall({ config, outcome, payload, startedAt, startedAtMs, step });
 
   let response: Response;
   try {
@@ -249,6 +315,11 @@ async function scoreSafeguard(
         stream: false,
         temperature: 0,
         top_p: 1,
+        // Ask the router for the per-call cost. Ignored by every other
+        // OpenAI-compatible endpoint, which reports plain token counts instead.
+        ...(guardianProvider(config) === "openrouter"
+          ? { usage: { include: true } }
+          : {}),
       }),
       headers,
       method: "POST",
@@ -260,6 +331,7 @@ async function scoreSafeguard(
     if (signal?.aborted) {
       throw signal.reason ?? error;
     }
+    record("error", null);
     throw new GuardianError(
       "GUARDIAN_UNAVAILABLE",
       `The guardian model is unreachable: ${
@@ -270,6 +342,7 @@ async function scoreSafeguard(
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
+    record("error", null);
     throw new GuardianError(
       "GUARDIAN_UNAVAILABLE",
       `The guardian model returned HTTP ${response.status}. ${detail.slice(0, 200)}`.trim(),
@@ -284,6 +357,7 @@ async function scoreSafeguard(
   } | null;
   const choice = payload?.choices?.[0];
   if (choice?.finish_reason === "length") {
+    record("truncated", payload);
     throw new GuardianError(
       "GUARDIAN_BAD_RESPONSE",
       `The guardian verdict was cut off at the ${SAFEGUARD_MAX_OUTPUT_TOKENS}-token output limit.`,
@@ -296,36 +370,40 @@ async function scoreSafeguard(
   try {
     parsed = JSON.parse(raw);
   } catch {
+    record("error", payload);
     throw new GuardianError(
       "GUARDIAN_BAD_RESPONSE",
       `The guardian model did not return a JSON verdict: ${raw.slice(0, 120)}`,
     );
   }
-  const record = (parsed ?? {}) as Record<string, unknown>;
+  const verdict = (parsed ?? {}) as Record<string, unknown>;
   // Only the two values the policy allows count. Anything else — a string
   // "maybe", a missing field, a nested object — is an unusable verdict, and a
   // guardrail that guesses when it cannot read its own answer is not a guardrail.
   const violation =
-    record.violation === 1 || record.violation === true
+    verdict.violation === 1 || verdict.violation === true
       ? true
-      : record.violation === 0 || record.violation === false
+      : verdict.violation === 0 || verdict.violation === false
         ? false
         : null;
   if (violation === null) {
+    record("error", payload);
     throw new GuardianError(
       "GUARDIAN_BAD_RESPONSE",
       `The guardian verdict had no usable "violation" field: ${raw.slice(0, 120)}`,
     );
   }
+  record("ok", payload);
   return {
     rationale:
-      typeof record.rationale === "string" ? record.rationale.trim() : "",
+      typeof verdict.rationale === "string" ? verdict.rationale.trim() : "",
     violation,
   };
 }
 
 // Returns true when the guardian scores `yes` (the named risk IS present).
 async function score(
+  step: AiUsageStep,
   messages: GuardianMessage[],
   config: GuardianConfig,
   signal?: AbortSignal,
@@ -334,6 +412,10 @@ async function score(
   if (config.apiKey) {
     headers.authorization = `Bearer ${config.apiKey}`;
   }
+  const startedAt = new Date().toISOString();
+  const startedAtMs = performance.now();
+  const record = (outcome: AiUsageOutcome, payload: unknown) =>
+    recordGuardianCall({ config, outcome, payload, startedAt, startedAtMs, step });
 
   let response: Response;
   try {
@@ -356,6 +438,7 @@ async function score(
     if (signal?.aborted) {
       throw signal.reason ?? error;
     }
+    record("error", null);
     throw new GuardianError(
       "GUARDIAN_UNAVAILABLE",
       `The guardian model is unreachable: ${
@@ -365,12 +448,15 @@ async function score(
   }
 
   if (!response.ok) {
+    record("error", null);
     throw new GuardianError(
       "GUARDIAN_UNAVAILABLE",
       `The guardian model returned HTTP ${response.status}.`,
     );
   }
 
+  // Ollama's native surface reports `prompt_eval_count` / `eval_count` at the top
+  // level instead of an OpenAI `usage` object; `readProviderUsage` reads both.
   const payload = (await response.json().catch(() => null)) as {
     message?: { content?: unknown };
   } | null;
@@ -378,11 +464,13 @@ async function score(
     typeof payload?.message?.content === "string" ? payload.message.content : "";
   const match = content.match(/<score>\s*(yes|no)\s*<\/score>/i);
   if (!match) {
+    record("error", payload);
     throw new GuardianError(
       "GUARDIAN_BAD_RESPONSE",
       `The guardian model did not return a score: ${content.slice(0, 120)}`,
     );
   }
+  record("ok", payload);
   return match[1]!.toLowerCase() === "yes";
 }
 
@@ -394,6 +482,7 @@ export async function detectJailbreak(
 ): Promise<boolean> {
   if (config.dialect === "safeguard") {
     const verdict = await scoreSafeguard(
+      "guardian_jailbreak",
       SAFEGUARD_JAILBREAK_POLICY,
       text,
       config,
@@ -402,6 +491,7 @@ export async function detectJailbreak(
     return verdict.violation;
   }
   return score(
+    "guardian_jailbreak",
     [
       // Granite Guardian's Ollama template reads its criterion from the first
       // system message and scores the final user message. Supplying the judge
@@ -530,6 +620,7 @@ export async function checkGroundedness(
     // The two texts are labelled inside one user turn: gpt-oss-safeguard has no
     // `document` role, and the policy names DOCUMENT as the source of truth.
     const verdict = await scoreSafeguard(
+      "guardian_groundedness",
       SAFEGUARD_GROUNDEDNESS_POLICY,
       `DOCUMENT:
 ${rule}
@@ -543,6 +634,7 @@ ${interpretation}`,
   }
 
   const ungrounded = await score(
+    "guardian_groundedness",
     [
       // The Ollama template has first-class groundedness semantics: documents
       // provide the source of truth and the final assistant turn is what gets

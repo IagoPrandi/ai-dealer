@@ -77,6 +77,18 @@ import {
   type GuardianConfig,
 } from "./guardian.js";
 import {
+  captureAiRun,
+  exportAiUsageRunSummaries,
+  getAiUsagePricingStatus,
+  getAiUsageRunSummaries,
+  getAiUsageRuns,
+  importAiUsageRunSummaries,
+  resetAiUsageRegistry,
+  setAiRunSubject,
+  type AiRunUsageSummary,
+  type AiUsageStep,
+} from "./usage.js";
+import {
   checkPostgresHealth,
   checkRedisHealth,
   closeHealthResources,
@@ -1647,6 +1659,12 @@ const activeRulePreflightJobTasks = new Set<Promise<void>>();
 const rulePreflightJobControllers = new Map<string, AbortController>();
 
 export interface ApiStateSnapshotV1 {
+  /**
+   * Measured AI resource usage per pipeline run — totals plus CPU/RAM, without
+   * the per-call rows, which stay in memory (see apps/api/src/usage.ts). Optional
+   * so a snapshot written before this field existed still restores.
+   */
+  aiUsageRunSummaries?: AiRunUsageSummary[];
   auditLogOrder: string[];
   auditLogs: [string, AuditLogRecord][];
   claimRecords: [string, ClaimRecord][];
@@ -1694,6 +1712,7 @@ let apiStatePersistenceQueue: Promise<void> = Promise.resolve();
 export function exportApiStateSnapshot(): ApiStateSnapshotV1 {
   sweepRulePreflightJobs();
   return {
+    aiUsageRunSummaries: exportAiUsageRunSummaries(),
     auditLogOrder: [...auditLogOrder],
     auditLogs: [...auditLogs.entries()],
     claimRecords: [...claimRecords.entries()],
@@ -1777,6 +1796,7 @@ export function restoreApiStateSnapshot(snapshot: ApiStateSnapshotV1) {
   // fingerprint index is deliberately not rebuilt: restored jobs are all
   // terminal, and only running jobs are deduplicated.
   replaceMap(rulePreflightJobs, snapshot.rulePreflightJobs ?? []);
+  importAiUsageRunSummaries(snapshot.aiUsageRunSummaries ?? []);
   replaceMap(ruleProposals, snapshot.ruleProposals);
   replaceMap(ruleValidations, snapshot.ruleValidations);
   replaceMap(ruleVotes, snapshot.ruleVotes);
@@ -2530,6 +2550,7 @@ export function resetApiStateForTests() {
   auditLogOrder.length = 0;
   lastAuditLogHash = null;
   operatorAiAccessChallenges.clear();
+  resetAiUsageRegistry();
   resetTokenomicsProjectionForTests();
 }
 
@@ -3500,6 +3521,17 @@ async function createRuleInterpretation(
   reportProgress: RulePreflightProgressReporter = () => undefined,
   signal?: AbortSignal,
 ): Promise<RuleInterpretationResult> {
+  const { result } = await captureAiRun("rule_interpretation", () =>
+    runRuleInterpretationPipeline(text, reportProgress, signal),
+  );
+  return result;
+}
+
+async function runRuleInterpretationPipeline(
+  text: string,
+  reportProgress: RulePreflightProgressReporter = () => undefined,
+  signal?: AbortSignal,
+): Promise<RuleInterpretationResult> {
   reportProgress({
     message: "Checking rule limits and allowed inputs...",
     stage: "checking_input",
@@ -3633,7 +3665,34 @@ async function createRuleInterpretation(
   };
 }
 
+/**
+ * Wraps the pipeline in a resource-measurement scope (apps/api/src/usage.ts).
+ *
+ * Everything the run spends — the translate, guardian, interpret, compile,
+ * review, repair and escalation calls, including the retries @tyche/rule-compiler
+ * issues from inside its own provider loop — is recorded against this scope, and
+ * so are the CPU and RSS the API process itself burns while the run is open.
+ * A run that throws still publishes its report: the rules that fail are the
+ * expensive ones.
+ */
 async function createRulePreflight(
+  text: string,
+  reportProgress: RulePreflightProgressReporter = () => undefined,
+  signal?: AbortSignal,
+  approvedInterpretation?: ApprovedRuleInterpretation,
+): Promise<RulePreflightResult> {
+  const { result } = await captureAiRun("rule_preflight", () =>
+    runRulePreflightPipeline(
+      text,
+      reportProgress,
+      signal,
+      approvedInterpretation,
+    ),
+  );
+  return result;
+}
+
+async function runRulePreflightPipeline(
   text: string,
   reportProgress: RulePreflightProgressReporter = () => undefined,
   signal?: AbortSignal,
@@ -3815,6 +3874,8 @@ async function createRulePreflight(
     }
   }
   const ruleId = createRuleId();
+  // Ties the measurement scope to the rule an operator would look up.
+  setAiRunSubject(String(ruleId));
 
   // A full dealer pass for a given model: interpret (human message), compile the
   // AST from the rule text (skill-guided), and check groundedness.
@@ -8855,8 +8916,21 @@ export interface OperatorAiOperationsSnapshot {
     modelConfidenceBuckets: ConfidenceBucketCounts;
   };
   estimatedCost: {
+    /**
+     * What `totalTokens` and `estimatedUsd` are computed from.
+     *
+     * `rule_text_token_projection` counts the players' rule SENTENCES (the ~80
+     * token budget from PRD §11) — it is what the audit records can support, and
+     * it is NOT inference spend: one preflight sends the ~13k-token compiler
+     * skill prompt plus a ~2k-token JSON Schema on every compile and review call.
+     * `measuredResourceUsage` below carries what the providers actually billed;
+     * `measuredUsd` mirrors its total here so the two are never read as one.
+     */
+    basis: "rule_text_token_projection";
     costPerThousandTokensUsd: number;
     estimatedUsd: number;
+    /** Provider-measured cost over the retained runs; null when nothing priced. */
+    measuredUsd: number | null;
     source: "configured_rate" | "not_configured";
     totalTokens: number;
   };
@@ -8893,6 +8967,116 @@ export interface OperatorAiOperationsSnapshot {
     quantization: string | null;
     servingEngine: string;
   }>;
+  /**
+   * What the AI pipeline actually spent, measured at the transport (see
+   * apps/api/src/usage.ts). Every figure here comes from a provider response or
+   * from `process.cpuUsage()` / `process.memoryUsage()` — nothing is projected
+   * from rule text.
+   */
+  measuredResourceUsage: {
+    /**
+     * Per-endpoint aggregation, keyed by the provider a call actually went to
+     * and the model it ran. Covers `detailedRunCount` runs only.
+     *
+     * This is the answer to "how many tokens did we spend at Groq": every
+     * OpenAI-compatible endpoint reports `prompt_tokens` / `completion_tokens`,
+     * so the token columns are always complete even where `costUsd` is null
+     * because that provider does not report a price and none is configured.
+     */
+    byProvider: Array<{
+      cachedPromptTokens: number;
+      calls: number;
+      completionTokens: number;
+      costUsd: number | null;
+      errorCalls: number;
+      model: string;
+      promptTokens: number;
+      provider: string;
+      reasoningTokens: number;
+      totalDurationMs: number;
+      totalTokens: number;
+      truncatedCalls: number;
+      /** Calls this row could not price. Equal to `calls` means no cost at all. */
+      unpricedCalls: number;
+    }>;
+    /** Per-step aggregation. Covers `detailedRunCount` runs only. */
+    byStep: Array<{
+      calls: number;
+      completionTokens: number;
+      costUsd: number | null;
+      errorCalls: number;
+      promptTokens: number;
+      reasoningTokens: number;
+      step: AiUsageStep;
+      totalDurationMs: number;
+      totalTokens: number;
+      truncatedCalls: number;
+    }>;
+    compute: {
+      averageCpuMsPerRun: number;
+      averageWallClockMsPerRun: number;
+      cpuCores: number;
+      hostTotalMemoryBytes: number;
+      /**
+       * Highest number of runs measured concurrently. Above 1 the CPU and RSS
+       * figures are shared across those runs: `process.cpuUsage()` is
+       * process-wide and cannot be attributed to one scope.
+       */
+      peakConcurrentRuns: number;
+      peakRssBytes: number;
+      totalCpuMs: number;
+      totalWallClockMs: number;
+    };
+    /**
+     * How much of the account is complete. A run counted here spent calls whose
+     * tokens or cost the provider did not report, so the totals are a FLOOR for
+     * it, not an exact figure.
+     */
+    coverage: {
+      detailedRunCount: number;
+      retainedRunCount: number;
+      runsWithUnpricedCalls: number;
+      runsWithUntokenizedCalls: number;
+    };
+    perRunAverages: {
+      completionTokens: number;
+      costUsd: number | null;
+      llmCalls: number;
+      promptTokens: number;
+      totalTokens: number;
+      wallClockMs: number;
+    };
+    pricing: {
+      configurationError: string | null;
+      flatRatePerThousandTokensUsd: number;
+      pricedModels: string[];
+      unscopedCallCount: number;
+    };
+    /** Newest first, capped for payload size. */
+    recentRuns: Array<{
+      completedAt: string;
+      costUsd: number | null;
+      cpuTotalMs: number;
+      label: string;
+      llmCalls: number;
+      peakRssBytes: number;
+      subject: string | null;
+      totalTokens: number;
+      wallClockMs: number;
+    }>;
+    source: "measured_provider_usage";
+    totals: {
+      completionTokens: number;
+      costUsd: number | null;
+      errorCalls: number;
+      llmCalls: number;
+      promptTokens: number;
+      reasoningTokens: number;
+      runs: number;
+      totalTokens: number;
+      truncatedCalls: number;
+    };
+  };
   modelRouting: Array<{
     escalationCount: number;
     fallbackTriggered: number;
@@ -10348,6 +10532,206 @@ function getProviderName(identity: AgentModelIdentity, provider: string) {
   return provider || identity.provider || "not_recorded";
 }
 
+const OPERATOR_MEASURED_RECENT_RUN_LIMIT = 25;
+
+/**
+ * Aggregates the measured resource account for the operator console.
+ *
+ * Two retention tiers feed this, and they are reported separately rather than
+ * blended: run SUMMARIES (totals + CPU/RAM) survive a restart through the state
+ * snapshot and back every figure except `byStep`, while the per-call detail that
+ * `byStep` needs lives only in memory. `coverage` states how many runs each tier
+ * saw, so a per-step breakdown over 12 runs is never read as covering all 400.
+ */
+function buildMeasuredResourceUsage(): OperatorAiOperationsSnapshot["measuredResourceUsage"] {
+  const summaries = getAiUsageRunSummaries();
+  const detailed = getAiUsageRuns();
+
+  const totals = {
+    completionTokens: 0,
+    costUsd: null as number | null,
+    errorCalls: 0,
+    llmCalls: 0,
+    promptTokens: 0,
+    reasoningTokens: 0,
+    runs: summaries.length,
+    totalTokens: 0,
+    truncatedCalls: 0,
+  };
+  const compute = {
+    averageCpuMsPerRun: 0,
+    averageWallClockMsPerRun: 0,
+    cpuCores: 0,
+    hostTotalMemoryBytes: 0,
+    peakConcurrentRuns: 0,
+    peakRssBytes: 0,
+    totalCpuMs: 0,
+    totalWallClockMs: 0,
+  };
+  let runsWithUnpricedCalls = 0;
+  let runsWithUntokenizedCalls = 0;
+
+  for (const summary of summaries) {
+    totals.completionTokens += summary.totals.completionTokens;
+    totals.errorCalls += summary.totals.errorCallCount;
+    totals.llmCalls += summary.totals.callCount;
+    totals.promptTokens += summary.totals.promptTokens;
+    totals.reasoningTokens += summary.totals.reasoningTokens;
+    totals.totalTokens += summary.totals.totalTokens;
+    totals.truncatedCalls += summary.totals.truncatedCallCount;
+    if (summary.totals.costUsd !== null) {
+      totals.costUsd = (totals.costUsd ?? 0) + summary.totals.costUsd;
+    }
+    if (summary.totals.unpricedCallCount > 0) {
+      runsWithUnpricedCalls += 1;
+    }
+    if (summary.totals.untokenizedCallCount > 0) {
+      runsWithUntokenizedCalls += 1;
+    }
+    compute.totalCpuMs += summary.resources.cpuTotalMs;
+    compute.totalWallClockMs += summary.resources.wallClockMs;
+    compute.peakRssBytes = Math.max(
+      compute.peakRssBytes,
+      summary.resources.rssPeakBytes,
+    );
+    compute.peakConcurrentRuns = Math.max(
+      compute.peakConcurrentRuns,
+      summary.resources.concurrentRunsPeak,
+    );
+    // Host shape is a property of the machine, not of the run; the newest
+    // reading wins so a snapshot restored from another host is not reported as
+    // this one's capacity.
+    compute.cpuCores = summary.resources.cpuCores;
+    compute.hostTotalMemoryBytes = summary.resources.hostTotalMemoryBytes;
+  }
+  if (summaries.length > 0) {
+    compute.averageCpuMsPerRun = compute.totalCpuMs / summaries.length;
+    compute.averageWallClockMsPerRun =
+      compute.totalWallClockMs / summaries.length;
+  }
+
+  const stepMap = new Map<
+    AiUsageStep,
+    OperatorAiOperationsSnapshot["measuredResourceUsage"]["byStep"][number]
+  >();
+  const providerMap = new Map<
+    string,
+    OperatorAiOperationsSnapshot["measuredResourceUsage"]["byProvider"][number]
+  >();
+  for (const run of detailed) {
+    for (const call of run.calls) {
+      const providerKey = `${call.provider}:${call.model}`;
+      const providerRow = providerMap.get(providerKey) ?? {
+        cachedPromptTokens: 0,
+        calls: 0,
+        completionTokens: 0,
+        costUsd: null,
+        errorCalls: 0,
+        model: call.model,
+        promptTokens: 0,
+        provider: call.provider,
+        reasoningTokens: 0,
+        totalDurationMs: 0,
+        totalTokens: 0,
+        truncatedCalls: 0,
+        unpricedCalls: 0,
+      };
+      providerRow.cachedPromptTokens += call.cachedPromptTokens ?? 0;
+      providerRow.calls += 1;
+      providerRow.completionTokens += call.completionTokens ?? 0;
+      providerRow.promptTokens += call.promptTokens ?? 0;
+      providerRow.reasoningTokens += call.reasoningTokens ?? 0;
+      providerRow.totalDurationMs += call.durationMs;
+      providerRow.totalTokens += call.totalTokens ?? 0;
+      if (call.costUsd === null) {
+        providerRow.unpricedCalls += 1;
+      } else {
+        providerRow.costUsd = (providerRow.costUsd ?? 0) + call.costUsd;
+      }
+      if (call.outcome === "error") {
+        providerRow.errorCalls += 1;
+      }
+      if (call.outcome === "truncated") {
+        providerRow.truncatedCalls += 1;
+      }
+      providerMap.set(providerKey, providerRow);
+
+      const row = stepMap.get(call.step) ?? {
+        calls: 0,
+        completionTokens: 0,
+        costUsd: null,
+        errorCalls: 0,
+        promptTokens: 0,
+        reasoningTokens: 0,
+        step: call.step,
+        totalDurationMs: 0,
+        totalTokens: 0,
+        truncatedCalls: 0,
+      };
+      row.calls += 1;
+      row.completionTokens += call.completionTokens ?? 0;
+      row.promptTokens += call.promptTokens ?? 0;
+      row.reasoningTokens += call.reasoningTokens ?? 0;
+      row.totalTokens += call.totalTokens ?? 0;
+      row.totalDurationMs += call.durationMs;
+      if (call.costUsd !== null) {
+        row.costUsd = (row.costUsd ?? 0) + call.costUsd;
+      }
+      if (call.outcome === "error") {
+        row.errorCalls += 1;
+      }
+      if (call.outcome === "truncated") {
+        row.truncatedCalls += 1;
+      }
+      stepMap.set(call.step, row);
+    }
+  }
+
+  const runCount = summaries.length;
+  return {
+    byProvider: [...providerMap.values()].sort(
+      (left, right) =>
+        right.totalTokens - left.totalTokens ||
+        left.provider.localeCompare(right.provider) ||
+        left.model.localeCompare(right.model),
+    ),
+    byStep: [...stepMap.values()].sort(
+      (left, right) => right.totalTokens - left.totalTokens,
+    ),
+    compute,
+    coverage: {
+      detailedRunCount: detailed.length,
+      retainedRunCount: runCount,
+      runsWithUnpricedCalls,
+      runsWithUntokenizedCalls,
+    },
+    perRunAverages: {
+      completionTokens: runCount === 0 ? 0 : totals.completionTokens / runCount,
+      costUsd: totals.costUsd === null ? null : totals.costUsd / runCount,
+      llmCalls: runCount === 0 ? 0 : totals.llmCalls / runCount,
+      promptTokens: runCount === 0 ? 0 : totals.promptTokens / runCount,
+      totalTokens: runCount === 0 ? 0 : totals.totalTokens / runCount,
+      wallClockMs: compute.averageWallClockMsPerRun,
+    },
+    pricing: getAiUsagePricingStatus(),
+    recentRuns: summaries
+      .slice(0, OPERATOR_MEASURED_RECENT_RUN_LIMIT)
+      .map((summary) => ({
+        completedAt: summary.completedAt,
+        costUsd: summary.totals.costUsd,
+        cpuTotalMs: summary.resources.cpuTotalMs,
+        label: summary.label,
+        llmCalls: summary.totals.callCount,
+        peakRssBytes: summary.resources.rssPeakBytes,
+        subject: summary.subject,
+        totalTokens: summary.totals.totalTokens,
+        wallClockMs: summary.resources.wallClockMs,
+      })),
+    source: "measured_provider_usage",
+    totals,
+  };
+}
+
 export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot {
   const validations = [...ruleValidations.values()];
   const proposals = [...ruleProposals.values()];
@@ -10636,6 +11020,7 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
     (total, proposal) => total + proposal.tokenCount,
     0,
   );
+  const measuredResourceUsage = buildMeasuredResourceUsage();
 
   return {
     access: {
@@ -10695,8 +11080,10 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
       modelConfidenceBuckets,
     },
     estimatedCost: {
+      basis: "rule_text_token_projection",
       costPerThousandTokensUsd,
       estimatedUsd: (totalTokens / 1_000) * costPerThousandTokensUsd,
+      measuredUsd: measuredResourceUsage.totals.costUsd,
       source:
         costPerThousandTokensUsd > 0 ? "configured_rate" : "not_configured",
       totalTokens,
@@ -10734,6 +11121,7 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
             },
           ]
         : [...localModelMap.values()],
+    measuredResourceUsage,
     modelRouting: [...modelRoutingMap.values()].sort(
       (left, right) =>
         left.role.localeCompare(right.role) ||
@@ -10824,9 +11212,26 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
       },
       {
         endpoint: "LLM_ESTIMATED_COST_PER_1K_TOKENS_USD",
-        label: "Token usage and estimated LLM cost",
+        label: "Rule-text token projection and its estimated LLM cost",
         source: "internal_projection",
         status: costPerThousandTokensUsd > 0 ? "available" : "not_recorded",
+      },
+      {
+        endpoint: "provider usage payloads + process.cpuUsage/memoryUsage",
+        label:
+          "Measured AI token, cost, CPU and RAM usage per pipeline run",
+        source: "internal_projection",
+        status:
+          measuredResourceUsage.totals.runs > 0 ? "available" : "not_recorded",
+      },
+      {
+        endpoint: "LLM_PRICE_TABLE_JSON",
+        label: "Per-model price table for calls the provider does not price",
+        source: "operator_config",
+        status:
+          measuredResourceUsage.pricing.pricedModels.length > 0
+            ? "available"
+            : "not_recorded",
       },
     ],
     tokenUsageByProviderModelRole: [...tokenUsageMap.values()].sort(
@@ -10842,6 +11247,10 @@ export function exportOperatorAiOperationsCsv(
   snapshot: OperatorAiOperationsSnapshot,
 ) {
   const columns = [
+    // Two kinds of row share this table. `row_scope` says which, so a consumer
+    // summing a column never adds a role row to a provider row and counts the
+    // same tokens twice.
+    "row_scope",
     "role",
     "provider",
     "model",
@@ -10857,10 +11266,58 @@ export function exportOperatorAiOperationsCsv(
     "verification_jobs",
     "backlog_jobs",
     "dead_letter_jobs",
+    // Run-level measured columns. They repeat on every row (like fallback_rate
+    // already does) because they are aggregates over pipeline RUNS, which do not
+    // decompose along the role/provider/model key this export is built on.
+    "measured_runs",
+    "measured_llm_calls",
+    "measured_prompt_tokens",
+    "measured_completion_tokens",
+    "measured_total_tokens",
+    "measured_cost_usd",
+    "measured_cpu_ms",
+    "measured_wall_clock_ms",
+    "measured_peak_rss_bytes",
+    // Filled only on `measured_provider_model` rows: what THAT endpoint spent.
+    // The token columns are complete for every provider; the cost column is
+    // empty where the provider reports no price and none is configured, which
+    // `provider_measured_unpriced_calls` states outright.
+    "provider_measured_calls",
+    "provider_measured_prompt_tokens",
+    "provider_measured_completion_tokens",
+    "provider_measured_reasoning_tokens",
+    "provider_measured_cached_prompt_tokens",
+    "provider_measured_total_tokens",
+    "provider_measured_cost_usd",
+    "provider_measured_unpriced_calls",
+    "provider_measured_mean_duration_ms",
     "redaction_note",
   ];
   const redactionNote =
     "Restricted operator export includes redacted aggregates only; raw prompts, completions, compiled artifacts, provider payloads, secrets, private analytics, and unredacted stack traces are excluded.";
+  const measured = snapshot.measuredResourceUsage;
+  const runLevelMeasured: Array<number | string> = [
+    measured.totals.runs,
+    measured.totals.llmCalls,
+    measured.totals.promptTokens,
+    measured.totals.completionTokens,
+    measured.totals.totalTokens,
+    measured.totals.costUsd ?? "",
+    measured.compute.totalCpuMs,
+    measured.compute.totalWallClockMs,
+    measured.compute.peakRssBytes,
+  ];
+  const noProviderMeasured: Array<number | string> = [
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+  ];
   const keyFor = (role: string, provider: string, model: string) =>
     JSON.stringify([role, provider, model]);
   const routingByKey = new Map(
@@ -10882,10 +11339,11 @@ export function exportOperatorAiOperationsCsv(
     ]),
   );
   const rowKeys = new Set([...routingByKey.keys(), ...tokenUsageByKey.keys()]);
-  const rows =
+  const roleRows: Array<Array<number | string>> =
     rowKeys.size === 0
       ? [
           [
+            "role_provider_model",
             "",
             "",
             "",
@@ -10901,6 +11359,8 @@ export function exportOperatorAiOperationsCsv(
             snapshot.operationCounts.verificationJobs,
             snapshot.queue.backlogJobs,
             snapshot.queue.deadLetterJobs,
+            ...runLevelMeasured,
+            ...noProviderMeasured,
             redactionNote,
           ],
         ]
@@ -10913,6 +11373,7 @@ export function exportOperatorAiOperationsCsv(
           ) as string[];
 
           return [
+            "role_provider_model",
             routing?.role ?? tokenUsage?.role ?? role,
             routing?.provider ?? tokenUsage?.provider ?? provider,
             routing?.model ?? tokenUsage?.model ?? model,
@@ -10928,13 +11389,52 @@ export function exportOperatorAiOperationsCsv(
             snapshot.operationCounts.verificationJobs,
             snapshot.queue.backlogJobs,
             snapshot.queue.deadLetterJobs,
+            ...runLevelMeasured,
+            ...noProviderMeasured,
             redactionNote,
           ];
         });
 
+  // What each endpoint actually spent. Every OpenAI-compatible provider reports
+  // its token counts, so these rows are complete even for an endpoint whose
+  // price we cannot resolve.
+  const providerRows: Array<Array<number | string>> = measured.byProvider.map(
+    (row) => [
+      "measured_provider_model",
+      "",
+      row.provider,
+      row.model,
+      "",
+      "",
+      "",
+      "",
+      "",
+      // p50/p95 stay empty: these rows carry a mean over this endpoint's calls,
+      // which is a different statistic and gets its own column below.
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ...runLevelMeasured,
+      row.calls,
+      row.promptTokens,
+      row.completionTokens,
+      row.reasoningTokens,
+      row.cachedPromptTokens,
+      row.totalTokens,
+      row.costUsd ?? "",
+      row.unpricedCalls,
+      row.calls === 0 ? 0 : row.totalDurationMs / row.calls,
+      redactionNote,
+    ],
+  );
+
   return [
     columns.map(csvCell).join(","),
-    ...rows.map((row) => row.map(csvCell).join(",")),
+    ...[...roleRows, ...providerRows].map((row) => row.map(csvCell).join(",")),
   ].join("\n");
 }
 
@@ -11674,10 +12174,11 @@ export function handleApiRequest(
           await ensureDealerModelReady(runtime.chat.model, controller.signal);
           const context = buildDealerQuestionContext({ draft, message });
           if (!streamAnswer) {
-            const answer = await answerDealerQuestion(
-              context,
-              runtime.chat,
-              controller.signal,
+            // Measured like the rule pipeline: the chat prompt is ~8.7k tokens
+            // of skill and references on EVERY message, which makes the
+            // conversation a real share of the spend behind one rule.
+            const { result: answer } = await captureAiRun("dealer_chat", () =>
+              answerDealerQuestion(context, runtime.chat, controller.signal),
             );
             sendJsonWithoutStatePersistence(request, response, 200, answer);
             return;
@@ -11692,24 +12193,26 @@ export function handleApiRequest(
               streamStarted = true;
             }
           };
-          const answer = await streamDealerQuestionAnswer(
-            context,
-            (chunk) => {
-              openStream();
-              writeRulePreflightSseFrame(
-                response,
-                `event: delta\ndata: ${JSON.stringify({ text: chunk })}\n\n`,
-              );
-            },
-            runtime.chat,
-            controller.signal,
-            (chunk) => {
-              openStream();
-              writeRulePreflightSseFrame(
-                response,
-                `event: reasoning\ndata: ${JSON.stringify({ text: chunk })}\n\n`,
-              );
-            },
+          const { result: answer } = await captureAiRun("dealer_chat", () =>
+            streamDealerQuestionAnswer(
+              context,
+              (chunk) => {
+                openStream();
+                writeRulePreflightSseFrame(
+                  response,
+                  `event: delta\ndata: ${JSON.stringify({ text: chunk })}\n\n`,
+                );
+              },
+              runtime.chat,
+              controller.signal,
+              (chunk) => {
+                openStream();
+                writeRulePreflightSseFrame(
+                  response,
+                  `event: reasoning\ndata: ${JSON.stringify({ text: chunk })}\n\n`,
+                );
+              },
+            ),
           );
           if (!streamStarted) {
             // The model produced the whole object without a single answer
