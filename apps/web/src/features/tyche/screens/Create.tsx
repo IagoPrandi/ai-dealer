@@ -43,6 +43,7 @@ import {
   isLikelyRuleDraft,
   isRuleRefinementPatch,
   resolveGuidanceSubmissionText,
+  resolveRerunRuleText,
   type RuleGuidanceOption,
 } from "../ruleRefinement";
 import {
@@ -1251,6 +1252,8 @@ function CreateChat({
         } else {
           clarificationAttemptsRef.current += 1;
           openedGuidance = openGuidance({
+            ambiguousReadings:
+              snapshot.rule.reasonCodes.includes("AMBIGUOUS_RULE"),
             clarityNote: snapshot.rule.clarityNote,
             confirmationRequired: snapshot.rule.confirmationRequired,
             currentRuleText: snapshot.rule.sanitizedText,
@@ -1825,8 +1828,23 @@ function CreateChat({
 
   /**
    * Reconnect keeps following the same server-side job; Run again starts a
-   * fresh one from the player's last message, with no new bubble because the
-   * transcript already ends with it.
+   * fresh one from the rule the pipeline was working on, with no new bubble
+   * because the transcript already ends with the player's message.
+   *
+   * "Run again" must never derive the rule text from the transcript alone. The
+   * last user bubble is whatever the player said last, and after any
+   * confirmation that is an APPROVAL, not a rule: re-running it sent
+   * "Yes, generate this rule." to the interpret agent as a winning condition,
+   * which came back RULE_AGENT_BAD_RESPONSE ("try rephrasing the rule") about a
+   * sentence the player never proposed as one. The same is true of every reply
+   * that is an answer rather than a rule.
+   *
+   * So the sources are tried in order of authority: the text the dying run was
+   * actually given, then the server-authored rule text from the last verdict or
+   * pending interpretation, and only then the transcript — and there only when
+   * `isLikelyRuleDraft` agrees, which is the same classifier `send` uses to
+   * decide whether a message may reach the interpreter at all. A message that
+   * would never have been sent there cannot be re-sent there by a retry.
    */
   function resumeOrRerun() {
     if (resuming || !activeDraftId) {
@@ -1854,8 +1872,16 @@ function CreateChat({
     const lastUserMessage = [...msgs]
       .reverse()
       .find((message) => message.who === "user")?.text;
-    const ruleText = runJob?.ruleText ?? lastUserMessage;
+    const ruleText = resolveRerunRuleText({
+      interpretationRuleText: interpretation?.sanitizedText,
+      jobRuleText: runJob?.ruleText,
+      lastUserMessage,
+      verdictRuleText: rule?.sanitizedText,
+    });
     if (!ruleText) {
+      // Nothing on record is a rule, so there is nothing to run again. Handing
+      // the interpreter the player's last words instead would ask it to compile
+      // an answer, and it would blame their wording for failing.
       setResuming(false);
       setRunStatus("done");
       textareaRef.current?.focus();

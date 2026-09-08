@@ -13,6 +13,7 @@ import {
   isRuleCreationHelpRequest,
   isRuleRefinementPatch,
   resolveGuidanceSubmissionText,
+  resolveRerunRuleText,
 } from "./ruleRefinement.js";
 
 test("recognizes direct English and Portuguese winner conditions as rule drafts", () => {
@@ -651,3 +652,124 @@ test("a declared winner condition and an injection outrank the question mark", (
   );
 });
 
+
+test("an approval is never composed into the rule draft", () => {
+  // Once a rejection offers selectable options, `getRuleRefinementBase` returns
+  // one, and these messages satisfied `isRuleRefinementPatch`. Appending them
+  // produced "<option 1>. Additional correction: Yes, generate this rule." — a
+  // rule the player never wrote, over an option they never picked. They must
+  // fall through to the dealer instead.
+  const context = {
+    refinementQuestions: [
+      "Your wording compiles to 2 different rules, and they do not pay the same guesses. Which one did you mean? (1) ... (2) ...",
+    ],
+    suggestedRewrites: [
+      "A guess wins if the sum of your six numbers is equal to the sum of the drawn numbers.",
+      "A guess wins if the sum of the values present in both your numbers and the drawn numbers is equal to the sum of the drawn numbers.",
+    ],
+  };
+  for (const approval of [
+    "Yes, generate this rule.",
+    "yes",
+    "ok, do it",
+    "generate this rule",
+    "the second one",
+  ]) {
+    assert.equal(
+      composeRefinedRuleDraft(approval, context),
+      null,
+      `must not append: ${approval}`,
+    );
+  }
+});
+
+test("an answer that constrains the numbers is still composed", () => {
+  // The guard rejects messages with no rule content, not short ones. An answer
+  // that names numbers, data, or a comparison shape keeps its existing merge.
+  const context = {
+    suggestedRewrites: [
+      "A guess wins if the sum of your six numbers is equal to the sum of the drawn numbers.",
+    ],
+  };
+  assert.match(
+    composeRefinedRuleDraft(
+      "at least 3 of my numbers must match the draw",
+      context,
+    ) ?? "",
+    /at least 3 of my numbers must match the draw/u,
+  );
+  assert.match(
+    composeRefinedRuleDraft("any order", context) ?? "",
+    /Order is ignored/u,
+  );
+});
+
+test("reading choices are offered as readings, not as rewrites", () => {
+  // The options are the rule as written under each meaning it can carry, so
+  // calling them rewrites would say the player's wording is being changed when
+  // the only open question is which reading to compile.
+  const readings = [
+    "A guess wins if the sum of your six numbers is equal to the sum of the drawn numbers.",
+    "A guess wins if the sum of the values present in both your numbers and the drawn numbers is equal to the sum of the drawn numbers.",
+  ];
+  assert.deepEqual(
+    buildRuleGuidanceOptions({
+      ambiguousReadings: true,
+      suggestedRewrites: readings,
+    }).map((option) => option.label),
+    ["Use this reading", "Use this reading"],
+  );
+  // Unrelated blocks keep the existing label.
+  assert.deepEqual(
+    buildRuleGuidanceOptions({ suggestedRewrites: readings }).map(
+      (option) => option.label,
+    ),
+    ["Use intent-preserving rewrite", "Use intent-preserving rewrite"],
+  );
+});
+
+test("run again never re-sends an approval as the rule text", () => {
+  const rule = "vence quem acertar ao menos 3 dos numeros sorteados";
+
+  // The dying run's own text always wins: it is exactly what was being compiled.
+  assert.equal(
+    resolveRerunRuleText({
+      jobRuleText: rule,
+      lastUserMessage: "Yes, generate this rule.",
+    }),
+    rule,
+  );
+
+  // No job pointer left. The server-authored rule text from the last verdict is
+  // the rule; the approval bubble is not.
+  assert.equal(
+    resolveRerunRuleText({
+      lastUserMessage: "Yes, generate this rule.",
+      verdictRuleText: rule,
+    }),
+    rule,
+  );
+  assert.equal(
+    resolveRerunRuleText({
+      interpretationRuleText: rule,
+      lastUserMessage: "Yes, generate this rule.",
+    }),
+    rule,
+  );
+
+  // Nothing on record is a rule and the transcript ends with an approval, so
+  // there is nothing to run again. Sending the approval to the interpreter is
+  // what produced RULE_AGENT_BAD_RESPONSE about a sentence nobody proposed.
+  assert.equal(
+    resolveRerunRuleText({ lastUserMessage: "Yes, generate this rule." }),
+    null,
+  );
+  assert.equal(resolveRerunRuleText({}), null);
+});
+
+test("run again still recovers a genuine rule draft from the transcript", () => {
+  // The run died before any verdict or interpretation existed, so the player's
+  // own message is the only record of the rule — and it is one.
+  const draft = "vence quem acertar ao menos 3 dos numeros sorteados";
+  assert.equal(resolveRerunRuleText({ lastUserMessage: draft }), draft);
+});

@@ -17,6 +17,10 @@ export interface RuleRefinementContext {
 }
 
 export interface RuleGuidanceContext extends RuleRefinementContext {
+  /** The rule was blocked because its wording has more than one executable
+   * reading, and `suggestedRewrites` are those readings rather than reworded
+   * rules. The player is choosing a MEANING, so the options say so. */
+  ambiguousReadings?: boolean;
   apiCode?: string | null;
   clarityNote?: string | null;
   confirmationRequired?: boolean;
@@ -162,6 +166,28 @@ function buildResolvedRemainderClause(
   return `The remaining ${count} ${questionMatch[2]} ${numberNoun} may be any valid unique ${valueNoun} and ${effectVerb} not affect the winning condition.`;
 }
 
+/**
+ * Does this message say anything about the numbers at all?
+ *
+ * Deliberately built from the same three signals `isLikelyRuleDraft` uses — a
+ * digit, the data vocabulary, or the shape vocabulary — so "can these words be
+ * appended to a rule?" and "can these words be a rule?" cannot drift apart. A
+ * message with none of them ("yes", "ok, do it", "generate this rule") adds no
+ * constraint, so appending it can only corrupt the draft.
+ *
+ * The explicit branches above this guard stay in charge of the answers that are
+ * meaningful without any such vocabulary ("any order", "sim", "ignored"): those
+ * are recognised and rewritten, never appended.
+ */
+function carriesRuleContent(message: string) {
+  const normalized = normalizeIntentText(message);
+  return (
+    /\d/u.test(normalized) ||
+    RULE_DATA_PATTERN.test(normalized) ||
+    RULE_SHAPE_PATTERN.test(normalized)
+  );
+}
+
 function dedupeOptions(options: RuleGuidanceOption[]) {
   const seen = new Set<string>();
   const result: RuleGuidanceOption[] = [];
@@ -202,6 +228,40 @@ export function isExplicitRuleRefinementPatch(message: string) {
     Boolean(trimmed) &&
     !isNewRuleIntent(trimmed) &&
     EXPLICIT_PATCH_PATTERN.test(trimmed)
+  );
+}
+
+/**
+ * Which text "Run again" may re-send as the rule, in falling order of authority.
+ *
+ * The transcript is the LAST resort and is gated, because the last user bubble
+ * is whatever the player said last — after any confirmation that is an approval,
+ * not a rule. Re-running it sent "Yes, generate this rule." to the interpret
+ * agent as a winning condition, which came back RULE_AGENT_BAD_RESPONSE ("try
+ * rephrasing the rule") about a sentence the player never proposed as one.
+ *
+ * The gate is `isLikelyRuleDraft`, the same classifier the send path uses to
+ * decide whether a message may reach the interpreter at all: a message that
+ * would never have been sent there must not be re-sent there by a retry.
+ * Returning null means nothing on record is a rule, so there is nothing to run
+ * again — which is the honest outcome, not a failure to recover.
+ */
+export function resolveRerunRuleText(sources: {
+  interpretationRuleText?: string | null | undefined;
+  jobRuleText?: string | null | undefined;
+  lastUserMessage?: string | null | undefined;
+  verdictRuleText?: string | null | undefined;
+}) {
+  const transcriptDraft =
+    sources.lastUserMessage && isLikelyRuleDraft(sources.lastUserMessage)
+      ? sources.lastUserMessage
+      : null;
+  return (
+    sources.jobRuleText ??
+    sources.verdictRuleText ??
+    sources.interpretationRuleText ??
+    transcriptDraft ??
+    null
   );
 }
 
@@ -370,6 +430,23 @@ export function composeRefinedRuleDraft(
     return `${cleanSentence(base)}. ${correction}.`;
   }
 
+  // Everything above recognised WHAT the message says and rewrote the rule
+  // accordingly. These last two branches do not: they append the words verbatim.
+  // That is only safe for a message that states something about the numbers, so
+  // anything carrying no rule content at all stops here rather than being glued
+  // onto the draft.
+  //
+  // A bare approval is the case that matters. Once a rejection offers selectable
+  // options, `getRuleRefinementBase` starts returning one, and a typed
+  // "Yes, generate this rule." then satisfied `isRuleRefinementPatch` and was
+  // composed into "<option 1>. Additional correction: Yes, generate this rule."
+  // — a rule the player never wrote, built from an option they never picked.
+  // Returning null instead lets the message fall through to the dealer, which
+  // answers it and can say the choice is still open.
+  if (!carriesRuleContent(correction)) {
+    return null;
+  }
+
   if (context.baseCanBeClarified) {
     return `${cleanSentence(base)}. ${correction}.`;
   }
@@ -411,7 +488,13 @@ export function buildRuleGuidanceOptions(
     rewrites.map((text) => ({
       label: context.dealerSuggestion
         ? "Try dealer suggestion"
-        : "Use intent-preserving rewrite",
+        : context.ambiguousReadings
+          ? // Not a rewrite: this IS the rule as written, under one of the
+            // meanings it can carry. Calling it a rewrite would tell the player
+            // their wording is being changed when the only thing being settled
+            // is which reading of it to compile.
+            "Use this reading"
+          : "Use intent-preserving rewrite",
       text,
     })),
   ).slice(0, 4);
