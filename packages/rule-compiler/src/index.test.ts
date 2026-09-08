@@ -321,7 +321,7 @@ test("validates and precompiles a clear match-count rule", () => {
   assert.ok((result.artifact?.evaluatedTestCases.length ?? 0) > 0);
   assert.ok((result.artifact?.harnessCases.length ?? 0) > 0);
   assert.equal(result.artifact?.skillVersion, RULE_COMPILER_SKILL_VERSION);
-  assert.equal(result.artifact?.testHarnessVersion, "2.3.0");
+  assert.equal(result.artifact?.testHarnessVersion, "2.4.0");
 });
 
 test("validates supported sum and exact-order rules", () => {
@@ -3258,6 +3258,131 @@ test("fails closed when two providers compile the same text differently", async 
   assert.equal(result.artifact, null);
   assert.equal(result.log.providerDisagreementRateSample, 1);
   assert.ok(result.log.reasonCodes.includes("PROVIDER_DISAGREEMENT"));
+});
+
+test("a reviewer that agreed cannot certify away an operation the text names", async () => {
+  // Both models simplified the same clause out of existence, so they agreed —
+  // and agreement was being read as an independent reading of the whole
+  // sentence. It is not: two readings that lost the same clause are not a
+  // reading of that clause. The positional condition is named in the text and
+  // absent from the AST, which always changes which guesses win.
+  const text =
+    "a guess wins if the sum of the guessed numbers that also appear in the draw equals the sum of all six drawn numbers, and at least two of those matching numbers are at the same positions in the guess and in the draw.";
+  const droppedPositions = { schemaVersion: 1, node: { kind: "sum_equals" } };
+  const result = await compileRuleArtifact(
+    { originalText: text, prompt: text, tokenCount: 34 },
+    {
+      astProvider: async () => droppedPositions,
+      astReviewer: async () => droppedPositions,
+    },
+  );
+
+  assert.equal(result.decision, "INVALID");
+  assert.equal(result.artifact, null);
+  assert.ok(result.log.reasonCodes.includes("INTERPRETATION_MISMATCH"));
+  // The reviewer agreed, so this is not reported as a reviewer conflict — the
+  // fault is that neither reading implements the clause.
+  assert.ok(!result.log.reasonCodes.includes("REVIEWER_MISMATCH"));
+  const coverageStage = result.log.attemptDiagnostics[0]?.stages.find(
+    (stage) => stage.stage === "interpretation_coverage",
+  );
+  assert.equal(coverageStage?.status, "failed");
+  assert.match(coverageStage?.detail ?? "", /missing operations: position/u);
+});
+
+test("a reviewer still certifies a terse encoding that omits a stated value", async () => {
+  // The value half of the coverage gate keeps its bypass, and must: literal
+  // value matching cannot tell a faithful terse encoding from a drop, so an
+  // independent reading has to be able to overrule it. Only the operation half
+  // is unconditional.
+  const text =
+    "a guess wins if every guessed number from 2 through 5 is also drawn.";
+  const terse = {
+    schemaVersion: 2,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "compare",
+        op: "eq",
+        left: {
+          kind: "count",
+          of: {
+            kind: "intersection",
+            left: { kind: "source", source: "guess" },
+            right: { kind: "source", source: "draw" },
+          },
+        },
+        right: { kind: "lit", value: 6 },
+      },
+    },
+  };
+  const result = await compileRuleArtifact(
+    { originalText: text, prompt: text, tokenCount: 13 },
+    { astProvider: async () => terse, astReviewer: async () => terse },
+  );
+
+  const coverage = analyzeInterpretationCoverage({
+    ast: terse as never,
+    officialInterpretation: "",
+    text,
+  });
+  // Preconditions for what this test is actually asserting: values are missing,
+  // operations are not.
+  assert.ok(coverage.missingFromAst.length > 0);
+  assert.equal(coverage.missingOperations.length, 0);
+  assert.ok(!result.log.reasonCodes.includes("INTERPRETATION_MISMATCH"));
+});
+
+test("divergent readings of one text are reported as the text being ambiguous", async () => {
+  // Two providers, one sentence, two executable meanings. The divergence is
+  // evidence about the WORDING, so it must reach the player as a question
+  // (AMBIGUOUS_RULE, PRD 6.6) rather than as a compiler conflict they are told
+  // not to try to fix.
+  const answers = [sumCompareAst("lt", 10), sumCompareAst("gt", 10)];
+  let index = 0;
+  const result = await compileRuleArtifact(
+    {
+      originalText: NO_REFERENCE_PROMPT,
+      prompt: NO_REFERENCE_PROMPT,
+      tokenCount: 14,
+    },
+    {
+      astProvider: async () => answers[index++] ?? answers[0],
+    },
+  );
+
+  assert.equal(result.decision, "INVALID");
+  assert.ok(result.log.reasonCodes.includes("AMBIGUOUS_RULE"));
+  // Both readings are named, so a consumer can ask which one was meant instead
+  // of inventing a question.
+  assert.equal(result.log.providerDisagreementReadings.length, 2);
+  assert.notEqual(
+    result.log.providerDisagreementReadings[0],
+    result.log.providerDisagreementReadings[1],
+  );
+  assert.match(result.log.reasonSummary, /2 different executable readings/u);
+});
+
+test("a disagreement with only one reading is not reported as ambiguity", async () => {
+  // The secondary answers off-grammar, so it holds no opinion and contributes no
+  // reading. Nothing about the player's wording has been shown to be ambiguous;
+  // blaming it would send them rewording a sentence that was never the problem.
+  const answers: unknown[] = [sumCompareAst("lt", 10), { schemaVersion: 9 }];
+  let index = 0;
+  const result = await compileRuleArtifact(
+    {
+      originalText: NO_REFERENCE_PROMPT,
+      prompt: NO_REFERENCE_PROMPT,
+      providerConfidenceActionByPriority: { primary: "ESCALATE" },
+      tokenCount: 14,
+    },
+    {
+      astProvider: async () => answers[index++] ?? answers[0],
+    },
+  );
+
+  assert.ok(!result.log.reasonCodes.includes("AMBIGUOUS_RULE"));
+  assert.ok(result.log.providerDisagreementReadings.length < 2);
 });
 
 test("disableConsensus lifts the rejection but still records the divergence", async () => {

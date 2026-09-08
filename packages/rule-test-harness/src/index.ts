@@ -15,7 +15,10 @@ import {
 
 // 2.3.0 — ALWAYS_TRUE now requires a failed directed loss-witness search, so a
 // near-certain rule with a real counterexample is classified TOO_EASY.
-export const RULE_TEST_HARNESS_VERSION = "2.3.0";
+// 2.4.0 — a zero-win sample over a rule with a winning witness reports
+// `winRateBelowSampleResolution` and the rule-of-three `winRateUpperBound`, so
+// `estimatedWinRate: 0` can no longer be quoted as a measured rate.
+export const RULE_TEST_HARNESS_VERSION = "2.4.0";
 
 export type RuleDifficultyClass =
   | "IMPOSSIBLE"
@@ -29,7 +32,42 @@ export interface RuleDifficultyResult {
   difficultyClass: RuleDifficultyClass;
   estimatedWinRate: number;
   samplesRun: number;
+  /**
+   * True when the bounded sample observed no winner at all and yet a directed
+   * search proved one exists.
+   *
+   * `estimatedWinRate` is then `0` as a property of the SAMPLE, not of the rule:
+   * `wins / samplesRun` cannot express any rate below `1 / samplesRun`, and the
+   * EXTREME band reaches far below that. A consumer that reads the number alone
+   * states "your win rate is 0" about a rule the same run accepted as winnable
+   * and valid — two contradictory facts about the same rule. Read
+   * `winRateUpperBound` instead whenever this is true (PRD 6.8: record a
+   * confidence interval, and never let an unresolvable estimate pass as a
+   * measurement).
+   *
+   * Not a rejection signal. PRD 6.8 accepts EXTREME, and it has to: the game's
+   * own original condition — six numbers in the drawn order — wins about once in
+   * 858 billion, so a rule can be honestly this rare and still be the point.
+   */
+  winRateBelowSampleResolution: boolean;
+  /**
+   * Highest win rate consistent with the sample, at roughly 95% confidence.
+   *
+   * Only set when the sample observed zero wins, where it is the "rule of
+   * three": with no successes in `n` trials, rates above `3 / n` would have been
+   * seen with probability > 95%. Null when at least one win was observed,
+   * because then `estimatedWinRate` is a real point estimate and inventing a
+   * bound around it would assert precision this bounded run did not buy.
+   */
+  winRateUpperBound: number | null;
 }
+
+/**
+ * Rule of three: zero successes in `n` trials bounds the rate at ~3/n with about
+ * 95% confidence. The only distribution-free statement a zero-win sample
+ * supports, which is exactly why it is the one made here.
+ */
+const ZERO_WIN_UPPER_BOUND_NUMERATOR = 3;
 
 export interface RuleTestCaseResult {
   name: string;
@@ -364,6 +402,11 @@ export function classifyDifficulty(ast: RuleAst): RuleDifficultyResult {
       difficultyClass: classify(estimatedWinRate, true, true, true),
       estimatedWinRate,
       samplesRun: MONTE_CARLO.rankingDraws * MONTE_CARLO.rankingFieldSize,
+      // A ranking rule always has a winner in every field it scores, so its
+      // rate is a mean fraction of winners rather than a rare-event count and
+      // can never be unresolvably small.
+      winRateBelowSampleResolution: false,
+      winRateUpperBound: null,
     };
   }
 
@@ -388,6 +431,14 @@ export function classifyDifficulty(ast: RuleAst): RuleDifficultyResult {
     ),
     estimatedWinRate,
     samplesRun: MONTE_CARLO.predicateSamples,
+    // `winnable` is what separates the two zero-win cases. Without a witness the
+    // rule is IMPOSSIBLE and 0 is the honest answer; with one, 0 only means the
+    // sample was too small to see the winners that exist.
+    winRateBelowSampleResolution: wins === 0 && winnable,
+    winRateUpperBound:
+      wins === 0
+        ? ZERO_WIN_UPPER_BOUND_NUMERATOR / MONTE_CARLO.predicateSamples
+        : null,
   };
 }
 

@@ -182,7 +182,12 @@ test("an IMPOSSIBLE rule is detected", () => {
       },
     },
   };
-  assert.equal(classifyDifficulty(impossible).difficultyClass, "IMPOSSIBLE");
+  const difficulty = classifyDifficulty(impossible);
+  assert.equal(difficulty.difficultyClass, "IMPOSSIBLE");
+  // Here 0 IS the rule's win rate: no witness exists. The flag must stay false,
+  // or the one case where "your win rate is zero" is the truth would be softened
+  // into "rarer than we can measure".
+  assert.equal(difficulty.winRateBelowSampleResolution, false);
 });
 
 test("a ranking rule is never IMPOSSIBLE and surfaces non-winners", () => {
@@ -211,8 +216,25 @@ test("an AST-pinned exact guess set is rare but constructibly winnable", () => {
   };
 
   assert.equal(hasWinningWitness(ast), true);
-  assert.equal(classifyDifficulty(ast).difficultyClass, "EXTREME");
+  const difficulty = classifyDifficulty(ast);
+  assert.equal(difficulty.difficultyClass, "EXTREME");
   assert.ok(collectWorkedExamples(ast).some((example) => example.outcome === "WIN"));
+
+  // The sample saw no winner, so `estimatedWinRate` is 0 as a property of the
+  // SAMPLE. Reporting that 0 as the rule's win rate tells the player an accepted,
+  // provably winnable rule can never be won.
+  assert.equal(difficulty.estimatedWinRate, 0);
+  assert.equal(difficulty.winRateBelowSampleResolution, true);
+  assert.equal(difficulty.winRateUpperBound, 3 / difficulty.samplesRun);
+});
+
+test("a measured win rate carries no invented confidence bound", () => {
+  // At least one win was observed, so the point estimate stands on its own and
+  // there is nothing this bounded run can honestly bound it with.
+  const difficulty = classifyDifficulty(matchAtLeast(2));
+  assert.ok(difficulty.estimatedWinRate > 0);
+  assert.equal(difficulty.winRateBelowSampleResolution, false);
+  assert.equal(difficulty.winRateUpperBound, null);
 });
 
 test("difficulty estimate is reproducible for the same AST", () => {

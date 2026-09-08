@@ -227,6 +227,17 @@ export interface RulePreflightResult {
   englishText?: string;
   /** Monte-Carlo win rate, meaningful only when `difficultyMeasured`. */
   estimatedWinRate?: number;
+  /**
+   * True when `estimatedWinRate` is 0 only because the bounded sample cannot
+   * resolve a rate this small, while the rule was proved winnable. Anything that
+   * shows a win rate must then quote `estimatedWinRateUpperBound` instead: this
+   * rule was accepted, so telling the player their win rate is 0 contradicts the
+   * verdict shown next to it.
+   */
+  estimatedWinRateBelowSampleResolution?: boolean;
+  /** Highest win rate consistent with the sample (~95%), set only when no win
+   *  was observed. PRD 6.8's required confidence interval. */
+  estimatedWinRateUpperBound?: number | null;
   escalated?: boolean;
   finalConfidence?: number;
   guardianChecked?: boolean;
@@ -1371,6 +1382,10 @@ export interface ConversationLastPreflight {
   /** Null unless the harness actually measured it. */
   difficultyClass: string | null;
   estimatedWinRate: number | null;
+  /** See `RulePreflightResult.estimatedWinRateBelowSampleResolution`. The dealer
+   *  reads this before it is allowed to say a win rate out loud. */
+  estimatedWinRateBelowSampleResolution: boolean;
+  estimatedWinRateUpperBound: number | null;
   normalizedText: string;
   officialInterpretation: string;
   originalText: string;
@@ -2705,6 +2720,14 @@ interface RuleRefinementFeedbackInput {
    * did the blocking — attributing the block to the conflict would hide it.
    */
   providerDisagreementBlocked?: boolean;
+  /**
+   * The distinct executable readings the compilers produced for this one text,
+   * each rendered as the sentence its AST implements. Two or more is the
+   * machine-checked evidence that the WORDING has several meanings, and it is
+   * what lets the dealer ask which one was meant instead of asserting that
+   * nothing is missing from it.
+   */
+  providerDisagreementReadings?: readonly string[];
   reasonCodes: readonly RuleValidationReasonCode[];
   reasonSummary: string;
   sanitizedText: string;
@@ -3275,11 +3298,34 @@ export function buildRuleRefinementFeedback(
   const agentRewrites = (input.agentSuggestedRewrites ?? []).filter((rewrite) =>
     isIntentPreservingRewrite(sourceText, rewrite),
   );
-  const suggestedRewrites = dedupeBoundedStrings(
-    [...deterministicRefinement.rewrites, ...agentRewrites].filter(
-      isPreflightViableRewrite,
-    ),
+  // A rule with several executable readings is the one case where the options
+  // are not guesses: each reading is the sentence an AST the compiler actually
+  // produced from THIS text implements, so it is intent-derived by construction
+  // and `isIntentPreservingRewrite` — a heuristic for judging model-invented
+  // prose against the source — has nothing left to check. The preflight
+  // viability screen still applies, because an option the dealer offers has to
+  // be one preflight can clear.
+  //
+  // They REPLACE the ordinary suggestions rather than joining them: choosing
+  // which meaning to compile is the whole of what the player has to do here, and
+  // a reworded rule mixed into that list is an option the question does not
+  // number — the panel would offer a fourth card the player was never asked
+  // about, and the numbering in the question would stop matching the options.
+  const divergentReadings = dedupeBoundedStrings(
+    (input.providerDisagreementReadings ?? []).filter(isPreflightViableRewrite),
   );
+  const readingChoices =
+    reasonCodes.has("AMBIGUOUS_RULE") && divergentReadings.length >= 2
+      ? divergentReadings
+      : [];
+  const suggestedRewrites =
+    readingChoices.length >= 2
+      ? readingChoices
+      : dedupeBoundedStrings(
+          [...deterministicRefinement.rewrites, ...agentRewrites].filter(
+            isPreflightViableRewrite,
+          ),
+        );
   const suggestedRewrite = suggestedRewrites[0];
   const deterministicCheck = validateAndPrecompileRule({
     officialInterpretation: input.officialInterpretation,
@@ -3294,6 +3340,17 @@ export function buildRuleRefinementFeedback(
   const understoodInterpretation = input.officialInterpretation
     .trim()
     .replace(/[.]+$/u, "");
+  // A disagreement the compiler could NOT trace to several readings of the text:
+  // one provider answered, or the ones that did produced nothing comparable. The
+  // player genuinely cannot act on that, so saying so is accurate here.
+  //
+  // The `AMBIGUOUS_RULE` term is what keeps it accurate. The compiler adds that
+  // code whenever the divergence is two real readings of one sentence, and that
+  // is the opposite situation: the wording IS the thing to fix, and the readings
+  // below say exactly how. Without the distinction every ambiguity was reported
+  // as "your wording is clear, no missing rule detail was identified" and its
+  // clarification questions were deleted, so the only person who could resolve
+  // it was told there was nothing to resolve.
   const compilerConflictWithoutAmbiguity =
     reasonCodes.has("PROVIDER_DISAGREEMENT") &&
     (input.providerDisagreementBlocked ?? true) &&
@@ -3327,8 +3384,28 @@ export function buildRuleRefinementFeedback(
     // the thing that broke. Only the generic blame is dropped, below.
     questions.splice(0, questions.length);
   }
+  // The one question a multi-reading rule needs, built from readings that were
+  // actually compiled rather than from a guess about what the player left out.
+  // It goes first: until the meaning is settled, no other refinement applies,
+  // and answering it is a single choice rather than a rewrite.
+  const readingChoiceQuestion =
+    readingChoices.length >= 2
+      ? `Your wording compiles to ${readingChoices.length} different rules, and they do not pay the same guesses. Which one did you mean? ${readingChoices
+          .map(
+            (reading, index) =>
+              `(${index + 1}) ${reading.trim().replace(/[.]+$/u, "")}`,
+          )
+          .join(" ")}`
+      : null;
+  if (readingChoiceQuestion) {
+    questions.unshift(readingChoiceQuestion);
+  }
+  const readingChoiceAction =
+    "Pick the reading you meant, or restate the condition so only one reading is possible.";
   const explanations = getBlockingRuleReasonExplanations(input.reasonCodes);
-  if (compilerConflictWithoutAmbiguity) {
+  if (readingChoiceQuestion) {
+    focus.add(readingChoiceAction);
+  } else if (compilerConflictWithoutAmbiguity) {
     focus.add(compilerConflictAction);
   } else if (providerArtifactFault) {
     focus.add(providerArtifactAction);
@@ -3371,22 +3448,30 @@ export function buildRuleRefinementFeedback(
     understoodInterpretation.length > 0
       ? `I understood this as: ${understoodInterpretation}. `
       : "";
-  const reasonSummary = compilerConflictWithoutAmbiguity
-    ? `I understood this as: ${understoodInterpretation}. Your wording is clear, but independent compiler attempts produced different executable readings. This is a compiler conflict, not a missing answer from you.`
-    : providerArtifactFault
+  const reasonSummary = readingChoiceQuestion
+    ? `This wording has ${readingChoices.length} different executable readings, so which guesses win is not decided yet. Only you can say which one you meant.`
+    : compilerConflictWithoutAmbiguity
+      ? `I understood this as: ${understoodInterpretation}. Your wording is clear, but independent compiler attempts produced different executable readings. This is a compiler conflict, not a missing answer from you.`
+      : providerArtifactFault
       ? `${understoodPrefix}${topExplanation.whatHappened} ${topExplanation.whyItBlocks} This is a compiler fault, not a problem with your wording.`
       : unsupportedButUnderstood
         ? `I understood this as: ${understoodInterpretation}. ${topExplanation.whatHappened} ${topExplanation.whyItBlocks}`
         : `${topExplanation.whatHappened} ${topExplanation.whyItBlocks}`;
-  const rewriteLine =
-    suggestedRewrites.length > 0
+  const rewriteLine = readingChoiceQuestion
+    ? // Naming them "rewrites" here would be wrong: the options are the
+      // compiled readings of the rule as written, and the player is choosing
+      // between meanings rather than accepting a reworded rule.
+      ` Choose one of the ${readingChoices.length} readings or write your own.`
+    : suggestedRewrites.length > 0
       ? ` Choose one of the ${suggestedRewrites.length} intent-preserving rewrites or write your own.`
       : "";
-  const dealerAction = compilerConflictWithoutAmbiguity
-    ? compilerConflictAction
-    : providerArtifactFault
-      ? providerArtifactAction
-      : topExplanation.whatToChange;
+  const dealerAction = readingChoiceQuestion
+    ? readingChoiceAction
+    : compilerConflictWithoutAmbiguity
+      ? compilerConflictAction
+      : providerArtifactFault
+        ? providerArtifactAction
+        : topExplanation.whatToChange;
   const dealerMessage = `[${topExplanation.code}] ${reasonSummary} ${dealerAction}${rewriteLine}${
     questions.length > 0
       ? " Answer the clarification questions by sending a revised rule."
@@ -4312,6 +4397,8 @@ async function runRulePreflightPipeline(
           officialInterpretation,
           providerDisagreementBlocked:
             validation.log.providerDisagreementBlocked,
+          providerDisagreementReadings:
+            validation.log.providerDisagreementReadings,
           reasonCodes: validation.log.reasonCodes,
           reasonSummary,
           sanitizedText,
@@ -4379,6 +4466,9 @@ async function runRulePreflightPipeline(
     difficultyMeasured: validation.log.difficultyMeasured,
     englishText: compileText,
     estimatedWinRate: validation.log.estimatedWinRate,
+    estimatedWinRateBelowSampleResolution:
+      validation.log.estimatedWinRateBelowSampleResolution,
+    estimatedWinRateUpperBound: validation.log.estimatedWinRateUpperBound,
     escalated,
     finalConfidence: validation.log.confidence.final_confidence,
     guardianChecked: guardianConfig.enabled,
@@ -7506,6 +7596,12 @@ function toConversationLastPreflight(
     estimatedWinRate: preflight.difficultyMeasured
       ? (preflight.estimatedWinRate ?? null)
       : null,
+    estimatedWinRateBelowSampleResolution:
+      preflight.difficultyMeasured &&
+      preflight.estimatedWinRateBelowSampleResolution === true,
+    estimatedWinRateUpperBound: preflight.difficultyMeasured
+      ? (preflight.estimatedWinRateUpperBound ?? null)
+      : null,
     normalizedText: preflight.normalizedText,
     officialInterpretation: preflight.officialInterpretation,
     originalText: sanitizeRuleText(originalText),
@@ -7615,7 +7711,10 @@ export function buildDealerQuestionContext(args: {
     .reverse()
     .find((entry) => entry.who === "ai");
   const payload = {
-    contextVersion: 8,
+    // 9: `preflight` carries `estimatedWinRateBelowSampleResolution` and
+    //    `estimatedWinRateUpperBound`, so an unresolvable rate is never quoted
+    //    to the player as a measured zero.
+    contextVersion: 9,
     diagnosticsAvailable: diagnostics !== null,
     // Set when an input gate stopped the rule before anything compiled. It is
     // the ONLY record of why, so when it is present it is the reason to explain

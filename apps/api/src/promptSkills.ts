@@ -12,7 +12,11 @@ export const DEALER_INTERPRET_PROMPT_VERSION = "tyche_rule_interpret_prompt_v5";
 // winning condition. Measured before the change: a bare greeting produced an
 // invented rule and its submit panel in 3 of 16 runs, and the answer skipped the
 // greeting entirely.
-export const DEALER_CHAT_PROMPT_VERSION = "tyche_rule_dealer_chat_prompt_v10";
+// v11: a win rate of 0 that the bounded sample could not resolve is reported as
+// "rarer than the check can measure", with the upper bound, instead of as a
+// measured zero. Quoting the 0 told a player their accepted rule could never be
+// won, contradicting the verdict shown beside it.
+export const DEALER_CHAT_PROMPT_VERSION = "tyche_rule_dealer_chat_prompt_v11";
 
 function readPromptFile(relativePath: string): string {
   // Prompt assets are runtime code. A missing file must stop the request rather

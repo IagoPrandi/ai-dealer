@@ -4,6 +4,13 @@ This tracker records milestone status, work logs, and required document confirma
 
 ## Work Log
 
+### 2026-09-07 (Dealer progress spinner remains active with reduced motion)
+
+- Opened the required `PRD.md`, `AGENTS.md`, and `PROGRESS_TRACKER.md`; inspected `.claude/skills`; and reviewed the local frontend-development, Tyche UI-coherence, design-system, test-and-verify, and Playwright guidance. The required design-system tokens, components, screens, repository-integration, Create handoff HTML, and Create screenshot were reviewed alongside the live implementation.
+- Fixed the reported frozen reload/progress icon in `apps/web/src/features/tyche/tyche.css`. The active `.ide-spin` loader now remains rotational at a deliberately slower `1.8s` cadence when `prefers-reduced-motion: reduce` is enabled. Non-essential app motion remains reduced; this narrow exception preserves truthful in-progress feedback while a dealer or live action is still running.
+- Verification passed: `@tyche/web` typecheck, `294/294` tests, zero-warning lint, production build, and `git diff --check`. Browser verification at `/play/propose` with reduced motion forced confirmed the computed animation is `1.8s linear infinite ide-spin` and observed two distinct transform matrices after successive waits; no browser errors were reported. Screenshots are in `output/playwright/`.
+- Final consistency review confirms that the change introduces no new design token, copy, data fallback, API behavior, wallet behavior, or milestone-status mutation. No milestone checkbox was ticked because explicit user confirmation is still required.
+
 ### 2026-09-07 (Dealer-chat conversation-reference diagnosis)
 
 - Opened the required `PRD.md`, `AGENTS.md`, and `PROGRESS_TRACKER.md`; inspected `.claude/skills` and reviewed the local frontend and test-and-verify guidance before tracing the reported conversation.

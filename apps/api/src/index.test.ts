@@ -292,7 +292,7 @@ test("dealer question context carries server diagnostics and discloses their abs
   });
   assert.match(withoutDiagnostics, /"diagnosticsAvailable":false/u);
   assert.match(withoutDiagnostics, /"preflight":null/u);
-  assert.match(withoutDiagnostics, /"contextVersion":8/u);
+  assert.match(withoutDiagnostics, /"contextVersion":9/u);
   assert.match(withoutDiagnostics, /"gateBlock":null/u);
   assert.match(
     withoutDiagnostics,
@@ -332,6 +332,8 @@ test("dealer question context carries server diagnostics and discloses their abs
         decision: "INVALID",
         difficultyClass: null,
         estimatedWinRate: null,
+        estimatedWinRateBelowSampleResolution: false,
+        estimatedWinRateUpperBound: null,
         normalizedText: baseDraft.prompt,
         officialInterpretation: "Compare the two sums modulo 9.",
         originalText: baseDraft.prompt,
@@ -1027,6 +1029,75 @@ test("provider disagreement is reported as a compiler conflict, not another clar
     feedback.refinementFocus.some((item) =>
       /no missing rule detail was identified/iu.test(item),
     ),
+  );
+});
+
+test("divergent readings become the choice the player is asked to make", () => {
+  // The compiler traced the disagreement to two real readings of one sentence,
+  // so the wording IS the thing to fix and the readings say how. The player must
+  // be asked which one they meant — never told that nothing is missing from
+  // their wording, which is what left this class of rule unfreezable.
+  const text =
+    "A guess wins if the sum of the numbers it shares with the draw equals the sum of the draw.";
+  const readings = [
+    "A guess wins if the sum of your six numbers is equal to the sum of the drawn numbers.",
+    "A guess wins if the sum of the values present in both your numbers and the drawn numbers is equal to the sum of the drawn numbers.",
+  ];
+  const feedback = buildRuleRefinementFeedback({
+    clarityNote: "",
+    compileText: text,
+    officialInterpretation:
+      "The guess wins when the shared numbers add up to the drawn total.",
+    providerDisagreementReadings: readings,
+    reasonCodes: ["AMBIGUOUS_RULE", "PROVIDER_DISAGREEMENT"],
+    reasonSummary: "Rule rejected: PROVIDER_DISAGREEMENT.",
+    sanitizedText: text,
+    tokenCount: text.trim().split(/\s+/u).length,
+  });
+
+  // The question exists, names both readings, and leads.
+  assert.equal(feedback.refinementQuestions.length > 0, true);
+  const question = feedback.refinementQuestions[0] ?? "";
+  assert.match(question, /which one did you mean/iu);
+  assert.match(question, /\(1\)/u);
+  assert.match(question, /\(2\)/u);
+  // Both readings are selectable, and they come before any generic rewrite.
+  assert.deepEqual(feedback.suggestedRewrites.slice(0, 2), readings);
+  // The false claims are gone.
+  assert.doesNotMatch(feedback.reasonSummary, /wording is clear/iu);
+  assert.doesNotMatch(feedback.reasonSummary, /compiler conflict/iu);
+  assert.doesNotMatch(
+    feedback.dealerMessage,
+    /no missing rule detail was identified/iu,
+  );
+  assert.match(feedback.dealerMessage, /pick the reading you meant/iu);
+});
+
+test("a disagreement with no traced readings is still reported as a compiler conflict", () => {
+  // Without AMBIGUOUS_RULE the compiler could not show that the text has more
+  // than one meaning, so there is no choice to offer and the player genuinely
+  // cannot act. Inventing a "which did you mean" question here would be the
+  // same fabrication in the other direction.
+  const text =
+    "A guess wins if the sum of the numbers it shares with the draw equals the sum of the draw.";
+  const feedback = buildRuleRefinementFeedback({
+    clarityNote: "",
+    compileText: text,
+    officialInterpretation:
+      "The guess wins when the shared numbers add up to the drawn total.",
+    providerDisagreementReadings: [
+      "A guess wins if the sum of your six numbers is equal to the sum of the drawn numbers.",
+    ],
+    reasonCodes: ["PROVIDER_DISAGREEMENT"],
+    reasonSummary: "Rule rejected: PROVIDER_DISAGREEMENT.",
+    sanitizedText: text,
+    tokenCount: text.trim().split(/\s+/u).length,
+  });
+
+  assert.match(feedback.reasonSummary, /compiler conflict/iu);
+  assert.doesNotMatch(
+    feedback.refinementQuestions.join(" "),
+    /which one did you mean/iu,
   );
 });
 

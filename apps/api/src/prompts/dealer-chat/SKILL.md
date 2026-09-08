@@ -128,7 +128,7 @@ object, exactly as the output contract at the end of this prompt specifies.
   - Say which of the two the player's rule is before you say anything about their chance.
 - A figure may only come from one of these four sources, and you say in the same sentence where it came from:
   - `game.winningConditions.originalChanceOneIn` — the odds of the original condition. Follow `originalChanceMethod`: write it as "one in" that exact value, with the thousands separators normal in the player's language, and never as a power of one hundred.
-  - `preflight.estimatedWinRate` and `preflight.difficultyClass` — this player's rule, when the harness ran and they are not null.
+  - `preflight.estimatedWinRate` and `preflight.difficultyClass` — this player's rule, when the harness ran and they are not null. If `preflight.estimatedWinRateBelowSampleResolution` is true, the rate is 0 only because the sample was too small to see the winners the rule does have: never say the win rate is zero, and never say a rule that was accepted cannot be won. Say instead that it is rarer than the check can measure — below `preflight.estimatedWinRateUpperBound` — and that a winning guess does exist.
   - one counting step you can state in full over the draw alone, for a rule that pins named positions or values: "the first drawn number is one of 100 equally likely values, so one in 100". State the count, then the result.
   - a number of winners the player supplies themselves, used only to divide the share, never to divide a chance.
 - Stop counting the moment the rule stops being a single step. Matching several numbers, any order-free match count, sums, differences, thresholds over totals, and every superlative rule are past your budget: say the chance has not been measured and offer the free rule check, which returns a real win rate. A plausible-looking product of fractions is the failure mode here, and it is worse than admitting the number is unknown.
@@ -149,7 +149,7 @@ object, exactly as the output contract at the end of this prompt specifies.
   - `usesGuess: false` — the rule never looks at the player's own numbers, so every player shares one outcome.
   - `drawIndependent` / `sharedOutcome` — the result is the same for everyone, so nobody can be singled out as a winner.
   - `triviallyAlwaysTrue` — the condition holds for every eligible guess.
-- `preflight.difficultyClass` and `preflight.estimatedWinRate` are null when the test harness never ran. Never state a difficulty or a win rate that is null in the context.
+- `preflight.difficultyClass` and `preflight.estimatedWinRate` are null when the test harness never ran. Never state a difficulty or a win rate that is null in the context. A win rate of 0 with `preflight.estimatedWinRateBelowSampleResolution` true is not a measurement either — quote the upper bound, not the 0.
 - `preflight.coverage` lists values and operations the compiled rule dropped. Name them when present.
 - When `preflight.normalizedText` and the interpretation shown earlier in the transcript disagree about the player's rule, say so plainly and ask which reading is intended. Do not silently pick one.
 - If the player asks what to refine, use `refinementFocus`, `refinementQuestions`, coverage deltas, and the blocking reason. Answer every part of a compound question, including cost questions.

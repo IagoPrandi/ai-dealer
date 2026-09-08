@@ -46,6 +46,7 @@ import {
   collectRequiredOperations,
   collectRequiredValues,
   stripVacuousRanges,
+  type RuleOperation,
 } from "./interpretationCoverage.js";
 import { RULE_COMPILER_SKILL_VERSION } from "./skill.js";
 
@@ -413,6 +414,20 @@ export interface RuleValidationLog {
    *  unsupported rule reports IMPOSSIBLE without a single sampled guess. */
   difficultyMeasured: boolean;
   estimatedWinRate: number;
+  /**
+   * True when `estimatedWinRate` is 0 only because the bounded sample could not
+   * resolve a rate this small, while a directed search proved the rule winnable.
+   * Anything that shows a win rate to a player must read `estimatedWinRateUpperBound`
+   * instead of quoting the 0: the rule was accepted as winnable in the same run,
+   * so "your win rate is 0" would contradict its own verdict.
+   */
+  estimatedWinRateBelowSampleResolution: boolean;
+  /**
+   * Highest win rate consistent with the sample (~95% confidence), set only when
+   * no win was observed. Null whenever `estimatedWinRate` is a real point
+   * estimate. This is the `confidence_interval` PRD 6.8 requires be recorded.
+   */
+  estimatedWinRateUpperBound: number | null;
   evaluatedTestCases: RuleValidationTestResult[];
   fallbackRateSample: number;
   fallbackTriggered: boolean;
@@ -431,6 +446,19 @@ export interface RuleValidationLog {
    */
   providerDisagreementBlocked: boolean;
   providerDisagreementRateSample: number;
+  /**
+   * The DISTINCT executable readings the providers produced for this one text,
+   * each rendered as the player-facing sentence its AST implements, in the order
+   * the providers were asked.
+   *
+   * Fewer than two entries means there was no genuine multi-reading divergence
+   * (one provider answered, or the ones that did produced no AST to compare).
+   * Two or more is the machine-checked evidence that the text — not the
+   * compiler — has more than one meaning, which is what a consumer needs in
+   * order to ask the player WHICH reading they meant instead of asserting that
+   * nothing is missing from their wording.
+   */
+  providerDisagreementReadings: readonly string[];
   providerPath: AgentProviderAttemptLog[];
   reasonCodes: RuleValidationReasonCode[];
   reasonSummary: string;
@@ -763,6 +791,33 @@ function finalizeValidation(
   if (providerDisagreementRateSample === 1) {
     reasonCodes.add("PROVIDER_DISAGREEMENT");
   }
+  // Two independent readings of the SAME text that execute differently are
+  // evidence about the text, not about the compilers. Reporting only
+  // PROVIDER_DISAGREEMENT put that evidence on the wrong side of the boundary:
+  // the player was told "your wording is clear" and "no missing rule detail was
+  // identified", and the clarification questions were deleted — so the one
+  // person who could resolve the divergence was told there was nothing to
+  // resolve, and the rule could never be frozen however often it was retried.
+  //
+  // `AMBIGUOUS_RULE` is the code PRD §6.6 already defines for a rule that must
+  // not be accepted silently and has to be clarified first. Reaching it through
+  // the keyword gate alone (`close`, `lucky`, `balanced`, ...) can only ever
+  // catch ambiguous VOCABULARY; a divergence between compiled ASTs is how
+  // ambiguous STRUCTURE announces itself, and it is measured on every rule
+  // rather than enumerated in a word list.
+  //
+  // Only genuine multi-reading divergence qualifies. A non-answer (timeout,
+  // malformed, schema-invalid) is already excluded from the comparison, and an
+  // attempt that produced no AST contributes no reading — so a rule the
+  // compilers simply could not compile keeps reporting exactly why.
+  const disagreementReadings = collectDivergentProviderReadings(attempts);
+  if (
+    disagreementBlocks &&
+    disagreementResolution === null &&
+    disagreementReadings.length >= 2
+  ) {
+    reasonCodes.add("AMBIGUOUS_RULE");
+  }
   // A second opinion was required and could not be obtained (no second provider
   // reachable, or every extra attempt failed). The rule still stands on one
   // unchecked reading — record that in the audit log instead of letting it pass
@@ -782,6 +837,7 @@ function finalizeValidation(
     selectedAttempt.confidence.final_confidence,
     fallbackTriggered,
     disagreementBlocks && disagreementResolution === null,
+    disagreementReadings.length,
   );
 
   const artifact: RuleCompiledArtifact | null =
@@ -813,6 +869,9 @@ function finalizeValidation(
       difficultyClass: selectedAttempt.difficultyClass,
       difficultyMeasured: selectedAttempt.difficultyMeasured,
       estimatedWinRate: selectedAttempt.estimatedWinRate,
+      estimatedWinRateBelowSampleResolution:
+        selectedAttempt.estimatedWinRateBelowSampleResolution,
+      estimatedWinRateUpperBound: selectedAttempt.estimatedWinRateUpperBound,
       evaluatedTestCases: selectedAttempt.evaluatedTestCases,
       fallbackRateSample: fallbackTriggered ? 1 : 0,
       fallbackTriggered,
@@ -824,6 +883,7 @@ function finalizeValidation(
       provider: selectedAttempt.modelIdentity.provider,
       providerDisagreementBlocked: disagreementBlocks,
       providerDisagreementRateSample,
+      providerDisagreementReadings: disagreementReadings,
       providerPath,
       reasonCodes: [...reasonCodes],
       reasonSummary,
@@ -943,6 +1003,8 @@ interface ProviderEvaluation {
   difficultyMeasured: boolean;
   diagnostics: RuleCompilationAttemptDiagnostic;
   estimatedWinRate: number;
+  estimatedWinRateBelowSampleResolution: boolean;
+  estimatedWinRateUpperBound: number | null;
   evaluatedTestCases: RuleValidationTestResult[];
   generatedTestCases: RuleValidationTestCase[];
   modelIdentity: AgentModelIdentity;
@@ -1615,10 +1677,24 @@ function validateResolvedAst(
   // not survive compilation, so a rule can never be elected under a promise its
   // artifact does not keep.
   //
-  // Skipped only when an independent READING of the text certified the artifact.
-  // On the provider path the deterministic reviewer plays that role, and literal
-  // matching must then stay out of the way: it cannot tell a terse-but-equivalent
-  // encoding from a drop (turn 55's faithful terse compile never mentions 2..5).
+  // A reviewer AST certifies the VALUE half only. Literal value matching cannot
+  // tell a terse-but-equivalent encoding from a drop (turn 55's faithful terse
+  // compile never mentions 2..5), so an independent reading of the text has to
+  // be allowed to overrule it.
+  //
+  // It certifies NOTHING about the operation half, and treating it as a blanket
+  // bypass is how a rule reading "... mas apenas se ao menos dois desses numeros
+  // coincidirem nas mesmas posicoes" was frozen as a bare `sum_equals`: the
+  // compile model dropped the positional condition, the reviewer model dropped
+  // it the same way, they therefore agreed, and agreement was read as proof.
+  // Two readings that lost the same clause are not a reading of that clause.
+  //
+  // The asymmetry is exactly the one `RuleOperation` was defined around: its
+  // members are a closed set chosen because none of them can be legitimately
+  // simplified away, so an operation the player named that appears in NO
+  // candidate AST is always a real drop and never a terse encoding. The sibling
+  // agent-statement gate below already blocks on `missingOperations` with no
+  // bypass at all; this makes the two gates agree instead of contradicting.
   //
   // NEVER skipped for a deterministic artifact, whatever reviews it. That AST
   // comes from a regex pattern rather than from reading the sentence, so "the
@@ -1629,13 +1705,18 @@ function validateResolvedAst(
   const certifiedByIndependentReading =
     astSource === "provider" && reviewerAst !== null;
   let interpretationCoverageFailed = false;
-  if (ast && !forcedFailure && !certifiedByIndependentReading) {
+  let coverageMissingOperations: readonly RuleOperation[] = [];
+  if (ast && !forcedFailure) {
     const coverage = analyzeInterpretationCoverage({
       ast,
       officialInterpretation: describeRuleAstForPlayers(ast),
       text: request.originalText?.trim() || normalizedText,
     });
-    if (!coverage.covered) {
+    coverageMissingOperations = coverage.missingOperations;
+    const blocked = certifiedByIndependentReading
+      ? coverage.missingOperations.length > 0
+      : !coverage.covered;
+    if (blocked) {
       reasonCodes.add("INTERPRETATION_MISMATCH");
       interpretationCoverageFailed = true;
     }
@@ -1643,21 +1724,24 @@ function validateResolvedAst(
   stages.push({
     detail: !ast
       ? "Skipped because no schema-valid AST was available."
-      : certifiedByIndependentReading
-        ? "Skipped because an independent reviewer AST certified the provider reading."
-        : interpretationCoverageFailed
-          ? "The candidate AST does not cover every intent-bearing part of the rule text."
+      : interpretationCoverageFailed
+        ? `The candidate AST does not cover every intent-bearing part of the rule text${
+            coverageMissingOperations.length > 0
+              ? ` (missing operations: ${coverageMissingOperations.join(", ")})`
+              : ""
+          }.`
+        : certifiedByIndependentReading
+          ? "Every operation the rule text names survives into the candidate AST; value coverage was certified by the independent reviewer AST."
           : "The candidate AST covers the intent-bearing parts of the rule text.",
     reasonCodes: interpretationCoverageFailed
       ? ["INTERPRETATION_MISMATCH"]
       : [],
     stage: "interpretation_coverage",
-    status:
-      !ast || certifiedByIndependentReading
-        ? "skipped"
-        : interpretationCoverageFailed
-          ? "failed"
-          : "passed",
+    status: !ast
+      ? "skipped"
+      : interpretationCoverageFailed
+        ? "failed"
+        : "passed",
   });
 
   // Gap 1: the dealer's own reading is a promise to the player.
@@ -1711,6 +1795,15 @@ function validateResolvedAst(
   const difficultyClass: RuleDifficultyClass =
     harness?.difficulty.difficultyClass ?? "IMPOSSIBLE";
   const estimatedWinRate = harness?.difficulty.estimatedWinRate ?? 0;
+  // Carried beside the rate rather than folded into it: a rate of 0 that the
+  // sample could not resolve is not the same fact as a measured 0, and every
+  // consumer that shows a win rate to a player has to be able to tell them
+  // apart. Defaults describe the no-harness case, where nothing was measured at
+  // all and `difficultyMeasured` is already false.
+  const estimatedWinRateBelowSampleResolution =
+    harness?.difficulty.winRateBelowSampleResolution ?? false;
+  const estimatedWinRateUpperBound =
+    harness?.difficulty.winRateUpperBound ?? null;
 
   // Policy: any verifiable rule is allowed, EXCEPT the two classes PRD §6.8
   // rejects outright — a rule that no input can win and a rule every input wins
@@ -1732,7 +1825,11 @@ function validateResolvedAst(
   stages.push({
     detail: !harness
       ? "Skipped because the candidate did not pass schema and runtime-bound checks."
-      : `Harness coverage ${harness.coverageScore}; difficulty ${difficultyClass}; estimated win rate ${estimatedWinRate}.`,
+      : `Harness coverage ${harness.coverageScore}; difficulty ${difficultyClass}; estimated win rate ${
+          estimatedWinRateBelowSampleResolution
+            ? `below ${estimatedWinRateUpperBound} (winnable, but no winner in ${harness.difficulty.samplesRun} samples)`
+            : estimatedWinRate
+        }.`,
     reasonCodes: [...reasonCodes].filter(
       (code) =>
         code === "DIFFICULTY_IMPOSSIBLE" ||
@@ -1876,6 +1973,8 @@ function validateResolvedAst(
       status,
     },
     estimatedWinRate,
+    estimatedWinRateBelowSampleResolution,
+    estimatedWinRateUpperBound,
     evaluatedTestCases,
     generatedTestCases,
     modelIdentity,
@@ -2207,6 +2306,35 @@ function hasProviderDisagreement(attempts: ProviderEvaluation[]) {
 
 function countCompletedOpinions(attempts: ProviderEvaluation[]) {
   return attempts.filter(isCompletedProviderOpinion).length;
+}
+
+/**
+ * The distinct executable readings behind a disagreement, as player prose.
+ *
+ * Deduplicated by the SAME behavioural comparison that detected the
+ * disagreement, so the list can never contradict it: two attempts that
+ * `providerOpinionsAgree` considers one reading collapse to one entry, and the
+ * list reaches two entries exactly when the divergence is real. Comparing
+ * rendered sentences instead would split one reading into two whenever the
+ * describer worded the same AST differently.
+ */
+function collectDivergentProviderReadings(
+  attempts: ProviderEvaluation[],
+): string[] {
+  const distinct: ProviderEvaluation[] = [];
+  for (const attempt of attempts.filter(isCompletedProviderOpinion)) {
+    if (attempt.ast === null) {
+      continue;
+    }
+    if (
+      !distinct.some((existing) => providerOpinionsAgree(existing, attempt))
+    ) {
+      distinct.push(attempt);
+    }
+  }
+  return distinct.flatMap((attempt) =>
+    attempt.ast ? [describeRuleAstForPlayers(attempt.ast)] : [],
+  );
 }
 
 function resolveProviderDisagreement(attempts: ProviderEvaluation[]) {
@@ -5795,7 +5923,16 @@ function summarizeReasons(
   finalConfidence: number,
   fallbackTriggered: boolean,
   providerDisagreement: boolean,
+  divergentReadingCount: number,
 ) {
+  // Which of the two the divergence actually is decides who can fix it, so the
+  // summary must not merge them. Several distinct readings of one sentence is a
+  // question for the player; anything else (one provider answered, or the ones
+  // that did produced nothing comparable) is a compiler-side fault they cannot
+  // act on, and telling them to reword it would be a dead end.
+  if (providerDisagreement && divergentReadingCount >= 2) {
+    return `Rule rejected: this wording has ${divergentReadingCount} different executable readings, so which guesses win is not yet decided. Pick the reading you meant, or restate the condition so only one reading is possible.`;
+  }
   if (providerDisagreement) {
     return "Rule rejected because provider attempts disagreed; tertiary tiebreaker path was logged for audit.";
   }
