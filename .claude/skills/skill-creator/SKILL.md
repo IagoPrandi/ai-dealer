@@ -45,6 +45,14 @@ Match the level of specificity to the task's fragility and variability:
 
 Think of Codex as exploring a path: a narrow bridge with cliffs needs specific guardrails (low freedom), while an open field allows many routes (high freedom).
 
+### Encode Invariants, Not Incidents
+
+- Convert a reported failure into the underlying decision rule, invariant, or stopping condition before adding skill instructions.
+- Do not build keyword lists, literal examples, or fixed branches merely because they reproduce known incidents. Use examples to clarify an invariant, then forward-test the instruction with different wording, values, boundaries, polarity, and an unsupported case.
+- Distinguish a causal workflow from containment. If the skill can only mitigate a symptom, label the limitation and require escalation or follow-up instead of claiming resolution.
+- Require explicit behavior for unknown or unproved cases. “No counterexample found” is not proof of equivalence, correctness, or safety.
+- Prefer updating an already-triggered skill that owns the responsibility over creating a broad overlapping skill. Create a new skill only when it has a discriminating trigger and a distinct workflow.
+
 ### Anatomy of a Skill
 
 Every skill consists of a required SKILL.md file and optional bundled resources:
@@ -355,6 +363,12 @@ scripts/quick_validate.py <path/to/skill-folder>
 ```
 
 The validation script checks YAML frontmatter format, required fields, and naming rules. If validation fails, fix the reported issues and run the command again.
+
+Structural validation is only the first gate. For any instruction added because of
+a real failure, exercise at least one equivalent case with different surface form,
+one minimally changed counterexample, and one unsupported case that must remain
+explicitly unknown or escalated. Do not provide the intended answer to the
+evaluation in a way that lets it memorize the incident.
 
 ### Step 6: Iterate
 

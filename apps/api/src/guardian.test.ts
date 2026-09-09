@@ -66,7 +66,11 @@ test("accepts equivalent Portuguese match-count variations without guardian scor
     ],
     [
       "Vence quem tem pelo menos três números que coincidam com os números sorteados.",
-      "A guess wins if how many values are in the values present in both your numbers and the drawn numbers is at least 3.",
+      "A guess wins if at least 3 of its numbers appear in the official draw, regardless of order.",
+    ],
+    [
+      "Vence quem acertar ao menos três dos seis números sorteados.",
+      "A guess wins if at least three of its six numbers appear in the official draw.",
     ],
   ] as const;
 
@@ -104,6 +108,74 @@ test("does not treat a changed match threshold as clearly grounded", () => {
     ),
     false,
   );
+});
+
+test("semantic shortcut rejects executable mutations without guardian scoring", async () => {
+  globalThis.fetch = (async () => {
+    throw new Error("guardian must not overrule a deterministic counterexample");
+  }) as typeof fetch;
+
+  const source =
+    "A guess wins if at least 3 guessed numbers appear in the official draw.";
+  const mutations = [
+    "A guess wins if at least 4 guessed numbers appear in the official draw.",
+    "A guess wins if exactly 3 guessed numbers appear in the official draw.",
+    "A guess wins if at least 3 of the 6 reversed positions match.",
+    "A guess wins if at least 3 guessed numbers appear in the official draw and the guessed sum is greater than the drawn sum.",
+  ];
+
+  for (const mutation of mutations) {
+    assert.equal(
+      await checkGroundedness(source, mutation, GUARDIAN_CONFIG),
+      false,
+      mutation,
+    );
+  }
+});
+
+test("negation and unknown semantics never pass through a lexical shortcut", async () => {
+  globalThis.fetch = (async () => {
+    throw new Error("guardian must not overrule a proven polarity inversion");
+  }) as typeof fetch;
+
+  const polarityInversions = [
+    [
+      "Win if at least three guessed numbers do not appear in the draw.",
+      "A guess wins if at least three guessed numbers appear in the draw.",
+    ],
+    [
+      "Vence se pelo menos três números do palpite não coincidirem com o sorteio.",
+      "A guess wins if at least three guessed numbers match the draw.",
+    ],
+  ] as const;
+
+  for (const [rule, interpretation] of polarityInversions) {
+    assert.equal(
+      isClearlyGroundedRuleInterpretation(rule, interpretation),
+      false,
+      rule,
+    );
+    assert.equal(
+      await checkGroundedness(rule, interpretation, GUARDIAN_CONFIG),
+      false,
+      rule,
+    );
+  }
+
+  let guardianCalls = 0;
+  globalThis.fetch = (async () => {
+    guardianCalls += 1;
+    return new Response(
+      JSON.stringify({ message: { content: "<score>yes</score>" } }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+  const unknownRule = "A guess wins if its prime numbers form a palindrome.";
+  assert.equal(
+    await checkGroundedness(unknownRule, unknownRule, GUARDIAN_CONFIG),
+    false,
+  );
+  assert.equal(guardianCalls, 1);
 });
 
 test("guardian config ignores inline comments copied from .env examples", () => {
@@ -279,8 +351,8 @@ test("safeguard groundedness reports faithfulness, not violation", async () => {
   const requests = stubSafeguard({ violation: 1 });
   assert.equal(
     await checkGroundedness(
-      "Ganha quem acertar pelo menos 3 dezenas.",
-      "A player wins when exactly 5 numbers match and only the first is paid.",
+      "A guess wins if its prime numbers form a palindrome.",
+      "A guess wins if its composite numbers form a palindrome.",
       SAFEGUARD_CONFIG,
     ),
     false,

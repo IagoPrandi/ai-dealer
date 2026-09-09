@@ -5,10 +5,12 @@ import {
   analyzeInterpretationCoverage,
   analyzeStatementFidelity,
   buildRuleCompilerSkillPrompt,
+  compareDeterministicRuleSemantics,
   compileRuleArtifact,
   createDefaultProviderRoutingPolicy,
   createLocalOnlyProviderRoutingPolicy,
   createCompilerPlaceholder,
+  describeRuleAstForPlayers,
   evaluatePredicate,
   getDeterministicRuleCompilerPlan,
   getRuleCompilationCandidateJsonSchema,
@@ -322,6 +324,212 @@ test("validates and precompiles a clear match-count rule", () => {
   assert.ok((result.artifact?.harnessCases.length ?? 0) > 0);
   assert.equal(result.artifact?.skillVersion, RULE_COMPILER_SKILL_VERSION);
   assert.equal(result.artifact?.testHarnessVersion, "2.4.0");
+});
+
+test("compares known rule semantics instead of matching threshold words", () => {
+  const equivalentPairs = [
+    [
+      "Win if at least 4 of your numbers appear in the draw.",
+      "Compare every eligible guess by counting how many of its numbers appear in the draw; a guess wins when at least four match.",
+    ],
+    [
+      "Vence quem tem pelo menos três números que coincidam com os números sorteados.",
+      "A guess wins if at least 3 of its numbers appear in the official draw, regardless of order.",
+    ],
+    [
+      "Vence quem acertar ao menos três dos seis números sorteados.",
+      "A guess wins if at least three of its six numbers appear in the official draw.",
+    ],
+  ] as const;
+  for (const [left, right] of equivalentPairs) {
+    assert.equal(
+      compareDeterministicRuleSemantics(left, right),
+      "equivalent",
+    );
+  }
+
+  const mutations = [
+    "A guess wins if at least 4 of its numbers appear in the official draw.",
+    "A guess wins if exactly 3 of its numbers appear in the official draw.",
+    "A guess wins if at least 3 of the 6 reversed positions match.",
+    "A guess wins if at least 3 guessed numbers appear in the official draw and the guessed sum is greater than the drawn sum.",
+  ];
+  for (const mutation of mutations) {
+    assert.equal(
+      compareDeterministicRuleSemantics(
+        "A guess wins if at least 3 guessed numbers appear in the official draw.",
+        mutation,
+      ),
+      "different",
+      mutation,
+    );
+  }
+
+  assert.equal(
+    compareDeterministicRuleSemantics(
+      "A guess wins if its prime numbers form a palindrome.",
+      "A guess wins if its prime numbers form a palindrome.",
+    ),
+    "unknown",
+  );
+});
+
+test("compares every supported match threshold and stays conservative at equivalent boundaries", () => {
+  for (let threshold = 1; threshold <= 6; threshold += 1) {
+    assert.equal(
+      compareDeterministicRuleSemantics(
+        `Win if at least ${threshold} guessed numbers appear in the draw.`,
+        `A guess wins when ${threshold} or more of its numbers match the official draw.`,
+      ),
+      "equivalent",
+      `threshold ${threshold}`,
+    );
+
+    if (threshold < 6) {
+      assert.equal(
+        compareDeterministicRuleSemantics(
+          `Win if at least ${threshold} guessed numbers appear in the draw.`,
+          `Win if at least ${threshold + 1} guessed numbers appear in the draw.`,
+        ),
+        "different",
+        `threshold mutation ${threshold} -> ${threshold + 1}`,
+      );
+    }
+  }
+
+  assert.equal(
+    compareDeterministicRuleSemantics(
+      "Win if exactly three guessed numbers appear in the draw.",
+      "Win if exactly three guessed numbers do not appear in the draw.",
+    ),
+    "unknown",
+    "with six numbers these predicates share a truth table, but different syntax is not proof of complete equivalence",
+  );
+  assert.equal(
+    compareDeterministicRuleSemantics(
+      "Win if at least six guessed numbers appear in the draw.",
+      "Win if exactly six guessed numbers appear in the draw.",
+    ),
+    "unknown",
+    "bounded samples cannot promote structurally different programs to equivalent",
+  );
+});
+
+test("negative match counts never enter the positive deterministic shortcut", async () => {
+  const negativeRules = [
+    "Win if at least three guessed numbers do not appear in the draw.",
+    "Vence se pelo menos três números do palpite não coincidirem com o sorteio.",
+    "Vence se ao menos três números do palpite não coincidirem com o sorteio.",
+    "Win if at least three guessed numbers are absent from the draw.",
+    "Win with at least three missed numbers.",
+  ];
+  for (const text of negativeRules) {
+    assert.equal(getDeterministicRuleCompilerPlan(text), null, text);
+    assert.equal(
+      compareDeterministicRuleSemantics(
+        text,
+        "A guess wins if at least 3 guessed numbers appear in the draw.",
+      ),
+      "different",
+      text,
+    );
+  }
+  assert.equal(
+    compareDeterministicRuleSemantics(
+      "Win if at least three guessed numbers do not appear in the draw.",
+      "Win if at least four guessed numbers do not appear in the draw.",
+    ),
+    "different",
+  );
+  assert.equal(
+    compareDeterministicRuleSemantics(
+      "Win if at least three guessed numbers do not appear in the draw.",
+      "Win if exactly three guessed numbers do not appear in the draw.",
+    ),
+    "different",
+  );
+  assert.equal(
+    compareDeterministicRuleSemantics(
+      "Win if at least three guessed numbers do not appear in the draw.",
+      "A guess wins when at least three guessed numbers are absent from the draw.",
+    ),
+    "unknown",
+    "matching negative fingerprints cannot prove whole-rule equivalence",
+  );
+
+  const negativeAst = {
+    schemaVersion: 2 as const,
+    result: {
+      type: "predicate" as const,
+      predicate: {
+        kind: "count_at_least" as const,
+        value: 3,
+        of: {
+          kind: "difference" as const,
+          left: { kind: "source" as const, source: "guess" as const },
+          right: { kind: "source" as const, source: "draw" as const },
+        },
+      },
+    },
+  };
+  let generatorCalls = 0;
+  let reviewerCalls = 0;
+  const result = await compileRuleArtifact(
+    {
+      originalText: negativeRules[0]!,
+      prompt: negativeRules[0]!,
+      tokenCount: tokenCount(negativeRules[0]!),
+    },
+    {
+      astProvider: async () => {
+        generatorCalls += 1;
+        return negativeAst;
+      },
+      astReviewer: async () => {
+        reviewerCalls += 1;
+        return negativeAst;
+      },
+      preferDeterministic: true,
+    },
+  );
+
+  assert.equal(result.decision, "VALID");
+  assert.equal(generatorCalls, 1);
+  assert.equal(reviewerCalls, 1);
+  assert.deepEqual(result.artifact?.ast, negativeAst);
+});
+
+test("renders generic overlap-count ASTs as canonical player language", () => {
+  const providerAst = {
+    schemaVersion: 2 as const,
+    result: {
+      type: "predicate" as const,
+      predicate: {
+        kind: "compare" as const,
+        op: "gte" as const,
+        left: {
+          kind: "reduce" as const,
+          op: "count" as const,
+          of: {
+            kind: "intersection" as const,
+            left: { kind: "source" as const, source: "guess" as const },
+            right: { kind: "source" as const, source: "draw" as const },
+          },
+        },
+        right: { kind: "lit" as const, value: 3 },
+      },
+    },
+  };
+  const interpretation = describeRuleAstForPlayers(providerAst);
+
+  assert.equal(
+    interpretation,
+    "A guess wins if at least 3 of its numbers appear in the official draw, regardless of order.",
+  );
+  assert.deepEqual(getDeterministicRuleCompilerPlan(interpretation)?.ast, {
+    node: { kind: "match_count_at_least", value: 3 },
+    schemaVersion: 1,
+  });
 });
 
 test("validates supported sum and exact-order rules", () => {

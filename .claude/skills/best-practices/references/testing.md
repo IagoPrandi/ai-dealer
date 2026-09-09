@@ -119,12 +119,23 @@ contract PoolInvariantTest is Test {
 - **Todo bug corrigido deve ganhar um teste de regressão** que reproduz o bug antes da correção.
 - Nomeie o teste com referência ao issue: `test_Fix_Issue123_WithdrawRevertsOnReentrancy`.
 
+O teste do incidente é necessário, mas não é evidência suficiente de uma correção geral. Para mudanças em parsers, classificadores, guardrails, roteamento, regras de domínio ou qualquer lógica heurística, teste também o contrato semântico:
+
+- **Variações equivalentes:** entradas com forma superficial diferente que devem preservar o mesmo resultado.
+- **Mutações mínimas:** altere uma dimensão por vez (polaridade, operador, limite, ordem, escopo, identidade ou cláusula adicional) e exija o resultado diferente correspondente.
+- **Casos fora da amostra:** inclua pelo menos um caso que não copie palavras, valores ou estrutura da reprodução original.
+- **Caminho desconhecido:** prove que uma entrada não decidível segue a rota explícita de revisão, clarificação ou erro, sem ser aceita por ausência de contraexemplo.
+- **Propriedades:** quando o domínio for finito ou gerável, prefira tabela exaustiva, testes parametrizados, property-based testing ou fuzzing a uma coleção de frases conhecidas.
+
+Um teste que apenas procura a string adicionada pela correção protege o atalho, não a invariante. Sempre que viável, demonstre que o teste causal falha antes da mudança e passa depois dela.
+
 ### 3.2 Critérios de aceitação
 - Cobertura de linhas não é o objetivo — é consequência de testar invariantes e casos de borda.
 - Priorize testar:
   - Invariantes de domínio (conservação de valor, consistência de estado).
   - Casos de borda (zero, máximo, vazio, expirado).
   - Caminhos de erro (reverts, falhas esperadas).
+- Verifique que o teste observa a fronteira onde a invariante é decidida, e não apenas uma mensagem ou representação derivada no fim do pipeline.
 - Um teste que passa sempre sem verificar nada é pior que nenhum teste.
 
 ### 3.3 Determinismo e reprodutibilidade

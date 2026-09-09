@@ -26,6 +26,14 @@
 - Toda mudança deve poder ser reproduzida localmente (scripts, comandos, seeds, fixtures).
 - Ambientes efêmeros de teste devem ser criáveis com um único comando.
 
+### 1.6 Corrija a causa, não apenas o sintoma
+- Antes de editar, reconstrua a cadeia causal entre entrada, decisões intermediárias e efeito observado. Identifique a primeira invariante ou contrato violado; uma mensagem, tela ou exceção final costuma ser apenas o local onde o defeito apareceu.
+- Classifique a proposta como **correção causal**, **contenção temporária** ou **ajuste cosmético**. Não apresente contenção ou ajuste cosmético como correção definitiva.
+- Faça a correção na fronteira que possui informação suficiente para impor a invariante. Não replique no consumidor uma heurística que pertence ao parser, domínio, contrato ou fonte de verdade.
+- Uma alteração pequena é desejável, mas “diff pequeno” não autoriza lógica específica para o exemplo reportado. Evite exceções por frase, ID, fixture, modelo, endpoint ou valor conhecido quando o requisito real é semântico.
+- Trate casos não demonstravelmente suportados como estado explícito (`unknown`, erro tipado, revisão ou clarificação). Nunca transforme ausência de prova em sucesso por meio de fallback permissivo.
+- Antes de concluir, tente falsificar a solução com variações próximas, inversões, limites e casos fora do exemplo original. Se uma mudança funciona apenas porque reconhece a forma superficial do incidente, ela ainda não resolveu a causa.
+
 ---
 
 ## 2. Regras de ouro de segurança

@@ -51,6 +51,32 @@ fixtures, don't loosen the type.
 - Determinism: code must not rely on wall-clock/random in a way that breaks replay;
   pass timestamps in and vary by index instead.
 
+## Root-cause and anti-overfitting gate
+
+For bug fixes, especially parsers, rule compilation, AI guardrails, intent routing,
+validation, and error classification, one reproduction is not enough:
+
+1. Trace the failing input through each decision boundary and name the violated
+   invariant. Fix the earliest layer that has enough information and authority to
+   enforce it; do not duplicate a semantic rule in a downstream UI or consumer.
+2. Record whether the change is a causal fix, temporary containment, or cosmetic
+   correction. Only the first may be reported as the defect resolved.
+3. Reject literal phrase/value/fixture exceptions unless the product contract is
+   itself literal and bounded. Prefer canonical domain representations and
+   executable behavior over wording comparisons.
+4. Preserve an explicit undecidable path. Sampling or failure to find a
+   counterexample can reject proven differences, but cannot by itself prove
+   equivalence or safety.
+5. Add the smallest applicable forward-test set: the exact regression,
+   semantically equivalent paraphrases, one-dimension mutations (such as
+   polarity/operator/threshold/order/scope), boundary values, a held-out shape,
+   and the unknown/error/reviewer route. Use exhaustive or property-based tests
+   when the input domain is bounded.
+
+During final review, remove any test that merely asserts a newly added keyword
+unless that keyword is part of the actual public contract. A green suite that
+only memorizes the reported specimen is not verification.
+
 ## Rust / Solana contract testing
 
 The Windows host has `cargo` but **no** `anchor`/`solana`/`cargo-build-sbf`; all

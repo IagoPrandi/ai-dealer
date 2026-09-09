@@ -10,6 +10,10 @@ Uma entrega só é considerada **pronta** quando todos os itens aplicáveis est�
 - [ ] Sem regressão de cobertura abaixo do threshold definido.
 - [ ] Linting e formatação aprovados no CI.
 - [ ] Code review aprovado por pelo menos 1 pessoa além do autor.
+- [ ] A cadeia causal e a invariante violada estão identificadas; a mudança não atua somente na manifestação final.
+- [ ] A correção está na camada que possui autoridade e informação para impor a invariante, sem heurística duplicada em consumidores.
+- [ ] Regressão exata, mutações semânticas e casos fora da amostra rejeitam uma solução específica para o exemplo conhecido.
+- [ ] Casos não comprovados seguem um estado ou fluxo explícito; ausência de prova não é tratada como sucesso.
 
 ### Segurança
 - [ ] Nenhum segredo, chave ou credencial no código, logs, exemplos ou testes.
@@ -45,6 +49,9 @@ Uma entrega só é considerada **pronta** quando todos os itens aplicáveis est�
 
 ### 2.1 Código e design
 - ❌ "Refatorar tudo" para resolver um bug pequeno — scope creep disfarçado de boas práticas.
+- ❌ Adicionar exceção por string, frase, ID, fixture ou valor conhecido para fazer apenas a reprodução passar.
+- ❌ Duplicar no consumidor uma regra semântica que deveria ser decidida por uma representação canônica ou pela camada de domínio.
+- ❌ Usar “não encontrei contraexemplo” como prova de equivalência, segurança ou correção.
 - ❌ Criar "contrato deus" ou módulo único com regras + integração + IO.
 - ❌ Duplicar lógica de cálculo financeiro, parsing de eventos, comunicação com RPC.
 - ❌ "Magic numbers" e endereços hardcoded espalhados sem constante nomeada.
@@ -93,6 +100,8 @@ Uma entrega só é considerada **pronta** quando todos os itens aplicáveis est�
 - [ ] Funções/módulos coesos, sem duplicação
 - [ ] Configuração centralizada, sem magic numbers
 - [ ] Testes de regressão para bugs corrigidos
+- [ ] Causa-raiz e invariante registradas, com evidência além do caso reportado
+- [ ] Variações equivalentes, mutações mínimas, limites e rota desconhecida verificados quando aplicáveis
 
 ### Operação
 - [ ] Logs e métricas essenciais presentes
@@ -107,6 +116,8 @@ Uma entrega só é considerada **pronta** quando todos os itens aplicáveis est�
 Use ao revisar PRs de outros:
 
 - [ ] Entendi o que a mudança faz e por quê?
+- [ ] Consigo explicar por que a mudança corrige a causa e não apenas reconhece o exemplo reportado?
+- [ ] Existe alguma frase, valor, fixture ou branch específico do incidente que deveria ser uma regra de domínio mais geral?
 - [ ] Há algum caminho de erro não tratado?
 - [ ] Há alguma condição de borda não coberta por testes?
 - [ ] A mudança pode introduzir problemas de performance (N+1, lock, timeout)?

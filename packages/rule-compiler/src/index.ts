@@ -546,7 +546,7 @@ const MATCH_COUNT_ACTION =
   "(?:match(?:es|ed|ing)?|hits?|appear(?:s|ed|ing)?|drawn|in the draw|acert\\w*|aparec\\w*|sortead\\w*|sorteio|coincid\\w*|bat\\w*)";
 const EXACT_COUNT_CUE = "(?:exactly|only|exatamente|apenas|somente|so)";
 const THRESHOLD_COUNT_CUE =
-  "(?:at least|no fewer than|pelo menos|no minimo|minimo de|>=)";
+  "(?:at least|no fewer than|pelo menos|ao menos|no minimo|minimo de|>=)";
 
 const AMBIGUOUS_PATTERNS = [
   /\b(close|closest|near|nearest|almost)\b/i,
@@ -2643,6 +2643,11 @@ export interface DeterministicRuleCompilerPlan {
   interpretation: string;
 }
 
+export type DeterministicRuleSemanticComparison =
+  | "different"
+  | "equivalent"
+  | "unknown";
+
 /**
  * Exposes a semantic plan only after the deterministic parser has proved that
  * it preserves every value and operation in the source. The LLM may use this
@@ -2661,6 +2666,46 @@ export function getDeterministicRuleCompilerPlan(
     ast,
     interpretation: describeRuleAstForPlayers(ast),
   };
+}
+
+/**
+ * Compares two rule texts only when the bounded deterministic compiler can read
+ * both without dropping a stated value or operation.
+ *
+ * Exact canonical signatures are proof of equivalence. A concrete runtime
+ * counterexample is proof of difference. Merely failing to find a counterexample
+ * is not proof, so structurally different programs return `unknown` and remain
+ * subject to the independent model check.
+ */
+export function compareDeterministicRuleSemantics(
+  leftText: string,
+  rightText: string,
+): DeterministicRuleSemanticComparison {
+  const leftMatch = extractMatchCountSemanticFingerprint(
+    normalizeRuleText(leftText),
+  );
+  const rightMatch = extractMatchCountSemanticFingerprint(
+    normalizeRuleText(rightText),
+  );
+  if (
+    leftMatch &&
+    rightMatch &&
+    matchCountFingerprintsDiffer(leftMatch, rightMatch)
+  ) {
+    return "different";
+  }
+
+  const left = compileSupportedRule(normalizeRuleText(leftText));
+  const right = compileSupportedRule(normalizeRuleText(rightText));
+  if (!left || !right) {
+    return "unknown";
+  }
+
+  if (deterministicAstSignature(left) === deterministicAstSignature(right)) {
+    return "equivalent";
+  }
+
+  return sampledSemanticsMatch(left, right) ? "unknown" : "different";
 }
 
 function compileSupportedRulePattern(text: string): RuleAst | null {
@@ -3639,7 +3684,7 @@ function parseMostMatchesRankingRule(text: string): RuleAst | null {
   // predicates, not a comparison between players — keep them out of ranking.
   if (
     new RegExp(
-      `\\b(?:at least|at most|no more than|no fewer than|exactly|only|pelo menos|no minimo|minimo de|exatamente|apenas|somente)\\b|\\bso\\s+${MATCH_COUNT_NUMBER_1_TO_6}\\b`,
+      `\\b(?:at least|at most|no more than|no fewer than|exactly|only|pelo menos|ao menos|no minimo|minimo de|exatamente|apenas|somente)\\b|\\bso\\s+${MATCH_COUNT_NUMBER_1_TO_6}\\b`,
       "i",
     ).test(text) ||
     new RegExp(
@@ -4208,6 +4253,26 @@ function describePredicate(predicate: PredicateNode): string | null {
     return null;
   }
 
+  // Provider ASTs commonly spell the legacy match-count macro as the equivalent
+  // generic comparison `count(intersection(guess, draw)) >= N`. Render that
+  // semantic shape with the same canonical, parser-readable sentence as the
+  // macro. The previous generic renderer produced "how many values are in the
+  // values present in both...", which forced the Guardian to learn one generated
+  // phrase instead of comparing the rule programs themselves.
+  if (
+    predicate.left.kind === "reduce" &&
+    predicate.left.op === "count" &&
+    isIntersectionOfSources(predicate.left.of, "guess", "draw") &&
+    predicate.right.kind === "lit"
+  ) {
+    if (predicate.op === "gte") {
+      return `at least ${predicate.right.value} of its numbers appear in the official draw, regardless of order`;
+    }
+    if (predicate.op === "eq") {
+      return `exactly ${predicate.right.value} of its numbers appear in the official draw, regardless of order`;
+    }
+  }
+
   if (
     predicate.left.kind === "arith" &&
     predicate.left.op === "sub" &&
@@ -4375,6 +4440,13 @@ function isIntersectionOfSources(
 }
 
 function parseExactMatchCountRule(text: string): number | null {
+  if (hasNegatedMatchRelation(text)) {
+    return null;
+  }
+  return parseExactMatchCountThreshold(text);
+}
+
+function parseExactMatchCountThreshold(text: string): number | null {
   const match =
     text.match(
       new RegExp(
@@ -5446,15 +5518,44 @@ const UNMODELLED_MATCH_QUALIFIERS = [
   // IN THE OFFICIAL DRAW is greater than 50"). It cannot cross a clause
   // boundary, so it never reaches the comparison of a following clause.
   new RegExp(
-    `\\b(?:at least|at most|no more than|no fewer than|exactly|pelo menos|no minimo|exatamente)\\s+${MATCH_COUNT_NUMBER_0_TO_6}\\s+(?:of\\s+(?:the|its|my|your)\\s+)?(?:drawn|guessed?|picked|ticket)?\\s*(?:numbers?|numeros?)\\b[^.,;:]{0,32}?\\b(?:is|are|be|sao|e)\\s+(?:above|below|over|under|greater|higher|lower|less|smaller|bigger|acima|abaixo|maior|menor)\\b`,
+    `\\b(?:at least|at most|no more than|no fewer than|exactly|pelo menos|ao menos|no minimo|exatamente)\\s+${MATCH_COUNT_NUMBER_0_TO_6}\\s+(?:of\\s+(?:the|its|my|your)\\s+)?(?:drawn|guessed?|picked|ticket)?\\s*(?:numbers?|numeros?)\\b[^.,;:]{0,32}?\\b(?:is|are|be|sao|e)\\s+(?:above|below|over|under|greater|higher|lower|less|smaller|bigger|acima|abaixo|maior|menor)\\b`,
     "iu",
   ),
 ];
 
+// A positive overlap threshold and a threshold over misses are logical
+// opposites. Broad count patterns used to notice only the number and the word
+// "appear/match", so "at least three do NOT appear" was frozen as "at least
+// three appear". Decline every negative/absence form here and let the
+// schema-constrained provider path compile its full meaning; no deterministic
+// artifact is safer than one with inverted polarity.
+const NEGATED_MATCH_RELATION_PATTERNS = [
+  new RegExp(
+    `\\b(?:(?:do|does|did|is|are|was|were|must|should|would|can|could)\\s+)?not\\b[^.;:]{0,32}\\b(?:${MATCH_COUNT_ACTION})\\b`,
+    "iu",
+  ),
+  new RegExp(
+    `\\bnao\\b[^.;:]{0,32}\\b(?:${MATCH_COUNT_ACTION})\\b`,
+    "iu",
+  ),
+  /\b(?:fail(?:s|ed)?\s+to\s+(?:match|appear)|unmatched|non[ -]?matching|miss(?:es|ed|ing)?|missing|absent|outside|wrong|incorrect|errad\w*|erros?|ausent\w*|fora)\b/iu,
+];
+
+function hasNegatedMatchRelation(text: string): boolean {
+  return hasPattern(text, NEGATED_MATCH_RELATION_PATTERNS);
+}
+
 function parseMatchCountRule(text: string) {
-  if (hasPattern(text, UNMODELLED_MATCH_QUALIFIERS)) {
+  if (
+    hasPattern(text, UNMODELLED_MATCH_QUALIFIERS) ||
+    hasNegatedMatchRelation(text)
+  ) {
     return null;
   }
+  return parseMatchCountThreshold(text);
+}
+
+function parseMatchCountThreshold(text: string) {
   const numericMatch = text.match(
     new RegExp(
       `\\b${THRESHOLD_COUNT_CUE}\\s+(${MATCH_COUNT_NUMBER_1_TO_6})\\b.{0,80}\\b(?:${MATCH_COUNT_NOUN}|${MATCH_COUNT_ACTION})\\b`,
@@ -5535,6 +5636,68 @@ function parseMatchCountRule(text: string) {
 
   const value = NUMBER_WORDS.get(rawValue.toLowerCase()) ?? Number(rawValue);
   return Number.isInteger(value) && value >= 1 && value <= 6 ? value : null;
+}
+
+interface MatchCountSemanticFingerprint {
+  comparison: "at_least" | "exact";
+  negated: boolean;
+  threshold: number;
+}
+
+const MATCH_COUNT_DOMAIN_SIZE = 6;
+
+function matchCountFingerprintResult(
+  fingerprint: MatchCountSemanticFingerprint,
+  overlapCount: number,
+): boolean {
+  const counted = fingerprint.negated
+    ? MATCH_COUNT_DOMAIN_SIZE - overlapCount
+    : overlapCount;
+  return fingerprint.comparison === "exact"
+    ? counted === fingerprint.threshold
+    : counted >= fingerprint.threshold;
+}
+
+function matchCountFingerprintsDiffer(
+  left: MatchCountSemanticFingerprint,
+  right: MatchCountSemanticFingerprint,
+): boolean {
+  for (let overlap = 0; overlap <= MATCH_COUNT_DOMAIN_SIZE; overlap += 1) {
+    if (
+      matchCountFingerprintResult(left, overlap) !==
+      matchCountFingerprintResult(right, overlap)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// This fingerprint is never sufficient to prove equivalence; its job is only
+// to prove a material contradiction before a probabilistic reviewer is asked.
+// The complete canonical AST remains the sole deterministic proof of equality.
+function extractMatchCountSemanticFingerprint(
+  text: string,
+): MatchCountSemanticFingerprint | null {
+  if (hasPattern(text, UNMODELLED_MATCH_QUALIFIERS)) {
+    return null;
+  }
+  const exact = parseExactMatchCountThreshold(text);
+  if (exact !== null) {
+    return {
+      comparison: "exact",
+      negated: hasNegatedMatchRelation(text),
+      threshold: exact,
+    };
+  }
+  const threshold = parseMatchCountThreshold(text);
+  return threshold === null
+    ? null
+    : {
+        comparison: "at_least",
+        negated: hasNegatedMatchRelation(text),
+        threshold,
+      };
 }
 
 // Total node count budget for a compiled rule. Raised from 64 to 100 because a
@@ -5828,6 +5991,15 @@ function knownAstSignature(
   return ast.result.type === "predicate"
     ? `predicate:${predicateSignature(ast.result.predicate)}`
     : `ranking:${ast.result.direction}:${scalarSignature(ast.result.score)}`;
+}
+
+function deterministicAstSignature(ast: RuleAst): string {
+  // v1/v2 have a semantic signature that canonicalizes commutative operations
+  // and legacy macros. v3 exact structural identity is still safe evidence of
+  // equivalence; algebraically different v3 trees deliberately remain unknown.
+  return ast.schemaVersion === 3
+    ? `v3:${JSON.stringify(ast)}`
+    : knownAstSignature(ast);
 }
 
 function arraySignature(node: ArrayExpr): string {
