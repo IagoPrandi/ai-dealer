@@ -15,7 +15,14 @@ import { useConversationDrafts, usePlayerClaims, usePlayerHistory } from "../dat
 import { claimRecordToWallet } from "../data/claimFlow";
 import { summarizePlayerClaims } from "../data/claimState";
 import { describeTxError } from "../data/tx";
-import { ConversationList, Dealer, Ico, VoteTally, WalletButton } from "../shared";
+import {
+  ConversationList,
+  Dealer,
+  DealerNotifySetting,
+  Ico,
+  VoteTally,
+  WalletButton,
+} from "../shared";
 import type { PlayerHistoryEventApi } from "../data/types";
 
 /* withdraw-breakdown tile — square block on the inner surface, DM Mono micro
@@ -115,6 +122,11 @@ export function ProfileScreen() {
           <h2 className="ide-plate" style={{ fontSize: 26, fontWeight: 400, margin: "16px 0 8px" }}>Your wallet</h2>
           <p style={{ color: "var(--muted)", fontSize: 15, margin: "0 0 24px" }}>Connect to see your rules, earnings, and claims.</p>
           <button onClick={() => connect()} className="ide-btn" style={{ width: "100%", padding: 16 }} type="button"><Ico.wallet style={{ color: "var(--on-accent)" }} /> Connect wallet</button>
+          {/* Preflight runs without a wallet, so the reply banner is offered
+              here too: it is a browser preference, not a wallet one. */}
+          <div style={{ marginTop: 24, textAlign: "left", width: "100%" }}>
+            <DealerNotifySetting />
+          </div>
         </div>
       </div>
     );
@@ -242,6 +254,9 @@ export function ProfileScreen() {
             <Ico.arrow style={{ color: "var(--yellow)", flexShrink: 0, width: 18, height: 18 }} />
           </button>
         ) : null}
+
+        {/* NOTIFICATIONS — opt-in banner when the dealer finishes a run */}
+        <DealerNotifySetting />
 
         </div>
         <div>

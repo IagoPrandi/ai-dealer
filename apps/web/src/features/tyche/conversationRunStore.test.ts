@@ -10,6 +10,7 @@ import {
   patchConversationRunJob,
   rememberLatestConversationRun,
   subscribeConversationRun,
+  subscribeConversationRuns,
   upsertConversationRun,
 } from "./conversationRunStore.js";
 
@@ -176,4 +177,26 @@ test("the run store cap removes the oldest non-pending snapshot", () => {
 
   assert.equal(getConversationRun("client:101:cap-0"), null);
   assert.equal(getConversationRun("client:101:cap-20")?.status, "done");
+});
+
+test("global subscribers see every run, whichever draft it belongs to", () => {
+  const seen: string[] = [];
+  const unsubscribe = subscribeConversationRuns((run) => {
+    seen.push(`${run.draftId}:${run.status}`);
+  });
+
+  upsertConversationRun(snapshot("client:90:global-a", "pending"));
+  upsertConversationRun(snapshot("client:90:global-b", "pending"));
+  patchConversationRun("client:90:global-a", { status: "done" });
+  unsubscribe();
+  patchConversationRun("client:90:global-b", { status: "done" });
+
+  assert.deepEqual(seen, [
+    "client:90:global-a:pending",
+    "client:90:global-b:pending",
+    "client:90:global-a:done",
+  ]);
+
+  deleteConversationRun("client:90:global-a");
+  deleteConversationRun("client:90:global-b");
 });

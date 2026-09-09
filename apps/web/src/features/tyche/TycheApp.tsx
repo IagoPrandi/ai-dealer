@@ -75,6 +75,7 @@ import {
   getRoundPhase,
   getTurnEndTimestamp,
 } from "./roundPhase";
+import { startDealerReplyNotifier } from "./dealerReplyNotifier";
 import { HomeScreen } from "./screens/Home";
 import { GuessesScreen } from "./screens/Guesses";
 import { PlayScreen } from "./screens/Play";
@@ -332,6 +333,12 @@ export function TycheApp({
 } = {}) {
   const client = useSolanaClient();
   const standalone = useStandaloneDisplayMode();
+
+  // Mounted at the app root rather than inside the chat: the player who needs
+  // telling is the one who left the conversation screen while the dealer was
+  // still writing.
+  useEffect(() => startDealerReplyNotifier(), []);
+
   const { connect, connecting, connected, connectors, wallet } =
     useWalletConnection();
   const walletAddress = wallet?.account.address.toString();

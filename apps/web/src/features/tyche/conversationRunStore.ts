@@ -46,6 +46,9 @@ type Listener = (snapshot: ConversationRunSnapshot) => void;
 const runs = new Map<string, ConversationRunSnapshot>();
 const latestRunByScope = new Map<string, string>();
 const listeners = new Map<string, Set<Listener>>();
+// Listeners that follow every run rather than one draft, for app-wide concerns
+// (reply notifications) that must keep working after the chat screen unmounts.
+const globalListeners = new Set<Listener>();
 const MAX_CONVERSATION_RUNS = 20;
 
 function scopeKey(wallet: null | string | undefined, turnId: number) {
@@ -107,6 +110,7 @@ export function upsertConversationRun(snapshot: ConversationRunSnapshot) {
     deleteConversationRun(oldestTerminal[0]);
   }
   listeners.get(snapshot.draftId)?.forEach((listener) => listener(snapshot));
+  globalListeners.forEach((listener) => listener(snapshot));
 }
 
 export function patchConversationRun(
@@ -159,5 +163,13 @@ export function subscribeConversationRun(
     if (set.size === 0) {
       listeners.delete(draftId);
     }
+  };
+}
+
+/** Subscribes to every run, whichever draft it belongs to. */
+export function subscribeConversationRuns(listener: Listener) {
+  globalListeners.add(listener);
+  return () => {
+    globalListeners.delete(listener);
   };
 }

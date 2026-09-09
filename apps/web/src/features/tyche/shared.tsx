@@ -9,6 +9,12 @@ import Image from "next/image";
 import { useEffect, useState, type CSSProperties, type SVGProps } from "react";
 
 import { useTyche } from "./context";
+import {
+  browserDealerNotifyDeps,
+  readDealerNotifyState,
+  setDealerNotifyEnabled,
+  type DealerNotifyState,
+} from "./dealerNotify";
 import { fmtCountdown, fmtSol, fmtTurnId, timeAgo, truncateAddress } from "./data/format";
 import type { ConversationDraftApi, UiRule } from "./data/types";
 import { isPreflightJobPointerFresh } from "./preflightJobStore";
@@ -131,6 +137,108 @@ export function WalletButton() {
     >
       <Ico.wallet style={{ color: "var(--on-accent)" }} />{" "}
       {connected && walletAddress ? truncateAddress(walletAddress) : "Connect"}
+    </button>
+  );
+}
+
+/* ------------------- DEALER REPLY NOTIFICATIONS ------------------- */
+
+const DEALER_NOTIFY_LINES: Readonly<Record<DealerNotifyState, string>> = {
+  blocked: "Blocked in your browser settings",
+  off: "Off",
+  on: "On · pinged while you are away",
+  unsupported: "",
+};
+
+/**
+ * Opt-in row for a browser banner when the dealer stops writing. It lives in
+ * Account rather than in the chat header: a rule run outlives the screen, and
+ * the header has no room left for a control at 320px.
+ */
+export function DealerNotifySetting() {
+  const [state, setState] = useState<DealerNotifyState>("unsupported");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setState(readDealerNotifyState());
+  }, []);
+
+  if (state === "unsupported") {
+    return null;
+  }
+
+  const on = state === "on";
+  const blocked = state === "blocked";
+  const tone = on ? "var(--yellow)" : blocked ? "var(--red)" : "var(--dim)";
+
+  const flip = async () => {
+    setBusy(true);
+    try {
+      setState(await setDealerNotifyEnabled(browserDealerNotifyDeps, !on));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <button
+      aria-pressed={on}
+      className="ide-listrow"
+      disabled={busy}
+      onClick={() => void flip()}
+      style={{
+        background: "var(--surface-2)",
+        borderRadius: 0,
+        margin: "0 0 18px",
+        padding: "13px 14px",
+        width: "100%",
+      }}
+      type="button"
+    >
+      <span
+        style={{
+          alignItems: "center",
+          background: on ? "var(--yellow)" : "var(--surface-3)",
+          borderRadius: 0,
+          display: "grid",
+          flexShrink: 0,
+          height: 34,
+          placeItems: "center",
+          width: 34,
+        }}
+      >
+        <Ico.bell
+          style={{
+            color: on ? "var(--on-accent)" : tone,
+            height: 17,
+            width: 17,
+          }}
+        />
+      </span>
+      <span style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
+        <span
+          style={{
+            color: "var(--text)",
+            display: "block",
+            fontFamily: "Oswald, sans-serif",
+            fontSize: 14,
+            letterSpacing: "0.05em",
+            textTransform: "uppercase",
+          }}
+        >
+          Dealer replies
+        </span>
+        <span
+          style={{
+            color: blocked ? "var(--red-soft)" : "var(--dim)",
+            display: "block",
+            fontSize: 12.5,
+            marginTop: 2,
+          }}
+        >
+          {DEALER_NOTIFY_LINES[state]}
+        </span>
+      </span>
     </button>
   );
 }
