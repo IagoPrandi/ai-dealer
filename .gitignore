@@ -26,3 +26,11 @@ Plataforma-handoff-nongroup.zip
 Tokenomics staking e rewards-handoff.zip
 guia-identidade-publica-tywish.md
 nova-narrativa-jogo.md
+
+# Terraform working directories and state. The provider lock file
+# (.terraform.lock.hcl) is deliberately NOT ignored: it pins provider versions.
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log

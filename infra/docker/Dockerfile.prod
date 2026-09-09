@@ -1,0 +1,90 @@
+# syntax=docker/dockerfile:1.9
+#
+# Production image for apps/api and apps/worker.
+#
+# Both services ship in a single image because they share the same workspace
+# install and build; the compose file selects which entrypoint to run. That
+# keeps one build in CI and one tag in ECR per release, so the API and the
+# worker can never drift to different commits.
+#
+# Unlike infra/docker/Dockerfile.node (the local development image) this one
+# runs compiled JavaScript from dist/, carries no Solana CLI, and runs as a
+# non-root user.
+
+ARG NODE_VERSION=24.12.0
+ARG RUST_VERSION=1.91
+
+# ---------------------------------------------------------------------------
+# The worker shells out to this binary to compute tokenomics epochs
+# (apps/worker/src/tokenomics-epoch.ts). It is a runtime dependency, not a
+# build tool, so it has to exist in the final image.
+# ---------------------------------------------------------------------------
+FROM rust:${RUST_VERSION}-bookworm AS tokenomics-calculator
+
+WORKDIR /build/contracts/solana
+COPY contracts/solana ./
+RUN cargo build --locked --release -p tokenomics-calculator
+
+# ---------------------------------------------------------------------------
+# Workspace install + TypeScript build.
+# ---------------------------------------------------------------------------
+FROM node:${NODE_VERSION}-slim AS build
+
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+WORKDIR /app
+RUN corepack enable
+
+# The whole repository is copied (minus .dockerignore) so pnpm sees every
+# workspace importer the lockfile declares; a partial copy makes
+# --frozen-lockfile fail. The install itself is filtered to the two services
+# and their workspace dependencies, so apps/web and apps/admin dependencies
+# are never downloaded.
+COPY . .
+
+RUN pnpm install --frozen-lockfile \
+  --filter=tyche \
+  --filter=@tyche/api... \
+  --filter=@tyche/worker...
+
+# pnpm runs recursive scripts in topological order, so the shared packages are
+# compiled to dist/ before the services that import them.
+RUN pnpm --filter=@tyche/api... --filter=@tyche/worker... run build
+
+# Drop everything the running services never read. Removed after the build so
+# the runtime layer carries only the workspace the two entrypoints resolve.
+RUN rm -rf \
+  apps/web \
+  apps/admin \
+  contracts \
+  design_handoff_desktop \
+  docs \
+  deployments \
+  infra \
+  *.md \
+  *.zip
+
+# ---------------------------------------------------------------------------
+# Runtime.
+# ---------------------------------------------------------------------------
+FROM node:${NODE_VERSION}-slim AS runtime
+
+ENV NODE_ENV=production \
+  HOST=0.0.0.0 \
+  TYCHE_TOKENOMICS_RUST_CALCULATOR=/usr/local/bin/tokenomics-calculator
+
+WORKDIR /app
+
+COPY --from=tokenomics-calculator \
+  /build/contracts/solana/target/release/tokenomics-calculator \
+  /usr/local/bin/tokenomics-calculator
+COPY --from=build /app /app
+
+# `node` (uid 1000) ships with the base image. /app stays root-owned and
+# read-only to the process; scratch files go to the OS temp directory.
+USER node
+
+# 3002 = @tyche/api, 3003 = @tyche/worker.
+EXPOSE 3002 3003
+
+# Overridden per service in docker-compose.prod.yml.
+CMD ["node", "apps/api/dist/index.js"]

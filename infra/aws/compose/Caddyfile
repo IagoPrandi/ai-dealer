@@ -1,0 +1,141 @@
+# Public edge for the Tyche backend.
+#
+# THIS FILE IS A SECURITY BOUNDARY, NOT A ROUTING CONVENIENCE.
+#
+# apps/api serves player endpoints and the settlement pipeline on the same
+# port, and the settlement endpoints carry no authentication: they are meant to
+# be called by apps/worker over the private compose network
+# (TYCHE_API_BASE_URL=http://api:3002). Publishing the port unfiltered would let
+# anyone on the internet drive draws, winner calculation, reward calculation,
+# and claim creation. So the edge is deny-by-default and only the methods and
+# paths the browser actually uses are forwarded.
+#
+# Every entry below was derived from the request sites in apps/web
+# (features/tyche/data/apiClient.ts, features/public-site/serverApi.ts) and
+# apps/admin, cross-checked against the route table in apps/api/src/index.ts.
+#
+# When you add a player-facing route to the API you must add it here too, or it
+# will return 403 in production. A 403 carrying OPERATOR_ONLY_ENDPOINT means the
+# route was never allowlisted here — it does not mean the API rejected it.
+#
+# Paths are kept on single `path` lines because a named matcher accepts one
+# matcher of each type; the values are ORed.
+{
+	email {$ACME_EMAIL}
+	# Nothing on the host needs to reconfigure Caddy at runtime.
+	admin off
+}
+
+(hardening) {
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Cross-Origin-Opener-Policy "same-origin"
+	}
+	# Rule text, votes, and receipts are small JSON documents; the largest
+	# public write is a rule proposal.
+	request_body {
+		max_size 512KB
+	}
+	# text/event-stream and application/x-ndjson are deliberately absent:
+	# compressing a live stream reintroduces the buffering the API avoids.
+	encode zstd gzip {
+		match {
+			header Content-Type application/json*
+		}
+	}
+}
+
+(api_upstream) {
+	reverse_proxy api:3002 {
+		# -1 disables response buffering, which the rule-preflight SSE stream
+		# and the NDJSON dealer stream both depend on.
+		flush_interval -1
+		# Rule compilation and dealer answers are long-running by design; the
+		# API applies its own per-model deadlines.
+		transport http {
+			read_timeout 10m
+			write_timeout 10m
+		}
+	}
+}
+
+(deny) {
+	handle {
+		header Content-Type "application/json"
+		respond `{"error":"OPERATOR_ONLY_ENDPOINT","message":"This endpoint is not exposed publicly. Operator and settlement routes are reachable only from inside the deployment."}` 403
+	}
+}
+
+# ---------------------------------------------------------------------------
+# API
+# ---------------------------------------------------------------------------
+{$TYCHE_API_DOMAIN} {
+	import hardening
+
+	# Public reads: proof material, round/turn projections, player projections,
+	# and the transparency console feeds. /operator/ai-operations is included
+	# because apps/admin needs it and it enforces its own wallet-signature
+	# authorization (OPERATOR_AI_CONSOLE_AUTHORIZED_WALLETS).
+	@public_read {
+		method GET HEAD OPTIONS
+		path /health /rounds /rounds/* /audit /audit/* /transparency /transparency/export /tokenomics/public /tokenomics/wallets/* /tokenomics/artifacts/* /players/* /api/v1/turns/* /rule-proposals /rule-votes /rule-elimination-votes /rule-removals /rule-validations/* /rule-preflight/jobs/* /guess-receipts /draws/* /elections/* /winner-records /reward-records /claim-records /verification-jobs /verification-results /settlement-transitions /prize-pool-rollovers /prize-pool-accounting/* /turn-rollovers/settlement /operator/ai-operations /operator/ai-operations/export
+	}
+
+	# Public writes: exactly the player actions the DApp performs. Note the
+	# absence of /claim-records/create-turn, /claim-records/expire-unclaimed,
+	# /winner-records/calculate-turn, /reward-records/calculate-turn,
+	# /verification-jobs/create-turn, /verification-results,
+	# /turn-rollovers/settle, /settlement-transitions, /prize-pool-rollovers,
+	# /draws, /elections, /rule-eliminations, /rule-precompilations,
+	# /rule-validations, /rule-validations/run, /tokenomics/projection and
+	# /tokenomics/artifacts — every one of those is a settlement or operator
+	# route driven by apps/worker over the private network.
+	#
+	# POST /players/* is safe to allow as a prefix: conversation-drafts is the
+	# only POST route under /players/.
+	@public_write {
+		method POST OPTIONS
+		path /rule-dealer/ask /rule-preflight /guess-receipts /rule-proposals /rule-votes /rule-elimination-votes /rule-removals /claim-records/request /claim-records/complete /players/* /operator/ai-operations/challenge
+	}
+
+	# A player cancelling their own rule preflight job.
+	@public_cancel {
+		method DELETE OPTIONS
+		path /rule-preflight/jobs/*
+	}
+
+	handle @public_read {
+		import api_upstream
+	}
+	handle @public_write {
+		import api_upstream
+	}
+	handle @public_cancel {
+		import api_upstream
+	}
+	import deny
+}
+
+# ---------------------------------------------------------------------------
+# Worker
+# ---------------------------------------------------------------------------
+# The worker also serves TEST-ONLY manual turn control and manual settlement
+# (/manual/*). Those must stay unreachable from the internet even if
+# TYCHE_TURN_MANUAL_CONTROL_ENABLED is ever misconfigured, so only the two read
+# endpoints the DApp uses are forwarded.
+{$TYCHE_WORKER_DOMAIN} {
+	import hardening
+
+	@public_read {
+		method GET HEAD OPTIONS
+		path /health /turn/active
+	}
+
+	handle @public_read {
+		reverse_proxy worker:3003
+	}
+	import deny
+}

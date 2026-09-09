@@ -1,0 +1,46 @@
+# Copy to production.tfvars and fill in. The file holds no credentials -
+# domains, origins, the repository name, and the alarm address - so it is
+# committed, which is also what lets the plan run on pull requests.
+#
+#   cp terraform.tfvars.example production.tfvars
+
+region      = "us-east-1"
+environment = "production"
+
+# Must resolve to the Elastic IP before the first deploy, or Caddy cannot
+# complete the ACME challenge.
+api_domain    = "api.tywish.com"
+worker_domain = "worker.tywish.com"
+
+# Browser origins allowed to call the API and the worker cross-origin. Becomes
+# WEB_ORIGIN and TYCHE_WORKER_CORS_ORIGINS. Vercel preview URLs are not listed
+# because previews reach the API through the Next.js server-side proxy, which
+# is same-origin and therefore not subject to CORS.
+web_origins = [
+  "https://tywish.com",
+  "https://www.tywish.com",
+  "https://tywish.vercel.app",
+]
+
+acme_email  = "ops@tywish.com"
+alarm_email = "ops@tywish.com"
+
+# Optional. When set, the A records are created automatically.
+# route53_zone_id = "Z0123456789ABCDEFGHIJ"
+
+github_repository = "IagoPrandi/ai-dealer"
+
+# Set to false if this AWS account already has the GitHub Actions OIDC provider.
+create_github_oidc_provider = true
+
+# --- sizing -----------------------------------------------------------------
+# t3.medium holds the in-memory game state plus about 1000 concurrent SSE
+# readers. t3.small is enough below roughly 300 concurrent players.
+instance_type = "t3.medium"
+
+# db.t4g.micro allows about 112 connections against the ~60 the pg pools in
+# apps/api and apps/worker can open.
+db_instance_class = "db.t4g.micro"
+
+# Alert threshold, not a cap. The stack is expected near US$ 32/month.
+monthly_budget_usd = 60

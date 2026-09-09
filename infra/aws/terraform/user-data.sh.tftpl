@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+#
+# First-boot host preparation for the Tyche backend.
+#
+# This script only prepares the host: Docker, the data volume, and the
+# deploy entrypoint. It never starts the application, because the image tag to
+# run is decided by a release, not by an instance boot. The first rollout comes
+# from .github/workflows/deploy-backend.yml.
+#
+# Everything here is idempotent so re-running it on a replaced instance is
+# safe. Failures abort: a half-prepared host must not look healthy.
+set -euo pipefail
+
+exec > >(tee -a /var/log/tyche-bootstrap.log) 2>&1
+echo "[bootstrap] starting at $(date --iso-8601=seconds)"
+
+AWS_REGION="${aws_region}"
+DATA_DEVICE="${data_device}"
+DEPLOY_BUCKET="${deploy_bucket}"
+ECR_REPOSITORY="${ecr_repository}"
+ENVIRONMENT="${environment}"
+SSM_CONFIG_PATH="${ssm_config_path}"
+COMPOSE_VERSION="v2.32.4"
+
+# ---------------------------------------------------------------------------
+# Packages
+# ---------------------------------------------------------------------------
+dnf update -y
+dnf install -y docker jq
+
+# The Compose plugin is not in the Amazon Linux 2023 repositories, so it is
+# installed from a pinned release and verified against the checksum published
+# with it. The version is pinned rather than "latest" so a rebuilt instance
+# runs the same Compose as the one before it.
+install -d /usr/libexec/docker/cli-plugins
+cd /tmp
+curl -fsSL -o docker-compose \
+  "https://github.com/docker/compose/releases/download/$COMPOSE_VERSION/docker-compose-linux-x86_64"
+curl -fsSL -o docker-compose.sha256 \
+  "https://github.com/docker/compose/releases/download/$COMPOSE_VERSION/docker-compose-linux-x86_64.sha256"
+awk '{print $1 "  docker-compose"}' docker-compose.sha256 | sha256sum --check -
+install -m 0755 docker-compose /usr/libexec/docker/cli-plugins/docker-compose
+rm -f docker-compose docker-compose.sha256
+
+systemctl enable --now docker
+
+# ---------------------------------------------------------------------------
+# Persistent data volume
+# ---------------------------------------------------------------------------
+# Holds the issued TLS certificates and the Redis append-only file. It survives
+# instance replacement, which is what keeps a rebuild from re-requesting
+# certificates and hitting the ACME rate limit.
+# Terraform attaches the volume once the instance reaches "running", which can
+# be after this script starts, so the wait is generous rather than optimistic.
+for _ in $(seq 1 90); do
+  if [ -b "$DATA_DEVICE" ]; then
+    break
+  fi
+  echo "[bootstrap] waiting for $DATA_DEVICE"
+  sleep 2
+done
+
+if [ ! -b "$DATA_DEVICE" ]; then
+  echo "[bootstrap] FATAL: $DATA_DEVICE never appeared; the data volume is not attached." >&2
+  exit 1
+fi
+
+if ! blkid "$DATA_DEVICE" >/dev/null 2>&1; then
+  echo "[bootstrap] formatting $DATA_DEVICE (first use)"
+  mkfs.xfs "$DATA_DEVICE"
+fi
+
+DATA_UUID="$(blkid -s UUID -o value "$DATA_DEVICE")"
+install -d /var/lib/tyche
+if ! grep -q "$DATA_UUID" /etc/fstab; then
+  echo "UUID=$DATA_UUID /var/lib/tyche xfs defaults,nofail 0 2" >>/etc/fstab
+fi
+mount -a
+install -d -m 0700 /var/lib/tyche/redis /var/lib/tyche/caddy/data /var/lib/tyche/caddy/config
+
+# ---------------------------------------------------------------------------
+# Deploy entrypoint
+# ---------------------------------------------------------------------------
+install -d -m 0755 /opt/tyche /opt/tyche/release /opt/tyche/state
+install -d -m 0700 /etc/tyche
+
+cat >/etc/tyche/deploy.conf <<CONF
+# Written by Terraform user_data. Read by /usr/local/bin/tyche-deploy and by
+# the release scripts under /opt/tyche/release/scripts.
+AWS_REGION=$AWS_REGION
+DEPLOY_BUCKET=$DEPLOY_BUCKET
+ECR_REPOSITORY=$ECR_REPOSITORY
+TYCHE_ENVIRONMENT=$ENVIRONMENT
+SSM_CONFIG_PATH=$SSM_CONFIG_PATH
+CONF
+chmod 0600 /etc/tyche/deploy.conf
+
+# Thin wrapper so the SSM command stays a single stable line
+# (`tyche-deploy <tag>`), and the logic it runs is versioned in the repository
+# under infra/aws/scripts and delivered through the release bundle.
+cat >/usr/local/bin/tyche-deploy <<'WRAPPER'
+#!/usr/bin/env bash
+set -euo pipefail
+
+# shellcheck disable=SC1091
+source /etc/tyche/deploy.conf
+
+if [ "$#" -lt 1 ]; then
+  echo "usage: tyche-deploy <image-tag>|rollback" >&2
+  exit 64
+fi
+
+# Always fetch the release bundle before acting on it: the compose file, the
+# Caddyfile, the non-secret environment, the deployment manifests, and these
+# scripts are part of the release, not host state someone edited by hand.
+#
+# --delete is safe because /opt/tyche/release holds nothing but the release.
+# Host state (the deployed tag, the compose interpolation file) lives in
+# /opt/tyche/state and the sync never touches it.
+aws s3 sync "s3://$DEPLOY_BUCKET/release/" /opt/tyche/release/ \
+  --region "$AWS_REGION" --delete --only-show-errors
+chmod 0755 /opt/tyche/release/scripts/*.sh
+
+exec /opt/tyche/release/scripts/deploy.sh "$@"
+WRAPPER
+chmod 0755 /usr/local/bin/tyche-deploy
+
+echo "[bootstrap] host ready. Waiting for a release; run the deploy workflow."

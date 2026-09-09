@@ -1,0 +1,158 @@
+# Production runtime for the Tyche backend on a single EC2 host.
+#
+# Shape is dictated by the code, not by preference:
+#   * apps/api keeps the whole operational game state in process memory and
+#     rehydrates it from Postgres on boot, so exactly one replica may run.
+#   * apps/worker owns singleton automation loops (turn, settlement, rewards),
+#     so exactly one replica may run.
+#   * Redis is only reached by the two health checks, so it runs on the host
+#     instead of a paid managed cache.
+#   * Postgres is NOT here: it is managed RDS, because the audit hash chain,
+#     claims, and prize accounting must survive the instance.
+#
+# Interpolated values come from /opt/tyche/.env, written by scripts/deploy.sh.
+# Runtime configuration and secrets come from /etc/tyche/runtime.env, written
+# by scripts/render-env.sh. Neither file is ever committed.
+name: tyche
+
+x-logging: &default-logging
+  # Local json-file keeps `docker compose logs` usable during an incident and
+  # costs nothing. To ship container logs to CloudWatch instead, replace this
+  # block with:
+  #   driver: awslogs
+  #   options:
+  #     awslogs-group: /tyche/production/containers
+  #     awslogs-region: <region>
+  #     mode: non-blocking
+  # and note that `docker compose logs` stops working once you do.
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+services:
+  api:
+    image: ${TYCHE_IMAGE:?TYCHE_IMAGE is required}
+    command: ["node", "apps/api/dist/index.js"]
+    container_name: tyche-api
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file:
+      - /etc/tyche/runtime.env
+    environment:
+      HOST: 0.0.0.0
+      PORT: "3002"
+    expose:
+      - "3002"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3002/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 6
+      start_period: 60s
+    init: true
+    logging: *default-logging
+    networks:
+      - tyche-internal
+    restart: unless-stopped
+    # The API rehydrates in-memory state on boot; give it room to drain SSE
+    # readers and flush the snapshot queue before SIGKILL.
+    stop_grace_period: 45s
+
+  worker:
+    image: ${TYCHE_IMAGE:?TYCHE_IMAGE is required}
+    command: ["node", "apps/worker/dist/index.js"]
+    container_name: tyche-worker
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file:
+      - /etc/tyche/runtime.env
+    environment:
+      HOST: 0.0.0.0
+      PORT: "3003"
+      # The worker reaches the API over the compose network, which is also why
+      # the settlement endpoints can stay blocked at the public edge.
+      TYCHE_API_BASE_URL: http://api:3002
+    expose:
+      - "3003"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3003/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 6
+      start_period: 60s
+    init: true
+    logging: *default-logging
+    networks:
+      - tyche-internal
+    restart: unless-stopped
+    stop_grace_period: 45s
+
+  redis:
+    image: redis:8.4.0-alpine
+    command:
+      [
+        "redis-server",
+        "--appendonly",
+        "yes",
+        "--maxmemory",
+        "256mb",
+        "--maxmemory-policy",
+        "noeviction",
+      ]
+    container_name: tyche-redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    logging: *default-logging
+    networks:
+      - tyche-internal
+    restart: unless-stopped
+    volumes:
+      - /var/lib/tyche/redis:/data
+
+  caddy:
+    image: caddy:2.10-alpine
+    container_name: tyche-caddy
+    depends_on:
+      - api
+      - worker
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL is required}
+      TYCHE_API_DOMAIN: ${TYCHE_API_DOMAIN:?TYCHE_API_DOMAIN is required}
+      TYCHE_WORKER_DOMAIN: ${TYCHE_WORKER_DOMAIN:?TYCHE_WORKER_DOMAIN is required}
+    logging: *default-logging
+    networks:
+      - tyche-internal
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    restart: unless-stopped
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Issued certificates live on the persistent data volume so replacing the
+      # instance does not re-request them and burn Let's Encrypt rate limits.
+      - /var/lib/tyche/caddy/data:/data
+      - /var/lib/tyche/caddy/config:/config
+
+networks:
+  tyche-internal:
+    driver: bridge

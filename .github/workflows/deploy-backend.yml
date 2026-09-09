@@ -1,0 +1,243 @@
+# Backend delivery: verify, publish an image, roll it out, prove it works, roll
+# back if it does not.
+#
+# AWS access is obtained through OIDC, so there is no access key stored in
+# GitHub. Only two repository variables are required:
+#
+#   AWS_REGION           - e.g. us-east-1
+#   AWS_DEPLOY_ROLE_ARN  - terraform output github_actions_variables
+#
+# Everything else about the target (instance id, ECR repository, release
+# bucket, public hostnames) is read from SSM Parameter Store, which Terraform
+# owns. That keeps one source of truth and means an infrastructure change does
+# not require editing GitHub configuration.
+name: Deploy backend
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Existing image tag to redeploy. Leave empty to build the checked-out commit."
+        required: false
+        type: string
+      rollback:
+        description: "Roll back to the previously deployed release instead of deploying."
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+# Never cancel a rollout in flight: on a single-instance backend a half-applied
+# deploy can leave the API stopped.
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+env:
+  TYCHE_ENVIRONMENT: production
+
+jobs:
+  # -------------------------------------------------------------------------
+  # A rollback is an incident response. It must not wait for a full test run,
+  # because the code it restores already passed one when it was deployed.
+  # -------------------------------------------------------------------------
+  rollback:
+    name: Roll back
+    if: inputs.rollback
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+
+      - name: Read deploy target
+        id: target
+        run: bash .github/scripts/read-deploy-target.sh
+
+      - name: Roll back on the host
+        run: bash .github/scripts/run-deploy-command.sh rollback
+        env:
+          INSTANCE_ID: ${{ steps.target.outputs.instance_id }}
+
+      - name: Smoke test the restored release
+        run: |
+          bash infra/aws/scripts/smoke-test.sh \
+            "${{ steps.target.outputs.api_domain }}" \
+            "${{ steps.target.outputs.worker_domain }}"
+
+  verify:
+    name: Verify
+    if: ${{ !inputs.rollback }}
+    uses: ./.github/workflows/ci.yml
+
+  # -------------------------------------------------------------------------
+  # Build and publish
+  # -------------------------------------------------------------------------
+  publish:
+    name: Publish image
+    if: ${{ !inputs.rollback }}
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      image_tag: ${{ steps.resolve.outputs.image_tag }}
+      should_deploy: ${{ steps.resolve.outputs.should_deploy }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The change filter diffs the pushed range.
+          fetch-depth: 0
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+
+      - name: Read deploy target
+        id: target
+        run: bash .github/scripts/read-deploy-target.sh
+
+      # A documentation-only or frontend-only push must not restart the backend:
+      # every API restart is a short player-visible outage while the in-memory
+      # state rehydrates.
+      - name: Decide whether this commit changes the backend
+        id: resolve
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+          ECR_REPOSITORY: ${{ steps.target.outputs.ecr_repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          REQUESTED_TAG: ${{ inputs.image_tag }}
+        run: bash .github/scripts/resolve-release.sh
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr
+        if: steps.resolve.outputs.build_required == 'true'
+
+      - uses: docker/setup-buildx-action@v3
+        if: steps.resolve.outputs.build_required == 'true'
+
+      - name: Build and push
+        if: steps.resolve.outputs.build_required == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/Dockerfile.prod
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: ${{ steps.target.outputs.ecr_repository }}:${{ steps.resolve.outputs.image_tag }}
+          # The Rust stage that builds tokenomics-calculator changes rarely, so
+          # layer caching is what keeps this build minutes instead of tens of
+          # minutes.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan the published image
+        if: steps.resolve.outputs.build_required == 'true'
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.target.outputs.ecr_repository }}:${{ steps.resolve.outputs.image_tag }}
+          severity: CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+  # -------------------------------------------------------------------------
+  # Roll out
+  # -------------------------------------------------------------------------
+  deploy:
+    name: Roll out
+    if: ${{ !inputs.rollback && needs.publish.outputs.should_deploy == 'true' }}
+    needs: publish
+    runs-on: ubuntu-latest
+    # Add required reviewers to this GitHub environment to gate production
+    # rollouts on a manual approval.
+    environment: production
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+
+      - name: Read deploy target
+        id: target
+        run: bash .github/scripts/read-deploy-target.sh
+
+      # The compose file, the Caddyfile, the non-secret environment, the host
+      # scripts, and the deployment manifests are part of the release. Shipping
+      # them through the same pipeline is what keeps anyone from hand-editing
+      # configuration on the instance.
+      - name: Publish the release bundle
+        env:
+          DEPLOY_BUCKET: ${{ steps.target.outputs.deploy_bucket }}
+        run: |
+          set -euo pipefail
+          mkdir -p bundle/scripts bundle/deployments
+          cp infra/aws/compose/docker-compose.prod.yml bundle/
+          cp infra/aws/compose/Caddyfile bundle/
+          cp infra/aws/compose/production.env bundle/
+          cp infra/aws/scripts/*.sh bundle/scripts/
+          cp deployments/solana-devnet.json bundle/deployments/
+          aws s3 sync bundle/ "s3://$DEPLOY_BUCKET/release/" --delete --only-show-errors
+          echo "Published release bundle:"
+          find bundle -type f | sort
+
+      - name: Roll out on the host
+        id: rollout
+        env:
+          INSTANCE_ID: ${{ steps.target.outputs.instance_id }}
+        run: bash .github/scripts/run-deploy-command.sh "${{ needs.publish.outputs.image_tag }}"
+
+      # Verifies both that the release serves and that the edge still blocks
+      # the unauthenticated settlement routes.
+      - name: Smoke test
+        id: smoke
+        run: |
+          bash infra/aws/scripts/smoke-test.sh \
+            "${{ steps.target.outputs.api_domain }}" \
+            "${{ steps.target.outputs.worker_domain }}"
+
+      - name: Roll back a failed release
+        if: failure() && (steps.rollout.outcome == 'failure' || steps.smoke.outcome == 'failure')
+        env:
+          INSTANCE_ID: ${{ steps.target.outputs.instance_id }}
+        run: |
+          echo "::error::Rollout or smoke test failed; restoring the previous release."
+          bash .github/scripts/run-deploy-command.sh rollback
+          bash infra/aws/scripts/smoke-test.sh \
+            "${{ steps.target.outputs.api_domain }}" \
+            "${{ steps.target.outputs.worker_domain }}"
+          echo "::error::Previous release restored. The failed release was not promoted."
+          exit 1
+
+  summary:
+    name: Summary
+    if: ${{ always() && !inputs.rollback }}
+    needs: [publish, deploy]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report
+        run: |
+          {
+            echo "### Backend release"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Commit | \`${{ github.sha }}\` |"
+            echo "| Image tag | \`${{ needs.publish.outputs.image_tag || 'n/a' }}\` |"
+            echo "| Backend changed | ${{ needs.publish.outputs.should_deploy }} |"
+            echo "| Rollout | ${{ needs.deploy.result }} |"
+          } >>"$GITHUB_STEP_SUMMARY"

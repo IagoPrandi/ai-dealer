@@ -1,0 +1,128 @@
+# Shared verification pipeline for the TypeScript workspace.
+#
+# Runs on every pull request and is called by the deploy workflows through
+# `workflow_call`, so a production deploy can never ship a commit that did not
+# pass lint, typecheck, tests, build, and the dependency/secret scan.
+#
+# The Rust workspace (`contracts/solana`) is deliberately excluded: it has its
+# own pipeline in `solana-program.yml`, and running cargo here would add ~15
+# minutes to every web/API change.
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Matches infra/docker/Dockerfile.prod so CI and production run the same major.
+  NODE_VERSION: "24.12.0"
+  TURBO_TELEMETRY_DISABLED: "1"
+
+jobs:
+  verify:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The formatting gate diffs against the base commit.
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Restore turbo cache
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: turbo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-
+
+      # Repository-wide `prettier --check .` cannot pass today: a large set of
+      # pre-existing sources and documents was never formatted. Gating the files
+      # a change actually touches keeps the rule enforceable without a
+      # repository-wide rewrite.
+      #
+      # Markdown is excluded on purpose. Every task appends to
+      # PROGRESS_TRACKER.md, which is over a megabyte of unformatted history, so
+      # including .md would fail nearly every run for a reason unrelated to the
+      # change under review.
+      - name: Check formatting of changed files
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="$(git rev-parse "HEAD~1" 2>/dev/null || git rev-parse HEAD)"
+          fi
+          mapfile -t changed < <(
+            git diff --name-only --diff-filter=ACMR "$base" HEAD \
+              | grep -E '\.(ts|tsx|mts|mjs|js|jsx|json|yml|yaml|css)$' || true
+          )
+          if [ "${#changed[@]}" -eq 0 ]; then
+            echo "No formattable files changed."
+            exit 0
+          fi
+          printf '%s\n' "${changed[@]}"
+          pnpm exec prettier --check "${changed[@]}"
+
+      - name: Lint
+        run: pnpm turbo run lint --filter='!@tyche/solana-programs'
+
+      - name: Typecheck
+        run: pnpm turbo run typecheck --filter='!@tyche/solana-programs'
+
+      - name: Test
+        run: pnpm turbo run test --filter='!@tyche/solana-programs'
+
+      - name: Build
+        run: pnpm turbo run build --filter='!@tyche/solana-programs'
+
+  security:
+    name: Dependency and secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Blocking gate: a critical advisory in a runtime dependency must never
+      # reach production. High advisories are reported in the same step output.
+      - name: Audit production dependencies
+        run: |
+          set -euo pipefail
+          pnpm audit --prod --audit-level=high || true
+          pnpm audit --prod --audit-level=critical
+
+      - name: Scan repository for vulnerabilities and secrets
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scanners: vuln,secret,misconfig
+          severity: CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+          skip-dirs: node_modules,.claude,contracts/solana/target

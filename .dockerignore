@@ -22,3 +22,8 @@ test-results
 !.env.example
 pnpm-debug.log*
 npm-debug.log*
+
+# Never bake credentials into an image layer.
+**/*-keypair.json
+**/*.pem
+**/*.key

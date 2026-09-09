@@ -1,0 +1,18 @@
+# Vendored external skills. Some fixtures are not valid in any parser prettier
+# infers from their extension, so a repository-wide check cannot pass with them
+# included.
+.claude/
+
+# Generated or lock content.
+pnpm-lock.yaml
+**/dist/
+**/.next/
+**/target/
+**/.terraform/
+output/
+test-results/
+coverage/
+
+# Deployment manifests are hash-verified records of what is on chain. Do not
+# reformat them; a diff here has to be a deliberate deployment change.
+deployments/

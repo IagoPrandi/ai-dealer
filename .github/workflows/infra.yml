@@ -1,0 +1,133 @@
+# Infrastructure review. Format, validate, and plan on pull requests.
+#
+# There is deliberately no apply job. An apply on this stack can create IAM
+# principals and destroy the database that holds the audit hash chain, so it
+# runs from a human session with MFA, following the runbook in
+# infra/aws/README.md. Automating it would mean granting an
+# admin-equivalent role to anything that can trigger a workflow.
+#
+# The plan job needs two repository variables to run; without them the workflow
+# still formats and validates, and says why it could not plan.
+#
+#   AWS_REGION
+#   AWS_PLAN_ROLE_ARN   - terraform output github_actions_variables
+#   TF_STATE_BUCKET     - created during bootstrap
+name: Infrastructure
+
+on:
+  pull_request:
+    paths:
+      - "infra/aws/**"
+      - ".github/workflows/infra.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+concurrency:
+  group: infra-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: infra/aws/terraform
+
+jobs:
+  validate:
+    name: Format and validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+          terraform_wrapper: false
+
+      - name: Format check
+        run: terraform fmt -check -recursive -diff
+
+      # -backend=false so validation needs no credentials and no state access.
+      - name: Validate
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+
+      # The release bundle scripts run as root on the host and hold the
+      # settlement-route allowlist checks, so they are linted rather than
+      # trusted.
+      - name: Lint host and CI scripts
+        working-directory: .
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+          shellcheck --severity=warning \
+            infra/aws/scripts/*.sh \
+            .github/scripts/*.sh
+
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: validate
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check plan prerequisites
+        id: prereq
+        run: |
+          set -euo pipefail
+          if [ -z "${{ vars.AWS_PLAN_ROLE_ARN }}" ] || [ -z "${{ vars.TF_STATE_BUCKET }}" ]; then
+            echo "::warning::AWS_PLAN_ROLE_ARN or TF_STATE_BUCKET is not configured; skipping the plan."
+            echo "ready=false" >>"$GITHUB_OUTPUT"
+          elif [ ! -f production.tfvars ]; then
+            # Created during bootstrap from terraform.tfvars.example. It holds
+            # domains, origins, and the alarm address - no credentials - so it
+            # is committed and the plan can therefore run in CI.
+            echo "::warning::infra/aws/terraform/production.tfvars is not committed; skipping the plan."
+            echo "ready=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >>"$GITHUB_OUTPUT"
+          fi
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: steps.prereq.outputs.ready == 'true'
+        with:
+          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+
+      - uses: hashicorp/setup-terraform@v3
+        if: steps.prereq.outputs.ready == 'true'
+        with:
+          terraform_version: 1.10.5
+          terraform_wrapper: false
+
+      - name: Plan
+        if: steps.prereq.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=production/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION }}" \
+            -backend-config="use_lockfile=true" \
+            -backend-config="encrypt=true"
+          # -lock=false because the plan role is read-only apart from state and
+          # a pull-request plan must never block a real apply.
+          terraform plan -input=false -lock=false -no-color \
+            -var-file=production.tfvars | tee plan.txt
+
+      - name: Publish the plan
+        if: steps.prereq.outputs.ready == 'true'
+        run: |
+          {
+            echo "### Terraform plan"
+            echo
+            echo '```'
+            tail -c 60000 plan.txt
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"

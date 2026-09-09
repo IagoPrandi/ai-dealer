@@ -1,0 +1,167 @@
+# Frontend delivery to Vercel: a preview per pull request, production on main.
+#
+# The Vercel CLI is driven from GitHub Actions rather than from Vercel's own Git
+# integration so a deploy is gated on the same tests as the backend, and so the
+# build runs once (--prebuilt uploads the output instead of rebuilding it).
+#
+# Vercel CLI must be invoked from the monorepo root; the Root Directory setting
+# on each project (apps/web, apps/admin) is what selects the app, and
+# apps/*/vercel.json supplies the workspace-aware install and build commands.
+# See infra/aws/README.md for the required project settings and environment
+# variables.
+#
+# Required configuration:
+#   secret VERCEL_TOKEN
+#   variable VERCEL_ORG_ID
+#   variable VERCEL_PROJECT_ID_WEB
+#   variable VERCEL_PROJECT_ID_ADMIN   (optional; the admin job is skipped
+#                                       when it is absent)
+name: Deploy web
+
+on:
+  pull_request:
+    paths:
+      - "apps/web/**"
+      - "apps/admin/**"
+      - "packages/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/deploy-web.yml"
+  push:
+    branches: [main]
+    paths:
+      - "apps/web/**"
+      - "apps/admin/**"
+      - "packages/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/deploy-web.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-web-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+  # Vercel builds are non-interactive; this keeps the CLI from prompting.
+  VERCEL_TELEMETRY_DISABLED: "1"
+
+jobs:
+  web:
+    name: ${{ github.ref == 'refs/heads/main' && 'Production' || 'Preview' }} - player app
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_WEB }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Fail early on missing configuration
+        run: |
+          set -euo pipefail
+          [ -n "${{ vars.VERCEL_ORG_ID }}" ] || {
+            echo "::error::VERCEL_ORG_ID repository variable is not set."
+            exit 1
+          }
+          [ -n "${{ vars.VERCEL_PROJECT_ID_WEB }}" ] || {
+            echo "::error::VERCEL_PROJECT_ID_WEB repository variable is not set."
+            exit 1
+          }
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24.12.0"
+          cache: pnpm
+
+      # Tracks latest, as Vercel's own CI guide does. Pin a major here if you
+      # need byte-identical CLI behaviour across runs.
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Resolve target environment
+        id: env
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "target=production" >>"$GITHUB_OUTPUT"
+            echo "prod_flag=--prod" >>"$GITHUB_OUTPUT"
+          else
+            echo "target=preview" >>"$GITHUB_OUTPUT"
+            echo "prod_flag=" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Pull project settings and environment
+        run: vercel pull --yes --environment=${{ steps.env.outputs.target }} --token=${{ secrets.VERCEL_TOKEN }}
+
+      # The build is the type and lint gate for the frontend: `next build` fails
+      # the job on a type error, so a broken commit never reaches a URL.
+      - name: Build
+        run: vercel build ${{ steps.env.outputs.prod_flag }} --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Deploy
+        id: deploy
+        run: |
+          set -euo pipefail
+          url="$(vercel deploy --prebuilt ${{ steps.env.outputs.prod_flag }} --token=${{ secrets.VERCEL_TOKEN }})"
+          echo "url=$url" >>"$GITHUB_OUTPUT"
+          {
+            echo "### Player app (${{ steps.env.outputs.target }})"
+            echo
+            echo "$url"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+  admin:
+    name: ${{ github.ref == 'refs/heads/main' && 'Production' || 'Preview' }} - operator console
+    # The operator console is optional: without a project id configured the job
+    # is skipped instead of failing the run.
+    if: ${{ vars.VERCEL_PROJECT_ID_ADMIN != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_ADMIN }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24.12.0"
+          cache: pnpm
+
+      # Tracks latest, as Vercel's own CI guide does. Pin a major here if you
+      # need byte-identical CLI behaviour across runs.
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Resolve target environment
+        id: env
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "target=production" >>"$GITHUB_OUTPUT"
+            echo "prod_flag=--prod" >>"$GITHUB_OUTPUT"
+          else
+            echo "target=preview" >>"$GITHUB_OUTPUT"
+            echo "prod_flag=" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Pull project settings and environment
+        run: vercel pull --yes --environment=${{ steps.env.outputs.target }} --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Build
+        run: vercel build ${{ steps.env.outputs.prod_flag }} --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Deploy
+        run: |
+          set -euo pipefail
+          url="$(vercel deploy --prebuilt ${{ steps.env.outputs.prod_flag }} --token=${{ secrets.VERCEL_TOKEN }})"
+          {
+            echo "### Operator console (${{ steps.env.outputs.target }})"
+            echo
+            echo "$url"
+          } >>"$GITHUB_STEP_SUMMARY"

@@ -92,6 +92,23 @@ For controlled real-Solana devnet operations, including starting the
 containerized services and opening a short test turn, see
 [docs/devnet-turn-operations-runbook.md](docs/devnet-turn-operations-runbook.md).
 
+## Deployment
+
+The backend (`apps/api` + `apps/worker`) runs on AWS and the frontend
+(`apps/web`, `apps/admin`) on Vercel, both delivered by GitHub Actions:
+
+| Workflow | Trigger | Does |
+| --- | --- | --- |
+| [ci.yml](.github/workflows/ci.yml) | pull request | format, lint, typecheck, test, build, dependency and secret scan |
+| [deploy-backend.yml](.github/workflows/deploy-backend.yml) | push to `main` | build and publish the image, roll it out over SSM, smoke test, roll back on failure |
+| [deploy-web.yml](.github/workflows/deploy-web.yml) | pull request / push to `main` | Vercel preview / production |
+| [infra.yml](.github/workflows/infra.yml) | pull request | Terraform format, validate, plan (apply stays manual) |
+| [solana-program.yml](.github/workflows/solana-program.yml) | `contracts/solana` changes | Rust checks and the SBF instruction suite |
+
+Bootstrap, cost breakdown, secrets layout, rollback, and the reasoning behind
+the single-instance topology are in
+[infra/aws/README.md](infra/aws/README.md).
+
 ## Boundary Rules
 
 - The public DApp is mobile-first.
