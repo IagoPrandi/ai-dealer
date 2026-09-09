@@ -2148,7 +2148,12 @@ async function requestReviewerAst(
   options: RuleCompileArtifactOptions,
 ): Promise<RuleAst | null> {
   try {
-    const providerValue = await options.astProvider({
+    // When a dedicated source-only reviewer exists, use it to corroborate the
+    // deterministic artifact. Asking the generator here needlessly routes a
+    // rule that is already compiled back through the provider that may just
+    // have failed artifact emission, while leaving the actual reviewer idle.
+    const reviewer = options.astReviewer ?? options.astProvider;
+    const providerValue = await reviewer({
       normalizedText: ctx.normalizedText,
       prompt: request.prompt,
       providerConfig,

@@ -281,6 +281,48 @@ export interface RulePreflightCoverage {
   missingOperations: RuleOperation[];
 }
 
+export interface GroundednessFailureFeedback {
+  clarityNote: string;
+  dealerMessage: string;
+  reasonSummary: string;
+  refinementFocus: string[];
+  refinementQuestions: string[];
+  suggestedRewrite?: string;
+  suggestedRewrites: string[];
+}
+
+/**
+ * Turns the two directional fidelity checks into a player-facing diagnosis.
+ *
+ * A boolean-only `guardianGrounded` used to collapse every failure into "may
+ * not match", even though the pipeline knows whether the unverified link is
+ * source -> approved reading or approved reading -> compiled artifact. Besides
+ * being vague, that message told players to rewrite clear rules when no
+ * deterministic value/operation check had found anything missing.
+ */
+export function buildGroundednessFailureFeedback(input: {
+  promiseIsKept: boolean | undefined;
+  readingIsFaithful: boolean | undefined;
+}): GroundednessFailureFeedback {
+  const reasonSummary =
+    input.readingIsFaithful === false && input.promiseIsKept === false
+      ? "The fidelity check could not verify the dealer's reading against your wording or the compiled condition against the reading you approved. No missing value or operation was identified in your rule."
+      : input.readingIsFaithful === false
+        ? "The fidelity check could not verify that the dealer's reading preserves your original wording. The compiled condition is valid, but that reading must be verified before submission."
+        : "Your rule is clear and compiled successfully, but the fidelity check could not verify that the compiled condition preserves the reading you approved. No missing value or operation was identified in your wording.";
+
+  return {
+    clarityNote: reasonSummary,
+    dealerMessage: `${reasonSummary} Retry generation; you do not need to rephrase the rule unless the same check fails again.`,
+    reasonSummary,
+    refinementFocus: [
+      "Retry the compiled artifact while keeping the approved rule unchanged.",
+    ],
+    refinementQuestions: [],
+    suggestedRewrites: [],
+  };
+}
+
 export interface RuleReasonExplanation {
   code: RuleValidationReasonCode;
   whatHappened: string;
@@ -4102,10 +4144,11 @@ async function runRulePreflightPipeline(
       disableConsensus: envFlag(
         process.env.TYCHE_RULE_COMPILER_CONSENSUS_DISABLED,
       ),
-      // The LLM is the authoring engine for every rule. Known deterministic
-      // patterns remain an independent reference implementation, never the
-      // artifact generator, so unfamiliar compositions follow the same path.
-      preferDeterministic: false,
+      // A complete deterministic reading is the most reliable artifact for a
+      // rule shape the audited compiler already supports. It is still checked
+      // by the dedicated source-only reviewer; novel rules continue through
+      // schema-constrained LLM artifact generation.
+      preferDeterministic: true,
       requireProviderEvidence: true,
     };
     let validation = await compileRuleArtifact(
@@ -4148,6 +4191,8 @@ async function runRulePreflightPipeline(
       repairFeedback = buildCompilerRepairFeedback(validation);
     }
     let grounded: boolean | undefined;
+    let readingIsFaithful: boolean | undefined;
+    let promiseIsKept: boolean | undefined;
     if (guardianConfig.enabled && validation.decision === "VALID") {
       reportProgress({
         message: "Checking that the compiled rule matches your words...",
@@ -4172,7 +4217,7 @@ async function runRulePreflightPipeline(
         // 1. Did the dealer's reading drift from the player's words? The agent's
         //    sentence is generated FROM that text, so it is a subset claim and the
         //    direction is right.
-        const readingIsFaithful = await checkGroundedness(
+        readingIsFaithful = await checkGroundedness(
           compileText,
           interpretation.officialInterpretation,
           guardianConfig,
@@ -4189,7 +4234,7 @@ async function runRulePreflightPipeline(
         //    catches the same fault deterministically but only through literal
         //    values and named operations.
         const artifactStatement = validation.artifact?.officialInterpretation;
-        const promiseIsKept =
+        promiseIsKept =
           artifactStatement === undefined
             ? true
             : await checkGroundedness(
@@ -4213,6 +4258,8 @@ async function runRulePreflightPipeline(
       grounded,
       interpretation,
       model,
+      promiseIsKept,
+      readingIsFaithful,
       rejectedAttempts,
       validation,
     };
@@ -4270,6 +4317,12 @@ async function runRulePreflightPipeline(
     interpretation.officialInterpretation;
   const guardianGrounded = pass.grounded;
   const guardianBlocked = guardianGrounded === false;
+  const groundednessFailure = guardianBlocked
+    ? buildGroundednessFailureFeedback({
+        promiseIsKept: pass.promiseIsKept,
+        readingIsFaithful: pass.readingIsFaithful,
+      })
+    : null;
 
   const ruleAst = validation.artifact?.ast ?? null;
   // The headline sentence is model prose, but it is what the player reads, what
@@ -4328,12 +4381,13 @@ async function runRulePreflightPipeline(
     : null;
   const reasonCodes = [...validation.log.reasonCodes];
   const generationRetryable =
-    validation.decision !== "VALID" &&
-    !guardianBlocked &&
     !reproposalBlocked &&
     !semanticReview.impact.triviallyAlwaysTrue &&
     !semanticReview.confirmationRequired &&
-    isRuleGenerationRetryable(reasonCodes);
+    ((validation.decision !== "VALID" &&
+      !guardianBlocked &&
+      isRuleGenerationRetryable(reasonCodes)) ||
+      (validation.decision === "VALID" && guardianBlocked));
 
   const needsClarification =
     interpretation.needsClarification ||
@@ -4347,7 +4401,8 @@ async function runRulePreflightPipeline(
     : reproposalBlocked
       ? "This rule was already the Rule of the Hour in a previous turn. To reuse it, add a condition that differentiates it (e.g. combine it with another criterion over the numbers)."
       : guardianBlocked
-        ? "The dealer's interpretation may not match your rule. Please rephrase it."
+        ? (groundednessFailure?.reasonSummary ??
+          "The fidelity check could not verify the compiled rule.")
         : (semanticReview.reasonSummary ?? validation.log.reasonSummary);
   const semanticRejectionFeedback =
     semanticReview.impact.triviallyAlwaysTrue && validation.decision === "VALID"
@@ -4383,11 +4438,19 @@ async function runRulePreflightPipeline(
           suggestedRewrites: semanticReview.suggestedRewrites,
         }
       : null;
+  const groundednessFailureFeedback =
+    guardianBlocked &&
+    validation.decision === "VALID" &&
+    !reproposalBlocked &&
+    !semanticReview.impact.triviallyAlwaysTrue
+      ? groundednessFailure
+      : null;
   const rejectedAttemptDiagnostics =
     rejectedCompilerAttempts.length > 0 ? rejectedCompilerAttempts : undefined;
   const refinementFeedback =
     semanticRejectionFeedback ??
     semanticConfirmationFeedback ??
+    groundednessFailureFeedback ??
     (needsClarification && !reproposalBlocked && !guardianBlocked
       ? buildRuleRefinementFeedback({
           agentClarificationQuestions: interpretation.clarificationQuestions,

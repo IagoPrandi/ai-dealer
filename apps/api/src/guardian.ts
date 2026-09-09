@@ -584,7 +584,8 @@ function extractAtLeastMatchThreshold(value: string) {
     new RegExp(`\\b${MATCH_COUNT_ACTION}\\b`, "u").test(normalized) ||
     /\b(?:acerto|acertos|dezena|dezenas)\b/u.test(normalized);
   const comparesMembership =
-    new RegExp(`\\b${MATCH_COUNT_ACTION}\\b|\\b(?:acerto|acertos)\\b`, "u").test(normalized);
+    new RegExp(`\\b${MATCH_COUNT_ACTION}\\b|\\b(?:acerto|acertos)\\b`, "u").test(normalized) ||
+    /\bpresent\s+in\s+both\b/u.test(normalized);
 
   return mentionsGuessNumbers && mentionsDraw && comparesMembership ? amount : null;
 }

@@ -2198,6 +2198,36 @@ test("can prefer deterministic compilation for known preflight patterns", async 
   assert.equal(diagnostic.decision, "VALID");
 });
 
+test("a dedicated reviewer validates a deterministic artifact without calling the generator", async () => {
+  const prompt =
+    "The winning guess is the one whose six numbers include at least three numbers that also appear in the official draw.";
+  let generatorCalls = 0;
+  let reviewerCalls = 0;
+  const result = await compileRuleArtifact(
+    { originalText: prompt, prompt, tokenCount: tokenCount(prompt) },
+    {
+      astProvider: async () => {
+        generatorCalls += 1;
+        throw new Error("the generator is not needed for a known rule shape");
+      },
+      astReviewer: agreeingReviewer(() => {
+        reviewerCalls += 1;
+      }),
+      preferDeterministic: true,
+      requireProviderEvidence: true,
+    },
+  );
+
+  assert.equal(result.decision, "VALID");
+  assert.equal(generatorCalls, 0);
+  assert.equal(reviewerCalls, 1);
+  assert.deepEqual(result.artifact?.ast, {
+    node: { kind: "match_count_at_least", value: 3 },
+    schemaVersion: 1,
+  });
+  assert.deepEqual(result.log.reasonCodes, ["SUPPORTED_RULE"]);
+});
+
 test("the dealer's own sentence is a promise the artifact must keep", async () => {
   // The gap this closes: on the deterministic path the compiler REPLACES the
   // interpret agent's sentence with the AST-derived description. The player

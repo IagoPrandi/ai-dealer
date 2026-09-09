@@ -8,6 +8,7 @@ import {
   M3_7_POSTGRES_AUDIT_SCHEMA,
   authorizeOperatorAiRequest,
   buildDealerQuestionContext,
+  buildGroundednessFailureFeedback,
   getBlockingRuleReasonExplanations,
   buildOperatorAiAccessMessage,
   calculateAndStoreRewardRecords,
@@ -210,6 +211,32 @@ test("only compiler-generation faults offer retry without reinterpretation", () 
   assert.equal(isRuleGenerationRetryable(["DIFFICULTY_ALWAYS_TRUE"]), false);
   assert.equal(isRuleGenerationRetryable(["DIFFICULTY_IMPOSSIBLE"]), false);
   assert.equal(isRuleGenerationRetryable(["SUPPORTED_RULE"]), false);
+});
+
+test("groundedness failures identify the failed fidelity link and preserve clear wording", () => {
+  const artifactMismatch = buildGroundednessFailureFeedback({
+    promiseIsKept: false,
+    readingIsFaithful: true,
+  });
+  assert.match(artifactMismatch.reasonSummary, /rule is clear/iu);
+  assert.match(artifactMismatch.reasonSummary, /compiled condition/iu);
+  assert.match(artifactMismatch.reasonSummary, /no missing value or operation/iu);
+  assert.match(artifactMismatch.dealerMessage, /retry generation/iu);
+  assert.doesNotMatch(artifactMismatch.dealerMessage, /please rephrase/iu);
+  assert.deepEqual(artifactMismatch.refinementQuestions, []);
+
+  const readingMismatch = buildGroundednessFailureFeedback({
+    promiseIsKept: true,
+    readingIsFaithful: false,
+  });
+  assert.match(readingMismatch.reasonSummary, /dealer's reading/iu);
+  assert.match(readingMismatch.reasonSummary, /original wording/iu);
+
+  const bothMismatch = buildGroundednessFailureFeedback({
+    promiseIsKept: false,
+    readingIsFaithful: false,
+  });
+  assert.match(bothMismatch.reasonSummary, /or the compiled condition/iu);
 });
 
 test("an approved interpretation is bound to the exact source rule", () => {

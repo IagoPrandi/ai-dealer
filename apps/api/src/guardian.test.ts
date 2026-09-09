@@ -64,6 +64,10 @@ test("accepts equivalent Portuguese match-count variations without guardian scor
       "Um numero certo em qualquer ordem ganha.",
       "A guess wins if at least one number appears in the official draw.",
     ],
+    [
+      "Vence quem tem pelo menos três números que coincidam com os números sorteados.",
+      "A guess wins if how many values are in the values present in both your numbers and the drawn numbers is at least 3.",
+    ],
   ] as const;
 
   for (const [rule, interpretation] of cases) {
