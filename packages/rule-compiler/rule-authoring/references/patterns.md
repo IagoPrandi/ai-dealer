@@ -126,6 +126,13 @@ Rules for this idiom:
 - A criterion to be MINIMISED is SUBTRACTED (as above). A criterion to be
   MAXIMISED is ADDED. Do not flip `direction` to serve the secondary — the
   direction belongs to the primary criterion.
+- Keep `eligibleWhen` outside the folded score. For example, "among tickets no
+  greater than the drawn total, most matches wins; ties go to the larger sum" is
+  `direction:"max"`, `eligibleWhen: sum(guess) <= sum(draw)`, and
+  `score = 586 * count(intersection(guess,draw)) + sum(guess)`. A ticket sum is
+  at most 585, so scale 586 makes one additional match outweigh every possible
+  sum advantage. Worked-example scores must execute to this complete folded
+  value, not merely to the primary match count or secondary sum.
 - Fold at most two criteria. Three or more need a scale product that outruns two
   bounds at once; emit nothing and let the rule be refined instead of guessing.
 - The fallback marker is what makes this shape: "otherwise", "if nobody / if no

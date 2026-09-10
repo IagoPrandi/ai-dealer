@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import {
   answerDealerQuestion,
+  calculateRateLimitBackoffMs,
   compileRuleToAst,
   createJsonStringFieldReader,
   ensureModelLoaded,
@@ -192,6 +193,74 @@ const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+});
+
+test("429 backoff grows exponentially and honors Retry-After", () => {
+  assert.equal(calculateRateLimitBackoffMs(1, null, () => 0), 1_000);
+  assert.equal(calculateRateLimitBackoffMs(2, null, () => 0), 2_000);
+  assert.equal(calculateRateLimitBackoffMs(3, null, () => 0), 4_000);
+  assert.equal(calculateRateLimitBackoffMs(1, "5", () => 0), 5_000);
+  assert.equal(calculateRateLimitBackoffMs(9, null, () => 0), 30_000);
+});
+
+test("a transient HTTP 429 is retried before rule interpretation fails", async () => {
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    if (calls === 1) {
+      return new Response(JSON.stringify({ error: { message: "rate limited" } }), {
+        headers: { "retry-after": "0" },
+        status: 429,
+      });
+    }
+    return new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                addedOperationalClauses: [],
+                clarificationQuestions: [],
+                clarityNote: "Clear.",
+                dealerMessage: "Ready.",
+                needsClarification: false,
+                normalizedText: "At least one guessed number is drawn.",
+                officialInterpretation:
+                  "A guess wins when at least one guessed number appears in the draw.",
+                suggestedRewrites: [],
+                title: "One Match",
+              }),
+            },
+          },
+        ],
+      }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+
+  const result = await interpretRuleWithAgent(
+    "Win if at least one guessed number is drawn.",
+    CONFIG,
+  );
+  assert.equal(calls, 2);
+  assert.equal(result.title, "One Match");
+});
+
+test("a permanent output-budget 429 is not retried", async () => {
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return new Response(
+      "Request exceeds the output tokens per minute (OTPM) limit.",
+      { status: 429 },
+    );
+  }) as typeof fetch;
+
+  await assert.rejects(
+    interpretRuleWithAgent("Win if one number is drawn.", CONFIG),
+    /per-minute output-token limit/iu,
+  );
+  assert.equal(calls, 1);
 });
 
 test("ensureModelLoaded skips when the endpoint is not Ollama-native", async () => {

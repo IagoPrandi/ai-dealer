@@ -22,11 +22,13 @@ import {
   MAX_AST_DEPTH,
   ruleAstSchema,
   type ArrayExpr,
+  type ArrayExprV3,
   type CompareOp,
   type PredicateNode,
   type PredicateNodeV3,
   type RuleAst,
   type ScalarExpr,
+  type ScalarExprV3,
 } from "@tyche/rule-schema";
 import {
   evaluatePredicate,
@@ -123,7 +125,8 @@ export type RuleValidationReasonCode =
   | "SECOND_OPINION_UNAVAILABLE"
   | "SUPPORTED_RULE"
   | "UNSUPPORTED_RULE"
-  | "UNSAFE_RUNTIME_BOUNDS";
+  | "UNSAFE_RUNTIME_BOUNDS"
+  | "VACUOUS_CONDITION";
 
 // Async hook that asks an LLM provider to emit a rule AST (raw JSON) for the
 // given normalized text. Injected by the API (apps/api/src/llm.ts). When absent,
@@ -715,6 +718,21 @@ function shouldContinueAfterAttempt(
   attempts: ProviderEvaluation[],
   requireSecondOpinion = false,
 ): boolean {
+  if (hasUnresolvedReviewerMismatch(attempts) && attempts.length < 3) {
+    return true;
+  }
+  if (resolveReviewerDisagreement(attempts)) {
+    return false;
+  }
+  if (
+    attempts.some((attempt) =>
+      attempt.reasonCodes.includes("SECOND_OPINION_UNAVAILABLE"),
+    ) &&
+    countCompletedOpinions(attempts) < 2 &&
+    attempts.length < 3
+  ) {
+    return true;
+  }
   // With no deterministic reference reading, a single provider's AST is the only
   // account of what the rule means and nothing can contradict it. Buy a second
   // opinion in exactly that case — when the reviewer HAS a reference it already
@@ -775,7 +793,8 @@ function finalizeValidation(
     : 0;
   const disagreementResolution =
     providerDisagreementRateSample === 1
-      ? resolveProviderDisagreement(attempts)
+      ? (resolveReviewerDisagreement(attempts) ??
+        resolveProviderDisagreement(attempts))
       : null;
   // The disagreement is measured either way; this flag only decides whether it
   // blocks. With consensus disabled the sample and the reason code still reach
@@ -828,9 +847,11 @@ function finalizeValidation(
   // unchecked reading — record that in the audit log instead of letting it pass
   // silently as if it had been corroborated.
   if (
-    options.requireSecondOpinion &&
-    selectedAttempt.decision === "VALID" &&
-    countCompletedOpinions(attempts) < 2
+    countCompletedOpinions(attempts) < 2 &&
+    (options.requireSecondOpinion ||
+      attempts.some((attempt) =>
+        attempt.reasonCodes.includes("SECOND_OPINION_UNAVAILABLE"),
+      ))
   ) {
     reasonCodes.add("SECOND_OPINION_UNAVAILABLE");
   }
@@ -959,13 +980,18 @@ export async function compileRuleArtifact(
     !consensusDisabled &&
     lacksDeterministicReference(request) &&
     options.astReviewer === undefined;
+  const arbitrationOptions: RuleCompileArtifactOptions = { ...options };
+  delete arbitrationOptions.astReviewer;
 
   for (const providerConfig of providerRouting.providers) {
     const evaluation = await evaluateProviderAttemptAsync(
       request,
       timestamp,
       providerConfig,
-      options,
+      // The dedicated reviewer already supplied the second reading. Later
+      // provider slots are arbiters; asking the same reviewer again would
+      // duplicate one side of the disagreement instead of breaking it.
+      attempts.length === 0 ? options : arbitrationOptions,
     );
     attempts.push(evaluation);
     if (
@@ -976,7 +1002,10 @@ export async function compileRuleArtifact(
     }
     if (
       evaluation.status === "rejected" &&
-      evaluation.confidenceAction === "REJECT"
+      evaluation.confidenceAction === "REJECT" &&
+      !evaluation.reasonCodes.includes("REVIEWER_MISMATCH") &&
+      !evaluation.reasonCodes.includes("SECOND_OPINION_UNAVAILABLE") &&
+      !shouldContinueAfterAttempt(attempts, requireSecondOpinion)
     ) {
       break;
     }
@@ -1016,6 +1045,8 @@ interface ProviderEvaluation {
   normalizedText: string;
   priority: AgentProviderPriority;
   reasonCodes: RuleValidationReasonCode[];
+  /** Source-only reviewer reading used to arbitrate a novel candidate. */
+  reviewerAst: RuleAst | null;
   requestShape: AgentProviderConfig["request_shape"];
   /** Why the emitted AST failed `ruleAstSchema`, or null when it did not. */
   schemaError: string | null;
@@ -1563,7 +1594,7 @@ function validateResolvedAst(
   if (reviewerMismatch) {
     reasonCodes.add("REVIEWER_MISMATCH");
   }
-  stages.push({
+  const reviewerStage: RuleCompilerStageResult = {
     detail: !ast
       ? "Skipped because no schema-valid AST was available."
       : !reviewerAst
@@ -1581,7 +1612,8 @@ function validateResolvedAst(
         : reasonCodes.has("REVIEWER_MISMATCH")
           ? "failed"
           : "passed",
-  });
+  };
+  stages.push(reviewerStage);
 
   const evidenceVerification =
     ast && astSource === "provider" && providerEvidence
@@ -1595,6 +1627,24 @@ function validateResolvedAst(
   const verifiedProviderEvidence = evidenceVerification?.ok
     ? evidenceVerification.evidence
     : null;
+  // A reviewer program with a condition proven true for every value in its
+  // finite binder domain erased that condition; it is not an equal reading of
+  // the source. Verified source spans and executed examples on the draft carry
+  // more evidence, so the malformed review cannot veto that draft or be offered
+  // to the player as an alternative interpretation.
+  if (
+    reviewerMismatch &&
+    reviewerAst &&
+    astSource === "provider" &&
+    verifiedProviderEvidence &&
+    hasProvablyVacuousCondition(reviewerAst)
+  ) {
+    reasonCodes.delete("REVIEWER_MISMATCH");
+    reviewerStage.detail =
+      "The reviewer reading contained a provably vacuous condition and was discarded; verified provider evidence remains authoritative.";
+    reviewerStage.reasonCodes = [];
+    reviewerStage.status = "passed";
+  }
   // Only a compiled artifact can mis-state the rule. With no AST there is
   // nothing to compare the wording against, and the real cause is already
   // recorded (PROVIDER_MALFORMED_RESPONSE / SCHEMA_INVALID / UNSUPPORTED_RULE) —
@@ -1714,6 +1764,7 @@ function validateResolvedAst(
     astSource === "provider" && reviewerAst !== null;
   let interpretationCoverageFailed = false;
   let coverageMissingOperations: readonly RuleOperation[] = [];
+  const hasVacuousCondition = ast ? hasProvablyVacuousCondition(ast) : false;
   if (ast && !forcedFailure) {
     const coverage = analyzeInterpretationCoverage({
       ast,
@@ -1728,21 +1779,29 @@ function validateResolvedAst(
       reasonCodes.add("INTERPRETATION_MISMATCH");
       interpretationCoverageFailed = true;
     }
+    if (hasVacuousCondition) {
+      reasonCodes.add("VACUOUS_CONDITION");
+      interpretationCoverageFailed = true;
+    }
   }
   stages.push({
     detail: !ast
       ? "Skipped because no schema-valid AST was available."
       : interpretationCoverageFailed
-        ? `The candidate AST does not cover every intent-bearing part of the rule text${
-            coverageMissingOperations.length > 0
-              ? ` (missing operations: ${coverageMissingOperations.join(", ")})`
-              : ""
-          }.`
+        ? hasVacuousCondition
+          ? "The candidate AST contains a condition that is provably true for every value in its finite domain, so it cannot enforce that part of the player's wording."
+          : `The candidate AST does not cover every intent-bearing part of the rule text${
+              coverageMissingOperations.length > 0
+                ? ` (missing operations: ${coverageMissingOperations.join(", ")})`
+                : ""
+            }.`
         : certifiedByIndependentReading
           ? "Every operation the rule text names survives into the candidate AST; value coverage was certified by the independent reviewer AST."
           : "The candidate AST covers the intent-bearing parts of the rule text.",
     reasonCodes: interpretationCoverageFailed
-      ? ["INTERPRETATION_MISMATCH"]
+      ? hasVacuousCondition
+        ? ["VACUOUS_CONDITION"]
+        : ["INTERPRETATION_MISMATCH"]
       : [],
     stage: "interpretation_coverage",
     status: !ast
@@ -1989,6 +2048,7 @@ function validateResolvedAst(
     normalizedText,
     priority: providerConfig.priority,
     reasonCodes: [...reasonCodes],
+    reviewerAst,
     requestShape: providerConfig.request_shape,
     schemaError,
     status,
@@ -2299,10 +2359,25 @@ function providerOpinionsAgree(
   if (left.ast === null || right.ast === null) {
     return left.ast === right.ast;
   }
-  return knownAstSemanticsMatch(left.ast, right.ast);
+  return astOpinionsAgree(left.ast, right.ast);
+}
+
+function astOpinionsAgree(left: RuleAst, right: RuleAst) {
+  return knownAstSemanticsMatch(left, right);
 }
 
 function hasProviderDisagreement(attempts: ProviderEvaluation[]) {
+  if (
+    attempts.some(
+      (attempt) =>
+        attempt.ast !== null &&
+        attempt.reviewerAst !== null &&
+        attempt.reasonCodes.includes("REVIEWER_MISMATCH") &&
+        !astOpinionsAgree(attempt.ast, attempt.reviewerAst),
+    )
+  ) {
+    return true;
+  }
   const completedAttempts = attempts.filter(isCompletedProviderOpinion);
   if (completedAttempts.length < 2) {
     return false;
@@ -2315,6 +2390,31 @@ function hasProviderDisagreement(attempts: ProviderEvaluation[]) {
   return completedAttempts
     .slice(1)
     .some((attempt) => !providerOpinionsAgree(first, attempt));
+}
+
+function hasUnresolvedReviewerMismatch(attempts: ProviderEvaluation[]) {
+  for (const [index, attempt] of attempts.entries()) {
+    if (
+      attempt.ast === null ||
+      attempt.reviewerAst === null ||
+      !attempt.reasonCodes.includes("REVIEWER_MISMATCH")
+    ) {
+      continue;
+    }
+    const generatedAst = attempt.ast;
+    const reviewerAst = attempt.reviewerAst;
+    const arbiter = attempts.slice(index + 1).find(
+      (candidate) =>
+        candidate.ast !== null &&
+        isCompletedProviderOpinion(candidate) &&
+        (astOpinionsAgree(candidate.ast, generatedAst) ||
+          astOpinionsAgree(candidate.ast, reviewerAst)),
+    );
+    if (!arbiter) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function countCompletedOpinions(attempts: ProviderEvaluation[]) {
@@ -2334,20 +2434,45 @@ function countCompletedOpinions(attempts: ProviderEvaluation[]) {
 function collectDivergentProviderReadings(
   attempts: ProviderEvaluation[],
 ): string[] {
-  const distinct: ProviderEvaluation[] = [];
+  const distinct: RuleAst[] = [];
   for (const attempt of attempts.filter(isCompletedProviderOpinion)) {
-    if (attempt.ast === null) {
-      continue;
-    }
-    if (
-      !distinct.some((existing) => providerOpinionsAgree(existing, attempt))
-    ) {
-      distinct.push(attempt);
+    for (const ast of [attempt.ast, attempt.reviewerAst]) {
+      if (
+        ast !== null &&
+        !hasProvablyVacuousCondition(ast) &&
+        !distinct.some((existing) => astOpinionsAgree(existing, ast))
+      ) {
+        distinct.push(ast);
+      }
     }
   }
-  return distinct.flatMap((attempt) =>
-    attempt.ast ? [describeRuleAstForPlayers(attempt.ast)] : [],
-  );
+  return distinct.map(describeRuleAstForPlayers);
+}
+
+function resolveReviewerDisagreement(attempts: ProviderEvaluation[]) {
+  for (const [index, attempt] of attempts.entries()) {
+    if (
+      attempt.ast === null ||
+      attempt.reviewerAst === null ||
+      !attempt.reasonCodes.includes("REVIEWER_MISMATCH") ||
+      astOpinionsAgree(attempt.ast, attempt.reviewerAst)
+    ) {
+      continue;
+    }
+    const generatedAst = attempt.ast;
+    const reviewerAst = attempt.reviewerAst;
+    const arbiter = attempts.slice(index + 1).find(
+      (candidate) =>
+        candidate.ast !== null &&
+        candidate.decision === "VALID" &&
+        (astOpinionsAgree(candidate.ast, generatedAst) ||
+          astOpinionsAgree(candidate.ast, reviewerAst)),
+    );
+    if (arbiter) {
+      return arbiter;
+    }
+  }
+  return null;
 }
 
 function resolveProviderDisagreement(attempts: ProviderEvaluation[]) {
@@ -2737,6 +2862,12 @@ function compileSupportedRulePattern(text: string): RuleAst | null {
     return matchesThenDistanceRanking;
   }
 
+  const eligibleMatchesThenSumRanking =
+    parseEligibleMatchesThenSumRankingRule(text);
+  if (eligibleMatchesThenSumRanking) {
+    return eligibleMatchesThenSumRanking;
+  }
+
   // "closest total" is objective when both totals are named. A one-sided
   // qualifier changes it from minimum distance to maximum eligible total.
   const closestSumRanking = parseClosestSumRankingRule(text);
@@ -2755,6 +2886,11 @@ function compileSupportedRulePattern(text: string): RuleAst | null {
   const orderedTensRange = parseOrderedTensRangeRule(text);
   if (orderedTensRange) {
     return orderedTensRange;
+  }
+
+  const extremeCountMargin = parseExtremeCountMarginRule(text);
+  if (extremeCountMargin) {
+    return extremeCountMargin;
   }
 
   const orderedGuessPrefix = parseOrderedGuessPrefixRule(text);
@@ -3457,6 +3593,58 @@ function parseSumModuloEqualityRule(text: string): PredicateNode | null {
   );
 }
 
+/**
+ * Compile comparisons between two dynamically-filtered guess counts, where the
+ * thresholds are the draw's extrema. This needs v3 element binders; v2's
+ * filter_compare can only compare against a literal.
+ */
+function parseExtremeCountMarginRule(text: string): RuleAst | null {
+  const relation = text.match(
+    /\bcount\b[^.;]{0,40}\b(?:its|the guess(?:'s)?|guessed|ticket(?:'s)?)\b[^.;]{0,40}\bnumbers?\b[^.;]{0,20}\babove\b[^.;]{0,25}\bhighest\b[^.;]{0,20}\b(?:drawn?|draw)\b[^.;]{0,80}\b(?:exceeds?|is (?:greater|higher) than)\b[^.;]{0,60}\bcount\b[^.;]{0,40}\b(?:its|the guess(?:'s)?|guessed|ticket(?:'s)?)\b[^.;]{0,40}\bnumbers?\b[^.;]{0,20}\bbelow\b[^.;]{0,25}\blowest\b[^.;]{0,20}\b(?:drawn?|draw)\b[^.;]{0,45}\bby at least\s+(\d+|one|two|three|four|five|six)\b/i,
+  );
+  if (!relation?.[1]) {
+    return null;
+  }
+  const margin = NUMBER_WORDS.get(relation[1].toLowerCase()) ?? Number(relation[1]);
+  if (!Number.isInteger(margin) || margin < 0 || margin > 6) {
+    return null;
+  }
+
+  const guess: ArrayExprV3 = { kind: "source", source: "guess" };
+  const draw: ArrayExprV3 = { kind: "source", source: "draw" };
+  const filteredCount = (op: "gt" | "lt", threshold: ScalarExprV3): ScalarExprV3 => ({
+    kind: "reduce",
+    op: "count",
+    of: {
+      kind: "filter",
+      of: guess,
+      where: {
+        kind: "compare",
+        left: { kind: "elem" },
+        op,
+        right: threshold,
+      },
+    },
+  });
+  return {
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "compare",
+        left: {
+          kind: "arith",
+          left: filteredCount("gt", { kind: "reduce", op: "max", of: draw }),
+          op: "sub",
+          right: filteredCount("lt", { kind: "reduce", op: "min", of: draw }),
+        },
+        op: "gte",
+        right: { kind: "lit", value: margin },
+      },
+    },
+  };
+}
+
 // #24: "count of guessed numbers below 50 equals the count of drawn numbers
 // below 50" -> compare the two filtered counts. Supports below/under (lt) and
 // above/over (gt); thresholds must be a valid 1..100 number value.
@@ -3686,6 +3874,67 @@ function rankingRule(direction: "max" | "min", score: ScalarExpr): RuleAst {
 // dropped out of a frozen rule.
 const SECONDARY_CRITERION_MARKER =
   /\b(?:otherwise|tie[\s-]?break(?:er|ers)?|in case of a tie|failing that|if (?:nobody|no ?one|none|neither|there is no|there's no|no guess|no player)|when (?:nobody|no ?one)|senao|se nao houver|se nao tiver|caso nao haja|caso ninguem|se ninguem|quando ninguem|em caso de empate|no caso de empate|havendo empate|empatar|empate|desempate|desempatar)\b/i;
+
+/**
+ * Compile the complete two-level ranking used by test-set 5 N3. Multiplying the
+ * primary match count by 586 makes the score lexicographic: a valid six-number
+ * ticket can sum to at most 585, so one additional match always outranks every
+ * possible sum advantage. Eligibility stays separate so an all-ineligible pool
+ * correctly produces no winner.
+ */
+function parseEligibleMatchesThenSumRankingRule(text: string): RuleAst | null {
+  const namesEligibility =
+    /\b(?:tickets?|guesses?|picks?)\b[^.;]{0,80}\b(?:add up|sum|total)\b[^.;]{0,50}\b(?:no more than|not more than|at most|does(?:n'?t| not) exceed)\b[^.;]{0,40}\b(?:drawn?|draw)\b[^.;]{0,20}\b(?:sum|total)\b/i.test(
+      text,
+    );
+  const namesPrimary =
+    /\bmost\b[^.;]{0,50}\b(?:numbers?|matches?|hits?)\b[^.;]{0,40}\b(?:match(?:ing|es|ed)?|appear(?:ing|s|ed)?)\b[^.;]{0,30}\b(?:drawn?|draw)\b/i.test(
+      text,
+    ) ||
+    /\bmost\b[^.;]{0,40}\b(?:match(?:es|ing)?|hits?)\b/i.test(text);
+  const namesSumTieBreak =
+    /\b(?:if|when)\b[^.;]{0,60}\b(?:tie|same (?:amount|number|count))\b[^.;]{0,80}\b(?:larger|higher|greater)\b[^.;]{0,20}\b(?:sum|total)\b[^.;]{0,20}\b(?:wins?|winner)\b/i.test(
+      text,
+    );
+  if (!namesEligibility || !namesPrimary || !namesSumTieBreak) {
+    return null;
+  }
+
+  const guess = { kind: "source", source: "guess" } as const;
+  const draw = { kind: "source", source: "draw" } as const;
+  const guessSum: ScalarExprV3 = { kind: "reduce", op: "sum", of: guess };
+  const drawSum: ScalarExprV3 = { kind: "reduce", op: "sum", of: draw };
+  const matchCount: ScalarExprV3 = {
+    kind: "reduce",
+    op: "count",
+    of: { kind: "intersection", left: guess, right: draw },
+  };
+  return {
+    schemaVersion: 3,
+    result: {
+      type: "ranking",
+      direction: "max",
+      tieBreak: "share_pool",
+      eligibleWhen: {
+        kind: "compare",
+        left: guessSum,
+        op: "lte",
+        right: drawSum,
+      },
+      score: {
+        kind: "arith",
+        left: {
+          kind: "arith",
+          left: { kind: "lit", value: 586 },
+          op: "mul",
+          right: matchCount,
+        },
+        op: "add",
+        right: guessSum,
+      },
+    },
+  };
+}
 
 // The single most common ranking a player asks for: "whoever matches the most
 // (or fewest) drawn numbers wins". The deterministic predicate compiler has no
@@ -5903,6 +6152,83 @@ function hashJson(value: unknown) {
 // novel v3 compositions reviewable: a v2 reviewer macro and its v3 desugaring
 // have different shapes but identical behavior, so structural signatures alone
 // would flag every legitimate composition as a mismatch.
+function usesOnlyCurrentElementAndLiterals(value: unknown): boolean {
+  if (Array.isArray(value)) {
+    return value.every(usesOnlyCurrentElementAndLiterals);
+  }
+  if (!value || typeof value !== "object") {
+    return true;
+  }
+  const node = value as Record<string, unknown>;
+  if (node.kind === "elem") {
+    return node.up === undefined || node.up === 0;
+  }
+  if (
+    node.kind === "source" ||
+    node.kind === "pair" ||
+    node.kind === "forall" ||
+    node.kind === "exists" ||
+    node.kind === "pairs_forall" ||
+    node.kind === "pairs_exists" ||
+    node.kind === "contains" ||
+    node.kind === "reduce" ||
+    node.kind === "at"
+  ) {
+    return false;
+  }
+  return Object.values(node).every(usesOnlyCurrentElementAndLiterals);
+}
+
+function directForallIsProvablyTrue(clause: PredicateNodeV3): boolean {
+  if (clause.kind !== "forall" || clause.of.kind !== "source") {
+    return false;
+  }
+  if (!usesOnlyCurrentElementAndLiterals(clause.where)) {
+    return false;
+  }
+  const standalone = ruleAstSchema.safeParse({
+    schemaVersion: 3,
+    result: { predicate: clause, type: "predicate" },
+  });
+  if (!standalone.success) {
+    return false;
+  }
+  const domainTickets: number[][] = [];
+  for (let first = 1; first <= 100; first += 6) {
+    const ticket: number[] = [];
+    for (let offset = 0; ticket.length < 6; offset += 1) {
+      const value = ((first + offset - 1) % 100) + 1;
+      if (!ticket.includes(value)) {
+        ticket.push(value);
+      }
+    }
+    domainTickets.push(ticket);
+  }
+  return domainTickets.every(
+    (ticket) =>
+      evaluatePredicate(standalone.data, { draw: ticket, guess: ticket })
+        .result === "WIN",
+  );
+}
+
+/**
+ * Proves a narrow but important no-op: a top-level conjunct that universally
+ * quantifies a source while its body is true for every integer in [1, 100].
+ * The proof is exhaustive over the finite element domain and deliberately does
+ * not generalize from random samples.
+ */
+export function hasProvablyVacuousCondition(ast: RuleAst): boolean {
+  if (
+    ast.schemaVersion !== 3 ||
+    ast.result.type !== "predicate" ||
+    ast.result.predicate.kind !== "and" ||
+    ast.result.predicate.clauses.length < 2
+  ) {
+    return false;
+  }
+  return ast.result.predicate.clauses.some(directForallIsProvablyTrue);
+}
+
 function knownAstSemanticsMatch(expected: RuleAst, actual: RuleAst) {
   if (
     expected.schemaVersion !== 3 &&
@@ -6042,14 +6368,26 @@ function describeSemanticDisagreement(expected: RuleAst, actual: RuleAst) {
 
   try {
     for (const input of inputs) {
-      const reviewerResult = expectedRanking
-        ? evaluateRankingEntry(expected, input)
-        : evaluatePredicate(expected, input).result;
-      const draftResult = expectedRanking
-        ? evaluateRankingEntry(actual, input)
-        : evaluatePredicate(actual, input).result;
-      if (reviewerResult !== draftResult) {
-        return `The independent reviewer and draft disagree for guess ${JSON.stringify(input.guess)} and draw ${JSON.stringify(input.draw)}: reviewer=${String(reviewerResult)}, draft=${String(draftResult)}.`;
+      if (expectedRanking) {
+        const reviewerResult = evaluateRankingEntry(expected, input);
+        const draftResult = evaluateRankingEntry(actual, input);
+        if (
+          reviewerResult.score !== draftResult.score ||
+          reviewerResult.eligible !== draftResult.eligible
+        ) {
+          const format = (result: typeof reviewerResult) =>
+            JSON.stringify({
+              eligible: result.eligible,
+              score: result.score,
+            });
+          return `The independent reviewer and draft disagree for guess ${JSON.stringify(input.guess)} and draw ${JSON.stringify(input.draw)}: reviewer=${format(reviewerResult)}, draft=${format(draftResult)}.`;
+        }
+      } else {
+        const reviewerResult = evaluatePredicate(expected, input).result;
+        const draftResult = evaluatePredicate(actual, input).result;
+        if (reviewerResult !== draftResult) {
+          return `The independent reviewer and draft disagree for guess ${JSON.stringify(input.guess)} and draw ${JSON.stringify(input.draw)}: reviewer=${reviewerResult}, draft=${draftResult}.`;
+        }
       }
     }
   } catch {
@@ -6227,6 +6565,9 @@ function summarizeReasons(
   }
   if (blockingReasons.includes("DIFFICULTY_ALWAYS_TRUE")) {
     return "Rule rejected: every guess wins under this rule, so it cannot distinguish winners from losers.";
+  }
+  if (blockingReasons.includes("VACUOUS_CONDITION")) {
+    return "Rule rejected: the compiler emitted a condition that is true for every value in its finite domain, so it does not enforce that part of the player's rule. Retry the same rule; the wording is not the cause.";
   }
   return "Rule rejected because validation found a blocking safety, fidelity, or runtime issue. Review the structured reason explanations before revising the rule.";
 }

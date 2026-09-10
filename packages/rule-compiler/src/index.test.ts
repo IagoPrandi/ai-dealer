@@ -19,6 +19,7 @@ import {
   hasAmbiguousWording,
   hasExternalDependency,
   hasInvalidConstraint,
+  hasProvablyVacuousCondition,
   providerCompilationHasSchemaValidAst,
   RULE_COMPILER_SKILL_VERSION,
   ruleAstSchema,
@@ -960,6 +961,75 @@ test("compiles 'most matches, then closest by position' as two ordered criteria"
         plain.result.score.kind === "reduce" &&
         plain.result.score.op === "count",
       `a rule with no second criterion must stay the plain match-count ranking: ${prompt}`,
+    );
+  }
+});
+
+test("deterministically compiles an eligible match ranking with a sum tiebreak", () => {
+  const prompt =
+    "Among tickets whose numbers add up to no more than the drawn total, the winner is the one with the most numbers matching the draw; if two tickets match the same amount, the one with the larger sum wins.";
+  const result = validateAndPrecompileRule({
+    prompt,
+    tokenCount: tokenCount(prompt),
+  });
+  assert.equal(result.decision, "VALID");
+  const ast = result.artifact?.ast;
+  assert.ok(
+    ast?.schemaVersion === 3 &&
+      ast.result.type === "ranking" &&
+      ast.result.eligibleWhen,
+  );
+
+  const draw = [10, 20, 30, 40, 50, 60];
+  const smallerTie = evaluateRankingEntry(ast, {
+    draw,
+    guess: [10, 20, 30, 1, 2, 3],
+  });
+  const largerTie = evaluateRankingEntry(ast, {
+    draw,
+    guess: [10, 20, 30, 4, 5, 6],
+  });
+  const overLimit = evaluateRankingEntry(ast, {
+    draw,
+    guess: [10, 20, 30, 40, 50, 61],
+  });
+  const moreMatches = evaluateRankingEntry(ast, {
+    draw,
+    guess: [10, 20, 30, 40, 1, 2],
+  });
+  const fewerMatches = evaluateRankingEntry(ast, {
+    draw,
+    guess: [10, 20, 1, 2, 3, 90],
+  });
+  assert.equal(smallerTie.eligible, true);
+  assert.equal(largerTie.eligible, true);
+  assert.ok(largerTie.score > smallerTie.score);
+  assert.equal(overLimit.eligible, false);
+  assert.ok(moreMatches.score > fewerMatches.score);
+});
+
+test("deterministically compiles the margin between counts beyond draw extrema", () => {
+  const prompt =
+    "A guess wins if the count of its numbers above the highest drawn number exceeds the count of its numbers below the lowest drawn number by at least 2.";
+  const result = validateAndPrecompileRule({
+    prompt,
+    tokenCount: tokenCount(prompt),
+  });
+  assert.equal(result.decision, "VALID");
+  const ast = result.artifact?.ast;
+  assert.ok(ast);
+  const draw = [10, 20, 30, 40, 50, 60];
+  const fixtures = [
+    { guess: [61, 62, 30, 31, 32, 33], expected: "WIN" },
+    { guess: [61, 30, 31, 32, 33, 34], expected: "LOSE" },
+    { guess: [61, 62, 70, 80, 5, 30], expected: "WIN" },
+    { guess: [61, 62, 1, 2, 3, 4], expected: "LOSE" },
+    { guess: [70, 80, 90, 5, 6, 30], expected: "LOSE" },
+  ] as const;
+  for (const fixture of fixtures) {
+    assert.equal(
+      evaluatePredicate(ast, { draw, guess: [...fixture.guess] }).result,
+      fixture.expected,
     );
   }
 });
@@ -3500,8 +3570,12 @@ test("a novel-rule LLM disagreement reports a behavioral counterexample", async 
     },
   );
 
-  assert.equal(result.decision, "INVALID");
-  assert.ok(result.log.reasonCodes.includes("REVIEWER_MISMATCH"));
+  assert.equal(result.decision, "VALID");
+  assert.ok(
+    result.log.attemptDiagnostics[0]?.reasonCodes.includes(
+      "REVIEWER_MISMATCH",
+    ),
+  );
   const reviewStage = result.log.attemptDiagnostics[0]?.stages.find(
     (stage) => stage.stage === "independent_review",
   );
@@ -3511,7 +3585,11 @@ test("a novel-rule LLM disagreement reports a behavioral counterexample", async 
   assert.match(reviewStage?.detail ?? "", /draft=/u);
 });
 
-test("a missing dedicated reviewer fails a novel generation closed", async () => {
+test("a third provider arbitrates a reviewer mismatch instead of treating it as a veto", async () => {
+  const draft = sumCompareAst("lt", 10);
+  const reviewer = sumCompareAst("gt", 10);
+  let generationCalls = 0;
+  let reviewCalls = 0;
   const result = await compileRuleArtifact(
     {
       originalText: NO_REFERENCE_PROMPT,
@@ -3519,7 +3597,216 @@ test("a missing dedicated reviewer fails a novel generation closed", async () =>
       tokenCount: 14,
     },
     {
-      astProvider: async () => sumCompareAst("lt", 10),
+      astProvider: async () => {
+        generationCalls += 1;
+        return draft;
+      },
+      astReviewer: async () => {
+        reviewCalls += 1;
+        return reviewer;
+      },
+    },
+  );
+
+  assert.equal(result.decision, "VALID");
+  assert.equal(generationCalls, 2);
+  assert.equal(reviewCalls, 1);
+  assert.equal(result.log.providerDisagreementRateSample, 1);
+  assert.ok(result.log.reasonCodes.includes("PROVIDER_DISAGREEMENT"));
+});
+
+test("ranking disagreement diagnostics compare score and eligibility fields", async () => {
+  const ranking = (eligible: boolean) => ({
+    schemaVersion: 3,
+    result: {
+      direction: "max",
+      eligibleWhen: {
+        kind: "compare",
+        left: { kind: "lit", value: eligible ? 1 : 0 },
+        op: "eq",
+        right: { kind: "lit", value: 1 },
+      },
+      score: {
+        kind: "reduce",
+        of: { kind: "source", source: "guess" },
+        op: "sum",
+      },
+      tieBreak: "share_pool",
+      type: "ranking",
+    },
+  });
+  const result = await compileRuleArtifact(
+    {
+      originalText: NO_REFERENCE_PROMPT,
+      prompt: NO_REFERENCE_PROMPT,
+      tokenCount: 14,
+    },
+    {
+      astProvider: async () => ranking(true),
+      astReviewer: async () => ranking(false),
+    },
+  );
+  const review = result.log.attemptDiagnostics[0]?.stages.find(
+    (stage) => stage.stage === "independent_review",
+  );
+  assert.match(review?.detail ?? "", /reviewer=\{"eligible":false,"score":/u);
+  assert.match(review?.detail ?? "", /draft=\{"eligible":true,"score":/u);
+  assert.doesNotMatch(review?.detail ?? "", /\[object Object\]/u);
+});
+
+test("a provably vacuous reviewer cannot veto a novel candidate with executed evidence", async () => {
+  const text =
+    "the six picks strictly alternate odd/even in the order chosen and at least one is drawn";
+  const source = { kind: "source", source: "guess" } as const;
+  const draw = { kind: "source", source: "draw" } as const;
+  const parityDiffers = {
+    kind: "compare",
+    left: {
+      kind: "arith",
+      left: { kind: "pair", side: "left" },
+      op: "mod",
+      right: { kind: "lit", value: 2 },
+    },
+    op: "neq",
+    right: {
+      kind: "arith",
+      left: { kind: "pair", side: "right" },
+      op: "mod",
+      right: { kind: "lit", value: 2 },
+    },
+  } as const;
+  const matchClause = {
+    kind: "compare",
+    left: {
+      kind: "reduce",
+      of: { kind: "intersection", left: source, right: draw },
+      op: "count",
+    },
+    op: "gte",
+    right: { kind: "lit", value: 1 },
+  } as const;
+  const candidate = {
+    schemaVersion: 3,
+    result: {
+      predicate: {
+        clauses: [
+          {
+            kind: "pairs_forall",
+            left: { kind: "slice", end: -1, of: source, start: 0 },
+            right: { kind: "slice", of: source, start: 1 },
+            where: parityDiffers,
+          },
+          matchClause,
+        ],
+        kind: "and",
+      },
+      type: "predicate",
+    },
+  } as const;
+  const parityIsAlwaysValid = {
+    clauses: [
+      {
+        kind: "forall",
+        of: source,
+        where: {
+          clauses: [0, 1].map((value) => ({
+            kind: "compare" as const,
+            left: {
+              kind: "arith" as const,
+              left: { kind: "elem" as const },
+              op: "mod" as const,
+              right: { kind: "lit" as const, value: 2 },
+            },
+            op: "eq" as const,
+            right: { kind: "lit" as const, value },
+          })),
+          kind: "or",
+        },
+      },
+      matchClause,
+    ],
+    kind: "and",
+  } as const;
+  const vacuousReviewer = ruleAstSchema.parse({
+    schemaVersion: 3,
+    result: { predicate: parityIsAlwaysValid, type: "predicate" },
+  });
+  assert.equal(hasProvablyVacuousCondition(vacuousReviewer), true);
+
+  const result = await compileRuleArtifact(
+    { originalText: text, prompt: text, tokenCount: 16 },
+    {
+      astProvider: async () => ({
+        ast: candidate,
+        consumedSpans: [{ text }],
+        workedExamples: [
+          {
+            draw: [5, 20, 30, 40, 50, 60],
+            guess: [2, 3, 4, 5, 6, 7],
+            outcome: "WIN",
+          },
+          {
+            draw: [5, 20, 30, 40, 50, 60],
+            guess: [2, 4, 5, 6, 7, 8],
+            outcome: "LOSE",
+          },
+        ],
+      }),
+      astReviewer: async () => vacuousReviewer,
+      requireProviderEvidence: true,
+    },
+  );
+
+  assert.equal(result.decision, "VALID");
+  assert.ok(!result.log.reasonCodes.includes("REVIEWER_MISMATCH"));
+  assert.equal(result.log.providerDisagreementReadings.length, 1);
+  const review = result.log.attemptDiagnostics[0]?.stages.find(
+    (stage) => stage.stage === "independent_review",
+  );
+  assert.match(review?.detail ?? "", /vacuous condition.*discarded/iu);
+});
+
+test("a missing dedicated reviewer falls back to another configured provider", async () => {
+  let generationCalls = 0;
+  const result = await compileRuleArtifact(
+    {
+      originalText: NO_REFERENCE_PROMPT,
+      prompt: NO_REFERENCE_PROMPT,
+      tokenCount: 14,
+    },
+    {
+      astProvider: async () => {
+        generationCalls += 1;
+        return sumCompareAst("lt", 10);
+      },
+      astReviewer: async () => {
+        throw new Error("review model unavailable");
+      },
+    },
+  );
+
+  assert.equal(result.decision, "VALID");
+  assert.equal(generationCalls, 2);
+  assert.ok(!result.log.reasonCodes.includes("SECOND_OPINION_UNAVAILABLE"));
+  assert.equal(result.log.providerPath.length, 2);
+});
+
+test("a missing reviewer still fails closed when every fallback provider is unavailable", async () => {
+  let generationCalls = 0;
+  const result = await compileRuleArtifact(
+    {
+      originalText: NO_REFERENCE_PROMPT,
+      prompt: NO_REFERENCE_PROMPT,
+      tokenCount: 14,
+    },
+    {
+      astProvider: async () => {
+        generationCalls += 1;
+        if (generationCalls > 1) {
+          throw new Error("fallback provider unavailable");
+        }
+        return sumCompareAst("lt", 10);
+      },
       astReviewer: async () => {
         throw new Error("review model unavailable");
       },
@@ -3527,6 +3814,7 @@ test("a missing dedicated reviewer fails a novel generation closed", async () =>
   );
 
   assert.equal(result.decision, "INVALID");
+  assert.equal(generationCalls, 3);
   assert.ok(result.log.reasonCodes.includes("SECOND_OPINION_UNAVAILABLE"));
 });
 

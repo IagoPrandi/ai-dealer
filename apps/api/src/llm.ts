@@ -657,6 +657,101 @@ function combineAbortSignals(timeoutMs: number, signal?: AbortSignal) {
     : AbortSignal.timeout(timeoutMs);
 }
 
+const RATE_LIMIT_MAX_ATTEMPTS = 4;
+const RATE_LIMIT_BASE_DELAY_MS = 1_000;
+const RATE_LIMIT_MAX_DELAY_MS = 30_000;
+
+function parseRetryAfterMs(value: string | null, nowMs = Date.now()): number {
+  if (!value) {
+    return 0;
+  }
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1_000;
+  }
+  const retryAt = Date.parse(value);
+  return Number.isFinite(retryAt) ? Math.max(0, retryAt - nowMs) : 0;
+}
+
+export function calculateRateLimitBackoffMs(
+  retryNumber: number,
+  retryAfterHeader: string | null,
+  random = Math.random,
+): number {
+  const exponent = Math.max(0, Math.trunc(retryNumber) - 1);
+  const exponential = Math.min(
+    RATE_LIMIT_MAX_DELAY_MS,
+    RATE_LIMIT_BASE_DELAY_MS * 2 ** exponent,
+  );
+  // Jitter stays inside this retry's exponential band. Consecutive bands do not
+  // overlap, so delays still grow while concurrent clients stop retrying in lockstep.
+  const jittered = exponential + Math.floor(random() * exponential);
+  return Math.min(
+    RATE_LIMIT_MAX_DELAY_MS,
+    Math.max(jittered, parseRetryAfterMs(retryAfterHeader)),
+  );
+}
+
+function rateLimitIsTransient(detail: string): boolean {
+  return !/output tokens per minute|OTPM|max_tokens|insufficient (?:credits|quota)|billing/iu.test(
+    detail,
+  );
+}
+
+async function waitForRateLimitRetry(ms: number, signal?: AbortSignal) {
+  await new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason ?? new Error("Rate-limit retry aborted."));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason ?? new Error("Rate-limit retry aborted."));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+async function fetchChatCompletionWithRetry(
+  url: string,
+  init: Omit<RequestInit, "signal">,
+  config: RuleAgentConfig,
+  role: string,
+  signal?: AbortSignal,
+  onRateLimited?: () => void,
+): Promise<Response> {
+  for (let attempt = 1; ; attempt += 1) {
+    const response = await fetch(url, {
+      ...init,
+      signal: combineAbortSignals(config.timeoutMs, signal),
+    });
+    if (response.status !== 429) {
+      return response;
+    }
+    const detail = (await response.clone().text().catch(() => "")).slice(0, 400);
+    if (
+      attempt >= RATE_LIMIT_MAX_ATTEMPTS ||
+      !rateLimitIsTransient(detail) ||
+      signal?.aborted
+    ) {
+      return response;
+    }
+    onRateLimited?.();
+    const delayMs = calculateRateLimitBackoffMs(
+      attempt,
+      response.headers.get("retry-after"),
+    );
+    console.warn(
+      `The provider rate-limited ${role} on ${config.model}; retrying attempt ${attempt + 1}/${RATE_LIMIT_MAX_ATTEMPTS} in ${delayMs} ms.`,
+    );
+    await waitForRateLimitRetry(delayMs, signal);
+  }
+}
+
 function modelMatches(loaded: string, wanted: string): boolean {
   if (loaded === wanted) {
     return true;
@@ -1055,7 +1150,9 @@ async function requestAgentJson(
 
   let response: Response;
   try {
-    response = await fetch(`${config.baseUrl}/chat/completions`, {
+    response = await fetchChatCompletionWithRetry(
+      `${config.baseUrl}/chat/completions`,
+      {
       body: JSON.stringify({
         messages: [
           { content: systemPrompt, role: "system" },
@@ -1086,8 +1183,12 @@ async function requestAgentJson(
       }),
       headers,
       method: "POST",
-      signal: combineAbortSignals(config.timeoutMs, signal),
-    });
+      },
+      config,
+      "the rule agent",
+      signal,
+      () => record("error", null),
+    );
   } catch (error) {
     if (signal?.aborted) {
       throw signal.reason ?? error;
@@ -1372,7 +1473,9 @@ async function requestAgentJsonStream(
 
   let response: Response;
   try {
-    response = await fetch(`${config.baseUrl}/chat/completions`, {
+    response = await fetchChatCompletionWithRetry(
+      `${config.baseUrl}/chat/completions`,
+      {
       body: JSON.stringify({
         messages: [
           { content: systemPrompt, role: "system" },
@@ -1394,8 +1497,12 @@ async function requestAgentJsonStream(
       }),
       headers,
       method: "POST",
-      signal: combineAbortSignals(config.timeoutMs, signal),
-    });
+      },
+      config,
+      "the dealer chat",
+      signal,
+      () => record("error"),
+    );
   } catch (error) {
     if (signal?.aborted) {
       throw signal.reason ?? error;
@@ -1697,7 +1804,9 @@ export async function translateRuleToEnglish(
     });
   let response: Response;
   try {
-    response = await fetch(`${config.baseUrl}/chat/completions`, {
+    response = await fetchChatCompletionWithRetry(
+      `${config.baseUrl}/chat/completions`,
+      {
       body: JSON.stringify({
         messages: [
           { content: TRANSLATE_SYSTEM_PROMPT, role: "system" },
@@ -1716,8 +1825,12 @@ export async function translateRuleToEnglish(
       }),
       headers,
       method: "POST",
-      signal: combineAbortSignals(config.timeoutMs, signal),
-    });
+      },
+      config,
+      "the translator",
+      signal,
+      () => record("error", null),
+    );
   } catch (error) {
     if (signal?.aborted) {
       throw signal.reason ?? error;

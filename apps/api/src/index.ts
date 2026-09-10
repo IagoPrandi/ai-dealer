@@ -486,6 +486,15 @@ export const RULE_REASON_EXPLANATIONS: readonly RuleReasonExplanation[] = [
       "Retry when the dealer models are available; the rule wording may already be sufficient.",
   },
   {
+    code: "VACUOUS_CONDITION",
+    whatHappened:
+      "The compiler emitted a condition that is true for every value in its finite domain.",
+    whyItBlocks:
+      "That no-op condition cannot enforce the corresponding part of your rule.",
+    whatToChange:
+      "Nothing is missing from your wording. Retry the same rule so the compiler rebuilds that condition.",
+  },
+  {
     code: "SUPPORTED_RULE",
     whatHappened: "The rule matched a supported executable pattern.",
     whyItBlocks: "This code does not block the rule by itself.",
@@ -562,6 +571,7 @@ const RULE_GENERATION_RETRYABLE_CODES = new Set<RuleValidationReasonCode>([
   "SECOND_OPINION_UNAVAILABLE",
   "UNSUPPORTED_RULE",
   "UNSAFE_RUNTIME_BOUNDS",
+  "VACUOUS_CONDITION",
 ]);
 
 const RULE_GENERATION_AUTO_REPAIR_CODES = new Set<RuleValidationReasonCode>([
@@ -570,11 +580,11 @@ const RULE_GENERATION_AUTO_REPAIR_CODES = new Set<RuleValidationReasonCode>([
   "PROVIDER_EVIDENCE_UNVERIFIED",
   "PROVIDER_MALFORMED_RESPONSE",
   "PROVIDER_SPAN_COVERAGE_INCOMPLETE",
-  "REVIEWER_MISMATCH",
   "RUNTIME_TEST_FAILED",
   "SCHEMA_INVALID",
   "UNSUPPORTED_RULE",
   "UNSAFE_RUNTIME_BOUNDS",
+  "VACUOUS_CONDITION",
 ]);
 
 const RULE_GENERATION_FAILURE_TRIGGER_CODES = new Set<RuleValidationReasonCode>(
@@ -591,6 +601,7 @@ const RULE_GENERATION_FAILURE_TRIGGER_CODES = new Set<RuleValidationReasonCode>(
     "RUNTIME_TEST_FAILED",
     "SCHEMA_INVALID",
     "SECOND_OPINION_UNAVAILABLE",
+    "VACUOUS_CONDITION",
   ],
 );
 
@@ -632,6 +643,20 @@ export function isRuleGenerationRetryable(
     hasIndependentGenerationFailure &&
     effectiveBlockers.every((code) => RULE_GENERATION_RETRYABLE_CODES.has(code))
   );
+}
+
+export function shouldEscalateRulePreflight(
+  decision: RuleValidationDecision,
+  guardianGrounded: boolean | undefined,
+) {
+  return decision !== "VALID" || guardianGrounded === false;
+}
+
+export function shouldGuardianBlockRulePreflight(
+  guardianGrounded: boolean | undefined,
+  hasApprovedInterpretation: boolean,
+) {
+  return guardianGrounded === false && !hasApprovedInterpretation;
 }
 
 function buildCompilerRepairFeedback(
@@ -3372,6 +3397,19 @@ export function buildRuleRefinementFeedback(
             isPreflightViableRewrite,
           ),
         );
+  // A compiler-side refusal must always leave a concrete next action. When no
+  // semantic dimension is missing and no intent-preserving rewrite was found,
+  // offering the exact submitted rule is the honest retry payload; inventing a
+  // threshold or tie behavior would change the player's rule.
+  if (
+    suggestedRewrites.length === 0 &&
+    questions.length === 0 &&
+    !reasonCodes.has("AMBIGUOUS_RULE") &&
+    isRuleGenerationRetryable(input.reasonCodes) &&
+    isPreflightViableRewrite(input.sanitizedText)
+  ) {
+    suggestedRewrites.push(input.sanitizedText.trim());
+  }
   const suggestedRewrite = suggestedRewrites[0];
   const deterministicCheck = validateAndPrecompileRule({
     officialInterpretation: input.officialInterpretation,
@@ -4017,11 +4055,18 @@ async function runRulePreflightPipeline(
 
   // A full dealer pass for a given model: interpret (human message), compile the
   // AST from the rule text (skill-guided), and check groundedness.
-  const dealerPass = async (model: string) => {
+  const dealerPass = async (
+    model: string,
+    compilerModel = compilerConfig.model,
+  ) => {
     const passConfig = { ...agentConfig, model };
-    // Escalation changes the interpretation/reasoning model only. Artifact
-    // emission remains on the dedicated schema-capable compile role.
-    const passCompilerConfig = compilerConfig;
+    // A reactive escalation must rebuild the artifact too. Re-running only the
+    // interpretation model cannot repair an invalid compile on the approved-
+    // interpretation path, where the interpretation is intentionally frozen.
+    const passCompilerConfig =
+      compilerModel === compilerConfig.model
+        ? compilerConfig
+        : { ...compilerConfig, model: compilerModel };
     const passReviewerConfig = runtime.reviewer;
     reportProgress({
       message: approvedInterpretation
@@ -4289,15 +4334,16 @@ async function runRulePreflightPipeline(
   let pass = await dealerPass(firstModel);
   rejectedCompilerAttempts.push(...pass.rejectedAttempts);
   let escalated = firstModel !== agentConfig.model;
-  const needsEscalation =
-    !approvedInterpretation &&
-    (pass.validation.decision !== "VALID" || pass.grounded === false);
+  const needsEscalation = shouldEscalateRulePreflight(
+    pass.validation.decision,
+    pass.grounded,
+  );
   if (needsEscalation && escalationModel && pass.model !== escalationModel) {
     // The escalation attempt must never break the preflight: if the stronger
     // model is unavailable/slow, keep the primary result and surface the note.
     try {
       await ensureDealerModelReady(escalationModel, signal);
-      const strong = await dealerPass(escalationModel);
+      const strong = await dealerPass(escalationModel, escalationModel);
       if (strong.validation.decision === "VALID" && strong.grounded !== false) {
         pass = strong;
         escalated = true;
@@ -4320,7 +4366,22 @@ async function runRulePreflightPipeline(
     validation.artifact?.officialInterpretation ??
     interpretation.officialInterpretation;
   const guardianGrounded = pass.grounded;
-  const guardianBlocked = guardianGrounded === false;
+  // Once the player approved the exact interpretation, a stochastic guardian
+  // disagreement is escalation signal and audit evidence, not a coin-flip veto
+  // over a schema-valid artifact that passed source coverage, independent
+  // review, executed evidence, runtime bounds and the harness.
+  const guardianBlocked = shouldGuardianBlockRulePreflight(
+    guardianGrounded,
+    approvedInterpretation !== undefined,
+  );
+  if (guardianGrounded === false && approvedInterpretation) {
+    guardianNote = [
+      guardianNote,
+      "The advisory fidelity model disagreed, but the approved interpretation and deterministic artifact checks passed.",
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
   const groundednessFailure = guardianBlocked
     ? buildGroundednessFailureFeedback({
         promiseIsKept: pass.promiseIsKept,

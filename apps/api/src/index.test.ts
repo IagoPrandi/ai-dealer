@@ -76,6 +76,8 @@ import {
   removeRule,
   resolveEffectiveTurnDurationCycleSeconds,
   RuleRemovalRejectedError,
+  shouldEscalateRulePreflight,
+  shouldGuardianBlockRulePreflight,
   resetApiStateForTests,
   restoreApiStateSnapshot,
   runRuleValidationForProposal,
@@ -132,10 +134,10 @@ const walletThree = "6bYqf3rJ7m2nQh9sV1xCH8kLpWtD6eZaUg5oNbMcXyTK";
 const base58 = "ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd";
 
 test("every compiler reason code has one actionable player explanation", () => {
-  assert.equal(RULE_REASON_EXPLANATIONS.length, 20);
+  assert.equal(RULE_REASON_EXPLANATIONS.length, 21);
   assert.equal(
     new Set(RULE_REASON_EXPLANATIONS.map((entry) => entry.code)).size,
-    20,
+    21,
   );
   const explanations = getRuleReasonExplanations([
     "INTERPRETATION_MISMATCH",
@@ -1018,6 +1020,46 @@ test("rule preflight names a compiler capability gap without inventing ambiguity
     feedback.dealerMessage,
     /answer the clarification questions/i,
   );
+});
+
+test("approved compile failures still escalate and groundedness alone cannot veto approval", () => {
+  assert.equal(shouldEscalateRulePreflight("INVALID", undefined), true);
+  assert.equal(shouldEscalateRulePreflight("VALID", false), true);
+  assert.equal(shouldEscalateRulePreflight("VALID", true), false);
+  assert.equal(shouldGuardianBlockRulePreflight(false, false), true);
+  assert.equal(shouldGuardianBlockRulePreflight(false, true), false);
+});
+
+test("a compiler-side refusal always offers the unchanged rule as an actionable retry", () => {
+  const text =
+    "Among tickets summing to no more than the drawn total, most matches wins; ties go to the larger sum.";
+  const feedback = buildRuleRefinementFeedback({
+    agentClarificationQuestions: [],
+    agentSuggestedRewrites: [],
+    clarityNote: "",
+    compileText: text,
+    officialInterpretation:
+      "Only tickets at or below the drawn total are eligible; most matches wins, then the larger ticket sum breaks ties.",
+    reasonCodes: ["PROVIDER_EVIDENCE_UNVERIFIED"],
+    reasonSummary: "Rule rejected.",
+    sanitizedText: text,
+    semanticImpact: {
+      astAvailable: false,
+      drawIndependent: false,
+      rangeBoundsAmbiguous: false,
+      sharedOutcome: false,
+      triviallyAlwaysTrue: false,
+      usesDraw: false,
+      usesGuess: false,
+    },
+    tokenCount: 20,
+  });
+
+  assert.deepEqual(feedback.refinementQuestions, []);
+  assert.deepEqual(feedback.suggestedRewrites, [text]);
+  assert.equal(feedback.suggestedRewrite, text);
+  assert.match(feedback.dealerMessage, /retry/iu);
+  assert.doesNotMatch(feedback.dealerMessage, /missing threshold/iu);
 });
 
 test("provider disagreement is reported as a compiler conflict, not another clarification", () => {
