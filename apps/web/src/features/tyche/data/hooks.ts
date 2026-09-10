@@ -23,6 +23,7 @@ import {
 } from "../../../solana/tycheProgram";
 import { fetchActiveTurnSnapshotFromWorker } from "../../../solana/activeTurnApi";
 import {
+  deleteConversationDraft,
   getConversationDrafts,
   getGuessReceipt,
   getGuessReceipts,
@@ -769,6 +770,7 @@ export function useConversationDrafts(walletAddress: string | undefined) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<null | string>(null);
   const [loadMoreError, setLoadMoreError] = useState<null | string>(null);
+  const [deletingDraftId, setDeletingDraftId] = useState<null | string>(null);
 
   const reload = useCallback(
     (signal?: AbortSignal) => {
@@ -809,6 +811,29 @@ export function useConversationDrafts(walletAddress: string | undefined) {
     return () => controller.abort();
   }, [reload]);
 
+  /**
+   * Deletes one saved conversation. The row leaves the list only after the API
+   * confirms the delete, so a failure keeps the conversation visible and the
+   * caller reports it instead of showing a list the next reload contradicts.
+   */
+  const remove = useCallback(
+    async (draftId: string) => {
+      if (!walletAddress) {
+        throw new Error("Connect a wallet to delete a conversation.");
+      }
+      setDeletingDraftId(draftId);
+      try {
+        await deleteConversationDraft(walletAddress, draftId);
+        setDrafts((current) =>
+          current.filter((draft) => draft.draftId !== draftId),
+        );
+      } finally {
+        setDeletingDraftId(null);
+      }
+    },
+    [walletAddress],
+  );
+
   const loadMore = useCallback(() => {
     if (!walletAddress || !nextCursor || loadingMore) {
       return;
@@ -832,6 +857,7 @@ export function useConversationDrafts(walletAddress: string | undefined) {
   }, [loadingMore, nextCursor, walletAddress]);
 
   return {
+    deletingDraftId,
     drafts,
     error,
     hasMore: nextCursor !== null,
@@ -840,5 +866,6 @@ export function useConversationDrafts(walletAddress: string | undefined) {
     loading,
     loadingMore,
     reload: () => reload(),
+    remove,
   };
 }

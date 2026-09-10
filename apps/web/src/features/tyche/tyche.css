@@ -883,6 +883,23 @@
   color: var(--text); font-family: var(--font-body); cursor: pointer;
 }
 .ide-listrow:active { background: rgba(241,232,214,0.03); }
+/* Row that carries its own action: the resume target stays a button, so the
+   delete control can sit beside it instead of nested inside it. */
+.ide-listrow-main {
+  display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0;
+  padding: 0; background: none; border: none; text-align: left;
+  color: inherit; font: inherit; cursor: pointer;
+}
+.ide-listrow-delete {
+  display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 44px;
+  padding: 0; background: none; border: none; color: var(--dim); cursor: pointer;
+  transition: color .15s, background .15s;
+}
+.ide-listrow-delete:hover, .ide-listrow-delete:focus-visible { color: var(--red); background: rgba(255,59,47,0.08); }
+.ide-listrow-delete:disabled { opacity: 0.5; cursor: default; }
+/* The conversation open in the chat beside the list. */
+.ide-listrow.is-current { padding-left: 10px; background: rgba(53,240,224,0.06); box-shadow: inset 3px 0 0 var(--cyan); }
+.ide-listrow.is-confirming { gap: 8px; background: rgba(255,59,47,0.06); box-shadow: inset 3px 0 0 var(--red); padding-left: 10px; }
 
 /* Underline tabs — inset rails rather than borders, active rail in yellow. */
 .ide-tabs { display: flex; gap: 18px; box-shadow: inset 0 -2px 0 rgba(241,232,214,0.18); }
@@ -2023,7 +2040,9 @@
     grid-column: 2;
     grid-row: 1 / 3;
     min-height: 0;
-    overflow-y: auto;
+    /* The conversation list scrolls inside the panel, so the section label and
+       the footer's submit button stay put however long the list gets. */
+    overflow: hidden;
     padding: 26px 28px;
     display: flex;
     flex-direction: column;
@@ -2034,6 +2053,7 @@
   .ide-create-panel h2 { margin: 4px 0 0; font-size: 26px; font-weight: 400; line-height: 1.12; }
   .ide-create-panel > p { margin: 0; font-family: var(--font-body); font-size: 13.5px; line-height: 1.55; color: var(--ink-body); }
   .ide-create-panel-empty { padding: 22px 0; font-family: var(--font-body); font-size: 13.5px; line-height: 1.55; color: var(--muted); }
+  .ide-create-panel-list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
   .ide-create-panel-footer { margin-top: auto; padding-top: 18px; box-shadow: inset 0 1px 0 var(--line); }
   .ide-create-panel-footer .ide-btn { width: calc(100% - 3px); padding: 13px; font-size: 14px; }
   .ide-create-panel-footer > .ide-num { display: block; font-size: 10.5px; line-height: 1.5; color: var(--dim); text-transform: uppercase; }

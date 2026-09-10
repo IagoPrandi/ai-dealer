@@ -925,7 +925,17 @@ export function evaluatePredicate(
  * Compute the per-guess numeric score for a RANKING rule. Deterministic and
  * independent of other players; the comparative step is {@link resolveRankingWinners}.
  */
-export function scoreGuess(ast: RuleAst, input: RuleRuntimeInput): number {
+export interface RankingEvaluation {
+  eligible: boolean;
+  runtimeSteps: number;
+  score: number;
+}
+
+/** Evaluate a ranking rule's score and, for v3, its optional eligibility gate. */
+export function evaluateRankingEntry(
+  ast: RuleAst,
+  input: RuleRuntimeInput,
+): RankingEvaluation {
   const safeAst = parseRuntimeAst(ast);
   const safeInput = normalizeInput(input);
   if (safeAst.schemaVersion === 1 || safeAst.result.type !== "ranking") {
@@ -935,12 +945,32 @@ export function scoreGuess(ast: RuleAst, input: RuleRuntimeInput): number {
     );
   }
   const budget: Budget = { ops: 0, depth: 0 };
-  return safeAst.schemaVersion === 3
-    ? evalScalarV3(safeAst.result.score, safeInput, budget, [])
-    : evalScalar(safeAst.result.score, safeInput, budget);
+  if (safeAst.schemaVersion === 3) {
+    const eligible = safeAst.result.eligibleWhen
+      ? evalPredicateV3(safeAst.result.eligibleWhen, safeInput, budget, [])
+      : true;
+    const score = evalScalarV3(safeAst.result.score, safeInput, budget, []);
+    return {
+      eligible,
+      runtimeSteps: budget.ops,
+      score,
+    };
+  }
+  const score = evalScalar(safeAst.result.score, safeInput, budget);
+  return {
+    eligible: true,
+    runtimeSteps: budget.ops,
+    score,
+  };
+}
+
+export function scoreGuess(ast: RuleAst, input: RuleRuntimeInput): number {
+  return evaluateRankingEntry(ast, input).score;
 }
 
 export interface RankingEntry<T = string> {
+  /** False excludes this score from the turn-level ranking. */
+  eligible?: boolean;
   player: T;
   score: number;
 }
@@ -953,7 +983,9 @@ export function resolveRankingWinners<T>(
   scores: readonly RankingEntry<T>[],
   direction: "max" | "min",
 ): Set<T> {
-  const finite = scores.filter((entry) => Number.isFinite(entry.score));
+  const finite = scores.filter(
+    (entry) => entry.eligible !== false && Number.isFinite(entry.score),
+  );
   if (finite.length === 0) return new Set<T>();
   const best = finite.reduce(
     (acc, entry) =>

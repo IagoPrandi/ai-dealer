@@ -6,6 +6,7 @@ import type { PredicateNode, RuleAst } from "@tyche/rule-schema";
 
 import {
   evaluatePredicate,
+  evaluateRankingEntry,
   evaluateRule,
   resolveRankingWinners,
   RULE_RUNTIME_LIMITS,
@@ -67,6 +68,42 @@ test("ranking: scores units-digit matches and picks the max with ties sharing", 
     "max",
   );
   assert.deepEqual([...winners].sort(), ["b", "d"]);
+});
+
+test("ranking eligibility excludes over-limit guesses and permits no winner", () => {
+  const rule: RuleAst = {
+    schemaVersion: 3,
+    result: {
+      type: "ranking",
+      direction: "max",
+      tieBreak: "share_pool",
+      eligibleWhen: {
+        kind: "compare",
+        op: "lte",
+        left: { kind: "reduce", op: "sum", of: { kind: "source", source: "guess" } },
+        right: { kind: "reduce", op: "sum", of: { kind: "source", source: "draw" } },
+      },
+      score: { kind: "reduce", op: "sum", of: { kind: "source", source: "guess" } },
+    },
+  };
+  const draw = [10, 11, 12, 13, 14, 15]; // 75
+  const exact = evaluateRankingEntry(rule, { draw, guess: [1, 2, 3, 4, 28, 37] });
+  const over = evaluateRankingEntry(rule, { draw, guess: [1, 2, 3, 4, 30, 36] });
+  assert.equal(exact.score, 75);
+  assert.equal(exact.eligible, true);
+  assert.equal(over.score, 76);
+  assert.equal(over.eligible, false);
+  assert.deepEqual(
+    [...resolveRankingWinners([
+      { player: "exact", ...exact },
+      { player: "over", ...over },
+    ], "max")],
+    ["exact"],
+  );
+  assert.equal(
+    resolveRankingWinners([{ player: "over", ...over }], "max").size,
+    0,
+  );
 });
 
 test("predicate: count_at_least over intersection", () => {

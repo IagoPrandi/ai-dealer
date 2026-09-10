@@ -54,6 +54,7 @@ export const Ico = {
   bell: (p) => (<svg viewBox="0 0 24 24" fill="none" width="20" height="20" {...p}><path d="M6 16v-4.5a6 6 0 0112 0V16l1.8 2.2H4.2L6 16z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/><path d="M10 20a2 2 0 004 0" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>),
   coin: (p) => (<svg viewBox="0 0 24 24" fill="none" width="22" height="22" {...p}><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2"/><path d="M12 6.6v10.8M14.4 9.3c-.4-.9-1.3-1.4-2.4-1.4-1.4 0-2.4.7-2.4 1.8 0 2.5 5 1.3 5 3.9 0 1.2-1.1 1.9-2.6 1.9-1.2 0-2.2-.5-2.6-1.4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg>),
   shield: (p) => (<svg viewBox="0 0 24 24" fill="none" width="16" height="16" {...p}><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6l7-3z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/></svg>),
+  trash: (p) => (<svg viewBox="0 0 24 24" fill="none" width="16" height="16" {...p}><path d="M5 7h14M10 4.5h4M9.5 11v6M14.5 11v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M6.5 7l.8 12a2 2 0 002 1.9h5.4a2 2 0 002-1.9L17.5 7" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/></svg>),
   info: (p) => (<svg viewBox="0 0 24 24" fill="none" width="15" height="15" {...p}><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2"/><path d="M12 11v5" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><circle cx="12" cy="7.6" r="1.2" fill="currentColor"/></svg>),
 } satisfies Record<string, IconComponent>;
 
@@ -505,8 +506,27 @@ export function ScreenHead({ onBack, right, title }: { onBack?: () => void; righ
 
 /* ------------------- CONVERSATION DRAFTS (rule chats) ------------------- */
 
-export function ConversationRow({ draft, onResume }: { draft: ConversationDraftApi; onResume: () => void }) {
+export function ConversationRow({
+  active = false,
+  deleting = false,
+  draft,
+  onDelete,
+  onResume,
+}: {
+  /** The conversation currently open on screen, when the list sits beside it. */
+  active?: boolean;
+  deleting?: boolean;
+  draft: ConversationDraftApi;
+  /** Omitted where the list is read-only; the row then has no delete control. */
+  onDelete?: () => void;
+  onResume: () => void;
+}) {
+  // Deleting is free and permanent, so the row asks once before it happens.
+  // Kept in the row rather than in a dialog: the confirmation belongs to the
+  // conversation being removed, and a sheet over a side panel would hide it.
+  const [confirming, setConfirming] = useState(false);
   const isDraft = draft.status !== "submitted";
+  const title = draft.normalizedText || draft.prompt;
   // The pointer alone is not enough: it is cleared by whichever client sees the
   // run end, so a tab that was closed mid-run leaves it set. Bounding it by the
   // longest life the API gives a job keeps the badge from promising a
@@ -514,27 +534,82 @@ export function ConversationRow({ draft, onResume }: { draft: ConversationDraftA
   const compiling =
     Boolean(draft.preflightJobId) &&
     isPreflightJobPointerFresh(Date.parse(draft.updatedAt), Date.now());
-  return (
-    <button onClick={onResume} className="ide-listrow" type="button">
-      <span style={{ width: 34, height: 34, borderRadius: 11, display: "grid", placeItems: "center", flexShrink: 0, background: compiling ? "rgba(124,246,184,0.12)" : isDraft ? "rgba(255,210,63,0.12)" : "var(--surface-2)", color: compiling ? "var(--green)" : isDraft ? "var(--yellow)" : "var(--dim)" }}>
-        <Ico.chat style={{ color: "currentColor" }} />
-      </span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 700, fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {draft.normalizedText || draft.prompt}
+
+  if (confirming) {
+    return (
+      <div className="ide-listrow is-confirming">
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            Delete this conversation?
+          </div>
+          <div style={{ fontSize: 12.5, color: "var(--dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {title}
+          </div>
         </div>
-        <div style={{ fontSize: 12.5, color: "var(--dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {compiling ? <span style={{ color: "var(--green)", fontWeight: 700 }}>● compiling</span> : isDraft ? "draft" : `submitted · ${fmtTurnId(draft.turnId)}`} · <span className="ide-num">{draft.tokenCount}</span> tokens · {timeAgo(draft.updatedAt)}
-        </div>
+        <button
+          className="ide-votebtn against"
+          disabled={deleting}
+          onClick={() => onDelete?.()}
+          style={{ flexShrink: 0, padding: "9px 12px", fontSize: 13, opacity: deleting ? 0.6 : 1 }}
+          type="button"
+        >
+          {deleting ? "Deleting..." : "Delete"}
+        </button>
+        <button
+          aria-label="Keep this conversation"
+          className="ide-iconbtn"
+          disabled={deleting}
+          onClick={() => setConfirming(false)}
+          style={{ flexShrink: 0, width: 40, height: 40 }}
+          type="button"
+        >
+          <Ico.close style={{ width: 17, height: 17 }} />
+        </button>
       </div>
-      {compiling ? (
-        <span style={{ flexShrink: 0, color: "var(--green)", fontWeight: 700, fontSize: 13, display: "inline-flex", alignItems: "center", gap: 5 }}><Ico.bolt style={{ color: "currentColor" }} /> Reconnect</span>
-      ) : isDraft ? (
-        <span style={{ flexShrink: 0, color: "var(--yellow)", fontWeight: 700, fontSize: 13, display: "inline-flex", alignItems: "center", gap: 5 }}><Ico.edit style={{ color: "currentColor" }} /> continue</span>
-      ) : (
-        <Ico.chevron style={{ color: "var(--dim)", transform: "rotate(-90deg)", flexShrink: 0 }} />
-      )}
-    </button>
+    );
+  }
+
+  return (
+    <div className={`ide-listrow${active ? " is-current" : ""}`}>
+      <button
+        {...(active ? { "aria-current": "true" as const } : {})}
+        onClick={onResume}
+        className="ide-listrow-main"
+        type="button"
+      >
+        <span style={{ width: 34, height: 34, borderRadius: 11, display: "grid", placeItems: "center", flexShrink: 0, background: compiling ? "rgba(124,246,184,0.12)" : isDraft ? "rgba(255,210,63,0.12)" : "var(--surface-2)", color: compiling ? "var(--green)" : isDraft ? "var(--yellow)" : "var(--dim)" }}>
+          <Ico.chat style={{ color: "currentColor" }} />
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {title}
+          </div>
+          <div style={{ fontSize: 12.5, color: "var(--dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {compiling ? <span style={{ color: "var(--green)", fontWeight: 700 }}>● compiling</span> : isDraft ? "draft" : `submitted · ${fmtTurnId(draft.turnId)}`} · <span className="ide-num">{draft.tokenCount}</span> tokens · {timeAgo(draft.updatedAt)}
+          </div>
+        </div>
+        {active ? (
+          <span style={{ flexShrink: 0, color: "var(--cyan)", fontWeight: 700, fontSize: 13 }}>Open</span>
+        ) : compiling ? (
+          <span style={{ flexShrink: 0, color: "var(--green)", fontWeight: 700, fontSize: 13, display: "inline-flex", alignItems: "center", gap: 5 }}><Ico.bolt style={{ color: "currentColor" }} /> Reconnect</span>
+        ) : isDraft ? (
+          <span style={{ flexShrink: 0, color: "var(--yellow)", fontWeight: 700, fontSize: 13, display: "inline-flex", alignItems: "center", gap: 5 }}><Ico.edit style={{ color: "currentColor" }} /> continue</span>
+        ) : (
+          <Ico.chevron style={{ color: "var(--dim)", transform: "rotate(-90deg)", flexShrink: 0 }} />
+        )}
+      </button>
+      {onDelete ? (
+        <button
+          aria-label={`Delete conversation: ${title}`}
+          className="ide-listrow-delete"
+          onClick={() => setConfirming(true)}
+          title="Delete conversation"
+          type="button"
+        >
+          <Ico.trash style={{ color: "currentColor" }} />
+        </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -543,17 +618,26 @@ export function ConversationRow({ draft, onResume }: { draft: ConversationDraftA
  * screen and the Account screen's Conversations tab so both stay identical.
  */
 export function ConversationList({
+  activeDraftId = null,
+  deleteError = null,
+  deletingDraftId = null,
   drafts,
   error,
   loading,
   hasMore = false,
   loadingMore = false,
   loadMoreError = null,
+  onDelete,
   onLoadMore,
   onCreate,
   onResume,
   onRetry,
 }: {
+  /** Conversation currently open beside the list, if any. */
+  activeDraftId?: null | string;
+  /** Reported in place, so a delete that failed never looks like it worked. */
+  deleteError?: null | string;
+  deletingDraftId?: null | string;
   drafts: ConversationDraftApi[];
   error: null | string;
   hasMore?: boolean;
@@ -561,6 +645,8 @@ export function ConversationList({
   loadingMore?: boolean;
   loadMoreError?: null | string;
   onCreate: () => void;
+  /** Omitted where the list is read-only; rows then have no delete control. */
+  onDelete?: (draft: ConversationDraftApi) => void;
   onLoadMore?: () => void;
   onResume: (draft: ConversationDraftApi) => void;
   onRetry: () => void;
@@ -592,8 +678,20 @@ export function ConversationList({
   return (
     <div className="ide-list">
       {drafts.map((draft) => (
-        <ConversationRow key={draft.draftId} draft={draft} onResume={() => onResume(draft)} />
+        <ConversationRow
+          active={draft.draftId === activeDraftId}
+          deleting={draft.draftId === deletingDraftId}
+          draft={draft}
+          key={draft.draftId}
+          {...(onDelete ? { onDelete: () => onDelete(draft) } : {})}
+          onResume={() => onResume(draft)}
+        />
       ))}
+      {deleteError ? (
+        <div role="alert" style={{ color: "var(--red)", fontSize: 12.5, lineHeight: 1.45, padding: "12px 2px" }}>
+          {deleteError}
+        </div>
+      ) : null}
       {loadingMore ? (
         <div aria-live="polite" style={{ color: "var(--dim)", fontSize: 12.5, padding: "14px 0 2px", textAlign: "center" }}>
           Loading more conversations...

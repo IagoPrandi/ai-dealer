@@ -29,6 +29,8 @@ import {
   getConsoleReadOnlyMethodRejection,
   getPlayerClaimsSummary,
   getPlayerPublicProfile,
+  deleteConversationDraft,
+  isValidConversationDraftDeletion,
   listConversationDrafts,
   listConversationDraftsPage,
   listPlayerHistory,
@@ -3734,6 +3736,128 @@ test("conversation drafts are saved per wallet and newest draft is listed first"
   assert.equal(drafts.length, 1);
   assert.equal(drafts[0]?.status, "submitted");
   assert.equal(drafts[0]?.createdAt, first.createdAt);
+});
+
+test("deleting a conversation draft is scoped to its own wallet", () => {
+  resetApiStateForTests();
+  const mine = saveConversationDraft({
+    lastMessage: "I can compile this rule.",
+    normalizedText: null,
+    officialInterpretation: null,
+    prompt: "Win if at least 4 numbers match",
+    ruleId: null,
+    status: "draft",
+    tokenCount: 7,
+    turnId: 245,
+    wallet,
+  });
+  saveConversationDraft({
+    lastMessage: "Different wallet.",
+    normalizedText: null,
+    officialInterpretation: null,
+    prompt: "Win with the lowest number",
+    ruleId: null,
+    status: "draft",
+    tokenCount: 5,
+    turnId: 245,
+    wallet: walletTwo,
+  });
+
+  // Another wallet holding the id is not enough to remove the conversation.
+  assert.equal(
+    deleteConversationDraft({ draftId: mine.draftId, wallet: walletTwo }),
+    false,
+  );
+  assert.equal(listConversationDrafts(wallet).length, 1);
+
+  assert.equal(
+    deleteConversationDraft({ draftId: mine.draftId, wallet }),
+    true,
+  );
+  assert.equal(listConversationDrafts(wallet).length, 0);
+  // The other wallet's conversation is untouched.
+  assert.equal(listConversationDrafts(walletTwo).length, 1);
+
+  // A second delete is a miss, not a silent success.
+  assert.equal(
+    deleteConversationDraft({ draftId: mine.draftId, wallet }),
+    false,
+  );
+});
+
+test("conversation draft deletion body rejects anything but a wallet and a draft id", () => {
+  assert.equal(
+    isValidConversationDraftDeletion({ draftId: "draft-1", wallet }),
+    true,
+  );
+  assert.equal(
+    isValidConversationDraftDeletion({ draftId: "", wallet }),
+    false,
+  );
+  assert.equal(
+    isValidConversationDraftDeletion({ draftId: "draft-1", wallet: "nope" }),
+    false,
+  );
+  assert.equal(
+    isValidConversationDraftDeletion({
+      draftId: "d".repeat(129),
+      wallet,
+    }),
+    false,
+  );
+  assert.equal(isValidConversationDraftDeletion(null), false);
+});
+
+test("the conversation draft delete route validates, scopes and reports misses", async (t) => {
+  resetApiStateForTests();
+  const server = createServer(handleApiRequest);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise<void>((resolve, reject) => {
+    server.close((error) => error ? reject(error) : resolve());
+  }));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const draft = saveConversationDraft({
+    lastMessage: "I can compile this rule.",
+    normalizedText: null,
+    officialInterpretation: null,
+    prompt: "Win if at least 4 numbers match",
+    ruleId: null,
+    status: "draft",
+    tokenCount: 7,
+    turnId: 245,
+    wallet,
+  });
+
+  const post = (walletInPath: string, body: unknown) =>
+    fetch(`${baseUrl}/players/${walletInPath}/conversation-drafts/delete`, {
+      body: JSON.stringify(body),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+  const invalidBody = await post(wallet, { draftId: 7, wallet });
+  assert.equal(invalidBody.status, 400);
+  assert.deepEqual(await invalidBody.json(), {
+    error: "invalid_conversation_draft_deletion",
+  });
+
+  const mismatch = await post(wallet, {
+    draftId: draft.draftId,
+    wallet: walletTwo,
+  });
+  assert.equal(mismatch.status, 409);
+
+  const missing = await post(wallet, { draftId: "no-such-draft", wallet });
+  assert.equal(missing.status, 404);
+  assert.deepEqual(await missing.json(), { error: "not_found" });
+  assert.equal(listConversationDrafts(wallet).length, 1);
+
+  const deleted = await post(wallet, { draftId: draft.draftId, wallet });
+  assert.equal(deleted.status, 200);
+  assert.deepEqual(await deleted.json(), { deleted: draft.draftId });
+  assert.equal(listConversationDrafts(wallet).length, 0);
 });
 
 test("conversation draft persists the full message transcript", () => {

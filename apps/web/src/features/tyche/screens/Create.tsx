@@ -82,7 +82,14 @@ import {
   type StreamBlock,
   type StreamPlan,
 } from "../streamReveal";
-import { Dealer, Ico, SectionLabel, useCountdownTo } from "../shared";
+import { useConversationDrafts } from "../data/hooks";
+import {
+  ConversationList,
+  Dealer,
+  Ico,
+  SectionLabel,
+  useCountdownTo,
+} from "../shared";
 
 /**
  * The transcript entry this screen renders. It is the same record the run store
@@ -951,6 +958,10 @@ function CreateChat({
   const [retryingDraftSave, setRetryingDraftSave] = useState(false);
   const [error, setError] = useState<null | string>(null);
   const [activeDraftId, setActiveDraftId] = useState<null | string>(null);
+  // The desktop panel beside the chat: every rule conversation this wallet has
+  // saved, so switching between them never leaves the screen.
+  const conversations = useConversationDrafts(walletAddress);
+  const [deleteError, setDeleteError] = useState<null | string>(null);
   const [runStatus, setRunStatus] =
     useState<ConversationRunSnapshot["status"]>("done");
   const [connection, setConnection] =
@@ -1302,6 +1313,26 @@ function CreateChat({
     () => subscribeConversationRun(activeDraftId, applyRunSnapshot),
     [activeDraftId, applyRunSnapshot],
   );
+
+  // This chat is one of the rows in the panel beside it, and it rewrites its
+  // own draft on every message. The list is reloaded when the conversation
+  // gains an id and whenever a run settles, which is when its title, status and
+  // timestamp change. `reload` is rebuilt on every render of the hook, so it is
+  // read from a ref instead of being a dependency that would reload forever.
+  const reloadConversationsRef = useRef(conversations.reload);
+  reloadConversationsRef.current = conversations.reload;
+  const conversationsLoadedRef = useRef(false);
+  useEffect(() => {
+    if (typing) {
+      return;
+    }
+    // The hook already loads once on mount; this only covers changes after it.
+    if (!conversationsLoadedRef.current) {
+      conversationsLoadedRef.current = true;
+      return;
+    }
+    reloadConversationsRef.current();
+  }, [activeDraftId, submitted, typing]);
 
   // Everything that brings a conversation back on mount, in one place and in
   // one order. Three leads can name the same run - the in-memory snapshot, the
@@ -1827,6 +1858,50 @@ function CreateChat({
   }
 
   /**
+   * Opens another saved conversation in this same screen. The seed carries the
+   * saved prompt into the composer the way the My rules list does, so reopening
+   * a conversation behaves identically wherever it was opened from.
+   */
+  function openConversation(draft: ConversationDraftApi) {
+    if (draft.draftId === activeDraftId) {
+      return;
+    }
+    go("create", {
+      chatId: draft.draftId,
+      returnTo,
+      seed: draft.prompt,
+    });
+  }
+
+  /**
+   * Removes a saved conversation for good. The server record goes first: only
+   * once it is gone are the local copies dropped, so a failed delete leaves the
+   * conversation intact everywhere instead of vanishing from this tab and
+   * coming back on the next load.
+   */
+  async function deleteConversation(draft: ConversationDraftApi) {
+    setDeleteError(null);
+    try {
+      await conversations.remove(draft.draftId);
+    } catch (cause) {
+      setDeleteError(
+        `Could not delete this conversation. ${describeTxError(cause)}`,
+      );
+      return;
+    }
+
+    cancelConversationRun(draft.draftId);
+    deleteConversationRun(draft.draftId);
+    clearPersistedPreflightJob(
+      typeof window === "undefined" ? null : window.localStorage,
+      draft.draftId,
+    );
+    if (draft.draftId === activeDraftId) {
+      reset("Conversation deleted. How does your new rule decide the winner?");
+    }
+  }
+
+  /**
    * Reconnect keeps following the same server-side job; Run again starts a
    * fresh one from the rule the pipeline was working on, with no new bubble
    * because the transcript already ends with the player's message.
@@ -2346,28 +2421,45 @@ function CreateChat({
 
       <aside className="ide-desktop-only ide-create-panel">
         <div className="ide-section-label-row">
-          <span>My interpretation</span>
+          <span>Conversations</span>
           <i />
+          <button onClick={() => reset()} type="button">+ new</button>
         </div>
-        {rule ? (
-          <>
-            <h2 className="ide-plate">{rule.title}</h2>
-            <p>{rule.officialInterpretation || rule.sanitizedText}</p>
-            <div className="ide-rule-detail-meta">
-              <span>Tokens</span>
-              <b className="ide-num">{rule.tokenCount} / 80</b>
+        <div
+          className="ide-create-panel-list"
+          onScroll={(event) => {
+            // Same trigger the My rules list uses: the next page loads as the
+            // player reaches the end of this one.
+            const { clientHeight, scrollHeight, scrollTop } =
+              event.currentTarget;
+            if (scrollHeight - scrollTop - clientHeight <= 160) {
+              conversations.loadMore();
+            }
+          }}
+        >
+          {walletAddress ? (
+            <ConversationList
+              activeDraftId={activeDraftId}
+              deleteError={deleteError}
+              deletingDraftId={conversations.deletingDraftId}
+              drafts={conversations.drafts}
+              error={conversations.error}
+              hasMore={conversations.hasMore}
+              loading={conversations.loading}
+              loadingMore={conversations.loadingMore}
+              loadMoreError={conversations.loadMoreError}
+              onCreate={() => reset()}
+              onDelete={(draft) => void deleteConversation(draft)}
+              onLoadMore={conversations.loadMore}
+              onResume={openConversation}
+              onRetry={conversations.reload}
+            />
+          ) : (
+            <div className="ide-create-panel-empty">
+              Connect your wallet to keep this chat and reopen it later.
             </div>
-          </>
-        ) : interpretation && !interpretation.needsClarification ? (
-          <>
-            <h2 className="ide-plate">{interpretation.title}</h2>
-            <p>{interpretation.officialInterpretation}</p>
-          </>
-        ) : (
-          <div className="ide-create-panel-empty">
-            Describe the rule in the chat. The checked interpretation appears here before submission.
-          </div>
-        )}
+          )}
+        </div>
 
         <div className="ide-create-panel-footer">
           {rule && valid && !typing && reveal.settled && !submitted ? (

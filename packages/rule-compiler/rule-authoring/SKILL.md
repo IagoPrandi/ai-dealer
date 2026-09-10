@@ -71,7 +71,7 @@ The `ast` value is `{"schemaVersion":3,"result":<result>}`. Choose `<result>`:
   `{"type":"predicate","predicate":<pred>}`
 - **ranking** — a COMPARATIVE rule: the winner is decided by being better than
   other guesses ("the most", "the fewest", "the highest", "the closest", "miss the
-  most"). `{"type":"ranking","direction":"max"|"min","tieBreak":"share_pool","score":<scalar>}`
+  most"). `{"type":"ranking","direction":"max"|"min","tieBreak":"share_pool","score":<scalar>}`. When a ranking first filters guesses, include `"eligibleWhen":<predicate>`; ineligible guesses never participate and an empty eligible set has no winner.
   where `<scalar>` is the quantity to maximise/minimise.
 
 A threshold ("at least N", "N or more") is a **predicate**, not a ranking — even if
@@ -149,6 +149,7 @@ X = `reduce count`; "N smallest/largest" = `sort` + `slice`.
 - "exactly N match" -> same with `eq`. "none appear" -> `eq 0`.
 - "same set of numbers, regardless of order" -> `count(intersection(guess,draw)) == 6`; never ordered equality or a ranking.
 - "sums are equal" -> `compare(sum(guess), eq, sum(draw))`.
+- "closest sum without exceeding the draw" / "soma mais próxima sem ultrapassar" -> ranking `max` by `sum(guess)` with `eligibleWhen: compare(sum(guess), lte, sum(draw))`. This is not equality and must not be reduced to a score-only ranking: if every guess exceeds the draw, there is no winner.
 - "all six match in the same positions" -> `pairs_forall(guess, draw, pair.left == pair.right)`.
 - "all six are in the same tens range in corresponding positions" ->
   `pairs_forall(guess, draw, pair.left div 10 == pair.right div 10)`. This is a

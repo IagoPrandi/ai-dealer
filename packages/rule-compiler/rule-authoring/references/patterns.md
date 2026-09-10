@@ -8,6 +8,7 @@ Small models frequently mis-handle four intent shapes. Apply these rules exactly
   NOT appear in the draw → `difference(guess,draw)` (count with `reduce count`).
 - "more / most / mais / maior" = MAXIMISE → ranking `direction:"max"`.
 - "fewer / least / menos / menor" = MINIMISE → ranking `direction:"min"`.
+- "closest sum without exceeding" / "soma mais próxima sem ultrapassar" = MAXIMISE `sum(guess)` only among guesses with `sum(guess) <= sum(draw)`. Emit that boundary as ranking `eligibleWhen`; never use an out-of-band low score because it would incorrectly choose an ineligible guess when all guesses exceed the draw.
 - NEVER rewrite "miss the most" as "fewest correct" or vice-versa. Keep the
   player's quantity and direction exactly.
 

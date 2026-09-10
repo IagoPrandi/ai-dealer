@@ -228,6 +228,8 @@ export type RuleResultV3 =
   | { type: "predicate"; predicate: PredicateNodeV3 }
   | {
       type: "ranking";
+      /** Optional per-guess eligibility gate evaluated before ranking. */
+      eligibleWhen?: PredicateNodeV3 | undefined;
       score: ScalarExprV3;
       direction: "max" | "min";
       tieBreak: "share_pool";
@@ -613,6 +615,7 @@ const ruleResultV3Schema: z.ZodType<RuleResultV3> = z.union([
   z.object({ type: z.literal("predicate"), predicate: predicateNodeV3Schema }),
   z.object({
     type: z.literal("ranking"),
+    eligibleWhen: predicateNodeV3Schema.optional(),
     score: scalarExprV3Schema,
     direction: z.enum(["max", "min"]),
     tieBreak: z.literal("share_pool"),
@@ -820,6 +823,7 @@ export function validateV3StaticIssues(ast: RuleAstV3): string[] {
   if (ast.result.type === "predicate") {
     visitPredicate(ast.result.predicate, []);
   } else {
+    if (ast.result.eligibleWhen) visitPredicate(ast.result.eligibleWhen, []);
     visitScalar(ast.result.score, []);
   }
   return issues;

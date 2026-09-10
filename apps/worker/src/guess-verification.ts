@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { evaluatePredicate, scoreGuess } from "@tyche/rule-runtime";
-import { isRankingRule, type RuleAst } from "@tyche/rule-schema";
+import { evaluatePredicate, evaluateRankingEntry } from "@tyche/rule-runtime";
+import { isRankingRule, rankingDirection, type RuleAst } from "@tyche/rule-schema";
 
 export type GuessVerificationJobStatus =
   | "completed"
@@ -16,7 +16,7 @@ export interface FrozenRuleArtifact {
   normalizedText: string;
   promptContractVersion: string;
   ruleId: number;
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
 }
 
 export interface GuessVerificationJobPayload {
@@ -49,6 +49,7 @@ export interface RuleVerificationResult {
   runtimeMs: number;
   runtimeSteps: number;
   // Present for ranking rules: the per-guess score used by the turn-level argmax.
+  eligible?: boolean;
   score?: number;
 }
 
@@ -117,10 +118,7 @@ export function verifyGuessJob(
     : null;
   const alternativeAst = job.activeRuleArtifact?.ast;
   const ranking = alternativeAst ? isRankingRule(alternativeAst) : false;
-  const direction =
-    ranking && alternativeAst?.schemaVersion === 2 && alternativeAst.result.type === "ranking"
-      ? alternativeAst.result.direction
-      : undefined;
+  const direction = ranking && alternativeAst ? rankingDirection(alternativeAst) : null;
 
   return {
     activeRuleId: job.activeRuleArtifact?.ruleId ?? null,
@@ -215,16 +213,25 @@ function evaluateRuntimeRule(args: {
   // and leave `result` provisional (LOSE) until the turn-level argmax decides
   // winners. Predicate rules resolve WIN/LOSE here.
   if (isRankingRule(args.ast)) {
-    const score = scoreGuess(args.ast, { draw: args.draw, guess: args.guess });
-    const outputHash = hashJson({ branch: args.branch, inputHash, score });
+    const evaluation = evaluateRankingEntry(args.ast, {
+      draw: args.draw,
+      guess: args.guess,
+    });
+    const outputHash = hashJson({
+      branch: args.branch,
+      eligible: evaluation.eligible,
+      inputHash,
+      score: evaluation.score,
+    });
     return {
       inputHash,
       matchedRuleBranch: args.branch,
       outputHash,
       result: "LOSE",
       runtimeMs: 0,
-      runtimeSteps: 1,
-      score,
+      runtimeSteps: evaluation.runtimeSteps,
+      eligible: evaluation.eligible,
+      score: evaluation.score,
     };
   }
 

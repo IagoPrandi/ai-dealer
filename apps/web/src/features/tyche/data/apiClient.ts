@@ -640,6 +640,25 @@ export function postClaimComplete(body: {
   return postStrictJson<{ claim: unknown }>("/claim-records/complete", body);
 }
 
+/**
+ * Removes one saved rule conversation. POST rather than HTTP DELETE because the
+ * API persists its durable snapshot on POST only, so a DELETE would be undone
+ * by the next restart. Strict: a failed delete must surface, never be swallowed
+ * into a list that silently reappears on the next reload.
+ */
+export function deleteConversationDraft(
+  wallet: string,
+  draftId: string,
+  signal?: AbortSignal,
+) {
+  return postStrictJson<{ deleted: string }>(
+    `/players/${wallet}/conversation-drafts/delete`,
+    { draftId, wallet },
+    {},
+    signal,
+  );
+}
+
 export function postConversationDraft(
   wallet: string,
   body: Omit<ConversationDraftApi, "createdAt" | "draftId" | "updatedAt"> & {

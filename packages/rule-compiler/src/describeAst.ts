@@ -606,6 +606,32 @@ function isMatchCount(node: ScalarExprV3) {
   );
 }
 
+function isSumOfSource(node: ScalarExprV3, source: "draw" | "guess") {
+  return (
+    node.kind === "reduce" &&
+    node.op === "sum" &&
+    isSource(node.of, source)
+  );
+}
+
+function describeEligibleSumRanking(
+  result: Extract<RuleResultV3, { type: "ranking" }>,
+): string | null {
+  if (
+    result.direction !== "max" ||
+    !isSumOfSource(result.score, "guess") ||
+    result.eligibleWhen?.kind !== "compare" ||
+    result.eligibleWhen.op !== "lte" ||
+    !isSumOfSource(result.eligibleWhen.left, "guess") ||
+    !isSumOfSource(result.eligibleWhen.right, "draw")
+  ) {
+    return null;
+  }
+  return sentence(
+    "The winning guess is the eligible guess with the highest sum: a guess is eligible only when the sum of its six numbers is at most the sum of the official draw's six numbers. Tied eligible guesses share the prize. If no guess is eligible, there is no winner",
+  );
+}
+
 /**
  * `scale * matchCount` where the scale provably outruns the distance term, so
  * the subtraction below really is a tiebreak and not a blended score. Returns
@@ -688,6 +714,10 @@ export function describeRuleAstTotal(ast: RuleAst): string {
 
   if (ast.result.type === "ranking") {
     if (ast.schemaVersion === 3) {
+      const eligibleSumRanking = describeEligibleSumRanking(ast.result);
+      if (eligibleSumRanking) {
+        return eligibleSumRanking;
+      }
       const lexicographic = describeLexicographicRanking(ast.result);
       if (lexicographic) {
         return lexicographic;

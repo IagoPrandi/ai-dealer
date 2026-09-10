@@ -70,6 +70,39 @@ test("verifyGuessJob supports original-only turns without an active artifact", (
   assert.equal(result.alternative, null);
 });
 
+test("verifyGuessJob records eligibility for v3 ranking rules", () => {
+  const result = verifyGuessJob(
+    job({
+      activeRuleArtifact: {
+        ...activeArtifact,
+        ast: {
+          schemaVersion: 3,
+          result: {
+            type: "ranking",
+            direction: "max",
+            tieBreak: "share_pool",
+            eligibleWhen: {
+              kind: "compare",
+              op: "lte",
+              left: { kind: "reduce", op: "sum", of: { kind: "source", source: "guess" } },
+              right: { kind: "reduce", op: "sum", of: { kind: "source", source: "draw" } },
+            },
+            score: { kind: "reduce", op: "sum", of: { kind: "source", source: "guess" } },
+          },
+        },
+        schemaVersion: 3,
+      },
+      draw: [1, 2, 3, 4, 5, 6],
+      playerGuess: [10, 11, 12, 13, 14, 15],
+    }),
+    "2026-06-11T00:00:01.000Z",
+  );
+  assert.equal(result.alternativeMode, "ranking");
+  assert.equal(result.alternativeDirection, "max");
+  assert.equal(result.alternative?.eligible, false);
+  assert.equal(result.alternative?.score, 75);
+});
+
 test("runGuessVerificationCycle completes jobs and respects maxJobsPerCycle", async () => {
   const completed: GuessVerificationResult[] = [];
   const result = await runGuessVerificationCycle(

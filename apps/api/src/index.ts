@@ -135,6 +135,9 @@ const MAX_RULE_TEXT_BYTES = 6000;
 // bounded by count and per-message byte length rather than sanitized.
 const MAX_CONVERSATION_MESSAGES = 100;
 const MAX_CONVERSATION_MESSAGE_BYTES = 4000;
+// Draft ids are either the server's content hash (64 hex chars) or the client's
+// `client:<turnId>:<uuid>` id, so this only rejects an id no writer produces.
+const MAX_CONVERSATION_DRAFT_ID_LENGTH = 128;
 const RULE_PREVENTED_PATTERNS = [
   /\bignore\b.{0,40}\b(instructions?|rules?|prompt|polic\w+|safety)\b/i,
   /\b(system|developer)\s+(prompt|message|instruction)\b/i,
@@ -1197,6 +1200,7 @@ export interface RuleVerificationResultRecord {
   runtimeSteps: number;
   // For ranking rules the per-guess outcome is provisional (LOSE) until the
   // turn-level argmax; `score` carries the comparable value used by that argmax.
+  eligible?: boolean;
   score?: number;
 }
 
@@ -5249,6 +5253,28 @@ export function isValidConversationDraft(value: unknown): value is Omit<
   );
 }
 
+/**
+ * Body of the conversation-draft deletion route. Deletion is a POST rather than
+ * an HTTP DELETE so it rides the same durable-snapshot write that every other
+ * mutation takes (see sendJson) and stays inside the `GET,POST,OPTIONS` CORS
+ * contract the browser is told about.
+ */
+export function isValidConversationDraftDeletion(
+  value: unknown,
+): value is { draftId: string; wallet: string } {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const body = value as { draftId?: unknown; wallet?: unknown };
+  return (
+    isBase58Like(body.wallet) &&
+    typeof body.draftId === "string" &&
+    body.draftId.length > 0 &&
+    body.draftId.length <= MAX_CONVERSATION_DRAFT_ID_LENGTH
+  );
+}
+
 function isValidVerificationOutcome(
   value: unknown,
 ): value is VerificationOutcome {
@@ -5274,7 +5300,10 @@ function isValidRuleVerificationResult(
     Number.isInteger(result.runtimeSteps) &&
     Number(result.runtimeSteps) >= 0 &&
     typeof result.runtimeMs === "number" &&
-    result.runtimeMs >= 0
+    result.runtimeMs >= 0 &&
+    (result.score === undefined ||
+      (typeof result.score === "number" && Number.isFinite(result.score))) &&
+    (result.eligible === undefined || typeof result.eligible === "boolean")
   );
 }
 
@@ -6560,7 +6589,7 @@ function isWinnerForCategory(
 
 // Comparative ("ranking") alternative rules pick winners by best score across
 // all guesses (ties share the pool), instead of an absolute per-guess WIN/LOSE.
-function selectRankingWinners(
+export function selectRankingWinners(
   results: GuessVerificationResultRecord[],
 ): GuessVerificationResultRecord[] | null {
   const ranking = results.filter(
@@ -6574,6 +6603,7 @@ function selectRankingWinners(
   const direction = ranking[0]?.alternativeDirection === "min" ? "min" : "max";
   const winners = resolveRankingWinners(
     ranking.map((result) => ({
+      eligible: result.alternative?.eligible ?? true,
       player: result.resultId,
       score: result.alternative?.score ?? 0,
     })),
@@ -7620,6 +7650,26 @@ export function listConversationDrafts(wallet: string) {
         Date.parse(right.updatedAt) - Date.parse(left.updatedAt) ||
         right.draftId.localeCompare(left.draftId),
     );
+}
+
+/**
+ * Removes one saved rule conversation. Scoped by wallet so a known draft id is
+ * not on its own enough to delete another player's history, and reported as a
+ * miss rather than a success when nothing matched, so the UI never claims to
+ * have removed a conversation that is still there.
+ *
+ * Only the chat record goes: a conversation whose rule was already submitted
+ * keeps its rule proposal, its votes and its on-chain account untouched.
+ */
+export function deleteConversationDraft(args: {
+  draftId: string;
+  wallet: string;
+}) {
+  const draft = conversationDrafts.get(args.draftId);
+  if (!draft || draft.wallet !== args.wallet) {
+    return false;
+  }
+  return conversationDrafts.delete(args.draftId);
 }
 
 export function listConversationDraftsPage(args: {
@@ -13692,6 +13742,54 @@ export function handleApiRequest(
         wallet,
       }),
     });
+    return;
+  }
+
+  if (
+    request.method === "POST" &&
+    url.pathname.startsWith("/players/") &&
+    url.pathname.endsWith("/conversation-drafts/delete")
+  ) {
+    const wallet = url.pathname.slice(
+      "/players/".length,
+      url.pathname.length - "/conversation-drafts/delete".length,
+    );
+
+    if (!isBase58Like(wallet)) {
+      sendJson(request, response, 400, { error: "invalid_wallet" });
+      return;
+    }
+
+    void readJsonBody(request)
+      .then((body) => {
+        if (!isValidConversationDraftDeletion(body)) {
+          sendJson(request, response, 400, {
+            error: "invalid_conversation_draft_deletion",
+          });
+          return;
+        }
+
+        if (body.wallet !== wallet) {
+          sendJson(request, response, 409, {
+            error: "wallet_mismatch",
+            message: "Draft wallet must match the URL wallet.",
+          });
+          return;
+        }
+
+        if (!deleteConversationDraft({ draftId: body.draftId, wallet })) {
+          sendJson(request, response, 404, { error: "not_found" });
+          return;
+        }
+
+        sendJson(request, response, 200, { deleted: body.draftId });
+      })
+      .catch((error: unknown) => {
+        sendJson(request, response, 400, {
+          error: "invalid_json",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
     return;
   }
 

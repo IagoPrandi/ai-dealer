@@ -11,6 +11,7 @@ import {
   createLocalOnlyProviderRoutingPolicy,
   createCompilerPlaceholder,
   describeRuleAstForPlayers,
+  evaluateRankingEntry,
   evaluatePredicate,
   getDeterministicRuleCompilerPlan,
   getRuleCompilationCandidateJsonSchema,
@@ -819,6 +820,57 @@ test("deterministically compiles the canonical most/fewest-matches ranking famil
     portugueseThreshold?.schemaVersion === 1 &&
       portugueseThreshold.node.kind === "match_count_at_least",
     "Portuguese threshold wording must stay predicate, not ranking",
+  );
+});
+
+test("compiles closest-sum rankings without treating the boundary as ambiguity", () => {
+  const prompts = [
+    "Vence quem tem a soma dos números do palpite mais próxima da soma dos números do sorteio, sem ultrapassar.",
+    "The guess with the highest total that doesn't go over the drawn total takes the round.",
+    "The winning guess is the one whose sum is the largest value that is less than or equal to the draw sum.",
+  ];
+  for (const prompt of prompts) {
+    const result = validateAndPrecompileRule({
+      prompt,
+      tokenCount: tokenCount(prompt),
+    });
+    const ast = result.artifact?.ast;
+    assert.equal(result.decision, "VALID", prompt);
+    assert.equal(result.log.reasonCodes.includes("AMBIGUOUS_RULE"), false, prompt);
+    assert.ok(
+      ast?.schemaVersion === 3 &&
+        ast.result.type === "ranking" &&
+        ast.result.direction === "max" &&
+        ast.result.eligibleWhen?.kind === "compare" &&
+        ast.result.eligibleWhen.op === "lte",
+      prompt,
+    );
+    assert.match(
+      result.artifact?.officialInterpretation ?? "",
+      /If no guess is eligible, there is no winner/,
+    );
+  }
+
+  const ast = validateAndPrecompileRule({
+    prompt: prompts[0]!,
+    tokenCount: tokenCount(prompts[0]!),
+  }).artifact?.ast;
+  assert.ok(ast && ast.schemaVersion === 3 && ast.result.type === "ranking");
+  const over = evaluateRankingEntry(ast, {
+    draw: [1, 2, 3, 4, 5, 6],
+    guess: [10, 11, 12, 13, 14, 15],
+  });
+  assert.equal(over.eligible, false);
+
+  const absolute = validateAndPrecompileRule({
+    prompt: "The guess whose sum is closest to the draw sum wins.",
+    tokenCount: 10,
+  }).artifact?.ast;
+  assert.ok(
+    absolute?.schemaVersion === 3 &&
+      absolute.result.type === "ranking" &&
+      absolute.result.direction === "min" &&
+      absolute.result.score.kind === "abs",
   );
 });
 

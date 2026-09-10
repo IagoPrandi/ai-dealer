@@ -28,7 +28,11 @@ import {
   type RuleAst,
   type ScalarExpr,
 } from "@tyche/rule-schema";
-import { evaluatePredicate, scoreGuess } from "@tyche/rule-runtime";
+import {
+  evaluatePredicate,
+  evaluateRankingEntry,
+  scoreGuess,
+} from "@tyche/rule-runtime";
 import {
   collectWorkedExamples,
   generateAndRunTests,
@@ -72,6 +76,7 @@ export {
 } from "@tyche/rule-schema";
 export {
   evaluatePredicate,
+  evaluateRankingEntry,
   resolveRankingWinners,
   scoreGuess,
   type RankingEntry,
@@ -1448,6 +1453,9 @@ function buildAttemptContext(
   if (parseWithinAnyDistanceCountRule(normalizedText)) {
     reasonCodes.delete("AMBIGUOUS_RULE");
   }
+  if (parseClosestSumRankingRule(normalizedText)) {
+    reasonCodes.delete("AMBIGUOUS_RULE");
+  }
   // "all six reversed positions should match" carries an incidental vague word
   // ("around" in "flip the draw around") but is a fully explicit reverse rule.
   if (parseReversePositionMatchRule(normalizedText)) {
@@ -2694,7 +2702,6 @@ export function compareDeterministicRuleSemantics(
   ) {
     return "different";
   }
-
   const left = compileSupportedRule(normalizeRuleText(leftText));
   const right = compileSupportedRule(normalizeRuleText(rightText));
   if (!left || !right) {
@@ -2728,6 +2735,13 @@ function compileSupportedRulePattern(text: string): RuleAst | null {
     parseMatchCountThenPositionDistanceRankingRule(text);
   if (matchesThenDistanceRanking) {
     return matchesThenDistanceRanking;
+  }
+
+  // "closest total" is objective when both totals are named. A one-sided
+  // qualifier changes it from minimum distance to maximum eligible total.
+  const closestSumRanking = parseClosestSumRankingRule(text);
+  if (closestSumRanking) {
+    return closestSumRanking;
   }
 
   // Comparative "most/fewest matching numbers wins" ranking. Guarded to fire only
@@ -3060,6 +3074,11 @@ function compileSupportedRulePattern(text: string): RuleAst | null {
       text,
     )
   ) {
+    // "less than or equal" contains the word "equal" but is a boundary, not
+    // equality. Never erase that condition into the legacy sum-equals macro.
+    if (/\b(?:less|greater)\s+than\s+or\s+equal|\bat\s+(?:most|least)\b|\bwithout\s+exceeding\b|\bsem\s+ultrapassar\b|\bmenor\s+ou\s+igual\b/i.test(text)) {
+      return null;
+    }
     return { schemaVersion: 1, node: { kind: "sum_equals" } };
   }
 
@@ -4444,6 +4463,68 @@ function parseExactMatchCountRule(text: string): number | null {
     return null;
   }
   return parseExactMatchCountThreshold(text);
+}
+
+/**
+ * Compile complete "closest sum" rankings.  In the unqualified form, closest
+ * means minimum absolute distance.  With "without exceeding" (or equivalent),
+ * it means the greatest guess sum that is at most the draw sum; a v3
+ * eligibility gate is essential because a score alone cannot represent the
+ * no-eligible-guess case.
+ */
+function parseClosestSumRankingRule(text: string): RuleAst | null {
+  const namesGuess = /\b(?:guess|guessed|ticket|pick|palpite|aposta)\w*\b/i.test(text);
+  const namesDraw = /\b(?:draw|drawn|sorteio|sortead)\w*\b/i.test(text);
+  const namesSum = /\b(?:sum|total|soma)\w*\b/i.test(text);
+  if (!namesGuess || !namesDraw || !namesSum) return null;
+
+  const oneSided = /\b(?:without\s+exceeding|does(?:n'?t| not)\s+go\s+over|does(?:n'?t| not)\s+exceed|not\s+over|at\s+most|less\s+than\s+or\s+equal(?:\s+to)?)\b|\b(?:sem\s+ultrapassar|nao\s+ultrapassar|menor\s+ou\s+igual(?:\s+(?:a|ao))?)\b/i.test(
+    text,
+  );
+  const close = /\b(?:closest|nearest|close)\b|\bmais\s+proxim[oa]\b/i.test(text);
+  const greatest = /\b(?:highest|largest|greatest|maximum)\b|\bmaior\b/i.test(text);
+  if (!(close || (oneSided && greatest))) return null;
+
+  const guessSum = {
+    kind: "reduce",
+    op: "sum",
+    of: { kind: "source", source: "guess" },
+  } as const;
+  const drawSum = {
+    kind: "reduce",
+    op: "sum",
+    of: { kind: "source", source: "draw" },
+  } as const;
+  if (oneSided) {
+    return {
+      schemaVersion: 3,
+      result: {
+        type: "ranking",
+        direction: "max",
+        tieBreak: "share_pool",
+        eligibleWhen: {
+          kind: "compare",
+          op: "lte",
+          left: guessSum,
+          right: drawSum,
+        },
+        score: guessSum,
+      },
+    };
+  }
+  if (!close) return null;
+  return {
+    schemaVersion: 3,
+    result: {
+      type: "ranking",
+      direction: "min",
+      tieBreak: "share_pool",
+      score: {
+        kind: "abs",
+        of: { kind: "arith", op: "sub", left: guessSum, right: drawSum },
+      },
+    },
+  };
 }
 
 function parseExactMatchCountThreshold(text: string): number | null {
@@ -5899,7 +5980,12 @@ function sampledSemanticsMatch(expected: RuleAst, actual: RuleAst): boolean {
   try {
     for (const input of inputs) {
       if (expectedRanking) {
-        if (scoreGuess(expected, input) !== scoreGuess(actual, input)) {
+        const expectedEvaluation = evaluateRankingEntry(expected, input);
+        const actualEvaluation = evaluateRankingEntry(actual, input);
+        if (
+          expectedEvaluation.score !== actualEvaluation.score ||
+          expectedEvaluation.eligible !== actualEvaluation.eligible
+        ) {
           return false;
         }
       } else if (
@@ -5957,10 +6043,10 @@ function describeSemanticDisagreement(expected: RuleAst, actual: RuleAst) {
   try {
     for (const input of inputs) {
       const reviewerResult = expectedRanking
-        ? scoreGuess(expected, input)
+        ? evaluateRankingEntry(expected, input)
         : evaluatePredicate(expected, input).result;
       const draftResult = expectedRanking
-        ? scoreGuess(actual, input)
+        ? evaluateRankingEntry(actual, input)
         : evaluatePredicate(actual, input).result;
       if (reviewerResult !== draftResult) {
         return `The independent reviewer and draft disagree for guess ${JSON.stringify(input.guess)} and draw ${JSON.stringify(input.draw)}: reviewer=${String(reviewerResult)}, draft=${String(draftResult)}.`;

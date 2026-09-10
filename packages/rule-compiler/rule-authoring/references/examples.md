@@ -132,5 +132,8 @@ compositional core).
 "whoever's guessed sum is closest to the drawn sum" (ranking min over the ABSOLUTE difference) =>
 {"schemaVersion":3,"result":{"type":"ranking","direction":"min","tieBreak":"share_pool","score":{"kind":"abs","of":{"kind":"arith","op":"sub","left":{"kind":"reduce","op":"sum","of":{"kind":"source","source":"guess"}},"right":{"kind":"reduce","op":"sum","of":{"kind":"source","source":"draw"}}}}}}
 
+"closest guessed sum without exceeding the drawn sum" / "soma mais próxima sem ultrapassar" (ranking max with an eligibility boundary) =>
+{"schemaVersion":3,"result":{"type":"ranking","direction":"max","tieBreak":"share_pool","eligibleWhen":{"kind":"compare","op":"lte","left":{"kind":"reduce","op":"sum","of":{"kind":"source","source":"guess"}},"right":{"kind":"reduce","op":"sum","of":{"kind":"source","source":"draw"}}},"score":{"kind":"reduce","op":"sum","of":{"kind":"source","source":"guess"}}}}
+
 "win if you match at least one number AND at least one tens digit" / "acertar 1 número e 1 dezena" (compound — keep BOTH clauses) =>
 {"schemaVersion":3,"result":{"type":"predicate","predicate":{"kind":"and","clauses":[{"kind":"compare","op":"gte","left":{"kind":"reduce","op":"count","of":{"kind":"intersection","left":{"kind":"source","source":"guess"},"right":{"kind":"source","source":"draw"}}},"right":{"kind":"lit","value":1}},{"kind":"compare","op":"gte","left":{"kind":"reduce","op":"count","of":{"kind":"intersection","left":{"kind":"digits","place":"tens","of":{"kind":"source","source":"guess"}},"right":{"kind":"digits","place":"tens","of":{"kind":"source","source":"draw"}}}},"right":{"kind":"lit","value":1}}]}}}
