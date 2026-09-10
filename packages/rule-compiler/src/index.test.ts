@@ -3904,7 +3904,10 @@ test("a reviewer that agreed cannot certify away an operation the text names", a
     (stage) => stage.stage === "interpretation_coverage",
   );
   assert.equal(coverageStage?.status, "failed");
-  assert.match(coverageStage?.detail ?? "", /missing operations: position/u);
+  assert.match(
+    coverageStage?.detail ?? "",
+    /missing operations: .*position/u,
+  );
 });
 
 test("a reviewer still certifies a terse encoding that omits a stated value", async () => {
@@ -4395,17 +4398,10 @@ test("rejected deterministic candidates remain inspectable but are not player re
   const firstAttempt = result.log.attemptDiagnostics[0];
   assert.equal(firstAttempt?.decision, "INVALID");
   assert.ok(firstAttempt?.candidate?.ast);
-  assert.ok(result.log.providerDisagreementReadings.length > 0);
-  assert.ok(
-    result.log.providerDisagreementReadings.every((reading) =>
-      /sum of/iu.test(reading),
-    ),
-  );
-  assert.ok(
-    result.log.providerDisagreementReadings.every(
-      (reading) => !/1st.*greater/iu.test(reading),
-    ),
-  );
+  // The provider's sum AST drops the position comparison, so it is compiler
+  // evidence only; it must not be presented as a reading of the player's text.
+  assert.deepEqual(result.log.providerDisagreementReadings, []);
+  assert.ok(!result.log.reasonCodes.includes("AMBIGUOUS_RULE"));
 });
 
 test("v3 composition descriptions expose digit counts and shifted comparisons", () => {
@@ -5499,4 +5495,133 @@ test("providerCompilationHasSchemaValidAst separates a usable envelope from an o
   assert.equal(providerCompilationHasSchemaValidAst(usable.ast), true);
   assert.equal(providerCompilationHasSchemaValidAst(null), false);
   assert.equal(providerCompilationHasSchemaValidAst({ ast: null }), false);
+});
+
+test("set-7 distance, gap, and quantified rules cannot enter the match-count shortcut", () => {
+  const falseMatchCountShapes = [
+    "A guess wins if every drawn number has at least one guessed number within 3 of it, and none of the guessed numbers is itself one of the drawn numbers.",
+    "A guess wins if both of these hold: the largest gap between its consecutive sorted numbers is at least 8, and every one of its numbers is at least 4 away from every drawn number.",
+    "Every one of its numbers is at least 4 away from every drawn number.",
+    "At least 2 of its numbers sit more than 10 below the lowest drawn number.",
+    "The gap between its two smallest numbers is at least 5 and its largest number is above every drawn number.",
+  ];
+
+  for (const text of falseMatchCountShapes) {
+    const result = compile(text);
+    assert.equal(result.decision, "INVALID", text);
+    assert.ok(!result.log.reasonCodes.includes("SUPPORTED_RULE"), text);
+    assert.equal(result.artifact, null, text);
+  }
+
+  const genuine = compile(
+    "A guess wins if at least four of its numbers appear in the official draw.",
+  );
+  assert.equal(genuine.decision, "VALID");
+  assert.ok(genuine.log.reasonCodes.includes("SUPPORTED_RULE"));
+});
+
+test("set-7 coverage sees directional quantifiers, distance thresholds, and derived gaps", () => {
+  const text =
+    "A guess wins if every drawn number has at least one guessed number within 3 of it, and none of the guessed numbers is itself one of the drawn numbers.";
+  const droppedCoverage = ruleAstSchema.parse({
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "compare",
+        op: "eq",
+        left: {
+          kind: "reduce",
+          op: "count",
+          of: {
+            kind: "intersection",
+            left: { kind: "source", source: "guess" },
+            right: { kind: "source", source: "draw" },
+          },
+        },
+        right: { kind: "lit", value: 0 },
+      },
+    },
+  });
+  const coverage = analyzeInterpretationCoverage({
+    ast: droppedCoverage,
+    officialInterpretation: describeRuleAstForPlayers(droppedCoverage),
+    text,
+  });
+  assert.equal(coverage.covered, false);
+  assert.deepEqual(coverage.requiredValues, [3]);
+  assert.ok(coverage.missingOperations.includes("all_draw"));
+  assert.ok(coverage.missingOperations.includes("distance"));
+
+  const gapRequirements = analyzeInterpretationCoverage({
+    ast: droppedCoverage,
+    officialInterpretation: describeRuleAstForPlayers(droppedCoverage),
+    text: "The five gaps between consecutive sorted numbers are all different, and the largest gap is below the lowest drawn number.",
+  });
+  for (const operation of [
+    "adjacent_gap",
+    "distinct",
+    "maximum",
+    "minimum",
+    "sort",
+  ] as const) {
+    assert.ok(gapRequirements.requiredOperations.includes(operation));
+    assert.ok(gapRequirements.missingOperations.includes(operation));
+  }
+});
+
+test("protocol ranking tie clauses are neither external state nor ambiguity", () => {
+  const prizeTie =
+    "The winning ticket has the biggest remainder after division by the lowest drawn number; tickets with the same remainder share the prize.";
+  const severalTie =
+    "The ticket with the most same-position matches wins; if several tickets tie on that count, they split it equally.";
+  assert.equal(hasExternalDependency(prizeTie), false);
+  assert.equal(hasAmbiguousWording(severalTie), false);
+  assert.equal(
+    hasExternalDependency(
+      "A ticket wins only when the current prize pool is above 10 SOL.",
+    ),
+    true,
+  );
+  assert.equal(
+    hasAmbiguousWording("A guess wins if some positions match the draw."),
+    true,
+  );
+});
+
+test("nested cross-source distance ASTs render without binder implementation prose", () => {
+  const ast = ruleAstSchema.parse({
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "forall",
+        of: { kind: "source", source: "draw" },
+        where: {
+          kind: "exists",
+          of: { kind: "source", source: "guess" },
+          where: {
+            kind: "compare",
+            op: "lte",
+            left: {
+              kind: "abs",
+              of: {
+                kind: "arith",
+                op: "sub",
+                left: { kind: "elem" },
+                right: { kind: "elem", up: 1 },
+              },
+            },
+            right: { kind: "lit", value: 3 },
+          },
+        },
+      },
+    },
+  });
+  const description = describeRuleAstForPlayers(ast);
+  assert.match(
+    description,
+    /every drawn number is within 3 of at least one guessed number/iu,
+  );
+  assert.doesNotMatch(description, /level\(s\)|distance from zero/iu);
 });

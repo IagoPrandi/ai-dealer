@@ -3394,6 +3394,10 @@ export function buildRuleRefinementFeedback(
     ?.map((attempt) => attempt.semanticDisagreementWitness)
     .find(
       (witness) =>
+        // The value 100 is diagnostic only for digit/tens semantics (100 has a
+        // three-digit boundary). The sampler may place 100 in any unrelated
+        // rule, so its mere presence cannot establish the cause of a conflict.
+        /\b(?:digit|digits|tens?|units?)\b/iu.test(sourceText) &&
         witness !== null &&
         witness !== undefined &&
         (witness.guess.includes(100) || witness.draw.includes(100)) &&
@@ -4128,6 +4132,42 @@ async function runRulePreflightPipeline(
               ),
           ),
         );
+    // Clarification is a successful product result, not a failed compilation.
+    // Once the interpreter has identified missing intent, do not ask an AST
+    // model to invent it; that path could only return malformed output or a
+    // different rule and previously surfaced a misleading HTTP 502.
+    if (interpretation.needsClarification) {
+      const clarificationText = selectCompilationText(
+        sanitizedText,
+        interpretation.normalizedText,
+      );
+      const validation = validateAndPrecompileRule({
+        agentInterpretation: [
+          interpretation.dealerMessage,
+          interpretation.officialInterpretation,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        model: passCompilerConfig.model,
+        officialInterpretation: interpretation.officialInterpretation,
+        originalText: sanitizedText,
+        prompt: clarificationText,
+        ruleId,
+        tokenCount,
+      });
+      return {
+        compilerModel: passCompilerConfig.model,
+        grounded: undefined,
+        interpretation,
+        model,
+        promiseIsKept: undefined,
+        readingIsFaithful: undefined,
+        rejectedAttempts: validation.log.attemptDiagnostics.filter(
+          (attempt) => attempt.decision === "INVALID",
+        ),
+        validation,
+      };
+    }
     reportProgress({
       message: "Building and testing the executable rule...",
       model: passCompilerConfig.model,
@@ -4206,7 +4246,12 @@ async function runRulePreflightPipeline(
       // so the compiler can still see it after the deterministic path replaces
       // that field with the AST-derived description. The player approved THIS
       // sentence, so the artifact has to keep it.
-      agentInterpretation: interpretation.officialInterpretation,
+      agentInterpretation: [
+        interpretation.dealerMessage,
+        interpretation.officialInterpretation,
+      ]
+        .filter(Boolean)
+        .join("\n"),
       model: passCompilerConfig.model,
       officialInterpretation: interpretation.officialInterpretation,
       originalText: sanitizedText,
@@ -4241,6 +4286,11 @@ async function runRulePreflightPipeline(
     const rejectedAttempts = validation.log.attemptDiagnostics.filter(
       (attempt) => attempt.decision === "INVALID",
     );
+    const seenRejectedCandidates = new Set(
+      rejectedAttempts
+        .filter((attempt) => attempt.candidate !== null)
+        .map((attempt) => JSON.stringify(attempt.candidate)),
+    );
     let repairFeedback = buildCompilerRepairFeedback(validation);
     const MAX_VALIDATION_REPAIRS = 2;
     for (
@@ -4266,12 +4316,26 @@ async function runRulePreflightPipeline(
         requireProviderEvidence: true,
       });
       validation = repaired;
-      rejectedAttempts.push(
-        ...repaired.log.attemptDiagnostics.filter(
-          (attempt) => attempt.decision === "INVALID",
-        ),
+      const repairedRejectedAttempts = repaired.log.attemptDiagnostics.filter(
+        (attempt) => attempt.decision === "INVALID",
       );
+      const freshCandidateKeys = repairedRejectedAttempts
+        .filter((attempt) => attempt.candidate !== null)
+        .map((attempt) => JSON.stringify(attempt.candidate));
+      const producedNewCandidate = freshCandidateKeys.some(
+        (candidate) => !seenRejectedCandidates.has(candidate),
+      );
+      freshCandidateKeys.forEach((candidate) =>
+        seenRejectedCandidates.add(candidate),
+      );
+      rejectedAttempts.push(...repairedRejectedAttempts);
       repairFeedback = buildCompilerRepairFeedback(validation);
+      // Re-running the same deterministic/schema candidate cannot consume new
+      // diagnostics or produce a different result. Stop the bounded loop here;
+      // another identical call only spends latency and model budget.
+      if (freshCandidateKeys.length > 0 && !producedNewCandidate) {
+        break;
+      }
     }
     let grounded: boolean | undefined;
     let readingIsFaithful: boolean | undefined;

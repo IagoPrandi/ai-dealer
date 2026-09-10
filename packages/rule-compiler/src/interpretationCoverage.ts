@@ -51,12 +51,23 @@ export interface InterpretationCoverage {
  * an unordered count can never stand in for a positional comparison.
  */
 export type RuleOperation =
+  | "adjacent_gap"
+  | "all_draw"
+  | "all_guess"
   | "comparison_count"
   | "digit"
+  | "distance"
+  | "distinct"
+  | "exists_draw"
+  | "exists_guess"
+  | "maximum"
+  | "membership"
+  | "minimum"
   | "mod"
   | "parity"
   | "position"
   | "product"
+  | "sort"
   | "sum";
 
 export interface InterpretationCoverageInput {
@@ -118,6 +129,21 @@ const MEMBERSHIP_ENUMERATION =
   /\b(?:contains?|includes?|contem|inclui)\s+(?:(?:the|os|as)\s+)?(?:numbers?|numeros?|dezenas?)?\s*(\d{1,3}(?:\s*(?:[,;]\s*(?:(?:and|e)\s+)?|(?:and|e)\s+|\s+)\d{1,3})+)\b/gu;
 const NUMERIC_RANGE =
   /\b(?:between|entre)\s+(\d{1,3})\s+(?:and|e)\s+(\d{1,3})\b|\b(?:from|de)\s+(\d{1,3})\s+(?:to|through|a|ate)\s+(\d{1,3})\b/gu;
+
+// Thresholds attached to a measurable comparison are values too. Counts and
+// positions may legitimately compile away ("at least one" -> `exists`, first
+// -> index 0), but a distance/gap boundary cannot: changing or dropping it
+// changes the winner set. Keep this deliberately shape-based rather than
+// harvesting every number in prose, which would re-introduce the old false
+// rejection of safely simplified counts.
+const COMPARISON_THRESHOLD_PATTERNS = [
+  /\bwithin\s+(\d{1,3})\s+(?:of|from)\b/gu,
+  /\b(?:distance|difference)\s+(?:of|is)\s+(\d{1,3})\b/gu,
+  /\b(\d{1,3})\s+(?:away|apart|below|above|lower|higher)\b/gu,
+  /\b(?:gap|gaps|distance|distances|difference|differences)\b[^.;:]{0,60}\b(?:at\s+least|at\s+most|more\s+than|less\s+than|greater\s+than|no\s+more\s+than|no\s+less\s+than)\s+(\d{1,3})\b/gu,
+  /\b(?:a\s+no\s+maximo|distancia\s+(?:de|e)|diferenca\s+(?:de|e))\s+(\d{1,3})\b/gu,
+  /\b(\d{1,3})\s+(?:de\s+distancia|abaixo|acima|menor|maior)\b/gu,
+] as const;
 
 // "contains the number 13" states a membership requirement, and dropping it
 // always changes which guesses win — unlike a count or a threshold, there is no
@@ -259,6 +285,12 @@ export function collectRequiredValues(text: string): number[] {
   for (const [, literal] of prepared.matchAll(MEMBERSHIP_LITERAL)) {
     readDigits(literal ?? "").forEach((value) => required.add(value));
   }
+  for (const pattern of COMPARISON_THRESHOLD_PATTERNS) {
+    pattern.lastIndex = 0;
+    for (const match of prepared.matchAll(pattern)) {
+      readDigits(match[1] ?? "").forEach((value) => required.add(value));
+    }
+  }
 
   // Ranges are read last: whether a range constrains anything at all depends on
   // the values pinned above, so the pinned set has to be complete first.
@@ -306,6 +338,7 @@ export function collectAstValues(ast: RuleAst): Set<number> {
     if (typeof node === "number") {
       if (Number.isSafeInteger(node)) {
         values.add(node);
+        values.add(Math.abs(node));
       }
       return;
     }
@@ -336,6 +369,39 @@ export function collectAstValues(ast: RuleAst): Set<number> {
 // an operation the prose does not name, never the reverse. "even if" and "even
 // though" are excluded because they are conjunctions, not parity.
 const OPERATION_TEXT_CUES: ReadonlyArray<readonly [RuleOperation, RegExp]> = [
+  [
+    "all_draw",
+    /\b(?:all|every|each)(?:\s+one)?(?:\s+value)?\s+(?:of\s+)?(?:the\s+)?(?:official\s+)?(?:drawn|draw)\s+(?:numbers?|values?)\b[^.;:]{0,80}\b(?:within|away|distance|satisf(?:y|ies)|for\s+each|every|at\s+least\s+one)\b/u,
+  ],
+  [
+    "all_guess",
+    /\b(?:all|every|each)(?:\s+one)?(?:\s+value)?\s+(?:of\s+)?(?:its|my|your|the)?\s*(?:guessed|picked|ticket)?\s*(?:numbers?|values?|picks?)\b[^.;:]{0,80}\b(?:within|away|distance|satisf(?:y|ies)|for\s+each|every|at\s+least\s+one)\b/u,
+  ],
+  [
+    "distance",
+    /\b(?:distance|distances|away|apart)\b|\bwithin\s+\d{1,3}\s+(?:of|from)\b/u,
+  ],
+  [
+    "distinct",
+    /\b(?:gaps?|distances?|digits?|remainders?|derived\s+values?)\b[^.;:]{0,50}\b(?:all\s+different|distinct|unique)\b|\b(?:all\s+different|distinct|unique)\b[^.;:]{0,50}\b(?:gaps?|distances?|digits?|remainders?|derived\s+values?)\b/u,
+  ],
+  [
+    "membership",
+    /\b(?:appear(?:s|ed|ing)?\s+in|present\s+in|contained?\s+in|(?:contains?|includes?)\s+(?:(?:at\s+least|exactly)\s+one\s+)?(?:the\s+)?(?:numbers?|values?|drawn)|one\s+of\s+the\s+drawn|intersection|overlap)\b/u,
+  ],
+  [
+    "minimum",
+    /\b(?:smallest|lowest|minimum|minimo)\s+(?:drawn|guessed|picked|ticket)?\s*(?:number|value|gap)|\b(?:numero|valor|lacuna)\s+(?:minimo|menor)\b/u,
+  ],
+  [
+    "maximum",
+    /\b(?:largest|highest|biggest|maximum|maximo)\s+(?:drawn|guessed|picked|ticket)?\s*(?:number|value|gap)|\b(?:numero|valor|lacuna)\s+(?:maximo|maior)\b/u,
+  ],
+  ["sort", /\b(?:sorted?|ordenad[oa]s?)\b/u],
+  [
+    "adjacent_gap",
+    /\b(?:gaps?|distances?)\s+between\s+(?:consecutive|adjacent)|\b(?:consecutive|adjacent)\s+(?:gaps?|numbers?)\b/u,
+  ],
   // A quantified list of boolean comparisons is not a conjunction. Losing the
   // count changes "at least four of five" into "all comparisons", or into the
   // handful a regex happened to enumerate. Keep this as its own operation so
@@ -437,6 +503,9 @@ function readLiteral(node: unknown): number | null {
 export function collectAstOperations(ast: RuleAst): Set<RuleOperation> {
   const operations = new Set<RuleOperation>();
   if (ast.schemaVersion === 1) {
+    if (ast.node.kind === "match_count_at_least") {
+      operations.add("membership");
+    }
     if (ast.node.kind === "sum_equals") {
       operations.add("sum");
     }
@@ -462,6 +531,11 @@ export function collectAstOperations(ast: RuleAst): Set<RuleOperation> {
     const kind = typeof record.kind === "string" ? record.kind : "";
     const op = typeof record.op === "string" ? record.op : "";
 
+    if (record.type === "ranking") {
+      if (record.direction === "max") operations.add("maximum");
+      if (record.direction === "min") operations.add("minimum");
+    }
+
     if (kind.includes("digit") || kind === "digits") {
       operations.add("digit");
     }
@@ -485,6 +559,99 @@ export function collectAstOperations(ast: RuleAst): Set<RuleOperation> {
     }
     if (op === "mul" || kind.includes("product")) {
       operations.add("product");
+    }
+    if (kind === "abs") {
+      operations.add("distance");
+    }
+    if (
+      kind === "all_ordered_abs_diff_lte" ||
+      kind === "total_ordered_abs_diff_lte" ||
+      kind === "value_within_any_count_at_least"
+    ) {
+      operations.add("distance");
+    }
+    if (
+      kind === "all_ordered_abs_diff_lte" ||
+      kind === "all_equal_ordered" ||
+      kind === "all_values_between_min_max" ||
+      kind === "map_arithmetic" ||
+      kind === "map_with_guard"
+    ) {
+      operations.add("all_guess");
+    }
+    if (
+      kind === "intersection" ||
+      kind === "difference" ||
+      kind === "contains"
+    ) {
+      operations.add("membership");
+    }
+    if (kind === "distinct") {
+      operations.add("distinct");
+    }
+    if (kind === "sort") {
+      operations.add("sort");
+      if (record.order === "asc") operations.add("minimum");
+      if (record.order === "desc") operations.add("maximum");
+    }
+    if (
+      kind === "slice" &&
+      record.end === -1 &&
+      record.of !== null &&
+      typeof record.of === "object" &&
+      (record.of as Record<string, unknown>).kind === "sort" &&
+      (record.of as Record<string, unknown>).order === "asc"
+    ) {
+      operations.add("maximum");
+    }
+    if (kind === "forall" || kind === "exists") {
+      const source = record.of as Record<string, unknown> | undefined;
+      if (source?.kind === "source") {
+        const operation = `${kind === "forall" ? "all" : "exists"}_${String(
+          source.source,
+        )}` as RuleOperation;
+        operations.add(operation);
+      }
+    }
+    if (
+      kind === "pairs_forall" &&
+      record.left !== null &&
+      typeof record.left === "object" &&
+      (record.left as Record<string, unknown>).kind === "source" &&
+      (record.left as Record<string, unknown>).source === "guess"
+    ) {
+      operations.add("all_guess");
+    }
+    if (kind === "all_values_between_min_max") {
+      operations.add("minimum");
+      operations.add("maximum");
+    }
+    if (kind === "remove_up_to_n") {
+      if (record.strategy === "highest") operations.add("maximum");
+      if (record.strategy === "lowest") operations.add("minimum");
+    }
+    if (kind === "reduce" && op === "min") {
+      operations.add("minimum");
+    }
+    if (kind === "reduce" && op === "max") {
+      operations.add("maximum");
+    }
+    if (kind === "reduce" && op === "range_span") {
+      operations.add("minimum");
+      operations.add("maximum");
+    }
+    if (
+      (kind === "pairs_map" ||
+        kind === "pairs_forall" ||
+        kind === "pairs_exists") &&
+      [record.left, record.right].every(
+        (side) =>
+          side !== null &&
+          typeof side === "object" &&
+          (side as Record<string, unknown>).kind === "slice",
+      )
+    ) {
+      operations.add("adjacent_gap");
     }
     // `total_ordered_abs_diff_lte` adds up per-position differences: a total is
     // a sum, whatever the node is called.

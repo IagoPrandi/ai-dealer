@@ -564,7 +564,7 @@ const MATCH_COUNT_NUMBER_0_TO_6 =
 const MATCH_COUNT_NOUN =
   "(?:numbers?|matches|hits|overlaps?|acertos?|numeros?|dezenas?)";
 const MATCH_COUNT_ACTION =
-  "(?:match(?:es|ed|ing)?|hits?|appear(?:s|ed|ing)?|drawn|in the draw|acert\\w*|aparec\\w*|sortead\\w*|sorteio|coincid\\w*|bat\\w*)";
+  "(?:match(?:es|ed|ing)?|hits?|appear(?:s|ed|ing)?|in the draw|acert\\w*|aparec\\w*|sortead\\w*|coincid\\w*|bat\\w*)";
 const EXACT_COUNT_CUE = "(?:exactly|only|exatamente|apenas|somente|so)";
 const THRESHOLD_COUNT_CUE =
   "(?:at least|no fewer than|pelo menos|ao menos|no minimo|minimo de|>=)";
@@ -594,6 +594,17 @@ const AMBIGUOUS_PATTERNS = [
   /\b(?:play|played|playing|pick|picked|guess|guessed|jogar|joguei|jogando|apostar|aposto)\s+([1-9])\d\b[\s\S]{0,160}\b(?:number|numbers|numero|numeros)\s+\1\b/i,
   /\b(?:play|played|playing|pick|picked|guess|guessed|jogar|joguei|jogando|apostar|aposto)\s+\d([0-9])\b[\s\S]{0,160}\b(?:number|numbers|numero|numeros)\s+\1\b/i,
 ] as const;
+
+// A ranking tie is settled by the protocol (`tieBreak: "share_pool"). A
+// complete clause that merely states that mandated behavior is neither an
+// external prize dependency nor an undefined quantity. Other prize/pool text
+// remains visible to the normal external-dependency block.
+const PROTOCOL_TIE_BREAK_CLAUSE_PATTERN =
+  /(?:^|\s*(?:,|;|\band\b)\s*)(?:if\s+)?(?:(?:several|some|multiple|two\s+or\s+more)\s+)?(?:tickets?|guesses?|players?)\b[^.;]{0,80}\b(?:tie|tied|same\s+(?:score|count|remainder|total|value))\b[^.;]{0,80}\b(?:share|split)\b[^.;]{0,40}\b(?:prize|pool|it|equally)\b[^.;]*(?:[.;]|$)/giu;
+
+function stripProtocolTieBreakClauses(text: string) {
+  return text.replace(PROTOCOL_TIE_BREAK_CLAUSE_PATTERN, " ");
+}
 
 const EXTERNAL_DEPENDENCY_PATTERNS = [
   /\b(wallet|address|creator|voter|votes?|leaderboard|profile|admin)\b/i,
@@ -680,7 +691,7 @@ const OBJECTIVE_CLARIFICATION_PATTERN =
  * the text as the compiler gate (no gate disagreement).
  */
 export function externalDependencyGateText(text: string): string {
-  return normalizeRuleText(text)
+  return stripProtocolTieBreakClauses(normalizeRuleText(text))
     .replace(OBJECTIVE_CLARIFICATION_PATTERN, " ")
     .replace(SIMILE_CLAUSE_PATTERN, (clause) =>
       DISMISSAL_KEEP_PATTERN.test(clause) ? clause : " ",
@@ -711,7 +722,10 @@ export function hasExternalDependency(text: string): boolean {
  * vibe, ...). Exposed for the same reason as hasExternalDependency.
  */
 export function hasAmbiguousWording(text: string): boolean {
-  return hasPattern(normalizeRuleText(text), AMBIGUOUS_PATTERNS);
+  return hasPattern(
+    stripProtocolTieBreakClauses(normalizeRuleText(text)),
+    AMBIGUOUS_PATTERNS,
+  );
 }
 
 export function createCompilerPlaceholder(
@@ -847,7 +861,10 @@ function finalizeValidation(
   // malformed, schema-invalid) is already excluded from the comparison, and an
   // attempt that produced no AST contributes no reading — so a rule the
   // compilers simply could not compile keeps reporting exactly why.
-  const disagreementReadings = collectDivergentProviderReadings(attempts);
+  const disagreementReadings = collectDivergentProviderReadings(
+    attempts,
+    request.originalText?.trim() || request.prompt,
+  );
   if (
     disagreementBlocks &&
     disagreementResolution === null &&
@@ -1487,7 +1504,7 @@ function buildAttemptContext(
     reasonCodes.add("SCHEMA_INVALID");
   }
 
-  if (hasPattern(normalizedText, AMBIGUOUS_PATTERNS)) {
+  if (hasAmbiguousWording(normalizedText)) {
     reasonCodes.add("AMBIGUOUS_RULE");
   }
   if (looksLikeObjectiveStartComparison(normalizedText)) {
@@ -1791,6 +1808,7 @@ function validateResolvedAst(
   const certifiedByIndependentReading =
     astSource === "provider" && reviewerAst !== null;
   let interpretationCoverageFailed = false;
+  let interpretationCoverageChecked = false;
   let coverageMissingOperations: readonly RuleOperation[] = [];
   const hasVacuousCondition = ast ? hasProvablyVacuousCondition(ast) : false;
   if (ast && !forcedFailure) {
@@ -1799,6 +1817,9 @@ function validateResolvedAst(
       officialInterpretation: describeRuleAstForPlayers(ast),
       text: request.originalText?.trim() || normalizedText,
     });
+    interpretationCoverageChecked =
+      coverage.requiredOperations.length > 0 ||
+      coverage.requiredValues.length > 0;
     coverageMissingOperations = coverage.missingOperations;
     const blocked = certifiedByIndependentReading
       ? coverage.missingOperations.length > 0
@@ -1823,7 +1844,9 @@ function validateResolvedAst(
                 ? ` (missing operations: ${coverageMissingOperations.join(", ")})`
                 : ""
             }.`
-        : certifiedByIndependentReading
+        : !interpretationCoverageChecked
+          ? "Skipped because the rule text exposed no deterministically checkable value or operation cue."
+          : certifiedByIndependentReading
           ? "Every operation the rule text names survives into the candidate AST; value coverage was certified by the independent reviewer AST."
           : "The candidate AST covers the intent-bearing parts of the rule text.",
     reasonCodes: interpretationCoverageFailed
@@ -1832,7 +1855,7 @@ function validateResolvedAst(
         : ["INTERPRETATION_MISMATCH"]
       : [],
     stage: "interpretation_coverage",
-    status: !ast
+    status: !ast || !interpretationCoverageChecked
       ? "skipped"
       : interpretationCoverageFailed
         ? "failed"
@@ -1851,12 +1874,16 @@ function validateResolvedAst(
   // more than the sentence spells out, never less.
   const agentStatement = request.agentInterpretation?.trim();
   let agentStatementCoverageFailed = false;
+  let agentStatementCoverageChecked = false;
   if (ast && !forcedFailure && agentStatement) {
     const agentCoverage = analyzeInterpretationCoverage({
       ast,
       officialInterpretation: describeRuleAstForPlayers(ast),
       text: agentStatement,
     });
+    agentStatementCoverageChecked =
+      agentCoverage.requiredOperations.length > 0 ||
+      agentCoverage.requiredValues.length > 0;
     if (
       agentCoverage.missingFromAst.length > 0 ||
       agentCoverage.missingOperations.length > 0
@@ -1870,7 +1897,9 @@ function validateResolvedAst(
       ? "Skipped because no schema-valid AST was available."
       : !agentStatement
         ? "Skipped because no agent interpretation was supplied."
-        : agentStatementCoverageFailed
+        : !agentStatementCoverageChecked
+          ? "Skipped because the agent statement exposed no deterministically checkable value or operation cue."
+          : agentStatementCoverageFailed
           ? "The candidate AST does not keep every load-bearing claim in the agent interpretation."
           : "The candidate AST keeps the load-bearing claims in the agent interpretation.",
     reasonCodes: agentStatementCoverageFailed
@@ -1878,7 +1907,7 @@ function validateResolvedAst(
       : [],
     stage: "agent_statement_coverage",
     status:
-      !ast || !agentStatement
+      !ast || !agentStatement || !agentStatementCoverageChecked
         ? "skipped"
         : agentStatementCoverageFailed
           ? "failed"
@@ -2466,6 +2495,7 @@ function countCompletedOpinions(attempts: ProviderEvaluation[]) {
  */
 function collectDivergentProviderReadings(
   attempts: ProviderEvaluation[],
+  sourceText: string,
 ): string[] {
   const distinct: RuleAst[] = [];
   for (const attempt of attempts.filter(isCompletedProviderOpinion)) {
@@ -2484,6 +2514,15 @@ function collectDivergentProviderReadings(
       if (
         ast !== null &&
         !hasProvablyVacuousCondition(ast) &&
+        // A program that omitted a source operation is a compiler defect, not
+        // an alternative meaning the player can select. Requiring each choice
+        // to cover the source also removes strict-prefix "readings" that only
+        // exist because one compiler dropped a compound clause.
+        analyzeInterpretationCoverage({
+          ast,
+          officialInterpretation: describeRuleAstForPlayers(ast),
+          text: sourceText,
+        }).covered &&
         !distinct.some((existing) => astOpinionsAgree(existing, ast))
       ) {
         distinct.push(ast);

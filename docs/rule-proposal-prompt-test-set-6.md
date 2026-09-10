@@ -397,3 +397,170 @@ reference ASTs were executed against all 27 fixtures before the agent was judged
 (G2) on demand. No package source or configuration was modified by this session,
 so no package test ladder was re-run and no milestone checkbox was marked;
 findings G1-G12 are reported for user decision before any repair is implemented.
+
+---
+
+# Addendum - Run 3, re-measured after the `aa3e63f` repairs
+
+The same four prompts, unchanged, replayed after commit `aa3e63f` ("enhance rule
+compiler with new predicate descriptions and validation checks"), which modified
+`packages/rule-compiler` in response to findings G1-G12. This is therefore a
+**cross-build comparison**, not a reproduction: runs 1-2 measured the pre-fix
+build, run 3 measures the repaired one. The prompts, fixtures and reference ASTs
+are byte-identical.
+
+Environment note: PostgreSQL and Redis had stopped between sessions, so Docker
+Desktop and both containers were restarted and `apps/api` was relaunched on
+`127.0.0.1:3099` against the rebuilt compiler before measuring.
+
+## Results
+
+| ID | Runs 1-2 (pre-fix) | Run 3 (post-fix) | Fixtures on the returned AST |
+|---|---|---|---|
+| S1 | INVALID, INVALID | **VALID**, 106 s, confidence 0.936 | **7/7 correct** |
+| S2 | INVALID, INVALID | **VALID**, 60 s, confidence 0.936 | **7/7 correct** |
+| S3 | INVALID, INVALID | stream terminated at 312 s; retry INVALID, 33 s | no AST returned |
+| S4 | INVALID, INVALID | INVALID, 147 s, confidence 0.869 | no AST returned |
+
+- Compilation rate: **2/4**, up from 0/4.
+- Semantic accuracy of what compiled: **14/14 fixtures**. No mis-compiled artifact
+  was accepted, so the "announced equals settled" property still holds.
+- Provider faults: **0** schema-decode rejections (was 3) and 3 rate limits, all on
+  the reviewer rather than the tertiary tier (was 8, all tertiary).
+- S1's accepted AST is **byte-identical to this set's hand-written reference AST**.
+
+## Findings closed by `aa3e63f`
+
+- **G2 - the deterministic parser no longer emits wrong rules.** The offline
+  control now returns `UNSUPPORTED_RULE` for all four prompts, replacing the two
+  `SUPPORTED_RULE` artifacts that were semantically wrong. `parseMatchCountThreshold`
+  refuses when the number is a multiplier ("at least three times"), and
+  `parsePositionComparisonRule` refuses a sentence that counts comparisons or
+  abbreviates them with an ellipsis.
+- **G8 - the tertiary arbiter can answer.** `uniqueItems` was removed from the
+  compile JSON schema (uniqueness is now checked after decoding), and no HTTP 400
+  schema-decode rejection occurred in this run.
+- **G9 - escalation no longer reports itself when it is a no-op.** Proactive
+  routing is now guarded by `!sameModel(escalationModel, agentConfig.model)`;
+  `escalated` was `false` throughout this run.
+- **G7 (partly) - the ranking refusal is no longer a dead end.** `AMBIGUOUS_RULE`
+  is dropped from the reason codes when fewer than two readings survive, which
+  re-enables the unchanged-rule retry. S4 now ships one rewrite instead of none,
+  and its message attributes the fault correctly: "Your wording is clear, but
+  independent compiler attempts produced different executable readings. This is a
+  compiler conflict, not a missing answer from you." The earlier, factually wrong
+  "the wording leaves part of the winning condition undefined" is gone.
+
+Notably, the repair for G2 was **not** another literal-phrase compile path. The
+load-bearing change is in `interpretationCoverage.ts`, which now tracks
+`comparison_count` and `product` as intent-bearing operations, so any AST that
+drops the aggregation or the multiplication fails the coverage gate regardless of
+which component produced it. That gate is observably working: S3 attempt 2 was
+rejected with "missing operations: comparison_count". No bespoke parser was added
+for S4's family.
+
+## Findings still open
+
+### H1 - S2 compiles a reading that differs from the prompt at the value 100
+
+The accepted S2 AST uses the tens-**range** reading (`elem div 10 == max(draw) div 10`)
+rather than the tens-**digit** reading the prompt asks for. Executed against the
+reference AST, the two agree everywhere except when the draw's maximum is 100 and
+the guess contains a single-digit number:
+
+```text
+guess [5,11,22,33,44,55] draw [10,20,30,40,50,100] -> accepted LOSE, reference WIN
+```
+
+In runs 1-2 this same 100-boundary divergence caused an outright refusal. It is
+now resolved silently in favour of one reading, and the player is not told which
+one was chosen or that a choice was made. Shipping a rule beats refusing it, but
+the resolution should be surfaced rather than hidden.
+
+### H2 - S3's compile request can die without a terminal event
+
+S3's first run 3 attempt streamed four `compiling` stages and then the NDJSON
+connection was terminated by the server at 312 s, with no terminal event and no
+verdict - against a documented contract that "every exit lands a terminal event,
+which is what lets attached readers rely on one terminal event, exactly once".
+`LLM_TIMEOUT_MS` is 300000, which the 312 s failure point matches closely. The API
+process itself stayed healthy, so this is a per-request stream fault.
+
+The job registry did keep the pipeline running: re-issuing the same request
+returned a verdict in 33 s with five recorded attempts. That is the resumable
+behaviour PRD SS6.15.1 promises, and it worked - but the first client saw only a
+dropped connection.
+
+An earlier attempt of the same case exceeded the runner's own 900 s ceiling, so S3
+costs somewhere between 5 and 15 minutes of paid provider traffic per refusal.
+
+### H3 - S3 still cannot compile, and its reading choices remain unusable
+
+Five attempts produced two malformed responses, one AST that dropped the
+aggregation, one with incomplete span coverage, and one whose declared examples
+contradicted its own AST. The first of the three readings offered to the player
+reads:
+
+```text
+(1) ((((1 when the 1st value of your numbers is greater than the 2nd value of the
+    drawn numbers, otherwise 0 plus 1 when ... ) plus 1 when ... ) is at least 4
+```
+
+Reading (1) is in fact **semantically correct** - an unrolled five-term sum
+compared against 4 - but it is rendered as nested arithmetic prose no player can
+evaluate. Reading (2) is off by one position, and reading (3) is incoherent. The
+new `describePairComparisonCountPredicate` renderer does produce readable text,
+but only for the canonical `pairs_map` shape; these candidates are unrolled
+`arith add` chains and miss that path entirely.
+
+### H4 - the ranking fold remains the blocking capability for S4
+
+Two of S4's three attempts failed `PROVIDER_EVIDENCE_UNVERIFIED` on every declared
+example score. G11 is unchanged: the `SCALE * primary +/- secondary` fold is still
+the weakest measured capability, and the evidence gate catches it every time.
+
+### G1 - the overfitting question is now answered more favourably
+
+Set 5's repair fitted its prompts and scored 0/4 on this set. This repair scored
+2/4 on prompts it was written against, but it did so through a coverage invariant
+rather than per-prompt parsers, and it left S3 and S4 failing rather than forcing
+them through. That is the healthier signature. It is still a fix measured against
+the prompts that motivated it: a further unseen set is required before the
+improvement can be attributed to capability rather than to this corpus.
+
+## Verdict
+
+The direction of travel is right. Compilation went from 0/4 to 2/4 with no loss of
+settlement integrity, the most dangerous finding (G2, a deterministic component
+emitting a different game and labelling it supported) is closed, the provider tier
+that could never answer now answers, and the refusal copy now blames the compiler
+when the compiler is at fault.
+
+What still blocks trust is narrower than before and mostly concentrated in two
+places: the counted-pairs composition that `patterns.md` itself prescribes for
+novel rules cannot be compiled or described (H3), and the ordered-criteria ranking
+fold cannot be produced self-consistently (H4). Added to those is one new
+availability defect (H2) and one silent semantic choice (H1).
+
+Next repairs, in order:
+
+1. Emit a terminal event on LLM timeout instead of terminating the NDJSON stream,
+   so a timed-out compile is reported rather than dropped (H2).
+2. Normalise unrolled `ite`-sum chains to the canonical `pairs_map` counted-pairs
+   shape before describing or comparing them, so the correct reading is both
+   recognised as one reading and rendered legibly (H3).
+3. Surface, rather than hide, a resolved boundary ambiguity like the tens-digit
+   versus tens-range choice at 100 (H1).
+4. Keep the ranking fold out of the provider's hands: derive `SCALE` and the
+   worked-example scores deterministically from the emitted AST rather than asking
+   the model to declare them (H4).
+5. Run a seventh, unseen set before treating any of this as a capability gain (G1).
+
+## Addendum verification scope
+
+`apps/api` lint passed with zero warnings. The runner's stream loop was hardened so
+a mid-stream abort is recorded as a transport fault on that case instead of
+crashing the whole run - the first run 3 attempt was lost to exactly that. The
+reference ASTs were re-executed against all 27 fixtures (27/27) on the rebuilt
+compiler before judging the agent. No package source or configuration was modified
+by this addendum, and no milestone checkbox was marked.

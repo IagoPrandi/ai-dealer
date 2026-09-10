@@ -1216,6 +1216,65 @@ test("a disagreement involving 100 asks about the concrete boundary outcome", ()
   );
 });
 
+test("an unrelated disagreement sample containing 100 keeps the real reading choice", () => {
+  const text =
+    "Every drawn number must have a guessed number within 3, and no guessed number may be drawn.";
+  const readings = [
+    "Every drawn number is within 3 of at least one guessed number.",
+    "Every drawn number is within 3 of at least one guessed number, and no guessed number appears in the draw.",
+  ];
+  const feedback = buildRuleRefinementFeedback({
+    clarityNote: "",
+    compileText: text,
+    officialInterpretation: readings[1]!,
+    providerDisagreementReadings: readings,
+    reasonCodes: ["AMBIGUOUS_RULE", "PROVIDER_DISAGREEMENT"],
+    reasonSummary: "Rule rejected.",
+    rejectedCompilerAttempts: [
+      {
+        candidate: null,
+        decision: "INVALID",
+        providerEvidence: null,
+        reasonCodes: ["REVIEWER_MISMATCH"],
+        schemaError: null,
+        semanticDisagreementWitness: {
+          draftResult: "WIN",
+          draw: [10, 20, 30, 40, 50, 100],
+          guess: [7, 17, 27, 37, 47, 97],
+          reviewerResult: "LOSE",
+        },
+        stages: [],
+        status: "rejected",
+      },
+    ],
+    sanitizedText: text,
+    tokenCount: 18,
+  });
+
+  assert.doesNotMatch(feedback.reasonSummary, /boundary value 100/iu);
+  assert.doesNotMatch(
+    feedback.refinementQuestions.join(" "),
+    /boundary value 100/iu,
+  );
+});
+
+test("a complete ranking tie clause does not re-open clarification", () => {
+  const source =
+    "Among all tickets, the winner has the most same-position matches; if several tickets tie on that count, they split it equally.";
+  const interpretation = {
+    addedOperationalClauses: [],
+    clarificationQuestions: [],
+    clarityNote: "",
+    dealerMessage: "The ticket with the most same-position matches wins; ties split equally.",
+    needsClarification: false,
+    normalizedText: source,
+    officialInterpretation: source,
+    suggestedRewrites: [],
+    title: "Position Match Leader",
+  };
+  assert.equal(enforceSourceAmbiguity(source, interpretation), interpretation);
+});
+
 test("a disagreement with no traced readings is still reported as a compiler conflict", () => {
   // Without AMBIGUOUS_RULE the compiler could not show that the text has more
   // than one meaning, so there is no choice to offer and the player genuinely

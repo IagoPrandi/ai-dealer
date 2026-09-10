@@ -199,27 +199,41 @@ async function callPreflight(baseUrl, body) {
   const decoder = new TextDecoder();
   let buffer = "";
   let terminal = null;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    let newline;
-    while ((newline = buffer.indexOf("\n")) >= 0) {
-      const line = buffer.slice(0, newline).trim();
-      buffer = buffer.slice(newline + 1);
-      if (!line) continue;
-      let event;
-      try {
-        event = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      if (event.type === "progress") {
-        stages.push({ atMs: Date.now() - startedAt, stage: event.progress.stage, model: event.progress.model ?? null });
-      } else {
-        terminal = event;
+  // The request timeout can fire mid-stream, after the response headers were
+  // already accepted. Recording it as a transport fault on THIS case keeps the
+  // remaining cases measurable; letting it reject would abort the whole run and
+  // lose every result after it.
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let newline;
+      while ((newline = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, newline).trim();
+        buffer = buffer.slice(newline + 1);
+        if (!line) continue;
+        let event;
+        try {
+          event = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (event.type === "progress") {
+          stages.push({ atMs: Date.now() - startedAt, stage: event.progress.stage, model: event.progress.model ?? null });
+        } else {
+          terminal = event;
+        }
       }
     }
+  } catch (error) {
+    return {
+      status: response.status,
+      stages,
+      terminal,
+      transportError: `stream aborted: ${error instanceof Error ? error.message : String(error)}`,
+      ms: Date.now() - startedAt,
+    };
   }
   return { status: response.status, stages, terminal, transportError: null, ms: Date.now() - startedAt };
 }

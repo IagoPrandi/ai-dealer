@@ -1,5 +1,4 @@
 import {
-  validateAndPrecompileRule,
   type AgentModelIdentity,
   type AgentProviderAttemptLog,
   type RuleCompiledArtifact,
@@ -41,12 +40,46 @@ export interface RuleValidationCycleDeps {
   fetchPendingRules: () => Promise<PendingRuleValidation[]>;
   nowIso: () => string;
   publishValidation: (validation: PublishedRuleValidation) => Promise<void>;
+  /**
+   * Must invoke the complete compiler pipeline. The worker verifies the
+   * resulting audit stages before publishing: independent review is mandatory,
+   * and a provider-authored artifact must also carry executed provider evidence.
+   * The worker deliberately has no deterministic fallback because a regex-only
+   * artifact is not authoritative settlement input.
+   */
+  validateRule: (
+    rule: PendingRuleValidation,
+    timestamp: string,
+  ) => Promise<RuleValidationResult>;
 }
 
 export interface RuleValidationCycleResult {
   invalid: number;
   processed: number;
   valid: number;
+}
+
+function hasAuthoritativeValidationAudit(result: RuleValidationResult) {
+  if (result.decision !== "VALID") {
+    return true;
+  }
+  const acceptedAttempt = result.log.attemptDiagnostics.find(
+    (attempt) => attempt.status === "accepted",
+  );
+  const independentReview = acceptedAttempt?.stages.find(
+    (stage) => stage.stage === "independent_review",
+  );
+  const providerEvidence = acceptedAttempt?.stages.find(
+    (stage) => stage.stage === "provider_evidence",
+  );
+  const deterministicArtifact = result.log.reasonCodes.includes("SUPPORTED_RULE");
+  return (
+    result.artifact !== null &&
+    result.artifactHash !== null &&
+    independentReview?.status === "passed" &&
+    (providerEvidence?.status === "passed" ||
+      (deterministicArtifact && providerEvidence?.status === "skipped"))
+  );
 }
 
 export async function runRuleValidationCycle(
@@ -57,12 +90,12 @@ export async function runRuleValidationCycle(
   let invalid = 0;
 
   for (const rule of pendingRules) {
-    const result = validateAndPrecompileRule({
-      prompt: rule.sanitizedText,
-      ruleId: rule.ruleId,
-      timestamp: deps.nowIso(),
-      tokenCount: rule.tokenCount,
-    });
+    const result = await deps.validateRule(rule, deps.nowIso());
+    if (!hasAuthoritativeValidationAudit(result)) {
+      throw new Error(
+        `Rule ${rule.ruleId} returned VALID without the required independent review and provider-evidence audit.`,
+      );
+    }
 
     if (result.decision === "VALID") {
       valid += 1;

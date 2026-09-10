@@ -284,6 +284,15 @@ function describeScalarV3(node: ScalarExprV3): string {
     case "lit":
       return String(node.value);
     case "reduce":
+      {
+        const gaps = describeAdjacentGaps(node.of);
+        if (gaps) {
+          if (node.op === "max") return `the largest ${gaps}`;
+          if (node.op === "min") return `the smallest ${gaps}`;
+          if (node.op === "sum") return `the sum of the ${gaps}`;
+          if (node.op === "count") return `the number of ${gaps}`;
+        }
+      }
       if (
         node.op === "count" &&
         node.of.kind === "distinct" &&
@@ -292,6 +301,10 @@ function describeScalarV3(node: ScalarExprV3): string {
         return `the number of different ${node.of.of.place} digits in ${describeArrayV3(
           node.of.of.of,
         )}`;
+      }
+      if (node.op === "count" && node.of.kind === "distinct") {
+        const gaps = describeAdjacentGaps(node.of.of);
+        if (gaps) return `the number of distinct ${gaps}`;
       }
       return describeReduce(node.op, describeArrayV3(node.of));
     case "at":
@@ -315,6 +328,81 @@ function describeScalarV3(node: ScalarExprV3): string {
       );
     }
   }
+}
+
+/** The canonical shifted-zip idiom for consecutive gaps in a sorted source. */
+function describeAdjacentGaps(node: ArrayExprV3): string | null {
+  if (
+    node.kind !== "pairs_map" ||
+    node.left.kind !== "slice" ||
+    node.left.start !== 0 ||
+    node.left.end !== -1 ||
+    node.right.kind !== "slice" ||
+    node.right.start !== 1 ||
+    node.right.end !== undefined ||
+    JSON.stringify(node.left.of) !== JSON.stringify(node.right.of) ||
+    node.left.of.kind !== "sort" ||
+    node.left.of.order !== "asc" ||
+    node.expr.kind !== "arith" ||
+    node.expr.op !== "sub" ||
+    node.expr.left.kind !== "pair" ||
+    node.expr.left.side !== "right" ||
+    node.expr.right.kind !== "pair" ||
+    node.expr.right.side !== "left"
+  ) {
+    return null;
+  }
+  const source = describeArrayV3(node.left.of.of);
+  return `adjacent gaps between consecutive values of ${source} sorted from lowest to highest`;
+}
+
+/**
+ * Reads nested forall/exists distance constraints in the player's direction.
+ * Binder direction is load-bearing: "every draw has a nearby guess" is not
+ * "every guess has a nearby draw", even though both contain the same words.
+ */
+function describeCrossSourceDistance(node: PredicateNodeV3): string | null {
+  if (
+    (node.kind !== "forall" && node.kind !== "exists") ||
+    node.of.kind !== "source" ||
+    (node.where.kind !== "forall" && node.where.kind !== "exists") ||
+    node.where.of.kind !== "source" ||
+    node.where.of.source === node.of.source ||
+    node.where.where.kind !== "compare"
+  ) {
+    return null;
+  }
+  const comparison = node.where.where;
+  if (
+    (comparison.op !== "lte" && comparison.op !== "gte") ||
+    comparison.left.kind !== "abs" ||
+    comparison.left.of.kind !== "arith" ||
+    comparison.left.of.op !== "sub" ||
+    comparison.right.kind !== "lit"
+  ) {
+    return null;
+  }
+  const operands = [comparison.left.of.left, comparison.left.of.right];
+  if (
+    !operands.every((operand) => operand.kind === "elem") ||
+    new Set(
+      operands.map((operand) =>
+        operand.kind === "elem" ? (operand.up ?? 0) : -1,
+      ),
+    ).size !== 2
+  ) {
+    return null;
+  }
+  const sourceName = (source: "draw" | "guess") =>
+    source === "draw" ? "drawn number" : "guessed number";
+  const outerQuantity = node.kind === "forall" ? "every" : "at least one";
+  const innerQuantity =
+    node.where.kind === "forall" ? "every" : "at least one";
+  const relation =
+    comparison.op === "lte"
+      ? `within ${comparison.right.value} of`
+      : `at least ${comparison.right.value} away from`;
+  return `${outerQuantity} ${sourceName(node.of.source)} is ${relation} ${innerQuantity} ${sourceName(node.where.of.source)}`;
 }
 
 function describeSamePositionPredicate(node: PredicateNodeV3): string | null {
@@ -398,6 +486,10 @@ function describePairComparisonCountPredicate(
 }
 
 function describePredicateV3(node: PredicateNodeV3): string {
+  const crossSourceDistance = describeCrossSourceDistance(node);
+  if (crossSourceDistance) {
+    return crossSourceDistance;
+  }
   switch (node.kind) {
     case "compare":
       return (
