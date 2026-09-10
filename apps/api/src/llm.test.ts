@@ -895,7 +895,6 @@ test("compile requests schema-constrained tickets and never falls back to JSON m
     type: "array",
     minItems: 6,
     maxItems: 6,
-    uniqueItems: true,
     items: { type: "integer", minimum: 1, maximum: 100 },
   });
   const messages =

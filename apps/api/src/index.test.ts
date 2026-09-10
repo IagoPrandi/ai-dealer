@@ -224,7 +224,10 @@ test("groundedness failures identify the failed fidelity link and preserve clear
   });
   assert.match(artifactMismatch.reasonSummary, /rule is clear/iu);
   assert.match(artifactMismatch.reasonSummary, /compiled condition/iu);
-  assert.match(artifactMismatch.reasonSummary, /no missing value or operation/iu);
+  assert.match(
+    artifactMismatch.reasonSummary,
+    /no missing value or operation/iu,
+  );
   assert.match(artifactMismatch.dealerMessage, /retry generation/iu);
   assert.doesNotMatch(artifactMismatch.dealerMessage, /please rephrase/iu);
   assert.deepEqual(artifactMismatch.refinementQuestions, []);
@@ -1062,6 +1065,31 @@ test("a compiler-side refusal always offers the unchanged rule as an actionable 
   assert.doesNotMatch(feedback.dealerMessage, /missing threshold/iu);
 });
 
+test("an ambiguity with no viable reading choices falls back to an unchanged retry", () => {
+  const text =
+    "Among tickets whose six numbers are all greater than the lowest drawn number, the smallest span wins; ties go to the smaller total.";
+  const feedback = buildRuleRefinementFeedback({
+    agentClarificationQuestions: [],
+    agentSuggestedRewrites: [],
+    clarityNote: "",
+    compileText: text,
+    officialInterpretation:
+      "Only tickets above the smallest drawn number are eligible; minimize span, then sum.",
+    providerDisagreementReadings: [
+      "The guess with the lowest value of an internal compiler formula wins.",
+    ],
+    reasonCodes: ["AMBIGUOUS_RULE", "PROVIDER_DISAGREEMENT"],
+    reasonSummary: "Rule rejected.",
+    sanitizedText: text,
+    tokenCount: 24,
+  });
+
+  assert.deepEqual(feedback.refinementQuestions, []);
+  assert.deepEqual(feedback.suggestedRewrites, [text]);
+  assert.match(feedback.reasonSummary, /compiler conflict/iu);
+  assert.doesNotMatch(feedback.reasonSummary, /leaves part.*undefined/iu);
+});
+
 test("provider disagreement is reported as a compiler conflict, not another clarification", () => {
   const text =
     "The player wins if their six-number guess contains the numbers 1, 2, 3, and 4 (in any order) and two other distinct numbers from 5 to 100, with no repeats.";
@@ -1142,6 +1170,50 @@ test("divergent readings become the choice the player is asked to make", () => {
     /no missing rule detail was identified/iu,
   );
   assert.match(feedback.dealerMessage, /pick the reading you meant/iu);
+});
+
+test("a disagreement involving 100 asks about the concrete boundary outcome", () => {
+  const text =
+    "A guess wins with five different tens digits and a tens-digit match with the highest drawn number.";
+  const readings = [
+    "A guess wins if it has five different tens digits and one matches the highest drawn number's tens digit.",
+    "A guess wins if five integer quotients by ten are different and one matches the highest drawn number divided by ten.",
+  ];
+  const feedback = buildRuleRefinementFeedback({
+    clarityNote: "",
+    compileText: text,
+    officialInterpretation: readings[0]!,
+    providerDisagreementReadings: readings,
+    reasonCodes: ["AMBIGUOUS_RULE", "PROVIDER_DISAGREEMENT"],
+    reasonSummary: "Rule rejected.",
+    rejectedCompilerAttempts: [
+      {
+        candidate: null,
+        decision: "INVALID",
+        providerEvidence: null,
+        reasonCodes: ["REVIEWER_MISMATCH"],
+        schemaError: null,
+        semanticDisagreementWitness: {
+          draftResult: "LOSE",
+          draw: [95, 96, 97, 98, 99, 100],
+          guess: [1, 20, 40, 60, 80, 100],
+          reviewerResult: "WIN",
+        },
+        stages: [],
+        status: "rejected",
+      },
+    ],
+    sanitizedText: text,
+    tokenCount: 18,
+  });
+
+  assert.match(feedback.refinementQuestions[0] ?? "", /boundary value 100/iu);
+  assert.match(feedback.refinementQuestions[0] ?? "", /should.*WIN or LOSE/iu);
+  assert.match(feedback.reasonSummary, /concrete guess\/draw pair/iu);
+  assert.doesNotMatch(
+    feedback.refinementQuestions[0] ?? "",
+    /which one did you mean/iu,
+  );
 });
 
 test("a disagreement with no traced readings is still reported as a compiler conflict", () => {
@@ -3697,7 +3769,13 @@ test("public rule detail uses turn and rule as a composite identity", () => {
   assert.equal(detail?.rule.votes, 1);
   assert.equal(detail?.election.active, true);
   const publicPayload = JSON.stringify(detail);
-  for (const privateField of ["rawPrompt", "rawCompletion", "input", "output", "telemetry"]) {
+  for (const privateField of [
+    "rawPrompt",
+    "rawCompletion",
+    "input",
+    "output",
+    "telemetry",
+  ]) {
     assert.equal(publicPayload.includes(privateField), false);
   }
   assert.equal(getPublicRuleDetail(246, 10), null);
@@ -3716,16 +3794,21 @@ test("public detail endpoints return validated 400 and absent 404 responses", as
   resetApiStateForTests();
   const server = createServer(handleApiRequest);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise<void>((resolve, reject) => {
-    server.close((error) => error ? reject(error) : resolve());
-  }));
+  t.after(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      }),
+  );
   const address = server.address();
   assert.ok(address && typeof address === "object");
   const baseUrl = `http://127.0.0.1:${address.port}`;
 
   const invalidRule = await fetch(`${baseUrl}/api/v1/turns/nope/rules/1`);
   assert.equal(invalidRule.status, 400);
-  assert.deepEqual(await invalidRule.json(), { error: "invalid_rule_identity" });
+  assert.deepEqual(await invalidRule.json(), {
+    error: "invalid_rule_identity",
+  });
 
   const missingRule = await fetch(`${baseUrl}/api/v1/turns/999/rules/1`);
   assert.equal(missingRule.status, 404);
@@ -3854,9 +3937,12 @@ test("the conversation draft delete route validates, scopes and reports misses",
   resetApiStateForTests();
   const server = createServer(handleApiRequest);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise<void>((resolve, reject) => {
-    server.close((error) => error ? reject(error) : resolve());
-  }));
+  t.after(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      }),
+  );
   const address = server.address();
   assert.ok(address && typeof address === "object");
   const baseUrl = `http://127.0.0.1:${address.port}`;

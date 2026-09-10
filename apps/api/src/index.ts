@@ -2799,6 +2799,7 @@ interface RuleRefinementFeedbackInput {
    * nothing is missing from it.
    */
   providerDisagreementReadings?: readonly string[];
+  rejectedCompilerAttempts?: readonly RuleCompilationAttemptDiagnostic[];
   reasonCodes: readonly RuleValidationReasonCode[];
   reasonSummary: string;
   sanitizedText: string;
@@ -3389,6 +3390,20 @@ export function buildRuleRefinementFeedback(
     reasonCodes.has("AMBIGUOUS_RULE") && divergentReadings.length >= 2
       ? divergentReadings
       : [];
+  const boundaryWitness = input.rejectedCompilerAttempts
+    ?.map((attempt) => attempt.semanticDisagreementWitness)
+    .find(
+      (witness) =>
+        witness !== null &&
+        witness !== undefined &&
+        (witness.guess.includes(100) || witness.draw.includes(100)) &&
+        /^(?:WIN|LOSE)$/u.test(witness.reviewerResult) &&
+        /^(?:WIN|LOSE)$/u.test(witness.draftResult),
+    );
+  const retryReasonCodes =
+    readingChoices.length < 2
+      ? input.reasonCodes.filter((code) => code !== "AMBIGUOUS_RULE")
+      : input.reasonCodes;
   const suggestedRewrites =
     readingChoices.length >= 2
       ? readingChoices
@@ -3404,8 +3419,7 @@ export function buildRuleRefinementFeedback(
   if (
     suggestedRewrites.length === 0 &&
     questions.length === 0 &&
-    !reasonCodes.has("AMBIGUOUS_RULE") &&
-    isRuleGenerationRetryable(input.reasonCodes) &&
+    isRuleGenerationRetryable(retryReasonCodes) &&
     isPreflightViableRewrite(input.sanitizedText)
   ) {
     suggestedRewrites.push(input.sanitizedText.trim());
@@ -3440,6 +3454,10 @@ export function buildRuleRefinementFeedback(
     (input.providerDisagreementBlocked ?? true) &&
     !reasonCodes.has("AMBIGUOUS_RULE") &&
     understoodInterpretation.length > 0;
+  const compilerConflictWithoutUsableChoices =
+    reasonCodes.has("AMBIGUOUS_RULE") &&
+    readingChoices.length < 2 &&
+    understoodInterpretation.length > 0;
   const compilerConflictAction =
     "No missing rule detail was identified. Do not repeat the same clarification; retry the exact interpretation once, and edit it only if the interpretation above is not what you meant.";
   /**
@@ -3472,24 +3490,34 @@ export function buildRuleRefinementFeedback(
   // actually compiled rather than from a guess about what the player left out.
   // It goes first: until the meaning is settled, no other refinement applies,
   // and answering it is a single choice rather than a rewrite.
+  const boundaryChoiceQuestion = boundaryWitness
+    ? `The compiler readings disagree on the boundary value 100. For guess ${JSON.stringify(
+        boundaryWitness.guess,
+      )} and draw ${JSON.stringify(boundaryWitness.draw)}, should the result be WIN or LOSE?`
+    : null;
   const readingChoiceQuestion =
-    readingChoices.length >= 2
+    boundaryChoiceQuestion ??
+    (readingChoices.length >= 2
       ? `Your wording compiles to ${readingChoices.length} different rules, and they do not pay the same guesses. Which one did you mean? ${readingChoices
           .map(
             (reading, index) =>
               `(${index + 1}) ${reading.trim().replace(/[.]+$/u, "")}`,
           )
           .join(" ")}`
-      : null;
+      : null);
   if (readingChoiceQuestion) {
     questions.unshift(readingChoiceQuestion);
   }
-  const readingChoiceAction =
-    "Pick the reading you meant, or restate the condition so only one reading is possible.";
+  const readingChoiceAction = boundaryChoiceQuestion
+    ? "State the intended WIN or LOSE outcome for this boundary case so the compiler can freeze the correct digit semantics."
+    : "Pick the reading you meant, or restate the condition so only one reading is possible.";
   const explanations = getBlockingRuleReasonExplanations(input.reasonCodes);
   if (readingChoiceQuestion) {
     focus.add(readingChoiceAction);
-  } else if (compilerConflictWithoutAmbiguity) {
+  } else if (
+    compilerConflictWithoutAmbiguity ||
+    compilerConflictWithoutUsableChoices
+  ) {
     focus.add(compilerConflictAction);
   } else if (providerArtifactFault) {
     focus.add(providerArtifactAction);
@@ -3532,26 +3560,32 @@ export function buildRuleRefinementFeedback(
     understoodInterpretation.length > 0
       ? `I understood this as: ${understoodInterpretation}. `
       : "";
-  const reasonSummary = readingChoiceQuestion
-    ? `This wording has ${readingChoices.length} different executable readings, so which guesses win is not decided yet. Only you can say which one you meant.`
-    : compilerConflictWithoutAmbiguity
-      ? `I understood this as: ${understoodInterpretation}. Your wording is clear, but independent compiler attempts produced different executable readings. This is a compiler conflict, not a missing answer from you.`
-      : providerArtifactFault
-      ? `${understoodPrefix}${topExplanation.whatHappened} ${topExplanation.whyItBlocks} This is a compiler fault, not a problem with your wording.`
-      : unsupportedButUnderstood
-        ? `I understood this as: ${understoodInterpretation}. ${topExplanation.whatHappened} ${topExplanation.whyItBlocks}`
-        : `${topExplanation.whatHappened} ${topExplanation.whyItBlocks}`;
-  const rewriteLine = readingChoiceQuestion
-    ? // Naming them "rewrites" here would be wrong: the options are the
-      // compiled readings of the rule as written, and the player is choosing
-      // between meanings rather than accepting a reworded rule.
-      ` Choose one of the ${readingChoices.length} readings or write your own.`
-    : suggestedRewrites.length > 0
-      ? ` Choose one of the ${suggestedRewrites.length} intent-preserving rewrites or write your own.`
-      : "";
+  const reasonSummary = boundaryChoiceQuestion
+    ? "The rule is clear except for how the boundary value 100 is interpreted, and the compiler found a concrete guess/draw pair where that choice changes the winner."
+    : readingChoiceQuestion
+      ? `This wording has ${readingChoices.length} different executable readings, so which guesses win is not decided yet. Only you can say which one you meant.`
+      : compilerConflictWithoutAmbiguity || compilerConflictWithoutUsableChoices
+        ? `I understood this as: ${understoodInterpretation}. Your wording is clear, but independent compiler attempts produced different executable readings. This is a compiler conflict, not a missing answer from you.`
+        : providerArtifactFault
+          ? `${understoodPrefix}${topExplanation.whatHappened} ${topExplanation.whyItBlocks} This is a compiler fault, not a problem with your wording.`
+          : unsupportedButUnderstood
+            ? `I understood this as: ${understoodInterpretation}. ${topExplanation.whatHappened} ${topExplanation.whyItBlocks}`
+            : `${topExplanation.whatHappened} ${topExplanation.whyItBlocks}`;
+  const rewriteLine = boundaryChoiceQuestion
+    ? readingChoices.length > 0
+      ? ` Choose the reading that gives the intended boundary outcome or write your own.`
+      : ""
+    : readingChoiceQuestion
+      ? // Naming them "rewrites" here would be wrong: the options are the
+        // compiled readings of the rule as written, and the player is choosing
+        // between meanings rather than accepting a reworded rule.
+        ` Choose one of the ${readingChoices.length} readings or write your own.`
+      : suggestedRewrites.length > 0
+        ? ` Choose one of the ${suggestedRewrites.length} intent-preserving rewrites or write your own.`
+        : "";
   const dealerAction = readingChoiceQuestion
     ? readingChoiceAction
-    : compilerConflictWithoutAmbiguity
+    : compilerConflictWithoutAmbiguity || compilerConflictWithoutUsableChoices
       ? compilerConflictAction
       : providerArtifactFault
         ? providerArtifactAction
@@ -4322,28 +4356,69 @@ async function runRulePreflightPipeline(
   // wrong-but-plausible AST the guardian can miss. Route those straight to the
   // stronger model instead of relying on a reactive catch.
   const escalationModel = runtime.escalationModel;
+  const sameModel = (left: string, right: string) =>
+    left.trim().toLowerCase() === right.trim().toLowerCase();
+  const complexRule = isComplexRule(compileText);
+  const proactivelyEscalateInterpretation = Boolean(
+    escalationModel &&
+    !approvedInterpretation &&
+    complexRule &&
+    !sameModel(escalationModel, agentConfig.model),
+  );
+  const proactivelyEscalateCompiler = Boolean(
+    escalationModel &&
+    complexRule &&
+    !sameModel(escalationModel, compilerConfig.model),
+  );
   const firstModel =
-    escalationModel && isComplexRule(compileText)
+    proactivelyEscalateInterpretation && escalationModel
       ? escalationModel
       : agentConfig.model;
+  const firstCompilerModel =
+    proactivelyEscalateCompiler && escalationModel
+      ? escalationModel
+      : compilerConfig.model;
 
-  if (firstModel !== agentConfig.model) {
+  if (!sameModel(firstModel, agentConfig.model)) {
     await ensureDealerModelReady(firstModel, signal);
   }
+  if (
+    !sameModel(firstCompilerModel, compilerConfig.model) &&
+    !sameModel(firstCompilerModel, firstModel)
+  ) {
+    await ensureDealerModelReady(firstCompilerModel, signal);
+  }
   const rejectedCompilerAttempts: RuleCompilationAttemptDiagnostic[] = [];
-  let pass = await dealerPass(firstModel);
+  let pass = await dealerPass(firstModel, firstCompilerModel);
   rejectedCompilerAttempts.push(...pass.rejectedAttempts);
-  let escalated = firstModel !== agentConfig.model;
+  let escalated =
+    !sameModel(firstModel, agentConfig.model) ||
+    !sameModel(firstCompilerModel, compilerConfig.model);
   const needsEscalation = shouldEscalateRulePreflight(
     pass.validation.decision,
     pass.grounded,
   );
-  if (needsEscalation && escalationModel && pass.model !== escalationModel) {
+  const escalationChangesInterpretation = Boolean(
+    escalationModel &&
+    !approvedInterpretation &&
+    !sameModel(pass.model, escalationModel),
+  );
+  const escalationChangesCompiler = Boolean(
+    escalationModel && !sameModel(pass.compilerModel, escalationModel),
+  );
+  if (
+    needsEscalation &&
+    escalationModel &&
+    (escalationChangesInterpretation || escalationChangesCompiler)
+  ) {
     // The escalation attempt must never break the preflight: if the stronger
     // model is unavailable/slow, keep the primary result and surface the note.
     try {
       await ensureDealerModelReady(escalationModel, signal);
-      const strong = await dealerPass(escalationModel, escalationModel);
+      const strong = await dealerPass(
+        escalationChangesInterpretation ? escalationModel : pass.model,
+        escalationChangesCompiler ? escalationModel : pass.compilerModel,
+      );
       if (strong.validation.decision === "VALID" && strong.grounded !== false) {
         pass = strong;
         escalated = true;
@@ -4445,13 +4520,19 @@ async function runRulePreflightPipeline(
       })()
     : null;
   const reasonCodes = [...validation.log.reasonCodes];
+  const retryReasonCodes =
+    reasonCodes.includes("AMBIGUOUS_RULE") &&
+    validation.log.providerDisagreementReadings.filter(isPreflightViableRewrite)
+      .length < 2
+      ? reasonCodes.filter((code) => code !== "AMBIGUOUS_RULE")
+      : reasonCodes;
   const generationRetryable =
     !reproposalBlocked &&
     !semanticReview.impact.triviallyAlwaysTrue &&
     !semanticReview.confirmationRequired &&
     ((validation.decision !== "VALID" &&
       !guardianBlocked &&
-      isRuleGenerationRetryable(reasonCodes)) ||
+      isRuleGenerationRetryable(retryReasonCodes)) ||
       (validation.decision === "VALID" && guardianBlocked));
 
   const needsClarification =
@@ -4527,6 +4608,7 @@ async function runRulePreflightPipeline(
             validation.log.providerDisagreementBlocked,
           providerDisagreementReadings:
             validation.log.providerDisagreementReadings,
+          rejectedCompilerAttempts,
           reasonCodes: validation.log.reasonCodes,
           reasonSummary,
           sanitizedText,
@@ -7614,7 +7696,9 @@ export function listPlayerHistory(args: {
   };
 }
 
-export function getPlayerPublicProfile(wallet: string): PlayerPublicProfile | null {
+export function getPlayerPublicProfile(
+  wallet: string,
+): PlayerPublicProfile | null {
   const proposals = [...ruleProposals.values()].filter(
     (proposal) => proposal.proposer === wallet,
   );
@@ -7628,8 +7712,7 @@ export function getPlayerPublicProfile(wallet: string): PlayerPublicProfile | nu
       getRuleElection(proposal.turnId)?.activeRuleId === proposal.ruleId,
   );
   const winnerProducingRules = rulesElected.filter(
-    (proposal) =>
-      getWinnerSummary(proposal.turnId).alternative.winnerCount > 0,
+    (proposal) => getWinnerSummary(proposal.turnId).alternative.winnerCount > 0,
   );
   const claims = getPlayerClaimsSummary(wallet);
 
@@ -7644,9 +7727,8 @@ export function getPlayerPublicProfile(wallet: string): PlayerPublicProfile | nu
       rulesElected: rulesElected.length,
       rulesProposed: proposals.length,
       totalEarnedLamports: claims.totalLamports,
-      votesCast: [...ruleVotes.values()].filter(
-        (vote) => vote.voter === wallet,
-      ).length,
+      votesCast: [...ruleVotes.values()].filter((vote) => vote.voter === wallet)
+        .length,
       votesReceived: [...ruleVotes.values()].filter((vote) =>
         proposalKeys.has(getRuleProposalKey(vote.turnId, vote.ruleId)),
       ).length,
@@ -11498,8 +11580,7 @@ export function getOperatorAiOperationsSnapshot(): OperatorAiOperationsSnapshot 
       },
       {
         endpoint: "provider usage payloads + process.cpuUsage/memoryUsage",
-        label:
-          "Measured AI token, cost, CPU and RAM usage per pipeline run",
+        label: "Measured AI token, cost, CPU and RAM usage per pipeline run",
         source: "internal_projection",
         status:
           measuredResourceUsage.totals.runs > 0 ? "available" : "not_recorded",

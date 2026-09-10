@@ -51,10 +51,12 @@ export interface InterpretationCoverage {
  * an unordered count can never stand in for a positional comparison.
  */
 export type RuleOperation =
+  | "comparison_count"
   | "digit"
   | "mod"
   | "parity"
   | "position"
+  | "product"
   | "sum";
 
 export interface InterpretationCoverageInput {
@@ -136,10 +138,7 @@ const NUMBER_DOMAIN_MAX = 100;
 const COMBINING_MARKS = /[̀-ͯ]/gu;
 
 function normalize(value: string) {
-  return value
-    .normalize("NFD")
-    .replace(COMBINING_MARKS, "")
-    .toLowerCase();
+  return value.normalize("NFD").replace(COMBINING_MARKS, "").toLowerCase();
 }
 
 function stripExampleClauses(value: string) {
@@ -313,7 +312,9 @@ export function collectAstValues(ast: RuleAst): Set<number> {
     if (!node || typeof node !== "object") {
       return;
     }
-    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+    for (const [key, value] of Object.entries(
+      node as Record<string, unknown>,
+    )) {
       if (key === "schemaVersion") {
         continue;
       }
@@ -335,12 +336,25 @@ export function collectAstValues(ast: RuleAst): Set<number> {
 // an operation the prose does not name, never the reverse. "even if" and "even
 // though" are excluded because they are conjunctions, not parity.
 const OPERATION_TEXT_CUES: ReadonlyArray<readonly [RuleOperation, RegExp]> = [
+  // A quantified list of boolean comparisons is not a conjunction. Losing the
+  // count changes "at least four of five" into "all comparisons", or into the
+  // handful a regex happened to enumerate. Keep this as its own operation so
+  // every parser/provider must preserve the aggregation, not just the
+  // underlying positional comparisons.
+  [
+    "comparison_count",
+    /\b(?:at\s+least|at\s+most|exactly|no\s+fewer\s+than|no\s+more\s+than|pelo\s+menos|no\s+minimo|no\s+maximo|exatamente)\s+(?:[0-6]|zero|one|two|three|four|five|six|um|uma|dois|duas|tres|quatro|cinco|seis)\b[^.;:]{0,80}\bcompar(?:ison|isons|acao|acoes|acoes)\b/u,
+  ],
   ["mod", /\b(?:modulo|modulus|mod|remainder|resto)\b/u],
   [
     "parity",
     /\b(?:even(?!\s+(?:if|though|when|so))|odd|numeros?\s+pares?|pares|impar(?:es)?)\b/u,
   ],
   ["sum", /\b(?:sum|sums|total|totals|soma|somam?)\b/u],
+  [
+    "product",
+    /\b(?:product|multiply|multiplied|multiplication|produto|multiplica(?:do|r|cao)?|(?:[0-9]+|one|two|three|four|five|six|um|uma|dois|duas|tres|quatro|cinco|seis)\s+(?:times?|vezes?))\b/u,
+  ],
   ["digit", /\b(?:digit|digits|digito|digitos)\b/u],
   // A rule that names WHERE a number sits is not the same rule as one that only
   // asks whether the number appears. "same position" is the cue that separates
@@ -401,9 +415,9 @@ function unmark(value: string) {
 
 export function collectRequiredOperations(text: string): RuleOperation[] {
   const prepared = stripVacuousClauses(stripExampleClauses(normalize(text)));
-  return OPERATION_TEXT_CUES.filter(([, pattern]) => pattern.test(prepared)).map(
-    ([operation]) => operation,
-  );
+  return OPERATION_TEXT_CUES.filter(([, pattern]) =>
+    pattern.test(prepared),
+  ).map(([operation]) => operation);
 }
 
 function readLiteral(node: unknown): number | null {
@@ -469,10 +483,39 @@ export function collectAstOperations(ast: RuleAst): Set<RuleOperation> {
         operations.add("digit");
       }
     }
+    if (op === "mul" || kind.includes("product")) {
+      operations.add("product");
+    }
     // `total_ordered_abs_diff_lte` adds up per-position differences: a total is
     // a sum, whatever the node is called.
     if (op === "sum" || kind.includes("sum") || kind.includes("total")) {
       operations.add("sum");
+    }
+    // The v3 idiom for "N of these comparisons hold" is either a count of a
+    // predicate-filtered list or a sum of 1/0 values produced by `ite`. Merely
+    // containing comparisons is insufficient: an `and` of the clauses has
+    // different semantics and must not satisfy this operation.
+    if (
+      kind === "reduce" &&
+      ((op === "count" &&
+        record.of !== null &&
+        typeof record.of === "object" &&
+        (record.of as Record<string, unknown>).kind === "filter") ||
+        (op === "sum" &&
+          record.of !== null &&
+          typeof record.of === "object" &&
+          ((record.of as Record<string, unknown>).kind === "map" ||
+            (record.of as Record<string, unknown>).kind === "pairs_map") &&
+          (record.of as Record<string, unknown>).expr !== null &&
+          typeof (record.of as Record<string, unknown>).expr === "object" &&
+          (
+            (record.of as Record<string, unknown>).expr as Record<
+              string,
+              unknown
+            >
+          ).kind === "ite"))
+    ) {
+      operations.add("comparison_count");
     }
     // Anything that reads a specific index, walks two arrays in lockstep, or
     // carries "ordered"/"position" in its name is positional. `slice`/`reverse`

@@ -237,7 +237,11 @@ export function getRuleCompilationCandidateJsonSchema(
     type: "array",
     minItems: 6,
     maxItems: 6,
-    uniqueItems: true,
+    // Some OpenAI-compatible constrained decoders reject `uniqueItems` on
+    // arrays even though they accept the rest of this schema. Uniqueness is
+    // still enforced after decoding by `isSixUniqueDomainNumbers`, so omitting
+    // this transport-only keyword broadens provider compatibility without
+    // weakening accepted evidence.
     items: { type: "integer", minimum: 1, maximum: 100 },
   };
   const predicateExample = {
@@ -403,8 +407,17 @@ export interface RuleCompilationAttemptDiagnostic {
   providerEvidence: RuleProviderEvidenceStageDiagnostic | null;
   reasonCodes: RuleValidationReasonCode[];
   schemaError: string | null;
+  /** Concrete input on which an independent reviewer and draft disagree. */
+  semanticDisagreementWitness?: RuleSemanticDisagreementWitness | null;
   stages: RuleCompilerStageResult[];
   status: AgentProviderAttemptStatus;
+}
+
+export interface RuleSemanticDisagreementWitness {
+  draftResult: string;
+  draw: number[];
+  guess: number[];
+  reviewerResult: string;
 }
 
 export interface RuleValidationLog {
@@ -1028,6 +1041,7 @@ interface ProviderEvaluation {
   artifact: RuleCompiledArtifact | null;
   artifactHash: string | null;
   ast: RuleAst | null;
+  astSource: "deterministic" | "provider";
   capabilityFlags: AgentProviderConfig["capabilities"];
   confidence: CompilerConfidenceBreakdown;
   confidenceAction: RuleConfidenceAction;
@@ -1047,6 +1061,7 @@ interface ProviderEvaluation {
   reasonCodes: RuleValidationReasonCode[];
   /** Source-only reviewer reading used to arbitrate a novel candidate. */
   reviewerAst: RuleAst | null;
+  reviewerAstSource: "deterministic" | "provider" | null;
   requestShape: AgentProviderConfig["request_shape"];
   /** Why the emitted AST failed `ruleAstSchema`, or null when it did not. */
   schemaError: string | null;
@@ -1545,7 +1560,7 @@ function validateResolvedAst(
   const reasonCodes = ctx.reasonCodes;
   const stages: RuleCompilerStageResult[] = [];
   const candidate =
-    astSource === "provider" && (rawAst !== null || providerEvidence !== null)
+    rawAst !== null || providerEvidence !== null
       ? {
           ast: rawAst,
           consumedSpans: providerEvidence?.consumedSpans ?? null,
@@ -1589,8 +1604,17 @@ function validateResolvedAst(
         ? (suppliedReviewerAst ?? compileSupportedRule(normalizedText))
         : suppliedReviewerAst
       : null;
+  const reviewerAstSource = reviewerAst
+    ? astSource === "deterministic" || suppliedReviewerAst !== null
+      ? "provider"
+      : "deterministic"
+    : null;
   const reviewerMismatch =
     ast && reviewerAst && !knownAstSemanticsMatch(reviewerAst, ast);
+  const semanticDisagreementWitness =
+    reviewerMismatch && ast && reviewerAst
+      ? findSemanticDisagreementWitness(reviewerAst, ast)
+      : null;
   if (reviewerMismatch) {
     reasonCodes.add("REVIEWER_MISMATCH");
   }
@@ -1600,7 +1624,11 @@ function validateResolvedAst(
       : !reviewerAst
         ? "No independent reviewer AST was available."
         : reviewerMismatch
-          ? describeSemanticDisagreement(reviewerAst, ast)
+          ? describeSemanticDisagreement(
+              reviewerAst,
+              ast,
+              semanticDisagreementWitness,
+            )
           : "The independent reviewer AST agrees with the candidate.",
     reasonCodes: reasonCodes.has("REVIEWER_MISMATCH")
       ? ["REVIEWER_MISMATCH"]
@@ -2022,6 +2050,7 @@ function validateResolvedAst(
     artifact,
     artifactHash,
     ast: forcedFailure ? null : ast,
+    astSource,
     capabilityFlags: providerConfig.capabilities,
     confidence,
     confidenceAction,
@@ -2036,6 +2065,7 @@ function validateResolvedAst(
       providerEvidence: evidenceVerification?.diagnostic ?? null,
       reasonCodes: [...reasonCodes],
       schemaError,
+      semanticDisagreementWitness,
       stages,
       status,
     },
@@ -2049,6 +2079,7 @@ function validateResolvedAst(
     priority: providerConfig.priority,
     reasonCodes: [...reasonCodes],
     reviewerAst,
+    reviewerAstSource,
     requestShape: providerConfig.request_shape,
     schemaError,
     status,
@@ -2403,13 +2434,15 @@ function hasUnresolvedReviewerMismatch(attempts: ProviderEvaluation[]) {
     }
     const generatedAst = attempt.ast;
     const reviewerAst = attempt.reviewerAst;
-    const arbiter = attempts.slice(index + 1).find(
-      (candidate) =>
-        candidate.ast !== null &&
-        isCompletedProviderOpinion(candidate) &&
-        (astOpinionsAgree(candidate.ast, generatedAst) ||
-          astOpinionsAgree(candidate.ast, reviewerAst)),
-    );
+    const arbiter = attempts
+      .slice(index + 1)
+      .find(
+        (candidate) =>
+          candidate.ast !== null &&
+          isCompletedProviderOpinion(candidate) &&
+          (astOpinionsAgree(candidate.ast, generatedAst) ||
+            astOpinionsAgree(candidate.ast, reviewerAst)),
+      );
     if (!arbiter) {
       return true;
     }
@@ -2436,7 +2469,18 @@ function collectDivergentProviderReadings(
 ): string[] {
   const distinct: RuleAst[] = [];
   for (const attempt of attempts.filter(isCompletedProviderOpinion)) {
-    for (const ast of [attempt.ast, attempt.reviewerAst]) {
+    // Only readings produced by a language model are suitable choices for the
+    // player. A deterministic regex artifact is audit evidence and may veto a
+    // draft, but a partial pattern match is not an alternative interpretation
+    // of the sentence. On the deterministic path the reviewer is the provider;
+    // on the provider path the candidate itself is the provider reading.
+    const providerReadings = [
+      ...(attempt.astSource === "provider" ? [attempt.ast] : []),
+      ...(attempt.reviewerAstSource === "provider"
+        ? [attempt.reviewerAst]
+        : []),
+    ];
+    for (const ast of providerReadings) {
       if (
         ast !== null &&
         !hasProvablyVacuousCondition(ast) &&
@@ -2461,13 +2505,15 @@ function resolveReviewerDisagreement(attempts: ProviderEvaluation[]) {
     }
     const generatedAst = attempt.ast;
     const reviewerAst = attempt.reviewerAst;
-    const arbiter = attempts.slice(index + 1).find(
-      (candidate) =>
-        candidate.ast !== null &&
-        candidate.decision === "VALID" &&
-        (astOpinionsAgree(candidate.ast, generatedAst) ||
-          astOpinionsAgree(candidate.ast, reviewerAst)),
-    );
+    const arbiter = attempts
+      .slice(index + 1)
+      .find(
+        (candidate) =>
+          candidate.ast !== null &&
+          candidate.decision === "VALID" &&
+          (astOpinionsAgree(candidate.ast, generatedAst) ||
+            astOpinionsAgree(candidate.ast, reviewerAst)),
+      );
     if (arbiter) {
       return arbiter;
     }
@@ -3212,7 +3258,11 @@ function compileSupportedRulePattern(text: string): RuleAst | null {
   ) {
     // "less than or equal" contains the word "equal" but is a boundary, not
     // equality. Never erase that condition into the legacy sum-equals macro.
-    if (/\b(?:less|greater)\s+than\s+or\s+equal|\bat\s+(?:most|least)\b|\bwithout\s+exceeding\b|\bsem\s+ultrapassar\b|\bmenor\s+ou\s+igual\b/i.test(text)) {
+    if (
+      /\b(?:less|greater)\s+than\s+or\s+equal|\bat\s+(?:most|least)\b|\bwithout\s+exceeding\b|\bsem\s+ultrapassar\b|\bmenor\s+ou\s+igual\b/i.test(
+        text,
+      )
+    ) {
       return null;
     }
     return { schemaVersion: 1, node: { kind: "sum_equals" } };
@@ -3605,14 +3655,18 @@ function parseExtremeCountMarginRule(text: string): RuleAst | null {
   if (!relation?.[1]) {
     return null;
   }
-  const margin = NUMBER_WORDS.get(relation[1].toLowerCase()) ?? Number(relation[1]);
+  const margin =
+    NUMBER_WORDS.get(relation[1].toLowerCase()) ?? Number(relation[1]);
   if (!Number.isInteger(margin) || margin < 0 || margin > 6) {
     return null;
   }
 
   const guess: ArrayExprV3 = { kind: "source", source: "guess" };
   const draw: ArrayExprV3 = { kind: "source", source: "draw" };
-  const filteredCount = (op: "gt" | "lt", threshold: ScalarExprV3): ScalarExprV3 => ({
+  const filteredCount = (
+    op: "gt" | "lt",
+    threshold: ScalarExprV3,
+  ): ScalarExprV3 => ({
     kind: "reduce",
     op: "count",
     of: {
@@ -3890,8 +3944,7 @@ function parseEligibleMatchesThenSumRankingRule(text: string): RuleAst | null {
   const namesPrimary =
     /\bmost\b[^.;]{0,50}\b(?:numbers?|matches?|hits?)\b[^.;]{0,40}\b(?:match(?:ing|es|ed)?|appear(?:ing|s|ed)?)\b[^.;]{0,30}\b(?:drawn?|draw)\b/i.test(
       text,
-    ) ||
-    /\bmost\b[^.;]{0,40}\b(?:match(?:es|ing)?|hits?)\b/i.test(text);
+    ) || /\bmost\b[^.;]{0,40}\b(?:match(?:es|ing)?|hits?)\b/i.test(text);
   const namesSumTieBreak =
     /\b(?:if|when)\b[^.;]{0,60}\b(?:tie|same (?:amount|number|count))\b[^.;]{0,80}\b(?:larger|higher|greater)\b[^.;]{0,20}\b(?:sum|total)\b[^.;]{0,20}\b(?:wins?|winner)\b/i.test(
       text,
@@ -4722,16 +4775,22 @@ function parseExactMatchCountRule(text: string): number | null {
  * no-eligible-guess case.
  */
 function parseClosestSumRankingRule(text: string): RuleAst | null {
-  const namesGuess = /\b(?:guess|guessed|ticket|pick|palpite|aposta)\w*\b/i.test(text);
+  const namesGuess =
+    /\b(?:guess|guessed|ticket|pick|palpite|aposta)\w*\b/i.test(text);
   const namesDraw = /\b(?:draw|drawn|sorteio|sortead)\w*\b/i.test(text);
   const namesSum = /\b(?:sum|total|soma)\w*\b/i.test(text);
   if (!namesGuess || !namesDraw || !namesSum) return null;
 
-  const oneSided = /\b(?:without\s+exceeding|does(?:n'?t| not)\s+go\s+over|does(?:n'?t| not)\s+exceed|not\s+over|at\s+most|less\s+than\s+or\s+equal(?:\s+to)?)\b|\b(?:sem\s+ultrapassar|nao\s+ultrapassar|menor\s+ou\s+igual(?:\s+(?:a|ao))?)\b/i.test(
+  const oneSided =
+    /\b(?:without\s+exceeding|does(?:n'?t| not)\s+go\s+over|does(?:n'?t| not)\s+exceed|not\s+over|at\s+most|less\s+than\s+or\s+equal(?:\s+to)?)\b|\b(?:sem\s+ultrapassar|nao\s+ultrapassar|menor\s+ou\s+igual(?:\s+(?:a|ao))?)\b/i.test(
+      text,
+    );
+  const close = /\b(?:closest|nearest|close)\b|\bmais\s+proxim[oa]\b/i.test(
     text,
   );
-  const close = /\b(?:closest|nearest|close)\b|\bmais\s+proxim[oa]\b/i.test(text);
-  const greatest = /\b(?:highest|largest|greatest|maximum)\b|\bmaior\b/i.test(text);
+  const greatest = /\b(?:highest|largest|greatest|maximum)\b|\bmaior\b/i.test(
+    text,
+  );
   if (!(close || (oneSided && greatest))) return null;
 
   const guessSum = {
@@ -4907,6 +4966,20 @@ function parseComparisonWord(value: string): CompareOp | null {
 }
 
 function parsePositionComparisonRule(text: string): PredicateNode | null {
+  // This parser emits a conjunction of clauses it can see. It must not claim a
+  // sentence that explicitly counts how many comparisons hold, or one that
+  // abbreviates further clauses with an ellipsis: both require a complete
+  // collection/aggregation that this parser does not implement.
+  if (
+    /\b(?:at\s+least|at\s+most|exactly|no\s+fewer\s+than|no\s+more\s+than|pelo\s+menos|no\s+minimo|no\s+maximo|exatamente)\s+(?:[0-6]|zero|one|two|three|four|five|six|um|uma|dois|duas|tres|quatro|cinco|seis)\b[^.;:]{0,80}\bcompar(?:ison|isons|acao|acoes)\b/iu.test(
+      text,
+    ) ||
+    /\b(?:and\s+so\s+on|and\s+the\s+pattern\s+continues|etc(?:etera)?|e\s+assim\s+por\s+diante)\b/iu.test(
+      text,
+    )
+  ) {
+    return null;
+  }
   const ordinal =
     "first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|sixth|6th|last|primeir[oa]|segund[oa]|terceir[oa]|quart[oa]|quint[oa]|sext[oa]|[uú]ltim[oa]";
   const comparison =
@@ -5864,10 +5937,7 @@ const NEGATED_MATCH_RELATION_PATTERNS = [
     `\\b(?:(?:do|does|did|is|are|was|were|must|should|would|can|could)\\s+)?not\\b[^.;:]{0,32}\\b(?:${MATCH_COUNT_ACTION})\\b`,
     "iu",
   ),
-  new RegExp(
-    `\\bnao\\b[^.;:]{0,32}\\b(?:${MATCH_COUNT_ACTION})\\b`,
-    "iu",
-  ),
+  new RegExp(`\\bnao\\b[^.;:]{0,32}\\b(?:${MATCH_COUNT_ACTION})\\b`, "iu"),
   /\b(?:fail(?:s|ed)?\s+to\s+(?:match|appear)|unmatched|non[ -]?matching|miss(?:es|ed|ing)?|missing|absent|outside|wrong|incorrect|errad\w*|erros?|ausent\w*|fora)\b/iu,
 ];
 
@@ -5886,6 +5956,19 @@ function parseMatchCountRule(text: string) {
 }
 
 function parseMatchCountThreshold(text: string) {
+  // In "at least three times X", the number is a multiplier, not a count of
+  // matching ticket values. The old look-ahead wandered up to 80 characters
+  // until it found an unrelated "number" and silently changed multiplication
+  // into `match_count_at_least`. Bind threshold parsing away from multiplicative
+  // units; a genuine match count is handled by the remaining noun/action forms.
+  if (
+    new RegExp(
+      `\\b${THRESHOLD_COUNT_CUE}\\s+${MATCH_COUNT_NUMBER_1_TO_6}\\s+(?:times?|vezes?)\\b`,
+      "i",
+    ).test(text)
+  ) {
+    return null;
+  }
   const numericMatch = text.match(
     new RegExp(
       `\\b${THRESHOLD_COUNT_CUE}\\s+(${MATCH_COUNT_NUMBER_1_TO_6})\\b.{0,80}\\b(?:${MATCH_COUNT_NOUN}|${MATCH_COUNT_ACTION})\\b`,
@@ -6328,16 +6411,19 @@ function sampledSemanticsMatch(expected: RuleAst, actual: RuleAst): boolean {
   }
 }
 
-function describeSemanticDisagreement(expected: RuleAst, actual: RuleAst) {
+function findSemanticDisagreementWitness(
+  expected: RuleAst,
+  actual: RuleAst,
+): RuleSemanticDisagreementWitness | null {
   const expectedRanking = isRankingRule(expected);
   if (expectedRanking !== isRankingRule(actual)) {
-    return `The independent reviewer compiled a ${expectedRanking ? "ranking" : "predicate"}, while the draft compiled a ${isRankingRule(actual) ? "ranking" : "predicate"}.`;
+    return null;
   }
   if (
     expectedRanking &&
     rankingDirection(expected) !== rankingDirection(actual)
   ) {
-    return `The independent reviewer selected ranking direction ${rankingDirection(expected)}, while the draft selected ${rankingDirection(actual)}.`;
+    return null;
   }
 
   let seed = 0x1dea1e7 >>> 0;
@@ -6380,20 +6466,51 @@ function describeSemanticDisagreement(expected: RuleAst, actual: RuleAst) {
               eligible: result.eligible,
               score: result.score,
             });
-          return `The independent reviewer and draft disagree for guess ${JSON.stringify(input.guess)} and draw ${JSON.stringify(input.draw)}: reviewer=${format(reviewerResult)}, draft=${format(draftResult)}.`;
+          return {
+            draftResult: format(draftResult),
+            draw: input.draw,
+            guess: input.guess,
+            reviewerResult: format(reviewerResult),
+          };
         }
       } else {
         const reviewerResult = evaluatePredicate(expected, input).result;
         const draftResult = evaluatePredicate(actual, input).result;
         if (reviewerResult !== draftResult) {
-          return `The independent reviewer and draft disagree for guess ${JSON.stringify(input.guess)} and draw ${JSON.stringify(input.draw)}: reviewer=${reviewerResult}, draft=${draftResult}.`;
+          return {
+            draftResult,
+            draw: input.draw,
+            guess: input.guess,
+            reviewerResult,
+          };
         }
       }
     }
   } catch {
-    return "The independent reviewer AST and draft could not be compared safely at runtime.";
+    return null;
   }
-  return "The independent reviewer AST differs behaviorally from the draft.";
+  return null;
+}
+
+function describeSemanticDisagreement(
+  expected: RuleAst,
+  actual: RuleAst,
+  witness = findSemanticDisagreementWitness(expected, actual),
+) {
+  const expectedRanking = isRankingRule(expected);
+  if (expectedRanking !== isRankingRule(actual)) {
+    return `The independent reviewer compiled a ${expectedRanking ? "ranking" : "predicate"}, while the draft compiled a ${isRankingRule(actual) ? "ranking" : "predicate"}.`;
+  }
+  if (
+    expectedRanking &&
+    rankingDirection(expected) !== rankingDirection(actual)
+  ) {
+    return `The independent reviewer selected ranking direction ${rankingDirection(expected)}, while the draft selected ${rankingDirection(actual)}.`;
+  }
+  if (witness) {
+    return `The independent reviewer and draft disagree for guess ${JSON.stringify(witness.guess)} and draw ${JSON.stringify(witness.draw)}: reviewer=${witness.reviewerResult}, draft=${witness.draftResult}.`;
+  }
+  return "The independent reviewer AST and draft could not be compared safely at runtime.";
 }
 
 function knownAstSignature(

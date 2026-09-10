@@ -213,7 +213,6 @@ test("the compiler candidate schema makes every worked ticket a valid game input
         type: "array",
         minItems: 6,
         maxItems: 6,
-        uniqueItems: true,
         items: { type: "integer", minimum: 1, maximum: 100 },
       });
     }
@@ -344,10 +343,7 @@ test("compares known rule semantics instead of matching threshold words", () => 
     ],
   ] as const;
   for (const [left, right] of equivalentPairs) {
-    assert.equal(
-      compareDeterministicRuleSemantics(left, right),
-      "equivalent",
-    );
+    assert.equal(compareDeterministicRuleSemantics(left, right), "equivalent");
   }
 
   const mutations = [
@@ -837,7 +833,11 @@ test("compiles closest-sum rankings without treating the boundary as ambiguity",
     });
     const ast = result.artifact?.ast;
     assert.equal(result.decision, "VALID", prompt);
-    assert.equal(result.log.reasonCodes.includes("AMBIGUOUS_RULE"), false, prompt);
+    assert.equal(
+      result.log.reasonCodes.includes("AMBIGUOUS_RULE"),
+      false,
+      prompt,
+    );
     assert.ok(
       ast?.schemaVersion === 3 &&
         ast.result.type === "ranking" &&
@@ -2442,6 +2442,42 @@ test("provider worked examples catch an inverted signed bound", async () => {
   );
 });
 
+test("worked-example ticket uniqueness is enforced after schema decoding", async () => {
+  const text =
+    "A guess wins if the sum of its six numbers equals the sum of the six drawn numbers.";
+  const duplicateTicket = [1, 1, 2, 3, 4, 5];
+  const result = await compileRuleArtifact(
+    { originalText: text, prompt: text, tokenCount: countWords(text) },
+    {
+      astProvider: async () => ({
+        ast: { schemaVersion: 1, node: { kind: "sum_equals" } },
+        consumedSpans: [{ text }],
+        workedExamples: [
+          {
+            draw: [10, 20, 30, 40, 50, 60],
+            guess: duplicateTicket,
+            outcome: "LOSE",
+          },
+          {
+            draw: [1, 2, 3, 4, 5, 6],
+            guess: [7, 8, 9, 10, 11, 12],
+            outcome: "LOSE",
+          },
+        ],
+      }),
+      requireProviderEvidence: true,
+    },
+  );
+
+  assert.equal(result.decision, "INVALID");
+  assert.ok(result.log.reasonCodes.includes("PROVIDER_EVIDENCE_UNVERIFIED"));
+  const evidence = result.log.attemptDiagnostics[0]?.providerEvidence;
+  assert.match(
+    evidence?.exampleResults[0]?.detail ?? "",
+    /six unique integers/iu,
+  );
+});
+
 test("can prefer deterministic compilation for known preflight patterns", async () => {
   let providerCalled = false;
   const result = await compileRuleArtifact(
@@ -3572,9 +3608,7 @@ test("a novel-rule LLM disagreement reports a behavioral counterexample", async 
 
   assert.equal(result.decision, "VALID");
   assert.ok(
-    result.log.attemptDiagnostics[0]?.reasonCodes.includes(
-      "REVIEWER_MISMATCH",
-    ),
+    result.log.attemptDiagnostics[0]?.reasonCodes.includes("REVIEWER_MISMATCH"),
   );
   const reviewStage = result.log.attemptDiagnostics[0]?.stages.find(
     (stage) => stage.stage === "independent_review",
@@ -3583,6 +3617,11 @@ test("a novel-rule LLM disagreement reports a behavioral counterexample", async 
   assert.match(reviewStage?.detail ?? "", /draw \[/u);
   assert.match(reviewStage?.detail ?? "", /reviewer=/u);
   assert.match(reviewStage?.detail ?? "", /draft=/u);
+  const witness = result.log.attemptDiagnostics[0]?.semanticDisagreementWitness;
+  assert.ok(witness);
+  assert.equal(witness.guess.length, 6);
+  assert.equal(witness.draw.length, 6);
+  assert.notEqual(witness.reviewerResult, witness.draftResult);
 });
 
 test("a third provider arbitrates a reviewer mismatch instead of treating it as a veto", async () => {
@@ -4301,6 +4340,175 @@ test("a cardinality phrase is not a match threshold", () => {
     ).decision,
     "INVALID",
   );
+});
+
+test("multipliers are never reinterpreted as match-count thresholds", () => {
+  for (const text of [
+    "A guess wins if the product of its two smallest numbers is at least three times the highest drawn number.",
+    "A guess wins when its two lowest values multiplied together are at least four times the largest value in the draw.",
+    "O palpite vence se o produto dos dois menores numeros for pelo menos cinco vezes o maior numero sorteado.",
+  ]) {
+    const result = compile(text);
+    assert.equal(result.decision, "INVALID", text);
+    assert.ok(!result.log.reasonCodes.includes("SUPPORTED_RULE"), text);
+    assert.equal(result.artifact, null, text);
+  }
+
+  const genuineCount = compile(
+    "A guess wins if at least three of its numbers match the official draw.",
+  );
+  assert.equal(genuineCount.decision, "VALID");
+  assert.deepEqual(genuineCount.artifact?.ast, {
+    node: { kind: "match_count_at_least", value: 3 },
+    schemaVersion: 1,
+  });
+});
+
+test("partial positional enumerations fail closed instead of becoming conjunctions", () => {
+  for (const text of [
+    "A guess wins if at least four of these five comparisons hold: the first guessed number is greater than the second drawn number, the second guessed number is greater than the third drawn number, and so on through the fifth guessed number being greater than the sixth drawn number.",
+    "A guess wins if exactly three comparisons hold: the first guessed number is greater than the second drawn number, the second guessed number is greater than the third drawn number, and the pattern continues.",
+    "O palpite vence se pelo menos quatro comparacoes forem verdadeiras: o primeiro numero e maior que o segundo numero do sorteio, o segundo numero e maior que o terceiro numero do sorteio, e assim por diante.",
+  ]) {
+    const result = compile(text);
+    assert.equal(result.decision, "INVALID", text);
+    assert.ok(!result.log.reasonCodes.includes("SUPPORTED_RULE"), text);
+    assert.equal(result.artifact, null, text);
+  }
+});
+
+test("rejected deterministic candidates remain inspectable but are not player readings", async () => {
+  const text =
+    "A guess wins if its first number is greater than the first drawn number.";
+  const providerReading = ruleAstSchema.parse({
+    schemaVersion: 1,
+    node: { kind: "sum_equals" },
+  });
+  const result = await compileRuleArtifact(
+    { originalText: text, prompt: text, tokenCount: tokenCount(text) },
+    {
+      astProvider: async () => providerReading,
+      astReviewer: async () => providerReading,
+      preferDeterministic: true,
+    },
+  );
+  const firstAttempt = result.log.attemptDiagnostics[0];
+  assert.equal(firstAttempt?.decision, "INVALID");
+  assert.ok(firstAttempt?.candidate?.ast);
+  assert.ok(result.log.providerDisagreementReadings.length > 0);
+  assert.ok(
+    result.log.providerDisagreementReadings.every((reading) =>
+      /sum of/iu.test(reading),
+    ),
+  );
+  assert.ok(
+    result.log.providerDisagreementReadings.every(
+      (reading) => !/1st.*greater/iu.test(reading),
+    ),
+  );
+});
+
+test("v3 composition descriptions expose digit counts and shifted comparisons", () => {
+  const guess = { kind: "source", source: "guess" } as const;
+  const draw = { kind: "source", source: "draw" } as const;
+  const digitCount = ruleAstSchema.parse({
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "compare",
+        op: "gte",
+        left: {
+          kind: "reduce",
+          op: "count",
+          of: {
+            kind: "distinct",
+            of: { kind: "digits", of: guess, place: "tens" },
+          },
+        },
+        right: { kind: "lit", value: 5 },
+      },
+    },
+  });
+  assert.match(
+    describeRuleAstForPlayers(digitCount),
+    /number of different tens digits in your numbers is at least 5/iu,
+  );
+
+  const shifted = ruleAstSchema.parse({
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "compare",
+        op: "gte",
+        left: {
+          kind: "reduce",
+          op: "sum",
+          of: {
+            kind: "pairs_map",
+            left: { kind: "slice", of: guess, start: 0, end: 5 },
+            right: { kind: "slice", of: draw, start: 1 },
+            expr: {
+              kind: "ite",
+              if: {
+                kind: "compare",
+                op: "gt",
+                left: { kind: "pair", side: "left" },
+                right: { kind: "pair", side: "right" },
+              },
+              then: { kind: "lit", value: 1 },
+              else: { kind: "lit", value: 0 },
+            },
+          },
+        },
+        right: { kind: "lit", value: 4 },
+      },
+    },
+  });
+  const description = describeRuleAstForPlayers(shifted);
+  assert.match(description, /at least 4 of the paired comparisons hold/iu);
+  assert.match(description, /positions 1 to 5 of your numbers/iu);
+  assert.match(description, /drawn numbers from position 2 onward/iu);
+  assert.match(description, /greater than/iu);
+});
+
+test("v3 ranking descriptions explain eligibility and ordered criteria", () => {
+  const guess = { kind: "source", source: "guess" } as const;
+  const draw = { kind: "source", source: "draw" } as const;
+  const ranking = ruleAstSchema.parse({
+    schemaVersion: 3,
+    result: {
+      type: "ranking",
+      direction: "min",
+      tieBreak: "share_pool",
+      eligibleWhen: {
+        kind: "forall",
+        of: guess,
+        where: {
+          kind: "compare",
+          op: "gt",
+          left: { kind: "elem" },
+          right: { kind: "reduce", op: "min", of: draw },
+        },
+      },
+      score: {
+        kind: "arith",
+        op: "add",
+        left: {
+          kind: "arith",
+          op: "mul",
+          left: { kind: "lit", value: 1000 },
+          right: { kind: "reduce", op: "range_span", of: guess },
+        },
+        right: { kind: "reduce", op: "sum", of: guess },
+      },
+    },
+  });
+  const description = describeRuleAstForPlayers(ranking);
+  assert.match(description, /all greater than the smallest drawn number/iu);
+  assert.match(description, /smallest gap between its highest and lowest/iu);
+  assert.match(description, /smaller sum breaks a tie/iu);
 });
 
 test("an explicit six-number set compiles without losing enumerated values", () => {

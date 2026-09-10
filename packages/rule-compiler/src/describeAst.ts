@@ -225,7 +225,9 @@ function describePredicate(node: PredicateNode): string {
       return `it is not the case that ${describePredicate(node.clause)}`;
     default: {
       const exhaustive: never = node;
-      throw new Error(`unrendered predicate node ${JSON.stringify(exhaustive)}`);
+      throw new Error(
+        `unrendered predicate node ${JSON.stringify(exhaustive)}`,
+      );
     }
   }
 }
@@ -282,6 +284,15 @@ function describeScalarV3(node: ScalarExprV3): string {
     case "lit":
       return String(node.value);
     case "reduce":
+      if (
+        node.op === "count" &&
+        node.of.kind === "distinct" &&
+        node.of.of.kind === "digits"
+      ) {
+        return `the number of different ${node.of.of.place} digits in ${describeArrayV3(
+          node.of.of.of,
+        )}`;
+      }
       return describeReduce(node.op, describeArrayV3(node.of));
     case "at":
       return `the ${ordinal(node.index + 1)} value of ${describeArrayV3(node.of)}`;
@@ -299,7 +310,9 @@ function describeScalarV3(node: ScalarExprV3): string {
         : "the value from the second list";
     default: {
       const exhaustive: never = node;
-      throw new Error(`unrendered v3 scalar node ${JSON.stringify(exhaustive)}`);
+      throw new Error(
+        `unrendered v3 scalar node ${JSON.stringify(exhaustive)}`,
+      );
     }
   }
 }
@@ -344,7 +357,9 @@ function describeSamePositionPredicate(node: PredicateNodeV3): string | null {
   return null;
 }
 
-function describeExactPositionCountPredicate(node: PredicateNodeV3): string | null {
+function describePairComparisonCountPredicate(
+  node: PredicateNodeV3,
+): string | null {
   if (
     node.kind !== "compare" ||
     (node.op !== "gte" && node.op !== "eq" && node.op !== "lte") ||
@@ -352,17 +367,12 @@ function describeExactPositionCountPredicate(node: PredicateNodeV3): string | nu
     node.left.kind !== "reduce" ||
     node.left.op !== "sum" ||
     node.left.of.kind !== "pairs_map" ||
-    node.left.of.left.kind !== "source" ||
-    node.left.of.left.source !== "guess" ||
-    node.left.of.right.kind !== "source" ||
-    node.left.of.right.source !== "draw" ||
     node.left.of.expr.kind !== "ite" ||
     node.left.of.expr.then.kind !== "lit" ||
     node.left.of.expr.then.value !== 1 ||
     node.left.of.expr.else.kind !== "lit" ||
     node.left.of.expr.else.value !== 0 ||
     node.left.of.expr.if.kind !== "compare" ||
-    node.left.of.expr.if.op !== "eq" ||
     node.left.of.expr.if.left.kind !== "pair" ||
     node.left.of.expr.if.left.side !== "left" ||
     node.left.of.expr.if.right.kind !== "pair" ||
@@ -372,15 +382,26 @@ function describeExactPositionCountPredicate(node: PredicateNodeV3): string | nu
   }
   const quantity =
     node.op === "gte" ? "at least" : node.op === "lte" ? "at most" : "exactly";
-  const plural = node.right.value === 1 ? "position" : "positions";
-  return `${quantity} ${node.right.value} guessed ${plural} exactly match the draw`;
+  const condition = node.left.of.expr.if;
+  const comparison = COMPARE_PHRASE[condition.op];
+  const left = describeArrayV3(node.left.of.left);
+  const right = describeArrayV3(node.left.of.right);
+  if (
+    condition.op === "eq" &&
+    isSource(node.left.of.left, "guess") &&
+    isSource(node.left.of.right, "draw")
+  ) {
+    const plural = node.right.value === 1 ? "position" : "positions";
+    return `${quantity} ${node.right.value} guessed ${plural} exactly match the draw`;
+  }
+  return `${quantity} ${node.right.value} of the paired comparisons hold: each value of ${left} ${comparison} the corresponding value of ${right}`;
 }
 
 function describePredicateV3(node: PredicateNodeV3): string {
   switch (node.kind) {
     case "compare":
       return (
-        describeExactPositionCountPredicate(node) ??
+        describePairComparisonCountPredicate(node) ??
         `${describeScalarV3(node.left)} ${COMPARE_PHRASE[node.op]} ${describeScalarV3(node.right)}`
       );
     case "contains":
@@ -542,7 +563,9 @@ function describePositionRangeConjunction(node: PredicateNode): string | null {
 
   const complete = [...ranges.values()]
     .filter(
-      (range): range is {
+      (
+        range,
+      ): range is {
         high: number;
         index: number;
         low: number;
@@ -608,9 +631,57 @@ function isMatchCount(node: ScalarExprV3) {
 
 function isSumOfSource(node: ScalarExprV3, source: "draw" | "guess") {
   return (
+    node.kind === "reduce" && node.op === "sum" && isSource(node.of, source)
+  );
+}
+
+function isRangeSpanOfSource(node: ScalarExprV3, sourceName: "draw" | "guess") {
+  return (
     node.kind === "reduce" &&
-    node.op === "sum" &&
-    isSource(node.of, source)
+    node.op === "range_span" &&
+    isSource(node.of, sourceName)
+  );
+}
+
+function isAllSourceAboveDrawMinimum(node: PredicateNodeV3 | undefined) {
+  return (
+    node?.kind === "forall" &&
+    isSource(node.of, "guess") &&
+    node.where.kind === "compare" &&
+    node.where.op === "gt" &&
+    node.where.left.kind === "elem" &&
+    (node.where.left.up ?? 0) === 0 &&
+    node.where.right.kind === "reduce" &&
+    node.where.right.op === "min" &&
+    isSource(node.where.right.of, "draw")
+  );
+}
+
+/**
+ * `scale * range_span(guess) + sum(guess)`, minimized. When the scale is above
+ * the largest possible sum difference, span is the primary criterion and sum
+ * is only a tiebreak. The eligibility predicate is rendered separately so no
+ * draw-relative condition disappears from the player-facing sentence.
+ */
+function describeMinimumSpanThenSumRanking(
+  result: Extract<RuleResultV3, { type: "ranking" }>,
+): string | null {
+  if (
+    result.direction !== "min" ||
+    result.score.kind !== "arith" ||
+    result.score.op !== "add" ||
+    result.score.left.kind !== "arith" ||
+    result.score.left.op !== "mul" ||
+    result.score.left.left.kind !== "lit" ||
+    result.score.left.left.value <= 600 ||
+    !isRangeSpanOfSource(result.score.left.right, "guess") ||
+    !isSumOfSource(result.score.right, "guess") ||
+    !isAllSourceAboveDrawMinimum(result.eligibleWhen)
+  ) {
+    return null;
+  }
+  return sentence(
+    "Only guesses whose six numbers are all greater than the smallest drawn number are eligible. Among them, the guess with the smallest gap between its highest and lowest number wins; a smaller sum breaks a tie. Guesses still tied after both criteria share the prize. If no guess is eligible, there is no winner",
   );
 }
 
@@ -722,6 +793,10 @@ export function describeRuleAstTotal(ast: RuleAst): string {
       if (lexicographic) {
         return lexicographic;
       }
+      const minimumSpanThenSum = describeMinimumSpanThenSumRanking(ast.result);
+      if (minimumSpanThenSum) {
+        return minimumSpanThenSum;
+      }
     }
     const score =
       ast.schemaVersion === 3
@@ -736,7 +811,7 @@ export function describeRuleAstTotal(ast: RuleAst): string {
   const clause =
     ast.schemaVersion === 3
       ? describeConjunctionV3(ast.result.predicate)
-      : describePositionRangeConjunction(ast.result.predicate) ??
-        describePredicate(ast.result.predicate);
+      : (describePositionRangeConjunction(ast.result.predicate) ??
+        describePredicate(ast.result.predicate));
   return sentence(`A guess wins if ${clause}`);
 }
