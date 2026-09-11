@@ -579,7 +579,11 @@ const AMBIGUOUS_PATTERNS = [
   /\b(feels?|vibe|balanced|nice|nicely|pattern|mirror-like|stronger)\b/i,
   /(?<!\bas\s)\bmany\b|\b(several|spread out|well spread|organized|cleaner)\b/i,
   /\b(anything|something|whatever)\b/i,
-  /\bsome\b/i,
+  // `some` is ambiguous only when it supplies an unspecified CARDINALITY
+  // ("some positions", "some of my numbers"). Before a singular noun it is the
+  // ordinary existential quantifier: "exactly one less than some drawn number"
+  // means there exists a drawn number and leaves no quantity unstated.
+  /\bsome\s+(?:of\s+(?:the|my|your|its)\s+)?(?:numbers|values|positions|places|slots|picks|matches|hits)\b/i,
   /\b(harmonious|near-perfect)\b/i,
   // Vague vocabulary from prompt-set-2: similes, hedges, and aesthetic words
   // that have no measurable threshold until the player defines one. A word here
@@ -603,7 +607,7 @@ const AMBIGUOUS_PATTERNS = [
 // external prize dependency nor an undefined quantity. Other prize/pool text
 // remains visible to the normal external-dependency block.
 const PROTOCOL_TIE_BREAK_CLAUSE_PATTERN =
-  /(?:^|\s*(?:,|;|\band\b)\s*)(?:if\s+)?(?:(?:several|some|multiple|two\s+or\s+more)\s+)?(?:tickets?|guesses?|players?)\b[^.;]{0,80}\b(?:tie|tied|same\s+(?:score|count|remainder|total|value))\b[^.;]{0,80}\b(?:share|split)\b[^.;]{0,40}\b(?:prize|pool|it|equally)\b[^.;]*(?:[.;]|$)/giu;
+  /(?:^|\s*(?:,|;|\band\b)\s*)(?:if\s+)?(?:(?:several|some|multiple|two\s+or\s+more)\s+)?(?:tickets?|guesses?|players?)\b[^.;]{0,80}\b(?:tie|tied|level|equal|same\s+(?:score|count|remainder|total|value))\b[^.;]{0,80}\b(?:share|split)\b[^.;]{0,40}\b(?:prize|pool|it|equally)\b[^.;]*(?:[.;]|$)/giu;
 
 function stripProtocolTieBreakClauses(text: string) {
   return text
@@ -1947,6 +1951,8 @@ function validateResolvedAst(
   const agentStatement = request.agentInterpretation?.trim();
   let agentStatementCoverageFailed = false;
   let agentStatementCoverageChecked = false;
+  let agentStatementMissingOperations: readonly RuleOperation[] = [];
+  let agentStatementMissingValues: readonly number[] = [];
   if (ast && !forcedFailure && agentStatement) {
     const agentCoverage = analyzeInterpretationCoverage({
       ast,
@@ -1956,6 +1962,8 @@ function validateResolvedAst(
     agentStatementCoverageChecked =
       agentCoverage.requiredOperations.length > 0 ||
       agentCoverage.requiredValues.length > 0;
+    agentStatementMissingOperations = agentCoverage.missingOperations;
+    agentStatementMissingValues = agentCoverage.missingFromAst;
     if (
       agentCoverage.missingFromAst.length > 0 ||
       agentCoverage.missingOperations.length > 0
@@ -1972,7 +1980,13 @@ function validateResolvedAst(
         : !agentStatementCoverageChecked
           ? "Skipped because the agent statement exposed no deterministically checkable value or operation cue."
           : agentStatementCoverageFailed
-          ? "The candidate AST does not keep every load-bearing claim in the agent interpretation."
+          ? `The candidate AST does not keep every load-bearing claim in the agent interpretation${
+              agentStatementMissingOperations.length > 0
+                ? ` (missing operations: ${agentStatementMissingOperations.join(", ")})`
+                : agentStatementMissingValues.length > 0
+                  ? ` (missing values: ${agentStatementMissingValues.join(", ")})`
+                  : ""
+            }.`
           : "The candidate AST keeps the load-bearing claims in the agent interpretation.",
     reasonCodes: agentStatementCoverageFailed
       ? ["AGENT_STATEMENT_MISMATCH"]
@@ -2604,17 +2618,13 @@ function collectDivergentProviderReadings(
 ): string[] {
   const distinct: RuleAst[] = [];
   for (const attempt of attempts.filter(isCompletedProviderOpinion)) {
-    // Only readings produced by a language model are suitable choices for the
-    // player. A deterministic regex artifact is audit evidence and may veto a
-    // draft, but a partial pattern match is not an alternative interpretation
-    // of the sentence. On the deterministic path the reviewer is the provider;
-    // on the provider path the candidate itself is the provider reading.
-    const providerReadings = [
-      ...(attempt.astSource === "provider" ? [attempt.ast] : []),
-      ...(attempt.reviewerAstSource === "provider"
-        ? [attempt.reviewerAst]
-        : []),
-    ];
+    // A source-only reviewer has no consumed spans or worked examples. It is a
+    // useful veto signal, but one uncorroborated reviewer program is not evidence
+    // that the PLAYER'S sentence has a second meaning. Only independently
+    // generated compile candidates may become choices shown to the player; a
+    // later candidate that agrees with the reviewer can still add that reading.
+    const providerReadings =
+      attempt.astSource === "provider" ? [attempt.ast] : [];
     for (const ast of providerReadings) {
       if (
         ast !== null &&
@@ -4996,7 +5006,7 @@ function parseExactMatchCountThreshold(text: string): number | null {
     ) ??
     text.match(
       new RegExp(
-        `\\b(${MATCH_COUNT_NUMBER_0_TO_6})\\b.{0,30}\\b${MATCH_COUNT_NOUN}\\b.{0,50}\\b(?:${EXACT_COUNT_CUE}|exatos?)\\b`,
+        `\\b(${MATCH_COUNT_NUMBER_0_TO_6})\\b(?:[^.;:]{0,30}\\b(?:matches|hits|overlaps?|acertos?)\\b[^.;:]{0,30}\\b(?:${EXACT_COUNT_CUE}|exatos?)\\b|[^.;:]{0,30}\\b(?:numbers?|numeros?|dezenas?)\\b[^.;:]{0,20}\\b(?:${MATCH_COUNT_ACTION}|certos?|corretos?|acertados?)\\b[^.;:]{0,20}\\b(?:${EXACT_COUNT_CUE}|exatos?)\\b)`,
         "i",
       ),
     ) ??
@@ -6120,9 +6130,19 @@ function parseMatchCountThreshold(text: string) {
   ) {
     return null;
   }
+  // A threshold plus a generic source noun is not a match count. "At least one
+  // drawn number" can introduce any predicate over the draw (even, above 50,
+  // divisible by a pick, ...). Require either a semantic result noun (matches,
+  // hits, overlaps, acertos) or an explicit relation after a generic number noun.
+  // This keeps the parser phrase-scoped instead of letting it claim a fragment
+  // from an unrelated compound/ranking rule.
+  const semanticMatchCountNoun = "(?:matches|hits|overlaps?|acertos?)";
+  const genericNumberNoun = "(?:numbers?|numeros?|dezenas?)";
+  const matchAbsenceAction =
+    "(?:absent|missing|unmatched|miss(?:es|ed|ing)?|do\\s+not\\s+(?:appear|match)|nao\\s+(?:aparec\\w*|coincid\\w*|acert\\w*))";
   const numericMatch = text.match(
     new RegExp(
-      `\\b${THRESHOLD_COUNT_CUE}\\s+(${MATCH_COUNT_NUMBER_1_TO_6})\\b.{0,80}\\b(?:${MATCH_COUNT_NOUN}|${MATCH_COUNT_ACTION})\\b`,
+      `\\b${THRESHOLD_COUNT_CUE}\\s+(${MATCH_COUNT_NUMBER_1_TO_6})\\b(?:[^.;:]{0,40}\\b${semanticMatchCountNoun}\\b|[^.;:]{0,40}\\b${genericNumberNoun}\\b[^.;:]{0,32}\\b(?:${MATCH_COUNT_ACTION}|${matchAbsenceAction})\\b|[^.;:]{0,40}\\b${MATCH_COUNT_ACTION}\\b)`,
       "i",
     ),
   );

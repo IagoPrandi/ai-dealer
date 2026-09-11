@@ -1773,7 +1773,18 @@ A candidate and every reviewer reading must independently
 cover the source's load-bearing values and operations before agreement can
 certify the artifact; two matching interpretations that omit the same clause
 are not consensus. Protocol settlement language such as equal prize sharing is
-excluded from winning-expression pattern selection.
+excluded from winning-expression pattern selection. Deterministic match-count
+shortcuts must identify an explicit guess/draw match relation; a bare source
+cardinality fragment such as "at least one drawn number" cannot authorize a
+match-count artifact. Language classification distinguishes an undefined plural
+quantity ("some positions") from a complete existential relation ("some drawn
+number"). Operation coverage is based on executable equivalence, so either sort
+direction may encode an order statistic such as the second largest value. A
+source-only reviewer AST remains a veto signal but cannot, without corroboration
+from an independently generated compile candidate, be presented to the player
+as an alternative reading of their rule. Compiler-only failures expose the
+explicit generation-retry action; they must not invent a clarification question
+or return the unchanged rejected sentence as a rewrite.
 
 Response shape (implemented):
 

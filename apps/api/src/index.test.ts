@@ -1090,6 +1090,11 @@ test("an ambiguity with no viable reading choices does not offer its own text", 
   assert.deepEqual(feedback.suggestedRewrites, []);
   assert.match(feedback.reasonSummary, /compiler conflict/iu);
   assert.doesNotMatch(feedback.reasonSummary, /leaves part.*undefined/iu);
+  assert.ok(
+    feedback.refinementFocus.some((item) =>
+      /retry the exact interpretation/iu.test(item),
+    ),
+  );
 });
 
 test("approved rule wording cannot be replaced by the compiler description", () => {

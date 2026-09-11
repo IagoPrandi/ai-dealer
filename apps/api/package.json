@@ -12,6 +12,8 @@
     "stress:rules:set6": "node scripts/rule-preflight-novel-set-6.mjs",
     "stress:rules:set7": "node scripts/rule-preflight-novel-set-7.mjs",
     "stress:rules:set8": "node scripts/rule-preflight-novel-set-8.mjs",
+    "stress:rules:set9": "node scripts/rule-preflight-novel-set-9.mjs",
+    "stress:rules:set10": "node scripts/rule-preflight-novel-set-10.mjs",
     "test": "node --test --import tsx \"src/**/*.test.ts\"",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.scripts.json",
     "usage:report": "node --import tsx scripts/rule-usage-report.mts"

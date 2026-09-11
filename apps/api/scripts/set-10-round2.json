@@ -1,0 +1,178 @@
+[
+  {
+    "id": "V1b-clarified-antecedent",
+    "kind": "ranking",
+    "expect": ["VALID"],
+    "note": "Answers the exact question the agent asked in round 1: 'it' is the sum of the official draw numbers. The tie sentence is the protocol's own share clause.",
+    "text": "The ticket with the most matched numbers wins, but if the sum of the six drawn numbers is even then the ticket with the fewest matched numbers wins instead. Ties share it equally.",
+    "referenceAst": {
+      "schemaVersion": 3,
+      "result": {
+        "type": "ranking",
+        "direction": "max",
+        "tieBreak": "share_pool",
+        "score": {
+          "kind": "ite",
+          "if": {
+            "kind": "compare",
+            "op": "eq",
+            "left": {
+              "kind": "arith",
+              "op": "mod",
+              "left": { "kind": "reduce", "op": "sum", "of": { "kind": "source", "source": "draw" } },
+              "right": { "kind": "lit", "value": 2 }
+            },
+            "right": { "kind": "lit", "value": 0 }
+          },
+          "then": {
+            "kind": "arith",
+            "op": "sub",
+            "left": { "kind": "lit", "value": 0 },
+            "right": {
+              "kind": "reduce",
+              "op": "count",
+              "of": {
+                "kind": "intersection",
+                "left": { "kind": "source", "source": "guess" },
+                "right": { "kind": "source", "source": "draw" }
+              }
+            }
+          },
+          "else": {
+            "kind": "reduce",
+            "op": "count",
+            "of": {
+              "kind": "intersection",
+              "left": { "kind": "source", "source": "guess" },
+              "right": { "kind": "source", "source": "draw" }
+            }
+          }
+        }
+      }
+    },
+    "rankingFixtures": [
+      {
+        "note": "the draw totals 210, an even sum, so the FEWEST matches wins",
+        "draw": [10, 20, 30, 40, 50, 60],
+        "entries": { "A": [10, 20, 30, 1, 2, 3], "B": [10, 1, 2, 3, 4, 5] },
+        "winners": ["B"]
+      },
+      {
+        "note": "the draw totals 201, an odd sum, so the MOST matches wins",
+        "draw": [1, 20, 30, 40, 50, 60],
+        "entries": { "A": [1, 20, 30, 2, 3, 4], "B": [1, 5, 6, 7, 8, 9] },
+        "winners": ["A"]
+      },
+      {
+        "note": "even draw, two tickets on one match each share it",
+        "draw": [10, 20, 30, 40, 50, 60],
+        "entries": { "A": [10, 1, 2, 3, 4, 5], "C": [20, 6, 7, 8, 9, 11] },
+        "winners": ["A", "C"]
+      },
+      {
+        "note": "even draw, zero matches beats one match",
+        "draw": [10, 20, 30, 40, 50, 60],
+        "entries": { "A": [91, 92, 93, 94, 95, 96], "B": [10, 1, 2, 3, 4, 5] },
+        "winners": ["A"]
+      },
+      {
+        "note": "order of entry is irrelevant: the same multisets score the same",
+        "draw": [10, 20, 30, 40, 50, 60],
+        "entries": { "A": [3, 30, 1, 20, 2, 10], "B": [5, 4, 3, 2, 1, 10] },
+        "winners": ["B"]
+      },
+      {
+        "note": "draw sensitivity: the same two tickets swap places once the drawn total turns odd",
+        "draw": [11, 20, 30, 40, 50, 60],
+        "entries": { "A": [11, 20, 30, 1, 2, 3], "B": [11, 1, 2, 3, 4, 5] },
+        "winners": ["A"]
+      }
+    ]
+  },
+  {
+    "id": "V2b-clarified-couple-just-under",
+    "kind": "predicate",
+    "expect": ["VALID"],
+    "note": "Answers both questions the agent asked in round 1: exactly one less, against any drawn number, and 'a couple' fixed at two.",
+    "text": "A guess wins if at least two of its numbers are exactly one less than some drawn number.",
+    "referenceAst": {
+      "schemaVersion": 3,
+      "result": {
+        "type": "predicate",
+        "predicate": {
+          "kind": "compare",
+          "op": "gte",
+          "left": {
+            "kind": "reduce",
+            "op": "count",
+            "of": {
+              "kind": "filter",
+              "of": { "kind": "source", "source": "guess" },
+              "where": {
+                "kind": "exists",
+                "of": { "kind": "source", "source": "draw" },
+                "where": {
+                  "kind": "compare",
+                  "op": "eq",
+                  "left": { "kind": "elem" },
+                  "right": {
+                    "kind": "arith",
+                    "op": "add",
+                    "left": { "kind": "elem", "up": 1 },
+                    "right": { "kind": "lit", "value": 1 }
+                  }
+                }
+              }
+            }
+          },
+          "right": { "kind": "lit", "value": 2 }
+        }
+      }
+    },
+    "fixtures": [
+      { "note": "9 sits one under 10 and 19 one under 20", "guess": [9, 19, 1, 2, 3, 4], "draw": [10, 20, 30, 40, 50, 60], "outcome": "WIN" },
+      { "note": "boundary: only one number is one under a drawn number", "guess": [9, 1, 2, 3, 4, 5], "draw": [10, 20, 30, 40, 50, 60], "outcome": "LOSE" },
+      { "note": "discriminator: two under is not one under", "guess": [8, 18, 1, 2, 3, 4], "draw": [10, 20, 30, 40, 50, 60], "outcome": "LOSE" },
+      { "note": "discriminator: one OVER is the wrong direction", "guess": [11, 21, 1, 2, 3, 4], "draw": [10, 20, 30, 40, 50, 60], "outcome": "LOSE" },
+      { "note": "all six sit one under a drawn number", "guess": [9, 19, 29, 39, 49, 59], "draw": [10, 20, 30, 40, 50, 60], "outcome": "WIN" },
+      { "note": "the same winning six entered unsorted", "guess": [2, 19, 4, 9, 1, 3], "draw": [10, 20, 30, 40, 50, 60], "outcome": "WIN" },
+      { "note": "draw sensitivity: the same ticket loses against a higher draw", "guess": [9, 19, 1, 2, 3, 4], "draw": [50, 60, 70, 80, 90, 100], "outcome": "LOSE" }
+    ]
+  },
+  {
+    "id": "N1b-agent-own-rewrite",
+    "kind": "predicate",
+    "expect": ["VALID"],
+    "note": "The clarification loop followed to the letter: this is suggestedRewrites[1] from N1's round-1 refusal, submitted verbatim, and it is the reading the player meant.",
+    "text": "A guess wins if the 2nd value of your numbers sorted from highest to lowest is greater than the 2nd value of the drawn numbers sorted from highest to lowest and the 2nd value of your numbers sorted from lowest to highest is less than the 2nd value of the drawn numbers sorted from lowest to highest.",
+    "fixturesFrom": "N1-second-largest-and-second-smallest",
+    "referenceFrom": "N1-second-largest-and-second-smallest"
+  },
+  {
+    "id": "N4b-tie-clause-reworded",
+    "kind": "ranking",
+    "expect": ["VALID"],
+    "note": "N4 with one variable changed: 'tickets level on that count share the prize equally' -> 'ties share it equally'. Isolates the pre-LLM block on the word 'prize'.",
+    "text": "The ticket holding the most numbers that divide exactly into at least one drawn number wins, and ties share it equally.",
+    "fixturesFrom": "N4-divisor-count-ranking",
+    "referenceFrom": "N4-divisor-count-ranking"
+  },
+  {
+    "id": "N2b-stability-replay",
+    "kind": "predicate",
+    "expect": ["VALID"],
+    "note": "N2 verbatim. Round 1 accepted it 7/7; a second run measures whether that reproduces.",
+    "text": "Take the numbers in your guess that the draw does not hold. You win if there is at least one such number and every one of them is even.",
+    "fixturesFrom": "N2-leftovers-all-even",
+    "referenceFrom": "N2-leftovers-all-even"
+  },
+  {
+    "id": "N3b-stability-replay",
+    "kind": "predicate",
+    "expect": ["VALID"],
+    "note": "N3 verbatim. Round 1 accepted it 7/7 only after a fallback; a second run measures whether that reproduces.",
+    "text": "Sort your numbers from lowest to highest and the drawn numbers from highest to lowest, then pair them off in that order. You win if at least four of the six pairs add up to more than 70.",
+    "fixturesFrom": "N3-mirrored-pair-sums",
+    "referenceFrom": "N3-mirrored-pair-sums"
+  }
+]

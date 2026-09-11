@@ -2620,6 +2620,10 @@ test("the dealer's own sentence is a promise the artifact must keep", async () =
     diverged.log.reasonCodes.includes("AGENT_STATEMENT_MISMATCH"),
     JSON.stringify(diverged.log.reasonCodes),
   );
+  const statementStage = diverged.log.attemptDiagnostics[0]?.stages.find(
+    (stage) => stage.stage === "agent_statement_coverage",
+  );
+  assert.match(statementStage?.detail ?? "", /missing operations: position/iu);
 
   // A faithful restatement of the same rule is not a divergence: the check is
   // one-directional, so prose that says less than the artifact is fine.
@@ -3660,6 +3664,8 @@ test("a third provider arbitrates a reviewer mismatch instead of treating it as 
   assert.equal(reviewCalls, 1);
   assert.equal(result.log.providerDisagreementRateSample, 1);
   assert.ok(result.log.reasonCodes.includes("PROVIDER_DISAGREEMENT"));
+  assert.ok(!result.log.reasonCodes.includes("AMBIGUOUS_RULE"));
+  assert.equal(result.log.providerDisagreementReadings.length, 1);
 });
 
 test("ranking disagreement diagnostics compare score and eligibility fields", async () => {
@@ -5552,6 +5558,100 @@ test("protocol ranking tie clauses are neither external state nor ambiguity", ()
     hasAmbiguousWording("A guess wins if some positions match the draw."),
     true,
   );
+});
+
+test("set-10 protocol ties and existential some stay on the compiler path", () => {
+  for (const text of [
+    "The ticket holding the most numbers that divide exactly into at least one drawn number wins, and tickets level on that count share the prize equally.",
+    "The highest score wins, and guesses equal on that score split the pool.",
+    "The lowest total wins; players level on the total share it equally.",
+  ]) {
+    assert.equal(hasExternalDependency(text), false, text);
+  }
+
+  for (const text of [
+    "A guess wins if at least two of its numbers are exactly one less than some drawn number.",
+    "Every guessed number must divide some official draw value.",
+    "A pick wins when some drawn number is exactly twice it.",
+  ]) {
+    assert.equal(hasAmbiguousWording(text), false, text);
+  }
+
+  for (const text of [
+    "A guess wins if some positions match the draw.",
+    "A guess wins if some of its numbers match the draw.",
+    "Some matches are enough to win.",
+  ]) {
+    assert.equal(hasAmbiguousWording(text), true, text);
+  }
+
+  assert.equal(
+    hasExternalDependency(
+      "The highest score wins only when the current prize pool exceeds 10 SOL.",
+    ),
+    true,
+  );
+});
+
+test("match-count shortcuts decline thresholds that qualify another operation", () => {
+  for (const text of [
+    "The ticket holding the most numbers that divide exactly into at least one drawn number wins, and ties share it equally.",
+    "A guess wins if at least one drawn number is even.",
+    "A guess wins if exactly two of its numbers are one less than any drawn number.",
+  ]) {
+    const result = compile(text);
+    assert.equal(result.artifact, null, text);
+    assert.ok(!result.log.reasonCodes.includes("SUPPORTED_RULE"), text);
+  }
+
+  for (const text of [
+    "A guess wins if at least four of its numbers appear in the draw.",
+    "A guess wins if exactly two numbers match the draw.",
+    "A guess wins with at least three hits.",
+  ]) {
+    assert.equal(compile(text).decision, "VALID", text);
+  }
+});
+
+test("coverage derives order statistics from sorting, independent of encoding direction", () => {
+  const source = { kind: "source", source: "guess" } as const;
+  const secondLargestText =
+    "The second largest guessed number is greater than the second largest drawn number.";
+  const selection = (order: "asc" | "desc", index: number) =>
+    ruleAstSchema.parse({
+      schemaVersion: 3,
+      result: {
+        type: "predicate",
+        predicate: {
+          kind: "compare",
+          left: {
+            kind: "at",
+            index,
+            of: { kind: "sort", order, of: source },
+          },
+          op: "gt",
+          right: {
+            kind: "at",
+            index,
+            of: {
+              kind: "sort",
+              order,
+              of: { kind: "source", source: "draw" },
+            },
+          },
+        },
+      },
+    });
+
+  for (const ast of [selection("desc", 1), selection("asc", 4)]) {
+    const coverage = analyzeInterpretationCoverage({
+      ast,
+      officialInterpretation: secondLargestText,
+      text: secondLargestText,
+    });
+    assert.ok(coverage.requiredOperations.includes("maximum"));
+    assert.equal(coverage.covered, true, JSON.stringify(coverage));
+  }
 });
 
 test("agent-authored tie phrasing and objective superlatives do not create ambiguity", () => {

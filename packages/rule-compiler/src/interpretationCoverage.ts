@@ -623,8 +623,13 @@ export function collectAstOperations(ast: RuleAst): Set<RuleOperation> {
     }
     if (kind === "sort") {
       operations.add("sort");
-      if (record.order === "asc") operations.add("minimum");
-      if (record.order === "desc") operations.add("maximum");
+      // A fully sorted fixed-size ticket supports every order statistic in both
+      // directions. `at(1, sort(desc))` is the second largest; the equivalent
+      // `at(4, sort(asc))` selects the same value. Treating the sort direction as
+      // only one extreme made coverage depend on the model's encoding rather
+      // than executable semantics and rejected equivalent ASTs.
+      operations.add("minimum");
+      operations.add("maximum");
     }
     if (
       kind === "slice" &&
