@@ -2763,6 +2763,35 @@ function reconcileSourceClarity(
   );
 }
 
+/**
+ * An interpretation that still asks a question is not an approved rule. Keep
+ * its compiler-facing fields bound to the translated source and the unresolved
+ * questions, rather than exposing a concrete assumption the model made before
+ * asking (for example, silently choosing positional scope).
+ */
+export function preserveUnresolvedInterpretation(
+  sourceText: string,
+  interpretation: RuleAgentInterpretation,
+): RuleAgentInterpretation {
+  if (!interpretation.needsClarification) {
+    return interpretation;
+  }
+  const questions = dedupeBoundedStrings(
+    interpretation.clarificationQuestions,
+  );
+  const unresolved =
+    questions.length > 0
+      ? questions.join(" ")
+      : interpretation.clarityNote ||
+        "The winning condition still has an unresolved dimension.";
+  return {
+    ...interpretation,
+    addedOperationalClauses: [],
+    normalizedText: sourceText.trim(),
+    officialInterpretation: `The winning condition is not complete yet. ${unresolved}`,
+  };
+}
+
 export function selectCompilationText(
   sourceText: string,
   normalizedInterpretation: string,
@@ -3843,15 +3872,18 @@ async function runRuleInterpretationPipeline(
     model: agentConfig.model,
     stage: "interpreting",
   });
-  const interpretation = enforceIncompleteTicketClarity(
-    `${englishText} ${sanitizedText}`,
-    reconcileSourceClarity(
-      sanitizedText,
-      knownInterpretation ??
-        enforceKnownRuleInterpretation(
-          `${englishText} ${sanitizedText}`,
-          await interpretRuleWithAgent(englishText, agentConfig, signal),
-        ),
+  const interpretation = preserveUnresolvedInterpretation(
+    englishText,
+    enforceIncompleteTicketClarity(
+      `${englishText} ${sanitizedText}`,
+      reconcileSourceClarity(
+        sanitizedText,
+        knownInterpretation ??
+          enforceKnownRuleInterpretation(
+            `${englishText} ${sanitizedText}`,
+            await interpretRuleWithAgent(englishText, agentConfig, signal),
+          ),
+      ),
     ),
   );
 
@@ -4121,14 +4153,17 @@ async function runRulePreflightPipeline(
     });
     const interpretation = approvedInterpretation
       ? approvedInterpretation
-      : enforceIncompleteTicketClarity(
-          `${compileText} ${sanitizedText}`,
-          reconcileSourceClarity(
-            sanitizedText,
-            knownInterpretation ??
-              enforceKnownRuleInterpretation(
-                `${compileText} ${sanitizedText}`,
-                await interpretRuleWithAgent(compileText, passConfig, signal),
+      : preserveUnresolvedInterpretation(
+          compileText,
+          enforceIncompleteTicketClarity(
+            `${compileText} ${sanitizedText}`,
+            reconcileSourceClarity(
+              sanitizedText,
+              knownInterpretation ??
+                enforceKnownRuleInterpretation(
+                  `${compileText} ${sanitizedText}`,
+                  await interpretRuleWithAgent(compileText, passConfig, signal),
+                ),
               ),
           ),
         );
@@ -12733,6 +12768,12 @@ export function handleApiRequest(
         ) {
           sendJson(request, response, 400, {
             error: "invalid_approved_interpretation",
+          });
+          return;
+        }
+        if (phase === "compile" && !approvedInterpretation) {
+          sendJson(request, response, 400, {
+            error: "missing_approved_interpretation",
           });
           return;
         }

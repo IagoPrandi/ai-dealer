@@ -379,6 +379,24 @@ test("a malformed rule preflight job path is not routed to the stream", async ()
   assert.deepEqual(await response.json(), { error: "not_found" });
 });
 
+test("compile phase fails closed before starting a job without an approved interpretation", async () => {
+  for (const body of [
+    { phase: "compile", text: RULE_TEXT },
+    { text: RULE_TEXT },
+  ]) {
+    const response = await fetch(`${baseUrl}/rule-preflight`, {
+      body: JSON.stringify(body),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), {
+      error: "missing_approved_interpretation",
+    });
+  }
+});
+
 test("the legacy NDJSON transport still streams the same envelopes", async () => {
   releaseAgent();
   const response = await fetch(`${baseUrl}/rule-preflight`, {

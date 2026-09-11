@@ -375,7 +375,7 @@ const OPERATION_TEXT_CUES: ReadonlyArray<readonly [RuleOperation, RegExp]> = [
   ],
   [
     "all_guess",
-    /\b(?:all|every|each)(?:\s+one)?(?:\s+value)?\s+(?:of\s+)?(?:its|my|your|the)?\s*(?:guessed|picked|ticket)?\s*(?:numbers?|values?|picks?)\b[^.;:]{0,80}\b(?:within|away|distance|satisf(?:y|ies)|for\s+each|every|at\s+least\s+one)\b/u,
+    /\b(?:all|every|each)(?:\s+one)?(?:\s+value)?\s+(?:of\s+)?(?:its|my|your|the)?\s*(?:guessed|picked|ticket)?\s*(?:numbers?|values?|picks?)\b[^.;:]{0,80}\b(?:within|away|distance|satisf(?:y|ies)|for\s+each|every|at\s+least\s+one|worth|scores?|earns?|vale(?:m)?)\b/u,
   ],
   [
     "distance",
@@ -538,6 +538,13 @@ export function collectAstOperations(ast: RuleAst): Set<RuleOperation> {
 
     if (kind.includes("digit") || kind === "digits") {
       operations.add("digit");
+      // Projecting a number to its units digit is exactly value modulo 10.
+      // The interpreter may spell that identity out as a parenthetical gloss;
+      // requiring a second arithmetic `mod` node would reject an equivalent
+      // canonical digit projection.
+      if (kind === "digits" && record.place === "units") {
+        operations.add("mod");
+      }
     }
     // A modulus is not just "modulo": mod 2 IS a parity test and mod 10 IS the
     // units digit. Players write it both ways ("the last digit of the totals
@@ -576,6 +583,19 @@ export function collectAstOperations(ast: RuleAst): Set<RuleOperation> {
       kind === "all_values_between_min_max" ||
       kind === "map_arithmetic" ||
       kind === "map_with_guard"
+    ) {
+      operations.add("all_guess");
+    }
+    // `map(guess, expr)` evaluates `expr` once for every guessed number. It is
+    // the canonical scoring fold for wording such as "each number is worth N
+    // points", so it satisfies the whole-guess quantification even though the
+    // resulting score is not a boolean `forall` predicate.
+    if (
+      kind === "map" &&
+      record.of !== null &&
+      typeof record.of === "object" &&
+      (record.of as Record<string, unknown>).kind === "source" &&
+      (record.of as Record<string, unknown>).source === "guess"
     ) {
       operations.add("all_guess");
     }

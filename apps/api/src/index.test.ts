@@ -110,6 +110,7 @@ import {
   enforceKnownRuleInterpretation,
   enforceSourceAmbiguity,
   enforceSourceClarity,
+  preserveUnresolvedInterpretation,
   selectCompilationText,
   type AuditLogRecord,
   type ConversationDraftRecord,
@@ -1420,6 +1421,33 @@ test("source vagueness cannot be silently made objective by the model", () => {
     "How many positions must match the draw exactly?",
   ]);
   assert.deepEqual(result.suggestedRewrites, []);
+});
+
+test("clarification output cannot preselect an unstated comparison scope", () => {
+  const source =
+    "A guess wins if a decent number of its numbers are noticeably bigger than the drawn ones.";
+  const result = preserveUnresolvedInterpretation(source, {
+    addedOperationalClauses: ["Compare numbers position by position."],
+    clarificationQuestions: [
+      "Should the comparison be position by position or against any drawn number?",
+      "How many guessed numbers must qualify?",
+    ],
+    clarityNote: "The comparison scope and count are missing.",
+    dealerMessage: "Please choose the comparison scope and count.",
+    needsClarification: true,
+    normalizedText:
+      "At least four guessed numbers must exceed the drawn number in the same position.",
+    officialInterpretation:
+      "The engine compares each guess and draw value position by position.",
+    suggestedRewrites: [],
+    title: "Unresolved High Numbers",
+  });
+
+  assert.equal(result.normalizedText, source);
+  assert.deepEqual(result.addedOperationalClauses, []);
+  assert.doesNotMatch(result.officialInterpretation, /the engine compares/iu);
+  assert.match(result.officialInterpretation, /should the comparison/iu);
+  assert.match(result.officialInterpretation, /or against any drawn number/iu);
 });
 
 test("the player's compilable text takes precedence over a lossy model paraphrase", () => {

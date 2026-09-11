@@ -5589,6 +5589,153 @@ test("protocol ranking tie clauses are neither external state nor ambiguity", ()
   );
 });
 
+test("agent-authored tie phrasing and objective superlatives do not create ambiguity", () => {
+  for (const text of [
+    "The ticket with the highest score wins, with ties splitting the prize equally.",
+    "Ties on the highest score result in an equal split of the prize.",
+    "The lowest score wins, with ties sharing the pool equally.",
+    "The closest range wins, and tickets that are equally close split it equally.",
+  ]) {
+    assert.equal(hasExternalDependency(text), false, text);
+    assert.equal(hasAmbiguousWording(text), false, text);
+  }
+  assert.equal(
+    hasExternalDependency(
+      "The closest score wins, with ties splitting the prize equally, but only when the prize exceeds 10 SOL.",
+    ),
+    true,
+  );
+
+  for (const text of [
+    "The ticket whose range is closest to the drawn range wins.",
+    "The ticket with the nearest total to the drawn total wins.",
+  ]) {
+    assert.equal(hasAmbiguousWording(text), false, text);
+  }
+  assert.equal(
+    hasAmbiguousWording("A guess wins if its total is close to the drawn total."),
+    true,
+  );
+});
+
+test("coverage recognizes whole-ticket scoring maps and units digits as modulo 10", () => {
+  const tieredScore = ruleAstSchema.parse({
+    schemaVersion: 3,
+    result: {
+      type: "ranking",
+      direction: "max",
+      tieBreak: "share_pool",
+      score: {
+        kind: "reduce",
+        op: "sum",
+        of: {
+          kind: "map",
+          of: { kind: "source", source: "guess" },
+          expr: {
+            kind: "ite",
+            if: {
+              kind: "contains",
+              array: { kind: "source", source: "draw" },
+              value: { kind: "elem" },
+            },
+            then: { kind: "lit", value: 3 },
+            else: { kind: "lit", value: 0 },
+          },
+        },
+      },
+    },
+  });
+  const scoreCoverage = analyzeInterpretationCoverage({
+    ast: tieredScore,
+    officialInterpretation: describeRuleAstForPlayers(tieredScore),
+    text: "Each of your numbers that was drawn is worth 3 points, and the ticket with the highest total wins.",
+  });
+  assert.ok(scoreCoverage.requiredOperations.includes("all_guess"));
+  assert.ok(!scoreCoverage.missingOperations.includes("all_guess"));
+
+  const units = ruleAstSchema.parse({
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "compare",
+        op: "gte",
+        left: {
+          kind: "reduce",
+          op: "count",
+          of: {
+            kind: "distinct",
+            of: {
+              kind: "digits",
+              place: "units",
+              of: { kind: "source", source: "guess" },
+            },
+          },
+        },
+        right: { kind: "lit", value: 2 },
+      },
+    },
+  });
+  const digitCoverage = analyzeInterpretationCoverage({
+    ast: units,
+    officialInterpretation: describeRuleAstForPlayers(units),
+    text: "At least two distinct last digits (each value modulo 10) must appear in the guess.",
+  });
+  assert.ok(digitCoverage.requiredOperations.includes("mod"));
+  assert.ok(!digitCoverage.missingOperations.includes("mod"));
+});
+
+test("independent behavioral review lets the server correct ranking arithmetic", async () => {
+  const text = "The ticket with the highest sum of its guessed numbers wins.";
+  const ast = ruleAstSchema.parse({
+    schemaVersion: 3,
+    result: {
+      type: "ranking",
+      direction: "max",
+      tieBreak: "share_pool",
+      score: {
+        kind: "reduce",
+        op: "sum",
+        of: { kind: "source", source: "guess" },
+      },
+    },
+  });
+  const result = await compileRuleArtifact(
+    { originalText: text, prompt: text, tokenCount: 11 },
+    {
+      astProvider: async () => ({
+        ast,
+        consumedSpans: [{ text }],
+        workedExamples: [
+          {
+            draw: [10, 20, 30, 40, 50, 60],
+            guess: [1, 2, 3, 4, 5, 6],
+            score: 999,
+          },
+          {
+            draw: [11, 21, 31, 41, 51, 61],
+            guess: [7, 8, 9, 10, 11, 12],
+            score: -1,
+          },
+        ],
+      }),
+      astReviewer: async () => ast,
+      requireProviderEvidence: true,
+    },
+  );
+
+  assert.equal(result.decision, "VALID");
+  assert.ok(!result.log.reasonCodes.includes("PROVIDER_EVIDENCE_UNVERIFIED"));
+  const evidence = result.log.attemptDiagnostics[0]?.providerEvidence;
+  assert.ok(
+    evidence?.exampleResults.every((example) => example.status === "passed"),
+  );
+  assert.match(
+    evidence?.exampleResults[0]?.detail ?? "",
+    /corrected to the deterministic runtime score/iu,
+  );
+});
+
 test("nested cross-source distance ASTs render without binder implementation prose", () => {
   const ast = ruleAstSchema.parse({
     schemaVersion: 3,

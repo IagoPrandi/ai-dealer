@@ -625,6 +625,14 @@ test("interpret harness teaches predicate min/max and casual threshold cases", a
   assert.match(systemPrompt, /quantity\/comparator, property being compared/i);
   assert.match(
     systemPrompt,
+    /do not choose it inside `normalizedText` or `officialInterpretation` before asking/i,
+  );
+  assert.match(
+    systemPrompt,
+    /must not become position-by-position unless the player said so/i,
+  );
+  assert.match(
+    systemPrompt,
     /never offer stock examples, generic match-count rules/i,
   );
   assert.match(systemPrompt, /fewer than six values.*complete guess/i);

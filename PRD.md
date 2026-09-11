@@ -1760,6 +1760,13 @@ Preflight endpoint:
 POST /rule-preflight
 ```
 
+The endpoint is explicitly two-phase. `phase: "interpret"` accepts rule text and
+returns the reading the player may approve. `phase: "compile"` requires the
+complete `approvedInterpretation` returned by that flow, bound to the same
+sanitized rule text; a missing or invalid approval is rejected before a job is
+created or any compiler model runs. A compile request must never reinterpret
+vague text or manufacture missing intent.
+
 Response shape (implemented):
 
 ```typescript

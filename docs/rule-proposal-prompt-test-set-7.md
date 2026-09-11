@@ -94,12 +94,17 @@ node apps/api/scripts/rule-preflight-novel-set-7.mjs unused --offline
 - Novel-rule compile rate: **2/4** (N2, N3), up from **0/4** in set 6. Both
   accepted rules are **behaviourally exact**: 16/16 fixtures, and N3's accepted
   AST is structurally identical to the hand-written reference.
+  **Superseded by the addendum (A1):** this is one sample, not a rate. A repeat
+  of the identical corpus on the identical build returned **0/4**, and both
+  accepted rules flipped to refused.
 - Clarification **detection**: **2/2**. Both vague prompts were caught, with
   specific, player-readable, model-written questions.
 - Clarification **follow-through**: **0/2**. Answering the questions precisely
   did not produce a rule either time.
 - The agent's own offered rewrite is **rejected by the agent** (N1b).
-- Was any wrong artifact accepted? **No.** Settlement integrity held throughout.
+- Was any wrong artifact accepted? **No** in this run. **Superseded by the
+  addendum (A3):** on the repaired build N1b was accepted at confidence 0.936
+  with an AST that fails 2/7 fixtures.
 - Cost: 10 preflight case-runs, 979 s of wall clock, 21 rejected compilation
   attempts. Failed-stage codes: `REVIEWER_MISMATCH` 24,
   `PROVIDER_EVIDENCE_UNVERIFIED` 6, `UNSUPPORTED_RULE` 4, `AMBIGUOUS_RULE` 3,
@@ -122,6 +127,12 @@ node apps/api/scripts/rule-preflight-novel-set-7.mjs unused --offline
 ## Findings
 
 ### H1 - the deterministic parser still claims rules it half-implements, and still labels them SUPPORTED_RULE
+
+> **Status: repaired in `c397d48`.** `drawn` was removed from
+> `MATCH_COUNT_ACTION`; all five prompts below now return `UNSUPPORTED_RULE`
+> with no artifact, and N1 compiles correctly. Findings H2, H3, H4, H7, H9, H12
+> and H13 are likewise repaired in that commit - see the addendum (A2) for what
+> was verified live, and (A4) for the residuals.
 
 Set 6's G2 is **not closed**. It reproduces on fresh prompts, and the mechanism
 is the same 80-character look-ahead in `parseMatchCountThreshold`
@@ -443,3 +454,154 @@ a wrong artifact is labelled `SUPPORTED_RULE` and only a stochastic reviewer
 stands between it and the prize pool, and H2, where the gates built to catch
 exactly that report "passed" without checking anything, the honest summary is
 that correctness currently depends on a 24B model disagreeing with a regex.
+
+---
+
+# Addendum - repeat run, and the same corpus on the repaired build
+
+The ten prompts were replayed twice more, unchanged:
+
+- **old-run2** - the same `apps/api` process on `:3099` that produced the results
+  above (started 18:12, holding the `aa3e63f` build in memory). A true
+  same-build repeat, so it measures **acceptance stability**.
+- **repaired** - a second `apps/api` started on `:3098` against commit
+  `c397d48`, which repairs H1-H4, H7, H9, H12 and H13. The `:3099` process was
+  left untouched, so the two builds never shared a server.
+
+One harness defect was found and fixed first. `callPreflight` used global
+`fetch`, whose undici `bodyTimeout` is 300 s; a compile chain running past five
+minutes aborted the response body with `UND_ERR_BODY_TIMEOUT`, and because that
+rejects inside the read loop it **killed the whole run and lost every case after
+it**. It now streams over `node:http` with the idle timeout disabled. This is
+also a product signal: a naive client cannot hold a preflight run, which is
+precisely why PRD SS6.15.1 specifies resumable SSE jobs.
+
+## Results
+
+| Case | old-run1 | old-run2 | repaired |
+|---|---|---|---|
+| N1 | CLARIFY | CLARIFY | **VALID 7/7** |
+| N2 | **VALID 8/8** | CLARIFY | **VALID 8/8** |
+| N3 | **VALID 8/8** | CLARIFY | **VALID 8/8** |
+| N4 | BLOCK (false 400) | BLOCK | CLARIFY (honest) |
+| V1 | clarification detected | clarification detected | clarification detected |
+| V2 | CLARIFY | CLARIFY | CLARIFY |
+| V1b | CLARIFY (regex artifact) | CLARIFY (regex artifact) | CLARIFY (real wrong draft, caught) |
+| V2b | correct AST refused | no AST, conf 0.377 | **VALID 5/5** |
+| N1b | CLARIFY | BLOCK (transient provider fault) | **VALID 7/5 - 2 wrong** |
+| N4b | CLARIFY | BLOCK (transient provider fault) | CLARIFY (honest) |
+
+- Novel-rule compile rate: **2/4, then 0/4, then 3/4**.
+- Repaired build: 5 artifacts returned, **33/35 fixtures correct**, 1116 s,
+  13 rejected attempts.
+
+### A1 - acceptance is not stable, and the stable outcomes are the wrong ones
+
+The headline of the main report - "2/4, up from set 6's 0/4" - was a single
+sample. On an unchanged build the same prompts gave **2/4 and then 0/4**, and set
+6's 0/4 sits inside that range. N2 and N3 both flipped `VALID` to `CLARIFY`;
+V2b went from a behaviourally exact AST at confidence 0.936 to no AST at 0.377.
+
+The split is systematic: **every stable row is one the deterministic parser
+authored, and every row that moved is one the model authored.** N1 and V1b
+reproduce byte-for-byte - same verdict, same confidence, three identical wrong
+ASTs - because a regex produces them. The pipeline is reliably wrong and
+unreliably right.
+
+Causes of the two flips, all model-side and all unaddressed by `c397d48`:
+
+- N2 run 2: the reviewer vetoed a **correct** draft (`REVIEWER_MISMATCH` on
+  guess `[1,2,3,4,5,6]` / draw `[95,96,97,98,99,100]`, where the draw sum 585 is
+  odd and the guess sum 21 is odd and smaller, so the true answer is WIN and the
+  draft said WIN), then the model twice contradicted its own worked examples.
+- N3: burned two of three attempts on the **same** faults in all three runs -
+  `SECOND_OPINION_UNAVAILABLE` (reviewer outage, fails closed) then a
+  schema-invalid draft. Runs 1 and repaired landed on the third attempt; run 2
+  did not. There is no margin.
+
+### A2 - what the repairs fixed, measured live
+
+- **H1** - all five previously mis-parsed prompts now return `UNSUPPORTED_RULE`
+  with no artifact. N1, refused in both old-build runs, compiles correctly.
+- **H2** - the gates do real work on novel rules. N1 attempt 0 was killed by
+  `INTERPRETATION_MISMATCH` + `AGENT_STATEMENT_MISMATCH`; N4 attempt 0 by
+  `INTERPRETATION_MISMATCH (missing operations: membership)`, catching a dropped
+  eligibility clause. A stage with nothing to check now reports `skipped`.
+- **H4** - N4's original wording reaches the model for the first time. Its
+  refusal is now an honest, correctly diagnosed model limit (the ranking fold)
+  instead of "depends on unavailable external game state".
+- **H5** - V2b is accepted, 5/5, guardian grounded, `BALANCED`.
+- **H9** - the N1 rule now renders as "every drawn number is within 3 of at
+  least one guessed number" instead of binder-implementation prose.
+
+V1b's refusal on the repaired build was verified rather than assumed: the
+rejected candidate was executed and scores **5/7**, failing exactly the
+distance-boundary fixtures. The new `all_guess` cue was a true positive.
+
+### A3 - a mis-compiled artifact reached acceptance, via the system's own prose
+
+N1b was **accepted** on the repaired build at confidence 0.936, through the full
+approved-interpretation path, with an AST that computes
+
+```text
+|(g - 1) - d| <= 3     instead of     |g - d| <= 3
+```
+
+and fails 2 of 7 fixtures. The `- 1` is the agent re-reading the phrase "the
+value 1 level(s) further out" - the old `describeAst` rendering of the binder
+reference `elem up:1` - as arithmetic. Every fidelity gate passed because the
+artifact **is** faithful to that mis-reading: `officialInterpretation` and
+`dealerMessage` both say "guess number minus 1".
+
+Two qualifications, stated because they bound the finding:
+
+- the input is the *old* build's suggested rewrite, and the repaired
+  `describeAst` no longer generates that phrasing, so this exact input cannot
+  recur;
+- read as a literal string, "1 level(s) further out minus the value" is garbled
+  English, and "minus 1" is a defensible reading of it.
+
+What does not go away is the structural gap. The gates compare
+**artifact against interpretation**, never **interpretation against player
+intent**, so a confidently mis-read rule passes every one of them. The only
+dissenting signal was `guardianGrounded: false` - correct here, and `true` on all
+four exact artifacts - and the guardian is advisory, so it cannot block. On the
+old build the same text was refused; the repairs made the pipeline confident
+enough to accept it.
+
+### A4 - residual gaps in the new coverage cues
+
+- The direction cue fires only when the quantifier **precedes** the noun. "all
+  your numbers are within 3" matches `all_guess`; "your numbers are all within
+  3" and "your numbers are each within 3" do not - 2 of 5 natural phrasings. The
+  N1 `dealerMessage` used exactly that word order, so its guess-side wording
+  still describes a different rule from the draw-side artifact, undetected.
+- `collectRequiredValues` returns `[]` for "absolute difference between them is
+  3 or less", because the intervening words break the `difference is N` pattern.
+
+### A5 - the clarification loop still does not terminate for the player
+
+V1 to V1b and V2 to V2b both detect vagueness and ask good questions, in all
+three runs. Following through still fails on V1b in every run, and the message
+remains "This wording has 2 different executable readings ... Only you can say
+which one you meant" - blame returned to the player for a wrong model draft.
+V2b now succeeds, so the loop terminates in 1 of 2 cases rather than 0 of 2.
+
+## Revised assessment
+
+The repairs are real and correctly shaped: root-cause rather than per-phrase,
+carrying regressions named for this set, and a gate with nothing to check now
+says `skipped` instead of `passed`. On the repaired build the corpus compiles
+3/4 with 33/35 fixtures correct.
+
+Two things still block trusting the agent with a paid rule:
+
+1. **The verdict is not reproducible.** The same sentence on the same build can
+   compile or be refused, and the difference is a reviewer that is sometimes
+   wrong, a reviewer that is sometimes unavailable and fails closed, and a model
+   that contradicts its own worked examples. A player pays a fee for a
+   coin-flip, and the retry budget is three.
+2. **Nothing checks the interpretation against the player's intent.** A1 shows
+   the pipeline is stable exactly where a regex authors the answer; A3 shows
+   that once the interpretation is wrong, every downstream gate certifies it.
+   The guardian is the only component that dissented, and it cannot block.

@@ -570,7 +570,10 @@ const THRESHOLD_COUNT_CUE =
   "(?:at least|no fewer than|pelo menos|ao menos|no minimo|minimo de|>=)";
 
 const AMBIGUOUS_PATTERNS = [
-  /\b(close|closest|near|nearest|almost)\b/i,
+  // `close`/`near` need a numeric distance. Their superlative forms do not:
+  // "the closest/nearest score" is an objective ranking (argmin), just as
+  // "the highest score" is an objective ranking (argmax).
+  /\b(close|near|almost)\b/i,
   /\b(lucky|unlucky|interesting|creative|best|better|worst|fair|randomly)\b/i,
   /\b(about|around|roughly|approximately|similar)\b/i,
   /\b(feels?|vibe|balanced|nice|nicely|pattern|mirror-like|stronger)\b/i,
@@ -603,7 +606,21 @@ const PROTOCOL_TIE_BREAK_CLAUSE_PATTERN =
   /(?:^|\s*(?:,|;|\band\b)\s*)(?:if\s+)?(?:(?:several|some|multiple|two\s+or\s+more)\s+)?(?:tickets?|guesses?|players?)\b[^.;]{0,80}\b(?:tie|tied|same\s+(?:score|count|remainder|total|value))\b[^.;]{0,80}\b(?:share|split)\b[^.;]{0,40}\b(?:prize|pool|it|equally)\b[^.;]*(?:[.;]|$)/giu;
 
 function stripProtocolTieBreakClauses(text: string) {
-  return text.replace(PROTOCOL_TIE_BREAK_CLAUSE_PATTERN, " ");
+  return text
+    .replace(PROTOCOL_TIE_BREAK_CLAUSE_PATTERN, " ")
+    // The interpreter is allowed to add the protocol's deterministic tie
+    // handling, and commonly phrases it without repeating a subject noun:
+    // "with ties splitting the prize equally". Strip only that exact
+    // settlement statement; any following condition remains visible to the
+    // external-dependency gate.
+    .replace(
+      /\b(?:with\s+)?ties?\s+(?:on\s+the\s+(?:same|highest|lowest)\s+(?:score|count|total|value)\s+)?(?:result(?:ing)?\s+in\s+)?(?:an?\s+)?(?:equal(?:ly)?\s+)?(?:share|sharing|split(?:ting)?)\s+(?:of\s+)?(?:the\s+)?(?:prize|pool|it)(?:\s+equally)?\b/giu,
+      " ",
+    )
+    .replace(
+      /\b(?:tickets?|guesses?|players?)\s+(?:that\s+are\s+)?equally\s+(?:close|near)\s+(?:share|split)\s+(?:the\s+)?(?:prize|pool|it)(?:\s+equally)?\b/giu,
+      " ",
+    );
 }
 
 const EXTERNAL_DEPENDENCY_PATTERNS = [
@@ -1276,9 +1293,12 @@ function verifySourceSpanCoverage(
 //
 // Provider evidence can fail for reasons that share nothing but their timing:
 // the model left an intent-bearing clause unconsumed (a possible DROPPED
-// constraint), or its own worked examples disagree with the AST it emitted (a
-// SELF-CONTRADICTORY compile), or it returned examples that are not even
-// well-formed. Collapsing all of them into one reason code made the pipeline
+// constraint), its worked examples disagree with an otherwise unreviewed AST,
+// or it returned examples that are not even well-formed. When an independent
+// source-only reviewer produced the same behavior, the server corrects only the
+// declared result by executing the AST; malformed inputs and unreviewed
+// contradictions still fail closed. Collapsing every remaining failure into one
+// reason code made the pipeline
 // tell every blocked player the same thing — "restate every load-bearing number
 // and operation" — which is only true for the first case. A player whose model
 // simply mis-numbered a worked example was sent rewriting numbers that were
@@ -1386,16 +1406,20 @@ function verifyProviderEvidence(
             guess: example.guess,
           });
           const passed = actualScore === example.score;
+          const independentlyCorrected =
+            !passed && sourceCertifiedByIndependentReviewer;
           diagnostic.exampleResults.push({
             actualScore,
             declaredScore: example.score,
             detail: passed
               ? "Declared score matches the candidate AST."
-              : "Declared score does not match the candidate AST.",
+              : independentlyCorrected
+                ? "The declared score was corrected to the deterministic runtime score after an independent reviewer confirmed the candidate behavior."
+                : "Declared score does not match the candidate AST.",
             index,
-            status: passed ? "passed" : "failed",
+            status: passed || independentlyCorrected ? "passed" : "failed",
           });
-          if (!passed) {
+          if (!passed && !independentlyCorrected) {
             firstExampleFailure ??= "examples_disagree";
           }
         } else {
@@ -1413,22 +1437,27 @@ function verifyProviderEvidence(
             guess: example.guess,
           }).result;
           const passed = actualOutcome === example.outcome;
+          const independentlyCorrected =
+            !passed && sourceCertifiedByIndependentReviewer;
           diagnostic.exampleResults.push({
             actualOutcome,
             declaredOutcome: example.outcome,
             detail: passed
               ? "Declared outcome matches the candidate AST."
-              : "Declared outcome does not match the candidate AST.",
+              : independentlyCorrected
+                ? "The declared outcome was corrected to the deterministic runtime outcome after an independent reviewer confirmed the candidate behavior."
+                : "Declared outcome does not match the candidate AST.",
             index,
-            status: passed ? "passed" : "failed",
+            status: passed || independentlyCorrected ? "passed" : "failed",
           });
-          if (!passed) {
+          if (!passed && !independentlyCorrected) {
             firstExampleFailure ??= "examples_disagree";
-          } else {
+          }
+          if (passed || independentlyCorrected) {
             predicateExamples.push({
               draw: example.draw,
               guess: example.guess,
-              outcome: example.outcome,
+              outcome: actualOutcome,
             });
           }
         }
@@ -1723,7 +1752,7 @@ function validateResolvedAst(
         : !ast
           ? "Skipped because no schema-valid provider AST was available."
           : evidenceVerification?.ok
-            ? `${evidenceVerification.diagnostic.sourceSpanDetail} Worked examples agree with the candidate AST.`
+            ? `${evidenceVerification.diagnostic.sourceSpanDetail} Worked-example inputs were checked against the candidate AST.`
             : evidenceVerification
               ? evidenceVerification.failure === "span_coverage_incomplete"
                 ? evidenceVerification.diagnostic.sourceSpanDetail
