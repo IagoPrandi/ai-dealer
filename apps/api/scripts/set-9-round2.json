@@ -1,0 +1,192 @@
+[
+  {
+    "id": "V1b-clarified-spread-and-mix",
+    "kind": "predicate",
+    "expect": ["VALID"],
+    "note": "Answers the two questions the agent itself asked in round 1: which spread measure, and what counts as a good mix of small and large.",
+    "text": "A guess wins if the difference between its highest and lowest number is greater than the same difference for the drawn numbers, and at least two of its numbers are below 50 while at least two are above 50.",
+    "referenceAst": {
+      "schemaVersion": 3,
+      "result": {
+        "type": "predicate",
+        "predicate": {
+          "kind": "and",
+          "clauses": [
+            {
+              "kind": "compare",
+              "op": "gt",
+              "left": { "kind": "reduce", "op": "range_span", "of": { "kind": "source", "source": "guess" } },
+              "right": { "kind": "reduce", "op": "range_span", "of": { "kind": "source", "source": "draw" } }
+            },
+            {
+              "kind": "compare",
+              "op": "gte",
+              "left": {
+                "kind": "reduce",
+                "op": "count",
+                "of": {
+                  "kind": "filter",
+                  "of": { "kind": "source", "source": "guess" },
+                  "where": { "kind": "compare", "op": "lt", "left": { "kind": "elem" }, "right": { "kind": "lit", "value": 50 } }
+                }
+              },
+              "right": { "kind": "lit", "value": 2 }
+            },
+            {
+              "kind": "compare",
+              "op": "gte",
+              "left": {
+                "kind": "reduce",
+                "op": "count",
+                "of": {
+                  "kind": "filter",
+                  "of": { "kind": "source", "source": "guess" },
+                  "where": { "kind": "compare", "op": "gt", "left": { "kind": "elem" }, "right": { "kind": "lit", "value": 50 } }
+                }
+              },
+              "right": { "kind": "lit", "value": 2 }
+            }
+          ]
+        }
+      }
+    },
+    "fixtures": [
+      { "note": "span 99 beats the draw span 50, three numbers on each side of 50", "guess": [1, 2, 3, 98, 99, 100], "draw": [10, 20, 30, 40, 50, 60], "outcome": "WIN" },
+      { "note": "boundary: a span equal to the draw span is not greater", "guess": [10, 20, 30, 55, 58, 60], "draw": [10, 20, 30, 40, 50, 60], "outcome": "LOSE" },
+      { "note": "boundary: one more than the draw span qualifies", "guess": [10, 20, 30, 55, 58, 61], "draw": [10, 20, 30, 40, 50, 60], "outcome": "WIN" },
+      { "note": "wide enough but only one number below 50", "guess": [10, 51, 52, 53, 54, 100], "draw": [10, 20, 30, 40, 50, 60], "outcome": "LOSE" },
+      { "note": "wide enough but only one number above 50", "guess": [1, 2, 3, 4, 5, 100], "draw": [10, 20, 30, 40, 50, 60], "outcome": "LOSE" },
+      { "note": "50 itself is neither below nor above 50", "guess": [10, 50, 51, 52, 53, 90], "draw": [10, 20, 30, 40, 50, 60], "outcome": "LOSE" },
+      { "note": "draw sensitivity: the same guess loses against a wider draw", "guess": [10, 20, 30, 55, 58, 61], "draw": [1, 2, 3, 4, 5, 100], "outcome": "LOSE" }
+    ]
+  },
+  {
+    "id": "V2b-clarified-looks-like-the-draw",
+    "kind": "ranking",
+    "expect": ["VALID"],
+    "note": "Answers the agent's round-1 question by naming the measurable property (how many numbers land within 5 of a drawn number) and the exclusion that 'without copying it' stood for (at most two exact hits).",
+    "text": "A ticket is eligible only if it holds at most two of the drawn numbers. Among eligible tickets, the one with the most numbers that are within 5 of a drawn number wins, and tickets on the same count split it equally.",
+    "referenceAst": {
+      "schemaVersion": 3,
+      "result": {
+        "type": "ranking",
+        "direction": "max",
+        "tieBreak": "share_pool",
+        "eligibleWhen": {
+          "kind": "compare",
+          "op": "lte",
+          "left": {
+            "kind": "reduce",
+            "op": "count",
+            "of": {
+              "kind": "intersection",
+              "left": { "kind": "source", "source": "guess" },
+              "right": { "kind": "source", "source": "draw" }
+            }
+          },
+          "right": { "kind": "lit", "value": 2 }
+        },
+        "score": {
+          "kind": "reduce",
+          "op": "count",
+          "of": {
+            "kind": "filter",
+            "of": { "kind": "source", "source": "guess" },
+            "where": {
+              "kind": "exists",
+              "of": { "kind": "source", "source": "draw" },
+              "where": {
+                "kind": "compare",
+                "op": "lte",
+                "left": {
+                  "kind": "abs",
+                  "of": {
+                    "kind": "arith",
+                    "op": "sub",
+                    "left": { "kind": "elem", "up": 0 },
+                    "right": { "kind": "elem", "up": 1 }
+                  }
+                },
+                "right": { "kind": "lit", "value": 5 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "rankingFixtures": [
+      {
+        "note": "six numbers within 5 beat five",
+        "draw": [10, 20, 30, 40, 50, 60],
+        "entries": { "A": [11, 21, 31, 41, 51, 61], "B": [16, 26, 36, 46, 56, 66] },
+        "winners": ["A"]
+      },
+      {
+        "note": "eligibility bites: three exact hits put the best ticket out",
+        "draw": [10, 20, 30, 40, 50, 60],
+        "entries": { "A": [10, 20, 30, 41, 51, 61], "B": [16, 26, 36, 46, 56, 66] },
+        "winners": ["B"]
+      },
+      {
+        "note": "boundary: exactly two exact hits are still eligible, and tie at six",
+        "draw": [10, 20, 30, 40, 50, 60],
+        "entries": { "A": [10, 20, 31, 41, 51, 61], "B": [11, 21, 31, 41, 51, 61] },
+        "winners": ["A", "B"]
+      },
+      {
+        "note": "boundary: a distance of exactly 5 counts",
+        "draw": [10, 20, 30, 40, 50, 60],
+        "entries": { "A": [15, 25, 35, 45, 55, 65], "B": [16, 26, 36, 46, 56, 66] },
+        "winners": ["A"]
+      },
+      {
+        "note": "nobody is eligible, so nobody wins",
+        "draw": [10, 20, 30, 40, 50, 60],
+        "entries": { "A": [10, 20, 30, 40, 51, 61], "B": [10, 20, 30, 40, 50, 61] },
+        "winners": []
+      },
+      {
+        "note": "draw sensitivity: the far ticket becomes the near one under another draw",
+        "draw": [70, 80, 90, 91, 92, 93],
+        "entries": { "A": [11, 21, 31, 41, 51, 61], "B": [66, 67, 68, 69, 70, 71] },
+        "winners": ["B"]
+      }
+    ]
+  },
+  {
+    "id": "N2b-guarded-double-above-100",
+    "kind": "predicate",
+    "expect": ["VALID"],
+    "note": "N2 with exactly one word changed, 'past 100' -> 'above 100', to isolate the pre-LLM external-dependency false positive on the word 'past'.",
+    "text": "Double each of your numbers, but if doubling a number would take it above 100 then keep that number as it is. You win if at least three of the resulting numbers appear in the draw.",
+    "fixturesFrom": "N2-guarded-double-membership",
+    "referenceFrom": "N2-guarded-double-membership"
+  },
+  {
+    "id": "N3b-same-number-of-multiples",
+    "kind": "predicate",
+    "expect": ["VALID"],
+    "note": "N3 with 'exactly as many ... as' -> 'the same number of ... as', to isolate the hasAmbiguousWording trigger on 'as many'.",
+    "text": "A guess wins if it holds the same number of multiples of three as the draw does, and the product of its two smallest numbers is greater than the largest drawn number.",
+    "fixturesFrom": "N3-matching-multiples-and-product",
+    "referenceFrom": "N3-matching-multiples-and-product"
+  },
+  {
+    "id": "N4b-tie-clause-reworded",
+    "kind": "ranking",
+    "expect": ["VALID"],
+    "note": "N4 with the tie sentence reworded away from the literal 'same total', to isolate the deterministic sum_equals over-claim.",
+    "text": "Line up your six numbers against the six drawn numbers from lowest to highest and add up the differences; the ticket with the smallest total wins. A ticket that holds any of the drawn numbers has 10 added to its total as a penalty, and tickets tied for the smallest total split it equally.",
+    "fixturesFrom": "N4-sorted-distance-with-penalty",
+    "referenceFrom": "N4-sorted-distance-with-penalty"
+  },
+  {
+    "id": "N1b-top-three-replay",
+    "kind": "predicate",
+    "expect": ["VALID"],
+    "note": "N1 verbatim, replayed to measure verdict stability on an unchanged build.",
+    "text": "A guess wins if, after sorting its own numbers and the drawn numbers from highest to lowest, each of its three highest numbers is strictly greater than the drawn number in the matching position.",
+    "fixturesFrom": "N1-top-three-positional-dominance",
+    "referenceFrom": "N1-top-three-positional-dominance"
+  }
+]

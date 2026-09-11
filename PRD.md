@@ -1765,7 +1765,15 @@ returns the reading the player may approve. `phase: "compile"` requires the
 complete `approvedInterpretation` returned by that flow, bound to the same
 sanitized rule text; a missing or invalid approval is rejected before a job is
 created or any compiler model runs. A compile request must never reinterpret
-vague text or manufacture missing intent.
+vague text or manufacture missing intent. After approval, `normalizedText` and
+`officialInterpretation` are player-facing contract fields: an AST-derived
+description may be retained for audit, but it must never replace or truncate
+the approved wording. A separate material-impact disclosure may be appended.
+A candidate and every reviewer reading must independently
+cover the source's load-bearing values and operations before agreement can
+certify the artifact; two matching interpretations that omit the same clause
+are not consensus. Protocol settlement language such as equal prize sharing is
+excluded from winning-expression pattern selection.
 
 Response shape (implemented):
 

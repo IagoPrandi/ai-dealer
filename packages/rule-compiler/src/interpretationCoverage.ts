@@ -55,6 +55,7 @@ export type RuleOperation =
   | "all_draw"
   | "all_guess"
   | "comparison_count"
+  | "conditional"
   | "digit"
   | "distance"
   | "distinct"
@@ -141,6 +142,7 @@ const COMPARISON_THRESHOLD_PATTERNS = [
   /\b(?:distance|difference)\s+(?:of|is)\s+(\d{1,3})\b/gu,
   /\b(\d{1,3})\s+(?:away|apart|below|above|lower|higher)\b/gu,
   /\b(?:gap|gaps|distance|distances|difference|differences)\b[^.;:]{0,60}\b(?:at\s+least|at\s+most|more\s+than|less\s+than|greater\s+than|no\s+more\s+than|no\s+less\s+than)\s+(\d{1,3})\b/gu,
+  /\b(?:below|above|under|over|lower\s+than|higher\s+than|less\s+than|greater\s+than|smaller\s+than|larger\s+than)\s+(\d{1,3})\b/gu,
   /\b(?:a\s+no\s+maximo|distancia\s+(?:de|e)|diferenca\s+(?:de|e))\s+(\d{1,3})\b/gu,
   /\b(\d{1,3})\s+(?:de\s+distancia|abaixo|acima|menor|maior)\b/gu,
 ] as const;
@@ -379,7 +381,7 @@ const OPERATION_TEXT_CUES: ReadonlyArray<readonly [RuleOperation, RegExp]> = [
   ],
   [
     "distance",
-    /\b(?:distance|distances|away|apart)\b|\bwithin\s+\d{1,3}\s+(?:of|from)\b/u,
+    /\b(?:distance|distances|away|apart)\b|\bwithin\s+\d{1,3}\s+(?:of|from)\b|\b(?:add|sum|total)\b[^.;:]{0,50}\bdifferences?\b|\bdifferences?\b[^.;:]{0,50}\b(?:add|sum|total)\b/u,
   ],
   [
     "distinct",
@@ -387,7 +389,7 @@ const OPERATION_TEXT_CUES: ReadonlyArray<readonly [RuleOperation, RegExp]> = [
   ],
   [
     "membership",
-    /\b(?:appear(?:s|ed|ing)?\s+in|present\s+in|contained?\s+in|(?:contains?|includes?)\s+(?:(?:at\s+least|exactly)\s+one\s+)?(?:the\s+)?(?:numbers?|values?|drawn)|one\s+of\s+the\s+drawn|intersection|overlap)\b/u,
+    /\b(?:appear(?:s|ed|ing)?\s+in|present\s+in|contained?\s+in|(?:contains?|includes?|holds?)\s+(?:(?:at\s+least|exactly|any)\s+)?(?:one\s+of\s+)?(?:the\s+)?(?:numbers?|values?|drawn)|one\s+of\s+the\s+drawn|intersection|overlap)\b/u,
   ],
   [
     "minimum",
@@ -397,7 +399,10 @@ const OPERATION_TEXT_CUES: ReadonlyArray<readonly [RuleOperation, RegExp]> = [
     "maximum",
     /\b(?:largest|highest|biggest|maximum|maximo)\s+(?:drawn|guessed|picked|ticket)?\s*(?:number|value|gap)|\b(?:numero|valor|lacuna)\s+(?:maximo|maior)\b/u,
   ],
-  ["sort", /\b(?:sorted?|ordenad[oa]s?)\b/u],
+  [
+    "sort",
+    /\b(?:sort(?:ed|ing)?|ordenad[oa]s?|lowest\s+to\s+highest|highest\s+to\s+lowest)\b/u,
+  ],
   [
     "adjacent_gap",
     /\b(?:gaps?|distances?)\s+between\s+(?:consecutive|adjacent)|\b(?:consecutive|adjacent)\s+(?:gaps?|numbers?)\b/u,
@@ -419,7 +424,11 @@ const OPERATION_TEXT_CUES: ReadonlyArray<readonly [RuleOperation, RegExp]> = [
   ["sum", /\b(?:sum|sums|total|totals|soma|somam?)\b/u],
   [
     "product",
-    /\b(?:product|multiply|multiplied|multiplication|produto|multiplica(?:do|r|cao)?|(?:[0-9]+|one|two|three|four|five|six|um|uma|dois|duas|tres|quatro|cinco|seis)\s+(?:times?|vezes?))\b/u,
+    /\b(?:product|multiply|multiplied|multiplication|double[ds]?|doubling|twice|triple[ds]?|tripling|produto|multiplica(?:do|r|cao)?|dobr(?:a|ar|ado|ando)|triplic(?:a|ar|ado|ando)|(?:[0-9]+|one|two|three|four|five|six|um|uma|dois|duas|tres|quatro|cinco|seis)\s+(?:times?|vezes?))\b/u,
+  ],
+  [
+    "conditional",
+    /\b(?:but|except|otherwise)\s+if\b|\bif\b[^.;:]{0,80}\b(?:then|otherwise|keep|remain)\b|[,;:]\s*else\b|\b(?:penalty|bonus)\b/u,
   ],
   ["digit", /\b(?:digit|digits|digito|digitos)\b/u],
   // A rule that names WHERE a number sits is not the same rule as one that only
@@ -564,8 +573,11 @@ export function collectAstOperations(ast: RuleAst): Set<RuleOperation> {
         operations.add("digit");
       }
     }
-    if (op === "mul" || kind.includes("product")) {
+    if (op === "mul" || op === "product" || kind.includes("product")) {
       operations.add("product");
+    }
+    if (kind === "ite") {
+      operations.add("conditional");
     }
     if (kind === "abs") {
       operations.add("distance");
@@ -659,6 +671,7 @@ export function collectAstOperations(ast: RuleAst): Set<RuleOperation> {
     if (kind === "reduce" && op === "range_span") {
       operations.add("minimum");
       operations.add("maximum");
+      operations.add("distance");
     }
     if (
       (kind === "pairs_map" ||

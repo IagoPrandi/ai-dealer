@@ -577,7 +577,7 @@ const AMBIGUOUS_PATTERNS = [
   /\b(lucky|unlucky|interesting|creative|best|better|worst|fair|randomly)\b/i,
   /\b(about|around|roughly|approximately|similar)\b/i,
   /\b(feels?|vibe|balanced|nice|nicely|pattern|mirror-like|stronger)\b/i,
-  /\b(many|several|spread out|well spread|organized|cleaner)\b/i,
+  /(?<!\bas\s)\bmany\b|\b(several|spread out|well spread|organized|cleaner)\b/i,
   /\b(anything|something|whatever)\b/i,
   /\bsome\b/i,
   /\b(harmonious|near-perfect)\b/i,
@@ -627,7 +627,8 @@ const EXTERNAL_DEPENDENCY_PATTERNS = [
   /\b(wallet|address|creator|voter|votes?|leaderboard|profile|admin)\b/i,
   /\b(time|timestamp|block|transaction|signature|balance|prize|pool|payout|fees?)\b/i,
   /\b(solana\s+slot|block\s+slot|slot\s+hash|slot\s+height)\b/i,
-  /\b(previous|next|future|past|history|streak|yesterday|today|tomorrow|last\s+turn|last\s+round|this\s+week)\b/i,
+  /\b(previous|next|future|history|streak|yesterday|today|tomorrow|last\s+turn|last\s+round|this\s+week)\b/i,
+  /\bpast\s+(?:turns?|rounds?|draws?|results?|winners?|guesses?|tickets?|events?|weeks?|days?|hours?)\b/i,
   /\bsame\s+rule\b.{0,60}\bdifferent\s+wording\b/i,
   /\b(other players?|all players?|no other player|among all players|everyone\s+else)\b/i,
   // Weather is external only as an actual condition ("weather", "raining"). A
@@ -1039,6 +1040,15 @@ export async function compileRuleArtifact(
       // provider slots are arbiters; asking the same reviewer again would
       // duplicate one side of the disagreement instead of breaking it.
       attempts.length === 0 ? options : arbitrationOptions,
+      attempts
+        .filter(
+          (attempt) =>
+            attempt.astSource === "provider" &&
+            attempt.ast !== null &&
+            isCompletedProviderOpinion(attempt),
+        )
+        .map((attempt) => attempt.ast as RuleAst),
+      options.astReviewer !== undefined,
     );
     attempts.push(evaluation);
     if (
@@ -1650,13 +1660,31 @@ function validateResolvedAst(
         ? (suppliedReviewerAst ?? compileSupportedRule(normalizedText))
         : suppliedReviewerAst
       : null;
+  const reviewerCoverage = reviewerAst
+    ? analyzeInterpretationCoverage({
+        ast: reviewerAst,
+        officialInterpretation: describeRuleAstForPlayers(reviewerAst),
+        text: request.originalText?.trim() || normalizedText,
+      })
+    : null;
+  const reviewerPreservesSource = reviewerCoverage?.covered === true;
   const reviewerAstSource = reviewerAst
     ? astSource === "deterministic" || suppliedReviewerAst !== null
       ? "provider"
       : "deterministic"
     : null;
+  // A reviewer program that already dropped a source value or operation is not
+  // an independent reading of the rule and has no authority to veto a complete
+  // candidate. Treat it as an unavailable opinion and continue to another
+  // provider. This remains fail-closed until a usable second reading arrives.
+  if (reviewerAst && !reviewerPreservesSource) {
+    reasonCodes.add("SECOND_OPINION_UNAVAILABLE");
+  }
   const reviewerMismatch =
-    ast && reviewerAst && !knownAstSemanticsMatch(reviewerAst, ast);
+    ast &&
+    reviewerAst &&
+    reviewerPreservesSource &&
+    !knownAstSemanticsMatch(reviewerAst, ast);
   const semanticDisagreementWitness =
     reviewerMismatch && ast && reviewerAst
       ? findSemanticDisagreementWitness(reviewerAst, ast)
@@ -1669,6 +1697,14 @@ function validateResolvedAst(
       ? "Skipped because no schema-valid AST was available."
       : !reviewerAst
         ? "No independent reviewer AST was available."
+        : !reviewerPreservesSource
+          ? `The reviewer AST was discarded because it did not preserve the complete source${
+              reviewerCoverage?.missingOperations.length
+                ? ` (missing operations: ${reviewerCoverage.missingOperations.join(", ")})`
+                : reviewerCoverage?.missingFromAst.length
+                  ? ` (missing values: ${reviewerCoverage.missingFromAst.join(", ")})`
+                  : ""
+            }.`
         : reviewerMismatch
           ? describeSemanticDisagreement(
               reviewerAst,
@@ -1681,7 +1717,7 @@ function validateResolvedAst(
       : [],
     stage: "independent_review",
     status:
-      !ast || !reviewerAst
+      !ast || !reviewerAst || !reviewerPreservesSource
         ? "skipped"
         : reasonCodes.has("REVIEWER_MISMATCH")
           ? "failed"
@@ -1695,7 +1731,9 @@ function validateResolvedAst(
           ast,
           normalizedText,
           providerEvidence,
-          suppliedReviewerAst !== null && !reviewerMismatch,
+          suppliedReviewerAst !== null &&
+            reviewerPreservesSource &&
+            !reviewerMismatch,
         )
       : null;
   const verifiedProviderEvidence = evidenceVerification?.ok
@@ -1809,17 +1847,11 @@ function validateResolvedAst(
   // not survive compilation, so a rule can never be elected under a promise its
   // artifact does not keep.
   //
-  // A reviewer AST certifies the VALUE half only. Literal value matching cannot
-  // tell a terse-but-equivalent encoding from a drop (turn 55's faithful terse
-  // compile never mentions 2..5), so an independent reading of the text has to
-  // be allowed to overrule it.
-  //
-  // It certifies NOTHING about the operation half, and treating it as a blanket
-  // bypass is how a rule reading "... mas apenas se ao menos dois desses numeros
-  // coincidirem nas mesmas posicoes" was frozen as a bare `sum_equals`: the
-  // compile model dropped the positional condition, the reviewer model dropped
-  // it the same way, they therefore agreed, and agreement was read as proof.
-  // Two readings that lost the same clause are not a reading of that clause.
+  // Independent agreement cannot certify either half of coverage. Two models
+  // can omit the same literal or the same operation and therefore agree on a
+  // different rule. That happened when both readings kept a range comparison
+  // but dropped two independent thresholds around 50. Agreement is useful only
+  // after each reading has independently preserved the source requirements.
   //
   // The asymmetry is exactly the one `RuleOperation` was defined around: its
   // members are a closed set chosen because none of them can be legitimately
@@ -1835,7 +1867,10 @@ function validateResolvedAst(
   // while the pattern reported success. Its reviewer is an additional net, not a
   // replacement for this one.
   const certifiedByIndependentReading =
-    astSource === "provider" && reviewerAst !== null;
+    astSource === "provider" &&
+    reviewerAst !== null &&
+    reviewerPreservesSource &&
+    !reviewerMismatch;
   let interpretationCoverageFailed = false;
   let interpretationCoverageChecked = false;
   let coverageMissingOperations: readonly RuleOperation[] = [];
@@ -1850,9 +1885,17 @@ function validateResolvedAst(
       coverage.requiredOperations.length > 0 ||
       coverage.requiredValues.length > 0;
     coverageMissingOperations = coverage.missingOperations;
-    const blocked = certifiedByIndependentReading
-      ? coverage.missingOperations.length > 0
-      : !coverage.covered;
+    // A source-complete independent reading may certify an equivalent terse
+    // encoding whose AST omits literals implied by the bounded ticket domain.
+    // It can never certify its own omission: the reviewer must itself cover the
+    // source, agree by behavior, and operations remain unconditional.
+    const reviewerCertifiesValues =
+      reviewerAst !== null && reviewerPreservesSource && !reviewerMismatch;
+    const blocked =
+      coverage.missingOperations.length > 0 ||
+      ((coverage.missingFromAst.length > 0 ||
+        coverage.missingFromInterpretation.length > 0) &&
+        !reviewerCertifiesValues);
     if (blocked) {
       reasonCodes.add("INTERPRETATION_MISMATCH");
       interpretationCoverageFailed = true;
@@ -1876,8 +1919,8 @@ function validateResolvedAst(
         : !interpretationCoverageChecked
           ? "Skipped because the rule text exposed no deterministically checkable value or operation cue."
           : certifiedByIndependentReading
-          ? "Every operation the rule text names survives into the candidate AST; value coverage was certified by the independent reviewer AST."
-          : "The candidate AST covers the intent-bearing parts of the rule text.",
+            ? "The candidate AST preserves every required operation; any terse value encoding was certified by a source-complete independent reading."
+            : "The candidate AST covers the intent-bearing parts of the rule text.",
     reasonCodes: interpretationCoverageFailed
       ? hasVacuousCondition
         ? ["VACUOUS_CONDITION"]
@@ -2171,6 +2214,8 @@ async function evaluateProviderAttemptAsync(
   timestamp: string,
   providerConfig: AgentProviderConfig,
   options: RuleCompileArtifactOptions,
+  corroboratingProviderAsts: readonly RuleAst[] = [],
+  allowProviderCorroboration = false,
 ): Promise<ProviderEvaluation> {
   const ctx = buildAttemptContext(request, providerConfig);
   let rawAst: unknown = null;
@@ -2248,6 +2293,37 @@ async function evaluateProviderAttemptAsync(
         );
         if (reviewerAst === null) {
           ctx.reasonCodes.add("SECOND_OPINION_UNAVAILABLE");
+        }
+      }
+
+      // Later provider slots are independent source-to-AST passes. When one of
+      // them agrees behaviorally with an earlier provider candidate, that prior
+      // program is a valid second reading for evidence verification. This lets
+      // the server correct unreliable hand-written example arithmetic without
+      // weakening consensus or requiring the dedicated reviewer to run again.
+      if (
+        reviewerAst === null &&
+        rawAst !== null &&
+        allowProviderCorroboration &&
+        // A known deterministic reference remains authoritative. Provider
+        // corroboration is only the replacement for a missing reviewer on a
+        // genuinely novel composition, never a way to outvote audited logic.
+        compileSupportedRule(ctx.normalizedText) === null
+      ) {
+        const parsedCandidate = ruleAstSchema.safeParse(rawAst);
+        const spansAreComplete =
+          parsedCandidate.success &&
+          providerEvidence !== null &&
+          verifySourceSpanCoverage(
+            ctx.normalizedText,
+            providerEvidence.consumedSpans,
+            collectAstValues(parsedCandidate.data),
+          ) !== null;
+        if (parsedCandidate.success && spansAreComplete) {
+          reviewerAst =
+            corroboratingProviderAsts.find((candidate) =>
+              knownAstSemanticsMatch(candidate, parsedCandidate.data),
+            ) ?? null;
         }
       }
     } catch {
@@ -2881,8 +2957,15 @@ function deterministicPatternPreservesText(ast: RuleAst, text: string) {
 }
 
 function compileSupportedRule(text: string): RuleAst | null {
-  const ast = compileSupportedRulePattern(text);
-  return ast && deterministicPatternPreservesText(ast, text) ? ast : null;
+  // Tie settlement is protocol metadata, never the winning expression. Remove
+  // it before dispatch so words such as "same total" cannot select the legacy
+  // sum-equality parser and become the whole rule. The same stripped source is
+  // used by coverage because the AST correctly has no payout node.
+  const semanticText = stripProtocolTieBreakClauses(text);
+  const ast = compileSupportedRulePattern(semanticText);
+  return ast && deterministicPatternPreservesText(ast, semanticText)
+    ? ast
+    : null;
 }
 
 export interface DeterministicRuleCompilerPlan {

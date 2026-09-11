@@ -112,6 +112,7 @@ import {
   enforceSourceClarity,
   preserveUnresolvedInterpretation,
   selectCompilationText,
+  selectPlayerFacingRuleStatements,
   type AuditLogRecord,
   type ConversationDraftRecord,
   type GuessVerificationResultRecord,
@@ -1034,7 +1035,7 @@ test("approved compile failures still escalate and groundedness alone cannot vet
   assert.equal(shouldGuardianBlockRulePreflight(false, true), false);
 });
 
-test("a compiler-side refusal always offers the unchanged rule as an actionable retry", () => {
+test("a compiler-side refusal exposes retry without presenting a no-op rewrite", () => {
   const text =
     "Among tickets summing to no more than the drawn total, most matches wins; ties go to the larger sum.";
   const feedback = buildRuleRefinementFeedback({
@@ -1060,13 +1061,13 @@ test("a compiler-side refusal always offers the unchanged rule as an actionable 
   });
 
   assert.deepEqual(feedback.refinementQuestions, []);
-  assert.deepEqual(feedback.suggestedRewrites, [text]);
-  assert.equal(feedback.suggestedRewrite, text);
+  assert.deepEqual(feedback.suggestedRewrites, []);
+  assert.equal(feedback.suggestedRewrite, undefined);
   assert.match(feedback.dealerMessage, /retry/iu);
   assert.doesNotMatch(feedback.dealerMessage, /missing threshold/iu);
 });
 
-test("an ambiguity with no viable reading choices falls back to an unchanged retry", () => {
+test("an ambiguity with no viable reading choices does not offer its own text", () => {
   const text =
     "Among tickets whose six numbers are all greater than the lowest drawn number, the smallest span wins; ties go to the smaller total.";
   const feedback = buildRuleRefinementFeedback({
@@ -1086,9 +1087,31 @@ test("an ambiguity with no viable reading choices falls back to an unchanged ret
   });
 
   assert.deepEqual(feedback.refinementQuestions, []);
-  assert.deepEqual(feedback.suggestedRewrites, [text]);
+  assert.deepEqual(feedback.suggestedRewrites, []);
   assert.match(feedback.reasonSummary, /compiler conflict/iu);
   assert.doesNotMatch(feedback.reasonSummary, /leaves part.*undefined/iu);
+});
+
+test("approved rule wording cannot be replaced by the compiler description", () => {
+  const approved = {
+    normalizedText:
+      "The guess range must beat the draw range, with two picks below 50 and two above 50.",
+    officialInterpretation:
+      "All three conditions are required, and values equal to 50 count toward neither side.",
+  };
+  const truncatedArtifact = {
+    normalizedText: "The guess range must beat the draw range.",
+    officialInterpretation: "Only the range comparison is required.",
+  };
+
+  assert.deepEqual(
+    selectPlayerFacingRuleStatements(approved, truncatedArtifact, true),
+    approved,
+  );
+  assert.deepEqual(
+    selectPlayerFacingRuleStatements(approved, truncatedArtifact, false),
+    truncatedArtifact,
+  );
 });
 
 test("provider disagreement is reported as a compiler conflict, not another clarification", () => {

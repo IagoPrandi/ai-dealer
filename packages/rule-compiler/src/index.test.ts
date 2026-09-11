@@ -2916,7 +2916,11 @@ test("escalates timeout, malformed, and schema failures through provider path", 
   });
 
   for (const result of [timeout, malformed, schemaFailure]) {
-    assert.equal(result.decision, "VALID");
+    assert.equal(
+      result.decision,
+      "VALID",
+      JSON.stringify(result.log.reasonCodes),
+    );
     assert.equal(result.log.fallbackTriggered, true);
     assert.equal(result.log.fallbackRateSample, 1);
     assert.equal(result.log.providerDisagreementRateSample, 0);
@@ -3100,7 +3104,11 @@ test("elects the same rule when the provider compiles it faithfully", async () =
         }),
       },
     );
-    assert.equal(result.decision, "VALID");
+    assert.equal(
+      result.decision,
+      "VALID",
+      JSON.stringify(result.log.reasonCodes),
+    );
     assert.equal(result.log.difficultyClass, "EXTREME");
     assert.match(result.artifactHash ?? "", /^[0-9a-f]{64}$/);
   }
@@ -3908,49 +3916,6 @@ test("a reviewer that agreed cannot certify away an operation the text names", a
     coverageStage?.detail ?? "",
     /missing operations: .*position/u,
   );
-});
-
-test("a reviewer still certifies a terse encoding that omits a stated value", async () => {
-  // The value half of the coverage gate keeps its bypass, and must: literal
-  // value matching cannot tell a faithful terse encoding from a drop, so an
-  // independent reading has to be able to overrule it. Only the operation half
-  // is unconditional.
-  const text =
-    "a guess wins if every guessed number from 2 through 5 is also drawn.";
-  const terse = {
-    schemaVersion: 2,
-    result: {
-      type: "predicate",
-      predicate: {
-        kind: "compare",
-        op: "eq",
-        left: {
-          kind: "count",
-          of: {
-            kind: "intersection",
-            left: { kind: "source", source: "guess" },
-            right: { kind: "source", source: "draw" },
-          },
-        },
-        right: { kind: "lit", value: 6 },
-      },
-    },
-  };
-  const result = await compileRuleArtifact(
-    { originalText: text, prompt: text, tokenCount: 13 },
-    { astProvider: async () => terse, astReviewer: async () => terse },
-  );
-
-  const coverage = analyzeInterpretationCoverage({
-    ast: terse as never,
-    officialInterpretation: "",
-    text,
-  });
-  // Preconditions for what this test is actually asserting: values are missing,
-  // operations are not.
-  assert.ok(coverage.missingFromAst.length > 0);
-  assert.equal(coverage.missingOperations.length, 0);
-  assert.ok(!result.log.reasonCodes.includes("INTERPRETATION_MISMATCH"));
 });
 
 test("divergent readings of one text are reported as the text being ambiguous", async () => {
@@ -5733,6 +5698,311 @@ test("independent behavioral review lets the server correct ranking arithmetic",
   assert.match(
     evidence?.exampleResults[0]?.detail ?? "",
     /corrected to the deterministic runtime score/iu,
+  );
+});
+
+test("set-9 objective wording cannot be claimed by a partial deterministic shortcut", () => {
+  const guardedTransform =
+    "Double each of your numbers, but if doubling a number would take it past 100 then keep that number as it is. You win if at least three of the resulting numbers appear in the draw.";
+  const guardedTransformParaphrase = guardedTransform.replace(
+    "past 100",
+    "above 100",
+  );
+  const penaltyRanking =
+    "Line up your six numbers against the six drawn numbers from lowest to highest and add up the differences; the ticket with the smallest total wins. A ticket that holds any of the drawn numbers has 10 added to its total as a penalty, and tickets on the same total split it equally.";
+
+  for (const text of [
+    guardedTransform,
+    guardedTransformParaphrase,
+    penaltyRanking,
+  ]) {
+    const result = validateAndPrecompileRule({
+      originalText: text,
+      prompt: text,
+      tokenCount: countWords(text),
+    });
+    assert.equal(result.artifact, null, text);
+    assert.ok(result.log.reasonCodes.includes("UNSUPPORTED_RULE"), text);
+    assert.ok(!result.log.reasonCodes.includes("SUPPORTED_RULE"), text);
+  }
+
+  assert.equal(hasExternalDependency(guardedTransform), false);
+  assert.equal(
+    hasExternalDependency(
+      "A guess wins only if it would also have won in past rounds.",
+    ),
+    true,
+  );
+  assert.equal(hasAmbiguousWording("exactly as many multiples as the draw"), false);
+  assert.equal(hasAmbiguousWording("a ticket with many multiples wins"), true);
+});
+
+test("set-9 coverage recognizes product reductions and guarded transformations", () => {
+  const guardedProduct = ruleAstSchema.parse({
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "compare",
+        op: "gte",
+        left: {
+          kind: "reduce",
+          op: "count",
+          of: {
+            kind: "filter",
+            of: {
+              kind: "map",
+              of: { kind: "source", source: "guess" },
+              expr: {
+                kind: "ite",
+                if: {
+                  kind: "compare",
+                  op: "lte",
+                  left: {
+                    kind: "arith",
+                    op: "mul",
+                    left: { kind: "elem" },
+                    right: { kind: "lit", value: 2 },
+                  },
+                  right: { kind: "lit", value: 100 },
+                },
+                then: {
+                  kind: "arith",
+                  op: "mul",
+                  left: { kind: "elem" },
+                  right: { kind: "lit", value: 2 },
+                },
+                else: { kind: "elem" },
+              },
+            },
+            where: {
+              kind: "contains",
+              array: { kind: "source", source: "draw" },
+              value: { kind: "elem" },
+            },
+          },
+        },
+        right: { kind: "lit", value: 3 },
+      },
+    },
+  });
+  const guardedCoverage = analyzeInterpretationCoverage({
+    ast: guardedProduct,
+    officialInterpretation: describeRuleAstForPlayers(guardedProduct),
+    text: "Double each number, but if doubling would exceed 100 then keep it; at least three resulting numbers must appear in the draw.",
+  });
+  for (const operation of [
+    "conditional",
+    "membership",
+    "product",
+  ] as const) {
+    assert.ok(guardedCoverage.requiredOperations.includes(operation));
+    assert.ok(!guardedCoverage.missingOperations.includes(operation));
+  }
+
+  const product = ruleAstSchema.parse({
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "compare",
+        op: "gt",
+        left: {
+          kind: "reduce",
+          op: "product",
+          of: {
+            kind: "slice",
+            start: 0,
+            end: 2,
+            of: {
+              kind: "sort",
+              order: "asc",
+              of: { kind: "source", source: "guess" },
+            },
+          },
+        },
+        right: {
+          kind: "reduce",
+          op: "max",
+          of: { kind: "source", source: "draw" },
+        },
+      },
+    },
+  });
+  const productCoverage = analyzeInterpretationCoverage({
+    ast: product,
+    officialInterpretation: describeRuleAstForPlayers(product),
+    text: "The product of the two smallest guessed numbers is greater than the largest drawn number.",
+  });
+  assert.ok(productCoverage.requiredOperations.includes("product"));
+  assert.ok(!productCoverage.missingOperations.includes("product"));
+});
+
+test("two compilers cannot certify the same dropped numeric clauses", async () => {
+  const text =
+    "A guess wins if the difference between its highest and lowest number is greater than the same difference for the drawn numbers, and at least two of its numbers are below 50 while at least two are above 50.";
+  const truncated = ruleAstSchema.parse({
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "compare",
+        op: "gt",
+        left: {
+          kind: "reduce",
+          op: "range_span",
+          of: { kind: "source", source: "guess" },
+        },
+        right: {
+          kind: "reduce",
+          op: "range_span",
+          of: { kind: "source", source: "draw" },
+        },
+      },
+    },
+  });
+  const result = await compileRuleArtifact(
+    { originalText: text, prompt: text, tokenCount: countWords(text) },
+    {
+      astProvider: async () => ({
+        ast: truncated,
+        consumedSpans: [{ text }],
+        workedExamples: [
+          {
+            draw: [10, 20, 30, 40, 50, 60],
+            guess: [1, 2, 3, 98, 99, 100],
+            outcome: "WIN",
+          },
+          {
+            draw: [10, 20, 30, 40, 50, 60],
+            guess: [10, 51, 52, 53, 54, 100],
+            outcome: "WIN",
+          },
+        ],
+      }),
+      astReviewer: async () => truncated,
+      requireProviderEvidence: true,
+    },
+  );
+
+  assert.equal(result.decision, "INVALID");
+  assert.equal(result.artifact, null);
+  assert.ok(result.log.reasonCodes.includes("INTERPRETATION_MISMATCH"));
+});
+
+test("a source-incomplete reviewer cannot veto two corroborating provider programs", async () => {
+  const text =
+    "Line up the guess and draw from lowest to highest and add up the absolute differences; the smallest total wins. A ticket holding a drawn number receives a 10 point penalty.";
+  const candidate = ruleAstSchema.parse({
+    schemaVersion: 3,
+    result: {
+      type: "ranking",
+      direction: "min",
+      tieBreak: "share_pool",
+      score: {
+        kind: "arith",
+        op: "add",
+        left: {
+          kind: "reduce",
+          op: "sum",
+          of: {
+            kind: "pairs_map",
+            left: {
+              kind: "sort",
+              order: "asc",
+              of: { kind: "source", source: "guess" },
+            },
+            right: {
+              kind: "sort",
+              order: "asc",
+              of: { kind: "source", source: "draw" },
+            },
+            expr: {
+              kind: "abs",
+              of: {
+                kind: "arith",
+                op: "sub",
+                left: { kind: "pair", side: "left" },
+                right: { kind: "pair", side: "right" },
+              },
+            },
+          },
+        },
+        right: {
+          kind: "ite",
+          if: {
+            kind: "compare",
+            op: "gte",
+            left: {
+              kind: "reduce",
+              op: "count",
+              of: {
+                kind: "intersection",
+                left: { kind: "source", source: "guess" },
+                right: { kind: "source", source: "draw" },
+              },
+            },
+            right: { kind: "lit", value: 1 },
+          },
+          then: { kind: "lit", value: 10 },
+          else: { kind: "lit", value: 0 },
+        },
+      },
+    },
+  });
+  const incompleteReviewer = ruleAstSchema.parse({
+    schemaVersion: 3,
+    result: {
+      type: "ranking",
+      direction: "min",
+      tieBreak: "share_pool",
+      score: {
+        kind: "reduce",
+        op: "count",
+        of: {
+          kind: "intersection",
+          left: { kind: "source", source: "guess" },
+          right: { kind: "source", source: "draw" },
+        },
+      },
+    },
+  });
+  let providerCalls = 0;
+  const result = await compileRuleArtifact(
+    { originalText: text, prompt: text, tokenCount: countWords(text) },
+    {
+      astProvider: async () => {
+        providerCalls += 1;
+        return {
+          ast: candidate,
+          consumedSpans: [{ text }],
+          workedExamples: [
+            {
+              draw: [1, 2, 3, 4, 5, 6],
+              guess: [1, 2, 3, 4, 5, 6],
+              score: providerCalls === 1 ? 10 : 999,
+            },
+            {
+              draw: [1, 2, 3, 4, 5, 6],
+              guess: [7, 8, 9, 10, 11, 12],
+              score: providerCalls === 1 ? 36 : -1,
+            },
+          ],
+        };
+      },
+      astReviewer: async () => incompleteReviewer,
+      requireProviderEvidence: true,
+    },
+  );
+
+  assert.equal(result.decision, "VALID", JSON.stringify(result.log.reasonCodes));
+  assert.deepEqual(result.artifact?.ast, candidate);
+  assert.equal(providerCalls, 2);
+  const correctedEvidence = result.log.attemptDiagnostics[1]?.providerEvidence;
+  assert.ok(
+    correctedEvidence?.exampleResults.every(
+      (example) => example.status === "passed",
+    ),
   );
 });
 

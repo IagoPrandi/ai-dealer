@@ -2806,6 +2806,36 @@ export function selectCompilationText(
     : normalizedInterpretation;
 }
 
+/**
+ * Compilation may add an AST-derived description for audit, but it cannot
+ * replace the approved player-facing contract. Keep this choice in one pure
+ * function so neither the response nor its hashes can silently drift to the
+ * compiler's narrower wording. Semantic-impact review may still append its
+ * explicit disclosure later.
+ */
+export function selectPlayerFacingRuleStatements(
+  interpretation: Pick<
+    RuleAgentInterpretation,
+    "normalizedText" | "officialInterpretation"
+  >,
+  artifact: Pick<
+    RuleCompiledArtifact,
+    "normalizedText" | "officialInterpretation"
+  > | null,
+  approvalLocked: boolean,
+) {
+  return {
+    normalizedText:
+      approvalLocked || !artifact
+        ? interpretation.normalizedText
+        : artifact.normalizedText,
+    officialInterpretation:
+      approvalLocked || !artifact
+        ? interpretation.officialInterpretation
+        : artifact.officialInterpretation,
+  };
+}
+
 interface RuleRefinementFeedbackInput {
   agentClarificationQuestions?: readonly string[];
   agentSuggestedRewrites?: readonly string[];
@@ -3433,10 +3463,6 @@ export function buildRuleRefinementFeedback(
         /^(?:WIN|LOSE)$/u.test(witness.reviewerResult) &&
         /^(?:WIN|LOSE)$/u.test(witness.draftResult),
     );
-  const retryReasonCodes =
-    readingChoices.length < 2
-      ? input.reasonCodes.filter((code) => code !== "AMBIGUOUS_RULE")
-      : input.reasonCodes;
   const suggestedRewrites =
     readingChoices.length >= 2
       ? readingChoices
@@ -3445,18 +3471,9 @@ export function buildRuleRefinementFeedback(
             isPreflightViableRewrite,
           ),
         );
-  // A compiler-side refusal must always leave a concrete next action. When no
-  // semantic dimension is missing and no intent-preserving rewrite was found,
-  // offering the exact submitted rule is the honest retry payload; inventing a
-  // threshold or tie behavior would change the player's rule.
-  if (
-    suggestedRewrites.length === 0 &&
-    questions.length === 0 &&
-    isRuleGenerationRetryable(retryReasonCodes) &&
-    isPreflightViableRewrite(input.sanitizedText)
-  ) {
-    suggestedRewrites.push(input.sanitizedText.trim());
-  }
+  // A compiler-side refusal is retried through `generationRetryable`. Repeating
+  // the submitted text in `suggestedRewrites` falsely presents a no-op as an
+  // intent-changing escape route and traps the player in the same compile loop.
   const suggestedRewrite = suggestedRewrites[0];
   const deterministicCheck = validateAndPrecompileRule({
     officialInterpretation: input.officialInterpretation,
@@ -4534,11 +4551,18 @@ async function runRulePreflightPipeline(
   }
 
   const { interpretation, validation } = pass;
-  const modelNormalizedText =
-    validation.artifact?.normalizedText ?? interpretation.normalizedText;
+  // Once approved, the compiler cannot replace these user-visible sentences.
+  // It may describe its AST for audit, and semantic review may append a material
+  // impact disclosure, but a truncated artifact can never rewrite the record to
+  // make itself look faithful.
+  const playerFacingStatements = selectPlayerFacingRuleStatements(
+    interpretation,
+    validation.artifact,
+    approvedInterpretation !== undefined,
+  );
+  const modelNormalizedText = playerFacingStatements.normalizedText;
   const baseOfficialInterpretation =
-    validation.artifact?.officialInterpretation ??
-    interpretation.officialInterpretation;
+    playerFacingStatements.officialInterpretation;
   const guardianGrounded = pass.grounded;
   // Once the player approved the exact interpretation, a stochastic guardian
   // disagreement is escalation signal and audit evidence, not a coin-flip veto
@@ -4564,18 +4588,13 @@ async function runRulePreflightPipeline(
     : null;
 
   const ruleAst = validation.artifact?.ast ?? null;
-  // The headline sentence is model prose, but it is what the player reads, what
-  // voters vote on, and what `normalizedTextHash` commits on-chain. When it
-  // claims something the frozen AST does not implement, the prose is the part
-  // that is wrong — the player never wrote it — so it is replaced by the
-  // AST-derived description rather than blamed on them or shipped as written.
+  // The headline sentence is what the player approved, voters read, and the
+  // normalized-text hash commits. Statement-fidelity diagnostics may reject or
+  // annotate it, but the AST never gains authority to rewrite that approval.
   const statementFidelity = ruleAst
     ? analyzeStatementFidelity({ ast: ruleAst, statement: modelNormalizedText })
     : null;
-  const normalizedText =
-    statementFidelity && !statementFidelity.faithful
-      ? baseOfficialInterpretation
-      : modelNormalizedText;
+  const normalizedText = modelNormalizedText;
   const sourceSpans = validation.artifact?.sourceSpans ?? null;
   // Technical validity is not the same as confirmed intent. Inspect the frozen
   // AST instead of trusting model prose so tautologies, draw-only/guess-only
@@ -4740,13 +4759,12 @@ async function runRulePreflightPipeline(
     semanticImpact: semanticReview.impact,
     title: interpretation.title,
     tokenCount,
-    // Audit trail for a replaced headline: which claims the model's own wording
-    // made that the frozen artifact does not back.
+    // Audit trail for unsupported headline claims. The approved headline is
+    // preserved even when this list is non-empty.
     unsupportedStatementClaims: statementFidelity?.unsupportedClaims ?? [],
     // 13: `semanticImpact` carries `astAvailable`.
-    // 14: `unsupportedStatementClaims`; `normalizedText` is AST-derived when the
-    //     model's wording failed statement fidelity.
-    version: 14,
+    // 15: compilation cannot replace approved interpretation text.
+    version: 15,
   });
 
   return {
