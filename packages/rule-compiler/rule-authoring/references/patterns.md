@@ -13,6 +13,7 @@ Small models frequently mis-handle four intent shapes. Apply these rules exactly
   player's quantity and direction exactly.
 
 Examples:
+
 - "ganhar quem errar mais números" = whoever MISSES the MOST → ranking, max,
   score = `count(difference(guess,draw))`.
 - "ganhar quem acertar mais números" = whoever MATCHES the MOST → ranking, max,
@@ -83,6 +84,19 @@ When no worked example fits, COMPOSE the core instead of refusing:
 - **Halves / zones**: `slice` the source, then filter + count each part.
 - **Cross-array quantification**: `forall(guess, exists(draw, ... elem(up:1) ...))`
   relates every pick to some drawn number.
+- **Nearest-neighbour minimax**: `max(map(guess, min(map(draw,
+abs(elem(up:1) - elem)))))`, used as a `direction:"min"` ranking score. The
+  nested map is load-bearing: `pairs_map(guess,draw,...)` compares only matching
+  positions and makes the result depend on entry order.
+- **Derived set equality**: when a projection can repeat values (digits,
+  residues, mapped buckets), encode both subset directions with
+  `and(forall(A, exists(B, elem == elem(up:1))), forall(B, exists(A, elem ==
+elem(up:1))))`. `count(intersection(A,B)) == 6` is wrong when the equal sets
+  contain fewer than six distinct values.
+- **Equal adjacent gaps**: construct the gap array by shifted self-zip, later
+  value minus earlier value, then require `range_span(gaps) == 0`. Both
+  `pairs_map(slice(sorted,0,-1), slice(sorted,1), right-left)` and the reversed
+  argument orientation with `left-right` are equivalent.
 
 ## 2c. Ordered criteria — primary, then tiebreak
 
@@ -102,11 +116,11 @@ Useful bounds (guess and draw are six numbers from 1 to 100). An UPPER bound is
 safe — the fold only needs `SCALE` above the real maximum, so overshooting is
 correct and undershooting is not:
 
-| Secondary quantity | Upper bound |
-| --- | --- |
-| total same-position distance `sum(pairs_map(guess,draw,abs(left-right)))` | 594 (6 x 99) |
-| same-position match count | 6 |
-| \|sum(guess) - sum(draw)\| | 564 (585 - 21) |
+| Secondary quantity                                                        | Upper bound    |
+| ------------------------------------------------------------------------- | -------------- |
+| total same-position distance `sum(pairs_map(guess,draw,abs(left-right)))` | 594 (6 x 99)   |
+| same-position match count                                                 | 6              |
+| \|sum(guess) - sum(draw)\|                                                | 564 (585 - 21) |
 
 Worked example — "the most matching numbers wins; if nobody matches any (or they
 tie), the smallest total distance in the same positions wins":
@@ -177,6 +191,7 @@ must lose, and a guess above the draw must lose.
 ## 4. Ambiguous terms — "dezena"
 
 "dezena" has two common meanings in Portuguese lottery language:
+
 - a drawn NUMBER (Mega-Sena sense): "acertar uma dezena" = match one drawn number
   → `count_at_least(1, intersection(guess,draw))`.
 - the TENS DIGIT of a number: → use `digits(...,"tens")`.
@@ -195,22 +210,22 @@ quotient 10; it is distinct from the isolated tens digit (`floor(n/10) mod 10`).
 
 ## Portuguese trigger glossary
 
-| Portuguese | Meaning | Maps to |
-| --- | --- | --- |
-| acertar / acerto | match a drawn number | `intersection(guess,draw)` |
-| errar / errou / fora | not in the draw (a miss) | `difference(guess,draw)` |
-| mais / maior / máximo | most / maximise | ranking `direction:"max"` |
-| menos / menor / mínimo | fewest / minimise | ranking `direction:"min"` |
-| pelo menos N / N ou mais | threshold ≥ N | `compare(count(intersection), gte, N)` |
-| exatamente N | exactly N | `compare(count(intersection), eq, N)` |
-| soma | sum | `reduce op:"sum"` |
-| dezena | a drawn number (default) or tens digit | see section 4 |
-| unidade / dígito da unidade | units digit | `digits(...,"units")` |
-| e | and | `and` |
-| ou | or | `or` |
-| mais perto / mais próximo | closest | ranking min over `arith sub` |
-| se não houver ganhador / senão | if nobody wins / otherwise | fallback marker → section 2c |
-| em caso de empate / desempate | in case of a tie / tiebreaker | fallback marker → section 2c |
-| caso ninguém / se ninguém | if no one | fallback marker → section 2c |
-| posições correspondentes | corresponding positions | `pairs_*(guess, draw, ...)` |
-| diferença / distância | difference / distance | `abs(left - right)` per pair |
+| Portuguese                     | Meaning                                | Maps to                                |
+| ------------------------------ | -------------------------------------- | -------------------------------------- |
+| acertar / acerto               | match a drawn number                   | `intersection(guess,draw)`             |
+| errar / errou / fora           | not in the draw (a miss)               | `difference(guess,draw)`               |
+| mais / maior / máximo          | most / maximise                        | ranking `direction:"max"`              |
+| menos / menor / mínimo         | fewest / minimise                      | ranking `direction:"min"`              |
+| pelo menos N / N ou mais       | threshold ≥ N                          | `compare(count(intersection), gte, N)` |
+| exatamente N                   | exactly N                              | `compare(count(intersection), eq, N)`  |
+| soma                           | sum                                    | `reduce op:"sum"`                      |
+| dezena                         | a drawn number (default) or tens digit | see section 4                          |
+| unidade / dígito da unidade    | units digit                            | `digits(...,"units")`                  |
+| e                              | and                                    | `and`                                  |
+| ou                             | or                                     | `or`                                   |
+| mais perto / mais próximo      | closest                                | ranking min over `arith sub`           |
+| se não houver ganhador / senão | if nobody wins / otherwise             | fallback marker → section 2c           |
+| em caso de empate / desempate  | in case of a tie / tiebreaker          | fallback marker → section 2c           |
+| caso ninguém / se ninguém      | if no one                              | fallback marker → section 2c           |
+| posições correspondentes       | corresponding positions                | `pairs_*(guess, draw, ...)`            |
+| diferença / distância          | difference / distance                  | `abs(left - right)` per pair           |

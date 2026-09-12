@@ -92,6 +92,7 @@ The grammar is a SMALL COMPOSITIONAL CORE. There are no specialized predicate
 kinds: every rule — including novel ones — is expressed by COMPOSING these nodes.
 
 Array nodes (produce a list of numbers):
+
 - `{"kind":"source","source":"guess"|"draw"}`
 - `{"kind":"sort","order":"asc"|"desc","of":<array>}`
 - `{"kind":"reverse","of":<array>}`
@@ -104,6 +105,7 @@ Array nodes (produce a list of numbers):
 - `{"kind":"pairs_map","left":<array>,"right":<array>,"expr":<scalar>}` — zip both arrays position by position (length = shorter side); `expr` sees `{"kind":"pair","side":"left"|"right"}`
 
 Scalar nodes (produce one number):
+
 - `{"kind":"lit","value":<int>}`
 - `{"kind":"reduce","op":"sum"|"product"|"count"|"min"|"max"|"range_span","of":<array>}`
 - `{"kind":"at","index":<int>,"of":<array>}` — 0-based; ONLY on arrays whose length is statically known (source/sort/reverse/slice/map/digits chains). After filter/intersection/difference/distinct use `sort`+`slice`+`reduce` instead.
@@ -114,11 +116,12 @@ Scalar nodes (produce one number):
 - `{"kind":"pair","side":"left"|"right"}` — the current pair inside pairs_map/pairs_forall/pairs_exists
 
 Predicate nodes (produce true/false):
+
 - `{"kind":"compare","op":"eq"|"neq"|"lt"|"lte"|"gt"|"gte","left":<scalar>,"right":<scalar>}`
 - `{"kind":"contains","array":<array>,"value":<scalar>}`
 - `{"kind":"forall"|"exists","of":<array>,"where":<pred>}` — quantify over elements; `where` sees `{"kind":"elem"}`
 - `{"kind":"pairs_forall"|"pairs_exists","left":<array>,"right":<array>,"where":<pred>}` — quantify over same-position pairs
-- `{"kind":"and"|"or","clauses":[<pred>,...]}`  `{"kind":"not","clause":<pred>}`
+- `{"kind":"and"|"or","clauses":[<pred>,...]}` `{"kind":"not","clause":<pred>}`
   Hard limit: **at most 10 clauses in a single `and`/`or`**. When one condition
   covers a LIST of values, nest that list in its own `and`/`or` and give the
   parent a single clause for it — flattening every value into the top level burns
@@ -147,7 +150,8 @@ X = `reduce count`; "N smallest/largest" = `sort` + `slice`.
 
 - "at least N of my numbers appear in the draw" -> `compare(count(intersection(guess,draw)), gte, N)`.
 - "exactly N match" -> same with `eq`. "none appear" -> `eq 0`.
-- "same set of numbers, regardless of order" -> `count(intersection(guess,draw)) == 6`; never ordered equality or a ranking.
+- "same set of numbers, regardless of order" -> `count(intersection(guess,draw)) == 6`; this shortcut is sound only for the two original six-distinct-number sources. Never use it for a derived view that can contain duplicate values.
+- "same set of units digits" -> mutual inclusion, because digit projections can contain duplicates: `and(forall(digits(guess,units), exists(digits(draw,units), elem == elem(up:1))), forall(digits(draw,units), exists(digits(guess,units), elem == elem(up:1))))`. Never require intersection count 6.
 - "sums are equal" -> `compare(sum(guess), eq, sum(draw))`.
 - "closest sum without exceeding the draw" / "soma mais próxima sem ultrapassar" -> ranking `max` by `sum(guess)` with `eligibleWhen: compare(sum(guess), lte, sum(draw))`. This is not equality and must not be reduced to a score-only ranking: if every guess exceeds the draw, there is no winner.
 - "all six match in the same positions" -> `pairs_forall(guess, draw, pair.left == pair.right)`.
@@ -163,6 +167,7 @@ X = `reduce count`; "N smallest/largest" = `sort` + `slice`.
 - "total position-by-position absolute difference <= T" -> `compare(sum(pairs_map(guess, draw, abs(left - right))), lte, T)`.
 - "N picks within D of ANY drawn number" (any-draw closeness, not same-position) ->
   `compare(count(filter(guess, exists(draw, abs(elem(up:1) - elem) <= D))), gte, N)`.
+- "for each pick, distance to its nearest drawn number; smallest largest distance wins" -> ranking `min` by `max(map(guess, min(map(draw, abs(elem(up:1) - elem)))))`. This compares every guessed number against all drawn numbers and is order-independent; `pairs_map(guess,draw,...)` is a positional zip and is not equivalent.
 - "at least N picks share the units/last digit with any drawn number" ->
   `compare(count(filter(digits(guess,units), contains(digits(draw,units), elem))), gte, N)`.
 - "all picks between the smallest and largest drawn number, inclusive" ->
@@ -173,6 +178,7 @@ X = `reduce count`; "N smallest/largest" = `sort` + `slice`.
 - "same count of even numbers" -> `compare(count(filter(guess, elem mod 2 == 0)), eq, count(filter(draw, elem mod 2 == 0)))`.
 - "the below-50 split: ticket and draw have the same count under 50" -> `compare(count(filter(guess, elem lt 50)), eq, count(filter(draw, elem lt 50)))`.
 - "sum of the two smallest/largest ..." -> `sum(slice(sort(src, asc|desc), 0, 2))`, then compare both sides.
+- "the sorted guess is equally spaced" -> build adjacent gaps with `pairs_map(slice(sort(guess,asc),1), slice(sort(guess,asc),0,-1), pair.left - pair.right)` and require `range_span(gaps) == 0`. Either shifted-zip orientation is valid only when the subtraction still computes later minus earlier.
 - "ignore my highest pick, the rest totals the draw" -> `compare(sum(slice(sort(guess,asc), 0, -1)), eq, sum(draw))`.
 - "drop up to two lowest picks, then still have three numbers in the draw" ->
   `compare(count(intersection(slice(sort(guess,asc), 2), draw)), gte, 3)`.
@@ -201,7 +207,7 @@ freezes a different rule.
   position; `pairs_forall` cannot be used, because there is no second array.
 - "the first four guessed numbers are 1 2 3 4 in order; the final two do not
   matter" (ordered literal prefix) -> `and(at(guess,0) == 1, ...,
-  at(guess,3) == 4)`. Do not add clauses for the explicitly free positions, and
+at(guess,3) == 4)`. Do not add clauses for the explicitly free positions, and
   do not require the official draw; the standard ticket domain and uniqueness
   constraints still apply to all six values.
 - "my ticket must be exactly 1 2 3 4 5 6, in any order" (unordered literal set) ->

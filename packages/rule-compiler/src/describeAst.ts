@@ -253,9 +253,16 @@ function describeArrayV3(node: ArrayExprV3): string {
     case "reverse":
       return `${describeArrayV3(node.of)} in reverse order`;
     case "slice":
-      return node.end === undefined
-        ? `${describeArrayV3(node.of)} from position ${node.start + 1} onward`
-        : `positions ${node.start + 1} to ${node.end} of ${describeArrayV3(node.of)}`;
+      if (node.end === undefined) {
+        return `${describeArrayV3(node.of)} from position ${node.start + 1} onward`;
+      }
+      if (node.end < 0) {
+        const excluded = Math.abs(node.end);
+        return `${describeArrayV3(node.of)} from position ${node.start + 1}, excluding ${
+          excluded === 1 ? "its final value" : `its final ${excluded} values`
+        }`;
+      }
+      return `positions ${node.start + 1} to ${node.end} of ${describeArrayV3(node.of)}`;
     case "distinct":
       return `the distinct values of ${describeArrayV3(node.of)}`;
     case "intersection":
@@ -291,6 +298,9 @@ function describeScalarV3(node: ScalarExprV3): string {
           if (node.op === "min") return `the smallest ${gaps}`;
           if (node.op === "sum") return `the sum of the ${gaps}`;
           if (node.op === "count") return `the number of ${gaps}`;
+          if (node.op === "range_span") {
+            return `the difference between the largest and smallest ${gaps}`;
+          }
         }
       }
       if (
@@ -332,27 +342,41 @@ function describeScalarV3(node: ScalarExprV3): string {
 
 /** The canonical shifted-zip idiom for consecutive gaps in a sorted source. */
 function describeAdjacentGaps(node: ArrayExprV3): string | null {
+  if (node.kind !== "pairs_map") {
+    return null;
+  }
+  const { left, right, expr } = node;
   if (
-    node.kind !== "pairs_map" ||
-    node.left.kind !== "slice" ||
-    node.left.start !== 0 ||
-    node.left.end !== -1 ||
-    node.right.kind !== "slice" ||
-    node.right.start !== 1 ||
-    node.right.end !== undefined ||
-    JSON.stringify(node.left.of) !== JSON.stringify(node.right.of) ||
-    node.left.of.kind !== "sort" ||
-    node.left.of.order !== "asc" ||
-    node.expr.kind !== "arith" ||
-    node.expr.op !== "sub" ||
-    node.expr.left.kind !== "pair" ||
-    node.expr.left.side !== "right" ||
-    node.expr.right.kind !== "pair" ||
-    node.expr.right.side !== "left"
+    left.kind !== "slice" ||
+    right.kind !== "slice" ||
+    JSON.stringify(left.of) !== JSON.stringify(right.of) ||
+    left.of.kind !== "sort" ||
+    left.of.order !== "asc" ||
+    expr.kind !== "arith" ||
+    expr.op !== "sub" ||
+    expr.left.kind !== "pair" ||
+    expr.right.kind !== "pair"
   ) {
     return null;
   }
-  const source = describeArrayV3(node.left.of.of);
+  const leftIsPrefix = left.start === 0 && left.end === -1;
+  const leftIsSuffix = left.start === 1 && left.end === undefined;
+  const rightIsPrefix = right.start === 0 && right.end === -1;
+  const rightIsSuffix = right.start === 1 && right.end === undefined;
+  const forwardGap =
+    leftIsPrefix &&
+    rightIsSuffix &&
+    expr.left.side === "right" &&
+    expr.right.side === "left";
+  const reverseZipSameGap =
+    leftIsSuffix &&
+    rightIsPrefix &&
+    expr.left.side === "left" &&
+    expr.right.side === "right";
+  if (!forwardGap && !reverseZipSameGap) {
+    return null;
+  }
+  const source = describeArrayV3(left.of.of);
   return `adjacent gaps between consecutive values of ${source} sorted from lowest to highest`;
 }
 
@@ -396,8 +420,7 @@ function describeCrossSourceDistance(node: PredicateNodeV3): string | null {
   const sourceName = (source: "draw" | "guess") =>
     source === "draw" ? "drawn number" : "guessed number";
   const outerQuantity = node.kind === "forall" ? "every" : "at least one";
-  const innerQuantity =
-    node.where.kind === "forall" ? "every" : "at least one";
+  const innerQuantity = node.where.kind === "forall" ? "every" : "at least one";
   const relation =
     comparison.op === "lte"
       ? `within ${comparison.right.value} of`
@@ -549,6 +572,54 @@ function containsLiteralOnGuess(node: PredicateNodeV3): number | null {
   return node.value.value;
 }
 
+function readSubsetRelation(
+  node: PredicateNodeV3,
+): readonly [ArrayExprV3, ArrayExprV3] | null {
+  if (
+    node.kind !== "forall" ||
+    node.where.kind !== "exists" ||
+    node.where.where.kind !== "compare" ||
+    node.where.where.op !== "eq" ||
+    node.where.where.left.kind !== "elem" ||
+    node.where.where.right.kind !== "elem"
+  ) {
+    return null;
+  }
+  const levels = [
+    node.where.where.left.up ?? 0,
+    node.where.where.right.up ?? 0,
+  ];
+  return new Set(levels).size === 2 &&
+    levels.every((level) => level === 0 || level === 1)
+    ? [node.of, node.where.of]
+    : null;
+}
+
+function describeMutualSetEquality(node: PredicateNodeV3): string | null {
+  if (node.kind !== "and") {
+    return null;
+  }
+  const relations = node.clauses
+    .map(readSubsetRelation)
+    .filter(
+      (relation): relation is readonly [ArrayExprV3, ArrayExprV3] =>
+        relation !== null,
+    );
+  if (relations.length !== node.clauses.length) {
+    return null;
+  }
+  const relation = relations.find(([left, right]) =>
+    relations.some(
+      ([reverseLeft, reverseRight]) =>
+        JSON.stringify(left) === JSON.stringify(reverseRight) &&
+        JSON.stringify(right) === JSON.stringify(reverseLeft),
+    ),
+  );
+  return relation
+    ? `the set of ${describeArrayV3(relation[0])} is identical to the set of ${describeArrayV3(relation[1])}`
+    : null;
+}
+
 // `exists(source, and(elem >= lo, elem <= hi))` reads far better as a range.
 function describeExistsInRange(node: PredicateNodeV3): string | null {
   if (node.kind !== "exists" || node.of.kind !== "source") {
@@ -590,6 +661,10 @@ function describeConjunctionV3(node: PredicateNodeV3): string {
   const shortcut = (clause: PredicateNodeV3) =>
     describeExistsInRange(clause) ?? describePredicateV3(clause);
 
+  const setEquality = describeMutualSetEquality(node);
+  if (setEquality) {
+    return setEquality;
+  }
   if (node.kind !== "and") {
     return shortcut(node);
   }
@@ -852,6 +927,47 @@ function describeLexicographicRanking(
   );
 }
 
+/**
+ * `max(map(guess, min(map(draw, abs(outerElem - elem)))))`, minimized.
+ * This is the order-independent nearest-neighbour minimax score. Recognizing
+ * the binder structure keeps the public explanation from degrading into
+ * implementation language such as "the value one level further out".
+ */
+function describeNearestNeighbourMinimaxRanking(
+  result: Extract<RuleResultV3, { type: "ranking" }>,
+): string | null {
+  if (
+    result.direction !== "min" ||
+    result.score.kind !== "reduce" ||
+    result.score.op !== "max" ||
+    result.score.of.kind !== "map" ||
+    !isSource(result.score.of.of, "guess") ||
+    result.score.of.expr.kind !== "reduce" ||
+    result.score.of.expr.op !== "min" ||
+    result.score.of.expr.of.kind !== "map" ||
+    !isSource(result.score.of.expr.of.of, "draw")
+  ) {
+    return null;
+  }
+  const distance = result.score.of.expr.of.expr;
+  if (
+    distance.kind !== "abs" ||
+    distance.of.kind !== "arith" ||
+    distance.of.op !== "sub" ||
+    distance.of.left.kind !== "elem" ||
+    distance.of.right.kind !== "elem" ||
+    new Set([distance.of.left.up ?? 0, distance.of.right.up ?? 0]).size !== 2 ||
+    ![distance.of.left.up ?? 0, distance.of.right.up ?? 0].every(
+      (level) => level === 0 || level === 1,
+    )
+  ) {
+    return null;
+  }
+  return sentence(
+    "For each guessed number, measure its distance to the nearest drawn number. The guess whose largest such distance is smallest wins; tied guesses share the prize",
+  );
+}
+
 export function describeRuleAstTotal(ast: RuleAst): string {
   if (ast.schemaVersion === 1) {
     switch (ast.node.kind) {
@@ -877,6 +993,12 @@ export function describeRuleAstTotal(ast: RuleAst): string {
 
   if (ast.result.type === "ranking") {
     if (ast.schemaVersion === 3) {
+      const nearestNeighbourMinimax = describeNearestNeighbourMinimaxRanking(
+        ast.result,
+      );
+      if (nearestNeighbourMinimax) {
+        return nearestNeighbourMinimax;
+      }
       const eligibleSumRanking = describeEligibleSumRanking(ast.result);
       if (eligibleSumRanking) {
         return eligibleSumRanking;

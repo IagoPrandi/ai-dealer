@@ -7,6 +7,7 @@ import {
   buildRuleCompilerSkillPrompt,
   compareDeterministicRuleSemantics,
   compileRuleArtifact,
+  collectRequiredValues,
   createDefaultProviderRoutingPolicy,
   createLocalOnlyProviderRoutingPolicy,
   createCompilerPlaceholder,
@@ -172,7 +173,10 @@ test("the compile_rule_to_ast skill prompt is versioned and covers both rule mod
   assert.ok(prompt.includes('"up":1'));
   assert.ok(prompt.includes("first pick only needs to be higher"));
   assert.ok(prompt.includes("sum(guess) mod 10"));
-  assert.match(prompt, /bounded procedural removal count is still a predicate/i);
+  assert.match(
+    prompt,
+    /bounded procedural removal count is still a predicate/i,
+  );
   assert.ok(prompt.includes("at(sort(guess,desc), N)"));
   assert.ok(prompt.includes("same tens range"));
   assert.ok(prompt.includes("pair.left div 10 == pair.right div 10"));
@@ -3579,7 +3583,11 @@ test("an interpreter-authored tie sentence cannot manufacture an external depend
     },
   );
 
-  assert.equal(result.decision, "VALID", JSON.stringify(result.log.reasonCodes));
+  assert.equal(
+    result.decision,
+    "VALID",
+    JSON.stringify(result.log.reasonCodes),
+  );
   assert.ok(!result.log.reasonCodes.includes("EXTERNAL_DEPENDENCY"));
 });
 
@@ -3748,7 +3756,11 @@ test("ranking review compares induced winners instead of raw score units", async
     },
   );
 
-  assert.equal(result.decision, "VALID", JSON.stringify(result.log.reasonCodes));
+  assert.equal(
+    result.decision,
+    "VALID",
+    JSON.stringify(result.log.reasonCodes),
+  );
   assert.equal(providerCalls, 1);
   assert.ok(
     !result.log.attemptDiagnostics[0]?.reasonCodes.includes(
@@ -3933,6 +3945,38 @@ test("a missing dedicated reviewer falls back to another configured provider", a
   assert.equal(result.log.providerPath.length, 2);
 });
 
+test("an impossible reviewer cannot veto a viable candidate or become a player reading", async () => {
+  let generationCalls = 0;
+  const result = await compileRuleArtifact(
+    {
+      originalText: NO_REFERENCE_PROMPT,
+      prompt: NO_REFERENCE_PROMPT,
+      tokenCount: 14,
+    },
+    {
+      astProvider: async () => {
+        generationCalls += 1;
+        return sumCompareAst("lt", 10);
+      },
+      astReviewer: async () => sumCompareAst("lt", 1_000),
+    },
+  );
+
+  assert.equal(
+    result.decision,
+    "VALID",
+    JSON.stringify(result.log.reasonCodes),
+  );
+  assert.equal(generationCalls, 2);
+  assert.deepEqual(result.artifact?.ast, sumCompareAst("lt", 10));
+  assert.equal(result.log.providerDisagreementReadings.length, 1);
+  assert.ok(!result.log.reasonCodes.includes("AMBIGUOUS_RULE"));
+  const review = result.log.attemptDiagnostics[0]?.stages.find(
+    (stage) => stage.stage === "independent_review",
+  );
+  assert.match(review?.detail ?? "", /non-degenerate difficulty checks/iu);
+});
+
 test("a missing reviewer still fails closed when every fallback provider is unavailable", async () => {
   let generationCalls = 0;
   const result = await compileRuleArtifact(
@@ -4007,10 +4051,7 @@ test("a reviewer that agreed cannot certify away an operation the text names", a
     (stage) => stage.stage === "interpretation_coverage",
   );
   assert.equal(coverageStage?.status, "failed");
-  assert.match(
-    coverageStage?.detail ?? "",
-    /missing operations: .*position/u,
-  );
+  assert.match(coverageStage?.detail ?? "", /missing operations: .*position/u);
 });
 
 test("divergent readings of one text are reported as the text being ambiguous", async () => {
@@ -5564,6 +5605,11 @@ test("set-7 distance, gap, and quantified rules cannot enter the match-count sho
     "Every one of its numbers is at least 4 away from every drawn number.",
     "At least 2 of its numbers sit more than 10 below the lowest drawn number.",
     "The gap between its two smallest numbers is at least 5 and its largest number is above every drawn number.",
+    "None of your numbers sits too far from every drawn number.",
+    "None of your numbers is greater than any drawn number.",
+    "None of your numbers divides a drawn number exactly.",
+    "None of your numbers is within 10 of a drawn number.",
+    "None of your numbers shares its last digit with a drawn number.",
   ];
 
   for (const text of falseMatchCountShapes) {
@@ -5822,7 +5868,9 @@ test("agent-authored tie phrasing and objective superlatives do not create ambig
     assert.equal(hasAmbiguousWording(text), false, text);
   }
   assert.equal(
-    hasAmbiguousWording("A guess wins if its total is close to the drawn total."),
+    hasAmbiguousWording(
+      "A guess wins if its total is close to the drawn total.",
+    ),
     true,
   );
 });
@@ -5982,10 +6030,16 @@ test("independent behavioral review reconstructs omitted ranking scores", async 
     },
   );
 
-  assert.equal(result.decision, "VALID", JSON.stringify(result.log.reasonCodes));
+  assert.equal(
+    result.decision,
+    "VALID",
+    JSON.stringify(result.log.reasonCodes),
+  );
   assert.ok(!result.log.reasonCodes.includes("PROVIDER_EVIDENCE_UNVERIFIED"));
   const evidence = result.log.attemptDiagnostics[0]?.providerEvidence;
-  assert.ok(evidence?.exampleResults.every((example) => example.status === "passed"));
+  assert.ok(
+    evidence?.exampleResults.every((example) => example.status === "passed"),
+  );
   assert.match(
     evidence?.exampleResults[0]?.detail ?? "",
     /replaced with the deterministic runtime score/iu,
@@ -6024,7 +6078,10 @@ test("set-9 objective wording cannot be claimed by a partial deterministic short
     ),
     true,
   );
-  assert.equal(hasAmbiguousWording("exactly as many multiples as the draw"), false);
+  assert.equal(
+    hasAmbiguousWording("exactly as many multiples as the draw"),
+    false,
+  );
   assert.equal(hasAmbiguousWording("a ticket with many multiples wins"), true);
 });
 
@@ -6082,11 +6139,7 @@ test("set-9 coverage recognizes product reductions and guarded transformations",
     officialInterpretation: describeRuleAstForPlayers(guardedProduct),
     text: "Double each number, but if doubling would exceed 100 then keep it; at least three resulting numbers must appear in the draw.",
   });
-  for (const operation of [
-    "conditional",
-    "membership",
-    "product",
-  ] as const) {
+  for (const operation of ["conditional", "membership", "product"] as const) {
     assert.ok(guardedCoverage.requiredOperations.includes(operation));
     assert.ok(!guardedCoverage.missingOperations.includes(operation));
   }
@@ -6286,7 +6339,11 @@ test("a source-incomplete reviewer cannot veto two corroborating provider progra
     },
   );
 
-  assert.equal(result.decision, "VALID", JSON.stringify(result.log.reasonCodes));
+  assert.equal(
+    result.decision,
+    "VALID",
+    JSON.stringify(result.log.reasonCodes),
+  );
   assert.deepEqual(result.artifact?.ast, candidate);
   assert.equal(providerCalls, 2);
   const correctedEvidence = result.log.attemptDiagnostics[1]?.providerEvidence;
@@ -6332,4 +6389,240 @@ test("nested cross-source distance ASTs render without binder implementation pro
     /every drawn number is within 3 of at least one guessed number/iu,
   );
   assert.doesNotMatch(description, /level\(s\)|distance from zero/iu);
+});
+
+test("complete enumerated residue domains are explanatory rather than required AST literals", () => {
+  assert.deepEqual(
+    collectRequiredValues(
+      "Compute the set of remainders (0, 1, 2, or 3) obtained by dividing each value by four.",
+    ),
+    [],
+  );
+  assert.deepEqual(
+    collectRequiredValues(
+      "Compute the possible residues {0, 1, 2, 3, 4} modulo five.",
+    ),
+    [],
+  );
+  assert.deepEqual(
+    collectRequiredValues(
+      "Only remainders 0, 1, 2 are allowed when values are divided by four.",
+    ),
+    [0, 1, 2],
+  );
+  assert.deepEqual(
+    collectRequiredValues("The allowed values are 0, 1, 2, or 3."),
+    [0, 1, 2, 3],
+  );
+});
+
+test("too-far wording requires a threshold while an explicit distance does not", () => {
+  assert.equal(
+    hasAmbiguousWording(
+      "None of your numbers sits too far from every drawn number.",
+    ),
+    true,
+  );
+  assert.equal(
+    hasAmbiguousWording(
+      "Every guessed number is within 10 of at least one drawn number.",
+    ),
+    false,
+  );
+});
+
+test("set-12 coverage distinguishes nearest-neighbour minimax from positional zip", () => {
+  const text =
+    "For each guessed number, measure its distance to the nearest drawn number regardless of order; the smallest largest distance wins.";
+  const nearest = ruleAstSchema.parse({
+    schemaVersion: 3,
+    result: {
+      type: "ranking",
+      direction: "min",
+      tieBreak: "share_pool",
+      score: {
+        kind: "reduce",
+        op: "max",
+        of: {
+          kind: "map",
+          of: { kind: "source", source: "guess" },
+          expr: {
+            kind: "reduce",
+            op: "min",
+            of: {
+              kind: "map",
+              of: { kind: "source", source: "draw" },
+              expr: {
+                kind: "abs",
+                of: {
+                  kind: "arith",
+                  op: "sub",
+                  left: { kind: "elem", up: 1 },
+                  right: { kind: "elem" },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+  const positional = ruleAstSchema.parse({
+    schemaVersion: 3,
+    result: {
+      type: "ranking",
+      direction: "min",
+      tieBreak: "share_pool",
+      score: {
+        kind: "reduce",
+        op: "max",
+        of: {
+          kind: "pairs_map",
+          left: { kind: "source", source: "guess" },
+          right: { kind: "source", source: "draw" },
+          expr: {
+            kind: "abs",
+            of: {
+              kind: "arith",
+              op: "sub",
+              left: { kind: "pair", side: "left" },
+              right: { kind: "pair", side: "right" },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  assert.equal(
+    analyzeInterpretationCoverage({
+      ast: nearest,
+      officialInterpretation: describeRuleAstForPlayers(nearest),
+      text,
+    }).covered,
+    true,
+  );
+  const wrongCoverage = analyzeInterpretationCoverage({
+    ast: positional,
+    officialInterpretation: describeRuleAstForPlayers(positional),
+    text,
+  });
+  assert.equal(wrongCoverage.covered, false);
+  assert.ok(wrongCoverage.missingOperations.includes("nearest_each"));
+  assert.doesNotMatch(describeRuleAstForPlayers(nearest), /level\(s\)/iu);
+});
+
+test("set-12 coverage distinguishes equality of derived sets from cardinality", () => {
+  const digits = (source: "draw" | "guess") => ({
+    kind: "digits" as const,
+    place: "units" as const,
+    of: { kind: "source" as const, source },
+  });
+  const coveredBy = (
+    left: ReturnType<typeof digits>,
+    right: ReturnType<typeof digits>,
+  ) => ({
+    kind: "forall" as const,
+    of: left,
+    where: {
+      kind: "exists" as const,
+      of: right,
+      where: {
+        kind: "compare" as const,
+        op: "eq" as const,
+        left: { kind: "elem" as const },
+        right: { kind: "elem" as const, up: 1 },
+      },
+    },
+  });
+  const faithful = ruleAstSchema.parse({
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "and",
+        clauses: [
+          coveredBy(digits("draw"), digits("guess")),
+          coveredBy(digits("guess"), digits("draw")),
+        ],
+      },
+    },
+  });
+  const cardinality = ruleAstSchema.parse({
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "compare",
+        op: "eq",
+        left: {
+          kind: "reduce",
+          op: "count",
+          of: {
+            kind: "intersection",
+            left: digits("guess"),
+            right: digits("draw"),
+          },
+        },
+        right: { kind: "lit", value: 6 },
+      },
+    },
+  });
+  const text =
+    "A guess wins when its set of units digits is exactly the same as the draw's set of units digits.";
+
+  assert.equal(
+    analyzeInterpretationCoverage({
+      ast: faithful,
+      officialInterpretation: describeRuleAstForPlayers(faithful),
+      text,
+    }).covered,
+    true,
+  );
+  assert.match(describeRuleAstForPlayers(faithful), /set.*is identical to/iu);
+  assert.doesNotMatch(describeRuleAstForPlayers(faithful), /level\(s\)/iu);
+  const wrongCoverage = analyzeInterpretationCoverage({
+    ast: cardinality,
+    officialInterpretation: describeRuleAstForPlayers(cardinality),
+    text,
+  });
+  assert.equal(wrongCoverage.covered, false);
+  assert.ok(wrongCoverage.missingOperations.includes("set_equality"));
+});
+
+test("reverse-oriented shifted zips render as adjacent gaps without negative positions", () => {
+  const sorted = {
+    kind: "sort" as const,
+    order: "asc" as const,
+    of: { kind: "source" as const, source: "guess" as const },
+  };
+  const ast = ruleAstSchema.parse({
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "compare",
+        op: "eq",
+        left: {
+          kind: "reduce",
+          op: "range_span",
+          of: {
+            kind: "pairs_map",
+            left: { kind: "slice", of: sorted, start: 1 },
+            right: { kind: "slice", of: sorted, start: 0, end: -1 },
+            expr: {
+              kind: "arith",
+              op: "sub",
+              left: { kind: "pair", side: "left" },
+              right: { kind: "pair", side: "right" },
+            },
+          },
+        },
+        right: { kind: "lit", value: 0 },
+      },
+    },
+  });
+  const description = describeRuleAstForPlayers(ast);
+  assert.match(description, /adjacent gaps between consecutive values/iu);
+  assert.doesNotMatch(description, /position\s+-?\d|to -1/iu);
 });

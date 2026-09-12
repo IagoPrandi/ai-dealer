@@ -13,6 +13,10 @@ import { fileURLToPath } from "node:url";
 
 export const RULE_COMPILER_SKILL = {
   name: "compile_rule_to_ast",
+  // v17: nearest-neighbour minimax, mutual equality of duplicate-bearing
+  // derived sets, and both orientations of the adjacent-gap shifted zip are
+  // explicit patterns. Positional zip and intersection cardinality are called
+  // out as invalid substitutes for those semantics.
   // v16: bounded procedural removal thresholds are explicitly compiled as
   // predicates over the corresponding order statistic, never as rankings.
   // v15: eligible two-criterion rankings retain `eligibleWhen`, calculate an
@@ -31,7 +35,7 @@ export const RULE_COMPILER_SKILL = {
   // side instead of flattening every value into the top-level `and`.
   // v10: ordered literal prefixes with an explicitly unconstrained remainder,
   // on top of v9's full literal sequences, sets, and their negation.
-  version: "tyche_rule_compiler_skill_v16",
+  version: "tyche_rule_compiler_skill_v17",
   allowedInputs: ["guess", "draw"] as const,
 } as const;
 

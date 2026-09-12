@@ -38,6 +38,7 @@ import {
   compileRuleArtifact,
   analyzeInterpretationCoverage,
   analyzeStatementFidelity,
+  collectRequiredValues,
   externalDependencyGateText,
   hasAmbiguousWording,
   hasExternalDependency,
@@ -655,8 +656,12 @@ export function shouldEscalateRulePreflight(
 export function shouldGuardianBlockRulePreflight(
   guardianGrounded: boolean | undefined,
   hasApprovedInterpretation: boolean,
+  hasCompilerConflict = false,
 ) {
-  return guardianGrounded === false && !hasApprovedInterpretation;
+  return (
+    guardianGrounded === false &&
+    (!hasApprovedInterpretation || hasCompilerConflict)
+  );
 }
 
 function buildCompilerRepairFeedback(
@@ -2741,6 +2746,21 @@ export function enforceSourceClarity(
   if (sourceValidation.decision !== "VALID") {
     return interpretation;
   }
+  const sourceAst = sourceValidation.artifact?.ast;
+  if (
+    sourceAst &&
+    !analyzeInterpretationCoverage({
+      ast: sourceAst,
+      officialInterpretation:
+        sourceValidation.artifact?.officialInterpretation ?? "",
+      text: `${interpretation.normalizedText} ${interpretation.officialInterpretation}`,
+    }).covered
+  ) {
+    // The deterministic parser recognized a narrower, different rule. It must
+    // not erase a model clarification whose reading contains semantic claims
+    // absent from that AST (for example distance versus zero overlap).
+    return interpretation;
+  }
   return {
     ...interpretation,
     clarificationQuestions: [],
@@ -2776,9 +2796,7 @@ export function preserveUnresolvedInterpretation(
   if (!interpretation.needsClarification) {
     return interpretation;
   }
-  const questions = dedupeBoundedStrings(
-    interpretation.clarificationQuestions,
-  );
+  const questions = dedupeBoundedStrings(interpretation.clarificationQuestions);
   const unresolved =
     questions.length > 0
       ? questions.join(" ")
@@ -3338,6 +3356,14 @@ function isIntentPreservingRewrite(source: string, rewrite: string): boolean {
     ) ||
     !/\b(draw|drawn)\b/.test(normalizedRewrite)
   ) {
+    return false;
+  }
+  const sourceValues = new Set(collectRequiredValues(source));
+  if (
+    collectRequiredValues(rewrite).some((value) => !sourceValues.has(value))
+  ) {
+    // Suggested rewrites may make an existing threshold explicit, but they may
+    // never invent a numeric boundary the player did not provide.
     return false;
   }
   if (looksLikeOrderedTensRangeRule(source)) {
@@ -4220,7 +4246,7 @@ async function runRulePreflightPipeline(
                   `${compileText} ${sanitizedText}`,
                   await interpretRuleWithAgent(compileText, passConfig, signal),
                 ),
-              ),
+            ),
           ),
         );
     // Clarification is a successful product result, not a failed compilation.
@@ -4603,15 +4629,31 @@ async function runRulePreflightPipeline(
   const baseOfficialInterpretation =
     playerFacingStatements.officialInterpretation;
   const guardianGrounded = pass.grounded;
-  // Once the player approved the exact interpretation, a stochastic guardian
-  // disagreement is escalation signal and audit evidence, not a coin-flip veto
-  // over a schema-valid artifact that passed source coverage, independent
-  // review, executed evidence, runtime bounds and the harness.
+  // Approval resolves player intent; it does not resolve contradictory machine
+  // evidence. A guardian rejection remains advisory by itself, but becomes a
+  // fail-closed veto when the compiler also recorded disagreement or a semantic
+  // mismatch. Set 12 showed that this paired signal identified every silently
+  // wrong freeze while leaving grounded, internally consistent artifacts alone.
+  const hasCompilerConflict =
+    validation.log.reasonCodes.includes("PROVIDER_DISAGREEMENT") ||
+    validation.log.attemptDiagnostics.some((attempt) =>
+      attempt.reasonCodes.some(
+        (reason) =>
+          reason === "REVIEWER_MISMATCH" ||
+          reason === "AGENT_STATEMENT_MISMATCH" ||
+          reason === "INTERPRETATION_MISMATCH",
+      ),
+    );
   const guardianBlocked = shouldGuardianBlockRulePreflight(
     guardianGrounded,
     approvedInterpretation !== undefined,
+    hasCompilerConflict,
   );
-  if (guardianGrounded === false && approvedInterpretation) {
+  if (
+    guardianGrounded === false &&
+    approvedInterpretation &&
+    !guardianBlocked
+  ) {
     guardianNote = [
       guardianNote,
       "The advisory fidelity model disagreed, but the approved interpretation and deterministic artifact checks passed.",

@@ -93,6 +93,7 @@ export { describeRuleAstTotal } from "./describeAst.js";
 export {
   analyzeInterpretationCoverage,
   analyzeStatementFidelity,
+  collectRequiredValues,
   type InterpretationCoverage,
   type RuleOperation,
   type RuleStatementClaim,
@@ -593,7 +594,7 @@ const AMBIGUOUS_PATTERNS = [
   /\b(looks?|feels?|feeling)\s+like\b/i,
   /\b\w+-(looking|style|heavy)\b/i,
   /\b(satisfying|rhythm|symmetrical|clustered|forgiving|safer|strange|soft|mirrors?)\b/i,
-  /\bnot\s+too\b|\btoo\s+(many|much|high|low|predictable|boring)\b/i,
+  /\bnot\s+too\b|\btoo\s+(many|much|high|low|far|close|near|large|small|wide|narrow|predictable|boring)\b/i,
   /\b(a\s+few\s+places|second\s+chance|strong\s+beginning|good\s+way|in\s+a\s+good\s+way)\b/i,
   // A two-digit pick cannot match the one-digit values contained in it. When a
   // player uses that as an example, they may mean tens digits, units digits, or
@@ -618,23 +619,25 @@ const NON_PROTOCOL_TIE_CONTEXT_PATTERN =
   /\b(?:wallet|address|creator|voter|votes?|leaderboard|profile|admin|time|timestamp|block|transaction|signature|balance|fees?|weather|rain|price|oracle|twitter|discord|website|api|previous|next|future|history|turn|round|only\s+if|unless|provided\s+that)\b/iu;
 
 function stripProtocolTieBreakClauses(text: string) {
-  return text
-    .replace(PROTOCOL_TIE_BREAK_CLAUSE_PATTERN, (clause) =>
-      NON_PROTOCOL_TIE_CONTEXT_PATTERN.test(clause) ? clause : " ",
-    )
-    // The interpreter is allowed to add the protocol's deterministic tie
-    // handling, and commonly phrases it without repeating a subject noun:
-    // "with ties splitting the prize equally". Strip only that exact
-    // settlement statement; any following condition remains visible to the
-    // external-dependency gate.
-    .replace(
-      /\b(?:with\s+)?ties?\s+(?:on\s+the\s+(?:same|highest|lowest)\s+(?:score|count|total|value)\s+)?(?:result(?:ing)?\s+in\s+)?(?:an?\s+)?(?:equal(?:ly)?\s+)?(?:share|sharing|split(?:ting)?)\s+(?:of\s+)?(?:the\s+)?(?:prize|pool|it)(?:\s+equally)?\b/giu,
-      " ",
-    )
-    .replace(
-      /\b(?:tickets?|guesses?|players?)\s+(?:that\s+are\s+)?equally\s+(?:close|near)\s+(?:share|split)\s+(?:the\s+)?(?:prize|pool|it)(?:\s+equally)?\b/giu,
-      " ",
-    );
+  return (
+    text
+      .replace(PROTOCOL_TIE_BREAK_CLAUSE_PATTERN, (clause) =>
+        NON_PROTOCOL_TIE_CONTEXT_PATTERN.test(clause) ? clause : " ",
+      )
+      // The interpreter is allowed to add the protocol's deterministic tie
+      // handling, and commonly phrases it without repeating a subject noun:
+      // "with ties splitting the prize equally". Strip only that exact
+      // settlement statement; any following condition remains visible to the
+      // external-dependency gate.
+      .replace(
+        /\b(?:with\s+)?ties?\s+(?:on\s+the\s+(?:same|highest|lowest)\s+(?:score|count|total|value)\s+)?(?:result(?:ing)?\s+in\s+)?(?:an?\s+)?(?:equal(?:ly)?\s+)?(?:share|sharing|split(?:ting)?)\s+(?:of\s+)?(?:the\s+)?(?:prize|pool|it)(?:\s+equally)?\b/giu,
+        " ",
+      )
+      .replace(
+        /\b(?:tickets?|guesses?|players?)\s+(?:that\s+are\s+)?equally\s+(?:close|near)\s+(?:share|split)\s+(?:the\s+)?(?:prize|pool|it)(?:\s+equally)?\b/giu,
+        " ",
+      )
+  );
 }
 
 const EXTERNAL_DEPENDENCY_PATTERNS = [
@@ -1727,6 +1730,19 @@ function validateResolvedAst(
       })
     : null;
   const reviewerPreservesSource = reviewerCoverage?.covered === true;
+  const reviewerBounds = reviewerAst
+    ? validateRuntimeBounds(reviewerAst)
+    : null;
+  const reviewerHarness =
+    reviewerAst && reviewerBounds?.safe
+      ? generateAndRunTests(reviewerAst)
+      : null;
+  const reviewerIsExecutable =
+    reviewerBounds?.safe === true &&
+    reviewerHarness?.coverageScore === 1 &&
+    reviewerHarness.difficulty.difficultyClass !== "IMPOSSIBLE" &&
+    reviewerHarness.difficulty.difficultyClass !== "ALWAYS_TRUE";
+  const reviewerIsEligible = reviewerPreservesSource && reviewerIsExecutable;
   const reviewerAstSource = reviewerAst
     ? astSource === "deterministic" || suppliedReviewerAst !== null
       ? "provider"
@@ -1736,13 +1752,13 @@ function validateResolvedAst(
   // an independent reading of the rule and has no authority to veto a complete
   // candidate. Treat it as an unavailable opinion and continue to another
   // provider. This remains fail-closed until a usable second reading arrives.
-  if (reviewerAst && !reviewerPreservesSource) {
+  if (reviewerAst && !reviewerIsEligible) {
     reasonCodes.add("SECOND_OPINION_UNAVAILABLE");
   }
   const reviewerMismatch =
     ast &&
     reviewerAst &&
-    reviewerPreservesSource &&
+    reviewerIsEligible &&
     !knownAstSemanticsMatch(reviewerAst, ast);
   const semanticDisagreementWitness =
     reviewerMismatch && ast && reviewerAst
@@ -1764,19 +1780,21 @@ function validateResolvedAst(
                   ? ` (missing values: ${reviewerCoverage.missingFromAst.join(", ")})`
                   : ""
             }.`
-        : reviewerMismatch
-          ? describeSemanticDisagreement(
-              reviewerAst,
-              ast,
-              semanticDisagreementWitness,
-            )
-          : "The independent reviewer AST agrees with the candidate.",
+          : !reviewerIsExecutable
+            ? "The reviewer AST was discarded because it did not pass runtime safety, harness, and non-degenerate difficulty checks."
+            : reviewerMismatch
+              ? describeSemanticDisagreement(
+                  reviewerAst,
+                  ast,
+                  semanticDisagreementWitness,
+                )
+              : "The independent reviewer AST agrees with the candidate.",
     reasonCodes: reasonCodes.has("REVIEWER_MISMATCH")
       ? ["REVIEWER_MISMATCH"]
       : [],
     stage: "independent_review",
     status:
-      !ast || !reviewerAst || !reviewerPreservesSource
+      !ast || !reviewerAst || !reviewerIsEligible
         ? "skipped"
         : reasonCodes.has("REVIEWER_MISMATCH")
           ? "failed"
@@ -1791,7 +1809,7 @@ function validateResolvedAst(
           normalizedText,
           providerEvidence,
           suppliedReviewerAst !== null &&
-            reviewerPreservesSource &&
+            reviewerIsEligible &&
             !reviewerMismatch,
         )
       : null;
@@ -1928,7 +1946,7 @@ function validateResolvedAst(
   const certifiedByIndependentReading =
     astSource === "provider" &&
     reviewerAst !== null &&
-    reviewerPreservesSource &&
+    reviewerIsEligible &&
     !reviewerMismatch;
   let interpretationCoverageFailed = false;
   let interpretationCoverageChecked = false;
@@ -1949,7 +1967,7 @@ function validateResolvedAst(
     // It can never certify its own omission: the reviewer must itself cover the
     // source, agree by behavior, and operations remain unconditional.
     const reviewerCertifiesValues =
-      reviewerAst !== null && reviewerPreservesSource && !reviewerMismatch;
+      reviewerAst !== null && reviewerIsEligible && !reviewerMismatch;
     const blocked =
       coverage.missingOperations.length > 0 ||
       ((coverage.missingFromAst.length > 0 ||
@@ -1986,11 +2004,12 @@ function validateResolvedAst(
         : ["INTERPRETATION_MISMATCH"]
       : [],
     stage: "interpretation_coverage",
-    status: !ast || !interpretationCoverageChecked
-      ? "skipped"
-      : interpretationCoverageFailed
-        ? "failed"
-        : "passed",
+    status:
+      !ast || !interpretationCoverageChecked
+        ? "skipped"
+        : interpretationCoverageFailed
+          ? "failed"
+          : "passed",
   });
 
   // Gap 1: the dealer's own reading is a promise to the player.
@@ -2035,14 +2054,14 @@ function validateResolvedAst(
         : !agentStatementCoverageChecked
           ? "Skipped because the agent statement exposed no deterministically checkable value or operation cue."
           : agentStatementCoverageFailed
-          ? `The candidate AST does not keep every load-bearing claim in the agent interpretation${
-              agentStatementMissingOperations.length > 0
-                ? ` (missing operations: ${agentStatementMissingOperations.join(", ")})`
-                : agentStatementMissingValues.length > 0
-                  ? ` (missing values: ${agentStatementMissingValues.join(", ")})`
-                  : ""
-            }.`
-          : "The candidate AST keeps the load-bearing claims in the agent interpretation.",
+            ? `The candidate AST does not keep every load-bearing claim in the agent interpretation${
+                agentStatementMissingOperations.length > 0
+                  ? ` (missing operations: ${agentStatementMissingOperations.join(", ")})`
+                  : agentStatementMissingValues.length > 0
+                    ? ` (missing values: ${agentStatementMissingValues.join(", ")})`
+                    : ""
+              }.`
+            : "The candidate AST keeps the load-bearing claims in the agent interpretation.",
     reasonCodes: agentStatementCoverageFailed
       ? ["AGENT_STATEMENT_MISMATCH"]
       : [],
@@ -2666,6 +2685,14 @@ function collectDivergentProviderReadings(
   attempts: ProviderEvaluation[],
   sourceText: string,
 ): string[] {
+  const ineligibleReadingReasons = new Set<RuleValidationReasonCode>([
+    "COMPLEXITY_EXCEEDED",
+    "DIFFICULTY_ALWAYS_TRUE",
+    "DIFFICULTY_IMPOSSIBLE",
+    "RUNTIME_TEST_FAILED",
+    "UNSAFE_RUNTIME_BOUNDS",
+    "VACUOUS_CONDITION",
+  ]);
   const distinct: RuleAst[] = [];
   for (const attempt of attempts.filter(isCompletedProviderOpinion)) {
     // A source-only reviewer has no consumed spans or worked examples. It is a
@@ -2678,6 +2705,9 @@ function collectDivergentProviderReadings(
     for (const ast of providerReadings) {
       if (
         ast !== null &&
+        !attempt.reasonCodes.some((reason) =>
+          ineligibleReadingReasons.has(reason),
+        ) &&
         !hasProvablyVacuousCondition(ast) &&
         // A program that omitted a source operation is a compiler defect, not
         // an alternative meaning the player can select. Requiring each choice
@@ -3380,7 +3410,7 @@ function compileSupportedRulePattern(text: string): RuleAst | null {
   }
 
   if (
-    /\bno\b.{0,40}\b(guessed?|picked|ticket|your)\s+numbers?\b.{0,60}\b(appear|appears|match|matches|drawn|in the draw)\b/i.test(
+    /\bno\s+(?:(?:guessed?|picked|ticket|your)\s+)?numbers?\s+(?:appears?|matches?)(?:\s+anywhere)?\s+(?:in\s+)?(?:the\s+)?(?:official\s+)?draw\b/i.test(
       text,
     ) ||
     // "none of its six numbers appear in the draw". The determiner and the
@@ -3389,7 +3419,7 @@ function compileSupportedRulePattern(text: string): RuleAst | null {
     // the match-count parser instead. A qualifier between the determiner and
     // "numbers" (e.g. "none of its EVEN numbers") is deliberately not accepted —
     // that is a different rule about a subset, not zero overlap.
-    /\b(?:none\s+of|not\s+one\s+of)\s+(?:my|your|the|its|their)?\s*(?:six\s+|6\s+)?(?:guessed?|picked|chosen|ticket)?\s*numbers?\b.{0,60}\b(appear|appears|match|matches|drawn|in the draw)\b/i.test(
+    /\b(?:none\s+of|not\s+one\s+of)\s+(?:my|your|the|its|their)?\s*(?:six\s+|6\s+)?(?:guessed?|picked|chosen|ticket)?\s*numbers?\s+(?:(?:appears?|matches?)(?:\s+anywhere)?\s+(?:in\s+)?(?:the\s+)?(?:official\s+)?draw|(?:is|are)\s+(?:itself\s+|themselves\s+)?(?:one\s+of\s+)?(?:the\s+)?drawn\s+numbers?)\b/i.test(
       text,
     ) ||
     /\b(ticket|picks?|numbers?)\b.{0,40}\bdodges?\s+the\s+draw\b/i.test(text)
@@ -6660,8 +6690,7 @@ function sampledSemanticsMatch(expected: RuleAst, actual: RuleAst): boolean {
         if (
           expectedCohort.evaluations.some(
             (evaluation, index) =>
-              evaluation.eligible !==
-              actualCohort.evaluations[index]?.eligible,
+              evaluation.eligible !== actualCohort.evaluations[index]?.eligible,
           ) ||
           !sameWinnerSet(expectedCohort.winners, actualCohort.winners)
         ) {
@@ -6671,8 +6700,8 @@ function sampledSemanticsMatch(expected: RuleAst, actual: RuleAst): boolean {
     } else {
       for (const input of inputs) {
         if (
-        evaluatePredicate(expected, input).result !==
-        evaluatePredicate(actual, input).result
+          evaluatePredicate(expected, input).result !==
+          evaluatePredicate(actual, input).result
         ) {
           return false;
         }

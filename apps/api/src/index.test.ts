@@ -1071,12 +1071,14 @@ test("rule preflight names a compiler capability gap without inventing ambiguity
   );
 });
 
-test("approved compile failures still escalate and groundedness alone cannot veto approval", () => {
+test("approved compile failures escalate and paired guardian/compiler conflicts veto approval", () => {
   assert.equal(shouldEscalateRulePreflight("INVALID", undefined), true);
   assert.equal(shouldEscalateRulePreflight("VALID", false), true);
   assert.equal(shouldEscalateRulePreflight("VALID", true), false);
   assert.equal(shouldGuardianBlockRulePreflight(false, false), true);
   assert.equal(shouldGuardianBlockRulePreflight(false, true), false);
+  assert.equal(shouldGuardianBlockRulePreflight(false, true, true), true);
+  assert.equal(shouldGuardianBlockRulePreflight(true, true, true), false);
 });
 
 test("a compiler-side refusal exposes retry without presenting a no-op rewrite", () => {
@@ -1338,7 +1340,8 @@ test("a complete ranking tie clause does not re-open clarification", () => {
     addedOperationalClauses: [],
     clarificationQuestions: [],
     clarityNote: "",
-    dealerMessage: "The ticket with the most same-position matches wins; ties split equally.",
+    dealerMessage:
+      "The ticket with the most same-position matches wins; ties split equally.",
     needsClarification: false,
     normalizedText: source,
     officialInterpretation: source,
@@ -1552,6 +1555,29 @@ test("a deterministic objective rule cannot inherit an invented model question",
   assert.equal(result.needsClarification, false);
   assert.deepEqual(result.clarificationQuestions, []);
   assert.equal(result.clarityNote, "");
+});
+
+test("an unspecified distance remains in clarification even near a deterministic shortcut", () => {
+  const source = "None of your numbers sits too far from every drawn number.";
+  const interpretation = {
+    addedOperationalClauses: [],
+    clarificationQuestions: [
+      "What exact numeric distance should count as too far?",
+    ],
+    clarityNote: "The distance threshold is unspecified.",
+    dealerMessage: "Please define the exact distance threshold.",
+    needsClarification: true,
+    normalizedText: source,
+    officialInterpretation:
+      "Every guessed number must be within an unspecified distance of at least one drawn number.",
+    suggestedRewrites: [],
+    title: "Nearest Draw Distance",
+  };
+
+  assert.equal(
+    enforceSourceClarity(source, interpretation).needsClarification,
+    true,
+  );
 });
 
 test("rule proposal preserves the dealer-generated title", () => {
@@ -4884,6 +4910,22 @@ test("a suggested rewrite that cannot clear preflight is never offered", () => {
   const viable =
     "A guess wins if at least three of the guessed numbers appear in the official draw.";
   assert.deepEqual(offer(viable), [viable]);
+
+  const vagueDistance =
+    "None of my guessed numbers may sit too far from every drawn number.";
+  const inventedThreshold = buildRuleRefinementFeedback({
+    agentSuggestedRewrites: [
+      "Every guessed number must be within 10 of at least one drawn number.",
+    ],
+    clarityNote: "The threshold is missing.",
+    compileText: vagueDistance,
+    officialInterpretation: vagueDistance,
+    reasonCodes: ["AMBIGUOUS_RULE"],
+    reasonSummary: "Rule rejected: AMBIGUOUS_RULE.",
+    sanitizedText: vagueDistance,
+    tokenCount: vagueDistance.trim().split(/\s+/u).length,
+  });
+  assert.deepEqual(inventedThreshold.suggestedRewrites, []);
 });
 
 test("conversation drafts paginate newest-first without crossing wallets", () => {

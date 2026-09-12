@@ -65,9 +65,11 @@ export type RuleOperation =
   | "membership"
   | "minimum"
   | "mod"
+  | "nearest_each"
   | "parity"
   | "position"
   | "product"
+  | "set_equality"
   | "sort"
   | "sum";
 
@@ -125,7 +127,7 @@ const EXAMPLE_MARKERS =
 // win, which is exactly how turn 55 shipped a rule nobody could win.
 const BRACED_SET = /[{[]([^}\]]*)[}\]]/gu;
 const NUMBER_ENUMERATION =
-  /\b\d{1,3}(?:\s*(?:,|;|\band\b|\be\b|\bor\b|\bou\b|\s)\s*\d{1,3}){2,}\b/gu;
+  /\b\d{1,3}(?:\s*(?:[,;]\s*(?:(?:and|or|e|ou)\s+)?|(?:and|or|e|ou)\s+|\s+)\d{1,3}){2,}\b/gu;
 const MEMBERSHIP_ENUMERATION =
   /\b(?:contains?|includes?|contem|inclui)\s+(?:(?:the|os|as)\s+)?(?:numbers?|numeros?|dezenas?)?\s*(\d{1,3}(?:\s*(?:[,;]\s*(?:(?:and|e)\s+)?|(?:and|e)\s+|\s+)\d{1,3})+)\b/gu;
 const NUMERIC_RANGE =
@@ -214,6 +216,66 @@ function readDigits(value: string) {
     .filter((parsed) => Number.isSafeInteger(parsed));
 }
 
+function readNamedInteger(value: string): number | null {
+  const digit = Number(value);
+  if (Number.isSafeInteger(digit)) {
+    return digit;
+  }
+  return NUMBER_WORD_VALUES.get(value) ?? null;
+}
+
+/**
+ * A complete residue domain is an explanation of modulo, not a set of values
+ * the rule compares against. For example, modulo four necessarily produces
+ * one of 0, 1, 2, or 3; requiring those four literals in the AST rejects the
+ * canonical `value mod 4` encoding even though it preserves the rule exactly.
+ *
+ * This is semantic rather than phrase-specific: the enumeration must be the
+ * complete contiguous domain 0..m-1, the surrounding clause must identify it
+ * as remainders/residues, and that same clause must state modulus/divisor m.
+ * Partial domains and enumerations attached to a different divisor remain
+ * load-bearing.
+ */
+function isCompleteResidueDomainEnumeration(
+  prepared: string,
+  index: number,
+  enumeration: string,
+) {
+  // NUMBER_ENUMERATION can stop before a final Oxford-comma conjunction
+  // (`0, 1, 2, or 3`). Expand from the same starting point before deciding
+  // whether the list is the full residue domain.
+  const expanded = prepared
+    .slice(index, index + 120)
+    .match(
+      /^\d{1,3}(?:\s*(?:[,;]\s*(?:(?:and|or|e|ou)\s+)?|(?:and|or|e|ou)\s+|\s+)\d{1,3}){2,}/u,
+    )?.[0];
+  const values = [...new Set(readDigits(expanded ?? enumeration))].sort(
+    (a, b) => a - b,
+  );
+  if (
+    values.length < 2 ||
+    values[0] !== 0 ||
+    values.some((value, valueIndex) => value !== valueIndex)
+  ) {
+    return false;
+  }
+
+  const modulus = values.length;
+  const context = prepared.slice(
+    Math.max(0, index - 80),
+    Math.min(prepared.length, index + (expanded ?? enumeration).length + 180),
+  );
+  if (!/\b(?:remainders?|residue(?:s|\s+classes)?|restos?)\b/u.test(context)) {
+    return false;
+  }
+
+  const divisorPattern =
+    /\b(?:mod(?:ulo)?|modulus|divid(?:e|ed|ing)?[^.;:]{0,80}?\bby|dividid[oa]s?[^.;:]{0,80}?\bpor)\s+(\d{1,3}|[a-z]+)\b/gu;
+  return [...context.matchAll(divisorPattern)].some(
+    (match) => readNamedInteger(match[1] ?? "") === modulus,
+  );
+}
+
 // A range stated over the numbers a rule has NOT already pinned is vacuous in
 // exactly the same way a 1..100 range is, and for the same reason: a ticket
 // holds six distinct values from 1..100, so once 1, 2, 3 and 4 are pinned the
@@ -275,11 +337,23 @@ export function collectRequiredValues(text: string): number[] {
   const prepared = stripVacuousRanges(stripExampleClauses(normalize(text)));
   const required = new Set<number>();
 
-  for (const [, inner] of prepared.matchAll(BRACED_SET)) {
-    readDigits(inner ?? "").forEach((value) => required.add(value));
+  for (const match of prepared.matchAll(BRACED_SET)) {
+    const inner = match[1] ?? "";
+    if (
+      match.index === undefined ||
+      !isCompleteResidueDomainEnumeration(prepared, match.index, inner)
+    ) {
+      readDigits(inner).forEach((value) => required.add(value));
+    }
   }
-  for (const [enumeration] of prepared.matchAll(NUMBER_ENUMERATION)) {
-    readDigits(enumeration).forEach((value) => required.add(value));
+  for (const match of prepared.matchAll(NUMBER_ENUMERATION)) {
+    const enumeration = match[0];
+    if (
+      match.index === undefined ||
+      !isCompleteResidueDomainEnumeration(prepared, match.index, enumeration)
+    ) {
+      readDigits(enumeration).forEach((value) => required.add(value));
+    }
   }
   for (const [, enumeration] of prepared.matchAll(MEMBERSHIP_ENUMERATION)) {
     readDigits(enumeration ?? "").forEach((value) => required.add(value));
@@ -418,6 +492,10 @@ const OPERATION_TEXT_CUES: ReadonlyArray<readonly [RuleOperation, RegExp]> = [
   ],
   ["mod", /\b(?:modulo|modulus|mod|remainder|resto)\b/u],
   [
+    "nearest_each",
+    /\b(?:distance|difference)\s+(?:from|to)\s+(?:whichever\s+)?(?:the\s+)?(?:drawn|guessed)?\s*(?:number|value)?\s*(?:is\s+)?(?:nearest|closest)\b|\b(?:nearest|closest)\s+(?:drawn|guessed)\s+(?:number|value)\b/u,
+  ],
+  [
     "parity",
     /\b(?:even(?!\s+(?:if|though|when|so))|odd|numeros?\s+pares?|pares|impar(?:es)?)\b/u,
   ],
@@ -431,6 +509,10 @@ const OPERATION_TEXT_CUES: ReadonlyArray<readonly [RuleOperation, RegExp]> = [
     /\b(?:but|except|otherwise)\s+if\b|\bif\b[^.;:]{0,80}\b(?:then|otherwise|keep|remain)\b|[,;:]\s*else\b|\b(?:penalty|bonus)\b/u,
   ],
   ["digit", /\b(?:digit|digits|digito|digitos)\b/u],
+  [
+    "set_equality",
+    /\b(?:same|identical|equal)\s+sets?\b|\bsets?\b[^.;:]{0,50}\b(?:same|identical|equal)\b/u,
+  ],
   // A rule that names WHERE a number sits is not the same rule as one that only
   // asks whether the number appears. "same position" is the cue that separates
   // an ordered comparison from an unordered intersection, and dropping it turns
@@ -570,6 +652,189 @@ export function collectAstOperations(ast: RuleAst): Set<RuleOperation> {
     return null;
   };
 
+  const isElemPairEquality = (node: unknown) => {
+    if (!node || typeof node !== "object" || Array.isArray(node)) {
+      return false;
+    }
+    const record = node as Record<string, unknown>;
+    if (record.kind !== "compare" || record.op !== "eq") {
+      return false;
+    }
+    const levels = [record.left, record.right]
+      .filter(
+        (operand): operand is Record<string, unknown> =>
+          operand !== null &&
+          typeof operand === "object" &&
+          !Array.isArray(operand),
+      )
+      .filter((operand) => operand.kind === "elem")
+      .map((operand) => (typeof operand.up === "number" ? operand.up : 0));
+    return levels.length === 2 && new Set(levels).size === 2;
+  };
+
+  const readSubsetRelation = (
+    node: unknown,
+  ): readonly [string, string] | null => {
+    if (!node || typeof node !== "object" || Array.isArray(node)) {
+      return null;
+    }
+    const outer = node as Record<string, unknown>;
+    if (
+      outer.kind !== "forall" ||
+      !outer.of ||
+      typeof outer.of !== "object" ||
+      Array.isArray(outer.of) ||
+      !outer.where ||
+      typeof outer.where !== "object" ||
+      Array.isArray(outer.where)
+    ) {
+      return null;
+    }
+    const where = outer.where as Record<string, unknown>;
+    if (
+      where.kind === "exists" &&
+      where.of &&
+      typeof where.of === "object" &&
+      !Array.isArray(where.of) &&
+      isElemPairEquality(where.where)
+    ) {
+      return [JSON.stringify(outer.of), JSON.stringify(where.of)];
+    }
+    if (
+      where.kind === "contains" &&
+      where.array &&
+      typeof where.array === "object" &&
+      !Array.isArray(where.array) &&
+      where.value &&
+      typeof where.value === "object" &&
+      !Array.isArray(where.value) &&
+      (where.value as Record<string, unknown>).kind === "elem"
+    ) {
+      return [JSON.stringify(outer.of), JSON.stringify(where.array)];
+    }
+    return null;
+  };
+
+  const hasMutualSetInclusion = (node: unknown) => {
+    if (!node || typeof node !== "object" || Array.isArray(node)) {
+      return false;
+    }
+    const record = node as Record<string, unknown>;
+    if (record.kind !== "and" || !Array.isArray(record.clauses)) {
+      return false;
+    }
+    const relations = record.clauses
+      .map(readSubsetRelation)
+      .filter(
+        (relation): relation is readonly [string, string] => relation !== null,
+      );
+    return relations.some(([left, right]) =>
+      relations.some(
+        ([reverseLeft, reverseRight]) =>
+          left === reverseRight && right === reverseLeft,
+      ),
+    );
+  };
+
+  const isDirectSourceSetEquality = (node: unknown) => {
+    if (!node || typeof node !== "object" || Array.isArray(node)) {
+      return false;
+    }
+    const record = node as Record<string, unknown>;
+    if (record.kind !== "compare" || record.op !== "eq") {
+      return false;
+    }
+    const sides = [record.left, record.right];
+    const countIntersection = sides.find((side) => {
+      if (!side || typeof side !== "object" || Array.isArray(side))
+        return false;
+      const scalar = side as Record<string, unknown>;
+      if (
+        scalar.kind !== "reduce" ||
+        scalar.op !== "count" ||
+        !scalar.of ||
+        typeof scalar.of !== "object" ||
+        Array.isArray(scalar.of)
+      ) {
+        return false;
+      }
+      const intersection = scalar.of as Record<string, unknown>;
+      return (
+        intersection.kind === "intersection" &&
+        new Set([
+          arraySource(intersection.left),
+          arraySource(intersection.right),
+        ]).size === 2 &&
+        [arraySource(intersection.left), arraySource(intersection.right)].every(
+          (source) => source !== null,
+        ) &&
+        [intersection.left, intersection.right].every(
+          (source) =>
+            source !== null &&
+            typeof source === "object" &&
+            !Array.isArray(source) &&
+            (source as Record<string, unknown>).kind === "source",
+        )
+      );
+    });
+    const literal = sides.find((side) => readLiteral(side) !== null);
+    return countIntersection !== undefined && readLiteral(literal) === 6;
+  };
+
+  const isCrossSourceElementDistance = (node: unknown) => {
+    if (!node || typeof node !== "object" || Array.isArray(node)) return false;
+    const record = node as Record<string, unknown>;
+    if (
+      record.kind !== "abs" ||
+      !record.of ||
+      typeof record.of !== "object" ||
+      Array.isArray(record.of)
+    ) {
+      return false;
+    }
+    const arithmetic = record.of as Record<string, unknown>;
+    return (
+      arithmetic.op === "sub" &&
+      isElemPairEquality({
+        kind: "compare",
+        left: arithmetic.left,
+        op: "eq",
+        right: arithmetic.right,
+      })
+    );
+  };
+
+  const isNearestEachReduction = (node: unknown) => {
+    if (!node || typeof node !== "object" || Array.isArray(node)) return false;
+    const record = node as Record<string, unknown>;
+    if (
+      record.kind !== "map" ||
+      !record.expr ||
+      typeof record.expr !== "object" ||
+      Array.isArray(record.expr)
+    ) {
+      return false;
+    }
+    const reduction = record.expr as Record<string, unknown>;
+    if (
+      reduction.kind !== "reduce" ||
+      reduction.op !== "min" ||
+      !reduction.of ||
+      typeof reduction.of !== "object" ||
+      Array.isArray(reduction.of)
+    ) {
+      return false;
+    }
+    const innerMap = reduction.of as Record<string, unknown>;
+    return (
+      innerMap.kind === "map" &&
+      arraySource(record.of) !== null &&
+      arraySource(innerMap.of) !== null &&
+      arraySource(record.of) !== arraySource(innerMap.of) &&
+      isCrossSourceElementDistance(innerMap.expr)
+    );
+  };
+
   const visit = (node: unknown) => {
     if (Array.isArray(node)) {
       node.forEach(visit);
@@ -623,6 +888,12 @@ export function collectAstOperations(ast: RuleAst): Set<RuleOperation> {
     }
     if (kind === "abs") {
       operations.add("distance");
+    }
+    if (isNearestEachReduction(record)) {
+      operations.add("nearest_each");
+    }
+    if (hasMutualSetInclusion(record) || isDirectSourceSetEquality(record)) {
+      operations.add("set_equality");
     }
     if (
       kind === "all_ordered_abs_diff_lte" ||
@@ -686,10 +957,7 @@ export function collectAstOperations(ast: RuleAst): Set<RuleOperation> {
         operations.add(operation);
       }
     }
-    if (
-      kind === "pairs_forall" &&
-      arraySource(record.left) === "guess"
-    ) {
+    if (kind === "pairs_forall" && arraySource(record.left) === "guess") {
       operations.add("all_guess");
     }
     if (kind === "all_values_between_min_max") {
