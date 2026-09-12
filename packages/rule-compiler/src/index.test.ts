@@ -172,6 +172,8 @@ test("the compile_rule_to_ast skill prompt is versioned and covers both rule mod
   assert.ok(prompt.includes('"up":1'));
   assert.ok(prompt.includes("first pick only needs to be higher"));
   assert.ok(prompt.includes("sum(guess) mod 10"));
+  assert.match(prompt, /bounded procedural removal count is still a predicate/i);
+  assert.ok(prompt.includes("at(sort(guess,desc), N)"));
   assert.ok(prompt.includes("same tens range"));
   assert.ok(prompt.includes("pair.left div 10 == pair.right div 10"));
   assert.ok(
@@ -3562,6 +3564,45 @@ test("a dedicated LLM reviewer certifies a novel rule without provider fallbacks
   assert.equal(result.log.providerPath.length, 1);
 });
 
+test("an interpreter-authored tie sentence cannot manufacture an external dependency", async () => {
+  const prompt = `${NO_REFERENCE_PROMPT} If multiple guesses have the same result, they share the prize equally.`;
+  const ast = sumCompareAst("lt", 10);
+  const result = await compileRuleArtifact(
+    {
+      originalText: NO_REFERENCE_PROMPT,
+      prompt,
+      tokenCount: 14,
+    },
+    {
+      astProvider: async () => ast,
+      astReviewer: async () => ast,
+    },
+  );
+
+  assert.equal(result.decision, "VALID", JSON.stringify(result.log.reasonCodes));
+  assert.ok(!result.log.reasonCodes.includes("EXTERNAL_DEPENDENCY"));
+});
+
+test("a non-protocol dependency added by the interpreter still fails closed", async () => {
+  const prompt = `${NO_REFERENCE_PROMPT} Only wallets created today qualify.`;
+  const ast = sumCompareAst("lt", 10);
+  const result = await compileRuleArtifact(
+    {
+      originalText: NO_REFERENCE_PROMPT,
+      prompt,
+      tokenCount: 14,
+    },
+    {
+      astProvider: async () => ast,
+      astReviewer: async () => ast,
+    },
+  );
+
+  assert.equal(result.decision, "INVALID");
+  assert.ok(result.log.reasonCodes.includes("AGENT_STATEMENT_MISMATCH"));
+  assert.ok(!result.log.reasonCodes.includes("EXTERNAL_DEPENDENCY"));
+});
+
 test("a novel rule with reviewer consensus binds the complete approved source", async () => {
   const ast = sumCompareAst("lt", 10);
   const result = await compileRuleArtifact(
@@ -3636,7 +3677,7 @@ test("a novel-rule LLM disagreement reports a behavioral counterexample", async 
   assert.notEqual(witness.reviewerResult, witness.draftResult);
 });
 
-test("a third provider arbitrates a reviewer mismatch instead of treating it as a veto", async () => {
+test("a corroborated reviewer mismatch is not mislabeled as provider disagreement", async () => {
   const draft = sumCompareAst("lt", 10);
   const reviewer = sumCompareAst("gt", 10);
   let generationCalls = 0;
@@ -3662,10 +3703,58 @@ test("a third provider arbitrates a reviewer mismatch instead of treating it as 
   assert.equal(result.decision, "VALID");
   assert.equal(generationCalls, 2);
   assert.equal(reviewCalls, 1);
-  assert.equal(result.log.providerDisagreementRateSample, 1);
-  assert.ok(result.log.reasonCodes.includes("PROVIDER_DISAGREEMENT"));
+  assert.equal(result.log.providerDisagreementRateSample, 0);
+  assert.ok(!result.log.reasonCodes.includes("PROVIDER_DISAGREEMENT"));
   assert.ok(!result.log.reasonCodes.includes("AMBIGUOUS_RULE"));
   assert.equal(result.log.providerDisagreementReadings.length, 1);
+});
+
+test("ranking review compares induced winners instead of raw score units", async () => {
+  const score = {
+    kind: "reduce",
+    op: "sum",
+    of: { kind: "source", source: "guess" },
+  } as const;
+  const ranking = (scaled: boolean) =>
+    ruleAstSchema.parse({
+      schemaVersion: 3,
+      result: {
+        type: "ranking",
+        direction: "max",
+        tieBreak: "share_pool",
+        score: scaled
+          ? {
+              kind: "arith",
+              op: "mul",
+              left: { kind: "lit", value: 6 },
+              right: score,
+            }
+          : score,
+      },
+    });
+  let providerCalls = 0;
+  const result = await compileRuleArtifact(
+    {
+      originalText: NO_REFERENCE_PROMPT,
+      prompt: NO_REFERENCE_PROMPT,
+      tokenCount: 14,
+    },
+    {
+      astProvider: async () => {
+        providerCalls += 1;
+        return ranking(false);
+      },
+      astReviewer: async () => ranking(true),
+    },
+  );
+
+  assert.equal(result.decision, "VALID", JSON.stringify(result.log.reasonCodes));
+  assert.equal(providerCalls, 1);
+  assert.ok(
+    !result.log.attemptDiagnostics[0]?.reasonCodes.includes(
+      "REVIEWER_MISMATCH",
+    ),
+  );
 });
 
 test("ranking disagreement diagnostics compare score and eligibility fields", async () => {
@@ -5541,12 +5630,61 @@ test("set-7 coverage sees directional quantifiers, distance thresholds, and deri
   }
 });
 
+test("coverage preserves quantifier lineage through derived draw and guess arrays", () => {
+  const ast = ruleAstSchema.parse({
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "forall",
+        of: {
+          kind: "digits",
+          place: "tens",
+          of: { kind: "source", source: "draw" },
+        },
+        where: {
+          kind: "exists",
+          of: {
+            kind: "digits",
+            place: "units",
+            of: { kind: "source", source: "guess" },
+          },
+          where: {
+            kind: "compare",
+            op: "eq",
+            left: { kind: "elem" },
+            right: { kind: "elem", up: 1 },
+          },
+        },
+      },
+    },
+  });
+  const text =
+    "A guess wins if the tens digit of every drawn number appears as the last digit of at least one guessed number.";
+  const coverage = analyzeInterpretationCoverage({
+    ast,
+    officialInterpretation: describeRuleAstForPlayers(ast),
+    text,
+  });
+
+  assert.ok(coverage.requiredOperations.includes("all_draw"));
+  assert.ok(!coverage.missingOperations.includes("all_draw"));
+  assert.ok(!coverage.missingOperations.includes("exists_guess"));
+  assert.equal(coverage.covered, true, JSON.stringify(coverage));
+});
+
 test("protocol ranking tie clauses are neither external state nor ambiguity", () => {
   const prizeTie =
     "The winning ticket has the biggest remainder after division by the lowest drawn number; tickets with the same remainder share the prize.";
   const severalTie =
     "The ticket with the most same-position matches wins; if several tickets tie on that count, they split it equally.";
+  const standaloneTie =
+    "The closest number wins. If multiple guesses share the same smallest distance, they share the prize equally.";
+  const productTie =
+    "The largest units-digit product wins. Tickets on the same product share the prize equally.";
   assert.equal(hasExternalDependency(prizeTie), false);
+  assert.equal(hasExternalDependency(standaloneTie), false);
+  assert.equal(hasExternalDependency(productTie), false);
   assert.equal(hasAmbiguousWording(severalTie), false);
   assert.equal(
     hasExternalDependency(
@@ -5556,6 +5694,12 @@ test("protocol ranking tie clauses are neither external state nor ambiguity", ()
   );
   assert.equal(
     hasAmbiguousWording("A guess wins if some positions match the draw."),
+    true,
+  );
+  assert.equal(
+    hasExternalDependency(
+      "Equal scores share the prize only if the wallet was created today.",
+    ),
     true,
   );
 });
@@ -5798,6 +5942,53 @@ test("independent behavioral review lets the server correct ranking arithmetic",
   assert.match(
     evidence?.exampleResults[0]?.detail ?? "",
     /corrected to the deterministic runtime score/iu,
+  );
+});
+
+test("independent behavioral review reconstructs omitted ranking scores", async () => {
+  const text = "The ticket with the highest sum of its guessed numbers wins.";
+  const ast = ruleAstSchema.parse({
+    schemaVersion: 3,
+    result: {
+      type: "ranking",
+      direction: "max",
+      tieBreak: "share_pool",
+      score: {
+        kind: "reduce",
+        op: "sum",
+        of: { kind: "source", source: "guess" },
+      },
+    },
+  });
+  const result = await compileRuleArtifact(
+    { originalText: text, prompt: text, tokenCount: 11 },
+    {
+      astProvider: async () => ({
+        ast,
+        consumedSpans: [{ text }],
+        workedExamples: [
+          {
+            draw: [10, 20, 30, 40, 50, 60],
+            guess: [1, 2, 3, 4, 5, 6],
+          },
+          {
+            draw: [11, 21, 31, 41, 51, 61],
+            guess: [7, 8, 9, 10, 11, 12],
+          },
+        ],
+      }),
+      astReviewer: async () => ast,
+      requireProviderEvidence: true,
+    },
+  );
+
+  assert.equal(result.decision, "VALID", JSON.stringify(result.log.reasonCodes));
+  assert.ok(!result.log.reasonCodes.includes("PROVIDER_EVIDENCE_UNVERIFIED"));
+  const evidence = result.log.attemptDiagnostics[0]?.providerEvidence;
+  assert.ok(evidence?.exampleResults.every((example) => example.status === "passed"));
+  assert.match(
+    evidence?.exampleResults[0]?.detail ?? "",
+    /replaced with the deterministic runtime score/iu,
   );
 });
 

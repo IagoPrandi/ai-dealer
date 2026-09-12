@@ -176,6 +176,12 @@ X = `reduce count`; "N smallest/largest" = `sort` + `slice`.
 - "ignore my highest pick, the rest totals the draw" -> `compare(sum(slice(sort(guess,asc), 0, -1)), eq, sum(draw))`.
 - "drop up to two lowest picks, then still have three numbers in the draw" ->
   `compare(count(intersection(slice(sort(guess,asc), 2), draw)), gte, 3)`.
+- A bounded procedural removal count is still a predicate. "Remove highest
+  values until every remaining value is strictly below the drawn average; at
+  most N removals may be needed" is equivalent, for a fixed six-number ticket,
+  to `at(sort(guess,desc), N) < sum(draw) div 6`. For N=1, compare the
+  second-highest guessed number. Do not compile the number of removals as a
+  ranking merely because the rule describes a repeated procedure.
 - "if doubling each pick stays within 1 to 100, at least three doubled values are drawn" ->
   `compare(count(intersection(filter(map(guess, elem * 2), elem >= 1 AND elem <= 100), draw)), gte, 3)`.
 - "first/last three picks sum to the first/last three drawn numbers" -> compare sums of `slice(src, 0, 3)` / `slice(src, 3)`.

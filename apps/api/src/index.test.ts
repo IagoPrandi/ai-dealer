@@ -820,6 +820,50 @@ test("rule preflight refinement feedback identifies the missing digit semantics"
   assert.equal(feedback.suggestedRewrites.length, 3);
 });
 
+test("digit aggregation refusals never offer digit-matching rules as rewrites", () => {
+  const original =
+    "Among tickets whose six numbers are all below the highest drawn number, the winner is the one with the largest product of the last digits of its numbers, and tickets on the same product split it equally.";
+  const feedback = buildRuleRefinementFeedback({
+    agentClarificationQuestions: [
+      "Should matching compare tens digits, units digits, or either digit?",
+    ],
+    agentSuggestedRewrites: [
+      "Win if at least one guessed number shares either its tens digit or its units digit with any drawn number, regardless of order.",
+    ],
+    clarityNote: "",
+    compileText: original,
+    officialInterpretation:
+      "Eligible guesses keep all six numbers below the drawn maximum and rank by the product of their last digits.",
+    reasonCodes: ["PROVIDER_EVIDENCE_UNVERIFIED"],
+    reasonSummary: "Rule rejected: provider evidence was not verified.",
+    sanitizedText: original,
+    tokenCount: original.trim().split(/\s+/u).length,
+  });
+
+  assert.deepEqual(feedback.refinementQuestions, []);
+  assert.deepEqual(feedback.suggestedRewrites, []);
+  assert.doesNotMatch(feedback.dealerMessage, /matching compare tens digits/iu);
+});
+
+test("last-digit reductions are explicit digit semantics outside matching", () => {
+  const text =
+    "A guess wins when the sum of the last digits of its numbers exceeds the same sum for the draw.";
+  const feedback = buildRuleRefinementFeedback({
+    clarityNote: "",
+    compileText: text,
+    officialInterpretation: text,
+    reasonCodes: ["PROVIDER_MALFORMED_RESPONSE"],
+    reasonSummary: "The compiler returned a malformed response.",
+    sanitizedText: text,
+    tokenCount: text.trim().split(/\s+/u).length,
+  });
+
+  assert.doesNotMatch(
+    feedback.refinementQuestions.join(" "),
+    /tens digits, units digits, or either digit/iu,
+  );
+});
+
 test("incomplete six-number assignments ask about the actual missing values", () => {
   const baseInterpretation = {
     addedOperationalClauses: [],

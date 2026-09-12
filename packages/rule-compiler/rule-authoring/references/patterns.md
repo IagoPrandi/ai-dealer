@@ -28,6 +28,12 @@ Examples:
 - Mixed phrasings like "acertar 2 ou mais" mean the threshold N=2 (predicate
   `compare(count(...), gte, 2)`). Do not collapse it into a ranking — that would
   drop the floor and let a 1-match guess win.
+- A threshold over the result of a procedure is also a predicate. For a fixed
+  six-number guess, "remove highest values until all remaining values are
+  strictly below the drawn average; at most N removals" means
+  `at(sort(guess,desc), N) < (sum(draw) div 6)`. The zero-based index N is the
+  first value that must remain after N removals. Keep `at most N`, the strict
+  comparison, and the drawn-average divisor; do not turn this into a ranking.
 
 - "win if" / "ticket wins if" / "guess wins if" describes a single-guess
   predicate unless the text explicitly compares against other guesses. Keep

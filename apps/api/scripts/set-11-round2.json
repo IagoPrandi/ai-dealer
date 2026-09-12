@@ -1,0 +1,132 @@
+[
+  {
+    "id": "N1r-verbatim-replay",
+    "kind": "predicate",
+    "expect": ["VALID"],
+    "note": "Identical text to round 1. Round 1 produced two behaviorally exact ASTs and discarded both, one on SECOND_OPINION_UNAVAILABLE and one on a missing `all_draw` coverage credit. A replay separates a stochastic reviewer failure from a deterministic refusal.",
+    "text": "A guess wins if the tens digit of every drawn number appears as the last digit of at least one of the guessed numbers.",
+    "referenceFrom": "N1-draw-tens-in-guess-units",
+    "fixturesFrom": "N1-draw-tens-in-guess-units"
+  },
+  {
+    "id": "N2b-tie-clause-reworded",
+    "kind": "ranking",
+    "expect": ["VALID"],
+    "note": "Same rule as round 1 with the tie clause worded the way sets 5-9 worded it. Round 1 rejected a 6/6 AST with EXTERNAL_DEPENDENCY raised on the word `prize`, which the agent's own interpretation introduced rather than the player.",
+    "text": "The winning ticket is the one holding the number closest to the average of the six drawn numbers, and tickets that are equally close split it equally.",
+    "referenceFrom": "N2-nearest-to-drawn-average",
+    "fixturesFrom": "N2-nearest-to-drawn-average"
+  },
+  {
+    "id": "N3b-tie-clause-reworded",
+    "kind": "ranking",
+    "expect": ["VALID"],
+    "note": "Round 1 never reached a model: HTTP 400 RULE_EXTERNAL_DEPENDENCY fired pre-LLM on `share the prize equally`. Only the four tie-clause words change here, so this measures the rule instead of the gate.",
+    "text": "Among tickets whose six numbers are all below the highest drawn number, the winner is the one with the largest product of the last digits of its numbers, and tickets on the same product split it equally.",
+    "referenceFrom": "N3-units-digit-product-ranking",
+    "fixturesFrom": "N3-units-digit-product-ranking"
+  },
+  {
+    "id": "V1b-removal-budget-answered",
+    "kind": "predicate",
+    "expect": ["VALID"],
+    "note": "The agent's own first suggested rewrite, used verbatim: it answers its own question (`at most 1` removal) and resolves the strict-comparison note it raised. A budget of at most one top removal is exactly `second largest < drawn average`.",
+    "text": "A guess wins if the number of guessed values removed, starting with the highest, until all remaining values are strictly less than the average of the official draw is at most 1.",
+    "referenceAst": {
+      "schemaVersion": 3,
+      "result": {
+        "type": "predicate",
+        "predicate": {
+          "kind": "compare",
+          "op": "lt",
+          "left": {
+            "kind": "at",
+            "index": 1,
+            "of": { "kind": "sort", "order": "desc", "of": { "kind": "source", "source": "guess" } }
+          },
+          "right": {
+            "kind": "arith",
+            "op": "div",
+            "left": { "kind": "reduce", "op": "sum", "of": { "kind": "source", "source": "draw" } },
+            "right": { "kind": "lit", "value": 6 }
+          }
+        }
+      }
+    },
+    "fixtures": [
+      { "note": "removing only 99 leaves 34 and below under the average 35", "guess": [99, 34, 3, 2, 1, 4], "draw": [10, 20, 30, 40, 50, 60], "outcome": "WIN" },
+      { "note": "boundary: the second largest lands exactly on the average 35", "guess": [99, 35, 3, 2, 1, 4], "draw": [10, 20, 30, 40, 50, 60], "outcome": "LOSE" },
+      { "note": "zero removals needed, which is also at most 1", "guess": [34, 33, 32, 31, 30, 29], "draw": [10, 20, 30, 40, 50, 60], "outcome": "WIN" },
+      { "note": "two removals are needed, one over budget", "guess": [99, 98, 3, 2, 1, 4], "draw": [10, 20, 30, 40, 50, 60], "outcome": "LOSE" },
+      { "note": "the same winning six entered in a scrambled order", "guess": [3, 99, 1, 34, 4, 2], "draw": [10, 20, 30, 40, 50, 60], "outcome": "WIN" },
+      { "note": "draw sensitivity: the same ticket needs more removals once the average is 10", "guess": [99, 34, 3, 2, 1, 4], "draw": [7, 8, 9, 10, 11, 15], "outcome": "LOSE" },
+      { "note": "draw sensitivity: one removal is enough against an average of 10", "guess": [99, 9, 8, 7, 6, 5], "draw": [7, 8, 9, 10, 11, 15], "outcome": "WIN" }
+    ]
+  },
+  {
+    "id": "V2b-formula-answered",
+    "kind": "ranking",
+    "expect": ["VALID"],
+    "note": "Answers both questions the agent asked, using the combination formula it offered as an example (match count times 100 minus the ticket total) and the direction it asked about (maximize).",
+    "text": "The winner is the ticket with the highest score, where the score is the count of its numbers that were drawn multiplied by 100 minus the total of its six numbers, and tickets on the same score split it equally.",
+    "referenceAst": {
+      "schemaVersion": 3,
+      "result": {
+        "type": "ranking",
+        "direction": "max",
+        "tieBreak": "share_pool",
+        "score": {
+          "kind": "arith",
+          "op": "sub",
+          "left": {
+            "kind": "arith",
+            "op": "mul",
+            "left": {
+              "kind": "reduce",
+              "op": "count",
+              "of": {
+                "kind": "intersection",
+                "left": { "kind": "source", "source": "guess" },
+                "right": { "kind": "source", "source": "draw" }
+              }
+            },
+            "right": { "kind": "lit", "value": 100 }
+          },
+          "right": { "kind": "reduce", "op": "sum", "of": { "kind": "source", "source": "guess" } }
+        }
+      }
+    },
+    "rankingFixtures": [
+      {
+        "note": "discriminator: four matches lose to three once the ticket total is charged",
+        "draw": [10, 20, 30, 40, 50, 60],
+        "entries": { "A": [10, 20, 30, 1, 2, 3], "B": [10, 20, 30, 40, 98, 99] },
+        "winners": ["A"]
+      },
+      {
+        "note": "discriminator: the lowest total does not win with no matches",
+        "draw": [10, 20, 30, 40, 50, 60],
+        "entries": { "C": [10, 1, 2, 3, 4, 5], "D": [1, 2, 3, 4, 5, 6] },
+        "winners": ["C"]
+      },
+      {
+        "note": "two tickets on the same score share it",
+        "draw": [10, 20, 30, 40, 50, 60],
+        "entries": { "E": [10, 50, 1, 2, 3, 4], "G": [20, 40, 1, 2, 3, 4] },
+        "winners": ["E", "G"]
+      },
+      {
+        "note": "order of entry is irrelevant: the same multiset scores the same",
+        "draw": [10, 20, 30, 40, 50, 60],
+        "entries": { "A": [3, 30, 1, 20, 2, 10], "B": [99, 40, 98, 30, 20, 10] },
+        "winners": ["A"]
+      },
+      {
+        "note": "draw sensitivity: the tied pair separates once 10 is drawn and 20 is not",
+        "draw": [10, 1, 2, 3, 4, 5],
+        "entries": { "E": [10, 50, 1, 2, 3, 4], "G": [20, 40, 1, 2, 3, 4] },
+        "winners": ["E"]
+      }
+    ]
+  }
+]

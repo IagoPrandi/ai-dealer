@@ -528,6 +528,48 @@ export function collectAstOperations(ast: RuleAst): Set<RuleOperation> {
     return operations;
   }
 
+  const arraySource = (node: unknown): "draw" | "guess" | null => {
+    if (!node || typeof node !== "object" || Array.isArray(node)) {
+      return null;
+    }
+    const record = node as Record<string, unknown>;
+    if (record.kind === "source") {
+      return record.source === "draw" || record.source === "guess"
+        ? record.source
+        : null;
+    }
+    // These nodes preserve the lineage of the collection they transform. A
+    // quantifier over digits(draw), sort(draw), filter(draw), and so on still
+    // quantifies a draw-derived collection; requiring a syntactically bare
+    // source made coverage depend on the provider's encoding rather than the
+    // operation the rule performs.
+    if (
+      [
+        "digits",
+        "distinct",
+        "filter",
+        "filter_compare",
+        "filter_mod",
+        "map",
+        "map_arithmetic",
+        "map_with_guard",
+        "remove_up_to_n",
+        "reverse",
+        "slice",
+        "sort",
+      ].includes(String(record.kind))
+    ) {
+      return arraySource(record.of);
+    }
+    // Intersection and difference retain values and ordering from their left
+    // operand. The right operand constrains membership but is not the array the
+    // surrounding forall/exists iterates.
+    if (record.kind === "intersection" || record.kind === "difference") {
+      return arraySource(record.left);
+    }
+    return null;
+  };
+
   const visit = (node: unknown) => {
     if (Array.isArray(node)) {
       node.forEach(visit);
@@ -602,13 +644,7 @@ export function collectAstOperations(ast: RuleAst): Set<RuleOperation> {
     // the canonical scoring fold for wording such as "each number is worth N
     // points", so it satisfies the whole-guess quantification even though the
     // resulting score is not a boolean `forall` predicate.
-    if (
-      kind === "map" &&
-      record.of !== null &&
-      typeof record.of === "object" &&
-      (record.of as Record<string, unknown>).kind === "source" &&
-      (record.of as Record<string, unknown>).source === "guess"
-    ) {
+    if (kind === "map" && arraySource(record.of) === "guess") {
       operations.add("all_guess");
     }
     if (
@@ -642,20 +678,17 @@ export function collectAstOperations(ast: RuleAst): Set<RuleOperation> {
       operations.add("maximum");
     }
     if (kind === "forall" || kind === "exists") {
-      const source = record.of as Record<string, unknown> | undefined;
-      if (source?.kind === "source") {
+      const source = arraySource(record.of);
+      if (source) {
         const operation = `${kind === "forall" ? "all" : "exists"}_${String(
-          source.source,
+          source,
         )}` as RuleOperation;
         operations.add(operation);
       }
     }
     if (
       kind === "pairs_forall" &&
-      record.left !== null &&
-      typeof record.left === "object" &&
-      (record.left as Record<string, unknown>).kind === "source" &&
-      (record.left as Record<string, unknown>).source === "guess"
+      arraySource(record.left) === "guess"
     ) {
       operations.add("all_guess");
     }

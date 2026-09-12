@@ -3166,9 +3166,19 @@ function looksLikeAmbiguousDigitExample(text: string) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
-  const mentionsUnqualifiedDigits =
-    /\b(digit|digits|algarismo|algarismos)\b/.test(normalized) &&
-    !/\b(units?|tens?|dezena|dezenas|unidade|unidades)\b/.test(normalized);
+  const digitCue = "(?:digit|digits|algarismo|algarismos)";
+  const comparisonCue =
+    "(?:match|matches|matching|share|shares|same|equal|equals|compare|compares|coincide|coincidem|igual|iguais)";
+  const comparesUnqualifiedDigits =
+    !/\b(?:units?|tens?|last\s+digits?|dezena|dezenas|unidade|unidades|ultimo\s+algarismo|ultimos\s+algarismos)\b/.test(
+      normalized,
+    ) &&
+    (new RegExp(`\\b${comparisonCue}\\b[^.;]{0,80}\\b${digitCue}\\b`).test(
+      normalized,
+    ) ||
+      new RegExp(`\\b${digitCue}\\b[^.;]{0,80}\\b${comparisonCue}\\b`).test(
+        normalized,
+      ));
   const splitsAPlayedNumberIntoDigits =
     /\b(?:play|played|playing|pick|picked|guess|guessed|jogar|joguei|jogando|apostar|aposto)\s+([1-9])\d\b[\s\S]{0,180}\b(?:number|numbers|numero|numeros)\s+\1\b/.test(
       normalized,
@@ -3176,7 +3186,7 @@ function looksLikeAmbiguousDigitExample(text: string) {
     /\b(?:play|played|playing|pick|picked|guess|guessed|jogar|joguei|jogando|apostar|aposto)\s+\d([0-9])\b[\s\S]{0,180}\b(?:number|numbers|numero|numeros)\s+\1\b/.test(
       normalized,
     );
-  return mentionsUnqualifiedDigits || splitsAPlayedNumberIntoDigits;
+  return comparesUnqualifiedDigits || splitsAPlayedNumberIntoDigits;
 }
 
 function inferIntentSpecificRefinement(text: string): IntentSpecificRefinement {
@@ -3229,6 +3239,24 @@ function isGenericClarificationQuestion(question: string) {
   return /(?:which exact comparison.*needs to be defined|restate (?:the|your) (?:complete|full) rule|restate the complete winning condition|what needs (?:to be )?clarified|please be more specific)/iu.test(
     question,
   );
+}
+
+function isSourceRelevantClarificationQuestion(
+  sourceText: string,
+  question: string,
+) {
+  // This template is valid only for a digit-matching ambiguity. A model once
+  // attached it to a product reduction merely because the source contained the
+  // word "digits", then the paired rewrites substituted an unrelated game.
+  // Bind the question to the same semantic predicate that generates it.
+  if (
+    /\b(?:matching|compare)\b[^?]{0,80}\b(?:tens|units)\s+digits?\b/iu.test(
+      question,
+    )
+  ) {
+    return looksLikeAmbiguousDigitExample(sourceText);
+  }
+  return true;
 }
 
 function dedupeBoundedStrings(values: readonly string[], limit = 3): string[] {
@@ -3337,6 +3365,14 @@ function isIntentPreservingRewrite(source: string, rewrite: string): boolean {
       /\b(miss|misses|missed|wrong|incorrect)\b/,
       /\b(miss|misses|missed|not appear|outside the draw)\b/,
     ],
+    [
+      /\b(product|multiply|multiplied|multiplication)\b/,
+      /\b(product|multiply|multiplied|multiplication)\b/,
+    ],
+    [
+      /\b(?:all|every|each)\b[^.;]{0,80}\b(?:below|less than|under)\b[^.;]{0,40}\b(?:highest|largest|maximum)\b[^.;]{0,20}\b(?:drawn|draw)\b/,
+      /\b(?:all|every|each)\b[^.;]{0,80}\b(?:below|less than|under)\b[^.;]{0,40}\b(?:highest|largest|maximum)\b[^.;]{0,20}\b(?:drawn|draw)\b/,
+    ],
   ];
   if (
     requiredCues.some(
@@ -3366,6 +3402,7 @@ function isIntentPreservingRewrite(source: string, rewrite: string): boolean {
     /\b(match|matches|appear|appears|intersection)\b/,
     /\b(digit|digits|tens|units|last digit)\b/,
     /\b(sum|total)\b/,
+    /\b(product|multiply|multiplied|multiplication)\b/,
     /\b(distance|within|close|near)\b/,
     /\b(even|odd|parity)\b/,
     /\b(position|positions|order|ordered)\b/,
@@ -3423,7 +3460,9 @@ export function buildRuleRefinementFeedback(
   const questions = dedupeBoundedStrings([
     ...deterministicRefinement.questions,
     ...(input.agentClarificationQuestions ?? []).filter(
-      (question) => !isGenericClarificationQuestion(question),
+      (question) =>
+        !isGenericClarificationQuestion(question) &&
+        isSourceRelevantClarificationQuestion(sourceText, question),
     ),
   ]);
   const agentRewrites = (input.agentSuggestedRewrites ?? []).filter((rewrite) =>

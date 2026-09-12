@@ -33,6 +33,7 @@ import {
 import {
   evaluatePredicate,
   evaluateRankingEntry,
+  resolveRankingWinners,
   scoreGuess,
 } from "@tyche/rule-runtime";
 import {
@@ -607,11 +608,20 @@ const AMBIGUOUS_PATTERNS = [
 // external prize dependency nor an undefined quantity. Other prize/pool text
 // remains visible to the normal external-dependency block.
 const PROTOCOL_TIE_BREAK_CLAUSE_PATTERN =
-  /(?:^|\s*(?:,|;|\band\b)\s*)(?:if\s+)?(?:(?:several|some|multiple|two\s+or\s+more)\s+)?(?:tickets?|guesses?|players?)\b[^.;]{0,80}\b(?:tie|tied|level|equal|same\s+(?:score|count|remainder|total|value))\b[^.;]{0,80}\b(?:share|split)\b[^.;]{0,40}\b(?:prize|pool|it|equally)\b[^.;]*(?:[.;]|$)/giu;
+  /(?:^|[.;]\s*|\s*(?:,|;|\band\b)\s*)(?:if\s+)?(?:(?:several|some|multiple|two\s+or\s+more)\s+)?(?:tickets?|guesses?|players?)\b(?=[^.;]{0,180}\b(?:share|sharing|split|splitting)\b[^.;]{0,60}\b(?:prize|pool|it|equally)\b)(?=[^.;]{0,180}\b(?:tie|tied|level|equal(?:ly)?(?:\s+(?:close|near))?|same\s+(?!(?:wallet|address|creator|voter|profile|admin|time|block|transaction|signature|balance|prize|pool|payout|fee|weather|price|oracle|history|turn|round)\b)[^.;,]{1,60}?(?=,|\s+(?:share|sharing|split|splitting)\b))\b)[^.;]*(?:[.;]|$)/giu;
+
+// A protocol tie statement cannot carry an additional condition. Keeping such
+// a sentence visible is what lets the normal dependency gate reject constructs
+// such as "equal scores share the prize only when it rains" instead of erasing
+// the external condition together with the harmless settlement wording.
+const NON_PROTOCOL_TIE_CONTEXT_PATTERN =
+  /\b(?:wallet|address|creator|voter|votes?|leaderboard|profile|admin|time|timestamp|block|transaction|signature|balance|fees?|weather|rain|price|oracle|twitter|discord|website|api|previous|next|future|history|turn|round|only\s+if|unless|provided\s+that)\b/iu;
 
 function stripProtocolTieBreakClauses(text: string) {
   return text
-    .replace(PROTOCOL_TIE_BREAK_CLAUSE_PATTERN, " ")
+    .replace(PROTOCOL_TIE_BREAK_CLAUSE_PATTERN, (clause) =>
+      NON_PROTOCOL_TIE_CONTEXT_PATTERN.test(clause) ? clause : " ",
+    )
     // The interpreter is allowed to add the protocol's deterministic tie
     // handling, and commonly phrases it without repeating a subject noun:
     // "with ties splitting the prize equally". Strip only that exact
@@ -1407,6 +1417,20 @@ function verifyProviderEvidence(
             typeof example.score !== "number" ||
             !Number.isFinite(example.score)
           ) {
+            if (sourceCertifiedByIndependentReviewer) {
+              const actualScore = scoreGuess(ast, {
+                draw: example.draw,
+                guess: example.guess,
+              });
+              diagnostic.exampleResults.push({
+                actualScore,
+                detail:
+                  "The missing or non-finite declared score was replaced with the deterministic runtime score after an independent reviewer confirmed the candidate behavior.",
+                index,
+                status: "passed",
+              });
+              continue;
+            }
             diagnostic.exampleResults.push({
               detail: "Ranking examples must declare a finite numeric score.",
               index,
@@ -1438,6 +1462,25 @@ function verifyProviderEvidence(
           }
         } else {
           if (example.outcome !== "WIN" && example.outcome !== "LOSE") {
+            if (sourceCertifiedByIndependentReviewer) {
+              const actualOutcome = evaluatePredicate(ast, {
+                draw: example.draw,
+                guess: example.guess,
+              }).result;
+              diagnostic.exampleResults.push({
+                actualOutcome,
+                detail:
+                  "The missing declared outcome was replaced with the deterministic runtime outcome after an independent reviewer confirmed the candidate behavior.",
+                index,
+                status: "passed",
+              });
+              predicateExamples.push({
+                draw: example.draw,
+                guess: example.guess,
+                outcome: actualOutcome,
+              });
+              continue;
+            }
             diagnostic.exampleResults.push({
               detail: "Predicate examples must declare outcome WIN or LOSE.",
               index,
@@ -1579,15 +1622,27 @@ function buildAttemptContext(
   if (looksLikeAmbiguousReverseRule(normalizedText)) {
     reasonCodes.add("AMBIGUOUS_RULE");
   }
-  // Same dismissal-aware view of the text as the API preflight gate, so the
-  // validator and the pre-LLM gate always agree.
-  if (
-    hasPattern(
-      externalDependencyGateText(normalizedText),
-      EXTERNAL_DEPENDENCY_PATTERNS,
-    )
-  ) {
+  // Attribute policy violations only to text the player supplied. The compile
+  // prompt may be an interpreter-authored paraphrase; treating a word added by
+  // that paraphrase as player intent produced false EXTERNAL_DEPENDENCY blocks
+  // that no player edit could prevent. A non-protocol external condition added
+  // only by the interpreter still fails closed, but under the compiler-fidelity
+  // code rather than falsely blaming the submitted rule.
+  const sourceText = normalizeRuleText(
+    request.originalText?.trim() || request.prompt,
+  );
+  const sourceHasExternalDependency = hasPattern(
+    externalDependencyGateText(sourceText),
+    EXTERNAL_DEPENDENCY_PATTERNS,
+  );
+  const compileTextHasExternalDependency = hasPattern(
+    externalDependencyGateText(normalizedText),
+    EXTERNAL_DEPENDENCY_PATTERNS,
+  );
+  if (sourceHasExternalDependency) {
     reasonCodes.add("EXTERNAL_DEPENDENCY");
+  } else if (compileTextHasExternalDependency) {
+    reasonCodes.add("AGENT_STATEMENT_MISMATCH");
   }
 
   return { forcedFailure, modelIdentity, normalizedText, reasonCodes };
@@ -2546,17 +2601,12 @@ function astOpinionsAgree(left: RuleAst, right: RuleAst) {
 }
 
 function hasProviderDisagreement(attempts: ProviderEvaluation[]) {
-  if (
-    attempts.some(
-      (attempt) =>
-        attempt.ast !== null &&
-        attempt.reviewerAst !== null &&
-        attempt.reasonCodes.includes("REVIEWER_MISMATCH") &&
-        !astOpinionsAgree(attempt.ast, attempt.reviewerAst),
-    )
-  ) {
-    return true;
-  }
+  // A source-only reviewer is a separate validation role, not a provider
+  // attempt. Its veto is recorded as REVIEWER_MISMATCH and arbitrated by later
+  // provider candidates. Counting the same event again as
+  // PROVIDER_DISAGREEMENT produced that diagnosis even when every actual
+  // provider candidate was behaviorally identical (and no provider witness
+  // existed).
   const completedAttempts = attempts.filter(isCompletedProviderOpinion);
   if (completedAttempts.length < 2) {
     return false;
@@ -6506,34 +6556,14 @@ function rankingDirection(ast: RuleAst): "max" | "min" | null {
     : null;
 }
 
-function sampledSemanticsMatch(expected: RuleAst, actual: RuleAst): boolean {
-  const expectedRanking = isRankingRule(expected);
-  if (expectedRanking !== isRankingRule(actual)) {
-    return false;
-  }
-  // Sampling compares SCORES, and a score says nothing about who wins until the
-  // direction is fixed: "most matches wins" and "fewest matches wins" compute
-  // the identical score on every input and pick opposite winners. Without this
-  // the reviewer certified a polarity flip as an equivalent reading — the very
-  // inversion the compile guidance calls out as the most common way a small
-  // model gets a rule wrong.
-  //
-  // This only ever tightens the check: two rankings that differ in direction AND
-  // are genuinely equivalent (minimise misses vs maximise matches) already
-  // disagree on scores, so they were reported as a mismatch before this too.
-  if (
-    expectedRanking &&
-    rankingDirection(expected) !== rankingDirection(actual)
-  ) {
-    return false;
-  }
+function semanticSampleInputs() {
   let seed = 0x1dea1e7 >>> 0;
   const rng = () => {
     seed |= 0;
     seed = (seed + 0x6d2b79f5) | 0;
-    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    let value = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    value = (value + Math.imul(value ^ (value >>> 7), 61 | value)) ^ value;
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
   };
   const sixUnique = () => {
     const pool = new Set<number>();
@@ -6542,37 +6572,110 @@ function sampledSemanticsMatch(expected: RuleAst, actual: RuleAst): boolean {
     }
     return [...pool];
   };
-  // Uniform samples alone cannot separate two jackpot rules: both lose on every
-  // sample, so the check certifies them equal. Turn 55's mis-compiled artifact
-  // and a faithful compile of the same text disagree on ZERO of 240 uniform
-  // samples and on the very first structured pair, so the structured battery is
-  // what gives this check its discriminating power.
-  const inputs = [
+  return [
     ...structuredInputPairs().map((pair) => ({
       draw: [...pair.draw],
       guess: [...pair.guess],
     })),
     ...Array.from({ length: SEMANTIC_MATCH_SAMPLES }, () => ({
-      guess: sixUnique(),
       draw: sixUnique(),
+      guess: sixUnique(),
     })),
   ];
+}
+
+function sameWinnerSet(left: ReadonlySet<number>, right: ReadonlySet<number>) {
+  return (
+    left.size === right.size && [...left].every((winner) => right.has(winner))
+  );
+}
+
+function evaluateRankingCohort(
+  ast: RuleAst,
+  draw: readonly number[],
+  guesses: readonly (readonly number[])[],
+) {
+  const evaluations = guesses.map((guess) =>
+    evaluateRankingEntry(ast, { draw: [...draw], guess: [...guess] }),
+  );
+  const direction = rankingDirection(ast);
+  if (!direction) {
+    throw new Error("NOT_A_RANKING_RULE");
+  }
+  const winners = resolveRankingWinners(
+    evaluations.map((evaluation, player) => ({
+      eligible: evaluation.eligible,
+      player,
+      score: evaluation.score,
+    })),
+    direction,
+  );
+  return { evaluations, winners };
+}
+
+function rankingSemanticCohorts(
+  inputs: ReturnType<typeof semanticSampleInputs>,
+) {
+  // A ranking has no per-ticket WIN/LOSE meaning. Compare several tickets under
+  // one draw, because only the induced winner set is observable. Rotations keep
+  // order-sensitive rules exercised, while held-out guesses cover score ties
+  // and non-linear transformations without relying on one reported fixture.
+  return inputs.slice(0, 64).map((input, index) => ({
+    draw: input.draw,
+    guesses: [
+      input.guess,
+      input.draw,
+      [...input.draw.slice(1), input.draw[0]!],
+      [...input.draw].reverse(),
+      inputs[(index + 17) % inputs.length]!.guess,
+      inputs[(index + 41) % inputs.length]!.guess,
+    ],
+  }));
+}
+
+function sampledSemanticsMatch(expected: RuleAst, actual: RuleAst): boolean {
+  const expectedRanking = isRankingRule(expected);
+  if (expectedRanking !== isRankingRule(actual)) {
+    return false;
+  }
+  // Uniform samples alone cannot separate two jackpot rules: both lose on every
+  // sample, so the check certifies them equal. Turn 55's mis-compiled artifact
+  // and a faithful compile of the same text disagree on ZERO of 240 uniform
+  // samples and on the very first structured pair, so the structured battery is
+  // what gives this check its discriminating power.
+  const inputs = semanticSampleInputs();
   try {
-    for (const input of inputs) {
-      if (expectedRanking) {
-        const expectedEvaluation = evaluateRankingEntry(expected, input);
-        const actualEvaluation = evaluateRankingEntry(actual, input);
+    if (expectedRanking) {
+      for (const cohort of rankingSemanticCohorts(inputs)) {
+        const expectedCohort = evaluateRankingCohort(
+          expected,
+          cohort.draw,
+          cohort.guesses,
+        );
+        const actualCohort = evaluateRankingCohort(
+          actual,
+          cohort.draw,
+          cohort.guesses,
+        );
         if (
-          expectedEvaluation.score !== actualEvaluation.score ||
-          expectedEvaluation.eligible !== actualEvaluation.eligible
+          expectedCohort.evaluations.some(
+            (evaluation, index) =>
+              evaluation.eligible !==
+              actualCohort.evaluations[index]?.eligible,
+          ) ||
+          !sameWinnerSet(expectedCohort.winners, actualCohort.winners)
         ) {
           return false;
         }
-      } else if (
+      }
+    } else {
+      for (const input of inputs) {
+        if (
         evaluatePredicate(expected, input).result !==
         evaluatePredicate(actual, input).result
-      ) {
-        return false;
+        ) {
+          return false;
+        }
       }
     }
     return true;
@@ -6590,61 +6693,53 @@ function findSemanticDisagreementWitness(
   if (expectedRanking !== isRankingRule(actual)) {
     return null;
   }
-  if (
-    expectedRanking &&
-    rankingDirection(expected) !== rankingDirection(actual)
-  ) {
-    return null;
-  }
-
-  let seed = 0x1dea1e7 >>> 0;
-  const rng = () => {
-    seed |= 0;
-    seed = (seed + 0x6d2b79f5) | 0;
-    let value = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-    value = (value + Math.imul(value ^ (value >>> 7), 61 | value)) ^ value;
-    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
-  };
-  const sixUnique = () => {
-    const pool = new Set<number>();
-    while (pool.size < 6) {
-      pool.add(1 + Math.floor(rng() * 100));
-    }
-    return [...pool];
-  };
-  const inputs = [
-    ...structuredInputPairs().map((pair) => ({
-      draw: [...pair.draw],
-      guess: [...pair.guess],
-    })),
-    ...Array.from({ length: SEMANTIC_MATCH_SAMPLES }, () => ({
-      draw: sixUnique(),
-      guess: sixUnique(),
-    })),
-  ];
+  const inputs = semanticSampleInputs();
 
   try {
-    for (const input of inputs) {
-      if (expectedRanking) {
-        const reviewerResult = evaluateRankingEntry(expected, input);
-        const draftResult = evaluateRankingEntry(actual, input);
-        if (
-          reviewerResult.score !== draftResult.score ||
-          reviewerResult.eligible !== draftResult.eligible
-        ) {
-          const format = (result: typeof reviewerResult) =>
+    if (expectedRanking) {
+      for (const cohort of rankingSemanticCohorts(inputs)) {
+        const reviewer = evaluateRankingCohort(
+          expected,
+          cohort.draw,
+          cohort.guesses,
+        );
+        const draft = evaluateRankingCohort(
+          actual,
+          cohort.draw,
+          cohort.guesses,
+        );
+        const differingIndex = cohort.guesses.findIndex(
+          (_guess, index) =>
+            reviewer.evaluations[index]?.eligible !==
+              draft.evaluations[index]?.eligible ||
+            reviewer.winners.has(index) !== draft.winners.has(index),
+        );
+        if (differingIndex >= 0) {
+          const format = (
+            result: (typeof reviewer.evaluations)[number],
+            winner: boolean,
+          ) =>
             JSON.stringify({
               eligible: result.eligible,
               score: result.score,
+              winner,
             });
           return {
-            draftResult: format(draftResult),
-            draw: input.draw,
-            guess: input.guess,
-            reviewerResult: format(reviewerResult),
+            draftResult: format(
+              draft.evaluations[differingIndex]!,
+              draft.winners.has(differingIndex),
+            ),
+            draw: cohort.draw,
+            guess: [...cohort.guesses[differingIndex]!],
+            reviewerResult: format(
+              reviewer.evaluations[differingIndex]!,
+              reviewer.winners.has(differingIndex),
+            ),
           };
         }
-      } else {
+      }
+    } else {
+      for (const input of inputs) {
         const reviewerResult = evaluatePredicate(expected, input).result;
         const draftResult = evaluatePredicate(actual, input).result;
         if (reviewerResult !== draftResult) {

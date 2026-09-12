@@ -13,6 +13,8 @@ import { fileURLToPath } from "node:url";
 
 export const RULE_COMPILER_SKILL = {
   name: "compile_rule_to_ast",
+  // v16: bounded procedural removal thresholds are explicitly compiled as
+  // predicates over the corresponding order statistic, never as rankings.
   // v15: eligible two-criterion rankings retain `eligibleWhen`, calculate an
   // exact dominance scale, and execute worked examples against the folded score.
   // v14: the full compilation envelope is now schema-constrained at decoding
@@ -29,7 +31,7 @@ export const RULE_COMPILER_SKILL = {
   // side instead of flattening every value into the top-level `and`.
   // v10: ordered literal prefixes with an explicitly unconstrained remainder,
   // on top of v9's full literal sequences, sets, and their negation.
-  version: "tyche_rule_compiler_skill_v15",
+  version: "tyche_rule_compiler_skill_v16",
   allowedInputs: ["guess", "draw"] as const,
 } as const;
 
