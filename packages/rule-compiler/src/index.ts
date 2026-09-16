@@ -114,6 +114,7 @@ export type RuleValidationReasonCode =
   | "DIFFICULTY_ALWAYS_TRUE"
   | "DIFFICULTY_IMPOSSIBLE"
   | "EXTERNAL_DEPENDENCY"
+  | "GUARDIAN_FIDELITY_CONFLICT"
   | "INTERPRETATION_MISMATCH"
   | "PROVIDER_DISAGREEMENT"
   | "PROVIDER_EVIDENCE_UNVERIFIED"
@@ -579,7 +580,7 @@ const AMBIGUOUS_PATTERNS = [
   /\b(lucky|unlucky|interesting|creative|best|better|worst|fair|randomly)\b/i,
   /\b(about|around|roughly|approximately|similar)\b/i,
   /\b(feels?|vibe|balanced|nice|nicely|pattern|mirror-like|stronger)\b/i,
-  /(?<!\bas\s)\bmany\b|\b(several|spread out|well spread|organized|cleaner)\b/i,
+  /(?<!\b(?:as|how)\s)\bmany\b|\b(several|spread out|well spread|organized|cleaner)\b/i,
   /\b(anything|something|whatever)\b/i,
   // `some` is ambiguous only when it supplies an unspecified CARDINALITY
   // ("some positions", "some of my numbers"). Before a singular noun it is the
@@ -593,7 +594,9 @@ const AMBIGUOUS_PATTERNS = [
   /\b(kind\s+of|sort\s+of|basically|somehow|enough)\b/i,
   /\b(looks?|feels?|feeling)\s+like\b/i,
   /\b\w+-(looking|style|heavy)\b/i,
-  /\b(satisfying|rhythm|symmetrical|clustered|forgiving|safer|strange|soft|mirrors?)\b/i,
+  // "mirror order" names reversal of positions. Bare "mirrors the draw"
+  // still leaves the numerical relation undefined.
+  /\b(satisfying|rhythm|symmetrical|clustered|forgiving|safer|strange|soft|mirrors?\b(?!\s+order\b))\b/i,
   /\bnot\s+too\b|\btoo\s+(many|much|high|low|far|close|near|large|small|wide|narrow|predictable|boring)\b/i,
   /\b(a\s+few\s+places|second\s+chance|strong\s+beginning|good\s+way|in\s+a\s+good\s+way)\b/i,
   // A two-digit pick cannot match the one-digit values contained in it. When a
@@ -757,10 +760,37 @@ export function hasExternalDependency(text: string): boolean {
  * vibe, ...). Exposed for the same reason as hasExternalDependency.
  */
 export function hasAmbiguousWording(text: string): boolean {
-  return hasPattern(
-    stripProtocolTieBreakClauses(normalizeRuleText(text)),
-    AMBIGUOUS_PATTERNS,
+  return (
+    hasPattern(
+      stripProtocolTieBreakClauses(normalizeRuleText(text)),
+      AMBIGUOUS_PATTERNS,
+    ) || hasStructuralArithmeticAmbiguity(text)
   );
+}
+
+/** A bare subtraction followed by addition has two plausible natural-language groupings. */
+export function hasStructuralArithmeticAmbiguity(text: string): boolean {
+  const normalized = normalizeRuleText(text).toLowerCase();
+  return normalized.split(/[.;!?]/u).some((clause) => {
+    if (
+      !/\b(?:minus|subtract(?:ed|ing)?|less)\b.{1,120}\b(?:plus|add(?:ed|ing)?)\b/u.test(
+        clause,
+      )
+    ) {
+      return false;
+    }
+    // A sequence or parentheses containing the actual operation fixes scope;
+    // incidental words such as "first number" do not.
+    return (
+      !/\b(?:then|after(?:wards)?|followed by)\b/u.test(clause) &&
+      !/\([^)]*\b(?:minus|subtract(?:ed|ing)?)\b[^)]*\)\s*\b(?:plus|add(?:ed|ing)?)\b/u.test(
+        clause,
+      ) &&
+      !/\b(?:minus|subtract(?:ed|ing)?)\s*\([^)]*\b(?:plus|add(?:ed|ing)?)\b[^)]*\)/u.test(
+        clause,
+      )
+    );
+  });
 }
 
 export function createCompilerPlaceholder(
@@ -834,7 +864,8 @@ function finalizeValidation(
   // Only attempts that actually produced an opinion may decide the outcome. A
   // provider that timed out or returned garbage scores as low-confidence and
   // would otherwise override an accepted answer purely by failing.
-  for (const evaluation of attempts.filter(isCompletedProviderOpinion)) {
+  const viableOpinions = attempts.filter(isViableProviderOpinion);
+  for (const evaluation of viableOpinions) {
     if (evaluation.status === "accepted") {
       finalEvaluation = evaluation;
     }
@@ -846,7 +877,8 @@ function finalizeValidation(
       break;
     }
   }
-  finalEvaluation ??= attempts.at(-1) ?? fallbackAttempt;
+  finalEvaluation ??=
+    viableOpinions.at(-1) ?? attempts.at(-1) ?? fallbackAttempt;
 
   const providerPath = resolveProviderPath(attempts);
   const fallbackTriggered = providerPath.length > 1;
@@ -863,7 +895,7 @@ function finalizeValidation(
   // the audit log below, so a divergence stays visible instead of vanishing.
   const disagreementBlocks =
     providerDisagreementRateSample === 1 && !options.disableConsensus;
-  const selectedAttempt = disagreementBlocks
+  let selectedAttempt = disagreementBlocks
     ? (disagreementResolution ?? {
         ...finalEvaluation,
         artifact: null,
@@ -873,40 +905,61 @@ function finalizeValidation(
       })
     : finalEvaluation;
 
+  // A successful generation is not a checked interpretation merely because a
+  // reviewer was configured. The reviewer may have failed source coverage, or
+  // a later repair may select a different AST that the reviewer never saw.
+  // Require corroboration of the AST actually selected for every novel rule.
+  const selectedAst = selectedAttempt.ast;
+  const hasIndependentReading =
+    selectedAst !== null &&
+    (attempts.some(
+      (attempt) =>
+        attempt.reviewerAst !== null &&
+        attempt.diagnostics.stages.some(
+          (stage) =>
+            stage.stage === "independent_review" &&
+            (stage.status === "passed" || stage.status === "failed"),
+        ) &&
+        astOpinionsAgree(attempt.reviewerAst, selectedAst),
+    ) ||
+      attempts.some(
+        (attempt) =>
+          attempt !== selectedAttempt &&
+          isViableProviderOpinion(attempt) &&
+          attempt.ast !== null &&
+          astOpinionsAgree(attempt.ast, selectedAst),
+      ));
+  const uncorroboratedSelection =
+    selectedAttempt.decision === "VALID" &&
+    !options.disableConsensus &&
+    lacksDeterministicReference(request) &&
+    !hasIndependentReading;
+  if (uncorroboratedSelection) {
+    selectedAttempt = {
+      ...selectedAttempt,
+      artifact: null,
+      artifactHash: null,
+      decision: "INVALID",
+      status: "rejected",
+    };
+  }
+
   const reasonCodes = new Set(selectedAttempt.reasonCodes);
+  if (uncorroboratedSelection) {
+    reasonCodes.add("SECOND_OPINION_UNAVAILABLE");
+  }
   if (providerDisagreementRateSample === 1) {
     reasonCodes.add("PROVIDER_DISAGREEMENT");
   }
-  // Two independent readings of the SAME text that execute differently are
-  // evidence about the text, not about the compilers. Reporting only
-  // PROVIDER_DISAGREEMENT put that evidence on the wrong side of the boundary:
-  // the player was told "your wording is clear" and "no missing rule detail was
-  // identified", and the clarification questions were deleted — so the one
-  // person who could resolve the divergence was told there was nothing to
-  // resolve, and the rule could never be frozen however often it was retried.
-  //
-  // `AMBIGUOUS_RULE` is the code PRD §6.6 already defines for a rule that must
-  // not be accepted silently and has to be clarified first. Reaching it through
-  // the keyword gate alone (`close`, `lucky`, `balanced`, ...) can only ever
-  // catch ambiguous VOCABULARY; a divergence between compiled ASTs is how
-  // ambiguous STRUCTURE announces itself, and it is measured on every rule
-  // rather than enumerated in a word list.
-  //
-  // Only genuine multi-reading divergence qualifies. A non-answer (timeout,
-  // malformed, schema-invalid) is already excluded from the comparison, and an
-  // attempt that produced no AST contributes no reading — so a rule the
-  // compilers simply could not compile keeps reporting exactly why.
+  // Keep distinct executable readings for audit. A compiler divergence alone
+  // cannot prove that the player's text itself has several meanings: a model
+  // may simply have made a mistake on an otherwise precise rule.
   const disagreementReadings = collectDivergentProviderReadings(
     attempts,
     request.originalText?.trim() || request.prompt,
   );
-  if (
-    disagreementBlocks &&
-    disagreementResolution === null &&
-    disagreementReadings.length >= 2
-  ) {
-    reasonCodes.add("AMBIGUOUS_RULE");
-  }
+  const providerDisagreementBlocked =
+    disagreementBlocks && disagreementResolution === null;
   // A second opinion was required and could not be obtained (no second provider
   // reachable, or every extra attempt failed). The rule still stands on one
   // unchecked reading — record that in the audit log instead of letting it pass
@@ -927,7 +980,7 @@ function finalizeValidation(
     [...reasonCodes].filter((reason) => reason !== "SUPPORTED_RULE"),
     selectedAttempt.confidence.final_confidence,
     fallbackTriggered,
-    disagreementBlocks && disagreementResolution === null,
+    providerDisagreementBlocked,
     disagreementReadings.length,
   );
 
@@ -972,7 +1025,7 @@ function finalizeValidation(
       normalizedText: selectedAttempt.normalizedText,
       promptContract: PROMPT_CONTRACT,
       provider: selectedAttempt.modelIdentity.provider,
-      providerDisagreementBlocked: disagreementBlocks,
+      providerDisagreementBlocked,
       providerDisagreementRateSample,
       providerDisagreementReadings: disagreementReadings,
       providerPath,
@@ -1047,6 +1100,17 @@ export async function compileRuleArtifact(
     options.astReviewer === undefined;
   const arbitrationOptions: RuleCompileArtifactOptions = { ...options };
   delete arbitrationOptions.astReviewer;
+  const executableFailureKey = (attempt: ProviderEvaluation) =>
+    JSON.stringify({
+      ast: attempt.ast,
+      reasons: attempt.reasonCodes
+        .filter(
+          (code) =>
+            code !== "REVIEWER_MISMATCH" &&
+            code !== "SECOND_OPINION_UNAVAILABLE",
+        )
+        .sort(),
+    });
 
   for (const providerConfig of providerRouting.providers) {
     const evaluation = await evaluateProviderAttemptAsync(
@@ -1064,10 +1128,43 @@ export async function compileRuleArtifact(
             attempt.ast !== null &&
             isCompletedProviderOpinion(attempt),
         )
-        .map((attempt) => attempt.ast as RuleAst),
+        .map((attempt) => ({
+          ast: attempt.ast as RuleAst,
+          hasVerifiedEvidence:
+            attempt.reasonCodes.every(
+              (code) =>
+                code === "SUPPORTED_RULE" ||
+                code === "SECOND_OPINION_UNAVAILABLE" ||
+                code === "REVIEWER_MISMATCH",
+            ) &&
+            attempt.diagnostics.providerEvidence?.sourceSpanStatus ===
+              "passed" &&
+            attempt.diagnostics.providerEvidence.exampleResults.length >= 2 &&
+            attempt.diagnostics.providerEvidence.exampleResults.every(
+              (example) => example.status === "passed",
+            ),
+          disagreedWithEligibleReviewer:
+            attempt.reasonCodes.includes("REVIEWER_MISMATCH"),
+        })),
       options.astReviewer !== undefined,
     );
     attempts.push(evaluation);
+    // Repeated invalid executable readings with the same faults cannot add a
+    // second opinion. Stop before a third provider call repeats the same work.
+    if (
+      evaluation.ast !== null &&
+      evaluation.decision === "INVALID" &&
+      attempts
+        .slice(0, -1)
+        .some(
+          (prior) =>
+            prior.ast !== null &&
+            prior.decision === "INVALID" &&
+            executableFailureKey(prior) === executableFailureKey(evaluation),
+        )
+    ) {
+      break;
+    }
     if (
       evaluation.status === "accepted" &&
       !shouldContinueAfterAttempt(attempts, requireSecondOpinion)
@@ -2302,7 +2399,11 @@ async function evaluateProviderAttemptAsync(
   timestamp: string,
   providerConfig: AgentProviderConfig,
   options: RuleCompileArtifactOptions,
-  corroboratingProviderAsts: readonly RuleAst[] = [],
+  corroboratingProviderAsts: readonly {
+    ast: RuleAst;
+    hasVerifiedEvidence: boolean;
+    disagreedWithEligibleReviewer: boolean;
+  }[] = [],
   allowProviderCorroboration = false,
 ): Promise<ProviderEvaluation> {
   const ctx = buildAttemptContext(request, providerConfig);
@@ -2399,19 +2500,24 @@ async function evaluateProviderAttemptAsync(
         compileSupportedRule(ctx.normalizedText) === null
       ) {
         const parsedCandidate = ruleAstSchema.safeParse(rawAst);
-        const spansAreComplete =
-          parsedCandidate.success &&
-          providerEvidence !== null &&
-          verifySourceSpanCoverage(
-            ctx.normalizedText,
-            providerEvidence.consumedSpans,
-            collectAstValues(parsedCandidate.data),
-          ) !== null;
-        if (parsedCandidate.success && spansAreComplete) {
-          reviewerAst =
-            corroboratingProviderAsts.find((candidate) =>
-              knownAstSemanticsMatch(candidate, parsedCandidate.data),
-            ) ?? null;
+        if (parsedCandidate.success) {
+          const corroborating = corroboratingProviderAsts.find((candidate) =>
+            knownAstSemanticsMatch(candidate.ast, parsedCandidate.data),
+          );
+          // Provider-authored spans and arithmetic are not proof of the AST's
+          // meaning. Two independent source-to-AST passes that agree can
+          // corroborate each other even if both omitted that bookkeeping. The
+          // reviewer eligibility, source-coverage and runtime gates still
+          // inspect both executable readings before either can certify. If an
+          // eligible source-only reviewer explicitly disagreed, a repeated
+          // unverified draft cannot outvote it by repetition alone.
+          if (
+            corroborating &&
+            (!corroborating.disagreedWithEligibleReviewer ||
+              corroborating.hasVerifiedEvidence)
+          ) {
+            reviewerAst = corroborating.ast;
+          }
         }
       }
     } catch {
@@ -2626,7 +2732,7 @@ function hasProviderDisagreement(attempts: ProviderEvaluation[]) {
   // PROVIDER_DISAGREEMENT produced that diagnosis even when every actual
   // provider candidate was behaviorally identical (and no provider witness
   // existed).
-  const completedAttempts = attempts.filter(isCompletedProviderOpinion);
+  const completedAttempts = attempts.filter(isViableProviderOpinion);
   if (completedAttempts.length < 2) {
     return false;
   }
@@ -2668,7 +2774,7 @@ function hasUnresolvedReviewerMismatch(attempts: ProviderEvaluation[]) {
 }
 
 function countCompletedOpinions(attempts: ProviderEvaluation[]) {
-  return attempts.filter(isCompletedProviderOpinion).length;
+  return attempts.filter(isViableProviderOpinion).length;
 }
 
 /**
@@ -2694,7 +2800,7 @@ function collectDivergentProviderReadings(
     "VACUOUS_CONDITION",
   ]);
   const distinct: RuleAst[] = [];
-  for (const attempt of attempts.filter(isCompletedProviderOpinion)) {
+  for (const attempt of attempts.filter(isViableProviderOpinion)) {
     // A source-only reviewer has no consumed spans or worked examples. It is a
     // useful veto signal, but one uncorroborated reviewer program is not evidence
     // that the PLAYER'S sentence has a second meaning. Only independently
@@ -2774,6 +2880,8 @@ function resolveProviderDisagreement(attempts: ProviderEvaluation[]) {
   // — so every genuine divergence was a permanent dead end with a message that
   // told the player there was nothing to fix.
   if (
+    !isViableProviderOpinion(secondary) ||
+    !isViableProviderOpinion(tertiary) ||
     !providerOpinionsAgree(secondary, tertiary) ||
     tertiary.decision !== "VALID"
   ) {
@@ -2802,6 +2910,29 @@ function isCompletedProviderOpinion(attempt: ProviderEvaluation) {
     !attempt.reasonCodes.includes("PROVIDER_TIMEOUT") &&
     !attempt.reasonCodes.includes("PROVIDER_MALFORMED_RESPONSE") &&
     !attempt.reasonCodes.includes("SCHEMA_INVALID")
+  );
+}
+
+// A schema-valid AST is not necessarily a usable reading of the player's rule.
+// In particular an impossible, always-winning, source-incomplete or unsafe
+// program cannot establish a second meaning or satisfy the second-opinion gate.
+// Evidence bookkeeping errors remain separate: they can reject the candidate
+// without changing what its executable AST says.
+function isViableProviderOpinion(attempt: ProviderEvaluation) {
+  const nonReadingReasons: ReadonlySet<RuleValidationReasonCode> = new Set([
+    "AGENT_STATEMENT_MISMATCH",
+    "COMPLEXITY_EXCEEDED",
+    "DIFFICULTY_ALWAYS_TRUE",
+    "DIFFICULTY_IMPOSSIBLE",
+    "INTERPRETATION_MISMATCH",
+    "RUNTIME_TEST_FAILED",
+    "UNSAFE_RUNTIME_BOUNDS",
+    "VACUOUS_CONDITION",
+  ]);
+  return (
+    isCompletedProviderOpinion(attempt) &&
+    attempt.ast !== null &&
+    !attempt.reasonCodes.some((reason) => nonReadingReasons.has(reason))
   );
 }
 
@@ -6938,16 +7069,10 @@ function summarizeReasons(
   providerDisagreement: boolean,
   divergentReadingCount: number,
 ) {
-  // Which of the two the divergence actually is decides who can fix it, so the
-  // summary must not merge them. Several distinct readings of one sentence is a
-  // question for the player; anything else (one provider answered, or the ones
-  // that did produced nothing comparable) is a compiler-side fault they cannot
-  // act on, and telling them to reword it would be a dead end.
-  if (providerDisagreement && divergentReadingCount >= 2) {
-    return `Rule rejected: this wording has ${divergentReadingCount} different executable readings, so which guesses win is not yet decided. Pick the reading you meant, or restate the condition so only one reading is possible.`;
-  }
+  // A disagreement is a compiler-side fault until source ambiguity is proven
+  // independently. Do not turn competing model outputs into player blame.
   if (providerDisagreement) {
-    return "Rule rejected because provider attempts disagreed; tertiary tiebreaker path was logged for audit.";
+    return `Rule rejected because compiler attempts produced ${divergentReadingCount >= 2 ? "different executable readings" : "conflicting results"}. Retry the same approved interpretation; no missing detail in your wording was established.`;
   }
   if (decision === "VALID") {
     return fallbackTriggered
@@ -6971,6 +7096,9 @@ function summarizeReasons(
   }
   if (blockingReasons.includes("PROVIDER_EVIDENCE_UNVERIFIED")) {
     return "Rule rejected: the compiler could not prove its own reading — its worked examples disagreed with the rule it produced. Nothing is wrong with the numbers you wrote; retry, or state the winning condition as one sentence.";
+  }
+  if (blockingReasons.includes("SECOND_OPINION_UNAVAILABLE")) {
+    return "Rule rejected: no eligible independent reading corroborated the selected executable rule. Retry generation with the same approved interpretation.";
   }
   if (blockingReasons.includes("DIFFICULTY_IMPOSSIBLE")) {
     return "Rule rejected: no guess can win under this rule, so it cannot distinguish winners from losers.";

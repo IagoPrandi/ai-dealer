@@ -41,7 +41,9 @@ export interface GuardianConfig {
   timeoutMs: number;
 }
 
-export type GuardianErrorCode = "GUARDIAN_BAD_RESPONSE" | "GUARDIAN_UNAVAILABLE";
+export type GuardianErrorCode =
+  | "GUARDIAN_BAD_RESPONSE"
+  | "GUARDIAN_UNAVAILABLE";
 
 export class GuardianError extends Error {
   readonly code: GuardianErrorCode;
@@ -90,7 +92,9 @@ export function resolveGuardianConfig(
     env.LLM_BASE_URL,
     env.LLM_PRIMARY_BASE_URL,
   );
-  const timeoutRaw = Number(cleanEnvValue(env.LLM_GUARDIAN_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS);
+  const timeoutRaw = Number(
+    cleanEnvValue(env.LLM_GUARDIAN_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS,
+  );
   return {
     apiKey: resolveGuardianApiKey(baseUrl, env),
     // Granite needs Ollama's native chat surface; safeguard is an ordinary
@@ -104,7 +108,9 @@ export function resolveGuardianConfig(
     enabled: model.length > 0 && baseUrl.length > 0,
     model,
     timeoutMs:
-      Number.isFinite(timeoutRaw) && timeoutRaw > 0 ? timeoutRaw : DEFAULT_TIMEOUT_MS,
+      Number.isFinite(timeoutRaw) && timeoutRaw > 0
+        ? timeoutRaw
+        : DEFAULT_TIMEOUT_MS,
   };
 }
 
@@ -120,7 +126,10 @@ function firstConfigured(...values: Array<string | undefined>): string {
 
 // Mirrors the rule agent: a Groq endpoint reads the Groq secret from the single
 // place it is configured, so the guardrail cannot drift onto a stale key.
-function resolveGuardianApiKey(baseUrl: string, env: NodeJS.ProcessEnv): string {
+function resolveGuardianApiKey(
+  baseUrl: string,
+  env: NodeJS.ProcessEnv,
+): string {
   let hostname: string;
   try {
     hostname = new URL(baseUrl).hostname.toLowerCase();
@@ -214,6 +223,28 @@ const SAFEGUARD_GROUNDEDNESS_POLICY = [
   'Respond ONLY with JSON: {"violation": 0 or 1, "rationale": "<one sentence>"}',
 ].join("\n");
 
+const SAFEGUARD_CLAIM_SUPPORT_POLICY = [
+  "# Instructions",
+  "You verify whether a CLAIM about a lottery rule is supported by a DOCUMENT.",
+  "The DOCUMENT is the sole source of truth.",
+  "",
+  "# Definitions",
+  "A claim is unsupported when it adds a condition the document does not state,",
+  "changes a threshold or count, or flips a comparison, polarity, or winner.",
+  "The claim may omit only protocol defaults: equal prize sharing among tied winners,",
+  "or no winner when no ticket is eligible. It must preserve every eligibility",
+  "condition, scoring operation, threshold, quantifier, ordering, and winner criterion.",
+  "Omitting any such rule condition is unsupported even if remaining claims are true.",
+  "Rewording, translating, or stating the same condition more precisely is NOT unsupported.",
+  "",
+  "# Criteria",
+  "violation = 1 -> the CLAIM adds or changes meaning versus the DOCUMENT.",
+  "violation = 0 -> every statement in the CLAIM is supported by the DOCUMENT.",
+  "",
+  "# Output",
+  'Respond ONLY with JSON: {"violation": 0 or 1, "rationale": "<one sentence>"}',
+].join("\n");
+
 /**
  * gpt-oss-safeguard reasons before answering and spends real tokens on it: the
  * verdict arrives after a few hundred tokens of trace. A tight ceiling truncates
@@ -289,14 +320,23 @@ async function scoreSafeguard(
   config: GuardianConfig,
   signal?: AbortSignal,
 ): Promise<SafeguardVerdict> {
-  const headers: Record<string, string> = { "content-type": "application/json" };
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+  };
   if (config.apiKey) {
     headers.authorization = `Bearer ${config.apiKey}`;
   }
   const startedAt = new Date().toISOString();
   const startedAtMs = performance.now();
   const record = (outcome: AiUsageOutcome, payload: unknown) =>
-    recordGuardianCall({ config, outcome, payload, startedAt, startedAtMs, step });
+    recordGuardianCall({
+      config,
+      outcome,
+      payload,
+      startedAt,
+      startedAtMs,
+      step,
+    });
 
   let response: Response;
   try {
@@ -410,14 +450,23 @@ async function score(
   config: GuardianConfig,
   signal?: AbortSignal,
 ): Promise<boolean> {
-  const headers: Record<string, string> = { "content-type": "application/json" };
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+  };
   if (config.apiKey) {
     headers.authorization = `Bearer ${config.apiKey}`;
   }
   const startedAt = new Date().toISOString();
   const startedAtMs = performance.now();
   const record = (outcome: AiUsageOutcome, payload: unknown) =>
-    recordGuardianCall({ config, outcome, payload, startedAt, startedAtMs, step });
+    recordGuardianCall({
+      config,
+      outcome,
+      payload,
+      startedAt,
+      startedAtMs,
+      step,
+    });
 
   let response: Response;
   try {
@@ -463,7 +512,9 @@ async function score(
     message?: { content?: unknown };
   } | null;
   const content =
-    typeof payload?.message?.content === "string" ? payload.message.content : "";
+    typeof payload?.message?.content === "string"
+      ? payload.message.content
+      : "";
   const match = content.match(/<score>\s*(yes|no)\s*<\/score>/i);
   if (!match) {
     record("error", payload);
@@ -516,14 +567,17 @@ export function isClearlyGroundedRuleInterpretation(
   rule: string,
   interpretation: string,
 ): boolean {
-  return compareDeterministicRuleSemantics(rule, interpretation) === "equivalent";
+  return (
+    compareDeterministicRuleSemantics(rule, interpretation) === "equivalent"
+  );
 }
 
 // True when the interpretation is FAITHFUL to (grounded in) the rule. Internally
 // the guardian scores ungroundedness (yes = drifted/contradicts), so this negates.
-export async function checkGroundedness(
+async function checkGroundednessWithPolicy(
   rule: string,
   interpretation: string,
+  safeguardPolicy: string,
   config: GuardianConfig = resolveGuardianConfig(),
   signal?: AbortSignal,
 ): Promise<boolean> {
@@ -543,7 +597,7 @@ export async function checkGroundedness(
     // `document` role, and the policy names DOCUMENT as the source of truth.
     const verdict = await scoreSafeguard(
       "guardian_groundedness",
-      SAFEGUARD_GROUNDEDNESS_POLICY,
+      safeguardPolicy,
       `DOCUMENT:
 ${rule}
 
@@ -570,4 +624,40 @@ ${interpretation}`,
     signal,
   );
   return !ungrounded;
+}
+
+/** Requires semantic equivalence, including that the claim did not drop a rule condition. */
+export async function checkGroundedness(
+  rule: string,
+  interpretation: string,
+  config: GuardianConfig = resolveGuardianConfig(),
+  signal?: AbortSignal,
+): Promise<boolean> {
+  return checkGroundednessWithPolicy(
+    rule,
+    interpretation,
+    SAFEGUARD_GROUNDEDNESS_POLICY,
+    config,
+    signal,
+  );
+}
+
+/**
+ * Checks the one-way promise used at the artifact boundary: every dealer claim
+ * must be supported by the artifact, while the dealer may omit protocol detail
+ * that the artifact states explicitly.
+ */
+export async function checkClaimGroundedness(
+  document: string,
+  claim: string,
+  config: GuardianConfig = resolveGuardianConfig(),
+  signal?: AbortSignal,
+): Promise<boolean> {
+  return checkGroundednessWithPolicy(
+    document,
+    claim,
+    SAFEGUARD_CLAIM_SUPPORT_POLICY,
+    config,
+    signal,
+  );
 }

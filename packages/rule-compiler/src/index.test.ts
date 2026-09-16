@@ -27,6 +27,460 @@ import {
   scoreGuess,
   validateAndPrecompileRule,
 } from "./index.js";
+import { collectRequiredOperations } from "./interpretationCoverage.js";
+
+test("existential comparisons and scalar totals retain their semantic coverage", () => {
+  const source = (side: "guess" | "draw") => ({ kind: "source", source: side });
+  const mirror = ruleAstSchema.parse({
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "pairs_exists",
+        left: source("guess"),
+        right: { kind: "reverse", of: source("draw") },
+        where: {
+          kind: "compare",
+          op: "eq",
+          left: { kind: "pair", side: "left" },
+          right: { kind: "pair", side: "right" },
+        },
+      },
+    },
+  });
+  const mirrorText =
+    "Compare the guess with the draw in reverse order. Win if at least one of those six comparisons is equal.";
+  assert.equal(
+    analyzeInterpretationCoverage({
+      ast: mirror,
+      officialInterpretation: mirrorText,
+      text: mirrorText,
+    }).covered,
+    true,
+  );
+  assert.equal(
+    analyzeInterpretationCoverage({
+      ast: mirror,
+      officialInterpretation: mirrorText,
+      text: "Compare the value at position i with the value at position 7-i for all i from 1 to 6; win if any pair matches.",
+    }).covered,
+    true,
+  );
+  assert.equal(
+    analyzeInterpretationCoverage({
+      ast: mirror,
+      officialInterpretation: mirrorText,
+      text: "For each guess, compare guess[1] with draw[6], guess[2] with draw[5], guess[3] with draw[4], guess[4] with draw[3], guess[5] with draw[2], and guess[6] with draw[1]; the guess wins if any of these six comparisons are equal.",
+    }).covered,
+    true,
+  );
+  const mirroredPairText =
+    "Line the guess up against the draw in mirror order. Win if at least one of those mirrored pairs holds the same number on both sides.";
+  assert.equal(
+    analyzeInterpretationCoverage({
+      ast: mirror,
+      officialInterpretation: mirroredPairText,
+      text: mirroredPairText,
+    }).covered,
+    true,
+  );
+  const mirrorForall = ruleAstSchema.parse({
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "pairs_forall",
+        left: source("guess"),
+        right: { kind: "reverse", of: source("draw") },
+        where: {
+          kind: "compare",
+          op: "eq",
+          left: { kind: "pair", side: "left" },
+          right: { kind: "pair", side: "right" },
+        },
+      },
+    },
+  });
+  assert.ok(
+    analyzeInterpretationCoverage({
+      ast: mirrorForall,
+      officialInterpretation: mirroredPairText,
+      text: mirroredPairText,
+    }).missingOperations.includes("comparison_exists"),
+  );
+  for (const text of [
+    "At least one comparison must be true.",
+    "At least one of these comparisons is greater than zero.",
+    "No fewer than one of the paired pairs has equal values.",
+  ]) {
+    assert.ok(
+      collectRequiredOperations(text).includes("comparison_exists"),
+      text,
+    );
+  }
+  assert.deepEqual(
+    collectRequiredOperations("At least one of six comparisons is equal."),
+    ["comparison_exists"],
+  );
+  assert.ok(
+    collectRequiredOperations(
+      "Exactly one of six comparisons is equal.",
+    ).includes("comparison_count"),
+  );
+  assert.ok(
+    analyzeInterpretationCoverage({
+      ast: mirror,
+      officialInterpretation: mirrorText,
+      text: "Exactly one of those six comparisons must be equal.",
+    }).missingOperations.includes("comparison_count"),
+  );
+  const comparisons = [
+    {
+      kind: "compare",
+      op: "eq",
+      left: { kind: "reduce", op: "max", of: source("guess") },
+      right: { kind: "lit", value: 40 },
+    },
+    {
+      kind: "compare",
+      op: "eq",
+      left: { kind: "reduce", op: "min", of: source("draw") },
+      right: { kind: "lit", value: 10 },
+    },
+  ];
+  const explicit = (kind: "or" | "and") =>
+    ruleAstSchema.parse({
+      schemaVersion: 3,
+      result: { type: "predicate", predicate: { kind, clauses: comparisons } },
+    });
+  const existentialText = "At least one of these comparisons must be equal.";
+  assert.equal(
+    analyzeInterpretationCoverage({
+      ast: explicit("or"),
+      officialInterpretation: existentialText,
+      text: existentialText,
+    }).covered,
+    true,
+  );
+  assert.ok(
+    analyzeInterpretationCoverage({
+      ast: explicit("and"),
+      officialInterpretation: existentialText,
+      text: existentialText,
+    }).missingOperations.includes("comparison_exists"),
+  );
+
+  const scalar = ruleAstSchema.parse({
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "compare",
+        op: "gt",
+        left: {
+          kind: "arith",
+          op: "add",
+          left: {
+            kind: "arith",
+            op: "sub",
+            left: { kind: "reduce", op: "max", of: source("guess") },
+            right: { kind: "reduce", op: "min", of: source("guess") },
+          },
+          right: {
+            kind: "reduce",
+            op: "count",
+            of: {
+              kind: "intersection",
+              left: source("guess"),
+              right: source("draw"),
+            },
+          },
+        },
+        right: { kind: "lit", value: 40 },
+      },
+    },
+  });
+  const scalarText =
+    "Subtract your lowest number from your highest. Add the count of numbers drawn. Win if the final total exceeds 40.";
+  assert.equal(
+    analyzeInterpretationCoverage({
+      ast: scalar,
+      officialInterpretation: scalarText,
+      text: scalarText,
+    }).covered,
+    true,
+  );
+  const answeredGrouping =
+    "For each guess, compute max(guess) - min(guess). Count how many of the six guessed numbers are also present in the six drawn numbers. Add the two values. The guess is a winner if the sum is strictly greater than 40.";
+  assert.equal(
+    analyzeInterpretationCoverage({
+      ast: scalar,
+      officialInterpretation: answeredGrouping,
+      text: answeredGrouping,
+    }).covered,
+    true,
+  );
+  const countAsNumberOf =
+    "For each guess, compute max(guess) - min(guess), add the number of guessed values that are also present in the draw; the guess is a winner if this sum is strictly greater than 40.";
+  assert.equal(
+    analyzeInterpretationCoverage({
+      ast: scalar,
+      text: countAsNumberOf,
+      officialInterpretation: countAsNumberOf,
+    }).covered,
+    true,
+  );
+  for (const text of [
+    "Add the number of matching entries. This sum must exceed 17.",
+    "Add the number of odd values. The sum must exceed 8.",
+  ]) {
+    assert.ok(collectRequiredOperations(text).includes("scalar_add"), text);
+    assert.equal(collectRequiredOperations(text).includes("sum"), false, text);
+  }
+  assert.ok(
+    collectRequiredOperations(
+      "Add the number of matches, then compare the sum of the guessed numbers with 40.",
+    ).includes("sum"),
+  );
+  assert.equal(
+    collectRequiredOperations(
+      "Add the numbers of the guess. The sum exceeds 40.",
+    ).includes("scalar_add"),
+    false,
+  );
+  assert.ok(collectRequiredOperations(answeredGrouping).includes("scalar_add"));
+  assert.ok(!collectRequiredOperations(answeredGrouping).includes("sum"));
+  assert.deepEqual(
+    collectRequiredOperations(
+      "Add the two measured values. This sum exceeds 40.",
+    ),
+    ["scalar_add"],
+  );
+  assert.ok(
+    collectRequiredOperations(
+      "Add the two measured values, then compare the sum of the drawn numbers with 40.",
+    ).includes("sum"),
+  );
+  assert.ok(collectRequiredOperations("The sum exceeds 40.").includes("sum"));
+  assert.ok(
+    analyzeInterpretationCoverage({
+      ast: scalar,
+      officialInterpretation: "The sum of your numbers exceeds 40.",
+      text: "The sum of your numbers exceeds 40.",
+    }).missingOperations.includes("sum"),
+  );
+  assert.ok(
+    collectRequiredOperations("The resulting total exceeds 40.").every(
+      (operation) => operation !== "sum",
+    ),
+  );
+  assert.ok(
+    collectRequiredOperations(
+      "The final total of your six numbers exceeds 40.",
+    ).includes("sum"),
+  );
+  const scalarSumText = "The sum of the span and the count exceeds 40.";
+  assert.deepEqual(collectRequiredOperations(scalarSumText), ["scalar_add"]);
+  assert.equal(
+    analyzeInterpretationCoverage({
+      ast: scalar,
+      officialInterpretation: scalarSumText,
+      text: scalarSumText,
+    }).covered,
+    true,
+  );
+  assert.ok(
+    collectRequiredOperations(
+      "The sum of your six numbers exceeds 40.",
+    ).includes("sum"),
+  );
+  for (const wording of [
+    "The sum of the range plus the match count exceeds 40.",
+    "The total of the span and the count exceeds 40.",
+    "Add the match count to the range before comparing with 40.",
+    "Add to that result the count of drawn numbers.",
+  ]) {
+    assert.ok(
+      collectRequiredOperations(wording).includes("scalar_add"),
+      wording,
+    );
+    assert.ok(!collectRequiredOperations(wording).includes("sum"), wording);
+  }
+});
+
+test("defined mirror order and counting questions do not trigger vocabulary ambiguity", () => {
+  assert.equal(
+    hasAmbiguousWording(
+      "Compare the first guess with the last drawn number in mirror order.",
+    ),
+    false,
+  );
+  assert.equal(
+    hasAmbiguousWording("You win if your numbers mirror the draw."),
+    true,
+  );
+  assert.equal(
+    hasAmbiguousWording(
+      "Count how many of your numbers were drawn, then compare the count with 2.",
+    ),
+    false,
+  );
+  assert.equal(hasAmbiguousWording("A ticket with many matches wins."), true);
+});
+
+test("mixed subtraction and addition requires explicit arithmetic grouping", () => {
+  assert.equal(
+    hasAmbiguousWording(
+      "Win if your highest number minus your lowest plus the match count exceeds 40.",
+    ),
+    true,
+  );
+  assert.equal(
+    hasAmbiguousWording(
+      "Win if the draw sum minus its minimum plus the guess maximum exceeds 50.",
+    ),
+    true,
+  );
+  assert.equal(
+    hasAmbiguousWording(
+      "Subtract your lowest number from your highest. Then add the match count to that result.",
+    ),
+    false,
+  );
+  assert.equal(
+    hasAmbiguousWording(
+      "Win if (your highest minus your lowest) plus the match count exceeds 40.",
+    ),
+    false,
+  );
+  assert.equal(
+    hasAmbiguousWording(
+      "Win if your first number minus your second plus the third exceeds 40.",
+    ),
+    true,
+  );
+  assert.equal(
+    hasAmbiguousWording(
+      "Win if the guess sum (in entry order) minus the draw sum plus 2 exceeds 40.",
+    ),
+    true,
+  );
+  assert.equal(
+    hasAmbiguousWording(
+      "Win if the guess sum plus the match count exceeds 40.",
+    ),
+    false,
+  );
+});
+
+test("iteration bounds are not mistaken for ticket-value requirements", () => {
+  assert.deepEqual(
+    collectRequiredValues(
+      "Compare the value at position i with position 7-i for all i from 1 to 6.",
+    ),
+    [],
+  );
+  assert.deepEqual(
+    collectRequiredValues(
+      "Compare all positions from 1 to 6 against the reversed draw.",
+    ),
+    [],
+  );
+  assert.deepEqual(
+    collectRequiredValues("Win if each number is from 1 to 6."),
+    [1, 6],
+  );
+  assert.deepEqual(
+    collectRequiredValues(
+      "At every position, the guessed value must be between 10 and 20.",
+    ),
+    [10, 20],
+  );
+  assert.deepEqual(
+    collectRequiredValues(
+      "For each guess, compare guess[1] with draw[6], guess[2] with draw[5], guess[3] with draw[4], guess[4] with draw[3], guess[5] with draw[2], and guess[6] with draw[1].",
+    ),
+    [],
+  );
+  assert.deepEqual(
+    collectRequiredValues("The guess must contain [1, 2, 3, 4, 5, 6]."),
+    [1, 2, 3, 4, 5, 6],
+  );
+});
+
+test("an exclusive rule cannot be certified by a plain inclusive OR", () => {
+  const source = (side: "guess" | "draw") => ({ kind: "source", source: side });
+  const sumGreater = {
+    kind: "compare",
+    op: "gt",
+    left: { kind: "reduce", op: "sum", of: source("guess") },
+    right: { kind: "reduce", op: "sum", of: source("draw") },
+  };
+  const maxAppears = {
+    kind: "contains",
+    array: source("draw"),
+    value: { kind: "reduce", op: "max", of: source("guess") },
+  };
+  const text =
+    "You win if exactly one of these two statements is true, and you lose if both are true or neither is: your six numbers add up to more than the six drawn numbers add up to, or your highest number was drawn.";
+  const ast = (predicate: unknown) =>
+    ruleAstSchema.parse({
+      schemaVersion: 3,
+      result: { type: "predicate", predicate },
+    });
+  const inclusive = ast({ kind: "or", clauses: [sumGreater, maxAppears] });
+  const exclusive = ast({
+    kind: "or",
+    clauses: [
+      {
+        kind: "and",
+        clauses: [sumGreater, { kind: "not", clause: maxAppears }],
+      },
+      {
+        kind: "and",
+        clauses: [{ kind: "not", clause: sumGreater }, maxAppears],
+      },
+    ],
+  });
+  const alternative = ast({
+    kind: "and",
+    clauses: [
+      { kind: "or", clauses: [sumGreater, maxAppears] },
+      {
+        kind: "not",
+        clause: { kind: "and", clauses: [sumGreater, maxAppears] },
+      },
+    ],
+  });
+  assert.ok(collectRequiredOperations(text).includes("exclusive_disjunction"));
+  assert.ok(
+    analyzeInterpretationCoverage({
+      ast: inclusive,
+      officialInterpretation: text,
+      text,
+    }).missingOperations.includes("exclusive_disjunction"),
+  );
+  assert.equal(
+    analyzeInterpretationCoverage({
+      ast: exclusive,
+      officialInterpretation: text,
+      text,
+    }).covered,
+    true,
+  );
+  assert.equal(
+    analyzeInterpretationCoverage({
+      ast: alternative,
+      officialInterpretation: text,
+      text,
+    }).covered,
+    true,
+  );
+  assert.deepEqual(
+    collectRequiredOperations("At least one of these two statements is true."),
+    [],
+  );
+});
 
 type PromptTestSetFile =
   | "rule-proposal-prompt-test-set-2.md"
@@ -156,6 +610,7 @@ test("the compile_rule_to_ast skill prompt is versioned and covers both rule mod
   );
   assert.ok(prompt.includes("pairs_forall"));
   assert.ok(prompt.includes("pairs_exists"));
+  assert.ok(prompt.includes('"op":"range_span"'));
   assert.ok(prompt.includes('"kind":"reverse"'));
   assert.ok(prompt.includes('"kind":"filter"'));
   assert.ok(prompt.includes('"kind":"ite"'));
@@ -417,6 +872,153 @@ test("compares every supported match threshold and stays conservative at equival
     "unknown",
     "bounded samples cannot promote structurally different programs to equivalent",
   );
+});
+
+test("existential mapped truth flags retain comparison coverage without changing polarity", () => {
+  const text = "At least one of the paired comparisons is equal.";
+  const makeAst = (kind: string, op: string, value: number, up = 0) =>
+    ruleAstSchema.parse({
+      schemaVersion: 3,
+      result: {
+        type: "predicate",
+        predicate: {
+          kind,
+          of: {
+            kind: "pairs_map",
+            left: { kind: "source", source: "guess" },
+            right: { kind: "reverse", of: { kind: "source", source: "draw" } },
+            expr: {
+              kind: "ite",
+              if: {
+                kind: "compare",
+                op: "eq",
+                left: { kind: "pair", side: "left" },
+                right: { kind: "pair", side: "right" },
+              },
+              then: { kind: "lit", value: 1 },
+              else: { kind: "lit", value: 0 },
+            },
+          },
+          where: {
+            kind: "compare",
+            op,
+            left: { kind: "elem", up },
+            right: { kind: "lit", value },
+          },
+        },
+      },
+    });
+  for (const [op, value] of [
+    ["eq", 1],
+    ["gte", 1],
+    ["gt", 0],
+  ] as const) {
+    const ast = makeAst("exists", op, value);
+    assert.equal(
+      analyzeInterpretationCoverage({ ast, text, officialInterpretation: text })
+        .covered,
+      true,
+    );
+    assert.equal(
+      evaluatePredicate(ast, {
+        guess: [1, 2, 3, 4, 5, 10],
+        draw: [10, 20, 30, 40, 50, 60],
+      }).result,
+      "WIN",
+    );
+    assert.equal(
+      evaluatePredicate(ast, {
+        guess: [1, 2, 3, 4, 5, 6],
+        draw: [10, 20, 30, 40, 50, 60],
+      }).result,
+      "LOSE",
+    );
+  }
+  for (const ast of [makeAst("forall", "eq", 1), makeAst("exists", "eq", 0)]) {
+    assert.ok(
+      analyzeInterpretationCoverage({
+        ast,
+        text,
+        officialInterpretation: text,
+      }).missingOperations.includes("comparison_exists"),
+    );
+  }
+  assert.throws(() => makeAst("exists", "eq", 1, 1), /binder scope/u);
+});
+
+test("comparative winner selection cannot collapse into an eligibility predicate", () => {
+  const sources = [
+    "A ticket is eligible if it matches at least two of the six drawn numbers; among eligible tickets, the winner is the ticket whose six numbers have the smallest numeric range (max \u2212 min). Tickets with equal smallest range share the prize equally.",
+    "Match at least three drawn numbers to qualify. Among qualifying entries the highest score wins.",
+    "Match at least four drawn numbers. The ticket with the lowest numeric span wins.",
+  ];
+  const predicate = ruleAstSchema.parse({
+    schemaVersion: 1,
+    node: { kind: "match_count_at_least", value: 2 },
+  });
+  const ranking = ruleAstSchema.parse({
+    schemaVersion: 3,
+    result: {
+      type: "ranking",
+      direction: "min",
+      tieBreak: "share_pool",
+      eligibleWhen: {
+        kind: "compare",
+        op: "gte",
+        left: {
+          kind: "reduce",
+          op: "count",
+          of: {
+            kind: "intersection",
+            left: { kind: "source", source: "guess" },
+            right: { kind: "source", source: "draw" },
+          },
+        },
+        right: { kind: "lit", value: 2 },
+      },
+      score: {
+        kind: "reduce",
+        op: "range_span",
+        of: { kind: "source", source: "guess" },
+      },
+    },
+  });
+  for (const text of sources) {
+    const plan = getDeterministicRuleCompilerPlan(text);
+    assert.ok(
+      plan === null ||
+        (plan.ast.schemaVersion !== 1 && plan.ast.result.type === "ranking"),
+      text,
+    );
+    assert.ok(
+      analyzeInterpretationCoverage({
+        ast: predicate,
+        text,
+        officialInterpretation: text,
+      }).missingOperations.includes("ranking"),
+      text,
+    );
+  }
+  assert.equal(
+    analyzeInterpretationCoverage({
+      ast: ranking,
+      text: sources[0]!,
+      officialInterpretation: sources[0]!,
+    }).covered,
+    true,
+  );
+  for (const text of [
+    "A guess wins if it matches at least two drawn numbers.",
+    "You win if your highest number was drawn.",
+    "Among eligible tickets, win if at least two numbers were drawn.",
+    "Among eligible tickets, win if your highest number was drawn.",
+  ]) {
+    assert.equal(
+      collectRequiredOperations(text).includes("ranking"),
+      false,
+      text,
+    );
+  }
 });
 
 test("negative match counts never enter the positive deterministic shortcut", async () => {
@@ -3717,6 +4319,51 @@ test("a corroborated reviewer mismatch is not mislabeled as provider disagreemen
   assert.equal(result.log.providerDisagreementReadings.length, 1);
 });
 
+test("a repeated rejected executable reading stops provider arbitration", async () => {
+  const draft = sumCompareAst("lt", 10);
+  const reviewer = sumCompareAst("gt", 10);
+  let generationCalls = 0;
+  const result = await compileRuleArtifact(
+    {
+      originalText: NO_REFERENCE_PROMPT,
+      prompt: NO_REFERENCE_PROMPT,
+      tokenCount: 14,
+    },
+    {
+      astProvider: async () => {
+        generationCalls += 1;
+        return {
+          ast: draft,
+          consumedSpans: [{ text: "ticket total" }],
+          workedExamples: [
+            {
+              guess: [1, 2, 3, 4, 5, 6],
+              draw: [10, 20, 30, 40, 50, 60],
+              outcome: "WIN",
+            },
+            {
+              guess: [90, 91, 92, 93, 94, 95],
+              draw: [1, 2, 3, 4, 5, 6],
+              outcome: "LOSE",
+            },
+          ],
+        };
+      },
+      astReviewer: async () => reviewer,
+      requireProviderEvidence: true,
+    },
+  );
+  assert.equal(result.decision, "INVALID");
+  assert.equal(
+    generationCalls,
+    2,
+    JSON.stringify(
+      result.log.attemptDiagnostics.map(({ reasonCodes }) => reasonCodes),
+    ),
+  );
+  assert.equal(result.log.attemptDiagnostics.length, 2);
+});
+
 test("ranking review compares induced winners instead of raw score units", async () => {
   const score = {
     kind: "reduce",
@@ -3808,7 +4455,7 @@ test("ranking disagreement diagnostics compare score and eligibility fields", as
   assert.doesNotMatch(review?.detail ?? "", /\[object Object\]/u);
 });
 
-test("a provably vacuous reviewer cannot veto a novel candidate with executed evidence", async () => {
+test("a provably vacuous reviewer cannot certify a novel candidate alone", async () => {
   const text =
     "the six picks strictly alternate odd/even in the order chosen and at least one is drawn";
   const source = { kind: "source", source: "guess" } as const;
@@ -3911,7 +4558,9 @@ test("a provably vacuous reviewer cannot veto a novel candidate with executed ev
     },
   );
 
-  assert.equal(result.decision, "VALID");
+  assert.equal(result.decision, "INVALID");
+  assert.equal(result.artifact, null);
+  assert.ok(result.log.reasonCodes.includes("SECOND_OPINION_UNAVAILABLE"));
   assert.ok(!result.log.reasonCodes.includes("REVIEWER_MISMATCH"));
   assert.equal(result.log.providerDisagreementReadings.length, 1);
   const review = result.log.attemptDiagnostics[0]?.stages.find(
@@ -4054,11 +4703,9 @@ test("a reviewer that agreed cannot certify away an operation the text names", a
   assert.match(coverageStage?.detail ?? "", /missing operations: .*position/u);
 });
 
-test("divergent readings of one text are reported as the text being ambiguous", async () => {
-  // Two providers, one sentence, two executable meanings. The divergence is
-  // evidence about the WORDING, so it must reach the player as a question
-  // (AMBIGUOUS_RULE, PRD 6.6) rather than as a compiler conflict they are told
-  // not to try to fix.
+test("divergent compiler readings do not blame the player's wording", async () => {
+  // Distinct ASTs prove that the compilers disagree. They do not prove that a
+  // clear source sentence has two legitimate meanings.
   const answers = [sumCompareAst("lt", 10), sumCompareAst("gt", 10)];
   let index = 0;
   const result = await compileRuleArtifact(
@@ -4073,15 +4720,18 @@ test("divergent readings of one text are reported as the text being ambiguous", 
   );
 
   assert.equal(result.decision, "INVALID");
-  assert.ok(result.log.reasonCodes.includes("AMBIGUOUS_RULE"));
-  // Both readings are named, so a consumer can ask which one was meant instead
-  // of inventing a question.
+  assert.ok(!result.log.reasonCodes.includes("AMBIGUOUS_RULE"));
+  assert.ok(result.log.reasonCodes.includes("PROVIDER_DISAGREEMENT"));
+  // Both readings remain available to diagnose which compiler went wrong.
   assert.equal(result.log.providerDisagreementReadings.length, 2);
   assert.notEqual(
     result.log.providerDisagreementReadings[0],
     result.log.providerDisagreementReadings[1],
   );
-  assert.match(result.log.reasonSummary, /2 different executable readings/u);
+  assert.match(
+    result.log.reasonSummary,
+    /compiler attempts produced different executable readings/u,
+  );
 });
 
 test("a disagreement with only one reading is not reported as ambiguity", async () => {
@@ -4104,6 +4754,29 @@ test("a disagreement with only one reading is not reported as ambiguity", async 
 
   assert.ok(!result.log.reasonCodes.includes("AMBIGUOUS_RULE"));
   assert.ok(result.log.providerDisagreementReadings.length < 2);
+});
+
+test("a degenerate compiler candidate cannot establish a second reading", async () => {
+  const answers = [sumCompareAst("lt", 10), sumCompareAst("lt", 1_000)];
+  let index = 0;
+  const result = await compileRuleArtifact(
+    {
+      originalText: NO_REFERENCE_PROMPT,
+      prompt: NO_REFERENCE_PROMPT,
+      providerConfidenceActionByPriority: { primary: "ESCALATE" },
+      tokenCount: 14,
+    },
+    { astProvider: async () => answers[index++] ?? answers[0] },
+  );
+  assert.equal(result.log.providerDisagreementRateSample, 0);
+  assert.ok(!result.log.reasonCodes.includes("AMBIGUOUS_RULE"));
+  assert.ok(
+    result.log.attemptDiagnostics.some(
+      (attempt) =>
+        attempt.reasonCodes.includes("DIFFICULTY_ALWAYS_TRUE") ||
+        attempt.reasonCodes.includes("DIFFICULTY_IMPOSSIBLE"),
+    ),
+  );
 });
 
 test("disableConsensus lifts the rejection but still records the divergence", async () => {
@@ -4209,6 +4882,7 @@ test("the tertiary resolves a real disagreement by behaviour, not byte equality"
   // The divergence is real and stays on the record...
   assert.equal(result.log.providerDisagreementRateSample, 1);
   assert.ok(result.log.reasonCodes.includes("PROVIDER_DISAGREEMENT"));
+  assert.equal(result.log.providerDisagreementBlocked, false);
   assert.equal(result.log.providerPath.length, 3);
   // ...and the tiebreaker now actually resolves it.
   assert.equal(result.decision, "VALID");
@@ -4266,6 +4940,8 @@ test("a schema-invalid response holds no opinion, so it is not dissent", async (
   // One reading survived and nothing corroborated it — say so rather than
   // presenting it as a checked result.
   assert.ok(result.log.reasonCodes.includes("SECOND_OPINION_UNAVAILABLE"));
+  assert.equal(result.decision, "INVALID");
+  assert.equal(result.artifact, null);
 });
 
 test("treats an equivalent rewrite as agreement, not disagreement", async () => {
@@ -4330,7 +5006,8 @@ test("records that a required second opinion could not be obtained", async () =>
     },
   );
 
-  assert.equal(result.decision, "VALID");
+  assert.equal(result.decision, "INVALID");
+  assert.equal(result.artifact, null);
   assert.ok(result.log.reasonCodes.includes("SECOND_OPINION_UNAVAILABLE"));
 });
 
@@ -4606,6 +5283,37 @@ test("v3 ranking descriptions explain eligibility and ordered criteria", () => {
   assert.match(description, /all greater than the smallest drawn number/iu);
   assert.match(description, /smallest gap between its highest and lowest/iu);
   assert.match(description, /smaller sum breaks a tie/iu);
+
+  const eligibleSpan = ruleAstSchema.parse({
+    schemaVersion: 3,
+    result: {
+      type: "ranking",
+      direction: "min",
+      tieBreak: "share_pool",
+      eligibleWhen: {
+        kind: "compare",
+        op: "gte",
+        left: {
+          kind: "reduce",
+          op: "count",
+          of: { kind: "intersection", left: guess, right: draw },
+        },
+        right: { kind: "lit", value: 2 },
+      },
+      score: { kind: "reduce", op: "range_span", of: guess },
+    },
+  });
+  const eligibleSpanDescription = describeRuleAstForPlayers(eligibleSpan);
+  assert.match(
+    eligibleSpanDescription,
+    /only guesses with at least 2 of their six numbers present in the official draw are eligible/iu,
+  );
+  assert.match(eligibleSpanDescription, /among eligible guesses/iu);
+  assert.match(
+    eligibleSpanDescription,
+    /smallest difference between its highest and lowest/iu,
+  );
+  assert.match(eligibleSpanDescription, /if no guess is eligible/iu);
 });
 
 test("an explicit six-number set compiles without losing enumerated values", () => {
@@ -6234,7 +6942,7 @@ test("two compilers cannot certify the same dropped numeric clauses", async () =
   assert.ok(result.log.reasonCodes.includes("INTERPRETATION_MISMATCH"));
 });
 
-test("a source-incomplete reviewer cannot veto two corroborating provider programs", async () => {
+test("matching independent ASTs repair bookkeeping unless a conflicting eligible reviewer has no verified counterevidence", async () => {
   const text =
     "Line up the guess and draw from lowest to highest and add up the absolute differences; the smallest total wins. A ticket holding a drawn number receives a 10 point penalty.";
   const candidate = ruleAstSchema.parse({
@@ -6319,7 +7027,10 @@ test("a source-incomplete reviewer cannot veto two corroborating provider progra
         providerCalls += 1;
         return {
           ast: candidate,
-          consumedSpans: [{ text }],
+          consumedSpans:
+            providerCalls === 1
+              ? [{ text }]
+              : [{ text: "line up the guess and draw from lowest to highest" }],
           workedExamples: [
             {
               draw: [1, 2, 3, 4, 5, 6],
@@ -6351,6 +7062,35 @@ test("a source-incomplete reviewer cannot veto two corroborating provider progra
     correctedEvidence?.exampleResults.every(
       (example) => example.status === "passed",
     ),
+  );
+  assert.match(
+    correctedEvidence?.sourceSpanDetail ?? "",
+    /server bound the complete approved source/iu,
+  );
+
+  const unverified = await compileRuleArtifact(
+    { originalText: text, prompt: text, tokenCount: countWords(text) },
+    {
+      astProvider: async () => ({
+        ast: candidate,
+        consumedSpans: [
+          { text: "line up the guess and draw from lowest to highest" },
+        ],
+        workedExamples: [
+          { draw: [1, 2, 3, 4, 5, 6], guess: [1, 2, 3, 4, 5, 6], score: 10 },
+          { draw: [1, 2, 3, 4, 5, 6], guess: [7, 8, 9, 10, 11, 12], score: 36 },
+        ],
+      }),
+      astReviewer: async () => incompleteReviewer,
+      requireProviderEvidence: true,
+    },
+  );
+  assert.equal(unverified.decision, "VALID");
+  assert.deepEqual(unverified.artifact?.ast, candidate);
+  assert.match(
+    unverified.log.attemptDiagnostics[1]?.providerEvidence?.sourceSpanDetail ??
+      "",
+    /server bound the complete approved source/iu,
   );
 });
 
@@ -6389,6 +7129,53 @@ test("nested cross-source distance ASTs render without binder implementation pro
     /every drawn number is within 3 of at least one guessed number/iu,
   );
   assert.doesNotMatch(description, /level\(s\)|distance from zero/iu);
+});
+
+test("nested miss-to-hit digit rules render player concepts instead of binder depth", () => {
+  const ast = ruleAstSchema.parse({
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "exists",
+        of: {
+          kind: "difference",
+          left: { kind: "source", source: "guess" },
+          right: { kind: "source", source: "draw" },
+        },
+        where: {
+          kind: "exists",
+          of: {
+            kind: "intersection",
+            left: { kind: "source", source: "guess" },
+            right: { kind: "source", source: "draw" },
+          },
+          where: {
+            kind: "compare",
+            op: "eq",
+            left: {
+              kind: "arith",
+              op: "mod",
+              left: { kind: "elem", up: 1 },
+              right: { kind: "lit", value: 10 },
+            },
+            right: {
+              kind: "arith",
+              op: "mod",
+              left: { kind: "elem" },
+              right: { kind: "lit", value: 10 },
+            },
+          },
+        },
+      },
+    },
+  });
+  const description = describeRuleAstForPlayers(ast);
+  assert.equal(
+    description,
+    "A guess wins if at least one guessed number absent from the draw has the same last digit as at least one guessed number present in the draw.",
+  );
+  assert.doesNotMatch(description, /level\(s\)|further out|binder/iu);
 });
 
 test("complete enumerated residue domains are explanatory rather than required AST literals", () => {

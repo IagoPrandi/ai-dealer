@@ -1,0 +1,118 @@
+[
+  {
+    "id": "N1r-verbatim-replay",
+    "kind": "ranking",
+    "expect": ["VALID"],
+    "fixturesFrom": "N1-eligible-then-tightest-span",
+    "referenceFrom": "N1-eligible-then-tightest-span",
+    "text": "Only tickets that match at least two of the drawn numbers are in the running. Among those, the ticket whose six numbers are packed into the smallest range between its lowest and its highest number wins, and tickets level on that range share the prize equally."
+  },
+  {
+    "id": "N2r-verbatim-replay",
+    "kind": "predicate",
+    "expect": ["VALID"],
+    "fixturesFrom": "N2-exactly-one-of-two",
+    "referenceFrom": "N2-exactly-one-of-two",
+    "text": "You win if exactly one of these two statements is true, and you lose if both are true or neither is: your six numbers add up to more than the six drawn numbers add up to, or your highest number was drawn."
+  },
+  {
+    "id": "N4b-same-rule-without-the-word-mirror",
+    "kind": "predicate",
+    "expect": ["VALID"],
+    "fixturesFrom": "N4-mirror-position-match",
+    "referenceFrom": "N4-mirror-position-match",
+    "text": "Compare your six numbers with the drawn numbers in reverse order: your first number against the sixth drawn number, your second against the fifth drawn, your third against the fourth drawn, your fourth against the third drawn, your fifth against the second drawn, and your sixth against the first drawn. You win if at least one of those six comparisons holds the same number on both sides."
+  },
+  {
+    "id": "V1b-grouping-answered",
+    "kind": "predicate",
+    "expect": ["VALID"],
+    "text": "Take your highest number and subtract your lowest number. Then add to that result the count of your numbers that were drawn. You win if that final total is more than forty.",
+    "referenceAst": {
+      "schemaVersion": 3,
+      "result": {
+        "type": "predicate",
+        "predicate": {
+          "kind": "compare",
+          "op": "gt",
+          "left": {
+            "kind": "arith",
+            "op": "add",
+            "left": {
+              "kind": "arith",
+              "op": "sub",
+              "left": { "kind": "reduce", "op": "max", "of": { "kind": "source", "source": "guess" } },
+              "right": { "kind": "reduce", "op": "min", "of": { "kind": "source", "source": "guess" } }
+            },
+            "right": {
+              "kind": "reduce",
+              "op": "count",
+              "of": {
+                "kind": "intersection",
+                "left": { "kind": "source", "source": "guess" },
+                "right": { "kind": "source", "source": "draw" }
+              }
+            }
+          },
+          "right": { "kind": "lit", "value": 40 }
+        }
+      }
+    },
+    "fixtures": [
+      { "note": "span 44 with no matches clears forty", "guess": [1, 45, 2, 3, 4, 5], "draw": [10, 20, 30, 40, 50, 60], "outcome": "WIN" },
+      { "note": "boundary: a total of exactly forty is not more than forty", "guess": [1, 41, 2, 3, 4, 5], "draw": [10, 20, 30, 40, 50, 60], "outcome": "LOSE" },
+      { "note": "boundary: a total of forty-one clears it", "guess": [1, 42, 2, 3, 4, 5], "draw": [10, 20, 30, 40, 50, 60], "outcome": "WIN" },
+      { "note": "discriminator: the match count is ADDED, not subtracted with the lowest - span 39 plus 4 matches wins, the other grouping gives 35 and loses", "guess": [1, 39, 10, 20, 30, 40], "draw": [10, 20, 30, 40, 50, 60], "outcome": "WIN" },
+      { "note": "entry order is irrelevant", "guess": [40, 1, 30, 20, 39, 10], "draw": [10, 20, 30, 40, 50, 60], "outcome": "WIN" },
+      { "note": "draw sensitivity: the same guess loses once none of its numbers are drawn", "guess": [1, 39, 10, 20, 30, 40], "draw": [2, 3, 4, 5, 6, 7], "outcome": "LOSE" },
+      { "note": "a very wide ticket clears it on span alone", "guess": [1, 100, 2, 3, 4, 5], "draw": [10, 20, 30, 40, 50, 60], "outcome": "WIN" },
+      { "note": "boundary: span 36 plus four matches is exactly forty and loses", "guess": [10, 20, 30, 40, 44, 8], "draw": [10, 20, 30, 40, 50, 60], "outcome": "LOSE" }
+    ]
+  },
+  {
+    "id": "V2b-clarification-answered",
+    "kind": "predicate",
+    "expect": ["VALID"],
+    "text": "You win if at least three of your six numbers are strictly greater than the median of the official draw, where that median is the average of the third and fourth lowest drawn numbers.",
+    "referenceAst": {
+      "schemaVersion": 3,
+      "result": {
+        "type": "predicate",
+        "predicate": {
+          "kind": "compare",
+          "op": "gte",
+          "left": {
+            "kind": "reduce",
+            "op": "count",
+            "of": {
+              "kind": "filter",
+              "of": { "kind": "source", "source": "guess" },
+              "where": {
+                "kind": "compare",
+                "op": "gt",
+                "left": { "kind": "arith", "op": "mul", "left": { "kind": "elem" }, "right": { "kind": "lit", "value": 2 } },
+                "right": {
+                  "kind": "arith",
+                  "op": "add",
+                  "left": { "kind": "at", "index": 2, "of": { "kind": "sort", "order": "asc", "of": { "kind": "source", "source": "draw" } } },
+                  "right": { "kind": "at", "index": 3, "of": { "kind": "sort", "order": "asc", "of": { "kind": "source", "source": "draw" } } }
+                }
+              }
+            }
+          },
+          "right": { "kind": "lit", "value": 3 }
+        }
+      }
+    },
+    "fixtures": [
+      { "note": "exactly three numbers above the median of 35", "guess": [36, 37, 38, 1, 2, 3], "draw": [10, 20, 30, 40, 50, 60], "outcome": "WIN" },
+      { "note": "boundary: only two above the median", "guess": [36, 37, 1, 2, 3, 4], "draw": [10, 20, 30, 40, 50, 60], "outcome": "LOSE" },
+      { "note": "boundary: a number equal to the median of 35 is not strictly greater", "guess": [35, 36, 37, 1, 2, 3], "draw": [10, 20, 34, 36, 50, 60], "outcome": "LOSE" },
+      { "note": "at least three, not exactly three: all six above still wins", "guess": [36, 37, 38, 39, 40, 41], "draw": [10, 20, 30, 40, 50, 60], "outcome": "WIN" },
+      { "note": "entry order is irrelevant", "guess": [3, 38, 2, 37, 1, 36], "draw": [10, 20, 30, 40, 50, 60], "outcome": "WIN" },
+      { "note": "discriminator: the MEDIAN, not the mean - the draw's mean is about 19 and its median 3.5", "guess": [4, 5, 6, 7, 8, 9], "draw": [1, 2, 3, 4, 5, 100], "outcome": "WIN" },
+      { "note": "draw sensitivity: the same guess loses against a draw whose median is 45", "guess": [36, 37, 38, 1, 2, 3], "draw": [10, 20, 40, 50, 70, 80], "outcome": "LOSE" },
+      { "note": "boundary: three above a median of 35 taken from a different draw shape", "guess": [36, 37, 99, 1, 2, 3], "draw": [1, 2, 34, 36, 90, 100], "outcome": "WIN" }
+    ]
+  }
+]

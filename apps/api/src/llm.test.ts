@@ -1894,6 +1894,49 @@ test("OpenRouter routing and reasoning never travel in the same request", async 
   assert.equal(bodies.some((body) => "keep_alive" in body), false);
 });
 
+test("the free router never asks a backend to disable reasoning", async () => {
+  // `openrouter/free` is a router, not a model: it picks a free backend per
+  // request and the request cannot know which. Measured 2026-09-16, 5 identical
+  // interpret calls were served by z-ai/glm-5.2:free, nex-agi/nex-n2.5-pro:free
+  // and dots-studio/dots-3-note-preview:free — and 2 of the 5 returned HTTP 400
+  // "Reasoning is mandatory for this endpoint and cannot be disabled". A model
+  // name whose backend is unknown gets the same floor gpt-oss gets.
+  const bodies = captureRequestBody();
+  const freeRouter = { ...OPENROUTER_CONFIG, model: "openrouter/free" };
+  await translateRuleToEnglish("Ganha com 3 acertos.", freeRouter);
+  assert.deepEqual(bodies[0]?.reasoning, { effort: "low" });
+
+  await answerDealerQuestion(
+    "<tyche_server_context>{}</tyche_server_context>",
+    freeRouter,
+  );
+  assert.deepEqual(bodies[1]?.reasoning, { effort: "low" });
+});
+
+test("a router slug can never attest to the compiler's decoder", () => {
+  // The hostname says OpenRouter enforces the schema, but the slug names no
+  // backend for it to enforce with. Measured against the real 8274-byte
+  // candidate schema: openrouter/free produced 0 of 4 parseable candidates, one
+  // of them HTTP 404 "No endpoints found that can handle the requested
+  // parameters" because `require_parameters` had filtered the free pool to
+  // nothing. Failing closed here is what keeps an unconstrained decode from
+  // being recorded as a schema-enforced artifact.
+  assert.equal(
+    supportsRuleCompilationSchema({
+      ...OPENROUTER_CONFIG,
+      model: "openrouter/free",
+    }),
+    false,
+  );
+  assert.equal(
+    supportsRuleCompilationSchema({
+      ...OPENROUTER_CONFIG,
+      model: "openrouter/auto",
+    }),
+    false,
+  );
+});
+
 test("OpenRouter is accepted as the artifact emitter, unlike Groq", () => {
   // Verified against the real candidate schema: openai/gpt-oss-120b and
   // mistralai/mistral-small-24b both returned schema-valid ASTs through

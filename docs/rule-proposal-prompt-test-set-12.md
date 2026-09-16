@@ -424,3 +424,116 @@ the set-12 references remain **30/30** and **38/38**. The rebuilt offline contro
 now routes both V1 and V2 to clarification and emits no artifact for any novel
 objective prompt. No live provider corpus was rerun, so the addendum does not
 claim a new stochastic compile rate or latency.
+
+## Live verification of the repairs (2026-09-11, `6a14b83`)
+
+The repair addendum above deliberately made no live claim. This section supplies
+it: the **same corpus, same runner, same providers**, replayed end to end on the
+repaired tree with the rule packages rebuilt and a fresh `apps/api` on
+`127.0.0.1:3099`. Reference ASTs re-verified first (**30/30**, **38/38**), and
+the independent test suites re-run here: compiler **142/142**, API **259/259**.
+
+### Round 1, before and after
+
+| ID  | on `2e41d19` | on `6a14b83` |
+| --- | --- | --- |
+| N1 | refused, 239 s, **9 correct ASTs burned** | **VALID 8/8**, 0 discarded, guardian grounded, 144 s |
+| N2 | **VALID, WRONG 5/6** (positional `pairs_map`) | **VALID 6/6**, the nested nearest-neighbour AST, 0 discarded, 54 s |
+| N3 | refused, 125 s | `decision: VALID` **with** `needsClarification`, AST 7/8 **held, not frozen**, 150 s |
+| N4 | **VALID, WRONG 5/8** (`count(intersection)==6`) | refused on `AGENT_STATEMENT_MISMATCH`, 306 s, **5 of 6 discarded ASTs were 8/8** |
+| V1 | clarify, 3 questions | clarify, 2 questions, 10 s |
+| V2 | **clarification suppressed**, then refused after 268 s | **clarify in 8 s**, one precise question |
+
+### Round 2, before and after
+
+| ID  | on `2e41d19` | on `6a14b83` |
+| --- | --- | --- |
+| N1r | VALID 8/8 | **VALID 8/8**, 0 discarded, 74 s |
+| N2b | **VALID, WRONG 5/6**, correct AST discarded | **VALID 6/6**, 0 discarded, guardian grounded, 44 s |
+| N4b | **VALID, WRONG 5/8**, correct AST discarded | refused, **2 of 3 discarded ASTs were 8/8**, 103 s |
+| V1b | VALID 8/8 | **VALID 8/8**, 41 s |
+| V2b | VALID 8/8 | **VALID 8/8**, 53 s |
+
+### Verdict per defect
+
+| defect | status | evidence |
+| --- | --- | --- |
+| D1 silent corruption | **closed for N2, converted to refusal for N4** | 4 wrong freezes -> **0**. N2/N2b now freeze the reference AST |
+| D2 reviewer veto selects the wrong artifact | **partially closed** | N2b/N4b vetoes gone; N3's wrong veto reproduced (see R2) |
+| D3 guardian signal unused | **closed as designed** | paired guardian + conflict evidence; N2 round 1 was grounded-false, conflict-free, and correct, so the paired rule avoided a false refusal the solo signal would have caused |
+| D4 parenthetical kills its own AST | **closed for values, open for operations** | `(0, 1, 2, or 3)` now yields no required literals; see R1 |
+| D5 `none of your numbers ...` over-claim | **closed** | every probe now `UNSUPPORTED_RULE`/`AMBIGUOUS_RULE`; the legitimate zero-overlap wording still compiles |
+| D6 suppressed clarification | **closed** | V2 asks its question in 8 s instead of refusing after 268 s |
+| D7 refusal offers no exit | **open** | N3 and N4 both return `refinementQuestions: []`, `suggestedRewrites: []` |
+| D8 keyword-level coverage | **closed for these two shapes** | `nearest_each` and `set_equality` block the positional and cardinality substitutes |
+| D9 refusal costs more than success | **open** | N4 306 s refusal against 44-144 s successes |
+
+### Residual defects
+
+#### R1 (SEVERE) - the dealer's chat sentence is screened as a binding contract, and a synonym in it destroys the correct AST
+
+`agentInterpretation` is built as `dealerMessage + "\n" + officialInterpretation`
+([apps/api/src/index.ts:4366](../apps/api/src/index.ts#L4366)), and
+`agent_statement_coverage` requires the AST to credit every operation cue in it.
+A faithful set-equality AST (`forall`/`exists` in both directions) contains
+neither a `distinct` nor a `membership` node, so any gloss that names one kills
+it. N4 failed this way in **both** rounds, with different words:
+
+```text
+round 1 dealer/official prose: "every last digit present in the draw must appear in the guess"
+                               -> required membership -> AGENT_STATEMENT_MISMATCH (5 ASTs, all 8/8)
+round 2 dealer prose:          "the unique last digits in your guess match the unique last digits in the draw"
+                               -> required distinct   -> AGENT_STATEMENT_MISMATCH (2 ASTs, both 8/8)
+```
+
+Reproducible offline in milliseconds against the live AST and the live sentence:
+
+```text
+agent officialInterpretation alone        covered: true
+dealerMessage alone                       covered: false, missing: ["distinct"]
+dealerMessage + officialInterpretation    covered: false, missing: ["distinct"]
+```
+
+This is the D4 class relocated from numeric literals to operations. Eight
+behaviorally exact artifacts were destroyed by it in this verification run, and
+no player wording can prevent it - the sentence that fails the check is written
+by the dealer, not by the player.
+
+#### R2 - a structurally plausible reviewer can still veto a correct AST with a wrong verdict
+
+The new eligibility gate (runtime bounds, harness coverage, non-degenerate
+difficulty, source preservation) disqualifies a reviewer whose reading is
+structurally unfaithful - which is why N2b's positional veto disappeared. It does
+not disqualify a reviewer that is structurally fine and arithmetically wrong.
+N3 reproduced the set-11 D4 witness exactly:
+
+```text
+The independent reviewer and draft disagree for guess [1,2,3,4,5,6] and
+draw [1,2,3,4,5,6]: reviewer=WIN, draft=LOSE
+```
+
+The sorted gaps are all 1 and the two lowest drawn numbers are 1 apart, so
+`spacing > drawn gap` is false and `LOSE` is right. The vetoed candidate scores
+**8/8**; what reached the player instead was a 7/8 artifact that checks only the
+first gap.
+
+#### R3 - the held artifact and the refusal text still leave the player with nothing
+
+N3's response is a new hybrid - `decision: VALID` with `needsClarification: true`
+and a wrong-but-unfrozen AST - which is the right failure direction, but it
+carries no question and no rewrite. N4's refusal says "independent compiler
+attempts produced different executable readings" when all five discarded
+candidates were the same correct reading rejected by one coverage cue.
+
+### What the repairs did achieve
+
+- **Wrong artifacts frozen: 4 -> 0.** Every artifact accepted in this run is
+  behaviorally exact against its fixtures.
+- **Correct compilations of a novel objective rule: 1/7 -> 4/7** (N1, N2, N1r,
+  N2b). N2 and N2b, both frozen wrong before, now freeze the reference AST.
+- **Clarification detection 1/2 -> 2/2**, follow-through held at **2/2**, and
+  V2's path shortened from a 268-second refusal to an 8-second question.
+- **Discarded work fell from 18 candidates (14 exact) to 10 (8 exact)**, and all
+  eight of the surviving losses are the single R1 cue on one rule.
+- **N1 is now stable across both rounds**, where the same text previously
+  produced a refusal and an acceptance on the same build.

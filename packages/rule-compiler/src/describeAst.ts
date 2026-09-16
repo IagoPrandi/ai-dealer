@@ -428,6 +428,50 @@ function describeCrossSourceDistance(node: PredicateNodeV3): string | null {
   return `${outerQuantity} ${sourceName(node.of.source)} is ${relation} ${innerQuantity} ${sourceName(node.where.of.source)}`;
 }
 
+/**
+ * `exists(difference(guess, draw), exists(intersection(guess, draw),
+ * mod(outer, 10) == mod(inner, 10)))` is the canonical "a miss shares its last
+ * digit with a hit" rule. Rendering binder depth as "one level further out"
+ * exposes an implementation detail and makes an exact artifact look different
+ * from the approved rule to both players and the fidelity guardian.
+ */
+function describeMissHitSameLastDigit(node: PredicateNodeV3): string | null {
+  if (
+    node.kind !== "exists" ||
+    node.of.kind !== "difference" ||
+    !isSource(node.of.left, "guess") ||
+    !isSource(node.of.right, "draw") ||
+    node.where.kind !== "exists" ||
+    node.where.of.kind !== "intersection" ||
+    !isSource(node.where.of.left, "guess") ||
+    !isSource(node.where.of.right, "draw") ||
+    node.where.where.kind !== "compare" ||
+    node.where.where.op !== "eq"
+  ) {
+    return null;
+  }
+  const binderLevelOfUnitsDigit = (value: ScalarExprV3): number | null => {
+    if (
+      value.kind !== "arith" ||
+      value.op !== "mod" ||
+      value.left.kind !== "elem" ||
+      value.right.kind !== "lit" ||
+      value.right.value !== 10
+    ) {
+      return null;
+    }
+    return value.left.up ?? 0;
+  };
+  const levels = [
+    binderLevelOfUnitsDigit(node.where.where.left),
+    binderLevelOfUnitsDigit(node.where.where.right),
+  ];
+  if (!levels.includes(0) || !levels.includes(1)) {
+    return null;
+  }
+  return "at least one guessed number absent from the draw has the same last digit as at least one guessed number present in the draw";
+}
+
 function describeSamePositionPredicate(node: PredicateNodeV3): string | null {
   if (
     (node.kind !== "pairs_forall" && node.kind !== "pairs_exists") ||
@@ -509,6 +553,10 @@ function describePairComparisonCountPredicate(
 }
 
 function describePredicateV3(node: PredicateNodeV3): string {
+  const missHitSameLastDigit = describeMissHitSameLastDigit(node);
+  if (missHitSameLastDigit) {
+    return missHitSameLastDigit;
+  }
   const crossSourceDistance = describeCrossSourceDistance(node);
   if (crossSourceDistance) {
     return crossSourceDistance;
@@ -870,6 +918,24 @@ function describeEligibleSumRanking(
   );
 }
 
+function describeEligibleMinimumSpanRanking(
+  result: Extract<RuleResultV3, { type: "ranking" }>,
+): string | null {
+  if (
+    result.direction !== "min" ||
+    !isRangeSpanOfSource(result.score, "guess") ||
+    result.eligibleWhen?.kind !== "compare" ||
+    result.eligibleWhen.op !== "gte" ||
+    !isMatchCount(result.eligibleWhen.left) ||
+    result.eligibleWhen.right.kind !== "lit"
+  ) {
+    return null;
+  }
+  return sentence(
+    `Only guesses with at least ${result.eligibleWhen.right.value} of their six numbers present in the official draw are eligible. Among eligible guesses, the guess with the smallest difference between its highest and lowest number wins. Tied eligible guesses share the prize. If no guess is eligible, there is no winner`,
+  );
+}
+
 /**
  * `scale * matchCount` where the scale provably outruns the distance term, so
  * the subtraction below really is a tiebreak and not a blended score. Returns
@@ -914,6 +980,7 @@ function describeLexicographicRanking(
 ): string | null {
   const { direction, score } = result;
   if (
+    result.eligibleWhen !== undefined ||
     direction !== "max" ||
     score.kind !== "arith" ||
     score.op !== "sub" ||
@@ -937,6 +1004,7 @@ function describeNearestNeighbourMinimaxRanking(
   result: Extract<RuleResultV3, { type: "ranking" }>,
 ): string | null {
   if (
+    result.eligibleWhen !== undefined ||
     result.direction !== "min" ||
     result.score.kind !== "reduce" ||
     result.score.op !== "max" ||
@@ -1003,6 +1071,12 @@ export function describeRuleAstTotal(ast: RuleAst): string {
       if (eligibleSumRanking) {
         return eligibleSumRanking;
       }
+      const eligibleMinimumSpanRanking = describeEligibleMinimumSpanRanking(
+        ast.result,
+      );
+      if (eligibleMinimumSpanRanking) {
+        return eligibleMinimumSpanRanking;
+      }
       const lexicographic = describeLexicographicRanking(ast.result);
       if (lexicographic) {
         return lexicographic;
@@ -1017,6 +1091,20 @@ export function describeRuleAstTotal(ast: RuleAst): string {
         ? describeScalarV3(ast.result.score)
         : describeScalar(ast.result.score);
     const direction = ast.result.direction === "max" ? "highest" : "lowest";
+    const winningCriterion = `the guess with the ${direction} value of ${score} wins`;
+    if (ast.schemaVersion === 3 && ast.result.eligibleWhen) {
+      const eligibility = ast.result.eligibleWhen;
+      const eligibilityDescription =
+        eligibility.kind === "compare" &&
+        eligibility.op === "gte" &&
+        isMatchCount(eligibility.left) &&
+        eligibility.right.kind === "lit"
+          ? `Only guesses containing at least ${eligibility.right.value} drawn numbers are eligible`
+          : `Only guesses satisfying this condition are eligible: ${describePredicateV3(eligibility)}`;
+      return sentence(
+        `${eligibilityDescription}. Among eligible guesses, ${winningCriterion}; tied eligible guesses share the prize. If no guess is eligible, there is no winner`,
+      );
+    }
     return sentence(
       `The guess with the ${direction} value of ${score} wins; tied guesses share the prize`,
     );

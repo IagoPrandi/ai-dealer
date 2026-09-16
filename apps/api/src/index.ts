@@ -41,6 +41,7 @@ import {
   collectRequiredValues,
   externalDependencyGateText,
   hasAmbiguousWording,
+  hasStructuralArithmeticAmbiguity,
   hasExternalDependency,
   hasInvalidConstraint,
   looksLikeOrderedTensRangeRule,
@@ -73,6 +74,7 @@ import {
   type RuleAgentInterpretation,
 } from "./llm.js";
 import {
+  checkClaimGroundedness,
   checkGroundedness,
   detectJailbreak,
   type GuardianConfig,
@@ -337,11 +339,12 @@ export interface RuleReasonExplanation {
 export const RULE_REASON_EXPLANATIONS: readonly RuleReasonExplanation[] = [
   {
     code: "AMBIGUOUS_RULE",
-    whatHappened: "The wording leaves part of the winning condition undefined.",
+    whatHappened:
+      "Your wording leaves a required part of the winning condition undefined.",
     whyItBlocks:
-      "The compiler cannot choose the missing meaning without changing your intent.",
+      "The compiler cannot choose a winning condition on your behalf.",
     whatToChange:
-      "Define the missing threshold, comparison direction, position, digit meaning, boundary, or tie behavior.",
+      "Define the missing detail named in the clarification question.",
   },
   {
     code: "COMPLEXITY_EXCEEDED",
@@ -376,6 +379,15 @@ export const RULE_REASON_EXPLANATIONS: readonly RuleReasonExplanation[] = [
       "Remove wallets, votes, time, history, prizes, other players, and off-chain events.",
   },
   {
+    code: "GUARDIAN_FIDELITY_CONFLICT",
+    whatHappened:
+      "The fidelity check found a possible mismatch between the approved rule and the compiled artifact.",
+    whyItBlocks:
+      "A mismatch could change which guesses win, so this artifact cannot be frozen.",
+    whatToChange:
+      "Retry generation with the same approved interpretation; no missing rule detail was established.",
+  },
+  {
     code: "INTERPRETATION_MISMATCH",
     whatHappened:
       "The compiled artifact did not preserve every stated value or operation.",
@@ -404,7 +416,7 @@ export const RULE_REASON_EXPLANATIONS: readonly RuleReasonExplanation[] = [
     whyItBlocks:
       "The system cannot safely freeze one interpretation while the providers disagree.",
     whatToChange:
-      "Rewrite the rule as one direct comparison with explicit thresholds and order behavior.",
+      "Retry generation with the same approved interpretation; change the wording only if it does not express your intent.",
   },
   {
     code: "PROVIDER_EVIDENCE_UNVERIFIED",
@@ -655,13 +667,38 @@ export function shouldEscalateRulePreflight(
 
 export function shouldGuardianBlockRulePreflight(
   guardianGrounded: boolean | undefined,
-  hasApprovedInterpretation: boolean,
-  hasCompilerConflict = false,
 ) {
-  return (
-    guardianGrounded === false &&
-    (!hasApprovedInterpretation || hasCompilerConflict)
-  );
+  // Approval confirms the player's intended prose, not an AST that contradicts
+  // it. A negative fidelity verdict is evidence against freezing either way.
+  return guardianGrounded === false;
+}
+
+export function resolveRulePreflightDecision(
+  compilerDecision: RuleValidationDecision,
+  guardianBlocked: boolean,
+  triviallyAlwaysTrue: boolean,
+): RuleValidationDecision {
+  return guardianBlocked || triviallyAlwaysTrue ? "INVALID" : compilerDecision;
+}
+
+export function rejectedCompilerAttemptFingerprint(
+  attempt: RuleCompilationAttemptDiagnostic,
+): string | null {
+  if (attempt.candidate === null) return null;
+  // Evidence arrays and prose can vary on every regeneration while the same
+  // executable program fails for the same reasons. Those variations cannot
+  // make another repair attempt useful.
+  return stableStringify({
+    ast: attempt.candidate.ast,
+    // The first attempt can have a reviewer and later arbiter attempts cannot.
+    // These slot-specific reasons do not change the executable failure.
+    reasons: attempt.reasonCodes
+      .filter(
+        (code) =>
+          code !== "REVIEWER_MISMATCH" && code !== "SECOND_OPINION_UNAVAILABLE",
+      )
+      .sort(),
+  });
 }
 
 function buildCompilerRepairFeedback(
@@ -2714,13 +2751,17 @@ export function enforceSourceAmbiguity(
     return interpretation;
   }
   const normalized = sourceText.toLowerCase();
-  const question = /\bsome\b[^.]{0,50}\bpositions?\b/u.test(normalized)
-    ? "How many positions must match the draw exactly?"
-    : /\b(?:near|almost|close)\b/u.test(normalized)
-      ? "What exact match count or numeric distance defines this near match?"
-      : "Which measurable numeric property and threshold should define this condition?";
-  const clarityNote =
-    "The player's wording is subjective or leaves a required threshold undefined.";
+  const structuralArithmetic = hasStructuralArithmeticAmbiguity(sourceText);
+  const question = structuralArithmetic
+    ? "Should the added quantity be outside the subtraction, or subtracted together with the second quantity? Please state the grouping in separate steps."
+    : /\bsome\b[^.]{0,50}\bpositions?\b/u.test(normalized)
+      ? "How many positions must match the draw exactly?"
+      : /\b(?:near|almost|close)\b/u.test(normalized)
+        ? "What exact match count or numeric distance defines this near match?"
+        : "Which measurable numeric property and threshold should define this condition?";
+  const clarityNote = structuralArithmetic
+    ? "The subtraction and addition can be grouped in two ways, producing different winners."
+    : "Your rule uses a subjective term or leaves a measurable part of the condition undefined.";
   return {
     ...interpretation,
     clarificationQuestions: [question],
@@ -3557,13 +3598,9 @@ export function buildRuleRefinementFeedback(
   // one provider answered, or the ones that did produced nothing comparable. The
   // player genuinely cannot act on that, so saying so is accurate here.
   //
-  // The `AMBIGUOUS_RULE` term is what keeps it accurate. The compiler adds that
-  // code whenever the divergence is two real readings of one sentence, and that
-  // is the opposite situation: the wording IS the thing to fix, and the readings
-  // below say exactly how. Without the distinction every ambiguity was reported
-  // as "your wording is clear, no missing rule detail was identified" and its
-  // clarification questions were deleted, so the only person who could resolve
-  // it was told there was nothing to resolve.
+  // AMBIGUOUS_RULE is reserved for source ambiguity established independently
+  // of provider disagreement. Different model outputs alone cannot assign the
+  // fault to the player's wording.
   const compilerConflictWithoutAmbiguity =
     reasonCodes.has("PROVIDER_DISAGREEMENT") &&
     (input.providerDisagreementBlocked ?? true) &&
@@ -3613,7 +3650,7 @@ export function buildRuleRefinementFeedback(
   const readingChoiceQuestion =
     boundaryChoiceQuestion ??
     (readingChoices.length >= 2
-      ? `Your wording compiles to ${readingChoices.length} different rules, and they do not pay the same guesses. Which one did you mean? ${readingChoices
+      ? `The compiler produced ${readingChoices.length} different rules, and they do not pay the same guesses. Which one did you mean? ${readingChoices
           .map(
             (reading, index) =>
               `(${index + 1}) ${reading.trim().replace(/[.]+$/u, "")}`,
@@ -3678,7 +3715,7 @@ export function buildRuleRefinementFeedback(
   const reasonSummary = boundaryChoiceQuestion
     ? "The rule is clear except for how the boundary value 100 is interpreted, and the compiler found a concrete guess/draw pair where that choice changes the winner."
     : readingChoiceQuestion
-      ? `This wording has ${readingChoices.length} different executable readings, so which guesses win is not decided yet. Only you can say which one you meant.`
+      ? `The compiler produced ${readingChoices.length} different executable readings, so which guesses win is not decided yet. Please choose the reading you intended.`
       : compilerConflictWithoutAmbiguity || compilerConflictWithoutUsableChoices
         ? `I understood this as: ${understoodInterpretation}. Your wording is clear, but independent compiler attempts produced different executable readings. This is a compiler conflict, not a missing answer from you.`
         : providerArtifactFault
@@ -4405,8 +4442,8 @@ async function runRulePreflightPipeline(
     );
     const seenRejectedCandidates = new Set(
       rejectedAttempts
-        .filter((attempt) => attempt.candidate !== null)
-        .map((attempt) => JSON.stringify(attempt.candidate)),
+        .map(rejectedCompilerAttemptFingerprint)
+        .filter((fingerprint): fingerprint is string => fingerprint !== null),
     );
     let repairFeedback = buildCompilerRepairFeedback(validation);
     const MAX_VALIDATION_REPAIRS = 2;
@@ -4437,8 +4474,8 @@ async function runRulePreflightPipeline(
         (attempt) => attempt.decision === "INVALID",
       );
       const freshCandidateKeys = repairedRejectedAttempts
-        .filter((attempt) => attempt.candidate !== null)
-        .map((attempt) => JSON.stringify(attempt.candidate));
+        .map(rejectedCompilerAttemptFingerprint)
+        .filter((fingerprint): fingerprint is string => fingerprint !== null);
       const producedNewCandidate = freshCandidateKeys.some(
         (candidate) => !seenRejectedCandidates.has(candidate),
       );
@@ -4501,7 +4538,7 @@ async function runRulePreflightPipeline(
         promiseIsKept =
           artifactStatement === undefined
             ? true
-            : await checkGroundedness(
+            : await checkClaimGroundedness(
                 artifactStatement,
                 interpretation.officialInterpretation,
                 guardianConfig,
@@ -4629,38 +4666,10 @@ async function runRulePreflightPipeline(
   const baseOfficialInterpretation =
     playerFacingStatements.officialInterpretation;
   const guardianGrounded = pass.grounded;
-  // Approval resolves player intent; it does not resolve contradictory machine
-  // evidence. A guardian rejection remains advisory by itself, but becomes a
-  // fail-closed veto when the compiler also recorded disagreement or a semantic
-  // mismatch. Set 12 showed that this paired signal identified every silently
-  // wrong freeze while leaving grounded, internally consistent artifacts alone.
-  const hasCompilerConflict =
-    validation.log.reasonCodes.includes("PROVIDER_DISAGREEMENT") ||
-    validation.log.attemptDiagnostics.some((attempt) =>
-      attempt.reasonCodes.some(
-        (reason) =>
-          reason === "REVIEWER_MISMATCH" ||
-          reason === "AGENT_STATEMENT_MISMATCH" ||
-          reason === "INTERPRETATION_MISMATCH",
-      ),
-    );
-  const guardianBlocked = shouldGuardianBlockRulePreflight(
-    guardianGrounded,
-    approvedInterpretation !== undefined,
-    hasCompilerConflict,
-  );
-  if (
-    guardianGrounded === false &&
-    approvedInterpretation &&
-    !guardianBlocked
-  ) {
-    guardianNote = [
-      guardianNote,
-      "The advisory fidelity model disagreed, but the approved interpretation and deterministic artifact checks passed.",
-    ]
-      .filter(Boolean)
-      .join(" ");
-  }
+  // Approval resolves player intent; it does not validate the generated AST.
+  // A negative fidelity verdict blocks freezing even when the compiler's final
+  // attempt contains no conflict (set-13 N2r froze a wrong OR under that gap).
+  const guardianBlocked = shouldGuardianBlockRulePreflight(guardianGrounded);
   const groundednessFailure = guardianBlocked
     ? buildGroundednessFailureFeedback({
         promiseIsKept: pass.promiseIsKept,
@@ -4688,10 +4697,11 @@ async function runRulePreflightPipeline(
     // A translation or model normalization must never manufacture consent.
     sourceText: sanitizedText,
   });
-  const decision: RuleValidationDecision = semanticReview.impact
-    .triviallyAlwaysTrue
-    ? "INVALID"
-    : validation.decision;
+  const decision = resolveRulePreflightDecision(
+    validation.decision,
+    guardianBlocked,
+    semanticReview.impact.triviallyAlwaysTrue,
+  );
 
   // Re-proposal gate: block a valid rule whose canonical meaning already held a
   // mandate (was elected active in a past turn). A semantically invalid rule is
@@ -4719,6 +4729,7 @@ async function runRulePreflightPipeline(
       })()
     : null;
   const reasonCodes = [...validation.log.reasonCodes];
+  if (guardianBlocked) reasonCodes.push("GUARDIAN_FIDELITY_CONFLICT");
   const retryReasonCodes =
     reasonCodes.includes("AMBIGUOUS_RULE") &&
     validation.log.providerDisagreementReadings.filter(isPreflightViableRewrite)
@@ -11067,6 +11078,7 @@ function isGuardrailReason(reason: string) {
     "DIFFICULTY_ALWAYS_TRUE",
     "DIFFICULTY_IMPOSSIBLE",
     "EXTERNAL_DEPENDENCY",
+    "GUARDIAN_FIDELITY_CONFLICT",
     "INTERPRETATION_MISMATCH",
     "PROVIDER_EVIDENCE_UNVERIFIED",
     "PROVIDER_SPAN_COVERAGE_INCOMPLETE",

@@ -55,10 +55,12 @@ export type RuleOperation =
   | "all_draw"
   | "all_guess"
   | "comparison_count"
+  | "comparison_exists"
   | "conditional"
   | "digit"
   | "distance"
   | "distinct"
+  | "exclusive_disjunction"
   | "exists_draw"
   | "exists_guess"
   | "maximum"
@@ -69,6 +71,8 @@ export type RuleOperation =
   | "parity"
   | "position"
   | "product"
+  | "ranking"
+  | "scalar_add"
   | "set_equality"
   | "sort"
   | "sum";
@@ -307,6 +311,13 @@ function isRemainderScopedRange(prepared: string, index: number) {
   return REMAINDER_SCOPE.test(prepared.slice(clauseStart + 1, index));
 }
 
+/** A range over positions or a bound index is not a range of ticket values. */
+function isPositionIndexRange(prepared: string, index: number) {
+  return /\b(?:positions?|indices|indexes|slots?|index|[ij])\s*(?:numbered|indexed|running)?\s*$/u.test(
+    prepared.slice(Math.max(0, index - 36), index),
+  );
+}
+
 /**
  * Does `[low, high]` cover exactly what is left of the domain once `pinned` is
  * removed? Only a gapless block from 1 counts: with 2 and 4 pinned, "the others
@@ -339,6 +350,17 @@ export function collectRequiredValues(text: string): number[] {
 
   for (const match of prepared.matchAll(BRACED_SET)) {
     const inner = match[1] ?? "";
+    // `guess[1]` and `draw[6]` select positions. The bracketed numeral is an
+    // index, not a value that must occur in the ticket or AST. An adjacent
+    // identifier makes this unambiguous; free-standing `[1, 2, 3]` remains a
+    // literal value set.
+    if (
+      match[0].startsWith("[") &&
+      match.index !== undefined &&
+      /[a-z0-9_]$/u.test(prepared.slice(0, match.index))
+    ) {
+      continue;
+    }
     if (
       match.index === undefined ||
       !isCompleteResidueDomainEnumeration(prepared, match.index, inner)
@@ -373,6 +395,12 @@ export function collectRequiredValues(text: string): number[] {
   const pinned = new Set(required);
   for (const match of prepared.matchAll(NUMERIC_RANGE)) {
     const bounds = readDigits(match[0]);
+    if (
+      match.index !== undefined &&
+      isPositionIndexRange(prepared, match.index)
+    ) {
+      continue;
+    }
     if (
       match.index !== undefined &&
       isRemainderScopedRange(prepared, match.index) &&
@@ -445,6 +473,13 @@ export function collectAstValues(ast: RuleAst): Set<number> {
 // an operation the prose does not name, never the reverse. "even if" and "even
 // though" are excluded because they are conjunctions, not parity.
 const OPERATION_TEXT_CUES: ReadonlyArray<readonly [RuleOperation, RegExp]> = [
+  // Selection by an extreme across tickets is a ranking, not a per-ticket
+  // qualification predicate. Preserve that result type before a deterministic
+  // match-count shortcut can suppress the provider compilation path.
+  [
+    "ranking",
+    /\bamong\s+(?:(?:all|the|eligible|qualifying|remaining|those)\s+)*(?:tickets|guesses|entries)\b[^.;:]{0,180}\b(?:smallest|largest|lowest|highest|minimum|maximum|minimal|maximal|fewest|most)\s+(?:(?:numeric|total|absolute)\s+)?(?:range|span|score|sum|total|count|distance|difference|matches|hits)\b|\b(?:ticket|guess|entry)\s+with\s+the\s+(?:smallest|largest|lowest|highest|minimum|maximum|minimal|maximal|fewest|most)\s+(?:(?:numeric|total|absolute)\s+)?(?:range|span|score|sum|total|count|distance|difference|matches|hits)\b[^.;:]{0,60}\bwins?\b/u,
+  ],
   [
     "all_draw",
     /\b(?:all|every|each)(?:\s+one)?(?:\s+value)?\s+(?:of\s+)?(?:the\s+)?(?:official\s+)?(?:drawn|draw)\s+(?:numbers?|values?)\b[^.;:]{0,80}\b(?:within|away|distance|satisf(?:y|ies)|for\s+each|every|at\s+least\s+one)\b/u,
@@ -488,7 +523,15 @@ const OPERATION_TEXT_CUES: ReadonlyArray<readonly [RuleOperation, RegExp]> = [
   // underlying positional comparisons.
   [
     "comparison_count",
-    /\b(?:at\s+least|at\s+most|exactly|no\s+fewer\s+than|no\s+more\s+than|pelo\s+menos|no\s+minimo|no\s+maximo|exatamente)\s+(?:[0-6]|zero|one|two|three|four|five|six|um|uma|dois|duas|tres|quatro|cinco|seis)\b[^.;:]{0,80}\bcompar(?:ison|isons|acao|acoes|acoes)\b/u,
+    /\b(?!(?:at\s+least|no\s+fewer\s+than|pelo\s+menos|no\s+minimo)\s+(?:1|one|um|uma)\b)(?:at\s+least|at\s+most|exactly|no\s+fewer\s+than|no\s+more\s+than|pelo\s+menos|no\s+minimo|no\s+maximo|exatamente)\s+(?:[0-6]|zero|one|two|three|four|five|six|um|uma|dois|duas|tres|quatro|cinco|seis)\b[^.;:]{0,80}\bcompar(?:ison|isons|acao|acoes|acoes)\b/u,
+  ],
+  [
+    "comparison_exists",
+    /\b(?:at\s+least|no\s+fewer\s+than|pelo\s+menos|no\s+minimo)\s+(?:1|one|um|uma)\b[^.;:]{0,80}\b(?:compar(?:ison|isons|acao|acoes)\b|(?:mirrored\s+|paired\s+)?pairs?\b[^.;:]{0,60}\b(?:same|equal|match(?:es|ing)?|holds?|igual|iguais|coincid\w*)\b)/u,
+  ],
+  [
+    "exclusive_disjunction",
+    /\b(?:exactly|only)\s+one\s+of\s+(?:(?:these|the)\s+)?(?:two\s+)?(?:statements?|conditions?|clauses?)\s+is\s+true\b|\b(?:one|either)\b[^.;:]{0,120}\b(?:but\s+not\s+both|not\s+both)\b/u,
   ],
   ["mod", /\b(?:modulo|modulus|mod|remainder|resto)\b/u],
   [
@@ -499,6 +542,8 @@ const OPERATION_TEXT_CUES: ReadonlyArray<readonly [RuleOperation, RegExp]> = [
     "parity",
     /\b(?:even(?!\s+(?:if|though|when|so))|odd|numeros?\s+pares?|pares|impar(?:es)?)\b/u,
   ],
+  // "final total" names the result of scalar arithmetic, not a reduction
+  // over ticket values.
   ["sum", /\b(?:sum|sums|total|totals|soma|somam?)\b/u],
   [
     "product",
@@ -571,10 +616,33 @@ function unmark(value: string) {
 }
 
 export function collectRequiredOperations(text: string): RuleOperation[] {
-  const prepared = stripVacuousClauses(stripExampleClauses(normalize(text)));
-  return OPERATION_TEXT_CUES.filter(([, pattern]) =>
-    pattern.test(prepared),
+  const source = stripExampleClauses(normalize(text));
+  // A sum of two already-derived scalar measures is addition, not a reduction
+  // over ticket numbers. Keep the operation requirement, but credit `arith add`
+  // rather than demanding a `reduce sum` node from an equivalent AST.
+  const scalarSum =
+    /\b(?:sum|total)\s+of\s+(?:the\s+)?(?:span|range|count|score|distance|difference|margin|result|match\s+count)\s+(?:and|plus)\s+(?:the\s+)?(?:span|range|count|score|distance|difference|margin|result|match\s+count)\b/gu;
+  const scalarAdd =
+    /\badd\b[^.;:]{0,75}\b(?:span|range|count|score|distance|difference|margin|result|matches|hits)\b|\b(?:span|range|count|score|distance|difference|margin|result|matches|hits)\b[^.;:]{0,50}\b(?:plus|added\s+to)\b[^.;:]{0,50}\b(?:span|range|count|score|distance|difference|margin|result|matches|hits)\b|\badd\s+(?:the\s+)?number\s+of\b|\badd\s+(?:the\s+)?(?:two|2)\s+(?:(?:measured|computed|derived)\s+)?(?:values|results|quantities|measures|numbers)\b/u;
+  const requiresScalarAdd = scalarSum.test(source) || scalarAdd.test(source);
+  let operationText = stripVacuousClauses(
+    source.replace(scalarSum, "combined result"),
+  ).replace(/\b(?:final|resulting)\s+total\b(?!\s+(?:of|for)\b)/gu, "result");
+  // After explicit scalar addition, "the sum" names its result. A separate
+  // "sum of the guessed numbers" still requires an array reduction.
+  if (requiresScalarAdd) {
+    operationText = operationText.replace(
+      /\b(?:the|this|that|their)\s+sum\b(?!\s+of\b)/gu,
+      "combined result",
+    );
+  }
+  const required = OPERATION_TEXT_CUES.filter(([operation, pattern]) =>
+    // Ranking relates the comparison field to its criterion across commas.
+    // Clause cleanup may insert periods there; inspect the complete source.
+    pattern.test(operation === "ranking" ? source : operationText),
   ).map(([operation]) => operation);
+  if (requiresScalarAdd) required.push("scalar_add");
+  return required;
 }
 
 function readLiteral(node: unknown): number | null {
@@ -585,6 +653,81 @@ function readLiteral(node: unknown): number | null {
   return record.kind === "lit" && typeof record.value === "number"
     ? record.value
     : null;
+}
+
+function predicateClauses(node: unknown, kind: string): unknown[] | null {
+  if (!node || typeof node !== "object" || Array.isArray(node)) return null;
+  const record = node as Record<string, unknown>;
+  return record.kind === kind && Array.isArray(record.clauses)
+    ? record.clauses
+    : null;
+}
+
+function positiveAndNegative(node: unknown): [string, string] | null {
+  const clauses = predicateClauses(node, "and");
+  if (clauses?.length !== 2) return null;
+  const negative = clauses.find(
+    (clause) =>
+      clause !== null &&
+      typeof clause === "object" &&
+      !Array.isArray(clause) &&
+      (clause as Record<string, unknown>).kind === "not",
+  ) as Record<string, unknown> | undefined;
+  const positive = clauses.find((clause) => clause !== negative);
+  return negative && positive
+    ? [JSON.stringify(positive), JSON.stringify(negative.clause)]
+    : null;
+}
+
+/** Recognize both canonical boolean encodings of exactly one of A and B. */
+function isExclusiveDisjunction(node: unknown): boolean {
+  const alternatives = predicateClauses(node, "or");
+  if (alternatives?.length === 2) {
+    const left = positiveAndNegative(alternatives[0]);
+    const right = positiveAndNegative(alternatives[1]);
+    return (
+      left !== null &&
+      right !== null &&
+      left[0] === right[1] &&
+      left[1] === right[0] &&
+      left[0] !== left[1]
+    );
+  }
+  const conjunction = predicateClauses(node, "and");
+  if (conjunction?.length !== 2) return false;
+  const positive = conjunction.find(
+    (clause) => predicateClauses(clause, "or")?.length === 2,
+  );
+  const negative = conjunction.find((clause) => {
+    if (!clause || typeof clause !== "object" || Array.isArray(clause))
+      return false;
+    const record = clause as Record<string, unknown>;
+    return (
+      record.kind === "not" &&
+      predicateClauses(record.clause, "and")?.length === 2
+    );
+  }) as Record<string, unknown> | undefined;
+  const either = predicateClauses(positive, "or");
+  const both = predicateClauses(negative?.clause, "and");
+  return (
+    either !== null &&
+    both !== null &&
+    either
+      .map((clause) => JSON.stringify(clause))
+      .sort()
+      .join("|") ===
+      both
+        .map((clause) => JSON.stringify(clause))
+        .sort()
+        .join("|")
+  );
+}
+
+function requiresExclusiveDisjunction(node: unknown): boolean {
+  if (isExclusiveDisjunction(node)) return true;
+  return (predicateClauses(node, "and") ?? []).some(
+    requiresExclusiveDisjunction,
+  );
 }
 
 /**
@@ -847,7 +990,15 @@ export function collectAstOperations(ast: RuleAst): Set<RuleOperation> {
     const kind = typeof record.kind === "string" ? record.kind : "";
     const op = typeof record.op === "string" ? record.op : "";
 
+    if (
+      record.type === "predicate" &&
+      requiresExclusiveDisjunction(record.predicate)
+    ) {
+      operations.add("exclusive_disjunction");
+    }
+
     if (record.type === "ranking") {
+      operations.add("ranking");
       if (record.direction === "max") operations.add("maximum");
       if (record.direction === "min") operations.add("minimum");
     }
@@ -997,6 +1148,54 @@ export function collectAstOperations(ast: RuleAst): Set<RuleOperation> {
     if (op === "sum" || kind.includes("sum") || kind.includes("total")) {
       operations.add("sum");
     }
+    if (kind === "arith" && op === "add") {
+      operations.add("scalar_add");
+    }
+    if (kind === "pairs_exists") {
+      operations.add("comparison_exists");
+    }
+    // An existential over mapped truth flags is the same quantifier as
+    // pairs_exists. Only credit a test selecting the true branch; selecting
+    // zero, using forall, or reading an outer binder means something else.
+    if (kind === "exists") {
+      const mapped = record.of as Record<string, unknown> | undefined;
+      const flag = mapped?.expr as Record<string, unknown> | undefined;
+      const condition = flag?.if as Record<string, unknown> | undefined;
+      const where = record.where as Record<string, unknown> | undefined;
+      const element = where?.left as Record<string, unknown> | undefined;
+      if (
+        (mapped?.kind === "pairs_map" || mapped?.kind === "map") &&
+        flag?.kind === "ite" &&
+        condition?.kind === "compare" &&
+        readLiteral(flag.then) === 1 &&
+        readLiteral(flag.else) === 0 &&
+        where?.kind === "compare" &&
+        element?.kind === "elem" &&
+        (element.up ?? 0) === 0 &&
+        (((where.op === "eq" || where.op === "gte") &&
+          readLiteral(where.right) === 1) ||
+          (where.op === "gt" && readLiteral(where.right) === 0))
+      ) {
+        operations.add("comparison_exists");
+      }
+    }
+    // An explicit OR of bounded comparisons is another encoding of "at
+    // least one comparison holds". A conjunction, or an OR containing an
+    // unrelated predicate, is not that existential comparison.
+    if (
+      kind === "or" &&
+      Array.isArray(record.clauses) &&
+      record.clauses.length >= 2 &&
+      record.clauses.every(
+        (clause) =>
+          clause !== null &&
+          typeof clause === "object" &&
+          !Array.isArray(clause) &&
+          (clause as Record<string, unknown>).kind === "compare",
+      )
+    ) {
+      operations.add("comparison_exists");
+    }
     // The v3 idiom for "N of these comparisons hold" is either a count of a
     // predicate-filtered list or a sum of 1/0 values produced by `ite`. Merely
     // containing comparisons is insufficient: an `and` of the clauses has
@@ -1022,6 +1221,7 @@ export function collectAstOperations(ast: RuleAst): Set<RuleOperation> {
           ).kind === "ite"))
     ) {
       operations.add("comparison_count");
+      operations.add("comparison_exists");
     }
     // Anything that reads a specific index, walks two arrays in lockstep, or
     // carries "ordered"/"position" in its name is positional. `slice`/`reverse`

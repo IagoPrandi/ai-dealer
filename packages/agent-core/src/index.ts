@@ -344,6 +344,13 @@ function supportsJsonSchemaDecoding(
   if (/:cloud$/iu.test(model)) {
     return false;
   }
+  // OpenRouter's router slugs (`openrouter/free`, `openrouter/auto`) select a
+  // different backend per request, so the slug attests to no decoder at all.
+  // `openrouter/free` produced 0 of 4 parseable candidates against the real
+  // schema, one of those a hard 404 from `require_parameters`.
+  if (/^openrouter\//iu.test(model)) {
+    return false;
+  }
   // This shape is the compiler's in-process deterministic provider. It emits
   // only schema-valid values and does not represent an unverified network
   // endpoint, so it remains a valid capability in offline evaluation/tests.

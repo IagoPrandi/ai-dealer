@@ -56,6 +56,8 @@ import {
   handleApiRequest,
   isRuleRemoved,
   isRuleGenerationRetryable,
+  rejectedCompilerAttemptFingerprint,
+  resolveRulePreflightDecision,
   isValidConversationDraft,
   ruleSignature,
   getRuleElimination,
@@ -131,15 +133,69 @@ import type { RuleCompilationAttemptDiagnostic } from "@tyche/rule-compiler";
 import { buildDealerChatPrompt } from "./promptSkills.js";
 
 const wallet = "4bYqf3rJ7m2nQh9sV1xCH8kLpWtD6eZaUg5oNbMcXyTH";
+
+test("compiler disagreements do not blame missing player thresholds", () => {
+  const conflictExplanation = getRuleReasonExplanations([
+    "PROVIDER_DISAGREEMENT",
+  ])[0];
+  assert.ok(conflictExplanation);
+  assert.doesNotMatch(
+    conflictExplanation.whatHappened,
+    /wording leaves|undefined threshold/iu,
+  );
+  const ambiguousExplanation = getRuleReasonExplanations(["AMBIGUOUS_RULE"])[0];
+  assert.match(ambiguousExplanation?.whatHappened ?? "", /wording leaves/iu);
+});
+
+test("an explicitly ordered mirror rule reaches compilation without a canned question", () => {
+  const text =
+    "Compare your first number with the last drawn number in mirror order; win if at least one mirrored pair is equal.";
+  const interpretation = {
+    addedOperationalClauses: [],
+    clarificationQuestions: [],
+    clarityNote: "",
+    dealerMessage: "I will compare the guess with the reversed draw.",
+    needsClarification: false,
+    normalizedText: text,
+    officialInterpretation: text,
+    suggestedRewrites: [],
+    title: "Mirror Pairs",
+  };
+  assert.equal(enforceSourceAmbiguity(text, interpretation), interpretation);
+});
+
+test("un-grouped arithmetic asks a grouping question before compilation", () => {
+  const text =
+    "You win if your highest number minus your lowest plus how many of your numbers were drawn is more than forty.";
+  const interpretation = {
+    addedOperationalClauses: [],
+    clarificationQuestions: [],
+    clarityNote: "",
+    dealerMessage: "Your range plus match count must exceed forty.",
+    needsClarification: false,
+    normalizedText: text,
+    officialInterpretation: text,
+    suggestedRewrites: [],
+    title: "Range and Matches",
+  };
+  const result = enforceSourceAmbiguity(text, interpretation);
+  assert.equal(result.needsClarification, true);
+  assert.match(result.clarificationQuestions[0] ?? "", /grouping/i);
+  assert.doesNotMatch(
+    result.clarificationQuestions[0] ?? "",
+    /numeric property|threshold/i,
+  );
+});
+
 const walletTwo = "5bYqf3rJ7m2nQh9sV1xCH8kLpWtD6eZaUg5oNbMcXyTJ";
 const walletThree = "6bYqf3rJ7m2nQh9sV1xCH8kLpWtD6eZaUg5oNbMcXyTK";
 const base58 = "ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd";
 
 test("every compiler reason code has one actionable player explanation", () => {
-  assert.equal(RULE_REASON_EXPLANATIONS.length, 21);
+  assert.equal(RULE_REASON_EXPLANATIONS.length, 22);
   assert.equal(
     new Set(RULE_REASON_EXPLANATIONS.map((entry) => entry.code)).size,
-    21,
+    22,
   );
   const explanations = getRuleReasonExplanations([
     "INTERPRETATION_MISMATCH",
@@ -1075,10 +1131,64 @@ test("approved compile failures escalate and paired guardian/compiler conflicts 
   assert.equal(shouldEscalateRulePreflight("INVALID", undefined), true);
   assert.equal(shouldEscalateRulePreflight("VALID", false), true);
   assert.equal(shouldEscalateRulePreflight("VALID", true), false);
-  assert.equal(shouldGuardianBlockRulePreflight(false, false), true);
-  assert.equal(shouldGuardianBlockRulePreflight(false, true), false);
-  assert.equal(shouldGuardianBlockRulePreflight(false, true, true), true);
-  assert.equal(shouldGuardianBlockRulePreflight(true, true, true), false);
+  assert.equal(shouldGuardianBlockRulePreflight(false), true);
+  assert.equal(shouldGuardianBlockRulePreflight(true), false);
+  assert.equal(shouldGuardianBlockRulePreflight(undefined), false);
+  assert.equal(resolveRulePreflightDecision("VALID", true, false), "INVALID");
+  assert.equal(resolveRulePreflightDecision("VALID", false, false), "VALID");
+  assert.match(
+    getRuleReasonExplanations(["GUARDIAN_FIDELITY_CONFLICT"])[0]
+      ?.whatToChange ?? "",
+    /retry generation/iu,
+  );
+});
+
+test("repair retries stop on the same AST and fault even if evidence prose changes", () => {
+  const attempt: Parameters<typeof rejectedCompilerAttemptFingerprint>[0] = {
+    candidate: {
+      ast: { schemaVersion: 1, node: { kind: "sum_equals", target: 20 } },
+      consumedSpans: [{ text: "all" }],
+      workedExamples: [{ outcome: "WIN" }],
+    },
+    decision: "INVALID",
+    providerEvidence: null,
+    reasonCodes: ["PROVIDER_EVIDENCE_UNVERIFIED"],
+    schemaError: null,
+    stages: [],
+    status: "rejected",
+  };
+  const sameAst = {
+    ...attempt,
+    candidate: {
+      ...attempt.candidate!,
+      consumedSpans: [{ text: "different wording" }],
+      workedExamples: [{ outcome: "LOSE" }],
+    },
+  };
+  assert.equal(
+    rejectedCompilerAttemptFingerprint(attempt),
+    rejectedCompilerAttemptFingerprint(sameAst),
+  );
+  assert.equal(
+    rejectedCompilerAttemptFingerprint({
+      ...attempt,
+      reasonCodes: ["PROVIDER_EVIDENCE_UNVERIFIED", "REVIEWER_MISMATCH"],
+    }),
+    rejectedCompilerAttemptFingerprint({
+      ...attempt,
+      reasonCodes: [
+        "PROVIDER_EVIDENCE_UNVERIFIED",
+        "SECOND_OPINION_UNAVAILABLE",
+      ],
+    }),
+  );
+  assert.notEqual(
+    rejectedCompilerAttemptFingerprint(attempt),
+    rejectedCompilerAttemptFingerprint({
+      ...attempt,
+      reasonCodes: ["PROVIDER_SPAN_COVERAGE_INCOMPLETE"],
+    }),
+  );
 });
 
 test("a compiler-side refusal exposes retry without presenting a no-op rewrite", () => {
@@ -1555,6 +1665,43 @@ test("a deterministic objective rule cannot inherit an invented model question",
   assert.equal(result.needsClarification, false);
   assert.deepEqual(result.clarificationQuestions, []);
   assert.equal(result.clarityNote, "");
+});
+
+test("unproved range clarification preserves the complete interpretation", () => {
+  const source =
+    "Only tickets with at least two drawn numbers are eligible. Among them, the ticket with the smallest range between its lowest and highest number wins.";
+  const interpretation = {
+    addedOperationalClauses: [],
+    clarificationQuestions: [
+      "Should the range be highest - lowest or an inclusive count, highest - lowest + 1?",
+    ],
+    clarityNote: "The range convention may be unclear.",
+    dealerMessage:
+      "Eligible tickets compete on the spread between their lowest and highest number.",
+    needsClarification: true,
+    normalizedText: source,
+    officialInterpretation: "The winning condition is not complete yet.",
+    suggestedRewrites: ["Use an inclusive count."],
+    title: "Eligible Tightest Range",
+  };
+
+  const result = enforceSourceClarity(source, interpretation);
+  assert.deepEqual(result, interpretation);
+
+  const membershipInterval = enforceSourceClarity(
+    "A guess wins if its secret score is between 10 and 20.",
+    interpretation,
+  );
+  assert.equal(membershipInterval.needsClarification, true);
+
+  const additionalQuestion = enforceSourceClarity(source, {
+    ...interpretation,
+    clarificationQuestions: [
+      ...interpretation.clarificationQuestions,
+      "Must a ticket match at least two or exactly two drawn numbers?",
+    ],
+  });
+  assert.equal(additionalQuestion.needsClarification, true);
 });
 
 test("an unspecified distance remains in clarification even near a deterministic shortcut", () => {

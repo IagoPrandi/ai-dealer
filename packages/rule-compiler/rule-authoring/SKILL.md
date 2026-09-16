@@ -154,6 +154,7 @@ X = `reduce count`; "N smallest/largest" = `sort` + `slice`.
 - "same set of units digits" -> mutual inclusion, because digit projections can contain duplicates: `and(forall(digits(guess,units), exists(digits(draw,units), elem == elem(up:1))), forall(digits(draw,units), exists(digits(guess,units), elem == elem(up:1))))`. Never require intersection count 6.
 - "sums are equal" -> `compare(sum(guess), eq, sum(draw))`.
 - "closest sum without exceeding the draw" / "soma mais próxima sem ultrapassar" -> ranking `max` by `sum(guess)` with `eligibleWhen: compare(sum(guess), lte, sum(draw))`. This is not equality and must not be reduced to a score-only ranking: if every guess exceeds the draw, there is no winner.
+- "only tickets matching at least N drawn numbers compete; among them the smallest range/span wins" -> ranking `min` by `range_span(guess)` with `eligibleWhen: compare(count(intersection(guess,draw)), gte, N)`. Never emit a predicate or put eligibility inside the score. A list's range/span is `max - min`, not an inclusive interval count.
 - "all six match in the same positions" -> `pairs_forall(guess, draw, pair.left == pair.right)`.
 - "all six are in the same tens range in corresponding positions" ->
   `pairs_forall(guess, draw, pair.left div 10 == pair.right div 10)`. This is a

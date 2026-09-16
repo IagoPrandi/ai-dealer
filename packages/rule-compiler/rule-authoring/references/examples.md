@@ -135,6 +135,9 @@ compositional core).
 "closest guessed sum without exceeding the drawn sum" / "soma mais próxima sem ultrapassar" (ranking max with an eligibility boundary) =>
 {"schemaVersion":3,"result":{"type":"ranking","direction":"max","tieBreak":"share_pool","eligibleWhen":{"kind":"compare","op":"lte","left":{"kind":"reduce","op":"sum","of":{"kind":"source","source":"guess"}},"right":{"kind":"reduce","op":"sum","of":{"kind":"source","source":"draw"}}},"score":{"kind":"reduce","op":"sum","of":{"kind":"source","source":"guess"}}}}
 
+"only tickets matching at least two drawn numbers compete; among them the ticket with the smallest range between its lowest and highest number wins" =>
+{"schemaVersion":3,"result":{"type":"ranking","direction":"min","tieBreak":"share_pool","eligibleWhen":{"kind":"compare","op":"gte","left":{"kind":"reduce","op":"count","of":{"kind":"intersection","left":{"kind":"source","source":"guess"},"right":{"kind":"source","source":"draw"}}},"right":{"kind":"lit","value":2}},"score":{"kind":"reduce","op":"range_span","of":{"kind":"source","source":"guess"}}}}
+
 "among tickets summing to no more than the drawn total, most matches wins; ties go to the larger sum" (eligible ranking with an exact two-criterion fold; max ticket sum is 585, so scale is 586) =>
 {"schemaVersion":3,"result":{"type":"ranking","direction":"max","tieBreak":"share_pool","eligibleWhen":{"kind":"compare","op":"lte","left":{"kind":"reduce","op":"sum","of":{"kind":"source","source":"guess"}},"right":{"kind":"reduce","op":"sum","of":{"kind":"source","source":"draw"}}},"score":{"kind":"arith","op":"add","left":{"kind":"arith","op":"mul","left":{"kind":"lit","value":586},"right":{"kind":"reduce","op":"count","of":{"kind":"intersection","left":{"kind":"source","source":"guess"},"right":{"kind":"source","source":"draw"}}}},"right":{"kind":"reduce","op":"sum","of":{"kind":"source","source":"guess"}}}}}
 

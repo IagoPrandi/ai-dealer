@@ -205,6 +205,21 @@ function isGptOssFamily(model: string): boolean {
 }
 
 /**
+ * True for OpenRouter's own router slugs (`openrouter/free`, `openrouter/auto`)
+ * rather than a named model.
+ *
+ * A router picks the backend per request, so nothing about the backend can be
+ * asserted from the slug: consecutive calls with the identical body were served
+ * by `z-ai/glm-5.2:free`, `nex-agi/nex-n2.5-pro:free` and
+ * `dots-studio/dots-3-note-preview:free`. Any request parameter that only some
+ * backends accept therefore fails intermittently instead of never, which is the
+ * harder failure to read in production.
+ */
+function isOpenRouterRouterSlug(model: string): boolean {
+  return /^openrouter\//iu.test(model.trim());
+}
+
+/**
  * Compiler evidence must use decoder-enforced schemas. Ollama cloud models do
  * not implement structured outputs; unknown OpenAI-compatible endpoints are
  * also treated as unsupported until their capability is made explicit.
@@ -214,6 +229,16 @@ export function supportsRuleCompilationSchema(
 ): boolean {
   const model = config.model.trim();
   if (/:cloud$/iu.test(model)) {
+    return false;
+  }
+  // A router slug names no backend, so it can attest to no decoder. Measured on
+  // `openrouter/free` against the real candidate schema (8274 bytes): 3 of 4
+  // calls returned unparseable JSON (one of them 70905 characters long) and the
+  // fourth was HTTP 404 "No endpoints found that can handle the requested
+  // parameters" — `require_parameters` had filtered the free pool down to
+  // nothing. The compile role must fail closed here rather than record a
+  // schema-enforced artifact that no decoder enforced.
+  if (isOpenRouterRouterSlug(model)) {
     return false;
   }
   const hostname = endpointHostname(config.baseUrl);
@@ -372,8 +397,18 @@ function transportControls(
     // refuses it ("Reasoning is mandatory for this endpoint and cannot be
     // disabled", HTTP 400), exactly as it refuses `reasoning_effort: "none"` on
     // Groq, so its floor is the shortest trace it will accept.
+    //
+    // `enabled: false` is also unavailable behind a router slug, for the same
+    // reason it is unavailable on gpt-oss: the free router routes to
+    // reasoning-mandatory backends often enough to matter. Measured on
+    // `openrouter/free`, 2 of 5 identical interpret calls returned HTTP 400
+    // "Reasoning is mandatory for this endpoint and cannot be disabled" while
+    // the other 3 answered normally. The shortest accepted trace is the floor
+    // the whole free pool shares.
     controls.reasoning =
-      trace === "low" || isGptOssFamily(config.model)
+      trace === "low" ||
+      isGptOssFamily(config.model) ||
+      isOpenRouterRouterSlug(config.model)
         ? { effort: "low" }
         : { enabled: false };
     return controls;

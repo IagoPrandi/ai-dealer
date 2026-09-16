@@ -13,6 +13,9 @@ import { fileURLToPath } from "node:url";
 
 export const RULE_COMPILER_SKILL = {
   name: "compile_rule_to_ast",
+  // v18: eligibility-gated range rankings are an explicit pattern. The match
+  // threshold stays in `eligibleWhen`, while `range_span(guess)` is the score;
+  // neither may be flattened into a predicate or an inclusive interval count.
   // v17: nearest-neighbour minimax, mutual equality of duplicate-bearing
   // derived sets, and both orientations of the adjacent-gap shifted zip are
   // explicit patterns. Positional zip and intersection cardinality are called
@@ -35,7 +38,7 @@ export const RULE_COMPILER_SKILL = {
   // side instead of flattening every value into the top-level `and`.
   // v10: ordered literal prefixes with an explicitly unconstrained remainder,
   // on top of v9's full literal sequences, sets, and their negation.
-  version: "tyche_rule_compiler_skill_v17",
+  version: "tyche_rule_compiler_skill_v18",
   allowedInputs: ["guess", "draw"] as const,
 } as const;
 
