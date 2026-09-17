@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { generateKeyPairSync, sign } from "node:crypto";
+import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { createServer } from "node:http";
 import { test } from "node:test";
 import { captureAiRun, recordAiCall, setAiRunSubject } from "./usage.js";
@@ -66,6 +66,7 @@ import {
   listClaimRecords,
   listCreatorRewardRecords,
   listPaidRuleRemovals,
+  listRuleProposals,
   listRuleVotes,
   listRuleEliminationVotes,
   listVoterRewardRecords,
@@ -74,6 +75,7 @@ import {
   matchPlayerProfilePath,
   matchPublicRuleDetailPath,
   recordSettlementTransition,
+  registerPreflightCompiledArtifact,
   listSettlementTransitions,
   removeRule,
   resolveEffectiveTurnDurationCycleSeconds,
@@ -129,7 +131,11 @@ import {
   RULE_MAX_TOKENS,
   TREASURY_FEE_BPS,
 } from "@tyche/constants";
-import type { RuleCompilationAttemptDiagnostic } from "@tyche/rule-compiler";
+import {
+  evaluatePredicate,
+  validateAndPrecompileRule,
+} from "@tyche/rule-compiler";
+import type { RuleAst, RuleCompilationAttemptDiagnostic } from "@tyche/rule-compiler";
 import { buildDealerChatPrompt } from "./promptSkills.js";
 
 const wallet = "4bYqf3rJ7m2nQh9sV1xCH8kLpWtD6eZaUg5oNbMcXyTH";
@@ -5777,4 +5783,258 @@ test("the operator console reports measured AI spend apart from the rule-text pr
 
   delete process.env.LLM_ESTIMATED_COST_PER_1K_TOKENS_USD;
   resetApiStateForTests();
+});
+
+// --- Precompilation freezes the artifact the player paid for -----------------
+// Preflight compiles through the provider pipeline; `validateAndPrecompileRule`
+// is the deterministic parser. The rule below is set 10's N1 ("second largest /
+// second smallest"), recorded there as `UNSUPPORTED_RULE` offline with no
+// artifact, so it is exactly the case where recompiling after payment used to
+// invalidate a rule preflight had already accepted. The first assertion below is
+// that control, so these tests stop proving the point loudly if the parser ever
+// learns this rule.
+const novelRuleText =
+  "A guess wins if its second largest number is greater than the second largest drawn number and its second smallest number is less than the second smallest drawn number.";
+const novelRuleAst = {
+  result: {
+    predicate: {
+      clauses: [
+        {
+          kind: "compare",
+          left: {
+            index: 1,
+            kind: "at",
+            of: {
+              kind: "sort",
+              of: { kind: "source", source: "guess" },
+              order: "desc",
+            },
+          },
+          op: "gt",
+          right: {
+            index: 1,
+            kind: "at",
+            of: {
+              kind: "sort",
+              of: { kind: "source", source: "draw" },
+              order: "desc",
+            },
+          },
+        },
+        {
+          kind: "compare",
+          left: {
+            index: 1,
+            kind: "at",
+            of: {
+              kind: "sort",
+              of: { kind: "source", source: "guess" },
+              order: "asc",
+            },
+          },
+          op: "lt",
+          right: {
+            index: 1,
+            kind: "at",
+            of: {
+              kind: "sort",
+              of: { kind: "source", source: "draw" },
+              order: "asc",
+            },
+          },
+        },
+      ],
+      kind: "and",
+    },
+    type: "predicate",
+  },
+  schemaVersion: 3,
+} as RuleAst;
+
+function hashArtifact(artifact: unknown) {
+  return createHash("sha256")
+    .update(JSON.stringify(artifact), "utf8")
+    .digest("hex");
+}
+
+/**
+ * Stands in for a provider compile: a real artifact and log from the compiler,
+ * carrying an AST the deterministic parser cannot produce.
+ * `registerPreflightCompiledArtifact` is what `runRulePreflightPipeline` calls
+ * on an accepted rule, so this registers the record the live pipeline registers.
+ */
+function registerNovelPreflightArtifact(sanitizedText: string) {
+  const supportedText = "Win if at least 4 of your numbers appear in the draw.";
+  const base = validateAndPrecompileRule({
+    originalText: supportedText,
+    prompt: supportedText,
+    tokenCount: 12,
+  });
+  assert.ok(base.artifact);
+  const artifact = {
+    ...base.artifact,
+    ast: novelRuleAst,
+    normalizedText: sanitizedText,
+    officialInterpretation:
+      "Compare the second largest and second smallest numbers of the guess against the same two positions of the draw; the guess wins only when it is above on the first and below on the second.",
+    originalText: sanitizedText,
+  };
+  const artifactHash = hashArtifact(artifact);
+  registerPreflightCompiledArtifact({
+    artifact,
+    artifactHash,
+    log: { ...base.log, compiledArtifactHash: artifactHash },
+    sanitizedText,
+  });
+  return artifactHash;
+}
+
+function novelProposal(turnId: number, ruleId: number, artifactHash: string) {
+  return {
+    ...proposal(turnId, ruleId),
+    compiledArtifactHash: artifactHash,
+    normalizedText: novelRuleText,
+    sanitizedText: novelRuleText,
+  };
+}
+
+test("precompilation freezes the paid preflight artifact instead of recompiling the rule", () => {
+  resetApiStateForTests();
+  const turnId = 3620;
+  assert.notEqual(
+    validateAndPrecompileRule({
+      originalText: novelRuleText,
+      prompt: novelRuleText,
+      tokenCount: 26,
+    }).decision,
+    "VALID",
+  );
+
+  const artifactHash = registerNovelPreflightArtifact(novelRuleText);
+  saveRuleProposal(novelProposal(turnId, 9, artifactHash));
+  const validation = runRuleValidationForProposal({ ruleId: 9, turnId });
+  const stored = listRuleProposals(turnId)[0];
+
+  assert.equal(validation.decision, "VALID");
+  assert.equal(validation.compiledArtifactHash, artifactHash);
+  assert.deepEqual(validation.compiledArtifact?.ast, novelRuleAst);
+  assert.equal(stored?.state, "eligible");
+  assert.equal(stored?.precompilationStatus, "passed");
+  // The hash the player committed to on-chain still describes the artifact
+  // settlement will execute.
+  assert.equal(
+    hashArtifact(validation.compiledArtifact),
+    stored?.compiledArtifactHash,
+  );
+});
+
+test("the frozen artifact is the behaviour the player saw, not a second reading", () => {
+  resetApiStateForTests();
+  const turnId = 3621;
+  const artifactHash = registerNovelPreflightArtifact(novelRuleText);
+  saveRuleProposal(novelProposal(turnId, 9, artifactHash));
+  const ast = runRuleValidationForProposal({ ruleId: 9, turnId })
+    .compiledArtifact?.ast;
+  assert.ok(ast);
+
+  const draw = [10, 20, 30, 40, 50, 60];
+  assert.equal(
+    evaluatePredicate(ast, { draw, guess: [99, 51, 31, 30, 19, 5] }).result,
+    "WIN",
+  );
+  // Boundary: the second largest ties the drawn 50.
+  assert.equal(
+    evaluatePredicate(ast, { draw, guess: [99, 50, 31, 30, 19, 5] }).result,
+    "LOSE",
+  );
+  // Discriminator: a huge maximum does not help, the SECOND largest is 45.
+  assert.equal(
+    evaluatePredicate(ast, { draw, guess: [99, 45, 44, 43, 19, 5] }).result,
+    "LOSE",
+  );
+});
+
+test("settlement resolves the paid artifact hash for a provider-compiled rule", () => {
+  resetApiStateForTests();
+  const turnId = 3622;
+  const artifactHash = registerNovelPreflightArtifact(novelRuleText);
+  saveRuleProposal(novelProposal(turnId, 9, artifactHash));
+  runRuleValidationForProposal({ ruleId: 9, turnId });
+  saveRuleElection({
+    ...settledElection(turnId, 9),
+    activeRuleArtifactHash: artifactHash,
+  });
+  saveReceiptForWallet(turnId, wallet, [1, 2, 3, 4, 5, 6]);
+  saveFulfilledDraw(turnId);
+
+  const { jobs } = createGuessVerificationJobsForTurn(turnId);
+  assert.equal(jobs[0]?.payload.compiled_artifact_hash, artifactHash);
+  assert.deepEqual(jobs[0]?.activeRuleArtifact?.ast, novelRuleAst);
+});
+
+test("a proposal claiming an artifact the API never compiled is refused, never recompiled", () => {
+  resetApiStateForTests();
+  const turnId = 3623;
+  saveRuleProposal(novelProposal(turnId, 9, "c".repeat(64)));
+
+  assert.throws(
+    () => runRuleValidationForProposal({ ruleId: 9, turnId }),
+    /RULE_ARTIFACT_NOT_REUSABLE/,
+  );
+  // The rule keeps its paid state: an artifact the server cannot produce is a
+  // server fault, and invalidating the rule here would burn the player's fee for
+  // it while a later pass could still resolve the artifact.
+  const stored = listRuleProposals(turnId)[0];
+  assert.equal(stored?.state, "proposed");
+  assert.equal(stored?.precompilationStatus, "pending");
+  assert.equal(getRuleValidation(turnId, 9), null);
+});
+
+test("an artifact hash copied from another rule does not bind to this proposal", () => {
+  resetApiStateForTests();
+  const turnId = 3624;
+  const artifactHash = registerNovelPreflightArtifact(novelRuleText);
+  // Same hash, different rule text: the artifact exists, but it is not this
+  // rule's artifact.
+  saveRuleProposal({
+    ...proposal(turnId, 9),
+    compiledArtifactHash: artifactHash,
+    sanitizedText: "Win if all of your numbers are even.",
+  });
+
+  assert.throws(
+    () => runRuleValidationForProposal({ ruleId: 9, turnId }),
+    /RULE_ARTIFACT_NOT_REUSABLE/,
+  );
+});
+
+test("a proposal with no paid artifact still precompiles through the deterministic parser", () => {
+  resetApiStateForTests();
+  const turnId = 3625;
+  saveRuleProposal(proposal(turnId, 9));
+
+  const validation = runRuleValidationForProposal({ ruleId: 9, turnId });
+
+  assert.equal(validation.decision, "VALID");
+  assert.equal(
+    validation.compiledArtifact?.originalText,
+    proposal(turnId, 9).sanitizedText,
+  );
+});
+
+test("the paid artifact survives a snapshot round trip", () => {
+  resetApiStateForTests();
+  const turnId = 3626;
+  const artifactHash = registerNovelPreflightArtifact(novelRuleText);
+  saveRuleProposal(novelProposal(turnId, 9, artifactHash));
+
+  const snapshot = exportApiStateSnapshot();
+  resetApiStateForTests();
+  restoreApiStateSnapshot(snapshot);
+
+  // The preflight registry is deliberately not snapshotted; the binding made at
+  // save time is what has to survive a restart between payment and precompile.
+  const validation = runRuleValidationForProposal({ ruleId: 9, turnId });
+  assert.equal(validation.compiledArtifactHash, artifactHash);
+  assert.deepEqual(validation.compiledArtifact?.ast, novelRuleAst);
 });

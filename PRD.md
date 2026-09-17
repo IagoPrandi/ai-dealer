@@ -2262,6 +2262,15 @@ interface CompilerConfidenceBreakdown {
 
 Before a rule can become active, it must pass the compiler pipeline. Deduplication is not part of this pipeline; it belongs to preflight before payment.
 
+**Where compilation happens.** Section 6.15 supersedes the step ordering below on
+one point: steps 3-11 run in the free preflight, before payment, because the
+compile gate (6.15, check 4) is what makes a rule payable and the player approves
+the interpretation and inspects the AST before signing. Steps 12-14 are the paid
+precompilation, and step 12 stores **that** artifact — precompilation never
+compiles the rule a second time. Recompiling after payment produces a different
+reading whenever the two compilers disagree, and the on-chain
+`preflight_result_hash` the player signed covers only the first one.
+
 ```text
 Preflight before payment/signature
   Step P1 — Verify current-turn Game Token

@@ -21,20 +21,22 @@ import {
  *
  * A rule submitted through the app is written on-chain as `RuleProposal` in the
  * `Proposed` state with `Precompilation::Pending`. Before it can be an election
- * candidate the deterministic AI Rule Compiler must validate it and the turn
- * authority must record the result on-chain via `precompile_rule`, flipping the
- * rule to `Eligible` + `Precompilation::Passed` (or `Invalidated` + `Failed`).
- * Without this step every turn with real user rules falls to the original-only
- * path (PRD §6.12) because `eligible_rule_pool` is always empty.
+ * candidate the turn authority must record its compiled artifact on-chain via
+ * `precompile_rule`, flipping the rule to `Eligible` + `Precompilation::Passed`
+ * (or `Invalidated` + `Failed`). Without this step every turn with real user
+ * rules falls to the original-only path (PRD §6.12) because
+ * `eligible_rule_pool` is always empty.
  *
  * This loop runs continuously while phase 1 is open (before the on-chain
  * `rule_election_cutoff_bps`), mirroring the turn/settlement loops: env-gated and
- * OFF by default. It reuses the API's deterministic validation endpoint
- * (`/rule-validations/run`, which stores the compiled artifact and projects the
- * read-side `eligible` state) and the same authority-signed `precompile_rule`
- * instruction the devnet seed operator uses — no mocks, no fallbacks. The
- * on-chain artifact hash is the one the API returns for the stored validation,
- * so on-chain state, the frozen election hash, and the stored artifact reconcile.
+ * OFF by default. It calls the API's validation endpoint
+ * (`/rule-validations/run`, which freezes the artifact the rule was compiled to
+ * during preflight, stores it, and projects the read-side `eligible` state) and
+ * the same authority-signed `precompile_rule` instruction the devnet seed
+ * operator uses — no mocks, no fallbacks. The on-chain artifact hash is the one
+ * the API returns for the stored validation, so on-chain state, the frozen
+ * election hash, the artifact the player paid for, and the artifact settlement
+ * executes all reconcile.
  */
 
 const DEFAULT_API_BASE_URL = "http://localhost:3002";
@@ -66,6 +68,8 @@ interface ApiValidationResult {
 export type PrecompileLoopResult =
   | {
       action: "precompiled";
+      /** Rules whose validation call failed; the pass continues past them. */
+      failed: { reason: string; ruleId: number }[];
       precompiled: { decision: string; ruleId: number; signature: string }[];
       turnId: number;
     }
@@ -92,7 +96,7 @@ export interface PrecompileLoopDeps {
   resolveTurn: () => Promise<
     { paused: true } | { paused: false; turn: OpenTurnPhase1 | null }
   >;
-  /** POST /rule-validations/run — deterministic compile + store + project. */
+  /** POST /rule-validations/run — freeze the paid artifact, store, project. */
   runValidation: (
     turnId: number,
     ruleId: number,
@@ -333,13 +337,27 @@ export async function runPrecompileLoopOnce(
 
   const precompiled: { decision: string; ruleId: number; signature: string }[] =
     [];
+  const failed: { reason: string; ruleId: number }[] = [];
   for (const proposal of pending) {
     // Re-check the cutoff before each send: compilation of an earlier rule can
     // push us past the phase-1 boundary mid-pass.
     if (deps.nowSeconds() >= cutoffTimestamp) {
       break;
     }
-    const validation = await deps.runValidation(turnId, proposal.ruleId);
+    let validation;
+    try {
+      validation = await deps.runValidation(turnId, proposal.ruleId);
+    } catch (error) {
+      // One rule the API cannot validate — an artifact it can no longer resolve
+      // — must not stop the turn's other rules from being precompiled. The rule
+      // stays `proposed`/`pending`, so a later pass retries it and it never
+      // enters the election on an artifact nobody paid for.
+      failed.push({
+        reason: error instanceof Error ? error.message : String(error),
+        ruleId: proposal.ruleId,
+      });
+      continue;
+    }
     if (validation.decision !== "VALID" || !validation.compiledArtifactHash) {
       // The API already projected the rule to `invalidated`; there is no valid
       // artifact to commit on-chain, so it is correctly excluded from election.
@@ -358,7 +376,7 @@ export async function runPrecompileLoopOnce(
     });
   }
 
-  return { action: "precompiled", precompiled, turnId };
+  return { action: "precompiled", failed, precompiled, turnId };
 }
 
 export function startPrecompileLoop(config: PrecompileLoopConfig) {
@@ -375,10 +393,15 @@ export function startPrecompileLoop(config: PrecompileLoopConfig) {
     running = true;
     try {
       const result = await runPrecompileLoopOnce(config, deps);
-      if (result.action === "precompiled" && result.precompiled.length > 0) {
+      if (result.action === "precompiled") {
         for (const entry of result.precompiled) {
           console.log(
             `precompile turn=${result.turnId} rule=${entry.ruleId} signature=${entry.signature}`,
+          );
+        }
+        for (const entry of result.failed) {
+          console.error(
+            `precompile turn=${result.turnId} rule=${entry.ruleId} validation failed: ${entry.reason}`,
           );
         }
       }

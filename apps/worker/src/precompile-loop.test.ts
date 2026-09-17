@@ -194,3 +194,35 @@ test("is disabled when the flag is off", async () => {
   assert.equal(result.action, "disabled");
   assert.deepEqual(rec.sent, []);
 });
+
+test("a rule whose artifact the API cannot resolve does not stop the turn's other rules", async () => {
+  const rec = recorder({
+    proposals: [proposal({ ruleId: 7 }), proposal({ ruleId: 8 })],
+    validate: (ruleId) => {
+      if (ruleId === 7) {
+        throw new Error(
+          'POST /rule-validations/run returned HTTP 409: {"error":"RULE_ARTIFACT_NOT_REUSABLE"}',
+        );
+      }
+      return { compiledArtifactHash: HASH_B, decision: "VALID" };
+    },
+  });
+
+  const result = await runPrecompileLoopOnce(config, rec.deps);
+
+  assert.equal(result.action, "precompiled");
+  assert.deepEqual(rec.validated, [7, 8]);
+  // Rule 7 is reported, not swallowed, and never reaches the chain; rule 8 is
+  // precompiled in the same pass rather than waiting for 7 to be repaired.
+  assert.deepEqual(rec.sent, [{ hash: HASH_B, ruleId: 8 }]);
+  if (result.action !== "precompiled") {
+    return;
+  }
+  assert.deepEqual(
+    result.precompiled.map(({ ruleId }) => ruleId),
+    [8],
+  );
+  assert.equal(result.failed.length, 1);
+  assert.equal(result.failed[0]?.ruleId, 7);
+  assert.match(result.failed[0]?.reason ?? "", /RULE_ARTIFACT_NOT_REUSABLE/);
+});

@@ -59,7 +59,9 @@ import {
   type RuleOperation,
   type RuleSourceSpan,
   type RuleValidationDecision,
+  type RuleValidationLog,
   type RuleValidationReasonCode,
+  type RuleValidationResult,
   type RuleValidationTestResult,
 } from "@tyche/rule-compiler";
 import pg from "pg";
@@ -1202,6 +1204,31 @@ export interface RuleValidationSummary {
   validationLogId: string;
 }
 
+/**
+ * A compiled artifact exactly as the preflight pipeline produced it, kept so
+ * precompilation can freeze THE artifact the player approved and paid for
+ * instead of compiling the same rule a second time with a different engine.
+ *
+ * Preflight compiles through the provider pipeline (PRD §6.15, check 4) while
+ * `validateAndPrecompileRule` is the deterministic parser. For every rule the
+ * parser cannot express — which is most novel compositions — recompiling after
+ * payment either invalidated a rule preflight had accepted or froze a DIFFERENT
+ * reading of it, and the on-chain `preflight_result_hash` the player signed
+ * covered neither. Settlement executes this artifact, so it must be the one the
+ * player saw.
+ *
+ * Server-authored: only `runRulePreflightPipeline` writes one, so a client can
+ * never hand the API an AST of its own. Reuse additionally requires the
+ * proposal's sanitized text to be the text this artifact was compiled from, so
+ * a hash copied from another player's rule does not resolve.
+ */
+export interface RuleCompiledArtifactRecord {
+  artifact: RuleCompiledArtifact;
+  artifactHash: string;
+  log: RuleValidationLog;
+  sanitizedText: string;
+}
+
 export interface RuleValidationRecord extends RuleValidationSummary {
   auditLogHash?: string;
   compiledArtifactHash: string | null;
@@ -1735,6 +1762,17 @@ const ruleElectionProofAuditLogs = new Map<number, string>();
 const settlementTransitions = new Map<string, SettlementTransitionRecord>();
 const settlementTransitionOrder: string[] = [];
 const ruleValidations = new Map<string, RuleValidationRecord>();
+// Artifacts produced by preflight, keyed by their own hash, waiting for the
+// paid proposal that claims one. Bounded because preflight is unauthenticated:
+// a rule is claimed seconds after it compiles, so this only has to outlive the
+// payment, while `ruleProposalArtifacts` below is the durable copy.
+const RULE_COMPILED_ARTIFACT_MAX_TOTAL = 256;
+const ruleCompiledArtifacts = new Map<string, RuleCompiledArtifactRecord>();
+// The artifact bound to a saved proposal (`turnId:ruleId`), resolved from the
+// registry above at save time and snapshotted, so precompilation hours later —
+// or after a restart — still freezes the artifact that was paid for. Never
+// served: it carries the provider path and the full test corpus.
+const ruleProposalArtifacts = new Map<string, RuleCompiledArtifactRecord>();
 const verificationJobs = new Map<string, GuessVerificationJobRecord>();
 const verificationResults = new Map<string, GuessVerificationResultRecord>();
 const winnerRecords = new Map<string, WinnerRecord>();
@@ -1808,6 +1846,13 @@ export interface ApiStateSnapshotV1 {
   ruleEliminations: [number, RuleEliminationRecord][];
   rulePreflightJobs: [string, RulePreflightJobRecord][];
   ruleProposals: [string, RuleProposalRecord][];
+  /**
+   * The preflight-compiled artifact bound to each saved proposal. Optional so a
+   * snapshot written before rule precompilation reused the artifact still
+   * restores; those proposals precompile through the deterministic parser, as
+   * they did when they were written.
+   */
+  ruleProposalArtifacts?: [string, RuleCompiledArtifactRecord][];
   ruleValidations: [string, RuleValidationRecord][];
   ruleVotes: [string, RuleVoteRecord][];
   settlementTransitionOrder: string[];
@@ -1877,6 +1922,7 @@ export function exportApiStateSnapshot(): ApiStateSnapshotV1 {
         },
       ]),
     ruleProposals: [...ruleProposals.entries()],
+    ruleProposalArtifacts: [...ruleProposalArtifacts.entries()],
     ruleValidations: [...ruleValidations.entries()],
     ruleVotes: [...ruleVotes.entries()],
     settlementTransitionOrder: [...settlementTransitionOrder],
@@ -1926,6 +1972,7 @@ export function restoreApiStateSnapshot(snapshot: ApiStateSnapshotV1) {
   replaceMap(rulePreflightJobs, snapshot.rulePreflightJobs ?? []);
   importAiUsageRunSummaries(snapshot.aiUsageRunSummaries ?? []);
   replaceMap(ruleProposals, snapshot.ruleProposals);
+  replaceMap(ruleProposalArtifacts, snapshot.ruleProposalArtifacts ?? []);
   replaceMap(ruleValidations, snapshot.ruleValidations);
   replaceMap(ruleVotes, snapshot.ruleVotes);
   replaceMap(settlementTransitions, snapshot.settlementTransitions);
@@ -2661,6 +2708,8 @@ export function resetApiStateForTests() {
   settlementTransitions.clear();
   settlementTransitionOrder.length = 0;
   ruleValidations.clear();
+  ruleCompiledArtifacts.clear();
+  ruleProposalArtifacts.clear();
   verificationJobs.clear();
   verificationResults.clear();
   winnerRecords.clear();
@@ -4827,6 +4876,20 @@ async function runRulePreflightPipeline(
         })
       : null);
 
+  // Keep the artifact this run compiled so the paid proposal can freeze it
+  // instead of being recompiled by the deterministic parser after payment. Only
+  // an accepted artifact is kept: `decision` is the acceptance signal the player
+  // pays against, and `resolveRulePreflightDecision` can only downgrade the
+  // compiler's verdict, so a VALID decision always carries an artifact.
+  if (decision === "VALID" && validation.artifact && validation.artifactHash) {
+    registerPreflightCompiledArtifact({
+      artifact: validation.artifact,
+      artifactHash: validation.artifactHash,
+      log: validation.log,
+      sanitizedText,
+    });
+  }
+
   const preflightResult = JSON.stringify({
     // Hashed alongside everything else the player is shown: the commitment must
     // cover the artifact they can now inspect, not only the prose about it.
@@ -6396,6 +6459,9 @@ export function saveRuleProposal(proposal: RuleProposalRecord) {
     getRuleProposalKey(proposal.turnId, proposal.ruleId),
     normalizedProposal,
   );
+  // Claim the preflight artifact now, while the registry that holds it is still
+  // warm: precompilation can run hours later, and across a restart.
+  bindProposalCompiledArtifact(normalizedProposal);
   return normalizedProposal;
 }
 
@@ -8740,6 +8806,89 @@ function getRuleWorkedExamples(turnId: number, ruleId: number) {
   return validation?.compiledArtifact?.workedExamples ?? [];
 }
 
+/**
+ * Keeps an accepted preflight artifact until the paid proposal claims it. The
+ * key is the artifact's own hash, so re-registering an identical artifact is a
+ * no-op apart from refreshing its position in the eviction order.
+ *
+ * Exported for the precompilation tests, which need an artifact the
+ * deterministic parser cannot produce. No HTTP route reaches it: the preflight
+ * pipeline is the only caller, which is what keeps a client from supplying an
+ * AST of its own.
+ */
+export function registerPreflightCompiledArtifact(
+  record: RuleCompiledArtifactRecord,
+) {
+  ruleCompiledArtifacts.delete(record.artifactHash);
+  ruleCompiledArtifacts.set(record.artifactHash, record);
+  while (ruleCompiledArtifacts.size > RULE_COMPILED_ARTIFACT_MAX_TOTAL) {
+    const oldest = ruleCompiledArtifacts.keys().next();
+    if (oldest.done) {
+      break;
+    }
+    ruleCompiledArtifacts.delete(oldest.value);
+  }
+}
+
+/**
+ * Binds the artifact a proposal claims to that proposal, once, at save time —
+ * while the registry is still warm. The claim is only honoured when the API
+ * itself compiled that artifact AND compiled it from this proposal's sanitized
+ * text, so neither an invented hash nor one copied from another player's rule
+ * can attach an artifact to a rule it does not belong to.
+ */
+function bindProposalCompiledArtifact(proposal: RuleProposalRecord) {
+  const key = getRuleProposalKey(proposal.turnId, proposal.ruleId);
+  if (!proposal.compiledArtifactHash) {
+    return;
+  }
+  const existing = ruleProposalArtifacts.get(key);
+  if (existing?.artifactHash === proposal.compiledArtifactHash) {
+    return;
+  }
+  const registered = ruleCompiledArtifacts.get(proposal.compiledArtifactHash);
+  if (
+    !registered ||
+    registered.sanitizedText !== proposal.sanitizedText ||
+    hashJson(registered.artifact) !== proposal.compiledArtifactHash
+  ) {
+    // A proposal is a projection of a transaction that already happened, so it
+    // is still stored. Precompilation is where the missing artifact surfaces,
+    // loudly, rather than being replaced by a second compilation here.
+    ruleProposalArtifacts.delete(key);
+    return;
+  }
+  ruleProposalArtifacts.set(key, registered);
+}
+
+/**
+ * The artifact precompilation must freeze for a proposal, or `null` when the
+ * proposal never carried one (an operator or seeded proposal that was not
+ * produced by a preflight compile), in which case the deterministic parser is
+ * still the compiler of record.
+ *
+ * Throws when the proposal claims an artifact that cannot be resolved: the
+ * player paid for a specific compiled meaning, and silently compiling a
+ * different one — or invalidating the rule — is what this path exists to stop.
+ */
+function getProposalCompiledArtifact(
+  proposal: RuleProposalRecord,
+): RuleCompiledArtifactRecord | null {
+  if (!proposal.compiledArtifactHash) {
+    return null;
+  }
+  const bound = ruleProposalArtifacts.get(
+    getRuleProposalKey(proposal.turnId, proposal.ruleId),
+  );
+  if (!bound || bound.artifactHash !== proposal.compiledArtifactHash) {
+    throw new Error("RULE_ARTIFACT_NOT_REUSABLE");
+  }
+  if (hashJson(bound.artifact) !== proposal.compiledArtifactHash) {
+    throw new Error("RULE_ARTIFACT_HASH_MISMATCH");
+  }
+  return bound;
+}
+
 export function runRuleValidationForProposal(args: {
   model?: string;
   provider?: string;
@@ -8753,18 +8902,27 @@ export function runRuleValidationForProposal(args: {
     throw new Error("RULE_PROPOSAL_NOT_FOUND");
   }
 
-  const request = {
-    prompt: proposal.sanitizedText,
-    ruleId: proposal.ruleId,
-    tokenCount: proposal.tokenCount,
-  };
-  const result = validateAndPrecompileRule({
-    ...request,
-    ...(args.model ? { model: args.model } : {}),
-    officialInterpretation: proposal.officialInterpretation,
-    originalText: proposal.sanitizedText,
-    ...(args.provider ? { provider: args.provider } : {}),
-  });
+  // PRD §7.5 step 13: precompilation freezes the artifact the preflight run
+  // compiled and the player paid against. Recompiling here would produce a
+  // second, unrelated reading whenever the two compilers disagree, and the
+  // deterministic parser rejects most rules the provider pipeline accepts.
+  const frozen = getProposalCompiledArtifact(proposal);
+  const result: RuleValidationResult = frozen
+    ? {
+        artifact: frozen.artifact,
+        artifactHash: frozen.artifactHash,
+        decision: frozen.log.decision,
+        log: frozen.log,
+      }
+    : validateAndPrecompileRule({
+        prompt: proposal.sanitizedText,
+        ruleId: proposal.ruleId,
+        tokenCount: proposal.tokenCount,
+        ...(args.model ? { model: args.model } : {}),
+        officialInterpretation: proposal.officialInterpretation,
+        originalText: proposal.sanitizedText,
+        ...(args.provider ? { provider: args.provider } : {}),
+      });
   const record: RuleValidationRecord = {
     compiledArtifact: result.artifact,
     compiledArtifactHash: result.artifactHash,
@@ -13263,9 +13421,15 @@ export function handleApiRequest(
         } catch (error) {
           const code =
             error instanceof Error ? error.message : "RULE_VALIDATION_FAILED";
-          sendJson(request, response, 404, {
+          // An unresolvable artifact is not a missing proposal: the rule was
+          // paid for and preflight accepted it, so this must read as the server
+          // fault it is instead of being reported as a client mistake.
+          const missingProposal = code === "RULE_PROPOSAL_NOT_FOUND";
+          sendJson(request, response, missingProposal ? 404 : 409, {
             error: code,
-            message: "Rule proposal not found for validation.",
+            message: missingProposal
+              ? "Rule proposal not found for validation."
+              : "The compiled artifact this proposal was paid against is unavailable, so precompilation cannot freeze it.",
           });
         }
       })
