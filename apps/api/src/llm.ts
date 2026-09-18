@@ -9,6 +9,7 @@ import {
   buildDealerInterpretPrompt,
 } from "./promptSkills.js";
 import {
+  digestAiCallInput,
   readProviderUsage,
   recordAiCall,
   type AiUsageOutcome,
@@ -60,11 +61,28 @@ export class RuleAgentError extends Error {
    */
   readonly detail: string | undefined;
 
-  constructor(code: RuleAgentErrorCode, message: string, detail?: string) {
+  /**
+   * The HTTP status that produced this error, when one did. `undefined` for a
+   * timeout, an unreachable endpoint or an unusable body.
+   *
+   * `RULE_AGENT_UNAVAILABLE` covers both a transient outage and an endpoint that
+   * refused the request on its tier, and only the status separates them: a 429
+   * reaching here has already exhausted `RATE_LIMIT_MAX_ATTEMPTS`, so asking the
+   * same endpoint again in the same run cannot succeed.
+   */
+  readonly status: number | undefined;
+
+  constructor(
+    code: RuleAgentErrorCode,
+    message: string,
+    detail?: string,
+    status?: number,
+  ) {
     super(message);
     this.name = "RuleAgentError";
     this.code = code;
     this.detail = detail;
+    this.status = status;
   }
 }
 
@@ -294,8 +312,16 @@ function openRouterUsageAccounting(
  */
 function recordTransportCall(args: {
   config: RuleAgentConfig;
+  /**
+   * The exact messages this request carried, in order, so a repeated call is
+   * provable rather than inferred from its step name. Required: every call site
+   * here builds the messages array itself, and an optional field would let the
+   * next one silently opt out of the redundancy accounting.
+   */
+  inputParts: readonly string[];
   outcome: AiUsageOutcome;
   payload: unknown;
+  /** When the interval being recorded began — the call, or one retried attempt. */
   startedAt: string;
   startedAtMs: number;
   step: AiUsageStep;
@@ -305,6 +331,7 @@ function recordTransportCall(args: {
     cachedPromptTokens: usage?.cachedPromptTokens ?? null,
     completionTokens: usage?.completionTokens ?? null,
     durationMs: performance.now() - args.startedAtMs,
+    inputDigest: digestAiCallInput(args.inputParts),
     model: args.config.model,
     outcome: args.outcome,
     promptTokens: usage?.promptTokens ?? null,
@@ -438,11 +465,15 @@ export function resolveEscalationModel(
   return firstConfigured(env.LLM_ESCALATION_MODEL);
 }
 
-// Whether to translate the rule to English before interpret/compile. ON by
-// default (it removes cross-language ambiguity for small models). A capable
-// multilingual model (gemma4:latest and stronger) reads Portuguese directly and
-// the rule-authoring skill already carries a Portuguese trigger glossary, so it
-// can be turned OFF to save one LLM call without losing consistency.
+// Whether to translate the rule to English EAGERLY, before interpret/compile.
+// ON by default (it removes cross-language ambiguity for small models).
+//
+// Read the note in `runRulePreflightPipeline` before trusting `false` to skip
+// the call: it only does so when the guardian is DISABLED. With the guardian on,
+// the jailbreak screen buys its own English reading of a non-English rule and
+// that reading becomes the compiled text, so the call happens and the
+// translation compiles either way. This is deliberate — the guard misreads the
+// player's own language — and the flag then only chooses when it happens.
 export function resolveTranslateToEnglish(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
@@ -757,9 +788,21 @@ async function fetchChatCompletionWithRetry(
   config: RuleAgentConfig,
   role: string,
   signal?: AbortSignal,
-  onRateLimited?: () => void,
+  /**
+   * Called once per rate-limited attempt, with THAT attempt's own start. The
+   * caller records one usage row per attempt, and without this it measured every
+   * row from the first attempt's start: the rows of a four-attempt 429 storm
+   * then carried cumulative durations (4 s, 13 s, 18 s, 23 s) that sum to far
+   * more wall clock than the call actually spent.
+   */
+  onRateLimited?: (attempt: {
+    startedAt: string;
+    startedAtMs: number;
+  }) => void,
 ): Promise<Response> {
   for (let attempt = 1; ; attempt += 1) {
+    const attemptStartedAt = new Date().toISOString();
+    const attemptStartedAtMs = performance.now();
     const response = await fetch(url, {
       ...init,
       signal: combineAbortSignals(config.timeoutMs, signal),
@@ -775,7 +818,10 @@ async function fetchChatCompletionWithRetry(
     ) {
       return response;
     }
-    onRateLimited?.();
+    onRateLimited?.({
+      startedAt: attemptStartedAt,
+      startedAtMs: attemptStartedAtMs,
+    });
     const delayMs = calculateRateLimitBackoffMs(
       attempt,
       response.headers.get("retry-after"),
@@ -1100,6 +1146,41 @@ export function isSchemaRejection(detail: string): boolean {
   );
 }
 
+/**
+ * True when asking this endpoint again, inside the same rule run, cannot change
+ * the answer.
+ *
+ * The provider loop walks every routing slot once per candidate and the repair
+ * loop walks it again per repair, so a permanently unusable slot is paid for
+ * repeatedly. Measured on the three-rule corpus: the tertiary slot spent 45.9 s
+ * across eight 429s and returned zero tokens.
+ *
+ * Only failures that are a property of the ENDPOINT qualify:
+ *   - a 429 reaching the caller has already used every attempt in
+ *     `fetchChatCompletionWithRetry`, or was classified non-transient there;
+ *   - a 413 is the tier refusing this prompt size, which the next candidate will
+ *     not shrink;
+ *   - a schema rejection is a property of the backend, not of the rule.
+ *
+ * A timeout, a 5xx and an unusable body are deliberately excluded: those can
+ * differ on the next call, and treating one of them as permanent would turn a
+ * single bad response into a silently skipped provider.
+ */
+export function isExhaustedProviderError(
+  error: unknown,
+): error is RuleAgentError {
+  if (!(error instanceof RuleAgentError)) {
+    return false;
+  }
+  if (error.code === "RULE_AGENT_SCHEMA_UNSUPPORTED") {
+    return true;
+  }
+  return (
+    error.code === "RULE_AGENT_UNAVAILABLE" &&
+    (error.status === 429 || error.status === 413)
+  );
+}
+
 async function describeChatHttpFailure(
   response: Response,
   config: RuleAgentConfig,
@@ -1115,6 +1196,7 @@ async function describeChatHttpFailure(
         ? `The provider refused the request: this prompt is larger than the tier's per-minute input-token allowance for ${config.model}. Raise the provider tier or route this step to another provider.`
         : `The provider rejected the request as too large for ${config.model}.`,
       detail,
+      response.status,
     );
   }
   if (response.status === 429) {
@@ -1125,6 +1207,7 @@ async function describeChatHttpFailure(
         ? `The provider refused the request: its per-minute output-token limit is below the configured ${config.maxOutputTokens}-token budget for ${config.model}. Lower LLM_MAX_OUTPUT_TOKENS or raise the provider tier.`
         : `The provider rate-limited ${role} on ${config.model}.`,
       detail,
+      response.status,
     );
   }
   if (response.status === 401 || response.status === 403) {
@@ -1132,6 +1215,7 @@ async function describeChatHttpFailure(
       "RULE_AGENT_NOT_CONFIGURED",
       `The provider rejected the credentials or blocked ${config.model} (HTTP ${response.status}).`,
       detail,
+      response.status,
     );
   }
   // A backend that refuses the compile SCHEMA rather than the request. This is a
@@ -1152,11 +1236,14 @@ async function describeChatHttpFailure(
       "RULE_AGENT_SCHEMA_UNSUPPORTED",
       `The provider serving ${config.model} cannot decode the rule compilation schema. Point this role at an endpoint that can, or remove the model from the routing tier.`,
       detail,
+      response.status,
     );
   }
   return new RuleAgentError(
     "RULE_AGENT_UNAVAILABLE",
     `The rule agent returned HTTP ${response.status}. ${detail}`.trim(),
+    detail,
+    response.status,
   );
 }
 
@@ -1180,8 +1267,22 @@ async function requestAgentJson(
   }
   const startedAt = new Date().toISOString();
   const startedAtMs = performance.now();
-  const record = (outcome: AiUsageOutcome, payload: unknown) =>
-    recordTransportCall({ config, outcome, payload, startedAt, startedAtMs, step });
+  // `attempt` is supplied only by the rate-limit callback, which records one row
+  // per retried attempt; everything else measures the whole call.
+  const record = (
+    outcome: AiUsageOutcome,
+    payload: unknown,
+    attempt?: { startedAt: string; startedAtMs: number },
+  ) =>
+    recordTransportCall({
+      config,
+      inputParts: [systemPrompt, userText],
+      outcome,
+      payload,
+      startedAt: attempt?.startedAt ?? startedAt,
+      startedAtMs: attempt?.startedAtMs ?? startedAtMs,
+      step,
+    });
 
   let response: Response;
   try {
@@ -1222,7 +1323,7 @@ async function requestAgentJson(
       config,
       "the rule agent",
       signal,
-      () => record("error", null),
+      (attempt) => record("error", null, attempt),
     );
   } catch (error) {
     if (signal?.aborted) {
@@ -1496,13 +1597,17 @@ async function requestAgentJsonStream(
   // A stream reports its token counts in a trailing chunk, not in the response
   // body, so the accounting has to be picked up while the SSE is consumed.
   let streamUsagePayload: unknown = null;
-  const record = (outcome: AiUsageOutcome) =>
+  const record = (
+    outcome: AiUsageOutcome,
+    attempt?: { startedAt: string; startedAtMs: number },
+  ) =>
     recordTransportCall({
       config,
+      inputParts: [systemPrompt, userText],
       outcome,
       payload: streamUsagePayload,
-      startedAt,
-      startedAtMs,
+      startedAt: attempt?.startedAt ?? startedAt,
+      startedAtMs: attempt?.startedAtMs ?? startedAtMs,
       step: "chat",
     });
 
@@ -1536,7 +1641,7 @@ async function requestAgentJsonStream(
       config,
       "the dealer chat",
       signal,
-      () => record("error"),
+      (attempt) => record("error", attempt),
     );
   } catch (error) {
     if (signal?.aborted) {
@@ -1828,13 +1933,18 @@ export async function translateRuleToEnglish(
   }
   const startedAt = new Date().toISOString();
   const startedAtMs = performance.now();
-  const record = (outcome: AiUsageOutcome, payload: unknown) =>
+  const record = (
+    outcome: AiUsageOutcome,
+    payload: unknown,
+    attempt?: { startedAt: string; startedAtMs: number },
+  ) =>
     recordTransportCall({
       config,
+      inputParts: [TRANSLATE_SYSTEM_PROMPT, text],
       outcome,
       payload,
-      startedAt,
-      startedAtMs,
+      startedAt: attempt?.startedAt ?? startedAt,
+      startedAtMs: attempt?.startedAtMs ?? startedAtMs,
       step: "translate",
     });
   let response: Response;
@@ -1864,7 +1974,7 @@ export async function translateRuleToEnglish(
       config,
       "the translator",
       signal,
-      () => record("error", null),
+      (attempt) => record("error", null, attempt),
     );
   } catch (error) {
     if (signal?.aborted) {

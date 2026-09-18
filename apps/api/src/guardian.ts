@@ -24,6 +24,7 @@
 import { compareDeterministicRuleSemantics } from "@tyche/rule-compiler";
 
 import {
+  digestAiCallInput,
   readProviderUsage,
   recordAiCall,
   type AiUsageOutcome,
@@ -289,6 +290,13 @@ function guardianProvider(config: GuardianConfig): string {
  */
 function recordGuardianCall(args: {
   config: GuardianConfig;
+  /**
+   * The exact messages this request carried, in order. The guardian is where
+   * the pipeline's cheapest duplicate lives — the same sanitized player text is
+   * classified once in the interpret phase and again in the compile phase — and
+   * only the input itself can prove that, so this is required, not optional.
+   */
+  inputParts: readonly string[];
   outcome: AiUsageOutcome;
   payload: unknown;
   startedAt: string;
@@ -300,6 +308,7 @@ function recordGuardianCall(args: {
     cachedPromptTokens: usage?.cachedPromptTokens ?? null,
     completionTokens: usage?.completionTokens ?? null,
     durationMs: performance.now() - args.startedAtMs,
+    inputDigest: digestAiCallInput(args.inputParts),
     model: args.config.model,
     outcome: args.outcome,
     promptTokens: usage?.promptTokens ?? null,
@@ -331,6 +340,7 @@ async function scoreSafeguard(
   const record = (outcome: AiUsageOutcome, payload: unknown) =>
     recordGuardianCall({
       config,
+      inputParts: [policy, content],
       outcome,
       payload,
       startedAt,
@@ -461,6 +471,10 @@ async function score(
   const record = (outcome: AiUsageOutcome, payload: unknown) =>
     recordGuardianCall({
       config,
+      inputParts: messages.flatMap((message) => [
+        message.role,
+        message.content,
+      ]),
       outcome,
       payload,
       startedAt,
@@ -527,35 +541,117 @@ async function score(
   return match[1]!.toLowerCase() === "yes";
 }
 
+/**
+ * Memoised jailbreak verdicts, keyed by the model and the exact text.
+ *
+ * The two-phase player flow classifies the SAME sanitized rule twice: once when
+ * `phase: "interpret"` screens it, and again when `phase: "compile"` screens it
+ * after approval. They are separate HTTP requests and separate jobs, so neither
+ * can see the other's work, and measurement on the three-rule corpus found the
+ * repeat on 3 of 3 rules at 688 ms per rule.
+ *
+ * Caching a SAFETY verdict is only sound because this verdict is a pure function
+ * of its inputs: both dialects are scored greedily (temperature 0, top_p 1,
+ * fixed seed) against a policy that ships with the build, so a second call to
+ * the same model with the same text cannot legitimately disagree with the first.
+ * The key includes the model for that reason — a reconfigured guardian shares
+ * nothing with the old one.
+ *
+ * Three rules keep it from becoming a hole:
+ *   - BOTH verdicts are cached. Remembering only "clear" would turn the cache
+ *     into a one-sided filter that can only ever weaken the guard.
+ *   - A failed classification is never cached: `detectJailbreak` throws, and the
+ *     next call must really ask.
+ *   - Entries expire, and the map is bounded, so a long-lived process cannot
+ *     answer from a verdict made by a policy or a model it no longer runs.
+ */
+const JAILBREAK_VERDICT_TTL_MS = 600_000;
+const JAILBREAK_VERDICT_MAX_ENTRIES = 512;
+const jailbreakVerdicts = new Map<
+  string,
+  { expiresAtMs: number; violation: boolean }
+>();
+
+function jailbreakVerdictKey(model: string, text: string): string {
+  return digestAiCallInput([model, text]);
+}
+
+function readCachedJailbreakVerdict(key: string): boolean | undefined {
+  const entry = jailbreakVerdicts.get(key);
+  if (!entry) {
+    return undefined;
+  }
+  if (entry.expiresAtMs <= Date.now()) {
+    jailbreakVerdicts.delete(key);
+    return undefined;
+  }
+  // Refresh the insertion order so the eviction below is least-recently-used
+  // rather than first-asked.
+  jailbreakVerdicts.delete(key);
+  jailbreakVerdicts.set(key, entry);
+  return entry.violation;
+}
+
+function writeCachedJailbreakVerdict(key: string, violation: boolean): void {
+  jailbreakVerdicts.delete(key);
+  jailbreakVerdicts.set(key, {
+    expiresAtMs: Date.now() + JAILBREAK_VERDICT_TTL_MS,
+    violation,
+  });
+  while (jailbreakVerdicts.size > JAILBREAK_VERDICT_MAX_ENTRIES) {
+    const oldest = jailbreakVerdicts.keys().next();
+    if (oldest.done) {
+      break;
+    }
+    jailbreakVerdicts.delete(oldest.value);
+  }
+}
+
+/** Test seam: the cache is process-wide, so a test must be able to empty it. */
+export function resetJailbreakVerdictCache(): void {
+  jailbreakVerdicts.clear();
+}
+
 // True when the text is a jailbreak / prompt-manipulation attempt.
 export async function detectJailbreak(
   text: string,
   config: GuardianConfig = resolveGuardianConfig(),
   signal?: AbortSignal,
 ): Promise<boolean> {
-  if (config.dialect === "safeguard") {
-    const verdict = await scoreSafeguard(
-      "guardian_jailbreak",
-      SAFEGUARD_JAILBREAK_POLICY,
-      text,
-      config,
-      signal,
-    );
-    return verdict.violation;
+  const cacheKey = jailbreakVerdictKey(config.model, text);
+  const cached = readCachedJailbreakVerdict(cacheKey);
+  if (cached !== undefined) {
+    return cached;
   }
-  return score(
-    "guardian_jailbreak",
-    [
-      // Granite Guardian's Ollama template reads its criterion from the first
-      // system message and scores the final user message. Supplying the judge
-      // block as another user turn makes the model score that block instead of
-      // the player's text and can return false for an explicit injection.
-      { content: "jailbreak", role: "system" },
-      { content: text, role: "user" },
-    ],
-    config,
-    signal,
-  );
+  // Outside the try: a classification that never completed must not be recorded
+  // as a verdict, so the throw propagates and the next call really asks.
+  const violation =
+    config.dialect === "safeguard"
+      ? (
+          await scoreSafeguard(
+            "guardian_jailbreak",
+            SAFEGUARD_JAILBREAK_POLICY,
+            text,
+            config,
+            signal,
+          )
+        ).violation
+      : await score(
+          "guardian_jailbreak",
+          [
+            // Granite Guardian's Ollama template reads its criterion from the
+            // first system message and scores the final user message. Supplying
+            // the judge block as another user turn makes the model score that
+            // block instead of the player's text and can return false for an
+            // explicit injection.
+            { content: "jailbreak", role: "system" },
+            { content: text, role: "user" },
+          ],
+          config,
+          signal,
+        );
+  writeCachedJailbreakVerdict(cacheKey, violation);
+  return violation;
 }
 
 // A deterministic shortcut is allowed only when both complete texts compile to

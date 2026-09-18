@@ -69,6 +69,7 @@ import {
   answerDealerQuestion,
   compileRuleToAst,
   interpretRuleWithAgent,
+  isExhaustedProviderError,
   reviewRuleToAst,
   RuleAgentError,
   streamDealerQuestionAnswer,
@@ -3920,7 +3921,14 @@ export async function screenForJailbreak(input: {
     : { clearedText: comparisonText, verdict: "clear" };
 }
 
-async function createRuleInterpretation(
+/**
+ * Phase 1 of the player flow, exported for the same reason `createRulePreflight`
+ * is: the redundancy and cost accounting has to measure the REAL two-scope run.
+ * The jailbreak classification of the player's sanitized text happens once here
+ * and again inside the compile scope, and a script that only called
+ * `createRulePreflight` could never see that pair.
+ */
+export async function createRuleInterpretation(
   text: string,
   reportProgress: RulePreflightProgressReporter = () => undefined,
   signal?: AbortSignal,
@@ -3977,9 +3985,10 @@ async function runRuleInterpretationPipeline(
   await ensureDealerModelReady(agentConfig.model, signal);
 
   // Translation runs BEFORE the guardian so the guard can read both the player's
-  // words and the English the compiler will actually read. The deterministic
-  // pattern gate above already ran, and this adds no call to the normal path --
-  // every rule was being translated anyway.
+  // words and the English the compiler will actually read. With the guardian
+  // enabled the flag cannot switch this off — the guard buys the same reading
+  // itself and `englishText` is reassigned to it. See the long note on the same
+  // step in `runRulePreflightPipeline`.
   const knownInterpretation = createKnownRuleInterpretation(sanitizedText);
   const shouldTranslate = !knownInterpretation && runtime.translateToEnglish;
   if (shouldTranslate) {
@@ -4198,16 +4207,28 @@ async function runRulePreflightPipeline(
     await ensureDealerModelReady(runtime.reviewer.model, signal);
   }
 
-  // 1. Optionally translate to English so the dealer + compiler reason in one
-  // language (removes cross-language ambiguity for small models). A capable
-  // multilingual model reads the original directly — and the rule-authoring skill
-  // carries a Portuguese trigger glossary — so this step can be turned off
-  // (LLM_TRANSLATE_TO_ENGLISH=false) to save a call without losing consistency.
+  // 1. Translate to English so the dealer and compiler reason in one language.
   //
-  // This now runs BEFORE the guardian so the jailbreak screening can compare the
-  // player's own words against the English the compiler reads. The deterministic
-  // pattern gate above still runs first, and the normal path spends no extra
-  // call — the translation was already happening.
+  // `LLM_TRANSLATE_TO_ENGLISH=false` does NOT turn this off whenever the
+  // guardian is enabled, and the comment here used to claim it did. The guard
+  // buys its own independent English reading (`translateForSecondOpinion`
+  // below), and `compileText` is then reassigned to `screening.clearedText` —
+  // which IS that reading. So with the guardian on, a Portuguese rule is
+  // translated and the TRANSLATION is what compiles, whatever the flag says.
+  // Measured: the flag was `false` and every rule still spent a translate call.
+  //
+  // That is the behaviour worth keeping, not a bug to route around: the guard
+  // classifies the player's own language poorly (measured 10/10 false positives
+  // on a legitimate Portuguese rule that is cleared 10/10 in English), so the
+  // second reading is what stops a real rule from being refused as an
+  // injection. It is a safety input, not an optional normalisation.
+  //
+  // The flag therefore has exactly one honest meaning, and it is narrow: with
+  // the guardian DISABLED there is no second-opinion path, so `false` really
+  // does compile the player's own words and really does save the call.
+  //
+  // Running it here rather than inside the guard only changes WHEN the same
+  // call happens; the cost and the compiled text are identical either way.
   const knownInterpretation =
     approvedInterpretation ?? createKnownRuleInterpretation(sanitizedText);
   const shouldTranslate = !knownInterpretation && runtime.translateToEnglish;
@@ -4290,6 +4311,25 @@ async function runRulePreflightPipeline(
   const ruleId = createRuleId();
   // Ties the measurement scope to the rule an operator would look up.
   setAiRunSubject(String(ruleId));
+
+  /**
+   * Endpoints that already proved, in THIS run, that they cannot serve it.
+   *
+   * The provider loop walks every routing slot once per candidate, and the
+   * repair loop walks it again per repair. An endpoint that exhausted its
+   * rate-limit budget or cannot decode the compilation schema answers the same
+   * way every time, so those later walks buy nothing but latency. Measured on
+   * the three-rule corpus (`pnpm --filter @tyche/api usage:report`): the
+   * tertiary slot spent 45.9 s across eight 429s and returned zero tokens, six
+   * of the eight byte-identical repeats of an earlier request.
+   *
+   * The recorded failure is REPLAYED, not swallowed: every attempt still throws
+   * the same typed error, so the compiler's diagnostics, reason codes and the
+   * operator log are identical to what a real round trip would produce. Only
+   * the wait is gone. Scoped to one run so a recovered provider is retried by
+   * the next rule rather than being blacklisted by a snapshot of a bad minute.
+   */
+  const exhaustedProviders = new Map<string, RuleAgentError>();
 
   // A full dealer pass for a given model: interpret (human message), compile the
   // AST from the rule text (skill-guided), and check groundedness.
@@ -4388,6 +4428,10 @@ async function runRulePreflightPipeline(
             : {}),
           model: providerModel || passCompilerConfig.model,
         };
+        const exhausted = exhaustedProviders.get(providerAgentConfig.model);
+        if (exhausted) {
+          throw exhausted;
+        }
         try {
           return await compileRuleToAst(
             normalizedText,
@@ -4398,6 +4442,9 @@ async function runRulePreflightPipeline(
         } catch (error) {
           if (signal?.aborted) {
             throw signal.reason ?? error;
+          }
+          if (isExhaustedProviderError(error)) {
+            exhaustedProviders.set(providerAgentConfig.model, error);
           }
           // The compiler collapses any provider throw into the single reason code
           // PROVIDER_MALFORMED_RESPONSE and keeps nothing else, so without this an
@@ -4418,6 +4465,10 @@ async function runRulePreflightPipeline(
     const createAstReviewer =
       (): RuleAstProvider =>
       async ({ normalizedText }) => {
+        const exhausted = exhaustedProviders.get(passReviewerConfig.model);
+        if (exhausted) {
+          throw exhausted;
+        }
         try {
           return await reviewRuleToAst(
             normalizedText,
@@ -4427,6 +4478,9 @@ async function runRulePreflightPipeline(
         } catch (error) {
           if (signal?.aborted) {
             throw signal.reason ?? error;
+          }
+          if (isExhaustedProviderError(error)) {
+            exhaustedProviders.set(passReviewerConfig.model, error);
           }
           const detail =
             error instanceof RuleAgentError && error.detail

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   captureAiRun,
+  digestAiCallInput,
   exportAiUsageRunSummaries,
   getAiUsagePricingStatus,
   getAiUsageRunSummaries,
@@ -11,6 +12,7 @@ import {
   recordAiCall,
   resetAiUsageRegistry,
   setAiRunSubject,
+  summarizeAiRedundancy,
   type RecordAiCallInput,
 } from "./usage.js";
 
@@ -259,4 +261,138 @@ test("run summaries survive an export/import round trip without the call rows", 
   assert.equal(restored[0]?.totals.totalTokens, 15_500);
   // The detail tier is in-memory only, so a restore brings back totals alone.
   assert.deepEqual(getAiUsageRuns(), []);
+});
+
+test("a length-prefixed digest cannot collide on a different split", () => {
+  // Without the length prefix ["ab", "c"] and ["a", "bc"] hash the same string,
+  // and two genuinely different prompts would be reported as one repeated call.
+  assert.notEqual(
+    digestAiCallInput(["ab", "c"]),
+    digestAiCallInput(["a", "bc"]),
+  );
+  assert.equal(digestAiCallInput(["ab", "c"]), digestAiCallInput(["ab", "c"]));
+});
+
+test("redundancy counts only the repeats, and only within the same step and model", async () => {
+  clearPricingEnv();
+  process.env.LLM_ESTIMATED_COST_PER_1K_TOKENS_USD = "0.001";
+  const jailbreak = digestAiCallInput(["jailbreak", "the player rule"]);
+  const { report } = await captureAiRun("rule_preflight", async () => {
+    recordAiCall(
+      call({
+        completionTokens: 5,
+        durationMs: 400,
+        inputDigest: jailbreak,
+        model: "guardian",
+        promptTokens: 95,
+        step: "guardian_jailbreak",
+      }),
+    );
+    // Same input, same model, same step: the repeat.
+    recordAiCall(
+      call({
+        completionTokens: 5,
+        durationMs: 600,
+        inputDigest: jailbreak,
+        model: "guardian",
+        promptTokens: 95,
+        step: "guardian_jailbreak",
+      }),
+    );
+    // Same digest but a different model is a different call, not a repeat.
+    recordAiCall(
+      call({
+        completionTokens: 5,
+        durationMs: 700,
+        inputDigest: jailbreak,
+        model: "other-guardian",
+        promptTokens: 95,
+        step: "guardian_jailbreak",
+      }),
+    );
+    recordAiCall(call({ inputDigest: digestAiCallInput(["compile", "rule"]) }));
+  });
+
+  const redundancy = summarizeAiRedundancy([report]);
+  assert.equal(redundancy.redundantCallCount, 1);
+  assert.equal(redundancy.redundantDurationMs, 600);
+  assert.equal(redundancy.redundantTotalTokens, 100);
+  assert.equal(redundancy.redundantCostUsd, 0.0001);
+  assert.equal(redundancy.duplicateGroups.length, 1);
+  assert.equal(redundancy.duplicateGroups[0]?.callCount, 2);
+  assert.equal(redundancy.duplicateGroups[0]?.step, "guardian_jailbreak");
+});
+
+test("redundancy spans the interpret and compile scopes of one rule", async () => {
+  clearPricingEnv();
+  const digest = digestAiCallInput(["jailbreak", "the player rule"]);
+  // The two-phase player flow opens one scope per phase, and the jailbreak
+  // classification of the same sanitized text happens in both. A single-run
+  // analysis can never see that pair, which is why the function takes a list.
+  const interpret = await captureAiRun("rule_interpretation", async () => {
+    recordAiCall(call({ inputDigest: digest, step: "guardian_jailbreak" }));
+  });
+  const compile = await captureAiRun("rule_preflight", async () => {
+    recordAiCall(call({ inputDigest: digest, step: "guardian_jailbreak" }));
+  });
+
+  assert.equal(summarizeAiRedundancy([interpret.report]).redundantCallCount, 0);
+  assert.equal(summarizeAiRedundancy([compile.report]).redundantCallCount, 0);
+  assert.equal(
+    summarizeAiRedundancy([interpret.report, compile.report])
+      .redundantCallCount,
+    1,
+  );
+});
+
+test("an unpriced repeat makes the redundant cost unknown, never zero", async () => {
+  clearPricingEnv();
+  const digest = digestAiCallInput(["compile", "rule"]);
+  const { report } = await captureAiRun("rule_preflight", async () => {
+    recordAiCall(call({ inputDigest: digest }));
+    // No price table and no provider cost: this repeat cost something, and
+    // reporting 0 would claim the duplicate was free.
+    recordAiCall(call({ inputDigest: digest }));
+  });
+  const redundancy = summarizeAiRedundancy([report]);
+  assert.equal(redundancy.redundantCallCount, 1);
+  assert.equal(redundancy.redundantCostUsd, null);
+  assert.equal(redundancy.redundantTotalTokens, 15_500);
+});
+
+test("calls with no digest are reported as unchecked rather than as distinct", async () => {
+  clearPricingEnv();
+  const { report } = await captureAiRun("rule_preflight", async () => {
+    recordAiCall(call());
+    recordAiCall(call());
+  });
+  const redundancy = summarizeAiRedundancy([report]);
+  assert.equal(redundancy.redundantCallCount, 0);
+  // Both are a reason the totals are a lower bound, so they must be visible.
+  assert.equal(redundancy.undigestedCallCount, 2);
+});
+
+test("a retried failing attempt is counted apart from a repeat that answered", async () => {
+  clearPricingEnv();
+  const digest = digestAiCallInput(["compile", "rule"]);
+  const { report } = await captureAiRun("rule_preflight", async () => {
+    recordAiCall(call({ durationMs: 8_000, inputDigest: digest }));
+    // The same request retried against a rate-limited provider. Pooling this
+    // with the row above would report one headline for two different faults.
+    recordAiCall(
+      call({
+        completionTokens: null,
+        durationMs: 4_000,
+        inputDigest: digest,
+        outcome: "error",
+        promptTokens: null,
+      }),
+    );
+    recordAiCall(call({ durationMs: 7_000, inputDigest: digest }));
+  });
+  const redundancy = summarizeAiRedundancy([report]);
+  assert.equal(redundancy.redundantCallCount, 2);
+  assert.equal(redundancy.redundantDurationMs, 11_000);
+  assert.equal(redundancy.redundantErrorCallCount, 1);
+  assert.equal(redundancy.redundantErrorDurationMs, 4_000);
 });

@@ -3,6 +3,7 @@ import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { createServer } from "node:http";
 import { test } from "node:test";
 import { captureAiRun, recordAiCall, setAiRunSubject } from "./usage.js";
+import { resetJailbreakVerdictCache } from "./guardian.js";
 import {
   API_STATE_POSTGRES_SCHEMA,
   M3_7_POSTGRES_AUDIT_SCHEMA,
@@ -5440,8 +5441,12 @@ test("a gate rejection is recorded so the dealer explains the real reason", () =
 
 test("Guardian second opinions are language-general and keep real injections blocked", async (t) => {
   const originalFetch = globalThis.fetch;
+  // The verdict memo is process-wide, so this test must start from an empty one
+  // to count transport calls at all.
+  resetJailbreakVerdictCache();
   t.after(() => {
     globalThis.fetch = originalFetch;
+    resetJailbreakVerdictCache();
   });
   const legitimateCases = [
     {
@@ -5547,10 +5552,16 @@ test("Guardian second opinions are language-general and keep real injections blo
   });
   assert.equal(clearRule.verdict, "clear");
   assert.equal(clearRuleTranslationCalls, 1);
+  // Two readings per case, and NOT a thirteenth call for the final block: its
+  // text is `legitimateCases[0].translated`, already classified as the second
+  // opinion in the first loop, so the memo answers it. Asserting on the distinct
+  // set as well keeps the coverage claim — every text below was really scored —
+  // separate from the call count, which is what the memo changes.
   assert.equal(
     scoredTexts.length,
-    legitimateCases.length * 2 + injectionCases.length * 2 + 1,
+    legitimateCases.length * 2 + injectionCases.length * 2,
   );
+  assert.equal(new Set(scoredTexts).size, scoredTexts.length);
 });
 
 test("a server-recorded gate block survives the client's transcript saves", () => {
@@ -6037,4 +6048,63 @@ test("the paid artifact survives a snapshot round trip", () => {
   const validation = runRuleValidationForProposal({ ruleId: 9, turnId });
   assert.equal(validation.compiledArtifactHash, artifactHash);
   assert.deepEqual(validation.compiledArtifact?.ast, novelRuleAst);
+});
+
+test("with the guardian on, the second-opinion reading is what compiles even when translation is off", async (t) => {
+  // Pins the behaviour LLM_TRANSLATE_TO_ENGLISH=false does NOT change. The
+  // guard misreads the player's own language (measured 10/10 false positives on
+  // a legitimate Portuguese rule cleared 10/10 in English), so the independent
+  // English reading is a safety input, and `screening.clearedText` — that
+  // reading — becomes the text the compiler is given. A refactor that made the
+  // flag "work" here would hand the compiler the very text the guard could not
+  // read, which is the fault this test exists to catch.
+  const originalFetch = globalThis.fetch;
+  resetJailbreakVerdictCache();
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    resetJailbreakVerdictCache();
+  });
+
+  const portuguese = "vence o palpite cuja soma for maior que a soma sorteada";
+  const english = "A guess wins if its sum is greater than the drawn sum.";
+  const scored: string[] = [];
+  globalThis.fetch = (async (
+    _input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    const body = JSON.parse(String(init?.body)) as {
+      messages: Array<{ content: string }>;
+    };
+    scored.push(body.messages.at(-1)?.content ?? "");
+    return new Response(
+      JSON.stringify({ message: { content: "<score>no</score>" } }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+
+  let translations = 0;
+  const screening = await screenForJailbreak({
+    englishText: portuguese, // what `shouldTranslate === false` produces
+    guardianConfig: {
+      apiKey: "",
+      chatUrl: "http://guardian.test/api/chat",
+      dialect: "granite",
+      enabled: true,
+      model: "guardian-test",
+      timeoutMs: 1_000,
+    },
+    sanitizedText: portuguese,
+    translateForSecondOpinion: async () => {
+      translations += 1;
+      return english;
+    },
+  });
+
+  // The call the flag is believed to save happened anyway...
+  assert.equal(translations, 1);
+  // ...both languages were classified...
+  assert.deepEqual(scored, [portuguese, english]);
+  // ...and the English reading is what the caller assigns to `compileText`.
+  assert.equal(screening.verdict, "clear");
+  assert.equal(screening.clearedText, english);
 });

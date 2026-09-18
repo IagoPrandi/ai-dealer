@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { cpus, freemem, loadavg, platform, totalmem } from "node:os";
 
 // Measured AI resource accounting for the rule pipeline (tokens, cost, CPU, RAM).
@@ -56,6 +56,17 @@ export interface AiCallUsageRecord {
   costSource: AiUsageCostSource;
   costUsd: number | null;
   durationMs: number;
+  /**
+   * Fingerprint of the exact model input this call sent (system prompt plus
+   * user content), or null when the call site supplied none.
+   *
+   * This is what turns "that call looked redundant" into a measurement. Two
+   * calls sharing a step, a model and this digest were handed byte-identical
+   * input, and every rule step decodes greedily (temperature 0, top_p 1, fixed
+   * seed), so the second one cannot return anything the first did not already
+   * produce. `summarizeAiRedundancy` reads only this.
+   */
+  inputDigest: string | null;
   model: string;
   outcome: AiUsageOutcome;
   promptTokens: number | null;
@@ -393,6 +404,8 @@ export interface RecordAiCallInput {
   cachedPromptTokens?: number | null;
   completionTokens?: number | null;
   durationMs: number;
+  /** See `AiCallUsageRecord.inputDigest`. Built with `digestAiCallInput`. */
+  inputDigest?: string | null;
   model: string;
   outcome: AiUsageOutcome;
   promptTokens?: number | null;
@@ -408,6 +421,23 @@ export interface RecordAiCallInput {
   startedAt: string;
   step: AiUsageStep;
   totalTokens?: number | null;
+}
+
+/**
+ * Fingerprints the model input of one call.
+ *
+ * Length-prefixed rather than concatenated, so ["ab", "c"] and ["a", "bc"]
+ * cannot collide into one digest and report two genuinely different prompts as
+ * a duplicate. Truncated to 16 hex characters: this identifies calls inside one
+ * process, it authenticates nothing.
+ */
+export function digestAiCallInput(parts: readonly string[]): string {
+  const hash = createHash("sha256");
+  for (const part of parts) {
+    hash.update(`${part.length} `);
+    hash.update(part);
+  }
+  return hash.digest("hex").slice(0, 16);
 }
 
 export function recordAiCall(input: RecordAiCallInput): void {
@@ -435,6 +465,7 @@ export function recordAiCall(input: RecordAiCallInput): void {
     costSource,
     costUsd,
     durationMs: input.durationMs,
+    inputDigest: input.inputDigest ?? null,
     model: input.model,
     outcome: input.outcome,
     promptTokens,
@@ -674,6 +705,165 @@ export function readProviderUsage(
 
 function numberOrNull(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+// --- Redundancy ------------------------------------------------------------
+
+export interface AiDuplicateCallGroup {
+  /** How many calls in the run shared this step, model and input. */
+  callCount: number;
+  inputDigest: string;
+  model: string;
+  /** Every call in the group after the first. */
+  redundantCallCount: number;
+  /** null when any redundant call in the group is unpriced. */
+  redundantCostUsd: number | null;
+  redundantDurationMs: number;
+  /**
+   * The subset of the repeats that returned nothing — a transport retry against
+   * a failing or rate-limited provider.
+   *
+   * Kept apart from the rest because the two have different fixes and must not
+   * be added up into one headline: a repeat that SUCCEEDED twice is a pipeline
+   * step issued twice and is removed by not issuing it, while a failed attempt
+   * is a provider that cannot serve the request at all.
+   */
+  redundantErrorCallCount: number;
+  redundantErrorDurationMs: number;
+  redundantTotalTokens: number;
+  step: AiUsageStep;
+}
+
+export interface AiRedundancyReport {
+  /**
+   * Rows the runs dropped past `MAX_CALLS_PER_RUN`. Non-zero means the figures
+   * below are a LOWER BOUND: a dropped duplicate cannot be counted.
+   */
+  droppedCallRows: number;
+  duplicateGroups: AiDuplicateCallGroup[];
+  redundantCallCount: number;
+  /** null when any redundant call is unpriced; the other figures stay exact. */
+  redundantCostUsd: number | null;
+  redundantDurationMs: number;
+  /** See `AiDuplicateCallGroup.redundantErrorCallCount`. */
+  redundantErrorCallCount: number;
+  redundantErrorDurationMs: number;
+  redundantTotalTokens: number;
+  /** Wall clock of the analysed runs, so the saving can be read as a share. */
+  totalWallClockMs: number;
+  /**
+   * Calls that carried no digest. They can be neither confirmed nor ruled out
+   * as duplicates, so a non-zero value is the second reason this is a lower
+   * bound.
+   */
+  undigestedCallCount: number;
+}
+
+/**
+ * Finds the calls a run issued more than once with byte-identical input.
+ *
+ * Takes a LIST of reports because the player-facing flow is two scopes, not
+ * one: `phase: "interpret"` and `phase: "compile"` each open their own
+ * `captureAiRun`, and the duplicate this pipeline actually pays for — the
+ * jailbreak classification of the player's own sanitized text — falls across
+ * that boundary. Pass the scopes belonging to ONE rule; grouping unrelated
+ * players' runs would count two people writing the same sentence as waste.
+ *
+ * The first call of each group is never counted: it is the one that produced
+ * the answer. Only the repeats are.
+ *
+ * Wall-clock saving equals `redundantDurationMs` only for calls issued
+ * sequentially. Every step of this pipeline awaits the previous one — the
+ * provider loop, the repair loop and the two groundedness questions included —
+ * so that holds here, and `totalWallClockMs` sits beside it to be checked
+ * rather than assumed.
+ */
+export function summarizeAiRedundancy(
+  reports: readonly AiRunUsageReport[],
+): AiRedundancyReport {
+  const groups = new Map<string, AiDuplicateCallGroup>();
+  let droppedCallRows = 0;
+  let totalWallClockMs = 0;
+  let undigestedCallCount = 0;
+
+  for (const report of reports) {
+    droppedCallRows += report.totals.droppedCallRows;
+    totalWallClockMs += report.resources.wallClockMs;
+    for (const call of report.calls) {
+      if (call.inputDigest === null) {
+        undigestedCallCount += 1;
+        continue;
+      }
+      const key = `${call.step} ${call.model} ${call.inputDigest}`;
+      const group = groups.get(key);
+      if (!group) {
+        groups.set(key, {
+          callCount: 1,
+          inputDigest: call.inputDigest,
+          model: call.model,
+          redundantCallCount: 0,
+          redundantCostUsd: 0,
+          redundantDurationMs: 0,
+          redundantErrorCallCount: 0,
+          redundantErrorDurationMs: 0,
+          redundantTotalTokens: 0,
+          step: call.step,
+        });
+        continue;
+      }
+      group.callCount += 1;
+      group.redundantCallCount += 1;
+      group.redundantDurationMs += call.durationMs;
+      group.redundantTotalTokens += call.totalTokens ?? 0;
+      if (call.outcome === "error") {
+        group.redundantErrorCallCount += 1;
+        group.redundantErrorDurationMs += call.durationMs;
+      }
+      // An unpriced repeat makes the group's cost unknown, not zero: reporting
+      // zero would say the duplicate was free, which is the one thing it is not.
+      group.redundantCostUsd =
+        call.costUsd === null || group.redundantCostUsd === null
+          ? null
+          : group.redundantCostUsd + call.costUsd;
+    }
+  }
+
+  const duplicateGroups = [...groups.values()]
+    .filter((group) => group.redundantCallCount > 0)
+    .sort(
+      (left, right) => right.redundantDurationMs - left.redundantDurationMs,
+    );
+
+  let redundantCallCount = 0;
+  let redundantCostUsd: number | null = 0;
+  let redundantDurationMs = 0;
+  let redundantErrorCallCount = 0;
+  let redundantErrorDurationMs = 0;
+  let redundantTotalTokens = 0;
+  for (const group of duplicateGroups) {
+    redundantCallCount += group.redundantCallCount;
+    redundantDurationMs += group.redundantDurationMs;
+    redundantErrorCallCount += group.redundantErrorCallCount;
+    redundantErrorDurationMs += group.redundantErrorDurationMs;
+    redundantTotalTokens += group.redundantTotalTokens;
+    redundantCostUsd =
+      group.redundantCostUsd === null || redundantCostUsd === null
+        ? null
+        : redundantCostUsd + group.redundantCostUsd;
+  }
+
+  return {
+    droppedCallRows,
+    duplicateGroups,
+    redundantCallCount,
+    redundantCostUsd,
+    redundantDurationMs,
+    redundantErrorCallCount,
+    redundantErrorDurationMs,
+    redundantTotalTokens,
+    totalWallClockMs,
+    undigestedCallCount,
+  };
 }
 
 // --- Registry access ------------------------------------------------------

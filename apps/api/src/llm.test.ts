@@ -7,6 +7,7 @@ import {
   createJsonStringFieldReader,
   ensureModelLoaded,
   interpretRuleWithAgent,
+  isExhaustedProviderError,
   resolveEscalationModel,
   resolveApiKeyForEndpoint,
   resolveDealerChatConfig,
@@ -14,6 +15,7 @@ import {
   resolveProviderDialect,
   resolveRuleAgentConfig,
   isSchemaRejection,
+  RuleAgentError,
   resolveRuleCompilerConfig,
   resolveRuleReviewerConfig,
   reviewRuleToAst,
@@ -2202,4 +2204,48 @@ test("the dealer's reasoning streams separately and never joins the answer", asy
   assert.equal(result.answer, answer);
   // It also rides on the result, so a reconnect or the JSON transport sees it.
   assert.equal(result.reasoning, trace);
+});
+
+test("only endpoint-permanent failures are treated as exhausted", () => {
+  const permanent = [
+    new RuleAgentError("RULE_AGENT_UNAVAILABLE", "rate limited", "", 429),
+    new RuleAgentError("RULE_AGENT_UNAVAILABLE", "too large", "", 413),
+    new RuleAgentError("RULE_AGENT_SCHEMA_UNSUPPORTED", "no schema", "", 400),
+  ];
+  for (const error of permanent) {
+    assert.equal(isExhaustedProviderError(error), true, error.message);
+  }
+
+  // Each of these can answer differently on the next call, so skipping the
+  // provider on one of them would turn a blip into a silently dropped opinion.
+  const transient = [
+    new RuleAgentError("RULE_AGENT_TIMEOUT", "took too long"),
+    new RuleAgentError("RULE_AGENT_BAD_RESPONSE", "unparseable"),
+    new RuleAgentError("RULE_AGENT_UNAVAILABLE", "gateway", "", 502),
+    new RuleAgentError("RULE_AGENT_UNAVAILABLE", "socket closed"),
+    new Error("something else"),
+  ];
+  for (const error of transient) {
+    assert.equal(isExhaustedProviderError(error), false, String(error));
+  }
+});
+
+test("an HTTP failure carries the status that produced it", async () => {
+  globalThis.fetch = (async () =>
+    new Response("Rate limit exceeded for this model.", {
+      status: 429,
+    })) as typeof fetch;
+
+  // Four attempts, because the detail is transient; the error the caller sees
+  // must still say it was a 429 so the provider can be skipped afterwards.
+  const error = await interpretRuleWithAgent(
+    "Win if one number is drawn.",
+    CONFIG,
+  ).then(
+    () => null,
+    (caught: unknown) => caught,
+  );
+  assert.ok(error instanceof RuleAgentError);
+  assert.equal(error.status, 429);
+  assert.equal(isExhaustedProviderError(error), true);
 });
