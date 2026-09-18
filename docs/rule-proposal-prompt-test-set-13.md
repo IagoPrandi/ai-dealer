@@ -850,3 +850,142 @@ the final tree. The dedicated API and disposable verification database were
 stopped; the user's existing PostgreSQL container was left running. No milestone
 checkbox was changed. Remaining closure work requires reliable provider evidence
 and independent review, affordable provider access, and a fresh full replay.
+
+
+## Consensus audit: symmetric majority and decorrelated voters (2026-09-17)
+
+Audits two changes to the compiler's consensus, using this set's round-1 corpus
+as the end-to-end probe. It does **not** revise any measurement above.
+
+### What changed
+
+- **`resolveProviderDisagreement` is now any two of three.** It required
+  `secondary` AND `tertiary` to agree. When the PRIMARY and the tertiary agreed
+  and the secondary dissented, a real 2-1 majority was discarded and the rule
+  was refused with nothing the player could fix.
+- **A majority needs two different models.** The pair must resolve to distinct
+  endpoint models, and `hasIndependentReading` now also requires the
+  corroborating reading to come from different weights than the selected
+  candidate. `RuleCompileArtifactOptions.reviewerModelId` carries the reviewer's
+  model so it can be told apart from a routing slot running the same one —
+  `LLM_MODEL_REVIEW` and `LLM_SECONDARY_MODEL` are both
+  `mistralai/mistral-small-24b-instruct-2501` in this repository, so a candidate
+  from the secondary slot could be "independently reviewed" by the weights that
+  wrote it. An unset `reviewerModelId` keeps the previous behaviour exactly.
+- The comparison uses the model the slot really calls
+  (`model_by_role.compile ?? identity.model`), not `modelIdentity.model`. That
+  exposed a separate attestation defect, **now fixed**: the API sets
+  `request.model` to the compile-role model on every request, and
+  `buildAttemptContext` let it OVERRIDE the per-slot identity, so all three
+  attempts recorded one model while three different endpoints answered.
+  `resolveProviderPath` copies the same value into `providerPath`, so nothing in
+  the frozen artifact recorded which model produced the AST — against PRD 6.10,
+  which requires the artifact to carry model identity, and PRD 7.13, which makes
+  it attestation. The slot now wins and `request.model` is a documented
+  fallback for a slot that names no model of its own.
+  **This moves `artifactHash` for newly compiled rules**, because `modelIdentity`
+  is part of the hashed artifact. Already-frozen artifacts are unaffected:
+  `getProposalCompiledArtifact` re-hashes the STORED artifact object, so it
+  still matches its recorded hash.
+- Separately: an ACCEPTED rule no longer contributes blocking-reason
+  explanations to the dealer chat. A resolved disagreement keeps
+  `PROVIDER_DISAGREEMENT` in the log on purpose, and its published explanation
+  opens with "Rule rejected...", which is the D4 contradiction in a new place.
+  The filter is now by decision, not by code.
+
+### Configuration
+
+Byte-identical to the runs above except for one **process-level** override
+(`.env` unchanged): `LLM_TERTIARY_MODEL=qwen/qwen3.8-27b`. The configured
+tertiary `qwen/qwen3.8-flash` answers HTTP 429 on every call and returns zero
+tokens, so `isViableProviderOpinion(tertiary)` is never true and the tiebreak —
+old or new — can never run. The replacement was probed first and returned a
+schema-valid AST in 42 s. Dedicated API on `127.0.0.1:3099` against a
+disposable `tyche_audit_consensus` database, dropped afterwards.
+
+**This override is a confound and the results below must not be read without
+it.** A live third voter changes the run on its own, independently of the
+consensus logic.
+
+### Round 1
+
+| ID  | outcome | fixtures | reason codes | latency | discarded (exact) |
+| --- | --- | --- | --- | --- | --- |
+| N1 | REFUSED | - | `AGENT_STATEMENT_MISMATCH`, `SUPPORTED_RULE` | 540 s | 8 (**4 of 7 verified**) |
+| N2 | **VALID** | **8/8** | `SUPPORTED_RULE` | 162 s | 2 (**1**) |
+| N3 | **VALID** | **8/8** | `SUPPORTED_RULE` | 130 s | 2 (**1**) |
+| N4 | **VALID** | **8/8** | `SUPPORTED_RULE` | 129 s | 0 |
+| V1 | CLARIFY | - | - | 16 s | 0 |
+| V2 | CLARIFY | - | - | 12 s | 0 |
+
+**5 of 6**, 24/24 executable fixtures on every accepted artifact, **zero wrong
+artifacts frozen**, and both vague prompts still asked for clarification. That
+is the best round-1 result recorded for this corpus. References re-verified
+32/32 and 40/40 first attempt; the offline parser still emits no artifact for
+any of the six, so the corpus is still novel against this tree.
+
+### The result is NOT attributable to the majority change
+
+**The tiebreak never fired.** All three accepted cases carry `SUPPORTED_RULE`
+alone — no `PROVIDER_DISAGREEMENT` was recorded anywhere in the round, so there
+was never a disagreement for a majority to settle. The gain belongs to having a
+live third provider and to run-to-run variance, not to the new rule.
+
+N1 shows why, and it is the same mechanism this set already named. Seven of its
+eight discarded candidates were executed: **four are behaviorally exact (8/8)**,
+and every one of the eight carries `AGENT_STATEMENT_MISMATCH`. That code is in
+`isViableProviderOpinion`'s exclusion list, so those candidates **cannot hold an
+opinion at all** — they are eliminated before consensus is consulted. No voting
+rule can recover them.
+
+Across the round, **6 of 11 discarded candidates were behaviorally exact**
+(N1 att0/1/3/6, N2 att0, N3 att0). The two in N2 and N3 died on
+`SECOND_OPINION_UNAVAILABLE` and `PROVIDER_SPAN_COVERAGE_INCOMPLETE`. The D1
+class is unchanged.
+
+The decorrelation change did not cause those two. Attempts are pushed in routing
+order, so `att0` is the PRIMARY slot (`openai/gpt-oss-120b`); the reviewer is
+`mistral-small-24b`, a different model, so the independence requirement cannot
+have tightened either case. With three distinct slot models the provider branch
+cannot tighten at all — the requirement only bites when the selected candidate
+comes from the secondary slot, which shares weights with the reviewer.
+
+### Related defect found while verifying, NOT fixed
+
+Compiler escalation is inert. `dealerPass` builds `passCompilerConfig` with the
+escalation model, but `createAstProvider` selects
+`providerModel || passCompilerConfig.model` where `providerModel` is the slot's
+own model and is never empty — so escalating the compiler model never changes
+which model is called. It is currently unreachable in this repository's `.env`
+(`LLM_ESCALATION_MODEL` equals `LLM_MODEL_COMPILE`, and with an approved
+interpretation `escalationChangesInterpretation` is always false), so PRD
+7.3/7.4 escalation does not run on the player path at all. Fixing it changes
+which model answers, so it is reported rather than changed here.
+
+### Status
+
+- Symmetric majority: **correct and proved offline** (four exhaustive tests
+  covering a primary+tertiary majority, a same-model pseudo-majority, three
+  distinct readings, and reviewer/generator collision), **unexercised live**.
+- Decorrelated voters: **no measurable effect in this configuration**, by
+  construction. It is a guard against a collision the repository's own `.env`
+  already contains, not a change to this run.
+- **The dominant refusal mechanism is untouched.** Prose-cue coverage
+  (`AGENT_STATEMENT_MISMATCH`, `INTERPRETATION_MISMATCH`) and model paperwork
+  (`PROVIDER_SPAN_COVERAGE_INCOMPLETE`, `PROVIDER_EVIDENCE_UNVERIFIED`,
+  `SECOND_OPINION_UNAVAILABLE`) still account for every discard here.
+- One sample. Acceptance on this pipeline is unstable across identical input, so
+  5/6 is not a rate. Round 2 was not run.
+- Verification on the changed tree: compiler **158/158**, API **286/286**,
+  typecheck, zero-warning lint and build for both packages. No milestone ticked.
+
+### Reproduction
+
+```bash
+docker exec tyche-postgres psql -U tyche -d postgres -c "CREATE DATABASE tyche_audit_consensus;"
+PORT=3099 HOST=127.0.0.1 LLM_TERTIARY_MODEL=qwen/qwen3.8-27b \
+  DATABASE_URL=postgresql://tyche:tyche_dev_password@localhost:5432/tyche_audit_consensus \
+  npx tsx apps/api/src/index.ts
+node apps/api/scripts/rule-preflight-novel-set-13.mjs http://127.0.0.1:3099 > round1.ndjson
+node apps/api/scripts/rule-preflight-novel-set-13.mjs --verify-rejected round1.ndjson
+```

@@ -4535,6 +4535,12 @@ async function runRulePreflightPipeline(
       // schema-constrained LLM artifact generation.
       preferDeterministic: true,
       requireProviderEvidence: true,
+      // Lets the compiler tell the reviewer apart from a routing slot running
+      // the same weights. `LLM_MODEL_REVIEW` and `LLM_SECONDARY_MODEL` are the
+      // same model in this repository's own configuration, and without this the
+      // secondary slot's candidate could be corroborated by the model that
+      // generated it.
+      reviewerModelId: passReviewerConfig.model,
     };
     let validation = await compileRuleArtifact(
       compilationRequest,
@@ -8288,9 +8294,18 @@ export function buildDealerQuestionContext(args: {
   // Only the codes that actually stop the rule, top one called out by name.
   // Passing the raw list would lead with SUPPORTED_RULE ("no change is
   // required for this code") on most rejections.
-  const blockingReasons = diagnostics
-    ? getBlockingRuleReasonExplanations(diagnostics.reasonCodes)
-    : [];
+  //
+  // An ACCEPTED rule has no blocking reason, whatever codes rode along. A
+  // resolved provider disagreement keeps `PROVIDER_DISAGREEMENT` in the log on
+  // purpose — the divergence happened and stays auditable — and its published
+  // explanation opens with "Rule rejected...". Handing that to the dealer for a
+  // rule that compiled would tell the player their accepted rule was refused.
+  // The majority tiebreak makes this pairing common, so the filter is by
+  // decision, not by code.
+  const blockingReasons =
+    diagnostics && diagnostics.decision !== "VALID"
+      ? getBlockingRuleReasonExplanations(diagnostics.reasonCodes)
+      : [];
   const recentMessages = (args.draft.messages ?? []).slice(-12);
   const previousDealerMessage = [...recentMessages]
     .reverse()

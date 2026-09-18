@@ -6108,3 +6108,62 @@ test("with the guardian on, the second-opinion reading is what compiles even whe
   assert.equal(screening.verdict, "clear");
   assert.equal(screening.clearedText, english);
 });
+
+test("an accepted rule carries no blocking reason, even with a resolved disagreement", () => {
+  // The majority tiebreak keeps PROVIDER_DISAGREEMENT in the log of a rule it
+  // ACCEPTED: the divergence happened and stays auditable. Its published
+  // explanation opens with "Rule rejected...", so filtering the dealer context
+  // by code instead of by decision would tell a player whose rule compiled that
+  // it was refused — the same contradiction set 13 recorded as D4.
+  const prompt = "A guess wins if its sum is greater than the drawn sum.";
+  const draft: ConversationDraftRecord = {
+    createdAt: "2026-09-17T00:00:00.000Z",
+    draftId: "client:1:accepted-rule",
+    lastMessage: "Is my rule ok?",
+    messages: [{ text: "Is my rule ok?", who: "user" }],
+    normalizedText: prompt,
+    officialInterpretation: "Compare the two sums.",
+    prompt,
+    ruleId: null,
+    status: "draft",
+    tokenCount: 12,
+    turnId: 1,
+    updatedAt: "2026-09-17T00:00:00.000Z",
+    wallet,
+  };
+  const accepted = buildDealerQuestionContext({
+    draft: {
+      ...draft,
+      lastPreflight: {
+        coverage: { missingFromAst: [], missingOperations: [] },
+        decision: "VALID",
+        difficultyClass: null,
+        estimatedWinRate: null,
+        estimatedWinRateBelowSampleResolution: false,
+        estimatedWinRateUpperBound: null,
+        normalizedText: prompt,
+        officialInterpretation: "Compare the two sums.",
+        originalText: prompt,
+        reasonCodes: ["SUPPORTED_RULE", "PROVIDER_DISAGREEMENT"],
+        reasonSummary: "Rule accepted after fallback with final confidence 0.9.",
+        refinementFocus: [],
+        refinementQuestions: [],
+        semanticImpact: {
+          astAvailable: true,
+          drawIndependent: false,
+          rangeBoundsAmbiguous: false,
+          sharedOutcome: false,
+          triviallyAlwaysTrue: false,
+          usesDraw: true,
+          usesGuess: true,
+        },
+        suggestedRewrites: [],
+      },
+    },
+    message: "Is my rule ok?",
+  });
+
+  assert.match(accepted, /"diagnosticsAvailable":true/u);
+  assert.match(accepted, /"blockingReasonCode":null/u);
+  assert.match(accepted, /"reasons":\[\]/u);
+});
