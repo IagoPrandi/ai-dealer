@@ -121,10 +121,13 @@ export function Dealer({ size = 38 }: { size?: number }) {
  * to hold the brand mark and the screen title.
  */
 export function WalletButton() {
-  const { connect, connected, go, walletAddress } = useTyche();
+  const { connect, connected, walletAddress } = useTyche();
   return (
     <button
-      onClick={() => (connected ? go("profile") : connect())}
+      aria-label={
+        connected ? "Change wallet or sign-in method" : "Choose how to play"
+      }
+      onClick={connect}
       className="ide-btn"
       style={{
         flexShrink: 0, whiteSpace: "nowrap",
@@ -134,6 +137,9 @@ export function WalletButton() {
         letterSpacing: "0.14em",
         boxShadow: "var(--solid-4), var(--halo-magenta)",
       }}
+      title={
+        connected ? "Change wallet or sign-in method" : "Choose how to play"
+      }
       type="button"
     >
       <Ico.wallet style={{ color: "var(--on-accent)" }} />{" "}

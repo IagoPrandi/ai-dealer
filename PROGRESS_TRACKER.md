@@ -4,6 +4,44 @@ This tracker records milestone status, work logs, and required document confirma
 
 ## Work Log
 
+### 2026-09-20 (Mandatory UI design-system gate)
+
+- Opened the required `PRD.md`, `AGENTS.md`, and `PROGRESS_TRACKER.md`; inspected `.claude/skills`, the existing Tyche design-system and UI-coherence instructions, and the skill-authoring guidance before changing a local skill.
+- Added a mandatory design-system gate to `tyche-ui-coherence`: every Tyche UI/UX addition, modification, review, or visual correction â€” including small spacing, layout, responsive, modal, sheet, control, state, and copy changes â€” must invoke both `tyche-ui-coherence` and `tyche-design-system` before implementation starts.
+- The gate now requires choosing the closest existing visual reference, reusing its tokens, anatomy, geometry, interaction treatment, and responsive behaviour, then recording the chosen pattern, mobile/desktop visual verification, and any intentional divergence in the work log or PR description.
+- Validation passed with `skill-creator`'s `quick_validate.py` and `git diff --check`. No application code, UI copy, environment, deployment, wallet, transaction, on-chain state, or milestone checkbox changed. Final consistency review: the rule is scoped to Tyche UI/UX work and does not impose design-system reading on unrelated backend or documentation tasks.
+
+### 2026-09-20 (Wallet selector card alignment)
+
+- Opened the required `PRD.md`, `AGENTS.md`, and `PROGRESS_TRACKER.md`; inspected `.claude/skills` and applied the existing frontend visual-coherence and browser-verification guidance before changing the selector layout.
+- Fixed the desktop wallet selector's excessive empty top area. The desktop content rule for `.ide-scroll` supplied a `96px` top padding to the connection dialog as well as ordinary pages. The connect-card selector now deliberately restores its compact `10px 20px 28px` dialog padding and its `540px` desktop measure.
+- Visual verification of `/play/wallet` passed at 1200 x 1000 and 390 x 844: the title is 33px below the card top in each layout, the bottom-sheet presentation remains intact on mobile, and no framework error overlay was present. The local headless browser reported no application console errors; its isolated dev-server HMR WebSocket handshake warning is non-functional and does not occur in the user browser session.
+- Verification passed: `@tyche/web` typecheck, zero-warning lint, **330/330** tests, production build, and `git diff --check`. The build retains only the known non-fatal optional Farcaster peer warning from Privy.
+- No wallet, email, OTP, transaction, environment, deployment, on-chain state, or milestone checkbox was changed. Final consistency review: the exception is scoped only to the connection dialog, external-wallet rows still scroll when needed, and UI copy remains English UTF-8.
+
+### 2026-09-20 (Wallet access-switch controls)
+
+- Opened the required `PRD.md`, `AGENTS.md`, and `PROGRESS_TRACKER.md`; inspected the local skill catalog and applied the frontend, web2-wallet-auth, test-and-verify, and browser-verification guidance before changing the wallet-access flow.
+- Changed both connected-wallet controls — the desktop rail status card and the yellow wallet pill used in the round headers — to open `Choose how to play` rather than navigate to Account. The controls now expose the accessible name and tooltip `Change wallet or sign-in method` while connected.
+- The existing selector remains the sole switch surface: it lists detected external Wallet Standard wallets. For a signed-in email user, its email row now switches directly to the already-created embedded Solana wallet instead of starting a second login. Opening the selector and choosing a method does not request a transaction signature.
+- Verification passed: `@tyche/web` typecheck, zero-warning lint, **330/330** tests, and the production build. The known optional Farcaster peer warning from Privy remains non-fatal and unchanged. Browser verification of `/play/wallet` found one visible, accessible `Choose how to play` dialog with a close control, no framework overlay, and no console errors. Worker health returned HTTP 200 with all automation and manual-control loops disabled.
+- No wallet was changed, no email/OTP was sent, no transaction was requested, and no milestone checkbox was changed. Final consistency review: wallet selection remains explicit, the production CSP change remains unrelated and intact, UI copy is English UTF-8, and the generated Next.js type reference was restored instead of left in the diff.
+
+### 2026-09-20 (Local Next.js CSP startup repair)
+
+- Opened the required `PRD.md`, `AGENTS.md`, and `PROGRESS_TRACKER.md`; inspected the local skill catalog and applied the frontend, Next.js, test-and-verify, browser-verification, and security guidance before changing the player web configuration.
+- Fixed the blank/stuck local `/play` screen at its cause: the production `script-src` policy was also sent by `next dev`, blocking Next.js's inline bootstrap and webpack source-map evaluation. `createWebSecurityHeaders` now accepts an explicit development mode; only `next.config.ts` derives it from `NODE_ENV === "development"`. Development adds `'unsafe-inline'` and `'unsafe-eval'` only to `script-src`; production remains strict.
+- Added CSP regression coverage for both modes. Verification passed: `@tyche/web` typecheck, zero-warning lint, and **330/330** tests. The production build completed; it retains the pre-existing non-fatal optional Farcaster peer warning from `@privy-io/react-auth`, while Farcaster remains disabled.
+- Live mobile-viewport verification of `http://localhost:3000/play` returned HTTP 200, loaded the settled round, rendered 27 interactive controls, and had no error overlay or console errors. API and worker health endpoints returned HTTP 200. The worker runs with every automatic settlement/reward/precompile loop and manual control explicitly disabled in its process environment, so this task did not submit a transaction or mutate devnet state.
+- No milestone checkbox, production environment, deployment, or on-chain state changed. Final consistency review: the local-only CSP relaxation cannot reach production, no RPC credential is exposed in the header, and user-facing copy remains English UTF-8.
+
+### 2026-09-20 (Local application startup)
+
+- Opened the required `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, the local skill catalog, the local-development runbook, and the verification guidance before starting services.
+- Started the local PostgreSQL and Redis containers, the host API on `http://localhost:3002`, and the public web server on `http://localhost:3000`. The API health endpoint returned HTTP 200; database and cache containers are running. No worker was started because the current local `.env` enables settlement automation, which is outside a request to open the application and could initiate devnet settlement work.
+- Browser verification at a mobile viewport found that the page returns HTTP 200 with no framework error overlay, but remains on `Loading verified game data…`. The active development CSP blocks Next.js inline development scripts and `unsafe-eval`, producing CSP console errors and preventing client initialization. This is a pre-existing local configuration defect; it was observed and not changed in this startup-only task.
+- No source, environment, deployment, transaction, on-chain state, or milestone checkbox was changed. Final consistency review: UI data and financial automation were not fabricated or silently bypassed; the running API reports healthy and the blocked frontend state is recorded explicitly.
+
 ### 2026-09-20 (Privy development App ID revalidation)
 
 - Reopened `PRD.md`, `AGENTS.md`, the Progress Tracker, and the local Privy production-release/browser-verification guidance before restarting the development server. Confirmed only that `NEXT_PUBLIC_PRIVY_APP_ID` is present; its value was neither printed nor changed.

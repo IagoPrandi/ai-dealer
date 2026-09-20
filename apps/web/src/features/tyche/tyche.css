@@ -1763,6 +1763,15 @@
     padding: 96px 32px 30px !important;
   }
 
+  /* The connect dialog shares the scroll utility with screen content, but it
+     must keep its compact dialog spacing instead of inheriting page gutters. */
+  .ide-web-shell .ide-overlay-card.is-connect.ide-scroll {
+    width: min(100%, 540px);
+    max-width: 540px;
+    margin-inline: 0;
+    padding: 10px 20px 28px !important;
+  }
+
   .ide-web-shell .ide-deck {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 400px;

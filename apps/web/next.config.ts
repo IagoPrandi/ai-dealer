@@ -32,6 +32,7 @@ const workerProxyTarget =
 
 const securityHeaders = createWebSecurityHeaders({
   apiUrl: process.env.NEXT_PUBLIC_TYCHE_API_URL,
+  isDevelopment: process.env.NODE_ENV === "development",
   rpcUrl: process.env.NEXT_PUBLIC_SOLANA_RPC_URL,
   workerUrl: process.env.NEXT_PUBLIC_TYCHE_WORKER_URL,
 });

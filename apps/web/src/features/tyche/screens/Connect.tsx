@@ -15,18 +15,22 @@ export function ConnectOverlay({
   connecting,
   connectors,
   emailOnboardingAvailable,
+  emailSignedIn,
   error,
   onClose,
   onConnect,
   onEmailLogin,
+  onSelectEmailWallet,
 }: {
   connecting: boolean;
   connectors: readonly Connector[];
   emailOnboardingAvailable: boolean;
+  emailSignedIn: boolean;
   error?: null | string;
   onClose: () => void;
   onConnect: (id: string) => void;
   onEmailLogin: () => void;
+  onSelectEmailWallet: () => void;
 }) {
   return (
     <div
@@ -71,7 +75,7 @@ export function ConnectOverlay({
         <div style={{ display: "grid", gap: 9, marginTop: 14 }}>
           {emailOnboardingAvailable ? (
             <button
-              onClick={onEmailLogin}
+              onClick={emailSignedIn ? onSelectEmailWallet : onEmailLogin}
               className="ide-card ide-tap"
               style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 15px", textAlign: "left", color: "var(--text)", cursor: "pointer" }}
               type="button"
@@ -80,10 +84,18 @@ export function ConnectOverlay({
                 <Ico.user style={{ color: "var(--on-accent)" }} />
               </span>
               <span style={{ flex: 1 }}>
-                <span style={{ display: "block", fontWeight: 700, fontSize: 15 }}>Continue with email</span>
-                <span style={{ display: "block", marginTop: 2, fontSize: 12.5, color: "var(--muted)" }}>Use a one-time code. Gmail and any email address work.</span>
+                <span style={{ display: "block", fontWeight: 700, fontSize: 15 }}>
+                  {emailSignedIn ? "Use email wallet" : "Continue with email"}
+                </span>
+                <span style={{ display: "block", marginTop: 2, fontSize: 12.5, color: "var(--muted)" }}>
+                  {emailSignedIn
+                    ? "Switch to the Solana wallet created for your email account."
+                    : "Use a one-time code. Gmail and any email address work."}
+                </span>
               </span>
-              <span style={{ fontSize: 12.5, color: "var(--dim)" }}>OTP</span>
+              <span style={{ fontSize: 12.5, color: "var(--dim)" }}>
+                {emailSignedIn ? "switch" : "OTP"}
+              </span>
             </button>
           ) : null}
           {emailOnboardingAvailable ? (

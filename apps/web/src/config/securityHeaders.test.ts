@@ -53,3 +53,29 @@ test("keeps explicit same-origin API proxies within self", () => {
   assert.match(csp, /connect-src 'self'/);
   assert.doesNotMatch(csp, /__api|__worker/);
 });
+
+test("allows only the Next.js development script requirements in development", () => {
+  const developmentHeaders = createWebSecurityHeaders({
+    isDevelopment: true,
+    rpcUrl: "https://devnet.helius-rpc.com",
+  });
+  const developmentCsp = developmentHeaders.find(
+    ({ key }) => key === "Content-Security-Policy",
+  )?.value;
+  const productionHeaders = createWebSecurityHeaders({
+    isDevelopment: false,
+    rpcUrl: "https://devnet.helius-rpc.com",
+  });
+  const productionCsp = productionHeaders.find(
+    ({ key }) => key === "Content-Security-Policy",
+  )?.value;
+
+  assert.match(
+    developmentCsp ?? "",
+    /script-src 'self' 'unsafe-inline' 'unsafe-eval'/,
+  );
+  assert.doesNotMatch(
+    productionCsp ?? "",
+    /script-src[^;]*'unsafe-inline'|script-src[^;]*'unsafe-eval'/,
+  );
+});

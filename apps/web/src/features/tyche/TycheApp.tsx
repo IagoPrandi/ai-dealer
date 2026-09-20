@@ -282,7 +282,13 @@ function DesktopRail({
         </section>
         <button
           className="ide-rail-wallet"
-          onClick={() => (connected ? go("profile") : onConnect())}
+          aria-label={
+            connected ? "Change wallet or sign-in method" : "Choose how to play"
+          }
+          onClick={onConnect}
+          title={
+            connected ? "Change wallet or sign-in method" : "Choose how to play"
+          }
           type="button"
         >
           <i />
@@ -993,6 +999,7 @@ export function TycheApp({
                 connecting={connecting}
                 connectors={connectors}
                 emailOnboardingAvailable={emailOnboardingAvailable}
+                emailSignedIn={emailSignedIn}
                 error={connectError ?? emailWalletError}
                 onClose={closeConnect}
                 onConnect={async (id) => {
@@ -1009,6 +1016,12 @@ export function TycheApp({
                   setConnectError(null);
                   requestEmailLogin();
                   closeConnect();
+                }}
+                onSelectEmailWallet={() => {
+                  setConnectError(null);
+                  selectEmbeddedWallet();
+                  closeConnect();
+                  reloadAll();
                 }}
               />
             ) : null}

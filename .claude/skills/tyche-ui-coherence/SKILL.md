@@ -7,6 +7,24 @@ description: Preserve current app visual identity when creating, editing, extend
 
 Use this skill as a guardrail before changing any Tyche UI. The goal is not to make screens "look better" in isolation; it is to extend the product without breaking the existing identity.
 
+## Mandatory Design-System Gate
+
+For every Tyche UI/UX change, invoke this skill together with
+`tyche-design-system` **before editing implementation code**. This includes
+new screens and components, visual bug fixes, layout or spacing adjustments,
+responsive changes, text/copy changes, and additions or removals of visible
+controls or states. A small change is not an exception.
+
+Treat `tyche-design-system` and its relevant reference artifacts as the visual
+source of truth. First identify the closest established screen or component
+pattern; then use its tokens, geometry, typography, interaction treatment, and
+responsive behavior. Do not introduce a local visual solution until this
+comparison shows that the existing pattern cannot serve the need.
+
+Before delivery, record in the work log or PR description: the reference
+pattern used, the mobile and desktop verification performed, and any necessary
+intentional divergence. An unreviewed UI/UX change is incomplete.
+
 ## Required Reading
 
 Before editing UI, open:

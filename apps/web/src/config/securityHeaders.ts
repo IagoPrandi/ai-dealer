@@ -1,5 +1,6 @@
 export interface WebSecurityHeaderOptions {
   apiUrl?: string | undefined;
+  isDevelopment?: boolean | undefined;
   rpcUrl: string | undefined;
   workerUrl?: string | undefined;
 }
@@ -51,6 +52,7 @@ function resolveSolanaRpcSources(rpcUrl: string | undefined): string[] {
  */
 export function createWebSecurityHeaders({
   apiUrl,
+  isDevelopment = false,
   rpcUrl,
   workerUrl,
 }: WebSecurityHeaderOptions) {
@@ -66,9 +68,15 @@ export function createWebSecurityHeaders({
     ...resolveOptionalHttpOrigin(apiUrl, "NEXT_PUBLIC_TYCHE_API_URL"),
     ...resolveOptionalHttpOrigin(workerUrl, "NEXT_PUBLIC_TYCHE_WORKER_URL"),
   ];
+  // Next.js development injects inline bootstrap code and evaluates webpack
+  // source maps. Restrict these exceptions to the local development server;
+  // production keeps the strict script policy below.
+  const scriptSources = isDevelopment
+    ? "'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com"
+    : "'self' https://challenges.cloudflare.com";
   const csp = [
     "default-src 'self'",
-    "script-src 'self' https://challenges.cloudflare.com",
+    `script-src ${scriptSources}`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self'",
