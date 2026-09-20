@@ -33,6 +33,7 @@ import {
   VOTER_REWARD_CONFIG,
   VOTER_REWARD_RATE_BPS,
   VOTE_FEE_START_TURN,
+  resolveAllowedCorsOrigin,
 } from "@tyche/constants";
 import {
   compileRuleArtifact,
@@ -2292,8 +2293,6 @@ const AUDIT_LOG_KINDS = new Set<AuditLogKind>([
   "rule.removal",
   "settlement.transition",
 ]);
-const LOCAL_WEB_ORIGIN_PATTERN =
-  /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3})(:\d+)?$/;
 const CORS_PATHS = new Set([
   "/draws",
   "/elections",
@@ -5937,23 +5936,11 @@ async function readJsonBody(
 }
 
 function getAllowedCorsOrigin(origin: string | undefined) {
-  if (!origin) {
-    return null;
-  }
-
-  const configuredOrigins = (process.env.WEB_ORIGIN ?? "")
-    .split(",")
-    .map((configuredOrigin) => configuredOrigin.trim())
-    .filter(Boolean);
-
-  if (
-    configuredOrigins.includes(origin) ||
-    LOCAL_WEB_ORIGIN_PATTERN.test(origin)
-  ) {
-    return origin;
-  }
-
-  return null;
+  return resolveAllowedCorsOrigin({
+    configuredOrigins: process.env.WEB_ORIGIN,
+    isProduction: process.env.NODE_ENV === "production",
+    origin,
+  });
 }
 
 function getCorsHeaders(request: import("node:http").IncomingMessage) {

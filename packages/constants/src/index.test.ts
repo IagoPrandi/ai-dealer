@@ -16,6 +16,7 @@ import {
   resolveFreeActionWindowEndsBeforeTurnIndex,
   SUPPORTER_REWARD_ATOMS,
   VOTER_REWARD_RATE_BPS,
+  resolveAllowedCorsOrigin,
 } from "./index.js";
 
 test("free-action cutoff is mainnet 30 and non-mainnet 100", () => {
@@ -56,4 +57,31 @@ test("active-rule and first-round bonus rates are 22.5% with an unchanged cap", 
   assert.equal(VOTER_REWARD_RATE_BPS, ACTIVE_RULE_REWARD_RATE_BPS);
   assert.equal(REFERRAL_INVITER_FIRST_ROUND_BONUS_RATE_BPS, 2_250n);
   assert.equal(ACTIVE_RULE_REWARD_CAP_ATOMS, 250_000_000n);
+});
+
+test("CORS permits local browser origins only outside production", () => {
+  assert.equal(
+    resolveAllowedCorsOrigin({
+      configuredOrigins: "https://tywish.com",
+      isProduction: false,
+      origin: "http://localhost:3000",
+    }),
+    "http://localhost:3000",
+  );
+  assert.equal(
+    resolveAllowedCorsOrigin({
+      configuredOrigins: "https://tywish.com",
+      isProduction: true,
+      origin: "http://localhost:3000",
+    }),
+    null,
+  );
+  assert.equal(
+    resolveAllowedCorsOrigin({
+      configuredOrigins: "https://tywish.com",
+      isProduction: true,
+      origin: "https://tywish.com",
+    }),
+    "https://tywish.com",
+  );
 });

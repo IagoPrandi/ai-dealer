@@ -4,6 +4,20 @@ This tracker records milestone status, work logs, and required document confirma
 
 ## Work Log
 
+### 2026-09-20 (Privy development App ID revalidation)
+
+- Reopened `PRD.md`, `AGENTS.md`, the Progress Tracker, and the local Privy production-release/browser-verification guidance before restarting the development server. Confirmed only that `NEXT_PUBLIC_PRIVY_APP_ID` is present; its value was neither printed nor changed.
+- `GET /play` returned `200` with the enforced CSP and anti-framing headers. The Privy SDK initialized without the previous invalid-App-ID error, confirming that the current development configuration is accepted by the client SDK. The remaining build message is the known non-fatal optional Farcaster peer warning from `@privy-io/react-auth`; Farcaster is not enabled.
+- The local server was stopped after verification. Sending an OTP and submitting wallet transactions were not attempted because they require a user email/OTP and user-controlled wallet funding. No production configuration, deployment, transaction, or milestone checkbox changed.
+
+### 2026-09-20 (Privy development security hardening)
+
+- Opened the required `PRD.md`, `AGENTS.md`, and `PROGRESS_TRACKER.md`; inspected `.claude/skills`; and applied the local security, Next.js, Privy production-release, Vercel environment-variable, and browser-verification guidance before implementation. Confirmed only the presence, never the values, of local `NEXT_PUBLIC_PRIVY_APP_ID` and `NEXT_PUBLIC_TYCHE_PROGRAM_ID`.
+- Added global player-web response headers in `apps/web/next.config.ts`: a Privy/WalletConnect/Solana-aware CSP, `frame-ancestors 'none'`, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, a strict referrer policy, and a restrictive permissions policy. CSP reduces the configured RPC URL to HTTPS/WSS origins, so its API-key query parameter is never sent as a header value; explicit same-origin `/__api` and `/__worker` proxies remain covered by `'self'`.
+- Moved CORS-origin matching into `@tyche/constants` and used it in both API and worker. Localhost/LAN origins remain available in development but are rejected when `NODE_ENV=production`; the AWS production compose configuration now explicitly sets that value for both services. The worker now declares the shared constants workspace dependency.
+- Added CSP and CORS regression coverage. Verification passed: constants typecheck and **5/5** tests; web typecheck, zero-warning lint, and **329/329** tests; API typecheck, zero-warning lint, and **286/286** tests; worker typecheck, zero-warning lint, and **169/169** tests; production Docker Compose syntax; and `git diff --check`. The web production build completed with the pre-existing non-fatal optional Farcaster peer warning from `@privy-io/react-auth`; Farcaster remains neither installed nor enabled.
+- Local HTTP verification of `/play` returned `200` with CSP, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, referrer policy, and permissions policy headers. The local Privy SDK rejected the configured App ID as invalid, so email OTP could not be manually completed; no identifier was logged or changed. Correct the development Privy App ID and approved `http://localhost:3000` domain in the Privy dashboard before the OTP -> embedded wallet -> funded devnet transaction flow is re-tested. No production resource, dashboard setting, environment variable, transaction, or milestone checkbox was changed. Final consistency review: no public variable or header contains an RPC API key, development same-origin proxy behavior is retained, and the production release skill remains the separate gate for dashboard MFA, HttpOnly cookies, and production deployment evidence.
+
 ### 2026-09-20 (Privy production-release gate skill)
 
 - Opened the required `PRD.md`, `AGENTS.md`, and `PROGRESS_TRACKER.md`; inspected `.claude/skills`; and applied the skill-creation, Vercel environment-variable, local Vercel deployment, AWS runbook, and Privy security guidance before creating the release skill.

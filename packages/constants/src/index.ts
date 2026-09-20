@@ -163,3 +163,4 @@ export function sanitizeRuleText(value: string) {
 }
 
 export { SHARED_ERROR_CODES, type SharedErrorCode } from "./error-codes.js";
+export { resolveAllowedCorsOrigin } from "./cors.js";

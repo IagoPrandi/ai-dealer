@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import type { NextConfig } from "next";
 
 import { loadWorkspaceEnvironment } from "./src/config/workspaceEnv";
+import { createWebSecurityHeaders } from "./src/config/securityHeaders";
 
 const webAppRoot = path.dirname(fileURLToPath(import.meta.url));
 loadWorkspaceEnvironment(path.resolve(webAppRoot, "../.."));
@@ -29,6 +30,12 @@ const workerProxyTarget =
       })()
     : "http://localhost:3003");
 
+const securityHeaders = createWebSecurityHeaders({
+  apiUrl: process.env.NEXT_PUBLIC_TYCHE_API_URL,
+  rpcUrl: process.env.NEXT_PUBLIC_SOLANA_RPC_URL,
+  workerUrl: process.env.NEXT_PUBLIC_TYCHE_WORKER_URL,
+});
+
 const nextConfig: NextConfig = {
   output: "standalone",
   // Quick Tunnels use a random trusted hostname on every run. Allow that
@@ -37,6 +44,14 @@ const nextConfig: NextConfig = {
   allowedDevOrigins: ["*.trycloudflare.com"],
   env: {
     NEXT_PUBLIC_UI_MOCK: mockEnabled ? "1" : "0",
+  },
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: securityHeaders,
+      },
+    ];
   },
   async rewrites() {
     return [

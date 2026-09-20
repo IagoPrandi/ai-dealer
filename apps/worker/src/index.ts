@@ -1,8 +1,13 @@
 import { existsSync } from "node:fs";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import {
+  createServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
 import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { getTurnDurationHours } from "@tyche/game-engine";
+import { resolveAllowedCorsOrigin } from "@tyche/constants";
 import { createSolanaRpc } from "@solana/kit";
 import pg from "pg";
 import { createClient } from "redis";
@@ -188,7 +193,9 @@ function getManualControlStatus(
 }
 
 function getFirstTurnDurationSeconds(config: null | TurnAutomationConfig) {
-  return config?.desiredTurnDurationCycle?.[0] ?? getTurnDurationHours(0) * 3_600;
+  return (
+    config?.desiredTurnDurationCycle?.[0] ?? getTurnDurationHours(0) * 3_600
+  );
 }
 
 function getTurnAutomationStatus(
@@ -219,26 +226,12 @@ function getSettlementAutomationStatus(
   return config.automation.authorityKeypairBytes ? "enabled" : "error";
 }
 
-const LOCAL_WEB_ORIGIN_PATTERN = /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3})(:\d+)?$/;
-
 function getAllowedCorsOrigin(origin: string | undefined) {
-  if (!origin) {
-    return null;
-  }
-
-  const configuredOrigins = (process.env.TYCHE_WORKER_CORS_ORIGINS ?? "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
-
-  if (
-    configuredOrigins.includes(origin) ||
-    LOCAL_WEB_ORIGIN_PATTERN.test(origin)
-  ) {
-    return origin;
-  }
-
-  return null;
+  return resolveAllowedCorsOrigin({
+    configuredOrigins: process.env.TYCHE_WORKER_CORS_ORIGINS,
+    isProduction: process.env.NODE_ENV === "production",
+    origin,
+  });
 }
 
 function getCorsHeaders(request: IncomingMessage) {
@@ -534,8 +527,10 @@ if (
 
     if (request.method === "GET" && path === "/turn/active") {
       const requireFresh =
-        new URL(request.url ?? "/turn/active", "http://worker.local")
-          .searchParams.get("fresh") === "1";
+        new URL(
+          request.url ?? "/turn/active",
+          "http://worker.local",
+        ).searchParams.get("fresh") === "1";
       void getActiveTurnStatus({ requireFresh })
         .then((result) =>
           sendJson(request, response, 200, {

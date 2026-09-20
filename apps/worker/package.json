@@ -32,6 +32,7 @@
     "@solana/web3.js": "1.98.4",
     "@sqds/multisig": "2.1.4",
     "@switchboard-xyz/on-demand": "3.10.4",
+    "@tyche/constants": "workspace:*",
     "@tyche/game-engine": "workspace:*",
     "@tyche/rule-compiler": "workspace:*",
     "@tyche/rule-runtime": "workspace:*",
