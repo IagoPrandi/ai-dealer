@@ -16,21 +16,23 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@tyche/constants": "workspace:*",
+    "@privy-io/react-auth": "^3.44.0",
     "@solana-mobile/wallet-standard-mobile": "0.5.2",
+    "@solana-program/memo": "0.10.0",
     "@solana/client": "1.7.0",
     "@solana/kit": "5.5.1",
     "@solana/react-hooks": "1.4.1",
     "@solana/web3.js": "1.98.4",
     "@sqds/multisig": "2.1.4",
+    "@tyche/constants": "workspace:*",
     "lucide-react": "^1.17.0",
     "next": "16.2.7",
     "react": "19.2.7",
     "react-dom": "19.2.7"
   },
   "devDependencies": {
-    "@tyche/config": "workspace:*",
     "@playwright/test": "^1.60.0",
+    "@tyche/config": "workspace:*",
     "@types/react": "19.2.16",
     "@types/react-dom": "19.2.3",
     "dotenv": "16.6.1",

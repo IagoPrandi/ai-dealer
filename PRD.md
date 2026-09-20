@@ -143,6 +143,18 @@ The product should not be presented publicly as an AI infrastructure product, a 
 
 Those are trust and execution layers. The user-facing product is a live mobile game where each round can have a new way to win.
 
+### 1.7 Founder Pass NFT (planned; not deployed)
+
+Tyche may issue a limited Founder Pass NFT collection to fund product
+development. Its benefits are strictly defined game utilities: capped
+campaign-funded JDR promotional boosts, capped vote credits, and a capped
+protocol-fee waiver for rule proposals. The pass does not create a claim on
+prize pools, treasury fees, protocol revenue, dividends, yield, or a guaranteed
+financial return. The authoritative functional specification is
+[`docs/founder-pass-nft.md`](docs/founder-pass-nft.md). No mint, sale, or
+mainnet deployment is authorized until the document's open sale and governance
+decisions are approved.
+
 ---
 
 ## 2. Core Concepts

@@ -4,6 +4,45 @@ This tracker records milestone status, work logs, and required document confirma
 
 ## Work Log
 
+### 2026-09-20 (Privy production-release gate skill)
+
+- Opened the required `PRD.md`, `AGENTS.md`, and `PROGRESS_TRACKER.md`; inspected `.claude/skills`; and applied the skill-creation, Vercel environment-variable, local Vercel deployment, AWS runbook, and Privy security guidance before creating the release skill.
+- Added `.claude/skills/privy-production-release/SKILL.md`. It is invoked for Vercel/AWS production release preparation and blocks release completion until Privy dashboard controls, CSP/anti-clickjacking, production CORS, production-only App ID configuration, live header evidence, and OTP/external-wallet flows are verified. It explicitly keeps the current development environment unchanged, excludes the Privy App ID from AWS, and prohibits copying a production identifier into preview, development, or tracked environment files.
+- No Privy dashboard setting, Vercel environment variable, AWS resource, deployment, transaction, or milestone checkbox was changed. Final consistency review: the skill preserves the existing production-missing-App-ID build failure, requires the production App ID only after dashboard verification, and retains the PRD's separate M9 gate for real-SOL/mainnet flow.
+
+### 2026-09-19 (Embedded Solana wallet provider assessment)
+
+- Opened the required `PRD.md`, `AGENTS.md`, and `PROGRESS_TRACKER.md`; inspected `.claude/skills` and applied `web2-wallet-auth/SKILL.md` while assessing email/Google onboarding for non-Web3-native players.
+- Reviewed current first-party Privy and Dynamic documentation. Recommended Privy for the MVP because its unified authentication supports email OTP, Google/social and external Solana-wallet linking alongside Solana embedded wallets; it also documents funding/on-ramp and sponsored-transaction paths needed to remove the separate "acquire SOL" and gas prompts from the casual-player journey. Dynamic remains a viable alternative, but its TSS-MPC Solana wallet documentation currently labels the implementation beta.
+- No code, dependency, configuration, database migration, transaction, deployment, or on-chain state was changed. No milestone checkbox was ticked because user confirmation is required. Final consistency review: the embedded wallet remains the authoritative Solana player address for all value-bearing actions; email/Google is the account-recovery and authentication method, and the product must introduce explicit funding, spend limits, anti-abuse controls, and legal/compliance review before accepting real-value play.
+
+### 2026-09-19 (Optional Privy email onboarding implementation)
+
+- Opened the required `PRD.md`, `AGENTS.md`, and `PROGRESS_TRACKER.md`; inspected `.claude/skills` and applied the local frontend, wallet-auth, and test-and-verify guidance before editing. Preserved the pre-existing Founder Pass changes in `PRD.md`, this tracker, and `docs/founder-pass-nft.md`.
+- Added Privy email-only OTP onboarding with automatic Solana embedded-wallet creation on devnet. `NEXT_PUBLIC_PRIVY_APP_ID` is required when `VERCEL_ENV=production`; a local checkout without it continues to expose the existing external Wallet Standard path rather than fabricating email auth. The new setup guide records the required Privy dashboard email-OTP/origin configuration and explicitly keeps Google OAuth out of this release.
+- Added a player-wallet abstraction that adapts Privy's Solana Wallet Standard signer into the same transaction path used by guesses, rule proposals, votes, removals, invites, claims, and rewards. External selection is explicit for the page session, an email selection does not silently fall back to an extension, and Account can switch between the two. No email address, Privy identifier, token, or secret is sent through Tyche APIs, browser application storage, analytics, or on-chain instructions.
+- Replaced the connection sheet with `Choose how to play`, including the email OTP route and detected Phantom, Solflare, Backpack, and mobile Wallet Standard options. Account now shows the embedded receive address, copy action, self-custody/devnet-SOL funding requirement, external-wallet switch, and email sign-out. Existing insufficient-funds transaction feedback remains intact; no sponsorship, relayer, on-ramp, or auto-funding path was added.
+- Added focused configuration and wallet-source selection tests. Installed `@privy-io/react-auth` plus its required `@solana-program/memo@0.10.0` peer compatible with the repository's Solana Kit v5. Verification passed: web typecheck, zero-warning lint, **326/326** web tests, production build with a non-secret validation app ID (generated `.next/BUILD_ID`), and `git diff --check`. The SDK emits a non-fatal webpack warning for its unused optional Farcaster peer; Farcaster was not installed or enabled because it is outside this release.
+- Manual Privy OTP/devnet validation remains an environment task: configure a real Privy app ID with approved origins, then complete OTP -> fund the displayed devnet address -> guess -> vote -> claim, and repeat with a mobile external wallet. No milestone checkbox was ticked because user confirmation is still required. Final consistency review: all user-facing additions are English UTF-8, existing transaction timeout/pending/error handling is retained, no server-side signing or database migration was introduced, and no unrelated dirty change was modified.
+
+### 2026-09-18 (Founder Pass NFT funding specification)
+
+- Opened the required `PRD.md`, `AGENTS.md`, and `PROGRESS_TRACKER.md`; inspected `.claude/skills` and applied the local Solana development, contract-upgrade, and verification guidance before documenting the feature.
+- Added `docs/founder-pass-nft.md`, defining a transferable Metaplex Core Founder Pass collection with on-chain ownership and collection verification. The specification limits the benefits to a campaign-funded, capped 100x JDR promotional boost, up to 1,000 auditable vote credits per turn, and 100 lifetime protocol-fee-free rule proposals per individual pass. It explicitly excludes SOL prizes, treasury distributions, yield, and guaranteed returns.
+- The design fails closed against forged asset data, wrong owner/collection, reward replay, allowance reset through NFT transfer, pass stacking, campaign exhaustion, and vote-credit overuse. It also records the required backward-compatible account design, SBF coverage, and devnet review before any release.
+- Updated `PRD.md` with a planned-feature reference. No code, mint, sale, transaction, deployment, or on-chain state changed. No milestone checkbox was ticked because milestone completion requires user confirmation. Final consistency review: UI-sale copy is specified in English UTF-8, the existing standard-player economics remain unchanged, and open commercial/legal parameters are blocked rather than guessed.
+- Verification: `prettier --check docs/founder-pass-nft.md` and `git diff --check` passed. The existing `PRD.md` and tracker still have repository-wide Prettier warnings, so they were not mechanically reformatted outside this feature's content.
+
+### 2026-09-18 (Solana onboarding convention check)
+
+- Opened `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, inspected `.claude/skills`, and used current official Solana and wallet-provider documentation to verify the recommended account model. Native Solana DApps conventionally use Wallet Standard for external wallet connection and signing; email-first onboarding is a separate consumer-app pattern that pairs email authentication with an embedded Solana wallet.
+- No code, dependency, configuration, database, transaction, or on-chain state was changed. No milestone checkbox was changed because user confirmation is required.
+
+### 2026-09-18 (Email sign-in architecture assessment)
+
+- Opened `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, inspected `.claude/skills`, and followed `web2-wallet-auth/SKILL.md` while assessing email sign-in. Reviewed the public web account flow, Solana wallet providers, API proxy, API persistence, and package manifests.
+- No code, dependencies, configuration, database migration, transaction, or on-chain state was changed. The recommendation preserves the wallet as the authoritative on-chain player identity: email authentication can create a Web2 account and own optional profile/notification data, but a linked Solana wallet must still sign all guesses, votes, claims, and other value-bearing actions. No milestone checkbox was changed because user confirmation is required.
+
 ### 2026-09-16 (Precompilation reuses the paid artifact — fix)
 
 - Opened `PRD.md` (§6.15, §7.5, §7.9), `.claude/CLAUDE.md`, `PROGRESS_TRACKER.md`, and `docs/rule-proposal-prompt-test-set-10/11/12.md`; inspected `.claude/skills` and followed `tyche-test-and-verify/SKILL.md`.

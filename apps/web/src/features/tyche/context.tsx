@@ -6,9 +6,10 @@
  * rule-detail overlay. Screens read this via `useTyche()` (see TycheApp).
  */
 import { createContext, useContext } from "react";
-import type { useSolanaClient, useWalletConnection } from "@solana/react-hooks";
+import type { useSolanaClient } from "@solana/react-hooks";
 
 import type { TurnStateSnapshot } from "../../solana/tycheProgram";
+import type { PlayerWallet, PlayerWalletSource } from "../../solana/PlayerWalletProvider";
 import type { RulesView } from "./data/hooks";
 import type { RoundSummaryApi } from "./data/types";
 
@@ -68,8 +69,6 @@ export function resolveCreateIntent(params?: NavParams): CreateIntent {
 }
 
 type SolanaClient = ReturnType<typeof useSolanaClient>;
-type ConnectedWallet = ReturnType<typeof useWalletConnection>["wallet"];
-
 export interface TycheContextValue {
   actionError: null | string;
   /**
@@ -92,6 +91,10 @@ export interface TycheContextValue {
   connect: () => void;
   connected: boolean;
   connecting: boolean;
+  emailOnboardingAvailable: boolean;
+  emailSignedIn: boolean;
+  logoutEmail: () => Promise<void>;
+  selectEmbeddedWallet: () => void;
   decisionPhase: boolean;
   eliminatedIds: number[];
   endSeconds: null | number;
@@ -145,8 +148,9 @@ export interface TycheContextValue {
   voteApprove: (ruleId: number) => Promise<void>;
   voteBusyRuleId: null | number;
   voteEliminate: (ruleId: number) => Promise<void>;
-  wallet: ConnectedWallet;
+  wallet: PlayerWallet | null;
   walletAddress: string | undefined;
+  walletSource: PlayerWalletSource | null;
 }
 
 export const TycheContext = createContext<TycheContextValue | null>(null);

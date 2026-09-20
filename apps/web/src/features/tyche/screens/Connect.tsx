@@ -14,15 +14,19 @@ interface Connector {
 export function ConnectOverlay({
   connecting,
   connectors,
+  emailOnboardingAvailable,
   error,
   onClose,
   onConnect,
+  onEmailLogin,
 }: {
   connecting: boolean;
   connectors: readonly Connector[];
+  emailOnboardingAvailable: boolean;
   error?: null | string;
   onClose: () => void;
   onConnect: (id: string) => void;
+  onEmailLogin: () => void;
 }) {
   return (
     <div
@@ -50,8 +54,8 @@ export function ConnectOverlay({
         <div style={{ display: "flex", alignItems: "center", gap: 11, marginBottom: 8 }}>
           <Dealer size={34} />
           <div style={{ flex: 1 }}>
-            <h2 id="wallet-dialog-title" style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>Connect your wallet</h2>
-            <p style={{ margin: "2px 0 0", fontSize: 13, color: "var(--muted)" }}>Solana devnet · approval happens in your wallet.</p>
+            <h2 id="wallet-dialog-title" style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>Choose how to play</h2>
+            <p style={{ margin: "2px 0 0", fontSize: 13, color: "var(--muted)" }}>Solana devnet · every action is approved by your wallet.</p>
           </div>
           <button aria-label="Close wallet dialog" onClick={onClose} style={{ background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--muted)", borderRadius: 12, padding: 7, display: "grid", placeItems: "center", cursor: "pointer" }} type="button">
             <Ico.close />
@@ -65,9 +69,31 @@ export function ConnectOverlay({
         ) : null}
 
         <div style={{ display: "grid", gap: 9, marginTop: 14 }}>
+          {emailOnboardingAvailable ? (
+            <button
+              onClick={onEmailLogin}
+              className="ide-card ide-tap"
+              style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 15px", textAlign: "left", color: "var(--text)", cursor: "pointer" }}
+              type="button"
+            >
+              <span style={{ width: 38, height: 38, borderRadius: 11, background: "var(--purple)", display: "grid", placeItems: "center", flexShrink: 0 }}>
+                <Ico.user style={{ color: "var(--on-accent)" }} />
+              </span>
+              <span style={{ flex: 1 }}>
+                <span style={{ display: "block", fontWeight: 700, fontSize: 15 }}>Continue with email</span>
+                <span style={{ display: "block", marginTop: 2, fontSize: 12.5, color: "var(--muted)" }}>Use a one-time code. Gmail and any email address work.</span>
+              </span>
+              <span style={{ fontSize: 12.5, color: "var(--dim)" }}>OTP</span>
+            </button>
+          ) : null}
+          {emailOnboardingAvailable ? (
+            <div className="ide-num" style={{ color: "var(--dim)", fontSize: 10.5, letterSpacing: "0.14em", margin: "6px 0 0", textTransform: "uppercase" }}>
+              Or use an external wallet
+            </div>
+          ) : null}
           {connectors.length === 0 ? (
             <p style={{ fontSize: 14, color: "var(--muted)", lineHeight: 1.5 }}>
-              No compatible wallet was detected. Open {BRAND_NAME} inside a Solana wallet&apos;s browser (Phantom, Backpack, Solflare) or install a Wallet Standard wallet.
+              No compatible external wallet was detected. Open {BRAND_NAME} inside a Solana wallet&apos;s browser (Phantom, Backpack, Solflare) or install a Wallet Standard wallet.
             </p>
           ) : (
             connectors.map((connector) => (

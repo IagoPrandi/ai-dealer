@@ -6,7 +6,7 @@
  * state to live wallet + on-chain + API data. Replaces the old per-route pages.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSolanaClient, useWalletConnection } from "@solana/react-hooks";
+import { useSolanaClient } from "@solana/react-hooks";
 import { address } from "@solana/kit";
 import { usePathname, useRouter } from "next/navigation";
 
@@ -29,6 +29,7 @@ import {
   deriveRuleVoteAddress,
   getActionCutoffTimestamp,
 } from "../../solana/tycheProgram";
+import { usePlayerWallet } from "../../solana/PlayerWalletProvider";
 import {
   resolveCreateIntent,
   TycheContext,
@@ -339,9 +340,21 @@ export function TycheApp({
   // still writing.
   useEffect(() => startDealerReplyNotifier(), []);
 
-  const { connect, connecting, connected, connectors, wallet } =
-    useWalletConnection();
-  const walletAddress = wallet?.account.address.toString();
+  const {
+    connectExternal,
+    connecting,
+    connected,
+    connectors,
+    emailOnboardingAvailable,
+    emailSignedIn,
+    emailWalletError,
+    logoutEmail,
+    requestEmailLogin,
+    selectEmbeddedWallet,
+    source: walletSource,
+    wallet,
+    walletAddress,
+  } = usePlayerWallet();
   const pathname = usePathname();
   const router = useRouter();
 
@@ -410,6 +423,12 @@ export function TycheApp({
   const [removeBusyRuleId, setRemoveBusyRuleId] = useState<null | number>(null);
   const [actionError, setActionError] = useState<null | string>(null);
   const [connectError, setConnectError] = useState<null | string>(null);
+
+  useEffect(() => {
+    if (!emailWalletError) return;
+    setConnectError(emailWalletError);
+    setShowConnect(true);
+  }, [emailWalletError]);
 
   const reloadAll = useCallback(() => {
     activeTurn.refresh();
@@ -783,6 +802,10 @@ export function TycheApp({
     connect: requestConnect,
     connected,
     connecting,
+    emailOnboardingAvailable,
+    emailSignedIn,
+    logoutEmail,
+    selectEmbeddedWallet,
     // Elimination voting is open for the whole of phase 2; it has no separate
     // countdown — the single visible phase-2 timer (endSeconds) governs it, and
     // it closes at the turn end.
@@ -829,6 +852,7 @@ export function TycheApp({
     voteEliminate: (ruleId) => sendVote(ruleId, "eliminate"),
     wallet,
     walletAddress,
+    walletSource,
   };
 
   const showNav =
@@ -968,17 +992,23 @@ export function TycheApp({
               <ConnectOverlay
                 connecting={connecting}
                 connectors={connectors}
-                error={connectError}
+                emailOnboardingAvailable={emailOnboardingAvailable}
+                error={connectError ?? emailWalletError}
                 onClose={closeConnect}
                 onConnect={async (id) => {
                   setConnectError(null);
                   try {
-                    await connect(id);
+                    await connectExternal(id);
                     closeConnect();
                     reloadAll();
                   } catch (error) {
                     setConnectError(describeWalletConnectError(error));
                   }
+                }}
+                onEmailLogin={() => {
+                  setConnectError(null);
+                  requestEmailLogin();
+                  closeConnect();
                 }}
               />
             ) : null}

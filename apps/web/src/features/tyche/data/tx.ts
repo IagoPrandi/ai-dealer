@@ -7,12 +7,11 @@
  * client.transaction.prepareAndSend).
  */
 import { createWalletTransactionSigner } from "@solana/client";
-import type { useSolanaClient, useWalletConnection } from "@solana/react-hooks";
+import type { useSolanaClient } from "@solana/react-hooks";
+import type { PlayerWallet } from "../../../solana/PlayerWalletProvider";
 import { describeTycheProgramError } from "./programErrors";
 
 type SolanaClient = ReturnType<typeof useSolanaClient>;
-type WalletConnection = ReturnType<typeof useWalletConnection>;
-type ConnectedWallet = NonNullable<WalletConnection["wallet"]>;
 type PrepareAndSendInput = Parameters<SolanaClient["transaction"]["prepareAndSend"]>[0];
 type ProgramInstruction = PrepareAndSendInput["instructions"][number];
 
@@ -61,7 +60,7 @@ export interface WalletPendingAction {
 /** Sign + send a single program instruction; resolves to the tx signature. */
 export async function sendInstruction(
   client: SolanaClient,
-  wallet: ConnectedWallet,
+  wallet: PlayerWallet,
   instruction: ProgramInstruction,
   options: SendInstructionOptions = {},
 ): Promise<string> {
@@ -71,7 +70,7 @@ export async function sendInstruction(
 /** Sign + send one atomic transaction containing one or more instructions. */
 export async function sendInstructions(
   client: SolanaClient,
-  wallet: ConnectedWallet,
+  wallet: PlayerWallet,
   instructions: readonly ProgramInstruction[],
   options: SendInstructionOptions = {},
 ): Promise<string> {

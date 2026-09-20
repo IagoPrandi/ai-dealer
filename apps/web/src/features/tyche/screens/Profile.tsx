@@ -91,13 +91,18 @@ export function ProfileScreen() {
     client,
     connect,
     connected,
+    emailOnboardingAvailable,
+    emailSignedIn,
     go,
+    logoutEmail,
     resultTurnId,
     round,
     rules,
     turnId,
     walletAddress,
     wallet,
+    walletSource,
+    selectEmbeddedWallet,
   } = useTyche();
   const { claims, error, loading, reload } = usePlayerClaims(walletAddress);
   const history = usePlayerHistory(walletAddress);
@@ -107,6 +112,8 @@ export function ProfileScreen() {
   const [busy, setBusy] = useState(false);
   const [txError, setTxError] = useState<null | string>(null);
   const [done, setDone] = useState(false);
+  const [addressCopied, setAddressCopied] = useState(false);
+  const [logoutBusy, setLogoutBusy] = useState(false);
   const myRules = rules.rules.filter((r) => r.mine);
 
   useEffect(() => {
@@ -190,6 +197,31 @@ export function ProfileScreen() {
     history.loadMore();
   }
 
+  async function copyReceiveAddress() {
+    if (!walletAddress) return;
+    try {
+      await navigator.clipboard.writeText(walletAddress);
+      setAddressCopied(true);
+    } catch (cause) {
+      setTxError(
+        cause instanceof Error
+          ? `Could not copy the receive address: ${cause.message}`
+          : "Could not copy the receive address.",
+      );
+    }
+  }
+
+  async function signOutEmail() {
+    setLogoutBusy(true);
+    try {
+      await logoutEmail();
+    } catch (cause) {
+      setTxError(describeTxError(cause));
+    } finally {
+      setLogoutBusy(false);
+    }
+  }
+
   return (
     <div className="ide-app ide-screen" style={{ height: "100%", position: "relative", overflow: "hidden" }}>
       <div className="ide-ambient" />
@@ -208,6 +240,28 @@ export function ProfileScreen() {
             is `display: contents` below 1024px. */}
         <div className="ide-deck is-account">
         <div>
+
+        {walletSource === "embedded" && walletAddress ? (
+          <section className="ide-card" style={{ marginBottom: 16, padding: "14px 15px" }} aria-label="Fund your email wallet">
+            <div className="ide-num" style={{ color: "var(--purple-soft)", fontSize: 10.5, letterSpacing: "0.14em", textTransform: "uppercase" }}>Email wallet · self-custody</div>
+            <div style={{ fontWeight: 800, fontSize: 16, marginTop: 5 }}>Fund this address with devnet SOL</div>
+            <p style={{ color: "var(--muted)", fontSize: 13, lineHeight: 1.5, margin: "6px 0 11px" }}>Your email signs into your self-custodial Solana wallet. Deposit your own devnet SOL here for transaction fees and account rent.</p>
+            <div className="ide-num" style={{ background: "var(--surface-3)", borderRadius: 8, color: "var(--text)", fontSize: 12, overflowWrap: "anywhere", padding: "10px 11px" }}>{walletAddress}</div>
+            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+              <button onClick={copyReceiveAddress} className="ide-btn-ghost ide-btn" style={{ flex: 1, padding: 10, fontSize: 13 }} type="button">{addressCopied ? "Address copied" : "Copy receive address"}</button>
+              <button onClick={connect} className="ide-btn-ghost ide-btn" style={{ padding: "10px 12px", fontSize: 13 }} type="button">Use external wallet</button>
+              {emailSignedIn ? <button onClick={signOutEmail} disabled={logoutBusy} className="ide-btn-ghost ide-btn is-magenta" style={{ padding: "10px 12px", fontSize: 13, opacity: logoutBusy ? 0.6 : 1 }} type="button">{logoutBusy ? "Signing out..." : "Sign out"}</button> : null}
+            </div>
+          </section>
+        ) : null}
+
+        {walletSource === "external" && emailOnboardingAvailable && emailSignedIn ? (
+          <section className="ide-card" style={{ marginBottom: 16, padding: "14px 15px" }} aria-label="Switch to your email wallet">
+            <div style={{ fontWeight: 800, fontSize: 16 }}>External wallet selected</div>
+            <p style={{ color: "var(--muted)", fontSize: 13, lineHeight: 1.5, margin: "6px 0 11px" }}>Your email wallet remains available. Switch back to use its funded Solana address.</p>
+            <button onClick={selectEmbeddedWallet} className="ide-btn-ghost ide-btn" style={{ padding: "10px 12px", fontSize: 13 }} type="button">Use email wallet</button>
+          </section>
+        ) : null}
 
         {/* CLAIM HERO — sits directly on the page surface: no fill and no solid
             offset, so the yellow CTA is the only weight in the block. */}

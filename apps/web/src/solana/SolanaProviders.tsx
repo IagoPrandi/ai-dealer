@@ -12,6 +12,7 @@ import { SolanaProvider } from "@solana/react-hooks";
 import { BRAND_NAME } from "@tyche/config";
 
 import { resolvePublicSolanaConfig } from "./publicRpcConfig";
+import { PlayerWalletProvider } from "./PlayerWalletProvider";
 import { isSupportedTycheWallet } from "./walletDiscovery";
 
 const {
@@ -80,7 +81,7 @@ export function SolanaProviders({
         storageKey: "tyche.solana.wallet",
       }}
     >
-      {children}
+      <PlayerWalletProvider>{children}</PlayerWalletProvider>
     </SolanaProvider>
   );
 }
