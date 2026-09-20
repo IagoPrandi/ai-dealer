@@ -924,6 +924,96 @@ remains open and the residual tokens remain isolated in its vault; no
 administrative sweep, arbitrary redistribution, or treasury reclassification is
 permitted.
 
+### 5.1.2 Founder Pass planning amendment (2026-09-20; not activated)
+
+The proposed Founder Pass would draw its optional JDR boost from the same
+finite Initial Campaign Reserve Vault as ordinary promotional rewards, with
+no separate Founder Pass vault or per-pass JDR allocation. On a qualifying
+manual claim, the ordinary reward is paid under its existing campaign rule
+and the additional amount is at most `99 × base_reward`, further limited
+to campaign atoms not committed to earlier reward liabilities. If the extra
+balance is insufficient, the claim records the actual partial boost; if
+there is no extra JDR, no Founder Pass round is consumed. The pass cannot
+create JDR, claim from another vault, or guarantee a 100x outcome. Earlier
+boosted claims can reduce what remains for later promotional rewards.
+
+This is a design request, not a change to the funded v2 campaign or its
+economic hash. Before activation, the claim-liability accounting and the
+current pay-at-settlement programme path must be reconciled, and the new
+formula must be versioned, reviewed, tested, and activated through the
+governed release process. The full Founder Pass specification is in
+[`PRD-FOUNDER-PASS-NFT.md`](PRD-FOUNDER-PASS-NFT.md), with a concise
+product summary in [`docs/founder-pass-nft.md`](docs/founder-pass-nft.md).
+
+#### Required claim-liability implementation
+
+The current `CampaignReserve` stores `remaining_atoms` and
+`cumulative_distributed_atoms`, but has no counter for earned, unclaimed
+base rewards. `settle_action_reward` currently calculates, debits, transfers,
+and creates `CampaignRewardReceipt` at settlement; its arguments include
+an action ID and kind but no turn ID. Its v2 economic hash and fixed reward
+constants do not implement Founder Pass boosts. The following change is
+required before a shared-vault bonus can be enabled:
+
+1. Add on-chain `reserved_base_atoms` accounting for every earned but
+   unclaimed campaign reward. A companion PDA is acceptable if it preserves
+   the byte layout of an existing `CampaignReserve`; an in-place account
+   reinterpretation is not. Track each pending entitlement by canonical
+   campaign, action ID, beneficiary, reward kind, originating turn ID, exact
+   reserved base atoms, and claimed state. Prove these values from the
+   qualifying on-chain game action, not an API response or caller-provided
+   claim amount. Keep the current settlement receipt replay protection.
+2. At action confirmation, reserve the ordinary base amount once:
+   `free = campaign.remaining_atoms - reserved_base_atoms`;
+   `base_reserved = min(nominal_base_atoms, free)`; then increase
+   `reserved_base_atoms` by `base_reserved` and create the entitlement
+   atomically with the qualifying action. This changes no token custody and
+   allocates no Founder Pass-specific vault. A zero allocation is recorded
+   for that action with an explicit no-reward reason, with no future claim
+   or debt. Every other campaign reward path must spend only `free`, so
+   active-rule, referral, and later action rewards cannot consume pending
+   base claims.
+3. At manual claim, load the entitlement and verified Founder Pass asset,
+   if offered. The ordinary payout is its reserved base amount. Compute
+   `free = campaign.remaining_atoms - reserved_base_atoms` and
+   `bonus = min(checked_mul(base_reserved, 99), free)`. Transfer
+   `base_reserved + bonus` to the immutable beneficiary; reduce
+   `reserved_base_atoms` by `base_reserved`; reduce
+   `campaign.remaining_atoms` and the vault by the total paid; and increase
+   `cumulative_distributed_atoms` by the same total. Mark the entitlement
+   claimed and write a versioned or companion receipt with base, bonus,
+   total, pass asset, and originating turn; do not reinterpret existing
+   `CampaignRewardReceipt` bytes. When `bonus = 0`, a normal base claim remains possible
+   and no Founder Pass round is consumed. A positive bonus and the pass's
+   round-use update must be atomic with the JDR transfer.
+4. Preserve, after every action and claim,
+   `0 <= reserved_base_atoms <= campaign.remaining_atoms`,
+   `campaign_vault.amount == campaign.remaining_atoms`, and
+   `original_allocation_atoms == cumulative_distributed_atoms + remaining_atoms`.
+   Free balance is derived as `remaining_atoms - reserved_base_atoms`.
+   If free balance reaches zero while reserved claims remain, reject new
+   reward allocations and bonuses but continue to permit existing valid
+   ordinary claims. Only mark the campaign fully exhausted when the vault
+   balance reaches zero. Concurrent claims and allocations must serialize
+   through writable campaign and liability accounts.
+5. Before activating this accounting on an already funded campaign,
+   reconcile all unclaimed rewards earned under the old settlement path.
+   Register their base liabilities from verifiable on-chain action records
+   before any bonus can spend the free balance. If that inventory cannot be
+   proven completely, keep Founder Pass boosts disabled until an approved
+   migration or release plan protects those claims. Already settled receipts
+   must not be replayed or reclassified. Any devnet migration must be
+   separately governed; no in-place v2 economic-hash change is implied.
+
+Acceptance tests must cover ordinary claims before and after a boosted claim,
+two passes racing for the last free atoms, a bonus smaller than 99x, zero
+free balance with outstanding ordinary claims, every other campaign reward
+path, claim replay, wrong beneficiary/pass/turn, transfer of a pass, and the
+three accounting invariants. The frontend must display the fixed base and
+latest quoted bonus/total before signature, warn that another claim may
+change the available bonus, then report the finalized amount. A stale
+preview cannot override on-chain settlement.
+
 ### 5.2 Proposal and supporter action rewards
 
 While the initial promotion reserve has a positive balance, eligible rule

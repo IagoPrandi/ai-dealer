@@ -26,11 +26,19 @@ use tokenomics_core::{
     instruction as tokenomics_instruction, CampaignReserve, CampaignRewardReceipt,
     DistributionVaultRecord, InitializeGenesisArgs,
 };
+use tyche::founder_pass::{
+    FounderPassAssetStandard, FounderPassFeeWaiverFunding, FounderPassOwnershipSnapshotPolicy,
+    FounderPassSupplyEnforcement, FP_DECISIONS_REQUIRED_FOR_ACTIVATION,
+    FOUNDER_PASS_ACTIVE_TURN_WINDOW, FOUNDER_PASS_BET_ALLOWANCE, FOUNDER_PASS_MAX_SUPPLY,
+    FOUNDER_PASS_RULE_PROPOSAL_ALLOWANCE, FOUNDER_PASS_VOTE_ALLOWANCE,
+};
 use tyche::{
-    accounts, instruction, DrawStatus, GlobalConfig, InitializeGlobalConfigArgs,
-    MigrateFeePoolCustodyArgs, PlayerGuess, PrecompilationStatus, PrecompileRuleArgs, PrizeVault,
-    ProposeRuleArgs, ResetStaleVrfRequestArgs, RuleProposal, RuleState, RuleVote, SetVrfConfigArgs,
-    SubmitGuessArgs, TreasuryVault, TurnState, TurnStatus, TycheError, VoteRuleArgs, VrfStage,
+    accounts, instruction, ConfigureFounderPassArgs, DrawStatus, FounderPassConfig,
+    FounderPassUsage, GlobalConfig, InitializeGlobalConfigArgs, MigrateFeePoolCustodyArgs,
+    PlayerGuess, PrecompilationStatus, PrecompileRuleArgs, PrizeVault, ProposeRuleArgs,
+    ResetStaleVrfRequestArgs, RuleProposal, RuleState, RuleVote, SetFounderPassActivationArgs,
+    SetVrfConfigArgs, SubmitGuessArgs, TreasuryVault, TurnState, TurnStatus, TycheError,
+    VoteRuleArgs, VrfStage,
 };
 
 const PLAYER_BALANCE: u64 = 2_000_000_000;
@@ -2861,5 +2869,467 @@ async fn fee_pool_custody_migration_balances_cross_program_cpi_and_is_replay_saf
     assert_eq!(
         lamports_of(&mut context, distribution_vault).await - distribution_before,
         migration_total
+    );
+}
+
+// ------------------------------------------------------------------
+// Founder Pass accounting core (PRD-FOUNDER-PASS-NFT.md, FP1)
+// ------------------------------------------------------------------
+
+/// Minimal Metaplex Core `AssetV1` account body: no plugins, bound to
+/// `collection` through `UpdateAuthority::Collection`.
+fn core_asset_account(owner: Pubkey, collection: Pubkey, asset_program: Pubkey) -> Account {
+    let mut data = vec![1u8];
+    data.extend_from_slice(owner.as_ref());
+    data.push(2);
+    data.extend_from_slice(collection.as_ref());
+    let name = b"Tywish Founder Pass";
+    data.extend_from_slice(&(name.len() as u32).to_le_bytes());
+    data.extend_from_slice(name);
+    let uri = b"https://example.invalid/pass.json";
+    data.extend_from_slice(&(uri.len() as u32).to_le_bytes());
+    data.extend_from_slice(uri);
+    data.push(0);
+
+    Account {
+        lamports: 10_000_000,
+        data,
+        owner: asset_program,
+        executable: false,
+        rent_epoch: 0,
+    }
+}
+
+fn governed_founder_pass_args(
+    asset_program: Pubkey,
+    collection: Pubkey,
+) -> ConfigureFounderPassArgs {
+    ConfigureFounderPassArgs {
+        asset_standard: FounderPassAssetStandard::MetaplexCore,
+        asset_program_id: asset_program,
+        canonical_collection: collection,
+        campaign: Pubkey::new_unique(),
+        supply_enforcement: FounderPassSupplyEnforcement::CollectionHardCap,
+        allowlist_commitment: [0u8; 32],
+        ownership_snapshot_policy: FounderPassOwnershipSnapshotPolicy::ClaimTimeOwnership,
+        boostable_reward_kinds: 0b11,
+        fee_waiver_funding: FounderPassFeeWaiverFunding::SponsorFunded,
+        max_pass_vote_actions_per_rule_per_turn: 3,
+        max_passes_per_wallet_per_turn: 1,
+    }
+}
+
+fn configure_founder_pass_ix(
+    governance_authority: Pubkey,
+    args: ConfigureFounderPassArgs,
+) -> Instruction {
+    Instruction {
+        program_id: tyche::ID,
+        accounts: accounts::ConfigureFounderPass {
+            governance_authority,
+            founder_pass_config: pda(&[b"founder_pass_config"]),
+            program_data: tyche_program_data(),
+        }
+        .to_account_metas(None),
+        data: instruction::ConfigureFounderPass { args }.data(),
+    }
+}
+
+fn set_founder_pass_activation_ix(
+    governance_authority: Pubkey,
+    enabled: bool,
+    paused: bool,
+    activation_turn_id: u64,
+) -> Instruction {
+    Instruction {
+        program_id: tyche::ID,
+        accounts: accounts::SetFounderPassActivation {
+            governance_authority,
+            founder_pass_config: pda(&[b"founder_pass_config"]),
+            program_data: tyche_program_data(),
+        }
+        .to_account_metas(None),
+        data: instruction::SetFounderPassActivation {
+            args: SetFounderPassActivationArgs {
+                enabled,
+                paused,
+                activation_turn_id,
+            },
+        }
+        .data(),
+    }
+}
+
+fn initialize_founder_pass_usage_ix(owner: Pubkey, asset: Pubkey) -> Instruction {
+    Instruction {
+        program_id: tyche::ID,
+        accounts: accounts::InitializeFounderPassUsage {
+            owner,
+            founder_pass_config: pda(&[b"founder_pass_config"]),
+            asset,
+            founder_pass_usage: pda(&[b"founder_pass_usage", asset.as_ref()]),
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+        data: instruction::InitializeFounderPassUsage {}.data(),
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires an SBF build and SBF_OUT_DIR; run the explicit SBF integration suite"]
+async fn founder_pass_config_is_governed_and_blocks_activation_until_decisions_are_resolved() {
+    let governance_authority = Keypair::new();
+    let unauthorized = Keypair::new();
+    let asset_program = Pubkey::new_unique();
+    let collection = Pubkey::new_unique();
+
+    let mut test = ProgramTest::new("tyche", tyche::ID, processor!(process_tyche_instruction));
+    test.add_account(
+        tyche_program_data(),
+        program_data_account(governance_authority.pubkey()),
+    );
+    let mut context = test.start_with_context().await;
+    fund(&mut context, &governance_authority.pubkey()).await;
+    fund(&mut context, &unauthorized.pubkey()).await;
+
+    let config_pda = pda(&[b"founder_pass_config"]);
+    let initialize = |authority: Pubkey| Instruction {
+        program_id: tyche::ID,
+        accounts: accounts::InitializeFounderPassConfig {
+            governance_authority: authority,
+            founder_pass_config: config_pda,
+            program_data: tyche_program_data(),
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+        data: instruction::InitializeFounderPassConfig {}.data(),
+    };
+
+    // A signer that is not the programme upgrade authority cannot create it.
+    assert_custom_error(
+        process(
+            &mut context,
+            initialize(unauthorized.pubkey()),
+            &[&unauthorized],
+        )
+        .await,
+        u32::from(TycheError::InvalidGovernanceAuthority),
+    );
+
+    process(
+        &mut context,
+        initialize(governance_authority.pubkey()),
+        &[&governance_authority],
+    )
+    .await
+    .unwrap();
+
+    // Birth state: disabled, every §14 decision unresolved, allowances pinned.
+    let config: FounderPassConfig = read_anchor_account(&mut context, config_pda).await;
+    assert!(!config.enabled && !config.paused);
+    assert_eq!(config.asset_standard, FounderPassAssetStandard::Unset);
+    assert_eq!(config.max_supply, FOUNDER_PASS_MAX_SUPPLY);
+    assert_eq!(config.vote_allowance, FOUNDER_PASS_VOTE_ALLOWANCE);
+    assert_eq!(
+        config.rule_proposal_allowance,
+        FOUNDER_PASS_RULE_PROPOSAL_ALLOWANCE
+    );
+    assert_eq!(config.bet_allowance, FOUNDER_PASS_BET_ALLOWANCE);
+    assert_eq!(config.active_turn_window, FOUNDER_PASS_ACTIVE_TURN_WINDOW);
+    assert_eq!(
+        config.unresolved_decisions(),
+        FP_DECISIONS_REQUIRED_FOR_ACTIVATION
+    );
+
+    // §14: activation is refused while any decision is open.
+    assert_custom_error(
+        process(
+            &mut context,
+            set_founder_pass_activation_ix(governance_authority.pubkey(), true, false, 1),
+            &[&governance_authority],
+        )
+        .await,
+        u32::from(TycheError::FounderPassDecisionsUnresolved),
+    );
+
+    // A concentration limit above the lifetime vote allowance is meaningless.
+    let mut invalid = governed_founder_pass_args(asset_program, collection);
+    invalid.max_pass_vote_actions_per_rule_per_turn = u16::MAX;
+    assert_custom_error(
+        process(
+            &mut context,
+            configure_founder_pass_ix(governance_authority.pubkey(), invalid),
+            &[&governance_authority],
+        )
+        .await,
+        u32::from(TycheError::InvalidFounderPassConcentrationLimit),
+    );
+
+    // Configuration is governance-gated too.
+    assert_custom_error(
+        process(
+            &mut context,
+            configure_founder_pass_ix(
+                unauthorized.pubkey(),
+                governed_founder_pass_args(asset_program, collection),
+            ),
+            &[&unauthorized],
+        )
+        .await,
+        u32::from(TycheError::InvalidGovernanceAuthority),
+    );
+
+    process(
+        &mut context,
+        configure_founder_pass_ix(
+            governance_authority.pubkey(),
+            governed_founder_pass_args(asset_program, collection),
+        ),
+        &[&governance_authority],
+    )
+    .await
+    .unwrap();
+
+    let config: FounderPassConfig = read_anchor_account(&mut context, config_pda).await;
+    assert_eq!(config.unresolved_decisions(), 0);
+    // Resolving the decisions does not itself activate anything.
+    assert!(!config.enabled);
+
+    process(
+        &mut context,
+        set_founder_pass_activation_ix(governance_authority.pubkey(), true, false, 12),
+        &[&governance_authority],
+    )
+    .await
+    .unwrap();
+
+    let config: FounderPassConfig = read_anchor_account(&mut context, config_pda).await;
+    assert!(config.enabled);
+    assert_eq!(config.activation_turn_id, 12);
+
+    // The activation turn anchors the one window every pass shares, so it is
+    // write-once: re-enabling cannot shift the window under existing holders.
+    assert_custom_error(
+        process(
+            &mut context,
+            set_founder_pass_activation_ix(governance_authority.pubkey(), true, false, 13),
+            &[&governance_authority],
+        )
+        .await,
+        u32::from(TycheError::FounderPassActivationTurnImmutable),
+    );
+
+    // Pausing and re-enabling at the original turn stays allowed, and the
+    // window is unchanged by that round trip.
+    let window_before = config.turn_window().unwrap();
+    process(
+        &mut context,
+        set_founder_pass_activation_ix(governance_authority.pubkey(), false, true, 0),
+        &[&governance_authority],
+    )
+    .await
+    .unwrap();
+    process(
+        &mut context,
+        set_founder_pass_activation_ix(governance_authority.pubkey(), true, false, 12),
+        &[&governance_authority],
+    )
+    .await
+    .unwrap();
+    let config: FounderPassConfig = read_anchor_account(&mut context, config_pda).await;
+    assert_eq!(config.turn_window().unwrap(), window_before);
+
+    // §4.3: the canonical collection cannot be replaced by a config write once
+    // benefits are live; that requires a governed migration.
+    assert_custom_error(
+        process(
+            &mut context,
+            configure_founder_pass_ix(
+                governance_authority.pubkey(),
+                governed_founder_pass_args(asset_program, Pubkey::new_unique()),
+            ),
+            &[&governance_authority],
+        )
+        .await,
+        u32::from(TycheError::FounderPassAlreadyActivated),
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires an SBF build and SBF_OUT_DIR; run the explicit SBF integration suite"]
+async fn founder_pass_usage_is_asset_keyed_and_refuses_unverified_assets() {
+    let governance_authority = Keypair::new();
+    let owner = Keypair::new();
+    let stranger = Keypair::new();
+    let asset_program = Pubkey::new_unique();
+    let other_program = Pubkey::new_unique();
+    let collection = Pubkey::new_unique();
+    let other_collection = Pubkey::new_unique();
+
+    let genuine_asset = Pubkey::new_unique();
+    let wrong_collection_asset = Pubkey::new_unique();
+    let wrong_program_asset = Pubkey::new_unique();
+
+    let mut test = ProgramTest::new("tyche", tyche::ID, processor!(process_tyche_instruction));
+    test.add_account(
+        tyche_program_data(),
+        program_data_account(governance_authority.pubkey()),
+    );
+    test.add_account(
+        genuine_asset,
+        core_asset_account(owner.pubkey(), collection, asset_program),
+    );
+    test.add_account(
+        wrong_collection_asset,
+        core_asset_account(owner.pubkey(), other_collection, asset_program),
+    );
+    // Byte-identical to a genuine pass, but owned by another programme.
+    test.add_account(
+        wrong_program_asset,
+        core_asset_account(owner.pubkey(), collection, other_program),
+    );
+
+    let mut context = test.start_with_context().await;
+    fund(&mut context, &governance_authority.pubkey()).await;
+    fund(&mut context, &owner.pubkey()).await;
+    fund(&mut context, &stranger.pubkey()).await;
+
+    let config_pda = pda(&[b"founder_pass_config"]);
+    process(
+        &mut context,
+        Instruction {
+            program_id: tyche::ID,
+            accounts: accounts::InitializeFounderPassConfig {
+                governance_authority: governance_authority.pubkey(),
+                founder_pass_config: config_pda,
+                program_data: tyche_program_data(),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(None),
+            data: instruction::InitializeFounderPassConfig {}.data(),
+        },
+        &[&governance_authority],
+    )
+    .await
+    .unwrap();
+
+    // While disabled, no usage account can be created at all.
+    assert_custom_error(
+        process(
+            &mut context,
+            initialize_founder_pass_usage_ix(owner.pubkey(), genuine_asset),
+            &[&owner],
+        )
+        .await,
+        u32::from(TycheError::FounderPassInactive),
+    );
+
+    process(
+        &mut context,
+        configure_founder_pass_ix(
+            governance_authority.pubkey(),
+            governed_founder_pass_args(asset_program, collection),
+        ),
+        &[&governance_authority],
+    )
+    .await
+    .unwrap();
+    process(
+        &mut context,
+        set_founder_pass_activation_ix(governance_authority.pubkey(), true, false, 1),
+        &[&governance_authority],
+    )
+    .await
+    .unwrap();
+
+    // Wrong collection, wrong owning programme, and a non-owner signer are all
+    // refused even though each account is otherwise well formed.
+    assert_custom_error(
+        process(
+            &mut context,
+            initialize_founder_pass_usage_ix(owner.pubkey(), wrong_collection_asset),
+            &[&owner],
+        )
+        .await,
+        u32::from(TycheError::FounderPassCollectionMismatch),
+    );
+    assert_custom_error(
+        process(
+            &mut context,
+            initialize_founder_pass_usage_ix(owner.pubkey(), wrong_program_asset),
+            &[&owner],
+        )
+        .await,
+        u32::from(TycheError::InvalidFounderPassAssetProgram),
+    );
+    assert_custom_error(
+        process(
+            &mut context,
+            initialize_founder_pass_usage_ix(stranger.pubkey(), genuine_asset),
+            &[&stranger],
+        )
+        .await,
+        u32::from(TycheError::FounderPassNotOwned),
+    );
+
+    process(
+        &mut context,
+        initialize_founder_pass_usage_ix(owner.pubkey(), genuine_asset),
+        &[&owner],
+    )
+    .await
+    .unwrap();
+
+    let config_after: FounderPassConfig = read_anchor_account(&mut context, config_pda).await;
+    let usage: FounderPassUsage = read_anchor_account(
+        &mut context,
+        pda(&[b"founder_pass_usage", genuine_asset.as_ref()]),
+    )
+    .await;
+    assert_eq!(usage.asset, genuine_asset);
+    assert_eq!(usage.collection, collection);
+    assert_eq!(usage.vote_actions_used, 0);
+    assert_eq!(usage.rule_proposals_used, 0);
+    assert_eq!(usage.bets_used, 0);
+    // The active-turn window is global and lives on the config, so a usage
+    // account carries no turn state of its own.
+    assert_eq!(
+        config_after.turn_window().unwrap().start_turn_id,
+        config_after.activation_turn_id
+    );
+
+    // The account is permanent: a second call cannot reset accrued usage, and
+    // it is keyed by the asset rather than by the wallet that paid for it.
+    assert!(process(
+        &mut context,
+        initialize_founder_pass_usage_ix(owner.pubkey(), genuine_asset),
+        &[&owner],
+    )
+    .await
+    .is_err());
+
+    // An emergency pause stops new benefit accounting without touching what
+    // already exists (§6.1).
+    process(
+        &mut context,
+        set_founder_pass_activation_ix(governance_authority.pubkey(), true, true, 1),
+        &[&governance_authority],
+    )
+    .await
+    .unwrap();
+    let still_there: FounderPassUsage = read_anchor_account(
+        &mut context,
+        pda(&[b"founder_pass_usage", genuine_asset.as_ref()]),
+    )
+    .await;
+    assert_eq!(still_there.asset, genuine_asset);
+    assert_custom_error(
+        process(
+            &mut context,
+            initialize_founder_pass_usage_ix(owner.pubkey(), wrong_collection_asset),
+            &[&owner],
+        )
+        .await,
+        u32::from(TycheError::FounderPassInactive),
     );
 }

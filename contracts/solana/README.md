@@ -274,6 +274,159 @@ first, then sweeps, so an abandoned claim cannot stall the rollover chain.
 - `initialize_global_config`, `open_turn`, `submit_guess`, `propose_rule`, `vote_rule`, and `close_turn`.
 - Isolated PDA constraints, checked fee accounting, turn lifecycle validation, and invalid-input tests.
 
+## Founder Pass Accounting Core (FP1)
+
+`programs/tyche/src/founder_pass.rs` implements milestone **FP1** of
+[`PRD-FOUNDER-PASS-NFT.md`](../../PRD-FOUNDER-PASS-NFT.md). It is state and
+governance only. **No benefit is implemented**: nothing here waives a Tyche
+fee, moves a lamport, or pays JDR. Fee waivers are FP2 and the JDR boost is
+FP3, and both are blocked until FP0 closes.
+
+FP0 is still open, so PRD §14 applies — "unresolved decisions block their
+dependent work; they do not silently select a default." Every open decision is
+an explicit `Unset` variant or a zero sentinel, and the programme refuses to
+activate while any of them remains unresolved. §4.2 is what makes this
+milestone shippable ahead of the Magic Eden gate: "A failed Launchpad gate
+blocks the sale, while platform-neutral usage accounting can still be
+implemented."
+
+### Accounts
+
+- `FounderPassConfig` — PDA `["founder_pass_config"]`, 180 bytes. Stores the
+  governed asset standard and programme id, canonical collection, campaign,
+  supply-enforcement mode and commitment, activation boundary, the §14 policy
+  selections, and the §3.2 allowances. Allowances, the active-turn window, and
+  the 5,000 supply cap are pinned to their constants, so governance cannot
+  widen a confirmed limit through this account.
+- `FounderPassUsage` — PDA `["founder_pass_usage", asset]`, 87 bytes. Keyed by
+  the **individual NFT asset address, never by a wallet**, so quotas belong to
+  the pass and survive a transfer (§3.2). Holds only the lifetime
+  vote/proposal/bet counters; the window is global, so there is no per-pass turn
+  state.
+
+Both accounts are new, so no existing bytes are reinterpreted. The seventeen new
+`TycheError` variants are appended, so existing error codes keep their numbers.
+
+#### The active-turn window
+
+Owner decisions of 2026-09-20, in two steps: a set of 100 distinct turn IDs
+became a window of 800 consecutive turns, and that window then became
+**global** rather than per-pass.
+
+There is one window for the whole collection —
+`[activation_turn_id, activation_turn_id + FOUNDER_PASS_ACTIVE_TURN_WINDOW - 1]`
+— anchored at the governed activation turn. `activation_turn_id` is write-once,
+so disabling and re-enabling cannot shift the window under existing holders. No
+player action opens, extends, renews, or resets it.
+
+§6.2 asked for membership-safe storage because "a counter alone cannot prove
+whether a previously used turn is being reused". A governed contiguous range
+satisfies that more strongly than a per-pass set: eligibility is a comparison
+against bounds no player can influence, and there is no per-pass turn state to
+corrupt. That is why the account is 87 bytes rather than the 889 the sorted-set
+model needed.
+
+Two trades are product rules, not optimizations:
+
+1. **The clock cannot be deferred.** Declining a benefit preserves quota but
+   buys no time.
+2. **Passes do not all get 800 usable turns.** Quotas are identical, but a pass
+   delivered late in the window inherits only the remainder, which departs from
+   the earlier "identical benefits regardless of purchase phase" wording. At a
+   24-hour production turn the whole window is about 800 days.
+
+#### Rent
+
+Rent exemption is a **refundable Solana deposit, not a Tyche fee** — PRD §3.2
+already places account rent outside Tyche action fees. Read from the live
+mainnet `SysvarRent111…` (`lamports_per_byte_year = 5080`,
+`exemption_threshold = 1.0`, over a 128-byte account overhead):
+
+| Account | Bytes | Lamports | SOL | Paid by |
+| --- | ---: | ---: | ---: | --- |
+| `FounderPassConfig` | 180 | 1,564,640 | 0.00156464 | governance, once |
+| `FounderPassUsage` | 87 | 1,092,200 | 0.00109220 | the asset owner, per pass |
+
+At the 5,000-pass cap the usage deposits total about 5.5 SOL, all of it
+holder-paid, so this is not a project cost. The window model cut the per-pass
+deposit by about 79% versus the 889-byte sorted-set layout. Note that the
+**program binary did not shrink**: `tyche.so` went 1,173,696 → 1,172,272 →
+1,173,904 bytes across the two changes, because the write-once activation check
+and its error offset the removed search and insert logic. The saving is rent,
+not code size. These are cluster parameters: re-read the sysvar at launch
+instead of trusting this table.
+
+### Instructions
+
+All four are gated on the programme upgrade authority through the same
+`require_program_upgrade_authority` path as `set_vrf_config`.
+
+- `initialize_founder_pass_config` — creates the config in its birth state:
+  benefits disabled, asset standard `Unset`, every §14 decision unresolved. It
+  deliberately takes no arguments, so a deployment cannot be born with a guessed
+  standard, collection, or policy.
+- `configure_founder_pass(args)` — records the governed resolution of the §14
+  decisions as one complete, reviewable statement. Refused once benefits are
+  enabled: §4.3 requires a governed migration that preserves every asset's used
+  allowances, not a config overwrite.
+- `set_founder_pass_activation({ enabled, paused, activation_turn_id })` —
+  enabling requires `unresolved_decisions() == 0`. Pausing is always permitted
+  and rewrites no historical usage.
+- `initialize_founder_pass_usage` — creates the per-asset usage account for a
+  verified pass. The signer must be the asset's current on-chain owner. The
+  account is permanent, so a second call fails rather than resetting accrued
+  usage.
+
+### Asset verification
+
+`verify_founder_pass_asset` dispatches on the governed standard. `Unset` is not
+a standard and refuses everything. Metaplex Core is the §4.1 **provisional**
+standard; there is no fallback variant and no acceptance of arbitrary metadata
+URIs, because adopting another standard requires its own reviewed verifier.
+
+The trust anchor is the account owner: bytes are interpreted only after the
+account is proved to be owned by the governed Core programme id, so a forged
+look-alike account owned by any other programme is rejected before a single
+field is read. The verifier then checks the `AssetV1` key discriminator (which
+a burned or uninitialized asset does not carry), the current owner against the
+signer, the collection binding through `UpdateAuthority::Collection`, and the
+plugin registry for a frozen `FreezeDelegate` or `PermanentFreezeDelegate`.
+Name, symbol, image, and URI are skipped structurally and never used as
+authorization input (§6.2). Every read is bounds-checked and fails closed.
+
+> **FP-D2 gate.** The Core plugin-registry discriminants were written from the
+> documented Metaplex Core layout and **must be re-verified against the exact
+> deployed `mpl-core` build during the FP0 freeze**, before governance enables
+> benefits. The decoder fails closed on any structural ambiguity and the whole
+> path is unreachable while `enabled` is false, so an unverified numbering
+> cannot authorize anything today.
+
+### What FP2 and FP3 build on
+
+`plan_founder_pass_use` takes the window from `FounderPassConfig::turn_window()`
+and decides one pass use without writing: it validates the account's
+representation invariant, checks the window before the action quota so an
+out-of-window attempt reports the governing reason, and returns every post-state
+counter. The caller writes those values. Because the planner is pure, a refusal
+leaves the account untouched, satisfying "a failed or reverted action consumes
+neither quota nor turn".
+
+Three preconditions belong to the FP2/FP3 call sites, not to this module:
+
+- An action already free under ordinary game policy must not reach the planner
+  at all — §3.2 requires it to consume no quota.
+- A JDR boost must pass its reward's **originating** turn, not the turn current
+  at claim time (§3.3). A reward earned before activation is therefore not
+  boostable.
+- The player-facing auto-apply preference (FP4) is an off-chain profile setting
+  that decides only whether the app prompts. Every transaction must still state
+  explicitly whether it takes the pass-funded path; a preference can never widen
+  what the programme authorizes.
+- That last point is an open product question, recorded under FP-D6/FP-D7:
+  attributing the boost to the originating turn existed to keep distinct-turn
+  counting honest, and the window model removes that reason. FP3 should confirm
+  whether the claim turn is the better attribution before it is built.
+
 ## M3.1 — Verifiable Draw Flow
 
 The draw uses a verifiable-randomness consumer pattern. Randomness is sourced

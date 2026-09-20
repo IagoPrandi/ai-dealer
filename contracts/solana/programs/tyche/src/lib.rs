@@ -13,6 +13,16 @@ use anchor_lang::{Discriminator, IdlBuild};
 use anchor_spl::token::{Mint, Token, TokenAccount};
 
 pub mod domain;
+pub mod founder_pass;
+
+use founder_pass::{
+    founder_pass_turn_window, founder_pass_unresolved_decisions,
+    validate_founder_pass_allowances, verify_founder_pass_asset, FounderPassAssetStandard,
+    FounderPassFeeWaiverFunding, FounderPassOwnershipSnapshotPolicy, FounderPassPolicy,
+    FounderPassSupplyEnforcement, FounderPassTurnWindow, FounderPassUsageView,
+    FOUNDER_PASS_ACCOUNT_VERSION, FOUNDER_PASS_ACTIVE_TURN_WINDOW, FOUNDER_PASS_BET_ALLOWANCE,
+    FOUNDER_PASS_MAX_SUPPLY, FOUNDER_PASS_RULE_PROPOSAL_ALLOWANCE, FOUNDER_PASS_VOTE_ALLOWANCE,
+};
 
 use domain::{
     derive_draw_numbers, next_cycle_index, run_rule_election, split_fee, validate_action_window,
@@ -2550,6 +2560,212 @@ pub mod tyche {
         });
         Ok(())
     }
+
+    // ---------------------------------------------------------------
+    // Founder Pass accounting core (PRD-FOUNDER-PASS-NFT.md, FP1)
+    //
+    // These four instructions add state and governance only. None of them
+    // waives a fee, moves a lamport, or pays JDR — that is FP2/FP3. The
+    // ordinary game instructions above are untouched, so no existing account
+    // bytes or instruction semantics change (§6.3).
+    // ---------------------------------------------------------------
+
+    /// Creates the governed Founder Pass configuration in its birth state:
+    /// every §14 decision unresolved and benefits disabled.
+    ///
+    /// The config is deliberately created empty rather than from caller
+    /// arguments, so a deployment cannot be born with a guessed standard,
+    /// collection, or policy. Each decision is then recorded by an explicit,
+    /// reviewable `configure_founder_pass` call.
+    pub fn initialize_founder_pass_config(ctx: Context<InitializeFounderPassConfig>) -> Result<()> {
+        require_program_upgrade_authority(
+            &ctx.accounts.program_data,
+            ctx.accounts.governance_authority.key(),
+        )?;
+
+        let config = &mut ctx.accounts.founder_pass_config;
+        config.version = FOUNDER_PASS_ACCOUNT_VERSION;
+        config.enabled = false;
+        config.paused = false;
+        config.asset_standard = FounderPassAssetStandard::Unset;
+        config.asset_program_id = Pubkey::default();
+        config.canonical_collection = Pubkey::default();
+        config.campaign = Pubkey::default();
+        config.max_supply = FOUNDER_PASS_MAX_SUPPLY;
+        config.supply_enforcement = FounderPassSupplyEnforcement::Unset;
+        config.allowlist_commitment = [0u8; 32];
+        config.vote_allowance = FOUNDER_PASS_VOTE_ALLOWANCE;
+        config.rule_proposal_allowance = FOUNDER_PASS_RULE_PROPOSAL_ALLOWANCE;
+        config.bet_allowance = FOUNDER_PASS_BET_ALLOWANCE;
+        config.active_turn_window = FOUNDER_PASS_ACTIVE_TURN_WINDOW;
+        config.activation_turn_id = 0;
+        config.ownership_snapshot_policy = FounderPassOwnershipSnapshotPolicy::Unset;
+        config.boostable_reward_kinds = 0;
+        config.fee_waiver_funding = FounderPassFeeWaiverFunding::Unset;
+        config.max_pass_vote_actions_per_rule_per_turn = 0;
+        config.max_passes_per_wallet_per_turn = 0;
+        config.bump = ctx.bumps.founder_pass_config;
+
+        emit!(FounderPassConfigInitialized {
+            authority: ctx.accounts.governance_authority.key(),
+            unresolved_decisions: config.unresolved_decisions(),
+        });
+        Ok(())
+    }
+
+    /// Records the governed resolution of the §14 decisions.
+    ///
+    /// The whole policy is written at once so every governance action is a
+    /// complete, reviewable statement rather than a partial diff. Allowances
+    /// and maximum supply are NOT arguments: §3.1/§3.2 confirm them, so they
+    /// stay pinned to their constants and governance cannot widen them here.
+    ///
+    /// Refused once benefits are enabled: §4.3 requires a governed migration
+    /// that preserves every asset's used allowances, not a config overwrite.
+    pub fn configure_founder_pass(
+        ctx: Context<ConfigureFounderPass>,
+        args: ConfigureFounderPassArgs,
+    ) -> Result<()> {
+        require_program_upgrade_authority(
+            &ctx.accounts.program_data,
+            ctx.accounts.governance_authority.key(),
+        )?;
+
+        let config = &mut ctx.accounts.founder_pass_config;
+        require!(!config.enabled, TycheError::FounderPassAlreadyActivated);
+
+        // A per-rule/per-turn concentration limit above the lifetime vote
+        // allowance would not constrain anything.
+        require!(
+            args.max_pass_vote_actions_per_rule_per_turn as u32 <= FOUNDER_PASS_VOTE_ALLOWANCE,
+            TycheError::InvalidFounderPassConcentrationLimit
+        );
+
+        config.asset_standard = args.asset_standard;
+        config.asset_program_id = args.asset_program_id;
+        config.canonical_collection = args.canonical_collection;
+        config.campaign = args.campaign;
+        config.supply_enforcement = args.supply_enforcement;
+        config.allowlist_commitment = args.allowlist_commitment;
+        config.ownership_snapshot_policy = args.ownership_snapshot_policy;
+        config.boostable_reward_kinds = args.boostable_reward_kinds;
+        config.fee_waiver_funding = args.fee_waiver_funding;
+        config.max_pass_vote_actions_per_rule_per_turn = args.max_pass_vote_actions_per_rule_per_turn;
+        config.max_passes_per_wallet_per_turn = args.max_passes_per_wallet_per_turn;
+
+        emit!(FounderPassConfigured {
+            authority: ctx.accounts.governance_authority.key(),
+            asset_standard: config.asset_standard,
+            asset_program_id: config.asset_program_id,
+            canonical_collection: config.canonical_collection,
+            campaign: config.campaign,
+            unresolved_decisions: config.unresolved_decisions(),
+        });
+        Ok(())
+    }
+
+    /// Sets the activation and pause state.
+    ///
+    /// This is where §14 is enforced: enabling requires every
+    /// activation-gating decision to be resolved, so an unresolved decision
+    /// cannot silently select a default. Pausing is always permitted and
+    /// rewrites no historical usage (§6.1).
+    pub fn set_founder_pass_activation(
+        ctx: Context<SetFounderPassActivation>,
+        args: SetFounderPassActivationArgs,
+    ) -> Result<()> {
+        require_program_upgrade_authority(
+            &ctx.accounts.program_data,
+            ctx.accounts.governance_authority.key(),
+        )?;
+
+        let config = &mut ctx.accounts.founder_pass_config;
+        let unresolved_decisions = config.unresolved_decisions();
+
+        if args.enabled {
+            require!(
+                unresolved_decisions == 0,
+                TycheError::FounderPassDecisionsUnresolved
+            );
+            validate_founder_pass_allowances(
+                config.vote_allowance,
+                config.rule_proposal_allowance,
+                config.bet_allowance,
+                config.active_turn_window,
+            )?;
+            require!(args.activation_turn_id >= 1, TycheError::InvalidTurnId);
+            // The activation turn anchors the one window every pass shares, so
+            // it is write-once. Disabling and re-enabling must not shift that
+            // window under holders who already paid for a fixed span.
+            if config.activation_turn_id == 0 {
+                config.activation_turn_id = args.activation_turn_id;
+            } else {
+                require!(
+                    args.activation_turn_id == config.activation_turn_id,
+                    TycheError::FounderPassActivationTurnImmutable
+                );
+            }
+            // Reject an anchor whose window would overflow before it is stored.
+            founder_pass_turn_window(config.activation_turn_id)?;
+        }
+
+        config.enabled = args.enabled;
+        config.paused = args.paused;
+
+        emit!(FounderPassActivationChanged {
+            authority: ctx.accounts.governance_authority.key(),
+            enabled: config.enabled,
+            paused: config.paused,
+            activation_turn_id: config.activation_turn_id,
+            unresolved_decisions,
+        });
+        Ok(())
+    }
+
+    /// Creates the per-asset usage account for a verified Founder Pass.
+    ///
+    /// Seeded by the individual asset address, never by a wallet, so quotas
+    /// belong to the NFT and survive a transfer (§3.2). The signer must be the
+    /// asset's current on-chain owner and also pays the account's rent; the
+    /// account is permanent, so a second call for the same asset fails rather
+    /// than resetting anything.
+    pub fn initialize_founder_pass_usage(ctx: Context<InitializeFounderPassUsage>) -> Result<()> {
+        let config = &ctx.accounts.founder_pass_config;
+        require!(
+            config.enabled && !config.paused,
+            TycheError::FounderPassInactive
+        );
+        validate_founder_pass_allowances(
+            config.vote_allowance,
+            config.rule_proposal_allowance,
+            config.bet_allowance,
+            config.active_turn_window,
+        )?;
+
+        let facts = verify_founder_pass_asset(
+            config.asset_standard,
+            &config.asset_program_id,
+            &config.canonical_collection,
+            &ctx.accounts.owner.key(),
+            &ctx.accounts.asset.to_account_info(),
+        )?;
+
+        let usage = &mut ctx.accounts.founder_pass_usage;
+        usage.version = FOUNDER_PASS_ACCOUNT_VERSION;
+        usage.asset = facts.asset;
+        usage.collection = facts.collection;
+        usage.vote_actions_used = 0;
+        usage.rule_proposals_used = 0;
+        usage.bets_used = 0;
+        usage.bump = ctx.bumps.founder_pass_usage;
+
+        emit!(FounderPassUsageInitialized {
+            asset: usage.asset,
+            collection: usage.collection,
+            owner: facts.owner,
+        });
+        Ok(())
+    }
 }
 
 fn validate_live_turn(config: &GlobalConfig, turn: &TurnState) -> Result<()> {
@@ -2947,6 +3163,47 @@ pub struct SetVrfConfigArgs {
     pub election_vrf_config: Pubkey,
 }
 
+/// The §14 decisions, recorded in one governed write. Allowances and maximum
+/// supply are absent on purpose: §3.1/§3.2 confirm them and they stay pinned to
+/// their constants.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct ConfigureFounderPassArgs {
+    /// FP-D2. `Unset` keeps the configuration unresolved and every asset
+    /// refused.
+    pub asset_standard: FounderPassAssetStandard,
+    /// FP-D2. The asset programme that must own a candidate asset account.
+    pub asset_program_id: Pubkey,
+    /// FP-D2/FP-D5. Read from finalized on-chain collection creation (§4.3).
+    pub canonical_collection: Pubkey,
+    /// §7. The shared campaign the JDR boost draws from.
+    pub campaign: Pubkey,
+    /// FP-D2. How the 5,000 hard cap is proved (§4.3).
+    pub supply_enforcement: FounderPassSupplyEnforcement,
+    /// FP-D2. Immutable commitment over the finalized minted asset IDs.
+    /// Required when `supply_enforcement` is `AllowlistCommitment`.
+    pub allowlist_commitment: [u8; 32],
+    /// FP-D6.
+    pub ownership_snapshot_policy: FounderPassOwnershipSnapshotPolicy,
+    /// FP-D7. Bitmask of boostable reward kinds; 0 means unresolved.
+    pub boostable_reward_kinds: u32,
+    /// FP-D8.
+    pub fee_waiver_funding: FounderPassFeeWaiverFunding,
+    /// FP-D9. Per-rule/per-turn pass vote concentration limit; 0 means
+    /// unresolved.
+    pub max_pass_vote_actions_per_rule_per_turn: u16,
+    /// FP-D9. Multiple-pass wallet policy; 0 means unresolved.
+    pub max_passes_per_wallet_per_turn: u8,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct SetFounderPassActivationArgs {
+    pub enabled: bool,
+    pub paused: bool,
+    /// The activation boundary (§6.1): the first turn in which a benefit may
+    /// be used. Required when enabling.
+    pub activation_turn_id: u64,
+}
+
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct MigrateFeePoolCustodyArgs {
     pub attributed_unbridged_lamports: u64,
@@ -3072,6 +3329,85 @@ pub struct SetVrfConfig<'info> {
     /// upgrade authority to `governance_authority`.
     #[account(owner = UPGRADEABLE_LOADER_ID)]
     pub program_data: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+pub struct InitializeFounderPassConfig<'info> {
+    #[account(mut)]
+    pub governance_authority: Signer<'info>,
+    #[account(
+        init,
+        payer = governance_authority,
+        space = 8 + FounderPassConfig::INIT_SPACE,
+        seeds = [b"founder_pass_config"],
+        bump
+    )]
+    pub founder_pass_config: Box<Account<'info, FounderPassConfig>>,
+    /// CHECK: The handler requires the canonical ProgramData PDA for this
+    /// program, validates the loader-v3 state tag, and matches its stored
+    /// upgrade authority to `governance_authority`.
+    #[account(owner = UPGRADEABLE_LOADER_ID)]
+    pub program_data: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct ConfigureFounderPass<'info> {
+    pub governance_authority: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [b"founder_pass_config"],
+        bump = founder_pass_config.bump
+    )]
+    pub founder_pass_config: Box<Account<'info, FounderPassConfig>>,
+    /// CHECK: Canonical loader-v3 ProgramData and upgrade authority are checked
+    /// by the handler.
+    #[account(owner = UPGRADEABLE_LOADER_ID)]
+    pub program_data: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+pub struct SetFounderPassActivation<'info> {
+    pub governance_authority: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [b"founder_pass_config"],
+        bump = founder_pass_config.bump
+    )]
+    pub founder_pass_config: Box<Account<'info, FounderPassConfig>>,
+    /// CHECK: Canonical loader-v3 ProgramData and upgrade authority are checked
+    /// by the handler.
+    #[account(owner = UPGRADEABLE_LOADER_ID)]
+    pub program_data: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+pub struct InitializeFounderPassUsage<'info> {
+    /// The asset's current on-chain owner, and the rent payer for the usage
+    /// account (§6.2).
+    #[account(mut)]
+    pub owner: Signer<'info>,
+    #[account(
+        seeds = [b"founder_pass_config"],
+        bump = founder_pass_config.bump
+    )]
+    pub founder_pass_config: Box<Account<'info, FounderPassConfig>>,
+    /// CHECK: Deliberately unchecked here and verified by
+    /// `verify_founder_pass_asset`, which proves the account owner is the
+    /// governed asset programme before interpreting a single byte, then checks
+    /// the asset key, collection binding, current owner, and freeze state.
+    /// Anchor cannot express that, and an `owner =` constraint on a config
+    /// value is not available at declaration time.
+    pub asset: UncheckedAccount<'info>,
+    #[account(
+        init,
+        payer = owner,
+        space = 8 + FounderPassUsage::INIT_SPACE,
+        seeds = [b"founder_pass_usage".as_ref(), asset.key().as_ref()],
+        bump
+    )]
+    pub founder_pass_usage: Box<Account<'info, FounderPassUsage>>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
@@ -4449,6 +4785,113 @@ pub struct GlobalConfig {
     pub bump: u8,
 }
 
+/// Governed Founder Pass configuration (§6.1).
+///
+/// New account in FP1: it reinterprets no existing bytes. Every §14 decision
+/// is born unresolved and `enabled` is born false, so the deployed programme
+/// authorizes no benefit until governance resolves each decision and activates
+/// explicitly.
+#[account]
+#[derive(InitSpace)]
+pub struct FounderPassConfig {
+    pub version: u16,
+    /// Benefits are live. Gated on `unresolved_decisions() == 0`.
+    pub enabled: bool,
+    /// Emergency pause. Suspends new benefits without rewriting historical
+    /// usage or a settled claim (§6.1).
+    pub paused: bool,
+    pub asset_standard: FounderPassAssetStandard,
+    pub asset_program_id: Pubkey,
+    pub canonical_collection: Pubkey,
+    pub campaign: Pubkey,
+    /// Pinned to `FOUNDER_PASS_MAX_SUPPLY` (§3.1).
+    pub max_supply: u32,
+    pub supply_enforcement: FounderPassSupplyEnforcement,
+    pub allowlist_commitment: [u8; 32],
+    /// Stored so the active allowances are auditable on-chain. Pinned to the
+    /// §3.2 constants by `validate_founder_pass_allowances`.
+    pub vote_allowance: u32,
+    pub rule_proposal_allowance: u32,
+    pub bet_allowance: u32,
+    /// Length in consecutive turns of the active-turn window a pass opens on
+    /// its first use. Pinned to `FOUNDER_PASS_ACTIVE_TURN_WINDOW`.
+    pub active_turn_window: u32,
+    /// Anchors the one active-turn window every pass shares. Write-once: it
+    /// cannot be changed after the first activation, so re-enabling can never
+    /// shift the window under existing holders.
+    pub activation_turn_id: u64,
+    pub ownership_snapshot_policy: FounderPassOwnershipSnapshotPolicy,
+    pub boostable_reward_kinds: u32,
+    pub fee_waiver_funding: FounderPassFeeWaiverFunding,
+    pub max_pass_vote_actions_per_rule_per_turn: u16,
+    pub max_passes_per_wallet_per_turn: u8,
+    pub bump: u8,
+}
+
+impl FounderPassConfig {
+    pub fn policy(&self) -> FounderPassPolicy {
+        FounderPassPolicy {
+            asset_standard: self.asset_standard,
+            asset_program_id: self.asset_program_id,
+            canonical_collection: self.canonical_collection,
+            campaign: self.campaign,
+            max_supply: self.max_supply,
+            supply_enforcement: self.supply_enforcement,
+            allowlist_commitment: self.allowlist_commitment,
+            ownership_snapshot_policy: self.ownership_snapshot_policy,
+            boostable_reward_kinds: self.boostable_reward_kinds,
+            fee_waiver_funding: self.fee_waiver_funding,
+            max_pass_vote_actions_per_rule_per_turn: self.max_pass_vote_actions_per_rule_per_turn,
+            max_passes_per_wallet_per_turn: self.max_passes_per_wallet_per_turn,
+        }
+    }
+
+    /// Bitmask of §14 decisions still unresolved. Must be zero to activate.
+    pub fn unresolved_decisions(&self) -> u16 {
+        founder_pass_unresolved_decisions(&self.policy())
+    }
+
+    /// The one active-turn window every pass shares. Errors while benefits
+    /// have never been activated, so no window exists to be inside.
+    pub fn turn_window(&self) -> Result<FounderPassTurnWindow> {
+        founder_pass_turn_window(self.activation_turn_id)
+    }
+}
+
+/// Per-asset Founder Pass usage (§6.2).
+///
+/// Seeded by the individual NFT asset address, so quotas belong to the NFT and
+/// do not reset when it moves (§3.2).
+///
+/// The shared turn budget is global — one window anchored at
+/// `FounderPassConfig::activation_turn_id` — so this account holds no turn
+/// state at all, only the action counters. §6.2 asked for membership-safe
+/// storage because "a counter alone cannot prove whether a previously used turn
+/// is being reused"; a governed contiguous range satisfies that more strongly
+/// than a per-pass set, since eligibility is a comparison against bounds no
+/// player can influence.
+#[account]
+#[derive(InitSpace)]
+pub struct FounderPassUsage {
+    pub version: u16,
+    pub asset: Pubkey,
+    pub collection: Pubkey,
+    pub vote_actions_used: u32,
+    pub rule_proposals_used: u32,
+    pub bets_used: u32,
+    pub bump: u8,
+}
+
+impl FounderPassUsage {
+    pub fn view(&self) -> FounderPassUsageView {
+        FounderPassUsageView {
+            vote_actions_used: self.vote_actions_used,
+            rule_proposals_used: self.rule_proposals_used,
+            bets_used: self.bets_used,
+        }
+    }
+}
+
 #[account]
 #[derive(InitSpace)]
 pub struct TurnState {
@@ -4706,6 +5149,39 @@ pub enum PrecompilationStatus {
 pub struct GlobalConfigInitialized {
     pub authority: Pubkey,
     pub treasury_address: Pubkey,
+}
+
+#[event]
+pub struct FounderPassConfigInitialized {
+    pub authority: Pubkey,
+    pub unresolved_decisions: u16,
+}
+
+#[event]
+pub struct FounderPassConfigured {
+    pub authority: Pubkey,
+    pub asset_standard: FounderPassAssetStandard,
+    pub asset_program_id: Pubkey,
+    pub canonical_collection: Pubkey,
+    pub campaign: Pubkey,
+    /// Zero means every activation-gating §14 decision is resolved.
+    pub unresolved_decisions: u16,
+}
+
+#[event]
+pub struct FounderPassActivationChanged {
+    pub authority: Pubkey,
+    pub enabled: bool,
+    pub paused: bool,
+    pub activation_turn_id: u64,
+    pub unresolved_decisions: u16,
+}
+
+#[event]
+pub struct FounderPassUsageInitialized {
+    pub asset: Pubkey,
+    pub collection: Pubkey,
+    pub owner: Pubkey,
 }
 
 #[event]
@@ -5104,4 +5580,40 @@ pub enum TycheError {
     FeePoolMigrationAlreadyApplied,
     #[msg("The fee-pool migration amounts do not reconcile with legacy custody.")]
     InvalidFeePoolMigrationAmounts,
+    // Founder Pass (PRD-FOUNDER-PASS-NFT.md, FP1). Appended so existing error
+    // codes keep their numbering.
+    #[msg("The stored Founder Pass allowances do not match the confirmed product limits.")]
+    InvalidFounderPassAllowance,
+    #[msg("The Founder Pass usage account violates its representation invariant.")]
+    InvalidFounderPassUsage,
+    #[msg("The supplied account is not a valid Founder Pass asset of the configured standard.")]
+    InvalidFounderPassAsset,
+    #[msg("The Founder Pass asset is not owned by the configured asset programme.")]
+    InvalidFounderPassAssetProgram,
+    #[msg("No Founder Pass asset standard has been governed, so no asset can be verified.")]
+    FounderPassAssetStandardUnset,
+    #[msg("The signing wallet is not the current owner of the Founder Pass asset.")]
+    FounderPassNotOwned,
+    #[msg("The Founder Pass asset does not belong to the canonical collection.")]
+    FounderPassCollectionMismatch,
+    #[msg("The Founder Pass asset is frozen, so its recorded owner is not its current controller.")]
+    FounderPassAssetFrozen,
+    #[msg("The Founder Pass active-turn window has not opened for this turn or has already closed.")]
+    FounderPassTurnWindowClosed,
+    #[msg("The Founder Pass has used all 1,000 fee-free vote actions.")]
+    FounderPassVoteAllowanceExhausted,
+    #[msg("The Founder Pass has used all 100 fee-free rule proposals.")]
+    FounderPassProposalAllowanceExhausted,
+    #[msg("The Founder Pass has used all 50 fee-free submitted bets.")]
+    FounderPassBetAllowanceExhausted,
+    #[msg("Founder Pass benefits cannot be activated while a governed decision is unresolved.")]
+    FounderPassDecisionsUnresolved,
+    #[msg("Founder Pass benefits are active; changing the configuration requires a governed migration.")]
+    FounderPassAlreadyActivated,
+    #[msg("Founder Pass benefits are disabled or paused.")]
+    FounderPassInactive,
+    #[msg("The Founder Pass vote concentration limit exceeds the lifetime vote allowance.")]
+    InvalidFounderPassConcentrationLimit,
+    #[msg("The Founder Pass activation turn anchors the shared window and cannot be changed.")]
+    FounderPassActivationTurnImmutable,
 }

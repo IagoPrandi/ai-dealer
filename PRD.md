@@ -145,15 +145,22 @@ Those are trust and execution layers. The user-facing product is a live mobile g
 
 ### 1.7 Founder Pass NFT (planned; not deployed)
 
-Tyche may issue a limited Founder Pass NFT collection to fund product
-development. Its benefits are strictly defined game utilities: capped
-campaign-funded JDR promotional boosts, capped vote credits, and a capped
-protocol-fee waiver for rule proposals. The pass does not create a claim on
-prize pools, treasury fees, protocol revenue, dividends, yield, or a guaranteed
-financial return. The authoritative functional specification is
-[`docs/founder-pass-nft.md`](docs/founder-pass-nft.md). No mint, sale, or
-mainnet deployment is authorized until the document's open sale and governance
-decisions are approved.
+Tyche is planning a limited Founder Pass NFT collection of up to 5,000 assets
+sold in five proposed price phases. The requested game utilities are an up-to-100x
+JDR promotional boost paid from the spendable shared campaign balance, 1,000
+ordinary-weight votes without Tyche action fees, 100 rule proposals without
+Tyche action fees, and 50 fee-free submitted bets, all usable only inside one
+global window of 800 consecutive rounds fixed by governance at activation. Every
+pass carries identical quotas, but a pass delivered later in that window
+inherits fewer usable rounds. The claim accounting
+and remaining sale decisions are in [`PRD-FOUNDER-PASS-NFT.md`](PRD-FOUNDER-PASS-NFT.md).
+Magic Eden is the selected venue for primary mint and launch. Its Launchpad
+onboarding and sale capabilities must be verified; the NFT standard and
+canonical collection must be fixed before benefits are activated.
+The pass does not create a claim on prize pools, treasury fees, protocol
+revenue, dividends, yield, or a guaranteed financial return. No mint, sale,
+or mainnet deployment is authorized until the open sale, economic, legal, and
+governance decisions are approved and the required mainnet gates pass.
 
 ---
 
