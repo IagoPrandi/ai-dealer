@@ -20,6 +20,8 @@ Use this checklist before delivering any Tyche UI change.
 - [ ] Button shape, height, padding, icon style, disabled state, and active/tap feedback match existing buttons.
 - [ ] Cards, pills, sheets, chat bubbles, dividers, and nav treatment match existing shapes and borders.
 - [ ] Effects use existing glow, shadow, gradient, and animation patterns.
+- [ ] Every outlined surface retains its inset ring when a new shadow is added; no CSS `border` replaces it.
+- [ ] Featured rows use hard offsets only when their reference calls for them; panels and sheets use their own reference-appropriate halo or elevation treatment.
 - [ ] Copy is concise, correctly spelled, and follows the current project UI language rule.
 
 ## Layout
@@ -46,6 +48,7 @@ Use this checklist before delivering any Tyche UI change.
 - [ ] Typecheck/lint/build or closest available checks passed.
 - [ ] Browser inspected with no console errors.
 - [ ] Screenshots or verification notes exist for changed mobile states.
+- [ ] For changed elevation, computed `box-shadow` and the screenshot confirm visible outlines and no clipped hard offset or halo.
 - [ ] No unrelated visual refactor was included.
 - [ ] Work log updated.
 - [ ] Milestone checkbox was not ticked without explicit user confirmation.

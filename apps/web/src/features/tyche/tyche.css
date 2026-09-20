@@ -1459,6 +1459,148 @@
 .ide-overlay { align-items: center; padding: 18px; }
 .ide-overlay.is-sheet { align-items: flex-end; padding: 0; }
 
+/* Wallet connection follows the canonical connect bottom-sheet handoff rather
+   than the generic card treatment used by screen content. */
+.ide-connect-overlay {
+  background: rgba(6,4,10,0.7);
+  backdrop-filter: blur(6px);
+  animation: ide-rise .2s ease both;
+}
+.ide-connect-sheet {
+  width: 100%;
+  max-height: 90%;
+  margin: 0;
+  overflow-y: auto;
+  padding: 14px 20px 28px;
+  background: var(--surface);
+  border: none;
+  border-radius: 0;
+  box-shadow: var(--ring), 0 0 70px -14px rgba(255,46,136,0.6);
+  animation: ide-rise .32s cubic-bezier(.2,.8,.3,1) both;
+}
+.ide-connect-handle {
+  width: 44px;
+  height: 5px;
+  margin: 0 auto 18px;
+  border-radius: 3px;
+  background: rgba(241,232,214,0.35);
+}
+.ide-connect-header { display: flex; align-items: center; gap: 11px; margin-bottom: 6px; }
+.ide-connect-header-copy { flex: 1; min-width: 0; }
+.ide-connect-title {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: clamp(20px, 5.2vw, 23px);
+  font-weight: 400;
+  line-height: 1.05;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-shadow: var(--plate);
+}
+.ide-connect-subtitle {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.ide-connect-close {
+  display: grid;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  padding: 0;
+  place-items: center;
+  border: none;
+  border-radius: 0;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1.5px rgba(241,232,214,0.25);
+  color: var(--muted);
+  cursor: pointer;
+}
+.ide-connect-close:active { transform: scale(0.94); }
+.ide-connect-options { display: grid; gap: 9px; margin-top: 16px; }
+.ide-connect-row {
+  display: flex;
+  width: 100%;
+  min-height: 64px;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 15px;
+  border: none;
+  border-radius: 0;
+  background: var(--surface-2);
+  box-shadow: var(--ring);
+  color: var(--text);
+  text-align: left;
+}
+.ide-connect-row.is-featured { box-shadow: var(--ring), 5px 5px 0 var(--cyan); }
+.ide-connect-row:disabled { cursor: default; }
+.ide-connect-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  place-items: center;
+  border-radius: 0;
+  background: var(--surface-3);
+  color: var(--purple-soft);
+}
+.ide-connect-row-copy { flex: 1; min-width: 0; }
+.ide-connect-row-title {
+  display: block;
+  color: var(--text);
+  font-family: var(--font-label);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+.ide-connect-row-description {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.ide-connect-row-action {
+  flex: 0 0 auto;
+  color: var(--dim);
+  font-family: var(--num-font), ui-monospace, monospace;
+  font-size: 11.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.ide-connect-row.is-featured .ide-connect-row-action { color: var(--cyan); }
+.ide-connect-divider {
+  margin: 6px 0 0;
+  color: var(--dim);
+  font-family: var(--num-font), ui-monospace, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.ide-connect-error {
+  margin-top: 14px;
+  padding: 11px 14px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1.5px rgba(255,59,47,0.45);
+  color: var(--red);
+  font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.ide-connect-empty {
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 /* ============================================================
    DESKTOP LAYER - a browser window is not a tall phone.
    Three moves, in order:
@@ -1768,8 +1910,8 @@
   .ide-web-shell .ide-overlay-card.is-connect.ide-scroll {
     width: min(100%, 540px);
     max-width: 540px;
-    margin-inline: 0;
-    padding: 10px 20px 28px !important;
+    margin: 0;
+    padding: 14px 20px 28px !important;
   }
 
   .ide-web-shell .ide-deck {

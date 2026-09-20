@@ -25,6 +25,28 @@ Before delivery, record in the work log or PR description: the reference
 pattern used, the mobile and desktop verification performed, and any necessary
 intentional divergence. An unreviewed UI/UX change is incomplete.
 
+## Elevation and Outline Contract
+
+Choose elevation by component role; do not copy a shadow from one role to
+another just because the colors match.
+
+- Every card, row, modal, panel, or sheet that needs an outline must retain its
+  inset ring as the first `box-shadow` layer. Adding a new shadow must extend
+  the stack, never replace the ring. Do not use CSS `border` as a substitute.
+- A featured list row may combine the inset ring with a hard `5px 5px 0` cyan
+  offset. Reserve space for that offset when it would otherwise be clipped.
+- A panel or sheet is a container, not a featured list row. Match its nearest
+  screen reference: use the established soft halo when that panel needs depth;
+  do not inherit a cyan hard offset from a child row unless the reference calls
+  for panel-level emphasis.
+- Keep hard offsets and soft halos semantically separate. A hard offset marks a
+  selected/actionable item; a halo gives a containing surface depth. If both
+  appear necessary, verify that the canonical reference uses both.
+- When changing elevation, inspect the computed `box-shadow` and a screenshot
+  at the affected viewport. Confirm the inset outline is visible on all four
+  edges, hard offsets are visible only where intended, and no shadow is cut off
+  by the viewport or an overflow container.
+
 ## Required Reading
 
 Before editing UI, open:

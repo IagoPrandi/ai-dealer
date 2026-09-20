@@ -4,6 +4,28 @@ This tracker records milestone status, work logs, and required document confirma
 
 ## Work Log
 
+### 2026-09-20 (Connect panel halo correction)
+
+- Opened the required `PRD.md`, `AGENTS.md`, and `PROGRESS_TRACKER.md`; inspected `.claude/skills` and reapplied the Tyche UI-coherence and design-system guidance before adjusting the panel treatment.
+- Removed the cyan 5px hard offset from the connection panel. The panel now retains its neutral inset outline and uses the existing Tyche magenta soft halo (`0 0 70px -14px`) instead. The cyan lower/right hard offset remains only on the featured email-wallet card, where it is the intended list-item emphasis.
+- Mobile visual verification at 390x844 passed: the panel reaches the viewport edge without overflow, has the expected inset ring plus magenta halo, the featured row retains its inset ring plus cyan offset, and no framework overlay or application console error was present. Web typecheck and zero-warning lint passed.
+- No wallet, email, OTP, transaction, environment, deployment, on-chain state, or milestone checkbox changed. Final consistency review: the panel and row now use distinct, intentional elevation treatments without removing their visible outlines.
+
+### 2026-09-20 (Connect featured-row outline correction)
+
+- Opened the required `PRD.md`, `AGENTS.md`, and `PROGRESS_TRACKER.md`; inspected `.claude/skills`, invoked `tyche-ui-coherence` and `tyche-design-system`, and compared the connection row against the list-card recipe before correcting the visual treatment.
+- Restored the missing inset outline on the featured email-wallet row while retaining its cyan 5px solid offset. Its computed shadow is now the canonical combination of `inset 0 0 0 1.5px` and `5px 5px 0` cyan, producing the visible top/left outline and bottom/right line required by the reference.
+- Mobile visual verification at 390x844 passed: the row is square, has no horizontal overflow, retains a 44px-plus tap target, and has no framework overlay or application console error. Web typecheck and zero-warning lint passed. No milestone checkbox was changed.
+- No wallet, email, OTP, transaction, environment, deployment, or on-chain state changed. Final consistency review: the correction is limited to the featured connect row; ordinary rows keep their neutral inset outline and all selection behaviour remains unchanged.
+
+### 2026-09-20 (Connect sheet design-system alignment)
+
+- Opened the required `PRD.md`, `AGENTS.md`, and `PROGRESS_TRACKER.md`; inspected `.claude/skills`, invoked `tyche-ui-coherence` and `tyche-design-system`, and read the canonical `16-connect.html`, component recipes, repository integration, desktop contract, and UI-coherence checklist before editing the connection sheet.
+- Replaced the generic `ide-card` and inline-style treatment in `ConnectOverlay` with a dedicated implementation of the canonical connect-sheet pattern: square list rows with inset rings, square icon wells, Oswald wallet names, DM Mono actions, a single cyan featured row, Bevan display heading, and the orange upper sheet offset. The external-wallet and email-selection behaviour is unchanged.
+- Mobile reference: the `16-connect.html` bottom sheet. Desktop reference: the documented 540px centered connect card. The longer `Choose how to play` heading scales from 20px to 23px so it remains one line at a 390px viewport without compromising the desktop display treatment.
+- Visual verification passed at 390x844 and 1200x1000: no horizontal overflow, no clipped sheet, a viewport-safe mobile bottom edge, square row radius, cyan featured offset, expected display and label fonts, and no framework overlay or application console errors. Verification passed: web typecheck, zero-warning lint, **330/330** tests, production build, and `git diff --check`; the known optional Privy/Farcaster peer warning remains non-fatal.
+- No wallet, email, OTP, transaction, environment, deployment, on-chain state, or milestone checkbox changed. Final consistency review: visible copy remains English UTF-8, the design exception is scoped to the connection sheet, and normal/pending/error/no-wallet states retain explicit feedback.
+
 ### 2026-09-20 (Mandatory UI design-system gate)
 
 - Opened the required `PRD.md`, `AGENTS.md`, and `PROGRESS_TRACKER.md`; inspected `.claude/skills`, the existing Tyche design-system and UI-coherence instructions, and the skill-authoring guidance before changing a local skill.
