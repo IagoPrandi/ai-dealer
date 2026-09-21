@@ -278,9 +278,10 @@ first, then sweeps, so an abandoned claim cannot stall the rollover chain.
 
 `programs/tyche/src/founder_pass.rs` implements milestone **FP1** of
 [`PRD-FOUNDER-PASS-NFT.md`](../../PRD-FOUNDER-PASS-NFT.md). It is state and
-governance only. **No benefit is implemented**: nothing here waives a Tyche
-fee, moves a lamport, or pays JDR. Fee waivers are FP2 and the JDR boost is
-FP3, and both are blocked until FP0 closes.
+governance only. **This module implements no benefit**: nothing in it waives a
+Tyche fee, moves a lamport, or pays JDR. Fee waivers are FP2, documented below,
+and the JDR boost is FP3, which is not built. Neither can activate until FP0
+closes and governance enables benefits explicitly.
 
 FP0 is still open, so PRD §14 applies — "unresolved decisions block their
 dependent work; they do not silently select a default." Every open decision is
@@ -427,6 +428,103 @@ Three preconditions belong to the FP2/FP3 call sites, not to this module:
   counting honest, and the window model removes that reason. FP3 should confirm
   whether the claim turn is the better attribution before it is built.
 
+## Founder Pass Game Benefits (FP2)
+
+Milestone **FP2** of [`PRD-FOUNDER-PASS-NFT.md`](../../PRD-FOUNDER-PASS-NFT.md)
+adds the fee-free bet, rule-proposal, and vote paths. It still implements **no
+JDR boost** (that is FP3) and it activates nothing on its own: every path goes
+through `plan_founder_pass_action`, which refuses while `enabled` is false,
+while any §14 decision is unresolved, or while the asset standard is `Unset`.
+
+### Pass-aware instructions
+
+Five variants sit beside the ordinary instructions, which keep their exact
+account lists and discriminants:
+
+- `submit_guess_with_founder_pass(args)`
+- `submit_additional_guess_with_founder_pass(args)`
+- `propose_rule_with_founder_pass(args)`
+- `vote_rule_with_founder_pass(args)`
+- `eliminate_vote_rule_with_founder_pass(args)`
+
+Each takes the ordinary accounts plus `founder_pass_config`, the `asset`, its
+`founder_pass_usage` PDA, `founder_pass_wallet_turn`,
+`founder_pass_sponsor_vault`, and — for the two vote paths —
+`founder_pass_vote_concentration`.
+
+**The ordinary handlers were not duplicated.** Each action's body now lives in
+one shared function (`apply_first_guess`, `apply_additional_guess`,
+`apply_rule_proposal`, `apply_rule_vote`, `apply_rule_elimination_vote`) that
+both the paid and the pass-funded path call, differing only in an
+`ActionFeeOutcome`. Copying the bodies would let the pass path drift from the
+paid one's checks, tally, or sequence advance, which PRD §6.3 forbids. The
+pre-existing SBF scenarios that exercise all five paths pass unchanged, which
+is the evidence that the extraction is behaviour-preserving.
+
+### Sponsor vault and the FP-D8 selector
+
+- `initialize_founder_pass_sponsor_vault` — governance creates PDA
+  `["founder_pass_sponsor"]`.
+- `fund_founder_pass_sponsor_vault(amount_lamports)` — **any** signer may fund
+  it. Funding only increases what the sponsor can cover and authorizes nothing,
+  so topping it up must not need a governance round trip.
+- `withdraw_founder_pass_sponsor_vault(amount_lamports)` — governance returns
+  unspent lamports.
+
+`FounderPassConfig::fee_waiver_funding` selects the PRD §8 policy and is born
+`Unset`, which refuses every waiver. Both policies are implemented:
+
+| Policy | Sponsor pays | Treasury/prize booked | Effect |
+| --- | --- | --- | --- |
+| `SponsorFunded` | the whole otherwise-due fee | the identical split a paid action would produce | turn economics unchanged; ledgers reconcile exactly |
+| `ReducedTurnPool` | nothing | nothing | the turn's treasury and prize pool receive less |
+
+§8 forbids charging a sponsor an unbounded exponential fee "without an explicit
+funded limit and rule". The funded limit is the vault's spendable balance above
+rent, and the rule is that a vault which cannot cover a waiver **refuses** it
+(`FounderPassSponsorUnderfunded`) rather than under-collecting or falling back
+to charging the player.
+
+The recorded action fee is zero whenever a fee is waived (§6.3), while the
+ordinary per-wallet sequence still advances, so a later paid action quotes the
+correct escalated fee. An action that is **already free** under ordinary policy
+is refused with `FounderPassBenefitNotApplicable` rather than silently spending
+a credit to reproduce the same zero fee (§8).
+
+### Concentration accounts (FP-D9)
+
+| Account | PDA seeds | Purpose |
+| --- | --- | --- |
+| `FounderPassSponsorVault` | `["founder_pass_sponsor"]` | sponsor balance and cumulative funded/spent totals |
+| `FounderPassWalletTurn` | `["fp_wallet_turn", wallet, turn_id]` | the distinct passes one wallet has spent this turn |
+| `FounderPassVoteConcentration` | `["fp_vote_conc", turn_id, rule_id, wallet]` | pass-funded approval and elimination votes on one rule |
+
+Both limits bind the **wallet**, not the pass. A per-pass limit is defeated by
+a wallet that rotates several passes, which is precisely the abuse PRD §10
+names. `FounderPassWalletTurn` stores the asset keys rather than a count,
+because a count cannot distinguish a repeat use from the admission of a new
+pass and the policy is about *distinct* passes;
+`FOUNDER_PASS_WALLET_TURN_PASS_SLOTS` (8) bounds the layout, and governance is
+refused a larger value instead of having it silently truncated.
+
+The two per-turn records are created on demand with `init_if_needed` and are
+re-validated against the identity their seeds claim, using `version == 0` as
+the unambiguous "just created" signal. That closes the re-initialization hole
+the Anchor feature otherwise opens.
+
+`set_founder_pass_activation` additionally refuses to enable unless the FP-D9
+numbers are enforceable by these accounts, so activation cannot promise a
+concentration policy the programme could not apply.
+
+> **SBF suite flakiness (open).** The Tyche SBF instruction suite is currently
+> flaky on the Windows/Docker host: across four runs of the unmodified pre-FP2
+> baseline, every run failed with one to three rotating failures on pre-existing
+> `assert!(…is_err())` replay assertions, and each of those tests passes in
+> isolation. With FP2 applied, two of four runs were fully green (15/15) and
+> the rest showed the same rotating pre-existing failures. The flakiness
+> predates FP2, but it should be root-caused before FP5, because it currently
+> prevents a clean deterministic acceptance run.
+
 ## M3.1 — Verifiable Draw Flow
 
 The draw uses a verifiable-randomness consumer pattern. Randomness is sourced
@@ -536,7 +634,7 @@ docker run --rm -e CARGO_TARGET_DIR=/sbf-target \
   rust:1.91-bookworm bash /workspace/contracts/solana/scripts/sbf.sh test-sbf
 ```
 
-The SBF suite executes 11 Tyche scenarios covering initialization, direct fee-pool transfers for every paid action, turn opening, guess/Game Token creation, rule proposal, sequenced vote idempotency, VRF request/settlement, invalid-input rejection, turn closing, winner claims, and rejection of legacy creator/voter SOL claims. It also executes 5 Tokenomics Core scenarios covering one-time fixed-supply genesis and authority revocation, one-shot backed legacy-fee rollover, pause-safe canonical treasury unlock, epoch review and sealing, fixed-destination treasury claims, replay rejection, exact liability/dust accounting, and correction-epoch binding to an original sealed epoch. The build helper treats any compiler `Error:` diagnostic as fatal even if `cargo-build-sbf` exits successfully and removes disposable keypair files that `cargo-build-sbf` may generate beside the artifacts.
+The SBF suite executes 15 Tyche scenarios covering initialization, direct fee-pool transfers for every paid action, turn opening, guess/Game Token creation, rule proposal, sequenced vote idempotency, VRF request/settlement, invalid-input rejection, turn closing, winner claims, rejection of legacy creator/voter SOL claims, Founder Pass governance and activation gating, asset-keyed usage creation with its verification negatives, and the FP2 fee waiver with its sponsor debit, zero recorded fee, sequence advance, and both concentration limits. It also executes 5 Tokenomics Core scenarios covering one-time fixed-supply genesis and authority revocation, one-shot backed legacy-fee rollover, pause-safe canonical treasury unlock, epoch review and sealing, fixed-destination treasury claims, replay rejection, exact liability/dust accounting, and correction-epoch binding to an original sealed epoch. The build helper treats any compiler `Error:` diagnostic as fatal even if `cargo-build-sbf` exits successfully and removes disposable keypair files that `cargo-build-sbf` may generate beside the artifacts.
 
 ## Devnet Deployment Gate
 

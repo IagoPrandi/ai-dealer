@@ -276,6 +276,21 @@ recorded action fee must be zero when waived; any sponsored prize-pool
 contribution is recorded separately. Do not reinterpret existing account
 bytes or silently change old instruction semantics.
 
+FP2 implements this as five additional instructions —
+`submit_guess_with_founder_pass`, `submit_additional_guess_with_founder_pass`,
+`propose_rule_with_founder_pass`, `vote_rule_with_founder_pass`, and
+`eliminate_vote_rule_with_founder_pass` — each taking the ordinary accounts
+plus the config, the asset, its usage PDA, the per-wallet turn record, the
+sponsor vault, and (for a vote) the concentration record. The ordinary
+instructions keep their exact account lists and discriminants. Both paths call
+one shared body per action, so a pass-funded action cannot diverge from the
+paid one in its checks, tally, or sequence advance. Three accounts are added:
+`FounderPassSponsorVault` (`founder_pass_sponsor`), `FounderPassWalletTurn`
+(`fp_wallet_turn` + wallet + turn), and `FounderPassVoteConcentration`
+(`fp_vote_conc` + turn + rule + wallet). The two per-turn records are created
+on demand and re-validated against the identity their seeds claim, so they
+cannot be re-initialized onto a different wallet, turn, or rule.
+
 ### 6.4 Cross-program claim integration
 
 The Tokenomics Core claim path must verify pass eligibility and update pass
@@ -317,14 +332,21 @@ sequence so that a later paid action quotes the correct next fee. Network
 rent and transaction fees remain payable.
 
 The existing fee schedule directs collected SOL into treasury and prize
-accounting. A waived fee cannot be booked as collected SOL. Before launch,
-choose and implement one disclosed policy: an approved sponsor pays the
-otherwise-due amount into the ordinary accounting path, or the turn's
-treasury/prize pool receives less. Both paths require bounded economic
-analysis for 5,000 passes, 5 million fee-free votes, 500,000 fee-free
-proposals, and 250,000 fee-free bets as absolute allowance ceilings; the
-100-turn limit may reduce realized use. A sponsor cannot be charged an
-unbounded exponential fee without an explicit funded limit and rule.
+accounting. A waived fee cannot be booked as collected SOL. Exactly one
+disclosed policy applies: an approved sponsor pays the otherwise-due amount
+into the ordinary accounting path, or the turn's treasury/prize pool receives
+less. FP2 implements **both**, selected by `FounderPassConfig::fee_waiver_funding`
+(FP-D8), which is born `Unset` and refuses every waiver until governance
+chooses; nothing is defaulted. Under the sponsor policy the
+`founder_pass_sponsor` vault pays the identical treasury/prize split into the
+identical destinations, so the turn's ledgers reconcile exactly as for a paid
+action; its spendable balance is the explicit funded limit §8 requires, and a
+vault that cannot cover a waiver **refuses** it rather than under-collecting or
+charging the player. A sponsor is therefore never exposed to an unbounded
+exponential fee. Choosing a policy still requires bounded economic analysis for
+5,000 passes, 5 million fee-free votes, 500,000 fee-free proposals, and 250,000
+fee-free bets as absolute allowance ceilings; the 800-turn global window and
+the §10 concentration limits reduce realized use below those ceilings.
 
 Ordinary first-action-free windows remain in force. When the ordinary
 action fee is zero, Tyche does not spend a pass credit merely to reproduce
@@ -363,7 +385,13 @@ the same zero fee.
   to redirect a reward earned by another beneficiary.
 - Publish and enforce a concentration policy before 1,000 fee-free vote
   actions can affect finalist or elimination outcomes. Fee waivers do not
-  bypass the Game Token gate or existing abuse limits.
+  bypass the Game Token gate or existing abuse limits. FP2 enforces two
+  governed limits, both keyed to the **wallet** rather than the pass, because a
+  per-pass limit is defeated by a wallet that rotates several passes: how many
+  pass-funded vote actions one wallet may aim at one rule in one turn (counted
+  separately for approval and elimination), and how many distinct passes one
+  wallet may draw on per turn. Neither has a default; zero is the §14
+  unresolved sentinel and activation is refused until governance sets both.
 - Control collection and programme authorities through the project's
   governance and custody process. Any emergency pause has an auditable
   event and preserves prior valid claims and usage.
@@ -394,19 +422,25 @@ review alone does not satisfy implementation acceptance.
 
 ## 12. Implementation Milestones
 
-All boxes are planning items and remain unchecked until the owner confirms
-their corresponding milestone, as required by `AGENTS.md`.
+Boxes remain unchecked until the owner confirms their corresponding milestone,
+as required by `AGENTS.md`. A ticked box records owner confirmation of the
+implementation only; it does not activate a benefit, authorize a mint, or
+release a deployment, all of which stay behind §13.
 
 - [ ] **FP0 — Decision and economics freeze:** verify Magic Eden Launchpad;
   finalize the NFT standard, collection authority, sale currency, lot
   quantities, transfer eligibility,
   concentration policy, and fee-waiver accounting; approve the economic
   configuration and migration design.
-- [ ] **FP1 — Contract model:** implement canonical asset verification,
+- [x] **FP1 — Contract model:** implement canonical asset verification,
   governed config, per-asset usage, used-turn membership, and compatible
-  account/instruction versions.
+  account/instruction versions. *(Confirmed by the owner on 2026-09-20.
+  Source-only; nothing is deployed and no benefit is active.)*
 - [ ] **FP2 — Game benefits:** implement fee-free votes, proposals, and bets
   while preserving ordinary game checks, tally, sequences, and SOL accounting.
+  *(Implemented 2026-09-20, awaiting owner confirmation: five pass-aware
+  instruction variants, both FP-D8 funding policies behind the governed
+  selector, and the FP-D9 concentration accounts. Inert until activation.)*
 - [ ] **FP3 — JDR benefits:** implement reward entitlement reservation,
   shared-vault liability accounting, pass-aware manual claim, replay
   protection, legacy-claim reconciliation, and finalized receipts.
@@ -442,8 +476,8 @@ M9/M10 readiness gates and an explicit owner go/no-go.
 | FP-D5 | Treasury wallet, collection/update authority, buyer limits, dates, and reserve supply | Open | Mint deployment |
 | FP-D6 | Whether earning-time ownership must be snapshotted and how transfer before claim affects the boost | Open; retroactive acquisition must not create a boost | JDR contract design |
 | FP-D7 | Which JDR reward kinds qualify for the 100x claim | Open | JDR economic version |
-| FP-D8 | Fee waiver's missing SOL contribution: funded sponsor or smaller turn pool | Open | Game contract design |
-| FP-D9 | Per-rule/per-turn vote concentration limit and multiple-pass wallet policy | Open | Vote activation |
+| FP-D8 | Fee waiver's missing SOL contribution: funded sponsor or smaller turn pool | Open. **Both** paths are implemented in FP2 behind `FounderPassConfig::fee_waiver_funding`, which is born `Unset` and refuses every waiver until governance selects one; the sponsor path is funded by the `founder_pass_sponsor` vault and refuses a waiver it cannot cover | Sale disclosure and activation |
+| FP-D9 | Per-rule/per-turn vote concentration limit and multiple-pass wallet policy | Open. FP2 enforces both as governed numbers bound to the **wallet** (not the pass, which rotation would defeat); zero stays the unresolved sentinel and activation is refused until both are set | Vote activation |
 | FP-D10 | Legal eligibility, final terms, refund policy, and public claim wording | Open | Sale publication |
 
 Unresolved decisions block their dependent work; they do not silently
