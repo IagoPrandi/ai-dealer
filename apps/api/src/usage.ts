@@ -31,6 +31,8 @@ export type AiUsageStep =
   | "guardian_groundedness"
   | "guardian_jailbreak"
   | "interpret"
+  | "jev_interpretation_advisory"
+  | "jev_semantic_review"
   | "review"
   | "translate";
 
@@ -401,6 +403,7 @@ export function setAiRunSubject(subject: string): void {
 }
 
 export interface RecordAiCallInput {
+  providerCostOnly?: boolean;
   cachedPromptTokens?: number | null;
   completionTokens?: number | null;
   durationMs: number;
@@ -451,13 +454,21 @@ export function recordAiCall(input: RecordAiCallInput): void {
       : (promptTokens ?? 0) + (completionTokens ?? 0));
   const tokenSource: AiUsageTokenSource =
     totalTokens === null ? "not_reported" : "provider_reported";
-  const { costSource, costUsd } = priceCall({
-    completionTokens,
-    model: input.model,
-    promptTokens,
-    providerCostUsd: finiteOrNull(input.providerCostUsd),
-    totalTokens,
-  });
+  const { costSource, costUsd } = input.providerCostOnly
+    ? {
+        costSource:
+          finiteOrNull(input.providerCostUsd) === null
+            ? ("unavailable" as const)
+            : ("provider_reported" as const),
+        costUsd: finiteOrNull(input.providerCostUsd),
+      }
+    : priceCall({
+        completionTokens,
+        model: input.model,
+        promptTokens,
+        providerCostUsd: finiteOrNull(input.providerCostUsd),
+        totalTokens,
+      });
 
   const record: AiCallUsageRecord = {
     cachedPromptTokens: finiteOrNull(input.cachedPromptTokens),
@@ -669,13 +680,17 @@ export function readProviderUsage(
     const completionDetails = usage.completion_tokens_details as
       | Record<string, unknown>
       | undefined;
-    const promptTokens = numberOrNull(usage.prompt_tokens);
-    const completionTokens = numberOrNull(usage.completion_tokens);
+    const promptTokens =
+      numberOrNull(usage.prompt_tokens) ?? numberOrNull(usage.input_tokens);
+    const completionTokens =
+      numberOrNull(usage.completion_tokens) ??
+      numberOrNull(usage.output_tokens);
     const totalTokens = numberOrNull(usage.total_tokens);
     if (
       promptTokens !== null ||
       completionTokens !== null ||
-      totalTokens !== null
+      totalTokens !== null ||
+      numberOrNull(usage.cost) !== null
     ) {
       return {
         cachedPromptTokens: numberOrNull(promptDetails?.cached_tokens),

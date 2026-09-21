@@ -2216,6 +2216,82 @@ Models may be routed per agent role:
 
 This routing reuses the existing composite confidence score (Section 7.4) and provider fallback chain (M3.6); a local provider simply takes a slot in the priority chain.
 
+### 7.3.2 Typed Semantic Review (Jev-Guarded Single Compiler)
+
+The routine `review_rule_ast` slot may be served by a **typed semantic reviewer**
+instead of a second LLM. The reviewer receives the player's original text, the
+approved interpretation, the candidate AST, the DSL contract, the total
+deterministic description, and the per-clause facts, and returns typed
+probabilities — never prose and never an AST. It answers one question: does this
+AST faithfully implement the reading the player approved?
+
+The LLM keeps every generative responsibility. It interprets the proposal, writes
+the official interpretation, asks the clarification questions, and generates the
+complete AST. The typed reviewer only judges the finished candidate.
+
+#### Authority boundary
+
+The typed reviewer may replace the routine LLM review of a candidate AST. It may
+do nothing else. It must never:
+
+- decide `WIN` or `LOSE` for a concrete guess, or take part in settlement;
+- authorize a payment, a claim, or a prize release;
+- freeze an artifact, produce an artifact hash, or submit a proposal;
+- remove, answer, or reword a clarification question the interpretation raised;
+- convert a high score into player consent.
+
+Its score can raise the priority of a question, never retire one. Measured
+directly on winner evaluation it reached 82.92% accuracy and still paid six
+tickets that had to lose even when both typed primitives were confident, which is
+why the settlement prohibition is unconditional rather than threshold-based
+(`docs/jev-rule-pipeline-experiment.md`).
+
+#### Placement in the compilation flow
+
+The typed review runs only after the local deterministic gates have already
+accepted the candidate: schema validation, runtime bounds, source-span coverage,
+and — on the provider path — verified provider evidence. It runs concurrently
+with the deterministic test harness, so a successful review costs no additional
+wall-clock beyond the harness it overlaps.
+
+| Result | Route | Effect |
+| --- | --- | --- |
+| `PASS` | `JEV` | The routine LLM reviewer is not called for this candidate. |
+| `MISMATCH` | `JEV` | The candidate is rejected as a compiler defect and regenerated. |
+| `ABSTAIN` | `LLM_FALLBACK` | The existing LLM reviewer decides, and the fallback is recorded. |
+| `ERROR` | `LLM_FALLBACK` | Same, with the technical cause recorded. Never fail-open. |
+
+A `MISMATCH` arrives after the player already approved the interpretation, so it
+is a defect in the artifact and not a defect in the wording. The pipeline
+regenerates the AST up to twice using the failed facets as feedback, without
+returning to the player. Only a genuine gap in the source text produces a
+question.
+
+#### Rollout modes
+
+The reviewer is deployed through four modes, configured per environment and
+reversible to `shadow` at any time:
+
+`off` — not called. `shadow` — called and recorded; the LLM reviewer stays
+authoritative. `gated` — authoritative for a stable rule-id cohort only.
+`active` — authoritative for every calibrated cohort.
+
+In `gated` and `active`, a candidate whose language/complexity cohort is not
+covered by operator-approved calibration evidence abstains to the LLM reviewer.
+Production pins the validated resolved model version rather than tracking a
+moving alias. The release gates, calibration evidence shape, and phase criteria
+are specified in `docs/jev-guarded-rollout.md`.
+
+#### Auditability
+
+Every compilation records the route, the fallback cause, the resolved model
+version, the scores, latency, cost, the candidate artifact hash, and an
+attestation hash over the typed result. An unreported cost is recorded as
+unknown, never as zero. The player-facing result carries only the status, the
+route, and the attestation hash; the probabilities and facet scores stay in the
+operator audit trail, because the distance between a score and its threshold is
+what an adversary would tune against.
+
 ### 7.4 Composite Confidence Score
 
 The final confidence score is a composite operational score.

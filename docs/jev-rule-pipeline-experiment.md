@@ -894,3 +894,27 @@ ability to write a correct tree.
 Raw screens, per-piece Nouls, transcripts, attempts, usage and costs are in
 `docs/jev-ast-piece-selection-results.json` and
 `docs/jev-ast-piece-selection-run2.json`.
+
+## What was implemented from these experiments
+
+The single-AST described-mode result is the only measurement this project builds
+on: one AST per request, with the deterministic total description in state,
+gated at Choice probability and confidence ≥0.70. It is the shape a production
+review has, and it made no false accept.
+
+That configuration ships as the **typed semantic reviewer** (PRD §7.3.2), which
+may replace the routine `review_rule_ast` LLM call and nothing else. It is off by
+default; `docs/jev-guarded-rollout.md` holds the configuration surface, the
+calibration evidence an operator must approve, the release gates, and the four
+rollout phases.
+
+The prohibitions above are enforced in code rather than restated as policy. The
+direct `WIN`/`LOSE` evaluation is not reachable from any production path: the
+review request carries no guess, no draw and no ticket, and every deterministic
+gate still decides after a `PASS`. The numbers in the JSON result files are
+recomputed from the individual judgments by `apps/api/src/jevEvidence.test.ts`,
+so a summary edit or a redefined metric fails the suite instead of quietly
+moving the ground under the release gates.
+
+Piece-by-piece assembly and bounded-grammar narrowing were **not** implemented.
+The LLM still generates the complete AST.

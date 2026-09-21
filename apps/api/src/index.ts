@@ -64,6 +64,8 @@ import {
   type RuleValidationReasonCode,
   type RuleValidationResult,
   type RuleValidationTestResult,
+  type JevSemanticReviewRoute,
+  type JevSemanticReviewStatus,
 } from "@tyche/rule-compiler";
 import pg from "pg";
 import {
@@ -95,6 +97,11 @@ import {
   type AiRunUsageSummary,
   type AiUsageStep,
 } from "./usage.js";
+import {
+  resolveJevReviewConfig,
+  reviewInterpretationWithJev,
+  reviewRuleAstWithJev,
+} from "./jev.js";
 import {
   checkPostgresHealth,
   checkRedisHealth,
@@ -277,6 +284,12 @@ export interface RulePreflightResult {
   sanitizedText: string;
   sanitizedTextHash: readonly number[];
   semanticImpact: RuleSemanticImpact;
+  /** Public JEV receipt. Full probabilities and cost remain in the audit log. */
+  semanticReview?: {
+    attestationHash: string | null;
+    route: JevSemanticReviewRoute;
+    status: JevSemanticReviewStatus | null;
+  };
   suggestedRewrite?: string;
   suggestedRewrites?: readonly string[];
   title: string;
@@ -412,6 +425,18 @@ export const RULE_REASON_EXPLANATIONS: readonly RuleReasonExplanation[] = [
       "You approved the summary, so paying a narrower rule would break that promise.",
     whatToChange:
       "State the condition the summary added — or drop it — so both readings agree.",
+  },
+  {
+    // Reached only when both bounded repairs failed. The approved reading is not
+    // in doubt — the compiler could not express it — so the advice is to restate
+    // the condition, never to answer a question the player was never asked.
+    code: "JEV_SEMANTIC_MISMATCH",
+    whatHappened:
+      "The typed semantic review found that the compiled rule does not implement the reading you approved.",
+    whyItBlocks:
+      "Paying a rule that differs from the approved reading would break the promise you accepted.",
+    whatToChange:
+      "Restate the winning condition in one explicit sentence, keeping every threshold, order, and source you meant.",
   },
   {
     code: "PROVIDER_DISAGREEMENT",
@@ -576,6 +601,7 @@ export function getBlockingRuleReasonExplanations(
 const RULE_GENERATION_RETRYABLE_CODES = new Set<RuleValidationReasonCode>([
   "AGENT_STATEMENT_MISMATCH",
   "INTERPRETATION_MISMATCH",
+  "JEV_SEMANTIC_MISMATCH",
   "PROVIDER_DISAGREEMENT",
   "PROVIDER_EVIDENCE_UNVERIFIED",
   "PROVIDER_MALFORMED_RESPONSE",
@@ -594,6 +620,7 @@ const RULE_GENERATION_RETRYABLE_CODES = new Set<RuleValidationReasonCode>([
 const RULE_GENERATION_AUTO_REPAIR_CODES = new Set<RuleValidationReasonCode>([
   "AGENT_STATEMENT_MISMATCH",
   "INTERPRETATION_MISMATCH",
+  "JEV_SEMANTIC_MISMATCH",
   "PROVIDER_EVIDENCE_UNVERIFIED",
   "PROVIDER_MALFORMED_RESPONSE",
   "PROVIDER_SPAN_COVERAGE_INCOMPLETE",
@@ -608,6 +635,7 @@ const RULE_GENERATION_FAILURE_TRIGGER_CODES = new Set<RuleValidationReasonCode>(
   [
     "AGENT_STATEMENT_MISMATCH",
     "INTERPRETATION_MISMATCH",
+    "JEV_SEMANTIC_MISMATCH",
     "PROVIDER_DISAGREEMENT",
     "PROVIDER_EVIDENCE_UNVERIFIED",
     "PROVIDER_MALFORMED_RESPONSE",
@@ -705,6 +733,21 @@ export function rejectedCompilerAttemptFingerprint(
   });
 }
 
+/**
+ * The typed semantic review's probabilities, facet scores, cost and resolved
+ * model version are operator audit data: they say how close a candidate came to
+ * a threshold, which is exactly what an attacker probing the compiler wants.
+ * The player-visible diagnostic keeps the route, status and attestation hash
+ * that the receipt already carries, and nothing that can be optimized against.
+ */
+export function redactSemanticReviewScores(
+  attempt: RuleCompilationAttemptDiagnostic,
+): RuleCompilationAttemptDiagnostic {
+  const publicDiagnostic = { ...attempt };
+  delete publicDiagnostic.semanticReview;
+  return publicDiagnostic;
+}
+
 function buildCompilerRepairFeedback(
   validation: Awaited<ReturnType<typeof compileRuleArtifact>>,
 ) {
@@ -738,6 +781,11 @@ function buildCompilerRepairFeedback(
     : [];
   return [
     `Rejected validation codes: ${blockers.join(", ")}.`,
+    ...(latestAttempt?.semanticReview?.status === "MISMATCH"
+      ? [
+          `Semantic review facets: ${JSON.stringify(latestAttempt.semanticReview.facets)}. Regenerate the complete AST against the approved interpretation; do not ask the player to repair compiler defects.`,
+        ]
+      : []),
     ...findings,
     "Re-read the exact rule as a whole and preserve every condition, comparator, source, position, threshold, conjunction, and negation.",
     "Make consumedSpans cover every intent-bearing clause and derive workedExamples independently from the source before checking them against the fresh AST.",
@@ -756,6 +804,12 @@ export interface RuleInterpretationResult {
   dealerMessage: string;
   englishText: string;
   guardianChecked: boolean;
+  /** Advisory only: this receipt never removes or answers a player question. */
+  interpretationReview?: {
+    attestationHash: string;
+    route: "ADVISORY";
+    status: "ERROR" | "RECORDED";
+  };
   needsClarification: boolean;
   normalizedText: string;
   officialInterpretation: string;
@@ -4062,6 +4116,29 @@ async function runRuleInterpretationPipeline(
       ),
     ),
   );
+  const jevConfig = resolveJevReviewConfig();
+  const interpretationReview =
+    jevConfig.mode === "off"
+      ? null
+      : await reviewInterpretationWithJev(
+          {
+            addedOperationalClauses: interpretation.addedOperationalClauses,
+            clarificationQuestions: interpretation.clarificationQuestions,
+            normalizedText: interpretation.normalizedText,
+            officialInterpretation: interpretation.officialInterpretation,
+            originalText: sanitizedText,
+          },
+          jevConfig,
+          signal,
+        );
+  if (interpretationReview) {
+    // Full scores are operator audit data. The public response below carries
+    // only the route, status and attestation hash and never changes questions.
+    console.info(
+      "JEV_INTERPRETATION_ADVISORY",
+      JSON.stringify(interpretationReview),
+    );
+  }
 
   return {
     addedOperationalClauses: interpretation.addedOperationalClauses,
@@ -4070,6 +4147,15 @@ async function runRuleInterpretationPipeline(
     dealerMessage: interpretation.dealerMessage,
     englishText,
     guardianChecked: guardianConfig.enabled,
+    ...(interpretationReview
+      ? {
+          interpretationReview: {
+            attestationHash: interpretationReview.attestationHash,
+            route: "ADVISORY" as const,
+            status: interpretationReview.status,
+          },
+        }
+      : {}),
     needsClarification: interpretation.needsClarification,
     normalizedText: interpretation.normalizedText,
     officialInterpretation: interpretation.officialInterpretation,
@@ -4179,6 +4265,7 @@ async function runRulePreflightPipeline(
     compiler: compilerConfig,
     guardian: guardianConfig,
   } = runtime;
+  const jevConfig = resolveJevReviewConfig();
   let guardianNote = "";
 
   // 0. Make sure the models are actually loaded before any time-boxed call. A
@@ -4540,6 +4627,15 @@ async function runRulePreflightPipeline(
       // secondary slot's candidate could be corroborated by the model that
       // generated it.
       reviewerModelId: passReviewerConfig.model,
+      semanticReviewCanaryPercent: jevConfig.canaryPercent,
+      ...(jevConfig.mode === "off"
+        ? {}
+        : {
+            semanticReviewer: (
+              request: Parameters<typeof reviewRuleAstWithJev>[0],
+            ) => reviewRuleAstWithJev(request, jevConfig, signal),
+          }),
+      semanticReviewMode: jevConfig.mode,
     };
     let validation = await compileRuleArtifact(
       compilationRequest,
@@ -4734,6 +4830,7 @@ async function runRulePreflightPipeline(
   );
   if (
     needsEscalation &&
+    !pass.validation.log.reasonCodes.includes("JEV_SEMANTIC_MISMATCH") &&
     escalationModel &&
     (escalationChangesInterpretation || escalationChangesCompiler)
   ) {
@@ -4909,8 +5006,28 @@ async function runRulePreflightPipeline(
     !semanticReview.impact.triviallyAlwaysTrue
       ? groundednessFailure
       : null;
+  if (jevConfig.mode !== "off") {
+    console.info(
+      "JEV_COMPILER_AUDIT",
+      JSON.stringify({
+        ruleId,
+        validationLogId: validation.log.validationLogId,
+        attempts: [
+          ...rejectedCompilerAttempts,
+          ...validation.log.attemptDiagnostics,
+        ],
+      }),
+    );
+  }
   const rejectedAttemptDiagnostics =
-    rejectedCompilerAttempts.length > 0 ? rejectedCompilerAttempts : undefined;
+    rejectedCompilerAttempts.length > 0
+      ? rejectedCompilerAttempts.map(redactSemanticReviewScores)
+      : undefined;
+  const jevReviewReceipt = {
+    attestationHash: validation.log.semanticReviewAttestationHash ?? null,
+    route: validation.log.semanticReviewRoute ?? "LLM_ONLY",
+    status: validation.log.semanticReviewStatus ?? null,
+  };
   const refinementFeedback =
     semanticRejectionFeedback ??
     semanticConfirmationFeedback ??
@@ -4971,6 +5088,7 @@ async function runRulePreflightPipeline(
     suggestedRewrite: refinementFeedback?.suggestedRewrite ?? null,
     suggestedRewrites: refinementFeedback?.suggestedRewrites ?? [],
     semanticImpact: semanticReview.impact,
+    semanticReview: jevReviewReceipt,
     title: interpretation.title,
     tokenCount,
     // Audit trail for unsupported headline claims. The approved headline is
@@ -5041,6 +5159,7 @@ async function runRulePreflightPipeline(
     sanitizedText,
     sanitizedTextHash: hashBytes(sanitizedText),
     semanticImpact: semanticReview.impact,
+    semanticReview: jevReviewReceipt,
     sourceSpans,
     ...(refinementFeedback?.suggestedRewrite
       ? { suggestedRewrite: refinementFeedback.suggestedRewrite }

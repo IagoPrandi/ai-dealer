@@ -104,6 +104,7 @@ import {
   settleTurnRollover,
   requestClaimApproval,
   RULE_REASON_EXPLANATIONS,
+  redactSemanticReviewScores,
   storeAuditLogInPostgres,
   toPostgresAuditLogRow,
   verifyAuditLogIntegrity,
@@ -136,7 +137,11 @@ import {
   evaluatePredicate,
   validateAndPrecompileRule,
 } from "@tyche/rule-compiler";
-import type { RuleAst, RuleCompilationAttemptDiagnostic } from "@tyche/rule-compiler";
+import type {
+  RuleAst,
+  RuleCompilationAttemptDiagnostic,
+  RuleValidationReasonCode,
+} from "@tyche/rule-compiler";
 import { buildDealerChatPrompt } from "./promptSkills.js";
 
 const wallet = "4bYqf3rJ7m2nQh9sV1xCH8kLpWtD6eZaUg5oNbMcXyTH";
@@ -199,11 +204,51 @@ const walletThree = "6bYqf3rJ7m2nQh9sV1xCH8kLpWtD6eZaUg5oNbMcXyTK";
 const base58 = "ExW6LBU6XWsP53cvbtV1N2KFYMaudCtrenimHNWBBENd";
 
 test("every compiler reason code has one actionable player explanation", () => {
-  assert.equal(RULE_REASON_EXPLANATIONS.length, 22);
+  // A `Record` keyed by the union makes this list exhaustive at COMPILE time:
+  // a reason code added to the compiler and forgotten here is a type error,
+  // not a player left without an explanation when the code first blocks a rule.
+  const everyReasonCode: Record<RuleValidationReasonCode, true> = {
+    AGENT_STATEMENT_MISMATCH: true,
+    AMBIGUOUS_RULE: true,
+    COMPLEXITY_EXCEEDED: true,
+    DIFFICULTY_ALWAYS_TRUE: true,
+    DIFFICULTY_IMPOSSIBLE: true,
+    EXTERNAL_DEPENDENCY: true,
+    GUARDIAN_FIDELITY_CONFLICT: true,
+    INTERPRETATION_MISMATCH: true,
+    JEV_SEMANTIC_MISMATCH: true,
+    PROVIDER_DISAGREEMENT: true,
+    PROVIDER_EVIDENCE_UNVERIFIED: true,
+    PROVIDER_MALFORMED_RESPONSE: true,
+    PROVIDER_SCHEMA_UNCONSTRAINED: true,
+    PROVIDER_SPAN_COVERAGE_INCOMPLETE: true,
+    PROVIDER_TIMEOUT: true,
+    REVIEWER_MISMATCH: true,
+    RUNTIME_TEST_FAILED: true,
+    SCHEMA_INVALID: true,
+    SECOND_OPINION_UNAVAILABLE: true,
+    SUPPORTED_RULE: true,
+    UNSAFE_RUNTIME_BOUNDS: true,
+    UNSUPPORTED_RULE: true,
+    VACUOUS_CONDITION: true,
+  };
+  assert.deepEqual(
+    RULE_REASON_EXPLANATIONS.map((entry) => entry.code).sort(),
+    Object.keys(everyReasonCode).sort(),
+  );
+  assert.equal(RULE_REASON_EXPLANATIONS.length, 23);
   assert.equal(
     new Set(RULE_REASON_EXPLANATIONS.map((entry) => entry.code)).size,
-    22,
+    23,
   );
+
+  // The typed semantic review only ever rejects a COMPILER defect, and both
+  // bounded repairs have already failed by the time the player reads this. The
+  // advice must not read as a question about their wording.
+  const semantic = getRuleReasonExplanations(["JEV_SEMANTIC_MISMATCH"])[0];
+  assert.ok(semantic, "JEV_SEMANTIC_MISMATCH needs an explanation");
+  assert.match(semantic.whatHappened, /approved/iu);
+  assert.doesNotMatch(semantic.whatToChange, /answer|question/iu);
   const explanations = getRuleReasonExplanations([
     "INTERPRETATION_MISMATCH",
     "UNSUPPORTED_RULE",
@@ -280,6 +325,55 @@ test("only compiler-generation faults offer retry without reinterpretation", () 
   assert.equal(isRuleGenerationRetryable(["DIFFICULTY_ALWAYS_TRUE"]), false);
   assert.equal(isRuleGenerationRetryable(["DIFFICULTY_IMPOSSIBLE"]), false);
   assert.equal(isRuleGenerationRetryable(["SUPPORTED_RULE"]), false);
+
+  // A typed semantic mismatch arrives AFTER the player approved the reading, so
+  // it can only be a compiler defect. It must regenerate the AST rather than
+  // send the player back to rewrite a sentence the pipeline already accepted.
+  assert.equal(isRuleGenerationRetryable(["JEV_SEMANTIC_MISMATCH"]), true);
+  assert.equal(
+    isRuleGenerationRetryable(["SUPPORTED_RULE", "JEV_SEMANTIC_MISMATCH"]),
+    true,
+  );
+});
+
+test("the semantic review's scores never leave the operator audit trail", () => {
+  const attempt = {
+    candidate: null,
+    decision: "INVALID" as const,
+    providerEvidence: null,
+    reasonCodes: ["JEV_SEMANTIC_MISMATCH" as const],
+    schemaError: null,
+    semanticReview: {
+      astCoversSource: 0.12,
+      attestationHash: "a".repeat(64),
+      candidateArtifactHash: "b".repeat(64),
+      costUsd: 0.00004,
+      facets: { threshold: 0.08 },
+      latencyMs: 412,
+      modelAlias: "typesafe/jev-1.13-20260917",
+      resolvedModel: "typesafe/jev-1.13-20260917",
+      sourceSupportsAst: 0.11,
+      status: "MISMATCH" as const,
+      structural: {
+        confidence: 0.94,
+        label: "no" as const,
+        probability: 0.96,
+      },
+    },
+    semanticReviewRoute: "JEV" as const,
+    stages: [],
+    status: "rejected" as const,
+  };
+
+  const redacted = redactSemanticReviewScores(attempt);
+  assert.equal(redacted.semanticReview, undefined);
+  assert.equal(redacted.semanticReviewRoute, "JEV");
+  assert.deepEqual(redacted.reasonCodes, ["JEV_SEMANTIC_MISMATCH"]);
+  // The distance between a score and its threshold is exactly what a player
+  // probing the compiler would tune against, so it stays out of the response.
+  assert.doesNotMatch(JSON.stringify(redacted), /0\.9[46]|0\.1[12]/u);
+  // Redaction must not mutate the record the audit log keeps.
+  assert.equal(attempt.semanticReview.structural.probability, 0.96);
 });
 
 test("groundedness failures identify the failed fidelity link and preserve clear wording", () => {
@@ -6145,7 +6239,8 @@ test("an accepted rule carries no blocking reason, even with a resolved disagree
         officialInterpretation: "Compare the two sums.",
         originalText: prompt,
         reasonCodes: ["SUPPORTED_RULE", "PROVIDER_DISAGREEMENT"],
-        reasonSummary: "Rule accepted after fallback with final confidence 0.9.",
+        reasonSummary:
+          "Rule accepted after fallback with final confidence 0.9.",
         refinementFocus: [],
         refinementQuestions: [],
         semanticImpact: {

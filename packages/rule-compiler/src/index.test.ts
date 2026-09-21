@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
@@ -23,6 +24,7 @@ import {
   hasProvablyVacuousCondition,
   providerCompilationHasSchemaValidAst,
   RULE_COMPILER_SKILL_VERSION,
+  collectSemanticReviewFacets,
   ruleAstSchema,
   scoreGuess,
   validateAndPrecompileRule,
@@ -4098,6 +4100,421 @@ function sumCompareAst(op: "gt" | "lt", offset: number) {
   };
 }
 
+function jevReview(
+  request: { candidateArtifactHash: string; facets: readonly string[] },
+  status: "ABSTAIN" | "ERROR" | "MISMATCH" | "PASS",
+) {
+  const passing = status === "PASS";
+  const mismatch = status === "MISMATCH";
+  const body = {
+    astCoversSource: passing ? 0.98 : mismatch ? 0.05 : 0.5,
+    candidateArtifactHash: request.candidateArtifactHash,
+    costUsd: null,
+    facets: Object.fromEntries(
+      request.facets.map((facet) => [
+        facet,
+        passing ? 0.99 : mismatch ? 0.05 : 0.5,
+      ]),
+    ),
+    latencyMs: 12,
+    modelAlias: "typesafe/jev-1.13-20260917",
+    resolvedModel: "typesafe/jev-1.13-20260917",
+    sourceSupportsAst: passing ? 0.98 : mismatch ? 0.05 : 0.5,
+    status,
+    structural: {
+      confidence: passing || mismatch ? 0.96 : 0.2,
+      label: passing
+        ? ("yes" as const)
+        : mismatch
+          ? ("no" as const)
+          : ("maybe" as const),
+      probability: passing || mismatch ? 0.97 : 0.4,
+    },
+  };
+  return {
+    ...body,
+    attestationHash: createHash("sha256")
+      .update(JSON.stringify(body))
+      .digest("hex"),
+  };
+}
+
+test("an active JEV PASS replaces the routine LLM reviewer", async () => {
+  let reviewerCalls = 0;
+  const result = await compileRuleArtifact(
+    {
+      originalText: NO_REFERENCE_PROMPT,
+      prompt: NO_REFERENCE_PROMPT,
+      ruleId: 101,
+      tokenCount: 14,
+    },
+    {
+      astProvider: async () => sumCompareAst("lt", 10),
+      astReviewer: async () => {
+        reviewerCalls += 1;
+        return sumCompareAst("lt", 10);
+      },
+      semanticReviewer: async (request) => jevReview(request, "PASS"),
+      semanticReviewMode: "active",
+    },
+  );
+
+  assert.equal(result.decision, "VALID");
+  assert.equal(reviewerCalls, 0);
+  assert.equal(result.log.semanticReviewRoute, "JEV");
+  assert.equal(result.log.semanticReviewStatus, "PASS");
+  assert.match(
+    result.log.semanticReviewAttestationHash ?? "",
+    /^[a-f0-9]{64}$/u,
+  );
+});
+
+test("an active JEV MISMATCH rejects the candidate for regeneration", async () => {
+  let reviewerCalls = 0;
+  const result = await compileRuleArtifact(
+    {
+      originalText: NO_REFERENCE_PROMPT,
+      prompt: NO_REFERENCE_PROMPT,
+      ruleId: 102,
+      tokenCount: 14,
+    },
+    {
+      astProvider: async () => sumCompareAst("lt", 10),
+      astReviewer: async () => {
+        reviewerCalls += 1;
+        return sumCompareAst("lt", 10);
+      },
+      semanticReviewer: async (request) => jevReview(request, "MISMATCH"),
+      semanticReviewMode: "active",
+    },
+  );
+
+  assert.equal(result.decision, "INVALID");
+  assert.equal(reviewerCalls, 0);
+  assert.ok(result.log.reasonCodes.includes("JEV_SEMANTIC_MISMATCH"));
+  assert.equal(result.log.semanticReviewRoute, "JEV");
+  assert.equal(result.log.semanticReviewStatus, "MISMATCH");
+});
+
+test("a JEV ABSTAIN uses the explicit LLM reviewer fallback", async () => {
+  let reviewerCalls = 0;
+  const result = await compileRuleArtifact(
+    {
+      originalText: NO_REFERENCE_PROMPT,
+      prompt: NO_REFERENCE_PROMPT,
+      ruleId: 103,
+      tokenCount: 14,
+    },
+    {
+      astProvider: async () => sumCompareAst("lt", 10),
+      astReviewer: async () => {
+        reviewerCalls += 1;
+        return sumCompareAst("lt", 10);
+      },
+      semanticReviewer: async (request) => jevReview(request, "ABSTAIN"),
+      semanticReviewMode: "active",
+    },
+  );
+
+  assert.equal(result.decision, "VALID");
+  assert.equal(reviewerCalls, 1);
+  assert.equal(result.log.semanticReviewRoute, "LLM_FALLBACK");
+  assert.equal(result.log.semanticReviewStatus, "ABSTAIN");
+  assert.equal(
+    result.log.attemptDiagnostics[0]?.semanticReviewFallbackReason,
+    "ABSTAIN",
+  );
+});
+
+test("shadow JEV records disagreement without changing the LLM decision", async () => {
+  let reviewerCalls = 0;
+  const result = await compileRuleArtifact(
+    {
+      originalText: NO_REFERENCE_PROMPT,
+      prompt: NO_REFERENCE_PROMPT,
+      ruleId: 104,
+      tokenCount: 14,
+    },
+    {
+      astProvider: async () => sumCompareAst("lt", 10),
+      astReviewer: async () => {
+        reviewerCalls += 1;
+        return sumCompareAst("lt", 10);
+      },
+      semanticReviewer: async (request) => jevReview(request, "MISMATCH"),
+      semanticReviewMode: "shadow",
+    },
+  );
+
+  assert.equal(result.decision, "VALID");
+  assert.equal(reviewerCalls, 1);
+  assert.equal(result.log.semanticReviewRoute, "SHADOW_LLM");
+  assert.equal(result.log.semanticReviewStatus, "MISMATCH");
+  assert.ok(!result.log.reasonCodes.includes("JEV_SEMANTIC_MISMATCH"));
+});
+
+test("gated mode uses a stable cohort and routes candidates outside it to LLM", async () => {
+  let reviewerCalls = 0;
+  const compile = (canaryPercent: number) =>
+    compileRuleArtifact(
+      {
+        originalText: NO_REFERENCE_PROMPT,
+        prompt: NO_REFERENCE_PROMPT,
+        ruleId: 105,
+        tokenCount: 14,
+      },
+      {
+        astProvider: async () => sumCompareAst("lt", 10),
+        astReviewer: async () => {
+          reviewerCalls += 1;
+          return sumCompareAst("lt", 10);
+        },
+        semanticReviewCanaryPercent: canaryPercent,
+        semanticReviewer: async (request) => jevReview(request, "PASS"),
+        semanticReviewMode: "gated",
+      },
+    );
+
+  const outside = await compile(0);
+  const inside = await compile(100);
+  assert.equal(outside.log.semanticReviewRoute, "SHADOW_LLM");
+  assert.equal(
+    outside.log.attemptDiagnostics[0]?.semanticReviewFallbackReason,
+    "OUTSIDE_CANARY",
+  );
+  assert.equal(inside.log.semanticReviewRoute, "JEV");
+  assert.equal(reviewerCalls, 1);
+});
+
+test("a JEV technical error fails over to the LLM reviewer", async () => {
+  let reviewerCalls = 0;
+  const result = await compileRuleArtifact(
+    {
+      originalText: NO_REFERENCE_PROMPT,
+      prompt: NO_REFERENCE_PROMPT,
+      ruleId: 106,
+      tokenCount: 14,
+    },
+    {
+      astProvider: async () => sumCompareAst("lt", 10),
+      astReviewer: async () => {
+        reviewerCalls += 1;
+        return sumCompareAst("lt", 10);
+      },
+      semanticReviewer: async (request) => jevReview(request, "ERROR"),
+      semanticReviewMode: "active",
+    },
+  );
+
+  assert.equal(result.decision, "VALID");
+  assert.equal(reviewerCalls, 1);
+  assert.equal(result.log.semanticReviewRoute, "LLM_FALLBACK");
+  assert.equal(result.log.semanticReviewStatus, "ERROR");
+});
+
+test("JEV cannot run before local schema and source coverage gates pass", async () => {
+  let calls = 0;
+  for (const candidate of [{ schemaVersion: 99 }, sumCompareAst("lt", 5)]) {
+    const result = await compileRuleArtifact(
+      {
+        prompt:
+          "Win if the sum of guess is less than the sum of draw minus 10 and at least two numbers match at the same positions.",
+        originalText:
+          "Win if the sum of guess is less than the sum of draw minus 10 and at least two numbers match at the same positions.",
+        tokenCount: 28,
+      },
+      {
+        astProvider: async () => candidate,
+        semanticReviewMode: "active",
+        semanticReviewer: async (request) => {
+          calls += 1;
+          return jevReview(request, "PASS");
+        },
+      },
+    );
+    assert.equal(result.decision, "INVALID");
+  }
+  assert.equal(calls, 0);
+});
+
+test("tampered JEV attestation routes to the LLM fallback", async () => {
+  const result = await compileRuleArtifact(
+    {
+      prompt: NO_REFERENCE_PROMPT,
+      originalText: NO_REFERENCE_PROMPT,
+      tokenCount: 14,
+    },
+    {
+      astProvider: async () => sumCompareAst("lt", 10),
+      astReviewer: async () => sumCompareAst("lt", 10),
+      semanticReviewMode: "active",
+      semanticReviewer: async (request) => ({
+        ...jevReview(request, "PASS"),
+        candidateArtifactHash: "f".repeat(64),
+      }),
+    },
+  );
+  assert.equal(result.decision, "VALID");
+  assert.equal(result.log.semanticReviewStatus, "ERROR");
+  assert.equal(result.log.semanticReviewRoute, "LLM_FALLBACK");
+});
+
+test("the semantic review only asks facets the rule actually exercises", () => {
+  // Regression from the offline corpus run: seeding every facet unconditionally
+  // asked a plain predicate rule whether it preserved "tie" and "binders"
+  // semantics it does not have. The honest answer is an uncertain score, and
+  // because the facet gate is conjunctive that score blocked a PASS on a fully
+  // correct AST — the live run returned zero PASS results for every candidate,
+  // correct or not, so the route cost a provider call and covered nothing.
+  const predicateFacets = collectSemanticReviewFacets(
+    ruleAstSchema.parse(sumCompareAst("lt", 10)),
+  );
+  assert.ok(predicateFacets.includes("source"));
+  assert.ok(predicateFacets.includes("threshold"));
+  for (const absent of ["tie", "score", "eligibility", "binders", "order"]) {
+    assert.ok(
+      !predicateFacets.includes(absent),
+      `a sum comparison has no ${absent} semantics to preserve`,
+    );
+  }
+
+  // A ranking rule genuinely has a score, a tie policy and an eligibility gate,
+  // so dropping those questions would be the opposite defect.
+  const rankingFacets = collectSemanticReviewFacets(
+    ruleAstSchema.parse({
+      result: {
+        direction: "min",
+        eligibleWhen: {
+          kind: "compare",
+          left: {
+            kind: "reduce",
+            of: {
+              kind: "intersection",
+              left: { kind: "source", source: "guess" },
+              right: { kind: "source", source: "draw" },
+            },
+            op: "count",
+          },
+          op: "gte",
+          right: { kind: "lit", value: 2 },
+        },
+        score: {
+          kind: "reduce",
+          of: { kind: "source", source: "guess" },
+          op: "sum",
+        },
+        tieBreak: "share_pool",
+        type: "ranking",
+      },
+      schemaVersion: 3,
+    }),
+  );
+  for (const required of ["eligibility", "score", "tie", "source"]) {
+    assert.ok(
+      rankingFacets.includes(required),
+      `a ranking rule must still be asked about ${required}`,
+    );
+  }
+
+  // A Boolean rule keeps its composition question.
+  assert.ok(
+    collectSemanticReviewFacets(
+      ruleAstSchema.parse({
+        result: {
+          predicate: {
+            clauses: [
+              sumCompareAst("lt", 10).result.predicate,
+              sumCompareAst("gt", 2).result.predicate,
+            ],
+            kind: "and",
+          },
+          type: "predicate",
+        },
+        schemaVersion: 2,
+      }),
+    ).includes("boolean"),
+  );
+});
+
+test("a JEV PASS cannot authorize an artifact a deterministic gate rejects", async () => {
+  // The typed review replaces the ROUTINE LLM reviewer and nothing else. It has
+  // no authority to freeze an artifact, and therefore none over payment either:
+  // every later gate still runs and still decides.
+  const impossible = await compileRuleArtifact(
+    {
+      originalText: "Win if you match exactly zero and exactly six numbers.",
+      prompt: "Win if you match exactly zero and exactly six numbers.",
+      ruleId: 107,
+      tokenCount: 14,
+    },
+    {
+      astProvider: async () => ({
+        schemaVersion: 2,
+        result: {
+          type: "predicate",
+          predicate: {
+            kind: "and",
+            clauses: [0, 6].map((value) => ({
+              kind: "compare",
+              left: {
+                kind: "reduce",
+                of: {
+                  kind: "intersection",
+                  left: { kind: "source", source: "guess" },
+                  right: { kind: "source", source: "draw" },
+                },
+                op: "count",
+              },
+              op: "eq",
+              right: { kind: "lit", value },
+            })),
+          },
+        },
+      }),
+      semanticReviewer: async (request) => jevReview(request, "PASS"),
+      semanticReviewMode: "active",
+    },
+  );
+
+  assert.equal(impossible.log.semanticReviewStatus, "PASS");
+  assert.equal(impossible.decision, "INVALID");
+  assert.equal(impossible.artifact, null);
+  assert.ok(impossible.log.reasonCodes.includes("DIFFICULTY_IMPOSSIBLE"));
+});
+
+test("the JEV request carries no guess, draw, or settlement input", async () => {
+  let seen: string[] = [];
+  await compileRuleArtifact(
+    {
+      originalText: NO_REFERENCE_PROMPT,
+      prompt: NO_REFERENCE_PROMPT,
+      ruleId: 108,
+      tokenCount: 14,
+    },
+    {
+      astProvider: async () => sumCompareAst("lt", 10),
+      astReviewer: async () => sumCompareAst("lt", 10),
+      semanticReviewer: async (request) => {
+        seen = Object.keys(request).sort();
+        return jevReview(request, "PASS");
+      },
+      semanticReviewMode: "active",
+    },
+  );
+
+  // A concrete ticket cannot be judged by a route that never receives one, so
+  // no live guess can be settled through this reviewer even by mistake.
+  assert.deepEqual(seen, [
+    "ast",
+    "astDescription",
+    "candidateArtifactHash",
+    "facets",
+    "normalizedText",
+    "officialInterpretation",
+    "originalText",
+  ]);
+});
+
 test("buys a second opinion only when no deterministic reading exists", async () => {
   let calls = 0;
   const withReference = await compileRuleArtifact(
@@ -7600,7 +8017,8 @@ test("a caller's model label still names a slot that declares none", () => {
   };
   const result = validateAndPrecompileRule({
     model: "operator/label",
-    originalText: "A guess wins if at least 3 of its numbers appear in the draw.",
+    originalText:
+      "A guess wins if at least 3 of its numbers appear in the draw.",
     prompt: "A guess wins if at least 3 of its numbers appear in the draw.",
     providerRouting: unnamed,
     tokenCount: 14,

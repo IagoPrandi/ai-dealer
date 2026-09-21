@@ -116,6 +116,7 @@ export type RuleValidationReasonCode =
   | "EXTERNAL_DEPENDENCY"
   | "GUARDIAN_FIDELITY_CONFLICT"
   | "INTERPRETATION_MISMATCH"
+  | "JEV_SEMANTIC_MISMATCH"
   | "PROVIDER_DISAGREEMENT"
   | "PROVIDER_EVIDENCE_UNVERIFIED"
   | "PROVIDER_MALFORMED_RESPONSE"
@@ -147,6 +148,49 @@ export type RuleAstProvider = (params: {
  * never frozen directly into an artifact.
  */
 export type RuleAstReviewer = RuleAstProvider;
+
+export type JevReviewMode = "active" | "gated" | "off" | "shadow";
+export type JevSemanticReviewStatus = "ABSTAIN" | "ERROR" | "MISMATCH" | "PASS";
+export type JevSemanticReviewRoute =
+  | "JEV"
+  | "LLM_FALLBACK"
+  | "LLM_ONLY"
+  | "SHADOW_LLM";
+
+export interface JevSemanticReview {
+  astCoversSource: number;
+  attestationHash: string;
+  candidateArtifactHash: string;
+  costUsd: number | null;
+  calibrationEvidenceHash?: string;
+  cohort?: string;
+  errorCode?: string;
+  facets: Record<string, number>;
+  latencyMs: number;
+  modelAlias: string;
+  resolvedModel: string;
+  sourceSupportsAst: number;
+  status: JevSemanticReviewStatus;
+  structural: {
+    confidence: number;
+    label: "maybe" | "no" | "yes";
+    probability: number;
+  };
+}
+
+export interface JevSemanticReviewRequest {
+  ast: RuleAst;
+  astDescription: string;
+  candidateArtifactHash: string;
+  facets: readonly string[];
+  normalizedText: string;
+  officialInterpretation: string;
+  originalText: string;
+}
+
+export type RuleSemanticReviewer = (
+  request: JevSemanticReviewRequest,
+) => Promise<JevSemanticReview>;
 
 export interface RuleSourceSpan {
   /** Exact substring of the normalized rule that produced an AST condition. */
@@ -318,6 +362,12 @@ export interface RuleCompileArtifactOptions {
    * did before this existed, so an unset value changes nothing.
    */
   reviewerModelId?: string;
+  /** Typed proposal-to-AST reviewer. It never emits or executes an AST. */
+  semanticReviewer?: RuleSemanticReviewer;
+  /** Defaults to off. Shadow never changes a validation decision. */
+  semanticReviewMode?: JevReviewMode;
+  /** Stable rule-id cohort used only by gated mode. */
+  semanticReviewCanaryPercent?: number;
   preferDeterministic?: boolean;
   /** Fail closed unless an LLM response includes verified source evidence. */
   requireProviderEvidence?: boolean;
@@ -377,6 +427,7 @@ export interface RuleValidationTestResult extends RuleValidationTestCase {
 
 export type RuleCompilerStageName =
   | "schema_validation"
+  | "semantic_review"
   | "independent_review"
   | "provider_evidence"
   | "runtime_bounds"
@@ -424,6 +475,10 @@ export interface RuleCompilationAttemptDiagnostic {
   decision: RuleValidationDecision;
   providerEvidence: RuleProviderEvidenceStageDiagnostic | null;
   reasonCodes: RuleValidationReasonCode[];
+  /** Full typed JEV result for the private compiler audit trail. */
+  semanticReview?: JevSemanticReview | null;
+  semanticReviewFallbackReason?: "ABSTAIN" | "ERROR" | "OUTSIDE_CANARY" | null;
+  semanticReviewRoute?: JevSemanticReviewRoute;
   schemaError: string | null;
   /** Concrete input on which an independent reviewer and draft disagree. */
   semanticDisagreementWitness?: RuleSemanticDisagreementWitness | null;
@@ -502,6 +557,9 @@ export interface RuleValidationLog {
   reasonCodes: RuleValidationReasonCode[];
   reasonSummary: string;
   ruleId: number | null;
+  semanticReviewAttestationHash?: string | null;
+  semanticReviewRoute?: JevSemanticReviewRoute;
+  semanticReviewStatus?: JevSemanticReviewStatus | null;
   timestamp: string;
   validationLogId: string;
 }
@@ -844,7 +902,14 @@ function shouldContinueAfterAttempt(
   // account of what the rule means and nothing can contradict it. Buy a second
   // opinion in exactly that case — when the reviewer HAS a reference it already
   // serves as the independent check, so the extra call is not spent.
-  if (attempts.length === 1 && requireSecondOpinion) {
+  if (
+    attempts.length === 1 &&
+    requireSecondOpinion &&
+    !(
+      attempts[0]?.semanticReviewAuthoritative === true &&
+      attempts[0].semanticReview?.status === "PASS"
+    )
+  ) {
     return true;
   }
   // Re-ask another provider when the current one disagrees with the first
@@ -940,19 +1005,28 @@ function finalizeValidation(
   const reviewerIsIndependent =
     reviewerModel === undefined ||
     reviewerModel !== selectedAttempt.resolvedModel;
+  const semanticReviewerIsIndependent =
+    selectedAttempt.semanticReview?.resolvedModel.trim().toLowerCase() !==
+    selectedAttempt.resolvedModel.trim().toLowerCase();
+  const selectedHasAuthoritativeSemanticPass =
+    selectedAttempt.semanticReviewAuthoritative &&
+    selectedAttempt.semanticReviewRoute === "JEV" &&
+    selectedAttempt.semanticReview?.status === "PASS" &&
+    semanticReviewerIsIndependent;
   const hasIndependentReading =
     selectedAst !== null &&
-    ((reviewerIsIndependent &&
-      attempts.some(
-        (attempt) =>
-          attempt.reviewerAst !== null &&
-          attempt.diagnostics.stages.some(
-            (stage) =>
-              stage.stage === "independent_review" &&
-              (stage.status === "passed" || stage.status === "failed"),
-          ) &&
-          astOpinionsAgree(attempt.reviewerAst, selectedAst),
-      )) ||
+    (selectedHasAuthoritativeSemanticPass ||
+      (reviewerIsIndependent &&
+        attempts.some(
+          (attempt) =>
+            attempt.reviewerAst !== null &&
+            attempt.diagnostics.stages.some(
+              (stage) =>
+                stage.stage === "independent_review" &&
+                (stage.status === "passed" || stage.status === "failed"),
+            ) &&
+            astOpinionsAgree(attempt.reviewerAst, selectedAst),
+        )) ||
       attempts.some(
         (attempt) =>
           attempt !== selectedAttempt &&
@@ -998,6 +1072,7 @@ function finalizeValidation(
   // silently as if it had been corroborated.
   if (
     countCompletedOpinions(attempts) < 2 &&
+    !selectedHasAuthoritativeSemanticPass &&
     (options.requireSecondOpinion ||
       attempts.some((attempt) =>
         attempt.reasonCodes.includes("SECOND_OPINION_UNAVAILABLE"),
@@ -1027,6 +1102,10 @@ function finalizeValidation(
     providerPath,
     reasonCodes: [...reasonCodes].sort(),
     ruleId: request.ruleId ?? null,
+    semanticReviewAttestationHash:
+      selectedAttempt.semanticReview?.attestationHash ?? null,
+    semanticReviewRoute: selectedAttempt.semanticReviewRoute,
+    semanticReviewStatus: selectedAttempt.semanticReview?.status ?? null,
     timestamp,
   });
 
@@ -1064,6 +1143,10 @@ function finalizeValidation(
       reasonCodes: [...reasonCodes],
       reasonSummary,
       ruleId: request.ruleId ?? null,
+      semanticReviewAttestationHash:
+        selectedAttempt.semanticReview?.attestationHash ?? null,
+      semanticReviewRoute: selectedAttempt.semanticReviewRoute,
+      semanticReviewStatus: selectedAttempt.semanticReview?.status ?? null,
       timestamp,
       validationLogId,
     },
@@ -1152,7 +1235,9 @@ export async function compileRuleArtifact(
       // The dedicated reviewer already supplied the second reading. Later
       // provider slots are arbiters; asking the same reviewer again would
       // duplicate one side of the disagreement instead of breaking it.
-      attempts.length === 0 ? options : arbitrationOptions,
+      attempts.length === 0 || (options.semanticReviewMode ?? "off") !== "off"
+        ? options
+        : arbitrationOptions,
       attempts
         .filter(
           (attempt) =>
@@ -1181,6 +1266,9 @@ export async function compileRuleArtifact(
       options.astReviewer !== undefined,
     );
     attempts.push(evaluation);
+    // The API owns the two feedback-driven semantic repairs. Do not spend
+    // further provider attempts on the same mismatch without that feedback.
+    if (evaluation.reasonCodes.includes("JEV_SEMANTIC_MISMATCH")) break;
     // Repeated invalid executable readings with the same faults cannot add a
     // second opinion. Stop before a third provider call repeats the same work.
     if (
@@ -1263,6 +1351,10 @@ interface ProviderEvaluation {
   normalizedText: string;
   priority: AgentProviderPriority;
   reasonCodes: RuleValidationReasonCode[];
+  semanticReview: JevSemanticReview | null;
+  semanticReviewAuthoritative: boolean;
+  semanticReviewFallbackReason: "ABSTAIN" | "ERROR" | "OUTSIDE_CANARY" | null;
+  semanticReviewRoute: JevSemanticReviewRoute;
   /** Source-only reviewer reading used to arbitrate a novel candidate. */
   reviewerAst: RuleAst | null;
   reviewerAstSource: "deterministic" | "provider" | null;
@@ -1818,6 +1910,274 @@ function buildAttemptContext(
   return { forcedFailure, modelIdentity, normalizedText, reasonCodes };
 }
 
+interface SemanticReviewExecution {
+  harness?: ReturnType<typeof generateAndRunTests>;
+  authoritative: boolean;
+  fallbackReason: "ABSTAIN" | "ERROR" | "OUTSIDE_CANARY" | null;
+  review: JevSemanticReview | null;
+  route: JevSemanticReviewRoute;
+}
+
+function semanticReviewCandidateHash(
+  request: RuleCompilationRequest,
+  normalizedText: string,
+  ast: RuleAst,
+) {
+  return hashJson({
+    ast,
+    agentInterpretation: request.agentInterpretation?.trim() ?? "",
+    normalizedText,
+    officialInterpretation: request.officialInterpretation?.trim() ?? "",
+    originalText: request.originalText?.trim() || request.prompt,
+  });
+}
+
+/** The facet list a production review sends, so a benchmark can send the same. */
+export function collectSemanticReviewFacets(ast: RuleAst): string[] {
+  const serialized = JSON.stringify(ast);
+  const facets = new Set<string>();
+  // Only facets the rule actually exercises. Asking a predicate rule whether it
+  // preserved "tie" semantics is a question with no answer: the honest response
+  // is an uncertain score, and because the facet gate is conjunctive that score
+  // blocks a PASS on a rule that is completely correct. Measured on the offline
+  // corpus, seeding every facet unconditionally drove PASS to zero — the
+  // reviewer abstained on every candidate, correct or not, so the route cost a
+  // provider call and delivered no coverage at all.
+  if (isRankingRule(ast)) {
+    facets.add("score");
+    facets.add("tie");
+    if (/"eligibleWhen"/u.test(serialized)) facets.add("eligibility");
+  }
+  if (/"kind":"(?:and|or|not)"/u.test(serialized)) facets.add("boolean");
+  if (/"kind":"(?:at|pairs_[^"]+|reverse|slice|sort)"/u.test(serialized)) {
+    facets.add("order");
+  }
+  if (
+    /"kind":"(?:exists|forall|pairs_exists|pairs_forall)"/u.test(serialized)
+  ) {
+    facets.add("binders");
+  }
+  if (/"kind":"source"/u.test(serialized)) facets.add("source");
+  if (/"kind":"lit"/u.test(serialized)) facets.add("threshold");
+  // Every rule reads at least one side of the game, so this is a floor rather
+  // than a fallback that could hide an empty, ungated review.
+  if (facets.size === 0) facets.add("source");
+  return [...facets].sort();
+}
+
+function semanticReviewCandidateIsEligible(
+  request: RuleCompilationRequest,
+  normalizedText: string,
+  ast: RuleAst,
+  astSource: "deterministic" | "provider",
+  providerEvidence: ProviderCompilationEvidence | null,
+  requireProviderEvidence: boolean,
+) {
+  const bounds = validateRuntimeBounds(ast);
+  if (!bounds.safe || hasProvablyVacuousCondition(ast)) return false;
+  const source = request.originalText?.trim() || normalizedText;
+  const sourceCoverage = analyzeInterpretationCoverage({
+    ast,
+    officialInterpretation: describeRuleAstForPlayers(ast),
+    text: source,
+  });
+  if (!sourceCoverage.covered) return false;
+  const agentStatement = request.agentInterpretation?.trim();
+  if (
+    agentStatement &&
+    !analyzeInterpretationCoverage({
+      ast,
+      officialInterpretation: describeRuleAstForPlayers(ast),
+      text: agentStatement,
+    }).covered
+  ) {
+    return false;
+  }
+  if (astSource === "provider" && requireProviderEvidence) {
+    return (
+      providerEvidence !== null &&
+      verifyProviderEvidence(ast, normalizedText, providerEvidence).ok
+    );
+  }
+  return true;
+}
+
+function semanticReviewCanBeAuthoritative(
+  request: RuleCompilationRequest,
+  options: RuleCompileArtifactOptions,
+) {
+  if (options.disableConsensus) return false;
+  const mode = options.semanticReviewMode ?? "off";
+  if (mode === "active") return true;
+  if (mode !== "gated" || !Number.isInteger(request.ruleId)) return false;
+  const percentage = Math.min(
+    100,
+    Math.max(0, options.semanticReviewCanaryPercent ?? 5),
+  );
+  const digest = createHash("sha256")
+    .update(`jev-review:${request.ruleId}`)
+    .digest();
+  return digest.readUInt32BE(0) % 10_000 < percentage * 100;
+}
+
+function isUnitProbability(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value >= 0 &&
+    value <= 1
+  );
+}
+
+function isJevSemanticReview(
+  value: unknown,
+  candidateArtifactHash: string,
+): value is JevSemanticReview {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<JevSemanticReview>;
+  const { attestationHash, ...attested } = candidate;
+  return (
+    attestationHash === hashJson(attested) &&
+    ["PASS", "MISMATCH", "ABSTAIN", "ERROR"].includes(
+      String(candidate.status),
+    ) &&
+    candidate.candidateArtifactHash === candidateArtifactHash &&
+    typeof candidate.attestationHash === "string" &&
+    /^[a-f0-9]{64}$/u.test(candidate.attestationHash) &&
+    typeof candidate.modelAlias === "string" &&
+    typeof candidate.resolvedModel === "string" &&
+    typeof candidate.latencyMs === "number" &&
+    Number.isFinite(candidate.latencyMs) &&
+    candidate.latencyMs >= 0 &&
+    (candidate.costUsd === null ||
+      (typeof candidate.costUsd === "number" &&
+        Number.isFinite(candidate.costUsd) &&
+        candidate.costUsd >= 0)) &&
+    isUnitProbability(candidate.sourceSupportsAst) &&
+    isUnitProbability(candidate.astCoversSource) &&
+    candidate.structural !== undefined &&
+    ["yes", "maybe", "no"].includes(String(candidate.structural.label)) &&
+    isUnitProbability(candidate.structural.probability) &&
+    isUnitProbability(candidate.structural.confidence) &&
+    candidate.facets !== undefined &&
+    Object.values(candidate.facets).every(isUnitProbability)
+  );
+}
+
+function semanticReviewError(
+  candidateArtifactHash: string,
+  errorCode: string,
+): JevSemanticReview {
+  const body = {
+    astCoversSource: 0,
+    candidateArtifactHash,
+    costUsd: null,
+    errorCode,
+    facets: {},
+    latencyMs: 0,
+    modelAlias: "unavailable",
+    resolvedModel: "unavailable",
+    sourceSupportsAst: 0,
+    status: "ERROR" as const,
+    structural: { confidence: 0, label: "maybe" as const, probability: 0 },
+  };
+  return { ...body, attestationHash: hashJson(body) };
+}
+
+async function requestSemanticReview(
+  request: RuleCompilationRequest,
+  normalizedText: string,
+  ast: RuleAst,
+  astSource: "deterministic" | "provider",
+  providerEvidence: ProviderCompilationEvidence | null,
+  options: RuleCompileArtifactOptions,
+): Promise<SemanticReviewExecution> {
+  const mode = options.semanticReviewMode ?? "off";
+  if (
+    mode === "off" ||
+    !options.semanticReviewer ||
+    !semanticReviewCandidateIsEligible(
+      request,
+      normalizedText,
+      ast,
+      astSource,
+      providerEvidence,
+      options.requireProviderEvidence === true,
+    )
+  ) {
+    return {
+      authoritative: false,
+      fallbackReason: null,
+      review: null,
+      route: "LLM_ONLY",
+    };
+  }
+  const candidateArtifactHash = semanticReviewCandidateHash(
+    request,
+    normalizedText,
+    ast,
+  );
+  let review: JevSemanticReview;
+  let harness: ReturnType<typeof generateAndRunTests> | undefined;
+  try {
+    const pendingReview = options.semanticReviewer({
+      ast,
+      astDescription: describeRuleAstTotal(ast),
+      candidateArtifactHash,
+      facets: collectSemanticReviewFacets(ast),
+      normalizedText,
+      officialInterpretation:
+        request.agentInterpretation?.trim() ||
+        request.officialInterpretation?.trim() ||
+        normalizedText,
+      originalText: request.originalText?.trim() || request.prompt,
+    });
+    // The request has started; overlap provider I/O with deterministic local work.
+    // Attach rejection handling before synchronous harness work starts.
+    const pendingResult = pendingReview.catch(() =>
+      semanticReviewError(candidateArtifactHash, "REQUEST_FAILED"),
+    );
+    harness = generateAndRunTests(ast);
+    const response = await pendingResult;
+    review =
+      isJevSemanticReview(response, candidateArtifactHash) &&
+      collectSemanticReviewFacets(ast).every(
+        (facet) =>
+          response.status === "ERROR" || Object.hasOwn(response.facets, facet),
+      )
+        ? response
+        : semanticReviewError(candidateArtifactHash, "INVALID_RESPONSE");
+  } catch {
+    review = semanticReviewError(candidateArtifactHash, "REQUEST_FAILED");
+  }
+  const authoritative = semanticReviewCanBeAuthoritative(request, options);
+  if (!authoritative) {
+    return {
+      authoritative: false,
+      fallbackReason: mode === "gated" ? "OUTSIDE_CANARY" : null,
+      review,
+      route: "SHADOW_LLM",
+      ...(harness ? { harness } : {}),
+    };
+  }
+  if (review.status === "PASS" || review.status === "MISMATCH") {
+    return {
+      authoritative: true,
+      fallbackReason: null,
+      review,
+      route: "JEV",
+      ...(harness ? { harness } : {}),
+    };
+  }
+  return {
+    authoritative: false,
+    fallbackReason: review.status,
+    review,
+    route: "LLM_FALLBACK",
+    ...(harness ? { harness } : {}),
+  };
+}
+
 // Shared validation core: given a candidate AST (from the offline pattern
 // compiler OR an LLM provider), run schema validation, runtime-bound checks, the
 // deterministic test harness, difficulty classification, and the composite
@@ -1840,6 +2200,12 @@ function validateResolvedAst(
   // The independent reading, when the caller already has one. Only the
   // deterministic path supplies it; the provider path derives its own below.
   suppliedReviewerAst: RuleAst | null = null,
+  semanticReviewExecution: SemanticReviewExecution = {
+    authoritative: false,
+    fallbackReason: null,
+    review: null,
+    route: "LLM_ONLY",
+  },
 ): ProviderEvaluation {
   const { forcedFailure, modelIdentity, normalizedText } = ctx;
   const reasonCodes = ctx.reasonCodes;
@@ -1878,6 +2244,34 @@ function validateResolvedAst(
         ),
     stage: "schema_validation",
     status: ast ? "passed" : "failed",
+  });
+  const semanticReview = semanticReviewExecution.review;
+  const semanticPass =
+    semanticReviewExecution.authoritative && semanticReview?.status === "PASS";
+  const semanticMismatch =
+    semanticReviewExecution.authoritative &&
+    semanticReview?.status === "MISMATCH";
+  if (semanticMismatch) reasonCodes.add("JEV_SEMANTIC_MISMATCH");
+  stages.push({
+    detail: !ast
+      ? "Skipped because no schema-valid AST was available."
+      : semanticReviewExecution.route === "LLM_ONLY"
+        ? "JEV semantic review was disabled or the candidate had not passed its local eligibility gates."
+        : semanticReviewExecution.route === "SHADOW_LLM"
+          ? `JEV shadow review recorded ${semanticReview?.status ?? "no result"}; the LLM reviewer remains authoritative.`
+          : semanticReviewExecution.route === "LLM_FALLBACK"
+            ? `JEV returned ${semanticReview?.status ?? "no result"}; the explicit LLM reviewer fallback is authoritative.`
+            : semanticPass
+              ? "JEV verified the proposal-to-AST semantics and replaces the routine LLM reviewer for this candidate."
+              : "JEV found a material proposal-to-AST semantic mismatch; regenerate the AST without changing the approved interpretation.",
+    reasonCodes: semanticMismatch ? ["JEV_SEMANTIC_MISMATCH"] : [],
+    stage: "semantic_review",
+    status:
+      semanticReviewExecution.route === "JEV"
+        ? semanticPass
+          ? "passed"
+          : "failed"
+        : "skipped",
   });
   // An independent reading of the same text. When it exists it is the strongest
   // available check: the two ASTs are compared by BEHAVIOR over the structured
@@ -2112,9 +2506,8 @@ function validateResolvedAst(
   // replacement for this one.
   const certifiedByIndependentReading =
     astSource === "provider" &&
-    reviewerAst !== null &&
-    reviewerIsEligible &&
-    !reviewerMismatch;
+    (semanticPass ||
+      (reviewerAst !== null && reviewerIsEligible && !reviewerMismatch));
   let interpretationCoverageFailed = false;
   let interpretationCoverageChecked = false;
   let coverageMissingOperations: readonly RuleOperation[] = [];
@@ -2134,7 +2527,8 @@ function validateResolvedAst(
     // It can never certify its own omission: the reviewer must itself cover the
     // source, agree by behavior, and operations remain unconditional.
     const reviewerCertifiesValues =
-      reviewerAst !== null && reviewerIsEligible && !reviewerMismatch;
+      semanticPass ||
+      (reviewerAst !== null && reviewerIsEligible && !reviewerMismatch);
     const blocked =
       coverage.missingOperations.length > 0 ||
       ((coverage.missingFromAst.length > 0 ||
@@ -2242,7 +2636,10 @@ function validateResolvedAst(
   });
 
   // Deterministic test harness + bounded Monte-Carlo difficulty (PRD §6.8, §7.8).
-  const harness = ast && hasSafeRuntimeBounds ? generateAndRunTests(ast) : null;
+  const harness =
+    ast && hasSafeRuntimeBounds
+      ? (semanticReviewExecution.harness ?? generateAndRunTests(ast))
+      : null;
   const difficultyClass: RuleDifficultyClass =
     harness?.difficulty.difficultyClass ?? "IMPOSSIBLE";
   const estimatedWinRate = harness?.difficulty.estimatedWinRate ?? 0;
@@ -2322,6 +2719,7 @@ function validateResolvedAst(
     // rule disagrees with the AST the provider emitted.
     hasReviewerMismatch:
       reasonCodes.has("REVIEWER_MISMATCH") ||
+      reasonCodes.has("JEV_SEMANTIC_MISMATCH") ||
       reasonCodes.has("INTERPRETATION_MISMATCH") ||
       reasonCodes.has("AGENT_STATEMENT_MISMATCH") ||
       reasonCodes.has("PROVIDER_EVIDENCE_UNVERIFIED") ||
@@ -2421,6 +2819,9 @@ function validateResolvedAst(
       decision,
       providerEvidence: evidenceVerification?.diagnostic ?? null,
       reasonCodes: [...reasonCodes],
+      semanticReview,
+      semanticReviewFallbackReason: semanticReviewExecution.fallbackReason,
+      semanticReviewRoute: semanticReviewExecution.route,
       schemaError,
       semanticDisagreementWitness,
       stages,
@@ -2435,6 +2836,10 @@ function validateResolvedAst(
     normalizedText,
     priority: providerConfig.priority,
     reasonCodes: [...reasonCodes],
+    semanticReview,
+    semanticReviewAuthoritative: semanticReviewExecution.authoritative,
+    semanticReviewFallbackReason: semanticReviewExecution.fallbackReason,
+    semanticReviewRoute: semanticReviewExecution.route,
     reviewerAst,
     reviewerAstSource,
     requestShape: providerConfig.request_shape,
@@ -2481,6 +2886,12 @@ async function evaluateProviderAttemptAsync(
   let rawAst: unknown = null;
   let providerEvidence: ProviderCompilationEvidence | null = null;
   let reviewerAst: RuleAst | null = null;
+  let semanticReviewExecution: SemanticReviewExecution = {
+    authoritative: false,
+    fallbackReason: null,
+    review: null,
+    route: "LLM_ONLY",
+  };
   if (!ctx.forcedFailure) {
     if (options.preferDeterministic) {
       const deterministicAst = compileSupportedRule(ctx.normalizedText);
@@ -2497,10 +2908,24 @@ async function evaluateProviderAttemptAsync(
         // AST as the ARTIFACT, not skip the review. `disableConsensus` is the
         // documented escape hatch that stops buying second opinions, so it turns
         // this off too.
-        const reviewerAst = options.disableConsensus
-          ? null
-          : await requestReviewerAst(request, ctx, providerConfig, options);
-        if (!options.disableConsensus && reviewerAst === null) {
+        semanticReviewExecution = await requestSemanticReview(
+          request,
+          ctx.normalizedText,
+          deterministicAst,
+          "deterministic",
+          null,
+          options,
+        );
+        const needsLlmReviewer = semanticReviewExecution.route !== "JEV";
+        const deterministicReviewerAst =
+          options.disableConsensus || !needsLlmReviewer
+            ? null
+            : await requestReviewerAst(request, ctx, providerConfig, options);
+        if (
+          !options.disableConsensus &&
+          needsLlmReviewer &&
+          deterministicReviewerAst === null
+        ) {
           ctx.reasonCodes.add("SECOND_OPINION_UNAVAILABLE");
         }
         const deterministicInterpretation = describeRuleAst(deterministicAst);
@@ -2518,7 +2943,8 @@ async function evaluateProviderAttemptAsync(
           "deterministic",
           null,
           false,
-          reviewerAst,
+          deterministicReviewerAst,
+          semanticReviewExecution,
         );
       }
     }
@@ -2533,6 +2959,18 @@ async function evaluateProviderAttemptAsync(
       rawAst = unwrapped.rawAst;
       providerEvidence = unwrapped.evidence;
 
+      const parsedCandidate = ruleAstSchema.safeParse(rawAst);
+      if (parsedCandidate.success) {
+        semanticReviewExecution = await requestSemanticReview(
+          request,
+          ctx.normalizedText,
+          parsedCandidate.data,
+          "provider",
+          providerEvidence,
+          options,
+        );
+      }
+
       // Novel rules have no deterministic reference implementation. Ask a
       // separately prompted LLM pass to compile the source from scratch, then
       // compare both programs by behavior. The reviewer never sees the draft,
@@ -2540,6 +2978,7 @@ async function evaluateProviderAttemptAsync(
       // anchoring. A missing review fails closed instead of silently accepting
       // one unchecked generation.
       if (
+        semanticReviewExecution.route !== "JEV" &&
         options.astReviewer &&
         !options.disableConsensus &&
         providerCompilationHasSchemaValidAst(providerValue) &&
@@ -2562,6 +3001,7 @@ async function evaluateProviderAttemptAsync(
       // the server correct unreliable hand-written example arithmetic without
       // weakening consensus or requiring the dedicated reviewer to run again.
       if (
+        semanticReviewExecution.route !== "JEV" &&
         reviewerAst === null &&
         rawAst !== null &&
         allowProviderCorroboration &&
@@ -2606,6 +3046,7 @@ async function evaluateProviderAttemptAsync(
     providerEvidence,
     options.requireProviderEvidence === true,
     reviewerAst,
+    semanticReviewExecution,
   );
 }
 
@@ -2788,9 +3229,7 @@ function summarizeSchemaError(
  * voter agreeing with itself.
  */
 function resolveSlotModel(providerConfig: AgentProviderConfig): string {
-  return (
-    providerConfig.model_by_role.compile ?? providerConfig.identity.model
-  )
+  return (providerConfig.model_by_role.compile ?? providerConfig.identity.model)
     .trim()
     .toLowerCase();
 }
@@ -3000,9 +3439,7 @@ function resolveProviderDisagreement(attempts: ProviderEvaluation[]) {
     if (group.length < 2) {
       continue;
     }
-    if (
-      !group.some((member) => opinionsAreIndependent(candidate, member))
-    ) {
+    if (!group.some((member) => opinionsAreIndependent(candidate, member))) {
       continue;
     }
     const winner = group.find((member) => member.decision === "VALID");
@@ -7222,6 +7659,9 @@ function summarizeReasons(
   }
   if (blockingReasons.includes("SECOND_OPINION_UNAVAILABLE")) {
     return "Rule rejected: no eligible independent reading corroborated the selected executable rule. Retry generation with the same approved interpretation.";
+  }
+  if (blockingReasons.includes("JEV_SEMANTIC_MISMATCH")) {
+    return "Rule rejected: the typed semantic review found that the candidate AST does not faithfully implement the approved interpretation. Regenerate the AST without changing the player's wording.";
   }
   if (blockingReasons.includes("DIFFICULTY_IMPOSSIBLE")) {
     return "Rule rejected: no guess can win under this rule, so it cannot distinguish winners from losers.";
