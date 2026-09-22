@@ -43,7 +43,13 @@ export interface ChoiceQuestion {
   type: "choice";
 }
 
-export type JevQuestion = ChoiceQuestion | NoulQuestion;
+export interface ScoreQuestion {
+  criteria: string[];
+  instructions: string;
+  type: "score";
+}
+
+export type JevQuestion = ChoiceQuestion | NoulQuestion | ScoreQuestion;
 export type JevQuestionSet = Record<string, JevQuestion>;
 
 export interface JevChoiceAnswer {
@@ -58,7 +64,15 @@ export interface JevNoulAnswer {
   type: "noul";
 }
 
-export type JevAnswer = JevChoiceAnswer | JevNoulAnswer;
+export interface JevScoreAnswer {
+  confidence: number;
+  legend: Record<string, string>;
+  probabilities: Record<string, number>;
+  score: number;
+  type: "score";
+}
+
+export type JevAnswer = JevChoiceAnswer | JevNoulAnswer | JevScoreAnswer;
 
 export interface ValidatedJevResponse {
   answers: Record<string, JevAnswer>;
@@ -449,6 +463,81 @@ export function validateJevResponse(
       validated[id] = {
         noul: finiteProbability(answer.noul, `${id}.noul`),
         type: "noul",
+      };
+      continue;
+    }
+    if (question.type === "score") {
+      if (question.criteria.length < 2 || question.criteria.length > 10) {
+        throw new Error(`Jev Score question ${id} must have 2 to 10 levels`);
+      }
+      const expectedLevels = question.criteria.map((_, index) => String(index));
+      if (
+        answer.legend === null ||
+        typeof answer.legend !== "object" ||
+        Array.isArray(answer.legend)
+      ) {
+        throw new Error(`Jev answer ${id}.legend must be an object`);
+      }
+      const legend = answer.legend as Record<string, unknown>;
+      if (
+        JSON.stringify(Object.keys(legend).sort()) !==
+          JSON.stringify([...expectedLevels].sort()) ||
+        expectedLevels.some(
+          (level, index) => legend[level] !== question.criteria[index],
+        )
+      ) {
+        throw new Error(`Jev answer ${id}.legend differs from Score levels`);
+      }
+      if (
+        answer.probabilities === null ||
+        typeof answer.probabilities !== "object" ||
+        Array.isArray(answer.probabilities)
+      ) {
+        throw new Error(`Jev answer ${id}.probabilities must be an object`);
+      }
+      const probabilityRecord = answer.probabilities as Record<string, unknown>;
+      if (
+        JSON.stringify(Object.keys(probabilityRecord).sort()) !==
+        JSON.stringify([...expectedLevels].sort())
+      ) {
+        throw new Error(
+          `Jev answer ${id} probabilities differ from Score levels`,
+        );
+      }
+      const probabilities = Object.fromEntries(
+        expectedLevels.map((level) => [
+          level,
+          finiteProbability(probabilityRecord[level], `${id}.${level}`),
+        ]),
+      );
+      const total = Object.values(probabilities).reduce(
+        (sum, probability) => sum + probability,
+        0,
+      );
+      if (Math.abs(total - 1) > 0.011) {
+        throw new Error(`Jev answer ${id} probabilities must sum to 1`);
+      }
+      if (
+        typeof answer.score !== "number" ||
+        !Number.isFinite(answer.score) ||
+        answer.score < 0 ||
+        answer.score > question.criteria.length - 1
+      ) {
+        throw new Error(
+          `Jev answer ${id}.score must be within the declared level range`,
+        );
+      }
+      validated[id] = {
+        confidence: finiteProbability(answer.confidence, `${id}.confidence`),
+        legend: Object.fromEntries(
+          expectedLevels.map((level, index) => [
+            level,
+            question.criteria[index]!,
+          ]),
+        ),
+        probabilities,
+        score: answer.score,
+        type: "score",
       };
       continue;
     }

@@ -6,10 +6,16 @@ import type {
   PredicateNode,
   PredicateNodeV3,
   RuleAst,
+  RuleResult,
   RuleResultV3,
   ScalarExpr,
   ScalarExprV3,
 } from "@tyche/rule-schema";
+
+export interface AstPathDescription {
+  astPath: string;
+  behaviorDescription: string;
+}
 
 // Total AST -> English renderer.
 //
@@ -742,6 +748,259 @@ function describeConjunctionV3(node: PredicateNodeV3): string {
   return joinList(parts, "and");
 }
 
+function appendPath(
+  target: AstPathDescription[],
+  astPath: string,
+  behaviorDescription: string,
+) {
+  target.push({ astPath, behaviorDescription });
+}
+
+function walkArrayV2(
+  node: ArrayExpr,
+  astPath: string,
+  target: AstPathDescription[],
+) {
+  appendPath(target, astPath, describeArray(node));
+  switch (node.kind) {
+    case "source":
+      return;
+    case "digits":
+    case "filter_compare":
+    case "filter_mod":
+    case "map_arithmetic":
+    case "map_with_guard":
+    case "sort":
+    case "remove_up_to_n":
+    case "slice":
+      walkArrayV2(node.of, `${astPath}.of`, target);
+      return;
+    case "intersection":
+    case "difference":
+      walkArrayV2(node.left, `${astPath}.left`, target);
+      walkArrayV2(node.right, `${astPath}.right`, target);
+      return;
+    default: {
+      const exhaustive: never = node;
+      throw new Error(`unrendered v2 array path ${JSON.stringify(exhaustive)}`);
+    }
+  }
+}
+
+function walkScalarV2(
+  node: ScalarExpr,
+  astPath: string,
+  target: AstPathDescription[],
+) {
+  appendPath(target, astPath, describeScalar(node));
+  switch (node.kind) {
+    case "lit":
+      return;
+    case "reduce":
+    case "at":
+      walkArrayV2(node.of, `${astPath}.of`, target);
+      return;
+    case "arith":
+      walkScalarV2(node.left, `${astPath}.left`, target);
+      walkScalarV2(node.right, `${astPath}.right`, target);
+      return;
+    default: {
+      const exhaustive: never = node;
+      throw new Error(
+        `unrendered v2 scalar path ${JSON.stringify(exhaustive)}`,
+      );
+    }
+  }
+}
+
+function walkPredicateV2(
+  node: PredicateNode,
+  astPath: string,
+  target: AstPathDescription[],
+) {
+  appendPath(target, astPath, describePredicate(node));
+  switch (node.kind) {
+    case "compare":
+      walkScalarV2(node.left, `${astPath}.left`, target);
+      walkScalarV2(node.right, `${astPath}.right`, target);
+      return;
+    case "count_at_least":
+      walkArrayV2(node.of, `${astPath}.of`, target);
+      return;
+    case "all_equal_ordered":
+    case "all_ordered_compare":
+    case "all_ordered_abs_diff_lte":
+    case "total_ordered_abs_diff_lte":
+    case "ordered_position_match_count_eq":
+    case "ordered_position_compare_count_eq":
+    case "value_within_any_count_at_least":
+    case "digit_match_count_at_least":
+    case "reversed_position_match_count_at_least":
+      walkArrayV2(node.left, `${astPath}.left`, target);
+      walkArrayV2(node.right, `${astPath}.right`, target);
+      return;
+    case "all_values_between_min_max":
+      walkArrayV2(node.of, `${astPath}.of`, target);
+      walkArrayV2(node.range, `${astPath}.range`, target);
+      return;
+    case "and":
+    case "or":
+      node.clauses.forEach((clause, index) =>
+        walkPredicateV2(clause, `${astPath}.clauses[${index}]`, target),
+      );
+      return;
+    case "not":
+      walkPredicateV2(node.clause, `${astPath}.clause`, target);
+      return;
+    default: {
+      const exhaustive: never = node;
+      throw new Error(
+        `unrendered v2 predicate path ${JSON.stringify(exhaustive)}`,
+      );
+    }
+  }
+}
+
+function walkResultV2(result: RuleResult, target: AstPathDescription[]) {
+  if (result.type === "predicate") {
+    walkPredicateV2(result.predicate, "result.predicate", target);
+    return;
+  }
+  walkScalarV2(result.score, "result.score", target);
+}
+
+function walkArrayV3(
+  node: ArrayExprV3,
+  astPath: string,
+  target: AstPathDescription[],
+) {
+  appendPath(target, astPath, describeArrayV3(node));
+  switch (node.kind) {
+    case "source":
+      return;
+    case "sort":
+    case "reverse":
+    case "slice":
+    case "distinct":
+    case "digits":
+      walkArrayV3(node.of, `${astPath}.of`, target);
+      return;
+    case "intersection":
+    case "difference":
+      walkArrayV3(node.left, `${astPath}.left`, target);
+      walkArrayV3(node.right, `${astPath}.right`, target);
+      return;
+    case "map":
+      walkArrayV3(node.of, `${astPath}.of`, target);
+      walkScalarV3(node.expr, `${astPath}.expr`, target);
+      return;
+    case "filter":
+      walkArrayV3(node.of, `${astPath}.of`, target);
+      walkPredicateV3(node.where, `${astPath}.where`, target);
+      return;
+    case "pairs_map":
+      walkArrayV3(node.left, `${astPath}.left`, target);
+      walkArrayV3(node.right, `${astPath}.right`, target);
+      walkScalarV3(node.expr, `${astPath}.expr`, target);
+      return;
+    default: {
+      const exhaustive: never = node;
+      throw new Error(`unrendered v3 array path ${JSON.stringify(exhaustive)}`);
+    }
+  }
+}
+
+function walkScalarV3(
+  node: ScalarExprV3,
+  astPath: string,
+  target: AstPathDescription[],
+) {
+  appendPath(target, astPath, describeScalarV3(node));
+  switch (node.kind) {
+    case "lit":
+    case "elem":
+    case "pair":
+      return;
+    case "reduce":
+    case "at":
+      walkArrayV3(node.of, `${astPath}.of`, target);
+      return;
+    case "arith":
+      walkScalarV3(node.left, `${astPath}.left`, target);
+      walkScalarV3(node.right, `${astPath}.right`, target);
+      return;
+    case "abs":
+      walkScalarV3(node.of, `${astPath}.of`, target);
+      return;
+    case "ite":
+      walkPredicateV3(node.if, `${astPath}.if`, target);
+      walkScalarV3(node.then, `${astPath}.then`, target);
+      walkScalarV3(node.else, `${astPath}.else`, target);
+      return;
+    default: {
+      const exhaustive: never = node;
+      throw new Error(
+        `unrendered v3 scalar path ${JSON.stringify(exhaustive)}`,
+      );
+    }
+  }
+}
+
+function walkPredicateV3(
+  node: PredicateNodeV3,
+  astPath: string,
+  target: AstPathDescription[],
+) {
+  appendPath(target, astPath, describePredicateV3(node));
+  switch (node.kind) {
+    case "compare":
+      walkScalarV3(node.left, `${astPath}.left`, target);
+      walkScalarV3(node.right, `${astPath}.right`, target);
+      return;
+    case "contains":
+      walkArrayV3(node.array, `${astPath}.array`, target);
+      walkScalarV3(node.value, `${astPath}.value`, target);
+      return;
+    case "forall":
+    case "exists":
+      walkArrayV3(node.of, `${astPath}.of`, target);
+      walkPredicateV3(node.where, `${astPath}.where`, target);
+      return;
+    case "pairs_forall":
+    case "pairs_exists":
+      walkArrayV3(node.left, `${astPath}.left`, target);
+      walkArrayV3(node.right, `${astPath}.right`, target);
+      walkPredicateV3(node.where, `${astPath}.where`, target);
+      return;
+    case "and":
+    case "or":
+      node.clauses.forEach((clause, index) =>
+        walkPredicateV3(clause, `${astPath}.clauses[${index}]`, target),
+      );
+      return;
+    case "not":
+      walkPredicateV3(node.clause, `${astPath}.clause`, target);
+      return;
+    default: {
+      const exhaustive: never = node;
+      throw new Error(
+        `unrendered v3 predicate path ${JSON.stringify(exhaustive)}`,
+      );
+    }
+  }
+}
+
+function walkResultV3(result: RuleResultV3, target: AstPathDescription[]) {
+  if (result.type === "predicate") {
+    walkPredicateV3(result.predicate, "result.predicate", target);
+    return;
+  }
+  if (result.eligibleWhen) {
+    walkPredicateV3(result.eligibleWhen, "result.eligibleWhen", target);
+  }
+  walkScalarV3(result.score, "result.score", target);
+}
+
 function describePositionRangeConjunction(node: PredicateNode): string | null {
   if (node.kind !== "and") {
     return null;
@@ -1116,4 +1375,49 @@ export function describeRuleAstTotal(ast: RuleAst): string {
       : (describePositionRangeConjunction(ast.result.predicate) ??
         describePredicate(ast.result.predicate));
   return sentence(`A guess wins if ${clause}`);
+}
+
+/**
+ * Returns one deterministic description for every semantic unit in an AST.
+ * Paths are stable, root-relative property paths suitable for audit records;
+ * array positions use bracket notation (for example
+ * `result.predicate.clauses[0]`). The first entry always describes the complete
+ * result, so ranking direction, eligibility, and tie handling cannot disappear
+ * merely because they are properties rather than child nodes.
+ */
+export function describeRuleAstPaths(
+  ast: RuleAst,
+): readonly AstPathDescription[] {
+  if (ast.schemaVersion === 1) {
+    return [
+      {
+        astPath: "node",
+        behaviorDescription: describeRuleAstTotal(ast),
+      },
+    ];
+  }
+
+  const descriptions: AstPathDescription[] = [
+    {
+      astPath: "result",
+      behaviorDescription: describeRuleAstTotal(ast),
+    },
+  ];
+  if (ast.schemaVersion === 3) {
+    walkResultV3(ast.result, descriptions);
+  } else {
+    walkResultV2(ast.result, descriptions);
+  }
+  return descriptions;
+}
+
+/** Resolves only paths emitted by `describeRuleAstPaths`; unknown paths fail. */
+export function describeRuleAstPath(
+  ast: RuleAst,
+  astPath: string,
+): string | null {
+  return (
+    describeRuleAstPaths(ast).find((entry) => entry.astPath === astPath)
+      ?.behaviorDescription ?? null
+  );
 }

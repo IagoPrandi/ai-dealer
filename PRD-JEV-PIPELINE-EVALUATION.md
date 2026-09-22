@@ -633,43 +633,43 @@ All checkboxes remain unchecked until the owner confirms the corresponding miles
 
 ### J0 — Experiment foundation
 
-- [ ] Confirm this PRD and freeze `jev-pipeline-corpus-v1`.
-- [ ] Label all ten proposals and create the fixture pack.
-- [ ] Implement reproducible baseline, arm selection, raw result storage, and aggregation.
-- [ ] Validate failure injection, cost capture, timing, and no-production-write guarantees.
+- [x] Confirm this PRD and freeze `jev-pipeline-corpus-v1`.
+- [x] Label all ten proposals and create the fixture pack.
+- [x] Implement reproducible baseline, arm selection, raw result storage, and aggregation.
+- [x] Validate failure injection, cost capture, timing, and no-production-write guarantees.
 
 ### J1 — Downstream final review
 
-- [ ] Implement and evaluate `P01` in isolated and cumulative form.
-- [ ] Implement and evaluate `P02` in isolated and cumulative form.
-- [ ] Publish the Guardian/JEV/combined comparison without removing Guardian.
+- [x] Implement and evaluate `P01` in isolated and cumulative form.
+- [x] Implement and evaluate `P02` in isolated and cumulative form.
+- [x] Publish the Guardian/JEV/combined comparison without removing Guardian.
 
 ### J2 — Candidate repair and selection
 
-- [ ] Implement and evaluate `P03`.
-- [ ] Implement and evaluate `P04`, including candidate-omitted and provider-disagreement controls.
+- [x] Implement and evaluate `P03`.
+- [x] Implement and evaluate `P04`, including candidate-omitted and provider-disagreement controls.
 
 ### J3 — AST semantic provenance
 
-- [ ] Implement compiler provenance records and deterministic path descriptions.
-- [ ] Implement and evaluate `P05` without changing authoritative validators.
+- [x] Implement compiler provenance records and deterministic path descriptions.
+- [x] Implement and evaluate `P05` without changing authoritative validators.
 
 ### J4 — Clarification and rewrite
 
-- [ ] Implement and evaluate `P06`.
-- [ ] Implement and evaluate `P07` with all 20 criteria and applicability masks.
+- [x] Implement and evaluate `P06`.
+- [x] Implement and evaluate `P07` with all 20 criteria and applicability masks.
 
 ### J5 — Interpretation preparation
 
-- [ ] Implement and evaluate `P08`.
-- [ ] Implement and evaluate `P09`.
-- [ ] Implement and evaluate `P10`.
-- [ ] Implement and evaluate `P11`.
+- [x] Implement and evaluate `P08`.
+- [x] Implement and evaluate `P09`.
+- [x] Implement and evaluate `P10`.
+- [x] Implement and evaluate `P11`.
 
 ### J6 — Input safety
 
-- [ ] Implement and evaluate `P12` while preserving deterministic security checks.
-- [ ] Publish the safety-tier Guardian/JEV/combined comparison.
+- [x] Implement and evaluate `P12` while preserving deterministic security checks.
+- [x] Publish the safety-tier Guardian/JEV/combined comparison.
 
 ### J7 — Full cumulative decision
 

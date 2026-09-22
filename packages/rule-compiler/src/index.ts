@@ -45,7 +45,11 @@ import {
   type RuleTestCaseResult,
   type RuleWorkedExample,
 } from "@tyche/rule-test-harness";
-import { describeRuleAstTotal } from "./describeAst.js";
+import {
+  describeRuleAstPaths,
+  describeRuleAstTotal,
+  type AstPathDescription,
+} from "./describeAst.js";
 import {
   analyzeInterpretationCoverage,
   collectAstOperations,
@@ -89,7 +93,12 @@ export {
   type RuleDifficultyClass,
   type RuleWorkedExample,
 } from "@tyche/rule-test-harness";
-export { describeRuleAstTotal } from "./describeAst.js";
+export {
+  describeRuleAstPath,
+  describeRuleAstPaths,
+  describeRuleAstTotal,
+  type AstPathDescription,
+} from "./describeAst.js";
 export {
   analyzeInterpretationCoverage,
   analyzeStatementFidelity,
@@ -153,6 +162,17 @@ export interface RuleSourceSpan {
   text: string;
 }
 
+/** Provider-authored semantic provenance for one deterministic AST path. */
+export interface AstProvenanceRecord {
+  astPath: string;
+  /** Exact substrings of the normalized source used to justify this unit. */
+  sourceSpans: string[];
+  /** Provider claim, retained for P05 comparison; never authoritative prose. */
+  claimedBehavior: string;
+  /** Why the cited source supports selecting this exact AST unit. */
+  selectionReason: string;
+}
+
 export interface RuleProviderWorkedExample {
   draw: number[];
   guess: number[];
@@ -171,6 +191,7 @@ export interface RuleProviderWorkedExample {
 export interface RuleCompilationCandidate {
   ast: unknown;
   consumedSpans: RuleSourceSpan[];
+  provenanceRecords: AstProvenanceRecord[];
   workedExamples: RuleProviderWorkedExample[];
 }
 
@@ -288,6 +309,40 @@ export function getRuleCompilationCandidateJsonSchema(
           required: ["text"],
         },
       },
+      provenanceRecords: {
+        type: "array",
+        minItems: 1,
+        maxItems: 128,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            astPath: { type: "string", minLength: 1, maxLength: 500 },
+            sourceSpans: {
+              type: "array",
+              minItems: 1,
+              maxItems: 12,
+              items: { type: "string", minLength: 1, maxLength: 6000 },
+            },
+            claimedBehavior: {
+              type: "string",
+              minLength: 1,
+              maxLength: 4000,
+            },
+            selectionReason: {
+              type: "string",
+              minLength: 1,
+              maxLength: 4000,
+            },
+          },
+          required: [
+            "astPath",
+            "sourceSpans",
+            "claimedBehavior",
+            "selectionReason",
+          ],
+        },
+      },
       workedExamples: {
         type: "array",
         minItems: 2,
@@ -295,7 +350,7 @@ export function getRuleCompilationCandidateJsonSchema(
         items: { anyOf: [predicateExample, rankingExample] },
       },
     },
-    required: ["ast", "consumedSpans", "workedExamples"],
+    required: ["ast", "consumedSpans", "provenanceRecords", "workedExamples"],
   };
 }
 
@@ -404,6 +459,8 @@ export interface RuleProviderWorkedExampleDiagnostic {
 
 export interface RuleProviderEvidenceStageDiagnostic {
   exampleResults: RuleProviderWorkedExampleDiagnostic[];
+  provenanceDetail?: string;
+  provenanceStatus?: "passed" | "failed";
   sourceSpanDetail: string;
   sourceSpanStatus: "passed" | "failed";
 }
@@ -416,6 +473,7 @@ export interface RuleProviderEvidenceStageDiagnostic {
 export interface RuleRejectedCompilationCandidate {
   ast: unknown;
   consumedSpans: unknown;
+  provenanceRecords?: unknown;
   workedExamples: unknown;
 }
 
@@ -515,6 +573,8 @@ export interface RuleValidationResult {
 
 export interface RuleCompiledArtifact {
   ast: RuleAst;
+  /** Deterministic descriptions of every auditable semantic AST path. */
+  astPathDescriptions?: readonly AstPathDescription[];
   complexityScore: number;
   constrainedDecodingUsed: boolean;
   createdAt: string;
@@ -527,6 +587,8 @@ export interface RuleCompiledArtifact {
   officialInterpretation: string;
   originalText: string;
   promptContractVersion: string;
+  /** Provider claims retained for P05 audit; legacy artifacts may omit them. */
+  provenanceRecords?: readonly AstProvenanceRecord[];
   providerPath: AgentProviderAttemptLog[];
   ruleMode: "predicate" | "ranking";
   schemaVersion: 1 | 2 | 3;
@@ -549,7 +611,7 @@ export interface RuleValidationPromptContract {
   output: "RuleCompilationCandidate | INVALID";
   prohibitedReferences: readonly string[];
   requiredChecks: readonly string[];
-  version: "tyche_rule_validation_prompt_v2";
+  version: "tyche_rule_validation_prompt_v3";
 }
 
 const NUMBER_WORDS = new Map<string, number>([
@@ -701,12 +763,13 @@ const PROMPT_CONTRACT: RuleValidationPromptContract = {
     "reject dependencies outside guess and draw",
     "compile only supported bounded AST nodes",
     "verify every intent-bearing source span was consumed",
+    "record one source-grounded provenance entry for every semantic AST path",
     "execute source-derived worked examples against the compiled AST",
     "generate deterministic standard and adversarial test cases",
     "execute tests through the deterministic runtime",
     "compute confidence breakdown",
   ],
-  version: "tyche_rule_validation_prompt_v2",
+  version: "tyche_rule_validation_prompt_v3",
 };
 
 export function getRuleValidationPromptContract(): RuleValidationPromptContract {
@@ -1281,10 +1344,12 @@ interface AttemptContext {
 
 interface ProviderCompilationEvidence {
   consumedSpans: unknown;
+  provenanceRecords: unknown;
   workedExamples: unknown;
 }
 
 interface VerifiedProviderEvidence {
+  provenanceRecords: readonly AstProvenanceRecord[];
   sourceSpans: readonly RuleSourceSpan[];
   workedExamples: readonly RuleWorkedExample[];
 }
@@ -1300,6 +1365,7 @@ function unwrapProviderCompilation(value: unknown): {
   return {
     evidence: {
       consumedSpans: candidate.consumedSpans,
+      provenanceRecords: candidate.provenanceRecords,
       workedExamples: candidate.workedExamples,
     },
     rawAst: candidate.ast,
@@ -1473,9 +1539,77 @@ function verifySourceSpanCoverage(
 // and operation" — which is only true for the first case. A player whose model
 // simply mis-numbered a worked example was sent rewriting numbers that were
 // never dropped, and the only escape was to reword until the model got lucky.
+function verifyProvenanceRecords(
+  ast: RuleAst,
+  normalizedText: string,
+  value: unknown,
+): AstProvenanceRecord[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const expectedPaths = describeRuleAstPaths(ast).map((entry) => entry.astPath);
+  if (value.length !== expectedPaths.length) {
+    return null;
+  }
+
+  const records: AstProvenanceRecord[] = [];
+  const seen = new Set<string>();
+  for (const rawRecord of value) {
+    if (!rawRecord || typeof rawRecord !== "object") {
+      return null;
+    }
+    const record = rawRecord as Record<string, unknown>;
+    const astPath =
+      typeof record.astPath === "string" ? record.astPath.trim() : "";
+    const claimedBehavior =
+      typeof record.claimedBehavior === "string"
+        ? record.claimedBehavior.trim()
+        : "";
+    const selectionReason =
+      typeof record.selectionReason === "string"
+        ? record.selectionReason.trim()
+        : "";
+    if (
+      !astPath ||
+      !claimedBehavior ||
+      !selectionReason ||
+      claimedBehavior.length > 4_000 ||
+      selectionReason.length > 4_000 ||
+      seen.has(astPath) ||
+      !expectedPaths.includes(astPath) ||
+      !Array.isArray(record.sourceSpans) ||
+      record.sourceSpans.length === 0 ||
+      record.sourceSpans.length > 12
+    ) {
+      return null;
+    }
+    const sourceSpans: string[] = [];
+    for (const rawSpan of record.sourceSpans) {
+      if (typeof rawSpan !== "string") {
+        return null;
+      }
+      const sourceSpan = normalizeRuleText(rawSpan);
+      if (!sourceSpan || !normalizedText.includes(sourceSpan)) {
+        return null;
+      }
+      sourceSpans.push(sourceSpan);
+    }
+    seen.add(astPath);
+    records.push({
+      astPath,
+      claimedBehavior,
+      selectionReason,
+      sourceSpans,
+    });
+  }
+
+  return expectedPaths.every((path) => seen.has(path)) ? records : null;
+}
+
 type ProviderEvidenceFailure =
   | "examples_disagree"
   | "examples_malformed"
+  | "provenance_invalid"
   | "span_coverage_incomplete";
 
 type ProviderEvidenceVerification =
@@ -1509,8 +1643,17 @@ function verifyProviderEvidence(
   const sourceSpans =
     providerSourceSpans ??
     (sourceCertifiedByIndependentReviewer ? [{ text: normalizedText }] : null);
+  const provenanceRecords = verifyProvenanceRecords(
+    ast,
+    normalizedText,
+    evidence.provenanceRecords,
+  );
   const diagnostic: RuleProviderEvidenceStageDiagnostic = {
     exampleResults: [],
+    provenanceDetail: provenanceRecords
+      ? "Every semantic AST path has one structurally valid provider provenance record with exact normalized-source citations."
+      : "Provider provenance is missing, malformed, cites a non-source span, references an unknown path, or does not cover every semantic AST path.",
+    provenanceStatus: provenanceRecords ? "passed" : "failed",
     sourceSpanDetail: providerSourceSpans
       ? "All intent-bearing source clauses were covered by consumed spans."
       : sourceCertifiedByIndependentReviewer
@@ -1518,7 +1661,9 @@ function verifyProviderEvidence(
         : "At least one intent-bearing source clause was not covered by the provider's consumed spans.",
     sourceSpanStatus: sourceSpans ? "passed" : "failed",
   };
-  let firstExampleFailure: ProviderEvidenceFailure | null = null;
+  let firstExampleFailure: ProviderEvidenceFailure | null = provenanceRecords
+    ? null
+    : "provenance_invalid";
   if (
     !Array.isArray(evidence.workedExamples) ||
     evidence.workedExamples.length < 2
@@ -1697,7 +1842,11 @@ function verifyProviderEvidence(
   }
   return {
     diagnostic,
-    evidence: { sourceSpans, workedExamples: predicateExamples },
+    evidence: {
+      provenanceRecords: provenanceRecords!,
+      sourceSpans,
+      workedExamples: predicateExamples,
+    },
     ok: true,
   };
 }
@@ -1849,6 +1998,7 @@ function validateResolvedAst(
       ? {
           ast: rawAst,
           consumedSpans: providerEvidence?.consumedSpans ?? null,
+          provenanceRecords: providerEvidence?.provenanceRecords ?? null,
           workedExamples: providerEvidence?.workedExamples ?? null,
         }
       : null;
@@ -2034,17 +2184,20 @@ function validateResolvedAst(
         : !ast
           ? "Skipped because no schema-valid provider AST was available."
           : evidenceVerification?.ok
-            ? `${evidenceVerification.diagnostic.sourceSpanDetail} Worked-example inputs were checked against the candidate AST.`
+            ? `${evidenceVerification.diagnostic.sourceSpanDetail} ${evidenceVerification.diagnostic.provenanceDetail} Worked-example inputs were checked against the candidate AST.`
             : evidenceVerification
               ? evidenceVerification.failure === "span_coverage_incomplete"
                 ? evidenceVerification.diagnostic.sourceSpanDetail
-                : evidenceVerification.diagnostic.exampleResults
-                    .filter((example) => example.status === "failed")
-                    .map(
-                      (example) =>
-                        `Example ${example.index}: ${example.detail}`,
-                    )
-                    .join(" ") || "Provider evidence is malformed."
+                : evidenceVerification.failure === "provenance_invalid"
+                  ? (evidenceVerification.diagnostic.provenanceDetail ??
+                    "Provider provenance is missing or malformed.")
+                  : evidenceVerification.diagnostic.exampleResults
+                      .filter((example) => example.status === "failed")
+                      .map(
+                        (example) =>
+                          `Example ${example.index}: ${example.detail}`,
+                      )
+                      .join(" ") || "Provider evidence is malformed."
               : requireProviderEvidence
                 ? "Provider evidence was required but not returned."
                 : "Provider evidence was not requested.",
@@ -2366,11 +2519,24 @@ function validateResolvedAst(
     providerConfig.capabilities.json_schema_response === true;
   const ruleMode: "predicate" | "ranking" =
     ast && isRankingRule(ast) ? "ranking" : "predicate";
+  const astPathDescriptions = ast ? describeRuleAstPaths(ast) : [];
+  const provenanceRecords: readonly AstProvenanceRecord[] =
+    verifiedProviderEvidence?.provenanceRecords ??
+    (astSource === "deterministic"
+      ? astPathDescriptions.map((description) => ({
+          astPath: description.astPath,
+          claimedBehavior: description.behaviorDescription,
+          selectionReason:
+            "The deterministic compiler selected this semantic unit from the complete normalized rule source.",
+          sourceSpans: [normalizedText],
+        }))
+      : []);
 
   const artifact: RuleCompiledArtifact | null =
     decision === "VALID" && ast
       ? {
           ast,
+          astPathDescriptions,
           complexityScore: bounds?.complexity ?? 0,
           constrainedDecodingUsed,
           createdAt: timestamp,
@@ -2386,6 +2552,7 @@ function validateResolvedAst(
           officialInterpretation: describeRuleAstForPlayers(ast),
           originalText: request.originalText?.trim() || request.prompt,
           promptContractVersion: PROMPT_CONTRACT.version,
+          provenanceRecords,
           providerPath: [],
           ruleMode,
           schemaVersion: ast.schemaVersion,
@@ -2788,9 +2955,7 @@ function summarizeSchemaError(
  * voter agreeing with itself.
  */
 function resolveSlotModel(providerConfig: AgentProviderConfig): string {
-  return (
-    providerConfig.model_by_role.compile ?? providerConfig.identity.model
-  )
+  return (providerConfig.model_by_role.compile ?? providerConfig.identity.model)
     .trim()
     .toLowerCase();
 }
@@ -3000,9 +3165,7 @@ function resolveProviderDisagreement(attempts: ProviderEvaluation[]) {
     if (group.length < 2) {
       continue;
     }
-    if (
-      !group.some((member) => opinionsAreIndependent(candidate, member))
-    ) {
+    if (!group.some((member) => opinionsAreIndependent(candidate, member))) {
       continue;
     }
     const winner = group.find((member) => member.decision === "VALID");

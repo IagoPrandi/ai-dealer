@@ -12,6 +12,7 @@ import {
   createLocalOnlyProviderRoutingPolicy,
   createCompilerPlaceholder,
   describeRuleAstForPlayers,
+  describeRuleAstPaths,
   evaluateRankingEntry,
   evaluatePredicate,
   getDeterministicRuleCompilerPlan,
@@ -561,6 +562,17 @@ function tokenCount(prompt: string) {
   return prompt.trim().split(/\s+/).filter(Boolean).length;
 }
 
+function provenanceRecords(ast: unknown, sourceText: string) {
+  const parsed = ruleAstSchema.parse(ast);
+  return describeRuleAstPaths(parsed).map((description) => ({
+    astPath: description.astPath,
+    claimedBehavior: description.behaviorDescription,
+    selectionReason:
+      "The cited source requires this semantic unit in the compiled rule.",
+    sourceSpans: [sourceText],
+  }));
+}
+
 /**
  * A cooperating reviewer for the deterministic path.
  *
@@ -619,6 +631,7 @@ test("the compile_rule_to_ast skill prompt is versioned and covers both rule mod
   assert.ok(prompt.includes('"kind":"abs"'));
   assert.ok(prompt.includes("consumedSpans"));
   assert.ok(prompt.includes("workedExamples"));
+  assert.ok(prompt.includes("provenanceRecords"));
   assert.match(prompt, /at least TWO valid domain cases/i);
   assert.match(prompt, /do NOT need to include both outcomes/i);
   assert.match(prompt, /draws without replacement/i);
@@ -662,7 +675,12 @@ test("the compiler candidate schema makes every worked ticket a valid game input
   };
   assert.equal(schema.additionalProperties, false);
   assert.ok(schema.definitions && Object.keys(schema.definitions).length > 0);
-  assert.deepEqual(schema.required, ["ast", "consumedSpans", "workedExamples"]);
+  assert.deepEqual(schema.required, [
+    "ast",
+    "consumedSpans",
+    "provenanceRecords",
+    "workedExamples",
+  ]);
   const examples = schema.properties?.workedExamples?.items?.anyOf ?? [];
   assert.equal(examples.length, 2);
   for (const example of examples) {
@@ -2915,6 +2933,7 @@ test("provider source spans reject an omitted clause without a conjunction heuri
         consumedSpans: [
           { text: "all six guessed numbers are strictly greater than 10" },
         ],
+        provenanceRecords: provenanceRecords(rangeAst, text),
         workedExamples,
       }),
       requireProviderEvidence: true,
@@ -2932,6 +2951,30 @@ test("provider source spans reject an omitted clause without a conjunction heuri
     false,
   );
 
+  const missingProvenancePath = await compileRuleArtifact(
+    { originalText: text, prompt: text, tokenCount: countWords(text) },
+    {
+      astProvider: async () => ({
+        ast: rangeAst,
+        consumedSpans: [{ text: text.toLowerCase() }],
+        provenanceRecords: provenanceRecords(rangeAst, text).slice(1),
+        workedExamples,
+      }),
+      requireProviderEvidence: true,
+    },
+  );
+  assert.equal(missingProvenancePath.decision, "INVALID");
+  assert.ok(
+    missingProvenancePath.log.reasonCodes.includes(
+      "PROVIDER_EVIDENCE_UNVERIFIED",
+    ),
+  );
+  assert.equal(
+    missingProvenancePath.log.attemptDiagnostics[0]?.providerEvidence
+      ?.provenanceStatus,
+    "failed",
+  );
+
   const complete = await compileRuleArtifact(
     { originalText: text, prompt: text, tokenCount: countWords(text) },
     {
@@ -2940,6 +2983,7 @@ test("provider source spans reject an omitted clause without a conjunction heuri
         // One source span is valid here: it records that the quantified range
         // consumed both bounds. No AST `and` node count is inferred from prose.
         consumedSpans: [{ text: text.toLowerCase() }],
+        provenanceRecords: provenanceRecords(rangeAst, text),
         workedExamples,
       }),
       requireProviderEvidence: true,
@@ -2983,6 +3027,7 @@ test("provider worked examples catch an inverted signed bound", async () => {
       astProvider: async () => ({
         ast: wrongSignAst,
         consumedSpans: [{ text: text.toLowerCase() }],
+        provenanceRecords: provenanceRecords(wrongSignAst, text),
         workedExamples: [
           {
             draw: [10, 20, 30, 40, 50, 60],
@@ -3060,6 +3105,10 @@ test("worked-example ticket uniqueness is enforced after schema decoding", async
       astProvider: async () => ({
         ast: { schemaVersion: 1, node: { kind: "sum_equals" } },
         consumedSpans: [{ text }],
+        provenanceRecords: provenanceRecords(
+          { schemaVersion: 1, node: { kind: "sum_equals" } },
+          text,
+        ),
         workedExamples: [
           {
             draw: [10, 20, 30, 40, 50, 60],
@@ -3458,7 +3507,7 @@ test("rejects an LLM-emitted ALWAYS_TRUE rule (PRD 6.8)", async () => {
 test("exposes the prompt contract for audit", () => {
   const contract = getRuleValidationPromptContract();
 
-  assert.equal(contract.version, "tyche_rule_validation_prompt_v2");
+  assert.equal(contract.version, "tyche_rule_validation_prompt_v3");
   assert.equal(contract.output, "RuleCompilationCandidate | INVALID");
   assert.deepEqual(contract.allowedInputs, ["guess", "draw"]);
 });
@@ -4225,6 +4274,7 @@ test("a novel rule with reviewer consensus binds the complete approved source", 
       astProvider: async () => ({
         ast,
         consumedSpans: [{ text: "my ticket total" }],
+        provenanceRecords: provenanceRecords(ast, NO_REFERENCE_PROMPT),
         workedExamples: [
           {
             draw: [95, 96, 97, 98, 99, 100],
@@ -4335,6 +4385,7 @@ test("a repeated rejected executable reading stops provider arbitration", async 
         return {
           ast: draft,
           consumedSpans: [{ text: "ticket total" }],
+          provenanceRecords: provenanceRecords(draft, NO_REFERENCE_PROMPT),
           workedExamples: [
             {
               guess: [1, 2, 3, 4, 5, 6],
@@ -4540,6 +4591,7 @@ test("a provably vacuous reviewer cannot certify a novel candidate alone", async
       astProvider: async () => ({
         ast: candidate,
         consumedSpans: [{ text }],
+        provenanceRecords: provenanceRecords(candidate, text),
         workedExamples: [
           {
             draw: [5, 20, 30, 40, 50, 60],
@@ -5377,29 +5429,31 @@ test("an enumerated ordered sequence is not a guess-versus-draw ordered match", 
       right: { kind: "lit", value },
     })),
   });
+  const candidateAst = {
+    schemaVersion: 3,
+    result: {
+      type: "predicate",
+      predicate: {
+        kind: "and",
+        clauses: [
+          orderedLiteral("guess"),
+          { kind: "not", clause: orderedLiteral("draw") },
+        ],
+      },
+    },
+  };
   const result = await compileRuleArtifact(
     { originalText: text, prompt: text, tokenCount: countWords(text) },
     {
       astProvider: async () => ({
-        ast: {
-          schemaVersion: 3,
-          result: {
-            type: "predicate",
-            predicate: {
-              kind: "and",
-              clauses: [
-                orderedLiteral("guess"),
-                { kind: "not", clause: orderedLiteral("draw") },
-              ],
-            },
-          },
-        },
+        ast: candidateAst,
         consumedSpans: [
           { text: "it exactly equals [1, 2, 3, 4, 5, 6] in that order" },
           {
             text: "the official draw does not equal [1, 2, 3, 4, 5, 6] in that same order",
           },
         ],
+        provenanceRecords: provenanceRecords(candidateAst, text),
         workedExamples: [
           {
             draw: [10, 20, 30, 40, 50, 60],
@@ -5479,19 +5533,21 @@ test("framing words outside the consumed spans do not block a faithful compile",
       outcome: "LOSE" as const,
     },
   ];
+  const ast = {
+    schemaVersion: 3,
+    result: { type: "predicate", predicate: condition },
+  };
   const framed = await compileRuleArtifact(
     { originalText: text, prompt: text, tokenCount: countWords(text) },
     {
       astProvider: async () => ({
-        ast: {
-          schemaVersion: 3,
-          result: { type: "predicate", predicate: condition },
-        },
+        ast,
         consumedSpans: [
           {
             text: "the sum of the guessed numbers is greater than the sum of the drawn numbers",
           },
         ],
+        provenanceRecords: provenanceRecords(ast, text),
         workedExamples,
       }),
       requireProviderEvidence: true,
@@ -5510,15 +5566,13 @@ test("framing words outside the consumed spans do not block a faithful compile",
     },
     {
       astProvider: async () => ({
-        ast: {
-          schemaVersion: 3,
-          result: { type: "predicate", predicate: condition },
-        },
+        ast,
         consumedSpans: [
           {
             text: "the sum of the guessed numbers is greater than the sum of the drawn numbers",
           },
         ],
+        provenanceRecords: provenanceRecords(ast, compoundText),
         workedExamples,
       }),
       requireProviderEvidence: true,
@@ -6056,6 +6110,7 @@ test("provider evidence does not have to include a winning example", async () =>
       astProvider: async () => ({
         ast,
         consumedSpans: [{ text: text.toLowerCase() }],
+        provenanceRecords: provenanceRecords(ast, text),
         workedExamples: losingOnly,
       }),
       requireProviderEvidence: true,
@@ -6075,6 +6130,7 @@ test("provider evidence does not have to include a winning example", async () =>
       astProvider: async () => ({
         ast,
         consumedSpans: [{ text: text.toLowerCase() }],
+        provenanceRecords: provenanceRecords(ast, text),
         workedExamples: [
           losingOnly[0],
           {
@@ -6161,7 +6217,12 @@ test("a vacuously true remainder clause is not an unread condition", async () =>
   const result = await compileRuleArtifact(
     { originalText: text, prompt: text, tokenCount: countWords(text) },
     {
-      astProvider: async () => ({ ast, consumedSpans, workedExamples }),
+      astProvider: async () => ({
+        ast,
+        consumedSpans,
+        provenanceRecords: provenanceRecords(ast, text),
+        workedExamples,
+      }),
       requireProviderEvidence: true,
     },
   );
@@ -6181,7 +6242,12 @@ test("a vacuously true remainder clause is not an unread condition", async () =>
       tokenCount: countWords(withRealDrop),
     },
     {
-      astProvider: async () => ({ ast, consumedSpans, workedExamples }),
+      astProvider: async () => ({
+        ast,
+        consumedSpans,
+        provenanceRecords: provenanceRecords(ast, withRealDrop),
+        workedExamples,
+      }),
       requireProviderEvidence: true,
     },
   );
@@ -6683,6 +6749,7 @@ test("independent behavioral review lets the server correct ranking arithmetic",
       astProvider: async () => ({
         ast,
         consumedSpans: [{ text }],
+        provenanceRecords: provenanceRecords(ast, text),
         workedExamples: [
           {
             draw: [10, 20, 30, 40, 50, 60],
@@ -6734,6 +6801,7 @@ test("independent behavioral review reconstructs omitted ranking scores", async 
       astProvider: async () => ({
         ast,
         consumedSpans: [{ text }],
+        provenanceRecords: provenanceRecords(ast, text),
         workedExamples: [
           {
             draw: [10, 20, 30, 40, 50, 60],
@@ -6931,6 +6999,7 @@ test("two compilers cannot certify the same dropped numeric clauses", async () =
       astProvider: async () => ({
         ast: truncated,
         consumedSpans: [{ text }],
+        provenanceRecords: provenanceRecords(truncated, text),
         workedExamples: [
           {
             draw: [10, 20, 30, 40, 50, 60],
@@ -7043,6 +7112,7 @@ test("matching independent ASTs repair bookkeeping unless a conflicting eligible
             providerCalls === 1
               ? [{ text }]
               : [{ text: "line up the guess and draw from lowest to highest" }],
+          provenanceRecords: provenanceRecords(candidate, text),
           workedExamples: [
             {
               draw: [1, 2, 3, 4, 5, 6],
@@ -7088,6 +7158,7 @@ test("matching independent ASTs repair bookkeeping unless a conflicting eligible
         consumedSpans: [
           { text: "line up the guess and draw from lowest to highest" },
         ],
+        provenanceRecords: provenanceRecords(candidate, text),
         workedExamples: [
           { draw: [1, 2, 3, 4, 5, 6], guess: [1, 2, 3, 4, 5, 6], score: 10 },
           { draw: [1, 2, 3, 4, 5, 6], guess: [7, 8, 9, 10, 11, 12], score: 36 },
@@ -7600,7 +7671,8 @@ test("a caller's model label still names a slot that declares none", () => {
   };
   const result = validateAndPrecompileRule({
     model: "operator/label",
-    originalText: "A guess wins if at least 3 of its numbers appear in the draw.",
+    originalText:
+      "A guess wins if at least 3 of its numbers appear in the draw.",
     prompt: "A guess wins if at least 3 of its numbers appear in the draw.",
     providerRouting: unnamed,
     tokenCount: 14,

@@ -40,7 +40,6 @@ import {
   analyzeInterpretationCoverage,
   analyzeStatementFidelity,
   collectRequiredValues,
-  externalDependencyGateText,
   hasAmbiguousWording,
   hasStructuralArithmeticAmbiguity,
   hasExternalDependency,
@@ -83,6 +82,10 @@ import {
   detectJailbreak,
   type GuardianConfig,
 } from "./guardian.js";
+import {
+  hasApiExternalRulePattern,
+  hasPreventedRulePattern,
+} from "./ruleInputSafety.js";
 import {
   captureAiRun,
   exportAiUsageRunSummaries,
@@ -145,38 +148,6 @@ const MAX_CONVERSATION_MESSAGE_BYTES = 4000;
 // Draft ids are either the server's content hash (64 hex chars) or the client's
 // `client:<turnId>:<uuid>` id, so this only rejects an id no writer produces.
 const MAX_CONVERSATION_DRAFT_ID_LENGTH = 128;
-const RULE_PREVENTED_PATTERNS = [
-  /\bignore\b.{0,40}\b(instructions?|rules?|prompt|polic\w+|safety)\b/i,
-  /\b(system|developer)\s+(prompt|message|instruction)\b/i,
-  /\bjailbreak\b/i,
-  /\bprompt\s*injection\b/i,
-  /\b(secretly|silently)\b.{0,60}\bcompile\b.{0,60}\bvalid\b/i,
-  /\bhide\b.{0,60}\b(blocked|invalid|rejected)\b/i,
-  /\breveal\b.{0,40}\b(prompt|secret|private key|seed phrase)\b/i,
-  /\b(?:ignore|ignora|ignorar|desconsidere|desconsiderar)\b.{0,60}\b(?:instrucoes?|regras?|prompt|politicas?|seguranca)\b/i,
-  /\b(?:prompt\s+do\s+sistema|mensage(?:m|ns)\s+d[eo]\s+desenvolvedor|instrucoes?\s+d[eo]\s+sistema)\b/i,
-  /\b(?:oculte|ocultar|esconda|esconder)\b.{0,60}\b(?:bloquead[oa]s?|invalid[oa]s?|rejeitad[oa]s?)\b/i,
-  /\b(?:revele|revelar|mostre|mostrar)\b.{0,60}\b(?:prompt|segredo|chave privada|frase semente)\b/i,
-  /\b(?:ignora|ignorar)\b.{0,60}\b(?:instrucciones?|reglas?|prompt|politicas?|seguridad)\b/i,
-  /\b(?:prompt\s+del\s+sistema|mensaje\s+del\s+desarrollador|instrucciones?\s+del\s+sistema)\b/i,
-  /\b(?:oculta|ocultar|esconde|esconder)\b.{0,60}\b(?:bloquead[oa]s?|invalid[oa]s?|rechazad[oa]s?)\b/i,
-  /\b(?:revela|revelar|muestra|mostrar)\b.{0,60}\b(?:prompt|secreto|clave privada|frase semilla)\b/i,
-] as const;
-const RULE_EXTERNAL_BLOCK_PATTERNS = [
-  /\bclosest\b.{0,40}\bamong\s+all\s+players\b/i,
-  /\bsol\s+price\b|\busd\b/i,
-  // Weather/rain/sunny live in the compiler's EXTERNAL_DEPENDENCY_PATTERNS
-  // (single source of truth), which is dismissal-aware — "no weather; ..." and
-  // "define sunny as <numeric criteria>" must not be blocked here.
-  /\bx\/twitter\b|\btwitter\b|\bpost\b.{0,40}\blikes?\b/i,
-  /\buse\s+python\b|\bimport\s+random\b|\bcode\s+to\s+calculate\b/i,
-  /\bfetch\b.{0,80}\bhttps?:\/\//i,
-  /\bread\b.{0,40}\blocal\s+file\b|\bsecret\.txt\b/i,
-  /\brandomly\s+choose\b.{0,60}\bplayers?\b/i,
-  /\bdivisor\s+is\s+zero\b.{0,80}\bruntime\b.{0,40}\bguess\b/i,
-  /\breuse\b.{0,40}\bexact\s+rule\b.{0,80}\blast\s+turn\b/i,
-  /\bsame\s+rule\b.{0,60}\bdifferent\s+wording\b/i,
-] as const;
 
 export interface ServiceHealth {
   dealer: "ready" | "unconfigured" | "warming";
@@ -2731,17 +2702,7 @@ export function resetApiStateForTests() {
   resetTokenomicsProjectionForTests();
 }
 
-export function hasPreventedRulePattern(value: string) {
-  const normalized = value
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase();
-  return RULE_PREVENTED_PATTERNS.some((pattern) => pattern.test(normalized));
-}
-
-function hasRulePattern(value: string, patterns: readonly RegExp[]) {
-  return patterns.some((pattern) => pattern.test(value));
-}
+export { hasPreventedRulePattern } from "./ruleInputSafety.js";
 
 // High-signal markers (on the English text) for rule shapes the small primary
 // model compiles unreliably: negation/inverse and compound conditions. These are
@@ -3416,10 +3377,7 @@ function isPreflightViableRewrite(rewrite: string): boolean {
   if (
     !sanitized ||
     hasPreventedRulePattern(sanitized) ||
-    hasRulePattern(
-      externalDependencyGateText(sanitized),
-      RULE_EXTERNAL_BLOCK_PATTERNS,
-    ) ||
+    hasApiExternalRulePattern(sanitized) ||
     hasExternalDependency(sanitized) ||
     hasInvalidConstraint(sanitized) ||
     countRuleTokens(sanitized) > RULE_MAX_TOKENS ||
@@ -3954,12 +3912,7 @@ async function runRuleInterpretationPipeline(
   if (!sanitizedText) throw new Error("RULE_EMPTY");
   if (hasPreventedRulePattern(sanitizedText))
     throw new Error("RULE_PROMPT_INJECTION");
-  if (
-    hasRulePattern(
-      externalDependencyGateText(sanitizedText),
-      RULE_EXTERNAL_BLOCK_PATTERNS,
-    )
-  ) {
+  if (hasApiExternalRulePattern(sanitizedText)) {
     throw new Error("RULE_EXTERNAL_DEPENDENCY");
   }
   if (hasExternalDependency(sanitizedText))
@@ -4139,12 +4092,7 @@ async function runRulePreflightPipeline(
   // Match on the compiler's dismissal-aware view of the text, so a refinement
   // that REMOVES a dependency ("forget shares, ...") is not blocked for
   // mentioning the removed thing.
-  if (
-    hasRulePattern(
-      externalDependencyGateText(sanitizedText),
-      RULE_EXTERNAL_BLOCK_PATTERNS,
-    )
-  ) {
+  if (hasApiExternalRulePattern(sanitizedText)) {
     throw new Error("RULE_EXTERNAL_DEPENDENCY");
   }
 
