@@ -1,0 +1,4 @@
+interface:
+  display_name: "Jev System One"
+  short_description: "Design reliable typed decisions with Jev."
+  default_prompt: "Use $jev-system-one to design and validate this TypeSafe Jev integration."
