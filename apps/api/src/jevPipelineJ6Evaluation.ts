@@ -117,7 +117,7 @@ export function createP12EvaluationTasks(
 }
 
 /** Reference labels and deterministic verdicts are intentionally excluded. */
-export function buildPublicP12State(task: P12EvaluationTask): PublicP12State {
+export function buildPublicP12State(task: Pick<P12EvaluationTask, "language" | "source">): PublicP12State {
   return {
     gameContext: {
       allowedRuleInputs: ["guess", "draw"],

@@ -1,0 +1,161 @@
+{
+  "generatedAt": "2026-09-22T19:31:33.797Z",
+  "method": "Current two-phase pipeline (createRuleInterpretation -> createRulePreflight) over jev-pipeline-corpus-v1; read-only.",
+  "rows": [
+    {
+      "calls": 8,
+      "providerCostUsd": 0.0017659,
+      "unpricedCalls": 5,
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": null,
+      "id": "CLR-01",
+      "reasonCodes": [
+        "SUPPORTED_RULE",
+        "GUARDIAN_FIDELITY_CONFLICT"
+      ],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 132549
+    },
+    {
+      "calls": 7,
+      "providerCostUsd": 0.00228555,
+      "unpricedCalls": 4,
+      "ast": {
+        "schemaVersion": 1,
+        "node": {
+          "kind": "sum_equals"
+        }
+      },
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": true,
+      "id": "CLR-02",
+      "reasonCodes": [
+        "SUPPORTED_RULE"
+      ],
+      "repeatId": 1,
+      "route": "ACCEPT",
+      "wallMs": 67110,
+      "rerunNote": "Original row was mis-scored UNAVAILABLE by a harness bug (the scorer rejected the legacy schemaVersion 1 AST the pipeline returned). This row is a separate rerun of CLR-02 after the scorer fix; the other nine rows are from the first run and do not store the returned AST."
+    },
+    {
+      "calls": 7,
+      "providerCostUsd": 0.003285395,
+      "unpricedCalls": 3,
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": null,
+      "id": "CLR-03",
+      "reasonCodes": [
+        "SUPPORTED_RULE",
+        "REVIEWER_MISMATCH",
+        "AGENT_STATEMENT_MISMATCH"
+      ],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 181114
+    },
+    {
+      "calls": 7,
+      "providerCostUsd": 0.0018881794,
+      "unpricedCalls": 4,
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": true,
+      "id": "CLR-04",
+      "reasonCodes": [
+        "SUPPORTED_RULE"
+      ],
+      "repeatId": 1,
+      "route": "ACCEPT",
+      "wallMs": 90578
+    },
+    {
+      "calls": 15,
+      "providerCostUsd": 0.005835267,
+      "unpricedCalls": 8,
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": true,
+      "id": "CLR-05",
+      "reasonCodes": [
+        "SUPPORTED_RULE"
+      ],
+      "repeatId": 1,
+      "route": "ACCEPT",
+      "wallMs": 793141
+    },
+    {
+      "calls": 3,
+      "providerCostUsd": 0.00142412,
+      "unpricedCalls": 1,
+      "class": "AMBIGUOUS",
+      "error": null,
+      "fixturesPass": null,
+      "id": "AMB-01",
+      "reasonCodes": [],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 4062
+    },
+    {
+      "calls": 4,
+      "providerCostUsd": 0.0016093482,
+      "unpricedCalls": 2,
+      "class": "AMBIGUOUS",
+      "error": null,
+      "fixturesPass": null,
+      "id": "AMB-02",
+      "reasonCodes": [],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 11808
+    },
+    {
+      "calls": 3,
+      "providerCostUsd": 0.0011644,
+      "unpricedCalls": 1,
+      "class": "AMBIGUOUS",
+      "error": null,
+      "fixturesPass": null,
+      "id": "AMB-03",
+      "reasonCodes": [],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 4210
+    },
+    {
+      "calls": 0,
+      "providerCostUsd": 0,
+      "unpricedCalls": 0,
+      "class": "BLOCKED",
+      "error": "RULE_PROMPT_INJECTION",
+      "fixturesPass": null,
+      "id": "BLK-01",
+      "reasonCodes": [],
+      "repeatId": 1,
+      "route": "BLOCK",
+      "wallMs": 1
+    },
+    {
+      "calls": 0,
+      "providerCostUsd": 0,
+      "unpricedCalls": 0,
+      "class": "BLOCKED",
+      "error": "RULE_EXTERNAL_DEPENDENCY",
+      "fixturesPass": null,
+      "id": "BLK-02",
+      "reasonCodes": [],
+      "repeatId": 1,
+      "route": "BLOCK",
+      "wallMs": 0
+    }
+  ],
+  "runs": 1,
+  "wallMs": 1278939,
+  "disclosures": [
+    "CLR-02 replaced by a rerun after a scorer fix; see rows[].rerunNote."
+  ]
+}

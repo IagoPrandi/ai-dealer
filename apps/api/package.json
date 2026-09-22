@@ -13,6 +13,7 @@
     "experiment:jev:pipeline:j4": "node --import tsx scripts/jev-pipeline-j4-evaluation.mts",
     "experiment:jev:pipeline:j5": "node --import tsx scripts/jev-pipeline-j5-evaluation.mts",
     "experiment:jev:pipeline:j6": "node --import tsx scripts/jev-pipeline-j6-evaluation.mts",
+    "experiment:jev:pipeline:j8": "node --import tsx scripts/jev-pipeline-j8-evaluation.mts",
     "stress:rules:set4": "node scripts/rule-preflight-stress-set-4.mjs",
     "stress:rules:set5": "node scripts/rule-preflight-novel-set-5.mjs",
     "stress:rules:set6": "node scripts/rule-preflight-novel-set-6.mjs",

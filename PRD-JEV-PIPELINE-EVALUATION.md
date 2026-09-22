@@ -509,6 +509,35 @@ When the result is `unsafe` or uncertain, predefined reason categories are evalu
 
 JEV may replace only the current Guardian semantic classification after the comparative gate in §9.1 is satisfied for safety as a separate consequence tier. Deterministic security controls are never removed.
 
+### 9.13 J8 — Structured claim-ledger state (rework of P01/P02/P05/P07/P09/P10)
+
+J1–J6 showed one failure pattern: questions of the form "does the text state **every** material X?" ask JEV to enumerate an open set and prove nothing is missing, which it answers conservatively (clear-rule recall 0–3% in P05/P07/P10) or, for quantifiers, wrongly (P09 `CLR-05`). J8 changes the input, not the model:
+
+1. **Deterministic screen first** (unchanged `ruleInputSafety`); blocked sources make no model call.
+2. **Claim ledger** — one LLM call decomposes the source into complete conditions, each with an exact `sourceSpan` and a literal English `meaning`, plus `openChoices` the source leaves undecided.
+3. **Code-owned completeness** — every span must be copied from the source; every material term (quantifier, comparator, negation, disjunction, position word, number) must lie inside a claim span and its class must reappear in that claim's meaning. Uncovered text with content words becomes a residual question.
+4. **Local JEV Nouls only**: span↔meaning support, per-claim undefined-vague-term, per open choice "already decided", per uncovered segment "material".
+5. **Candidate check against computed evidence**: per-claim forward Noul against the deterministic total description, per-AST-unit reverse Noul, and per-scenario Noul where code supplies the ticket facts, every closed sub-expression value, and per-quantifier satisfaction counts. JEV never counts.
+6. **Routing** — confident ambiguity → `CLARIFY`; interpretation defect → one LLM revision (the §10 cap), then review; any negative candidate Noul → reject; any uncertain → review; `ACCEPT` only when every Noul is ≥ the support band **and** all deterministic behavior fixtures pass.
+
+J8 is evaluated on corpus v1 (regression only, because J8 was designed against it) and on a held-out set frozen before the first J8 live call: the 20-rule benchmark from `docs/jev-rule-pipeline-experiment.md` with one mutation each, two universal-quantifier rules with an existential mutation, six unseen vague rules, and two blocked rules.
+
+### 9.14 J9 — End-to-end pipeline proposals
+
+J9 measures complete pipelines with real AST generation. It uses only what production would have (source, verified ledger, generated ASTs, and scenarios derived deterministically from the source); hidden reference ASTs score outcomes afterwards and reach no stage. Proposals:
+
+- `P1` — J8 ledger gate, one compile, JEV candidate check, one JEV-guided regeneration;
+- `P2` — ledger gate, two independent compilers, code equivalence, JEV check, JEV adjudication on disagreement;
+- `P3` — as `P2`, but compiler agreement accepts without a JEV AST check; JEV is used for the ledger and for disagreement only;
+- `P4` — `P3` with a confident-negative JEV veto;
+- ablations `A0` (no semantic gate), `N-only`, and `P5` (no JEV anywhere).
+
+All arms derive from the same provider calls. Evidence comes from corpus v1 (regression), the J8 held-out set (no longer blind), and `jev-j9-fresh-v1` (blind), against a contemporaneous B0 on the held-out and fresh sets.
+
+### 9.15 J10 — Adversarial comparison and Guardian replacement
+
+J10 runs the J9 arms, including a real `P5` arm, on `jev-j10-adversarial-v1`. The set contains implicit-ambiguity proposals, negation/quantifier and natural-reading trap rules with hidden references, and disguised prompt injections that pass the deterministic screen. It then compares JEV with the production Guardian on identical inputs in the Guardian's three roles: input safety (`detectJailbreak` vs the J6 question set), the final-artifact check (`checkClaimGroundedness` vs the J8/J9 candidate check), and provider selection (escalate, Guardian-select, JEV check-select, JEV adjudication), over one-right and none-right candidate pairs.
+
 ## 10. Retry and feasibility policy
 
 Before any LLM or JEV-driven process repeats, code must classify why the process failed:
@@ -670,6 +699,26 @@ All checkboxes remain unchecked until the owner confirms the corresponding miles
 
 - [x] Implement and evaluate `P12` while preserving deterministic security checks.
 - [x] Publish the safety-tier Guardian/JEV/combined comparison.
+
+### J8 — Structured claim-ledger state (§9.13)
+
+- [ ] Implement the claim ledger, deterministic material-term preservation, computed scenario evidence, and fail-closed routing.
+- [ ] Evaluate on corpus v1 (regression) and the frozen held-out set with three repeats each.
+- [ ] Measure the current two-phase pipeline on the same corpus-v1 sources as contemporaneous `B0`.
+- [ ] Publish the J8 report and recommendation.
+
+### J9 — End-to-end pipeline proposals (§9.14)
+
+- [ ] Implement the evidence library, vacuity and equivalence checks, exactly-one structure note, adjudication, and the P1–P5 routes.
+- [ ] Freeze `jev-j9-fresh-v1` before the first run at scale and evaluate all arms with three repeats.
+- [ ] Measure B0 on the held-out and fresh sets.
+- [ ] Publish the J9 report and the recommended pipeline.
+
+### J10 — Adversarial comparison and Guardian replacement (§9.15)
+
+- [ ] Freeze `jev-j10-adversarial-v1` and run P3 vs P5 (and the other J9 arms) with three repeats.
+- [ ] Compare JEV and the production Guardian on input safety, the final-artifact check, and provider selection.
+- [ ] Publish the J10 report and the P6 / P6-strict recommendation.
 
 ### J7 — Full cumulative decision
 

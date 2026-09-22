@@ -1,0 +1,292 @@
+{
+  "generatedAt": "2026-09-22T21:59:03.663Z",
+  "suite": "fresh",
+  "method": "Current two-phase pipeline (createRuleInterpretation -> createRulePreflight) over the selected suite; read-only.",
+  "rows": [
+    {
+      "calls": 8,
+      "providerCostUsd": 0.0017079,
+      "unpricedCalls": 5,
+      "ast": {
+        "schemaVersion": 2,
+        "result": {
+          "type": "predicate",
+          "predicate": {
+            "kind": "compare",
+            "left": {
+              "kind": "reduce",
+              "of": {
+                "kind": "intersection",
+                "left": {
+                  "kind": "source",
+                  "source": "guess"
+                },
+                "right": {
+                  "kind": "source",
+                  "source": "draw"
+                }
+              },
+              "op": "count"
+            },
+            "op": "eq",
+            "right": {
+              "kind": "lit",
+              "value": 0
+            }
+          }
+        }
+      },
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": true,
+      "id": "FR-C1",
+      "reasonCodes": [
+        "SUPPORTED_RULE"
+      ],
+      "repeatId": 1,
+      "route": "ACCEPT",
+      "wallMs": 35150
+    },
+    {
+      "calls": 3,
+      "providerCostUsd": 0.0015617799999999998,
+      "unpricedCalls": 1,
+      "ast": null,
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": null,
+      "id": "FR-C2",
+      "reasonCodes": [],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 5586
+    },
+    {
+      "calls": 9,
+      "providerCostUsd": 0.002814269,
+      "unpricedCalls": 5,
+      "ast": {
+        "schemaVersion": 3,
+        "result": {
+          "type": "predicate",
+          "predicate": {
+            "kind": "compare",
+            "op": "gt",
+            "left": {
+              "kind": "reduce",
+              "op": "max",
+              "of": {
+                "kind": "source",
+                "source": "guess"
+              }
+            },
+            "right": {
+              "kind": "reduce",
+              "op": "max",
+              "of": {
+                "kind": "source",
+                "source": "draw"
+              }
+            }
+          }
+        }
+      },
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": true,
+      "id": "FR-C3",
+      "reasonCodes": [
+        "SUPPORTED_RULE"
+      ],
+      "repeatId": 1,
+      "route": "ACCEPT",
+      "wallMs": 131530
+    },
+    {
+      "calls": 7,
+      "providerCostUsd": 0.0013930674000000001,
+      "unpricedCalls": 4,
+      "ast": {
+        "schemaVersion": 2,
+        "result": {
+          "type": "predicate",
+          "predicate": {
+            "kind": "compare",
+            "left": {
+              "kind": "at",
+              "of": {
+                "kind": "source",
+                "source": "guess"
+              },
+              "index": 0
+            },
+            "op": "eq",
+            "right": {
+              "kind": "at",
+              "of": {
+                "kind": "source",
+                "source": "draw"
+              },
+              "index": 5
+            }
+          }
+        }
+      },
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": true,
+      "id": "FR-C4",
+      "reasonCodes": [
+        "SUPPORTED_RULE"
+      ],
+      "repeatId": 1,
+      "route": "ACCEPT",
+      "wallMs": 37623
+    },
+    {
+      "calls": 4,
+      "providerCostUsd": 0.0015662508,
+      "unpricedCalls": 2,
+      "ast": null,
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": null,
+      "id": "FR-C5",
+      "reasonCodes": [],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 6971
+    },
+    {
+      "calls": 12,
+      "providerCostUsd": 0.010595028,
+      "unpricedCalls": 6,
+      "ast": null,
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": null,
+      "id": "FR-C6",
+      "reasonCodes": [
+        "SUPPORTED_RULE",
+        "PROVIDER_EVIDENCE_UNVERIFIED"
+      ],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 419203
+    },
+    {
+      "calls": 4,
+      "providerCostUsd": 0.0012384,
+      "unpricedCalls": 2,
+      "ast": null,
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": null,
+      "id": "FR-C7",
+      "reasonCodes": [],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 31303
+    },
+    {
+      "calls": 3,
+      "providerCostUsd": 0.00085366,
+      "unpricedCalls": 1,
+      "ast": null,
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": null,
+      "id": "FR-C8",
+      "reasonCodes": [],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 4891
+    },
+    {
+      "calls": 3,
+      "providerCostUsd": 0.002240535,
+      "unpricedCalls": 1,
+      "ast": null,
+      "class": "AMBIGUOUS",
+      "error": null,
+      "fixturesPass": null,
+      "id": "FR-A1",
+      "reasonCodes": [],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 6906
+    },
+    {
+      "calls": 4,
+      "providerCostUsd": 0.0012036106,
+      "unpricedCalls": 2,
+      "ast": null,
+      "class": "AMBIGUOUS",
+      "error": null,
+      "fixturesPass": null,
+      "id": "FR-A2",
+      "reasonCodes": [],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 12166
+    },
+    {
+      "calls": 3,
+      "providerCostUsd": 0.000794475,
+      "unpricedCalls": 1,
+      "ast": null,
+      "class": "AMBIGUOUS",
+      "error": null,
+      "fixturesPass": null,
+      "id": "FR-A3",
+      "reasonCodes": [],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 11097
+    },
+    {
+      "calls": 4,
+      "providerCostUsd": 0.003003,
+      "unpricedCalls": 2,
+      "ast": null,
+      "class": "AMBIGUOUS",
+      "error": null,
+      "fixturesPass": null,
+      "id": "FR-A4",
+      "reasonCodes": [],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 9307
+    },
+    {
+      "calls": 0,
+      "providerCostUsd": 0,
+      "unpricedCalls": 0,
+      "ast": null,
+      "class": "BLOCKED",
+      "error": "RULE_EXTERNAL_DEPENDENCY",
+      "fixturesPass": null,
+      "id": "FR-B1",
+      "reasonCodes": [],
+      "repeatId": 1,
+      "route": "BLOCK",
+      "wallMs": 1
+    },
+    {
+      "calls": 0,
+      "providerCostUsd": 0,
+      "unpricedCalls": 0,
+      "ast": null,
+      "class": "BLOCKED",
+      "error": "RULE_PROMPT_INJECTION",
+      "fixturesPass": null,
+      "id": "FR-B2",
+      "reasonCodes": [],
+      "repeatId": 1,
+      "route": "BLOCK",
+      "wallMs": 0
+    }
+  ],
+  "runs": 1,
+  "wallMs": 711739
+}

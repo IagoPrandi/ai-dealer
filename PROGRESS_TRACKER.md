@@ -4,6 +4,59 @@ This tracker records milestone status, work logs, and required document confirma
 
 ## Work Log
 
+### 2026-09-22 (JEV pipeline J10 adversarial comparison and Guardian replacement)
+
+- Opened `PRD-JEV-PIPELINE-EVALUATION.md`, `estudo-jev-pipeline.md`, `docs/jev-rule-pipeline-experiment.md`, and the J8/J9 reports; applied the `jev-system-one` and `tyche-test-and-verify` skills. Added §9.15 and an unticked J10 milestone.
+- Added the frozen adversarial set `jev-j10-adversarial-v1` (SHA-256 `7c46f2a3…`): 10 implicit-ambiguity proposals, 10 clear trap rules with hidden references, and 2 disguised injections that pass the deterministic screen.
+- Added a real `P5` arm to the J9 runner and wrote the J10 runner `scripts/jev-pipeline-j10-evaluation.mts`. It compares JEV with the production Guardian (`detectJailbreak`, `checkClaimGroundedness`) on identical inputs and adds provider-selection policies. The J6 state builder now takes only `language`/`source`.
+- Part A (66 runs): P5 had 6 false accepts, P3 4, P4 3, P6 (P4 + JEV safety gate) 3, and P2/P6-strict 0.
+  - JEV-only catches: `ADV-A1` ×2 (the LLM listed no question) and both disguised injections (safety gate 6/6; artifact veto on `ADV-B2`).
+  - The residual `ADV-A6` has a disputable ambiguous label.
+- Part B (963 JEV, 540 Guardian calls):
+  - Safety: JEV alone had 0 false safe against the Guardian's 9 (external dependencies); both reach 24/24 with the deterministic screen.
+  - Artifact check: JEV 87/129 correct supported vs Guardian 86/129. Both false supports (one each) were vacuous ASTs that code rejects first.
+  - Selection: JEV check-select recovered 234/366 one-right pairs (Guardian 222; escalate 0) with 0 wrong after the vacuity check. The pre-registered J9 adjudication recovered only 22; the JEV Choice alone made 13 wrong picks.
+- Published `docs/jev-pipeline-j10-report.md` and two raw packets. No production routing changed; J10 remains unticked pending explicit owner confirmation.
+
+### 2026-09-22 (JEV pipeline J9 end-to-end pipeline proposals)
+
+- Opened `PRD.md`, `PROGRESS_TRACKER.md`, `PRD-JEV-PIPELINE-EVALUATION.md`, `docs/jev-rule-pipeline-experiment.md`, and the J0–J8 reports; applied the `jev-system-one` and `tyche-test-and-verify` skills.
+- Added §9.14 and an unticked J9 milestone.
+- Implemented `apps/api/src/jevPipelineJ9Pipelines.ts`:
+  - source-derived evidence library with boundary-pair selection;
+  - vacuity check and behavioral-equivalence search;
+  - exactly-one structure note;
+  - JEV adjudication on compiler disagreement;
+  - pure routes for P1/P2/P3/P4 and the A0/N-only/P5 ablations.
+- Also added the blind set `jev-j9-fresh-v1` (SHA-256 `750af818…`), the runner `scripts/jev-pipeline-j9-evaluation.mts` with item-level error isolation, and shared `jev-pipeline-items`/`jev-pipeline-providers` modules (the J8 runner now uses them unchanged in behavior). B0 now supports the held-out and fresh suites. 8 unit tests.
+- Ran 162 live executions: all 54 proposals × 3, compilers `gpt-oss-120b` + `deepseek-v4-flash`, 297 JEV calls with no error.
+- P3 results: 0 false accepts; clear accepted 88/105 overall and 21/24 on the fresh set; 36/39 ambiguous → CLARIFY and the rest to review; about $0.0006–0.0007 per clear proposal; clear p50 27 s.
+- A0 (no semantic gate) accepted every ambiguous execution (39). JEV AST checks on agreed compiles caught nothing and cost 25 correct accepts; JEV-guided regeneration fixed 0/4.
+- JEV's unique measured catch: `FR-A3`, where the LLM ledger listed no open choice. The two compilers agreed on 21/39 ambiguous executions, so agreement is not an ambiguity detector.
+- B0: clear accepted 6/22 on held-out and 3/8 on fresh, 0 wrong ASTs, cost ≥ $0.0027–0.0053 per clear rule with about half the calls unpriced.
+- Published `docs/jev-pipeline-j9-report.md` and three raw packets.
+- Verification passed: self-test, identical reaggregation, secret scan, API typecheck, 353/353 tests, lint, and build.
+- Recommendation: P3 for a shadow rollout. J9 remains unticked pending explicit owner confirmation, and no production routing changed.
+
+### 2026-09-22 (JEV pipeline J8 structured claim-ledger state)
+
+- Opened the required `PRD.md`, `PROGRESS_TRACKER.md`, `PRD-JEV-PIPELINE-EVALUATION.md`, `docs/jev-rule-pipeline-experiment.md`, and the J0–J6 reports; inspected `.claude/skills` and applied `jev-system-one` (SKILL.md) and the `tyche-test-and-verify` verification ladder.
+- Diagnosed the J1–J6 `REWORK_AND_RETEST` pattern: open-world "does the text state every material X?" questions. Added §9.13 and an unticked J8 milestone to `PRD-JEV-PIPELINE-EVALUATION.md`. Implemented `apps/api/src/jevPipelineJ8Evaluation.ts` with these parts:
+  - LLM claim ledger with exact spans and literal meanings;
+  - deterministic PT/EN material-term coverage and preservation (quantifiers, comparators, negation, disjunction, position, numbers);
+  - residual uncovered segments;
+  - local ledger Nouls (support, vague, decided, material);
+  - forward, reverse, and scenario candidate Nouls over computed facts, closed sub-expression values, and quantifier satisfaction counts;
+  - fail-closed routing where deterministic behavior fixtures stay authoritative.
+- Also added the frozen held-out set `jev-j8-heldout-v1`, the runner `scripts/jev-pipeline-j8-evaluation.mts`, a read-only current-pipeline B0 runner `scripts/jev-pipeline-j8-baseline.mts`, and 11 unit tests.
+- Three live v1 probes drove the v2 prompt/questions and the quantifier trace (v1 is disclosed as regression-only). The design was then frozen, and v1 ×3 plus held-out ×3 were run.
+- Results: 0 terminal false accepts in 120 executions; 0 Jev-only supports of 75 wrong clear candidates; 27/27 ambiguous → CLARIFY; 12/12 blocked. Clear references accepted: 12/15 on v1 and 30/60 on held-out (excluding 6 existing-gate false blocks). The P09 rework had 0/48 false supports, versus 6 in J5. 319 JEV calls cost $0.02240, 125 ledger LLM calls cost $0.02859, all priced.
+- B0 (current pipeline, v1, 1 repeat): 8/10 exact, 3/5 clear accepted, clear p50 132 s, $0.01926 lower bound with 28/54 calls unpriced.
+- Found an existing production false positive: `hasExternalDependency` blocks supported ranking rules phrased "Among all submitted tickets…" (`BENCH-M04`, `BENCH-C01`).
+- Published `docs/jev-pipeline-j8-report.md`, `docs/jev-pipeline-j8-results.json`, and `docs/jev-pipeline-j8-baseline-results.json`. The `CLR-02` B0 row is a disclosed rerun after a scorer fix for legacy v1 ASTs.
+- Verification passed: dry run, oracle self-test (20/20), failure injection (timeout, malformed JEV, malformed ledger, storage), identical reaggregation, API typecheck, 346/346 API tests, zero-warning lint, build, and a secret scan of the packets.
+- Recommendation: `REWORK_AND_RETEST` toward `ADVISORY_ONLY`. J8 remains unticked pending explicit owner confirmation, and no production routing changed.
+
 ### 2026-09-22 (JEV pipeline delivery branch)
 
 - Opened the required `PRD.md`, `AGENTS.md`, and `PROGRESS_TRACKER.md`; inspected `.claude/skills` and applied the local `jev-system-one` and `tyche-test-and-verify` guidance while auditing the staged JEV delivery.
