@@ -36,7 +36,7 @@ function interpretation(text: string) {
       clarityNote: "",
       dealerMessage: LONG_INTERPRETATION,
       englishText: text,
-      guardianChecked: false,
+      claimLedger: null,
       needsClarification: false,
       normalizedText: text,
       officialInterpretation: LONG_INTERPRETATION,

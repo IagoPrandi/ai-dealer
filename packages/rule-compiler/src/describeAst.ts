@@ -12,6 +12,8 @@ import type {
   ScalarExprV3,
 } from "@tyche/rule-schema";
 
+import { canonicalJson } from "./canonicalJson.js";
+
 export interface AstPathDescription {
   astPath: string;
   behaviorDescription: string;
@@ -73,6 +75,142 @@ function joinList(parts: readonly string[], conjunction: "and" | "or") {
     return `${parts[0]} ${conjunction} ${parts[1]}`;
   }
   return `${parts.slice(0, -1).join(", ")} ${conjunction} ${parts.at(-1)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Boolean structure. A flat join of nested and/or/not ("A and not B or not A
+// and B") has no single reading, so compound operands are grouped, and the two
+// shapes that encode "exactly one of these conditions" are named as such.
+
+function isRecordNode(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+const sameNode = (left: unknown, right: unknown) =>
+  canonicalJson(left) === canonicalJson(right);
+const negatedClause = (value: unknown): unknown =>
+  isRecordNode(value) && value.kind === "not" ? value.clause : undefined;
+const clausesOf = (value: unknown, kind: "and" | "or"): unknown[] | null =>
+  isRecordNode(value) && value.kind === kind && Array.isArray(value.clauses)
+    ? value.clauses
+    : null;
+
+function pairListed(
+  pairs: readonly (unknown[] | null)[],
+  left: unknown,
+  right: unknown,
+): boolean {
+  return pairs.some(
+    (pair) =>
+      pair !== null &&
+      pair.length === 2 &&
+      ((sameNode(pair[0], left) && sameNode(pair[1], right)) ||
+        (sameNode(pair[0], right) && sameNode(pair[1], left))),
+  );
+}
+
+/**
+ * Relative clause paths of an exactly-one-of structure rooted at `node`, or
+ * null. Recognizes `and(or(C1..Cn), not(and(Ci,Cj)) for every i<j)` and
+ * `or(and(C1, not C2, ...), and(not C1, C2, ...), ...)`.
+ */
+export function exactlyOnePaths(node: unknown): string[] | null {
+  const conj = clausesOf(node, "and");
+  const options = conj ? clausesOf(conj[0], "or") : null;
+  if (conj && options && options.length >= 2) {
+    const pairs = conj
+      .slice(1)
+      .map((clause) => clausesOf(negatedClause(clause), "and"));
+    const expected = (options.length * (options.length - 1)) / 2;
+    let complete = pairs.length === expected;
+    for (let i = 0; complete && i < options.length; i += 1) {
+      for (let j = i + 1; complete && j < options.length; j += 1) {
+        complete = pairListed(pairs, options[i], options[j]);
+      }
+    }
+    if (complete) {
+      return options.map((_, index) => `.clauses[0].clauses[${index}]`);
+    }
+  }
+  const branches = clausesOf(node, "or");
+  if (branches && branches.length >= 2) {
+    const parts = branches.map((branch) => clausesOf(branch, "and"));
+    if (
+      !parts.every((part) => part !== null && part.length === branches.length)
+    ) {
+      return null;
+    }
+    const positiveIndex = parts.map((part) =>
+      part!.findIndex(
+        (clause) => !(isRecordNode(clause) && clause.kind === "not"),
+      ),
+    );
+    if (positiveIndex.some((index) => index < 0)) {
+      return null;
+    }
+    const conditions = parts.map((part, branch) => part![positiveIndex[branch]!]);
+    const valid = parts.every((part, branch) => {
+      const negatedConditions = part!
+        .filter((_, index) => index !== positiveIndex[branch])
+        .map(negatedClause);
+      const others = conditions.filter((_, other) => other !== branch);
+      return (
+        negatedConditions.every((value) => value !== undefined) &&
+        others.every((condition) =>
+          negatedConditions.some((value) => sameNode(value, condition)),
+        )
+      );
+    });
+    if (valid) {
+      return parts.map(
+        (_, branch) => `.clauses[${branch}].clauses[${positiveIndex[branch]}]`,
+      );
+    }
+  }
+  return null;
+}
+
+function nodeAtRelativePath(node: unknown, path: string): unknown {
+  let current: unknown = node;
+  for (const key of path.match(/[^.[\]]+/gu) ?? []) {
+    current = Array.isArray(current)
+      ? current[Number(key)]
+      : isRecordNode(current)
+        ? current[key]
+        : undefined;
+  }
+  return current;
+}
+
+function isCompoundPredicate(node: { kind: string }): boolean {
+  const clauses = (node as { clauses?: unknown }).clauses;
+  return (
+    (node.kind === "and" || node.kind === "or") &&
+    Array.isArray(clauses) &&
+    clauses.length >= 2
+  );
+}
+
+/** Renders a boolean node, grouping compound operands and naming exactly-one shapes. */
+function describeBoolean<TNode extends { kind: string }>(
+  node: TNode,
+  describe: (child: TNode) => string,
+): string {
+  const grouped = (child: TNode) =>
+    isCompoundPredicate(child) ? `(${describe(child)})` : describe(child);
+  if (node.kind === "not") {
+    return `it is not the case that ${grouped((node as unknown as { clause: TNode }).clause)}`;
+  }
+  const exactlyOne = exactlyOnePaths(node);
+  if (exactlyOne) {
+    const options = exactlyOne.map(
+      (path, index) =>
+        `(${index + 1}) ${describe(nodeAtRelativePath(node, path) as TNode)}`,
+    );
+    return `exactly one of these holds: ${options.join("; ")}`;
+  }
+  const clauses = (node as unknown as { clauses: TNode[] }).clauses;
+  return joinList(clauses.map(grouped), node.kind === "and" ? "and" : "or");
 }
 
 function sentence(value: string) {
@@ -224,11 +362,9 @@ function describePredicate(node: PredicateNode): string {
         node.right,
       )} when the positions are reversed`;
     case "and":
-      return joinList(node.clauses.map(describePredicate), "and");
     case "or":
-      return joinList(node.clauses.map(describePredicate), "or");
     case "not":
-      return `it is not the case that ${describePredicate(node.clause)}`;
+      return describeBoolean<PredicateNode>(node, describePredicate);
     default: {
       const exhaustive: never = node;
       throw new Error(
@@ -594,11 +730,9 @@ function describePredicateV3(node: PredicateNodeV3): string {
         )}, ${describePredicateV3(node.where)}`
       );
     case "and":
-      return joinList(node.clauses.map(describePredicateV3), "and");
     case "or":
-      return joinList(node.clauses.map(describePredicateV3), "or");
     case "not":
-      return `it is not the case that ${describePredicateV3(node.clause)}`;
+      return describeBoolean<PredicateNodeV3>(node, describePredicateV3);
     default: {
       const exhaustive: never = node;
       throw new Error(
@@ -719,7 +853,7 @@ function describeConjunctionV3(node: PredicateNodeV3): string {
   if (setEquality) {
     return setEquality;
   }
-  if (node.kind !== "and") {
+  if (node.kind !== "and" || exactlyOnePaths(node)) {
     return shortcut(node);
   }
 
@@ -744,7 +878,11 @@ function describeConjunctionV3(node: PredicateNodeV3): string {
         : `your numbers include ${joinList(sorted.map(String), "and")}`,
     );
   }
-  parts.push(...otherClauses.map(shortcut));
+  parts.push(
+    ...otherClauses.map((clause) =>
+      isCompoundPredicate(clause) ? `(${shortcut(clause)})` : shortcut(clause),
+    ),
+  );
   return joinList(parts, "and");
 }
 

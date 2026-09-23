@@ -1759,19 +1759,61 @@ deterministic.
 Preflight checks (in order):
 
 ```text
+interpret phase
 1. rule text is present and within the byte limit
 2. token count is within RULE_MAX_TOKENS
-3. prohibited references / prompt-injection absent
-     (deterministic patterns + optional Granite Guardian jailbreak classifier)
-4. the rule COMPILES to a verifiable DSL/AST (the verifiability gate)
-5. (optional) Granite Guardian groundedness: the official interpretation is
-     faithful to the rule
-6. re-proposal gate: the compiled rule's canonical AST signature has NOT already
-     held a mandate (Section 6.13)
+3. prohibited references / prompt-injection / external dependencies absent
+     (deterministic patterns; the protocol tie statement "tied tickets share
+     the prize" is not an external dependency)
+4. in parallel:
+   a. Jev input-safety gate (typed Choice + reason Scores): unsafe → blocked
+      (RULE_SEMANTIC_UNSAFE); anything short of a confident "safe" →
+      RULE_SAFETY_UNRESOLVED; a service failure → RULE_SAFETY_UNAVAILABLE (503)
+   b. the interpreter chain writes the reading the player approves
+   c. the claim ledger: an LLM splits the source into literal claims (exact
+      span + literal English meaning) and open choices; code checks every span
+      and material term (at most one revision); the Jev ledger gate asks
+      closed per-claim questions → verified, CLARIFY, or REVIEW. Code, not
+      Jev, decides that a verbatim claim (meaning = span) is supported. A
+      REVIEW ledger gets one fresh, independently seeded generation unless Jev
+      leaned ambiguous on it; CLARIFY is never regenerated. A phrase that only
+      frames a condition stays inside that condition's claim. The product
+      defaults the ledger may not ask about include the compiler's own
+      reading of a match: anywhere in the draw unless positions or order are
+      stated.
+5. needsClarification = interpreter OR ledger (fail closed; questions merged)
+
+compile phase (requires the approved interpretation, including its claim ledger)
+6. the claim ledger is re-verified server side; the client's copy is never
+   trusted. Code checks always re-run; the Jev gate re-runs unless a valid
+   server-signed attestation of this server's interpret-time verdict (HMAC
+   over the text, ledger, verdict, and question-set version, 6-hour validity,
+   `TYCHE_RULE_LEDGER_ATTESTATION_KEY`) comes back with the approval
+7. two independent compilers on different weights (LLM_MODEL_COMPILE and
+   LLM_MODEL_COMPILE_B) compile the player's sanitized text, under the
+   AST-only constrained-decoding schema; when exactly one produces a viable
+   AST, the other is asked once more (agreement is still required)
+8. deterministic gates on each AST: grammar, runtime bounds, provable
+   vacuity, the runtime harness (IMPOSSIBLE / ALWAYS_TRUE), and the
+   evidence-library degenerate check
+9. behavioral equivalence of the two ASTs over the source-derived evidence
+   library and 200 seeded random scenarios (code only)
+10. the Jev artifact check (claims vs. the AST's behavior on boundary
+    scenarios, with the code description's vocabulary defined in the state;
+    a context claim is checked for consistency, an instruction or condition
+    must be implemented): agreeing ASTs → strict mode freezes only a supported AST,
+    confident_negative mode vetoes only a confident "no"; disagreeing ASTs →
+    exactly one supported AST is selected, otherwise PROVIDER_DISAGREEMENT
+11. re-proposal gate: the compiled rule's canonical AST signature has NOT already
+    held a mandate (Section 6.13)
+12. the player reads computed boundary examples before signing
 ```
 
-A check that fails sets `decision: "INVALID"` and/or a specific block flag; a
-verifiable, safe, non-repeat rule returns `decision: "VALID"`.
+Jev never approves a rule alone. `VALID` requires both compilers, every
+deterministic gate, the Jev artifact check, and the player's confirmation; Jev
+may only block or route to clarification/review. A check that fails sets
+`decision: "INVALID"` and/or a specific block flag; a verifiable, safe,
+non-repeat rule returns `decision: "VALID"`.
 
 Preflight endpoint:
 
@@ -1788,22 +1830,20 @@ vague text or manufacture missing intent. After approval, `normalizedText` and
 `officialInterpretation` are player-facing contract fields: an AST-derived
 description may be retained for audit, but it must never replace or truncate
 the approved wording. A separate material-impact disclosure may be appended.
-A candidate and every reviewer reading must independently
-cover the source's load-bearing values and operations before agreement can
-certify the artifact; two matching interpretations that omit the same clause
-are not consensus. Protocol settlement language such as equal prize sharing is
-excluded from winning-expression pattern selection. Deterministic match-count
-shortcuts must identify an explicit guess/draw match relation; a bare source
-cardinality fragment such as "at least one drawn number" cannot authorize a
-match-count artifact. Language classification distinguishes an undefined plural
-quantity ("some positions") from a complete existential relation ("some drawn
-number"). Operation coverage is based on executable equivalence, so either sort
-direction may encode an order statistic such as the second largest value. A
-source-only reviewer AST remains a veto signal but cannot, without corroboration
-from an independently generated compile candidate, be presented to the player
-as an alternative reading of their rule. Compiler-only failures expose the
-explicit generation-retry action; they must not invent a clarification question
-or return the unchanged rejected sentence as a rewrite.
+Independence comes from two compilers on different weights reading the same
+sanitized text; neither sees the other's AST, the interpreter's paraphrase, or a
+server-authored plan, so one reading cannot anchor the other. Their agreement is
+behavioral, checked by code; it is not a model's opinion. Agreement alone cannot
+detect ambiguity (two compilers can agree on one reading of a vague rule), which
+is why the claim ledger and its Jev gate run first. Protocol settlement language
+such as equal prize sharing is excluded from winning-expression pattern
+selection and from the external-dependency gate. Compiler-only failures
+(`COMPILER_UNAVAILABLE`, `SCHEMA_INVALID`, `PROVIDER_DISAGREEMENT`,
+`SEMANTIC_CHECK_UNAVAILABLE`) expose the explicit generation-retry action; they
+must not invent a clarification question or return the unchanged rejected
+sentence as a rewrite. A Jev negative or an unconfirmed artifact
+(`SEMANTIC_CHECK_FAILED`, `SEMANTIC_CHECK_UNCONFIRMED`), a vacuous or degenerate
+rule, and a safety verdict are not retryable: the player restates the rule.
 
 Response shape (implemented):
 
@@ -1825,13 +1865,45 @@ interface RulePreflightResult {
   ruleMode?: "predicate" | "ranking";
   difficultyClass?: string;        // label only, never a gate
   finalConfidence?: number;
-  guardianChecked?: boolean;
-  guardianGrounded?: boolean;
+  // Computed tickets on both sides of the accepted rule's boundary; each
+  // outcome is the runtime's verdict on the frozen AST. Empty unless VALID.
+  // Committed in preflightResultHash (payload version 16).
+  boundaryExamples?: Array<{
+    id: string;
+    draw: number[];
+    ticket: number[];
+    outcome: "WIN" | "LOSE";
+    entries?: Array<{ player: string; ticket: number[]; wins: boolean }>; // ranking
+    facts: { drawnNumbersAlsoInTicket: number[]; howManyTicketNumbersWereDrawn: number;
+             positionsWhereTicketEqualsDraw: number[]; ticketSum: number };
+  }>;
+  // Decisions of the semantic checks (never raw model output).
+  semanticChecks?: {
+    safety: "safe" | "unsafe" | "insufficient_evidence" | null;
+    ledger: "LEDGER_VERIFIED" | "CLARIFY" | "REVIEW_INTERPRETATION_DEFECT"
+          | "REVIEW_LEDGER_INCOMPLETE" | null;
+    artifact: "candidate_supported" | "candidate_defect" | "insufficient_evidence" | null;
+  };
+  // The verified claim ledger, returned so a generation retry resends it.
+  claimLedger?: { claims: Array<{ dimension: string; sourceSpan: string; meaning: string }>;
+                  openChoices: Array<{ sourceSpan: string | null; question: string }> } | null;
   // dealer-facing fields: normalizedText, officialInterpretation,
   // addedOperationalClauses, dealerMessage, and the canonical hashes that bind
   // the on-chain proposal.
 }
 ```
+
+The interpretation result carries `claimLedger`, and `phase: "compile"` requires
+it back inside `approvedInterpretation` (bounded, strictly parsed; a missing or
+malformed ledger is an invalid approval). Configuration: `LLM_MODEL_COMPILE_B`
+(required, different from `LLM_MODEL_COMPILE`), `LLM_COMPILE_TIMEOUT_MS`
+(optional per-call bound for hosted compilers), `JEV_MODEL`,
+`JEV_EXPECTED_MODEL` (a different resolved model fails closed as drift), and
+`TYCHE_RULE_ARTIFACT_VETO` (`strict` by default, or `confident_negative`). The
+Guardian classifier, the independent LLM reviewer, provider-evidence paperwork
+(source spans, provenance records, worked examples), the repair loop, and model
+escalation are retired; the J8–J10 evaluations (docs/jev-pipeline-j8/j9/j10
+reports) measured them as the source of most false rejections.
 
 Implementation requirements:
 
@@ -1892,7 +1964,7 @@ Resume semantics:
 - an unknown or expired job is `404`, which is what stops a reconnecting
   client for good. A client must not treat that 404 as a rejected rule;
 - `: ping` heartbeats are emitted every 15s. They are not optional: model
-  loading, the guardian pass and translation each go silent for 60–180s, and
+  loading, the compilers and translation each go silent for up to a minute, and
   without a keepalive an intermediary idle timeout kills the socket mid-stage.
 
 Job lifecycle:
@@ -2121,6 +2193,12 @@ The AI workflow is split into specialized agents.
 The Final Validator is not an LLM-only decision. It must combine deterministic checks with agent outputs.
 
 ### 7.3 Multi-LLM Configuration
+
+> **Superseded for rule preflight (2026-09-22).** The rule pipeline no longer
+> routes through provider fallback, an LLM reviewer, or model escalation: it runs
+> two fixed independent compilers plus the Jev semantic checks described in
+> Section 6.15. The routing, reviewer, and escalation text below describes the
+> retired design and the deterministic compiler's provider metadata only.
 
 Multiple LLM providers are supported as fallback, escalation, and review diversity.
 

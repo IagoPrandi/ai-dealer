@@ -59,8 +59,9 @@ test("the OpenAI-compatible usage object is read whole, cost and details include
 });
 
 test("Ollama's native /api/chat counters are read as tokens too", () => {
-  // The Granite guardian talks to that surface, so without this branch every
-  // local guardrail call would be recorded as untokenized.
+  // A local model served through Ollama's native surface reports these
+  // counters instead of OpenAI-style usage; without this branch the call would
+  // be recorded as untokenized.
   const usage = readProviderUsage({
     eval_count: 24,
     message: { content: "<score>no</score>" },
@@ -83,12 +84,12 @@ test("a run collects every call made below it, including from nested callbacks",
   const { report } = await captureAiRun("rule_preflight", async () => {
     setAiRunSubject("1757203200000123");
     recordAiCall(call({ step: "translate", promptTokens: 300, completionTokens: 40 }));
-    // Stands in for the RuleAstProvider callback the rule compiler invokes from
-    // inside its own provider loop — the reason the scope is ambient.
+    // Stands in for the two compilers running in parallel callbacks below the
+    // pipeline — the reason the scope is ambient.
     const provider = async () => {
       await new Promise((resolve) => setImmediate(resolve));
       recordAiCall(call({ step: "compile" }));
-      recordAiCall(call({ step: "review", model: "mistralai/mistral-small-24b" }));
+      recordAiCall(call({ step: "compile", model: "deepseek/deepseek-v4-flash" }));
     };
     await provider();
     return "done";
@@ -101,7 +102,7 @@ test("a run collects every call made below it, including from nested callbacks",
   assert.equal(report.totals.totalTokens, 340 + 15_500 * 2);
   assert.deepEqual(
     report.calls.map((entry) => entry.step),
-    ["translate", "compile", "review"],
+    ["translate", "compile", "compile"],
   );
 });
 
@@ -276,16 +277,16 @@ test("a length-prefixed digest cannot collide on a different split", () => {
 test("redundancy counts only the repeats, and only within the same step and model", async () => {
   clearPricingEnv();
   process.env.LLM_ESTIMATED_COST_PER_1K_TOKENS_USD = "0.001";
-  const jailbreak = digestAiCallInput(["jailbreak", "the player rule"]);
+  const safety = digestAiCallInput(["safety", "the player rule"]);
   const { report } = await captureAiRun("rule_preflight", async () => {
     recordAiCall(
       call({
         completionTokens: 5,
         durationMs: 400,
-        inputDigest: jailbreak,
-        model: "guardian",
+        inputDigest: safety,
+        model: "~typesafe/jev-latest",
         promptTokens: 95,
-        step: "guardian_jailbreak",
+        step: "semantic_check",
       }),
     );
     // Same input, same model, same step: the repeat.
@@ -293,10 +294,10 @@ test("redundancy counts only the repeats, and only within the same step and mode
       call({
         completionTokens: 5,
         durationMs: 600,
-        inputDigest: jailbreak,
-        model: "guardian",
+        inputDigest: safety,
+        model: "~typesafe/jev-latest",
         promptTokens: 95,
-        step: "guardian_jailbreak",
+        step: "semantic_check",
       }),
     );
     // Same digest but a different model is a different call, not a repeat.
@@ -304,10 +305,10 @@ test("redundancy counts only the repeats, and only within the same step and mode
       call({
         completionTokens: 5,
         durationMs: 700,
-        inputDigest: jailbreak,
-        model: "other-guardian",
+        inputDigest: safety,
+        model: "~typesafe/jev-other",
         promptTokens: 95,
-        step: "guardian_jailbreak",
+        step: "semantic_check",
       }),
     );
     recordAiCall(call({ inputDigest: digestAiCallInput(["compile", "rule"]) }));
@@ -320,20 +321,20 @@ test("redundancy counts only the repeats, and only within the same step and mode
   assert.equal(redundancy.redundantCostUsd, 0.0001);
   assert.equal(redundancy.duplicateGroups.length, 1);
   assert.equal(redundancy.duplicateGroups[0]?.callCount, 2);
-  assert.equal(redundancy.duplicateGroups[0]?.step, "guardian_jailbreak");
+  assert.equal(redundancy.duplicateGroups[0]?.step, "semantic_check");
 });
 
 test("redundancy spans the interpret and compile scopes of one rule", async () => {
   clearPricingEnv();
-  const digest = digestAiCallInput(["jailbreak", "the player rule"]);
-  // The two-phase player flow opens one scope per phase, and the jailbreak
-  // classification of the same sanitized text happens in both. A single-run
+  const digest = digestAiCallInput(["ledger", "the player rule"]);
+  // The two-phase player flow opens one scope per phase, and the ledger gate
+  // over the same sanitized text runs in both (interpret, then re-verify). A single-run
   // analysis can never see that pair, which is why the function takes a list.
   const interpret = await captureAiRun("rule_interpretation", async () => {
-    recordAiCall(call({ inputDigest: digest, step: "guardian_jailbreak" }));
+    recordAiCall(call({ inputDigest: digest, step: "semantic_check" }));
   });
   const compile = await captureAiRun("rule_preflight", async () => {
-    recordAiCall(call({ inputDigest: digest, step: "guardian_jailbreak" }));
+    recordAiCall(call({ inputDigest: digest, step: "semantic_check" }));
   });
 
   assert.equal(summarizeAiRedundancy([interpret.report]).redundantCallCount, 0);

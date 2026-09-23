@@ -79,6 +79,9 @@ JEV provider time totalled 12,207 ms; Guardian provider time totalled 11,675 ms.
 
 ## Failure and reproducibility verification
 
+> **Runner retired (2026-09-22).** This comparison's runner imported the production Guardian, which the J11 production integration removed. The runner and the Guardian client remain in git history at commit `e3306bd`; check that commit out to reproduce these results.
+
+
 - JEV timeout remained `SERVICE_TIMEOUT`.
 - A malformed JEV response remained `SCHEMA_ERROR`.
 - Guardian failure remained `GUARDIAN_UNAVAILABLE`.

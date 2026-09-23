@@ -1,4 +1,4 @@
-import { ruleAstSchema, type RuleAst } from "@tyche/rule-compiler";
+import { ruleAstSchema, seededRandomScenarios, type RuleAst } from "@tyche/rule-compiler";
 
 import { canonicalJson } from "../src/jevPipelineEvaluation.js";
 import { JEV_PIPELINE_CORPUS_V1, type BehaviorFixture } from "../src/jevPipelineCorpusV1.js";
@@ -164,26 +164,11 @@ export function sameOutcome(left: string[] | "LOSE" | "WIN", right: string[] | "
 }
 
 
-interface RandomScenario {
-  draw: number[];
-  entries: Record<string, number[]>;
-  id: string;
-  targetTicket: number[];
-}
-
 let randomLibrary: ScenarioInput[] | null = null;
 
-/** The 200 seeded random scenarios of the J3/assembly benchmark, as ScenarioInputs. */
+/** The 200 seeded random scenarios of the J3/assembly benchmark (production generator). */
 export async function randomScenarioLibrary(): Promise<ScenarioInput[]> {
-  if (randomLibrary) return randomLibrary;
-  const assemblyPath = "./jev-ast-assembly.mjs";
-  const assembly = (await import(assemblyPath)) as { randomScenarios: (count: number) => RandomScenario[] };
-  randomLibrary = assembly.randomScenarios(200).map((scenario) => ({
-    draw: scenario.draw,
-    entries: scenario.entries,
-    guess: scenario.targetTicket,
-    id: scenario.id,
-  }));
+  randomLibrary ??= seededRandomScenarios();
   return randomLibrary;
 }
 

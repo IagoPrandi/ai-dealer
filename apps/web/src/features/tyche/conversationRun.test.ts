@@ -46,7 +46,7 @@ const INTERPRETATION: RuleInterpretationApiResult = {
   clarityNote: "",
   dealerMessage: "I understand the rule.",
   englishText: "Win if exactly 2 numbers match.",
-  guardianChecked: false,
+  claimLedger: null,
   needsClarification: false,
   normalizedText: "Win if exactly 2 numbers match.",
   officialInterpretation:

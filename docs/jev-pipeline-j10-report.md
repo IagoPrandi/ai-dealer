@@ -127,6 +127,9 @@ Both beat today's pipeline, which accepted 27–38% of clear rules at 4–8× th
 
 ## Reproduction
 
+> **Runner retired (2026-09-22).** This comparison's runner imported the production Guardian, which the J11 production integration removed. The runner and the Guardian client remain in git history at commit `e3306bd`; check that commit out to reproduce these results.
+
+
 ```powershell
 cd apps/api
 node --import tsx scripts/jev-pipeline-j9-evaluation.mts --live --suite=adversarial --runs=3 --concurrency=3 --output=../../docs/jev-pipeline-j10-adversarial-results.json

@@ -21,7 +21,7 @@ function interpretationFrame(id: number) {
         clarityNote: "",
         dealerMessage: "This is how I understand your rule.",
         englishText: RULE_TEXT,
-        guardianChecked: false,
+        claimLedger: null,
         needsClarification: false,
         normalizedText: RULE_TEXT,
         officialInterpretation:

@@ -1,18 +1,21 @@
 import pg from "pg";
 import { createClient } from "redis";
 
+import { resolveJevConfig, verifyJevModelAlias, type JevConfig } from "./jev.js";
 import {
   ensureModelLoaded,
-  resolveEscalationModel,
   resolveDealerChatConfig,
   resolveRuleAgentConfig,
   resolveRuleCompilerConfig,
-  resolveRuleReviewerConfig,
+  resolveSecondaryCompilerConfig,
   resolveTranslateToEnglish,
   type ModelWarmupResult,
   type RuleAgentConfig,
 } from "./llm.js";
-import { resolveGuardianConfig, type GuardianConfig } from "./guardian.js";
+import {
+  resolveArtifactVetoMode,
+  type ArtifactVetoMode,
+} from "./ruleSemanticChecks.js";
 
 const { Pool } = pg;
 
@@ -26,13 +29,16 @@ export interface DealerRuntime {
    * model than the rule pipeline. Same object as `agent` when unset.
    */
   chat: RuleAgentConfig;
-  /** Schema-constrained artifact emitter. May intentionally differ from the
-   * interpretation/chat model even when every role shares one endpoint. */
+  /** How the Jev artifact check gates an agreed AST (TYCHE_RULE_ARTIFACT_VETO). */
+  artifactVeto: ArtifactVetoMode;
+  /** Compiler A: schema-constrained AST emitter. May intentionally differ from
+   * the interpretation/chat model even when every role shares one endpoint.
+   * Also writes the claim ledger, under its own flat schema. */
   compiler: RuleAgentConfig;
-  /** Independent schema-constrained source-to-AST semantic reviewer. */
-  reviewer: RuleAgentConfig;
-  escalationModel: string;
-  guardian: GuardianConfig;
+  /** Compiler B: an independent AST emitter on different weights. */
+  compilerSecondary: RuleAgentConfig;
+  /** Typed semantic checks (input safety, ledger gate, artifact check). */
+  jev: JevConfig;
   translateToEnglish: boolean;
 }
 
@@ -80,11 +86,11 @@ export function getDealerRuntime(): DealerRuntime {
         kind: "ready",
         runtime: {
           agent: resolveRuleAgentConfig(),
+          artifactVeto: resolveArtifactVetoMode(),
           chat: resolveDealerChatConfig(),
           compiler: resolveRuleCompilerConfig(),
-          reviewer: resolveRuleReviewerConfig(),
-          escalationModel: resolveEscalationModel(),
-          guardian: resolveGuardianConfig(),
+          compilerSecondary: resolveSecondaryCompilerConfig(),
+          jev: resolveJevConfig(),
           translateToEnglish: resolveTranslateToEnglish(),
         },
       };
@@ -101,6 +107,7 @@ export function getDealerRuntime(): DealerRuntime {
 
 export function resetDealerRuntimeForTests() {
   dealerRuntimeCache = null;
+  jevAliasCheck = null;
   modelReadiness.clear();
   dealerWarmupState = "idle";
   dealerWarmupPromise = null;
@@ -113,7 +120,7 @@ export async function ensureDealerModelReady(
 ): Promise<ModelWarmupResult> {
   const runtime = getDealerRuntime();
   const config =
-    [runtime.compiler, runtime.reviewer, runtime.agent, runtime.chat].find(
+    [runtime.compiler, runtime.compilerSecondary, runtime.agent, runtime.chat].find(
       (candidate) => candidate.model === model,
     ) ?? runtime.agent;
   const current = modelReadiness.get(model);
@@ -145,6 +152,26 @@ export async function ensureDealerModelReady(
   entry.promise = promise;
   modelReadiness.set(model, entry);
   return promise;
+}
+
+let jevAliasCheck: { checkedAt: number; model: string } | null = null;
+
+/**
+ * Proves the configured Jev alias still resolves to the pinned model. A success
+ * is cached for the model-readiness TTL; a failure is never cached, so the next
+ * call retries rather than trusting a stale verdict. Every Jev call re-checks
+ * the resolved model anyway; this surfaces drift before a player meets it.
+ */
+export async function ensureJevAliasVerified(
+  signal?: AbortSignal,
+  nowMs = Date.now(),
+): Promise<string> {
+  if (jevAliasCheck && nowMs - jevAliasCheck.checkedAt < DEALER_MODEL_READY_TTL_MS) {
+    return jevAliasCheck.model;
+  }
+  const model = await verifyJevModelAlias(getDealerRuntime().jev, signal);
+  jevAliasCheck = { checkedAt: nowMs, model };
+  return model;
 }
 
 export function storeDealerWarmup(promise: Promise<void>) {

@@ -19,6 +19,7 @@ import type {
 } from "./types";
 import { createSseParser, readSseStream, type SseFrame } from "./sseStream";
 import { getApiBaseUrl } from "../../../lib/apiBase";
+import type { RuleClaimLedgerApi } from "../../../solana/tycheProgram";
 
 export { SseStreamDisconnectedError, SseStreamExpiredError } from "./sseStream";
 
@@ -304,7 +305,12 @@ export interface RuleInterpretationApiResult {
   clarityNote: string;
   dealerMessage: string;
   englishText: string;
-  guardianChecked: boolean;
+  /** Required back at compile time; the API re-verifies it. */
+  claimLedger: RuleClaimLedgerApi | null;
+  /** Server-signed proof of the ledger verdict; returned unchanged at compile. */
+  claimLedgerAttestation?: string | null;
+  /** Diagnostics only; missing on runs saved before they existed. */
+  interpreterNeedsClarification?: boolean;
   needsClarification: boolean;
   normalizedText: string;
   officialInterpretation: string;
@@ -320,9 +326,9 @@ export type RulePreflightProgressStage =
   | "checking_safety"
   | "translating"
   | "interpreting"
+  | "verifying_reading"
   | "compiling"
-  | "checking_fidelity"
-  | "escalating"
+  | "checking_artifact"
   | "reviewing_impact";
 
 export interface RulePreflightProgress {

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import {
+  canonicalJson,
   describeRuleAstForPlayers,
   evaluatePredicate,
   evaluateRankingEntry,
@@ -16,6 +17,29 @@ import {
   type JevPipelineCorpusFixture,
   type SemanticDimension,
 } from "./jevPipelineCorpusV1.js";
+import {
+  type JevAnswer,
+  type JevChoiceAnswer,
+  type JevQuestionSet,
+  type NoulQuestion,
+  type ValidatedJevResponse,
+} from "./jev.js";
+
+// The question/answer contract and its strict validator live in the production
+// client; the experiments re-export them so their runners stay unchanged.
+export {
+  validateJevResponse,
+  type ChoiceQuestion,
+  type JevAnswer,
+  type JevChoiceAnswer,
+  type JevNoulAnswer,
+  type JevQuestion,
+  type JevQuestionSet,
+  type JevScoreAnswer,
+  type NoulQuestion,
+  type ScoreQuestion,
+  type ValidatedJevResponse,
+} from "./jev.js";
 
 export const JEV_PIPELINE_STATE_SCHEMA_VERSION =
   "jev-pipeline-state-v1" as const;
@@ -30,59 +54,6 @@ export type SemanticDecision =
   | "insufficient_evidence"
   | "supported"
   | "unavailable";
-
-export interface NoulQuestion {
-  criteria: { false: string; true: string };
-  instructions: string;
-  type: "noul";
-}
-
-export interface ChoiceQuestion {
-  criteria: Record<string, string>;
-  instructions: string;
-  type: "choice";
-}
-
-export interface ScoreQuestion {
-  criteria: string[];
-  instructions: string;
-  type: "score";
-}
-
-export type JevQuestion = ChoiceQuestion | NoulQuestion | ScoreQuestion;
-export type JevQuestionSet = Record<string, JevQuestion>;
-
-export interface JevChoiceAnswer {
-  choice: string;
-  confidence: number;
-  probabilities: Record<string, number>;
-  type: "choice";
-}
-
-export interface JevNoulAnswer {
-  noul: number;
-  type: "noul";
-}
-
-export interface JevScoreAnswer {
-  confidence: number;
-  legend: Record<string, string>;
-  probabilities: Record<string, number>;
-  score: number;
-  type: "score";
-}
-
-export type JevAnswer = JevChoiceAnswer | JevNoulAnswer | JevScoreAnswer;
-
-export interface ValidatedJevResponse {
-  answers: Record<string, JevAnswer>;
-  model: string;
-  usage: {
-    costUsd: number | null;
-    inputTokens: number;
-    outputTokens: number;
-  };
-}
 
 export interface JevEvaluationTask {
   candidate: AstCandidateFixture;
@@ -144,18 +115,7 @@ const DIMENSION_INSTRUCTIONS: Record<SemanticDimension, string> = {
   ties: "tie behavior",
 };
 
-export function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalJson).join(",")}]`;
-  }
-  if (value !== null && typeof value === "object") {
-    return `{${Object.entries(value)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
+export { canonicalJson };
 
 export function sha256Canonical(value: unknown): string {
   return createHash("sha256")
@@ -392,226 +352,6 @@ export function createJevEvaluationTasks(
     }));
     return [...pipeline, ...controls];
   });
-}
-
-function finiteProbability(value: unknown, label: string): number {
-  if (
-    typeof value !== "number" ||
-    !Number.isFinite(value) ||
-    value < 0 ||
-    value > 1
-  ) {
-    throw new Error(`${label} must be a finite probability in [0, 1]`);
-  }
-  return value;
-}
-
-function numericUsage(
-  usage: Record<string, unknown>,
-  snake: string,
-  camel: string,
-): number {
-  const value = usage[snake] ?? usage[camel];
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-    throw new Error(`Jev usage.${snake} must be a non-negative number`);
-  }
-  return value;
-}
-
-export function validateJevResponse(
-  body: unknown,
-  questions: JevQuestionSet,
-): ValidatedJevResponse {
-  if (body === null || typeof body !== "object" || Array.isArray(body)) {
-    throw new Error("Jev response must be an object");
-  }
-  const response = body as Record<string, unknown>;
-  if (
-    typeof response.model !== "string" ||
-    response.model.trim().length === 0
-  ) {
-    throw new Error("Jev response.model must be a non-empty string");
-  }
-  if (
-    response.answers === null ||
-    typeof response.answers !== "object" ||
-    Array.isArray(response.answers)
-  ) {
-    throw new Error("Jev response.answers must be an object");
-  }
-  const answers = response.answers as Record<string, unknown>;
-  const expectedIds = Object.keys(questions).sort();
-  const actualIds = Object.keys(answers).sort();
-  if (JSON.stringify(expectedIds) !== JSON.stringify(actualIds)) {
-    throw new Error(
-      `Jev answer IDs differ: expected ${expectedIds.join(",")}; received ${actualIds.join(",")}`,
-    );
-  }
-
-  const validated: Record<string, JevAnswer> = {};
-  for (const id of expectedIds) {
-    const question = questions[id]!;
-    const raw = answers[id];
-    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
-      throw new Error(`Jev answer ${id} must be an object`);
-    }
-    const answer = raw as Record<string, unknown>;
-    if (answer.type !== question.type) {
-      throw new Error(`Jev answer ${id} has the wrong primitive type`);
-    }
-    if (question.type === "noul") {
-      validated[id] = {
-        noul: finiteProbability(answer.noul, `${id}.noul`),
-        type: "noul",
-      };
-      continue;
-    }
-    if (question.type === "score") {
-      if (question.criteria.length < 2 || question.criteria.length > 10) {
-        throw new Error(`Jev Score question ${id} must have 2 to 10 levels`);
-      }
-      const expectedLevels = question.criteria.map((_, index) => String(index));
-      if (
-        answer.legend === null ||
-        typeof answer.legend !== "object" ||
-        Array.isArray(answer.legend)
-      ) {
-        throw new Error(`Jev answer ${id}.legend must be an object`);
-      }
-      const legend = answer.legend as Record<string, unknown>;
-      if (
-        JSON.stringify(Object.keys(legend).sort()) !==
-          JSON.stringify([...expectedLevels].sort()) ||
-        expectedLevels.some(
-          (level, index) => legend[level] !== question.criteria[index],
-        )
-      ) {
-        throw new Error(`Jev answer ${id}.legend differs from Score levels`);
-      }
-      if (
-        answer.probabilities === null ||
-        typeof answer.probabilities !== "object" ||
-        Array.isArray(answer.probabilities)
-      ) {
-        throw new Error(`Jev answer ${id}.probabilities must be an object`);
-      }
-      const probabilityRecord = answer.probabilities as Record<string, unknown>;
-      if (
-        JSON.stringify(Object.keys(probabilityRecord).sort()) !==
-        JSON.stringify([...expectedLevels].sort())
-      ) {
-        throw new Error(
-          `Jev answer ${id} probabilities differ from Score levels`,
-        );
-      }
-      const probabilities = Object.fromEntries(
-        expectedLevels.map((level) => [
-          level,
-          finiteProbability(probabilityRecord[level], `${id}.${level}`),
-        ]),
-      );
-      const total = Object.values(probabilities).reduce(
-        (sum, probability) => sum + probability,
-        0,
-      );
-      if (Math.abs(total - 1) > 0.011) {
-        throw new Error(`Jev answer ${id} probabilities must sum to 1`);
-      }
-      if (
-        typeof answer.score !== "number" ||
-        !Number.isFinite(answer.score) ||
-        answer.score < 0 ||
-        answer.score > question.criteria.length - 1
-      ) {
-        throw new Error(
-          `Jev answer ${id}.score must be within the declared level range`,
-        );
-      }
-      validated[id] = {
-        confidence: finiteProbability(answer.confidence, `${id}.confidence`),
-        legend: Object.fromEntries(
-          expectedLevels.map((level, index) => [
-            level,
-            question.criteria[index]!,
-          ]),
-        ),
-        probabilities,
-        score: answer.score,
-        type: "score",
-      };
-      continue;
-    }
-    if (
-      typeof answer.choice !== "string" ||
-      !(answer.choice in question.criteria)
-    ) {
-      throw new Error(`Jev answer ${id} selected an undeclared Choice option`);
-    }
-    if (
-      answer.probabilities === null ||
-      typeof answer.probabilities !== "object" ||
-      Array.isArray(answer.probabilities)
-    ) {
-      throw new Error(`Jev answer ${id}.probabilities must be an object`);
-    }
-    const probabilityRecord = answer.probabilities as Record<string, unknown>;
-    const expectedOptions = Object.keys(question.criteria).sort();
-    const actualOptions = Object.keys(probabilityRecord).sort();
-    if (JSON.stringify(expectedOptions) !== JSON.stringify(actualOptions)) {
-      throw new Error(
-        `Jev answer ${id} probabilities differ from Choice options`,
-      );
-    }
-    const probabilities = Object.fromEntries(
-      expectedOptions.map((option) => [
-        option,
-        finiteProbability(probabilityRecord[option], `${id}.${option}`),
-      ]),
-    );
-    const total = Object.values(probabilities).reduce(
-      (sum, probability) => sum + probability,
-      0,
-    );
-    // Providers commonly round each displayed probability to two decimals.
-    // Accept the resulting 0.99/1.01 totals, but reject wider malformed shapes.
-    if (Math.abs(total - 1) > 0.011) {
-      throw new Error(`Jev answer ${id} probabilities must sum to 1`);
-    }
-    validated[id] = {
-      choice: answer.choice,
-      confidence: finiteProbability(answer.confidence, `${id}.confidence`),
-      probabilities,
-      type: "choice",
-    };
-  }
-
-  const rawUsage = response.usage;
-  if (
-    rawUsage === null ||
-    typeof rawUsage !== "object" ||
-    Array.isArray(rawUsage)
-  ) {
-    throw new Error("Jev response.usage must be an object");
-  }
-  const usage = rawUsage as Record<string, unknown>;
-  const rawCost = usage.cost ?? usage.cost_usd;
-  const costUsd =
-    rawCost === undefined
-      ? null
-      : typeof rawCost === "number" && Number.isFinite(rawCost) && rawCost >= 0
-        ? rawCost
-        : (() => {
-            throw new Error("Jev usage cost must be a non-negative number");
-          })();
-  return {
-    answers: validated,
-    model: response.model,
-    usage: {
-      costUsd,
-      inputTokens: numericUsage(usage, "input_tokens", "prompt_tokens"),
-      outputTokens: numericUsage(usage, "output_tokens", "completion_tokens"),
-    },
-  };
 }
 
 function noulValue(answers: Record<string, JevAnswer>, id: string): number {

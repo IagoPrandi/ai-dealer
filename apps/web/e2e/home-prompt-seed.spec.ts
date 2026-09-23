@@ -27,7 +27,7 @@ test("a prompt typed on Home is sent on arrival, without a second tap", async ({
           clarityNote: "",
           dealerMessage: "This is how I understand your rule.",
           englishText: body.text,
-          guardianChecked: false,
+          claimLedger: null,
           needsClarification: false,
           normalizedText: body.text,
           officialInterpretation:

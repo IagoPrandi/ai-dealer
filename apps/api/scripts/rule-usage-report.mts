@@ -9,19 +9,15 @@
 //   pnpm --filter @tyche/api usage:report
 //   pnpm --filter @tyche/api usage:report -- --json
 //   pnpm --filter @tyche/api usage:report -- "ganho se 3 dos meus numeros sairem"
-//   pnpm --filter @tyche/api usage:report -- --single-phase
 //
 // With no rule arguments it runs the small default corpus below. Each rule is a
 // separate measurement scope, so per-run figures stay attributable; runs are
 // sequential because `process.cpuUsage()` is process-wide and overlapping runs
 // would share one CPU counter.
 //
-// By default each rule is measured through the TWO-PHASE flow `Create.tsx`
-// performs — interpret, approve, compile — because that is the flow a player
-// pays for and the one whose repeated calls are worth counting. `--single-phase`
-// runs compile alone, which is the older behaviour and a different (cheaper,
-// unrepresentative) shape: it skips approval, so the compile scope reinterprets
-// the text itself.
+// Each rule is measured through the TWO-PHASE flow `Create.tsx` performs —
+// interpret, approve, compile — because that is the only flow a player can
+// reach: compilation requires the approved interpretation.
 //
 // The redundancy section is a measurement, not an estimate: a call is counted
 // as redundant only when another call in the same rule's scopes used the same
@@ -41,9 +37,8 @@ import {
   type AiRunUsageReport,
 } from "../src/usage.js";
 
-// Three shapes with different costs: one the deterministic compiler knows, one
-// novel composition that buys the independent reviewer, and one with negation
-// and a connector, which routes straight to the escalation model.
+// Three shapes with different costs: a plain threshold, a novel composition,
+// and one with negation and a connector.
 const DEFAULT_RULES = [
   "A guess wins if at least 3 of its numbers appear in the official draw.",
   "A guess wins if the sum of its three smallest numbers is greater than the sum of the three smallest drawn numbers.",
@@ -52,7 +47,6 @@ const DEFAULT_RULES = [
 
 const argv = process.argv.slice(2);
 const asJson = argv.includes("--json");
-const singlePhase = argv.includes("--single-phase");
 const rules = argv.filter((value) => !value.startsWith("--"));
 const corpus = rules.length > 0 ? rules : DEFAULT_RULES;
 
@@ -97,16 +91,6 @@ async function measureRule(rule: string): Promise<Outcome> {
     }
   };
   try {
-    if (singlePhase) {
-      const preflight = await createRulePreflight(rule);
-      collect();
-      return {
-        decision: preflight.decision ?? "UNKNOWN",
-        error: null,
-        reports,
-        rule,
-      };
-    }
     const interpretation = await createRuleInterpretation(rule);
     collect();
     if (interpretation.needsClarification) {
@@ -181,9 +165,9 @@ for (const [index, rule] of corpus.entries()) {
           call.step.padEnd(22),
           call.outcome.padEnd(10),
           `${padLeft(call.promptTokens ?? "-", 7)} in`,
-          // The compiler skill prompt plus the candidate JSON Schema is ~16k
-          // tokens and is re-sent on every compile and review call, so this
-          // column is where a prompt-cache configuration proves itself.
+          // The compiler skill prompt plus the AST JSON Schema is large and is
+          // sent to both compilers on every rule, so this column is where a
+          // prompt-cache configuration proves itself.
           `${padLeft(call.cachedPromptTokens ?? "-", 7)} cached`,
           `${padLeft(call.completionTokens ?? "-", 6)} out`,
           `${padLeft(call.reasoningTokens ?? "-", 6)} reason`,

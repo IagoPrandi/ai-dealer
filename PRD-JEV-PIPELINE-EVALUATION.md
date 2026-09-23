@@ -538,6 +538,18 @@ All arms derive from the same provider calls. Evidence comes from corpus v1 (reg
 
 J10 runs the J9 arms, including a real `P5` arm, on `jev-j10-adversarial-v1`. The set contains implicit-ambiguity proposals, negation/quantifier and natural-reading trap rules with hidden references, and disguised prompt injections that pass the deterministic screen. It then compares JEV with the production Guardian on identical inputs in the Guardian's three roles: input safety (`detectJailbreak` vs the J6 question set), the final-artifact check (`checkClaimGroundedness` vs the J8/J9 candidate check), and provider selection (escalate, Guardian-select, JEV check-select, JEV adjudication), over one-right and none-right candidate pairs.
 
+### 9.16 J11 — Production integration (P6)
+
+J11 replaces the production rule pipeline with P6. The interpret phase runs the deterministic screen, then the JEV input-safety gate (J6 questions), the existing interpreter chain, and the claim ledger with its JEV gate in parallel; either the interpreter or the ledger can require clarification. The compile phase re-verifies the returned ledger, runs two independent compilers on the player's sanitized text under an AST-only constrained-decoding schema, applies the deterministic gates (grammar, runtime bounds, provable vacuity, harness difficulty, evidence-library degeneracy), checks behavioral equivalence over the evidence library and 200 seeded random scenarios, and runs the JEV artifact check: strict mode (default, `TYCHE_RULE_ARTIFACT_VETO=strict`) freezes an agreed AST only when the check supports it; `confident_negative` vetoes only a confident "no"; on disagreement exactly one supported AST is selected. Accepted results carry computed boundary examples the player reads before signing. The Guardian, the LLM reviewer, provider-evidence paperwork, the repair loop, and escalation are removed. The production measurement harness is `apps/api/scripts/jev-pipeline-j8-baseline.mts` (the real two-phase flow) over v1, held-out, fresh, and adversarial.
+
+### 9.17 J12 — Recall recovery under strict mode
+
+J12 targets J11's measured recall losses without relaxing the strict artifact veto. The ledger's product defaults state the compiler's own positional reading of a match. Code, not JEV, decides that a verbatim claim is supported. A REVIEW ledger gets one fresh, independently seeded generation unless JEV leaned ambiguous on it, and CLARIFY is never regenerated. The artifact-check state defines the code description's vocabulary and checks context claims for consistency, while instructions and conditions must still be implemented. Boundary evidence never repeats a ticket. A compiler that gave no viable AST while the other did is asked once more, and `LLM_COMPILE_TIMEOUT_MS` bounds each compiler call. Guess-only rules, whose first product route is the semantic-impact scope confirmation, are scored separately from clear rules that read the draw. Report: `docs/jev-pipeline-j12-report.md`.
+
+### 9.18 J13 — Ledger attestation and frame-aware claims
+
+J13 measures J12's two open options with one repeat. First, a server-signed attestation of the interpret-time ledger verdict replaces the repeated compile-time JEV ledger call; code checks always re-run, and an absent or invalid attestation falls back to full re-verification. Second, the ledger prompt keeps frame phrases inside the condition they frame. Report: `docs/jev-pipeline-j13-report.md`.
+
 ## 10. Retry and feasibility policy
 
 Before any LLM or JEV-driven process repeats, code must classify why the process failed:
@@ -719,6 +731,25 @@ All checkboxes remain unchecked until the owner confirms the corresponding miles
 - [ ] Freeze `jev-j10-adversarial-v1` and run P3 vs P5 (and the other J9 arms) with three repeats.
 - [ ] Compare JEV and the production Guardian on input safety, the final-artifact check, and provider selection.
 - [ ] Publish the J10 report and the P6 / P6-strict recommendation.
+
+### J11 — Production integration of P6 (§9.16)
+
+- [ ] Promote the J6/J8/J9 logic into production modules (`jev.ts`, `ruleClaimLedger.ts`, `ruleSemanticChecks.ts`, rule-compiler `evidence.ts`) with the experiments importing them.
+- [ ] Fix the deterministic tie-break false block, group and/or/not and exactly-one shapes in the deterministic description, and share one artifact builder between compile paths.
+- [ ] Replace the interpret and compile pipelines with P6 (configurable artifact veto, strict by default) and remove the Guardian, reviewer, repair loop, escalation, and provider-evidence path.
+- [ ] Show computed boundary examples before the player signs.
+- [ ] Measure the production pipeline over v1, held-out, fresh, and adversarial; publish the J11 report.
+
+### J12 — Recall recovery under strict mode (§9.17)
+
+- [ ] Diagnose the J11 losses per stage and implement the targeted ledger, artifact-check, evidence, and compiler-retry changes with regression tests.
+- [ ] Evaluate the artifact-check state change offline on correct and wrong candidate ASTs (no new false support).
+- [ ] Measure the production pipeline with three repeats and publish the J12 report (repeat 3 is incomplete: the OpenRouter budget ran out).
+
+### J13 — Ledger attestation and frame-aware claims (§9.18)
+
+- [ ] Implement the server-signed ledger attestation (with tamper, expiry, and key tests) and the frame-aware ledger prompt.
+- [ ] Measure one production repeat and publish the J13 report.
 
 ### J7 — Full cumulative decision
 

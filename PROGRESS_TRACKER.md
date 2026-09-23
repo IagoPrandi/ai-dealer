@@ -4,6 +4,117 @@ This tracker records milestone status, work logs, and required document confirma
 
 ## Work Log
 
+### 2026-09-23 (JEV pipeline J13: ledger attestation and frame-aware claims)
+
+- Opened `PRD.md` (§6.15), `PROGRESS_TRACKER.md`, `PRD-JEV-PIPELINE-EVALUATION.md` and the J12 report. Checked `.claude/skills` and applied `jev-system-one` and `tyche-test-and-verify`. The only web change is a type field and the retry payload, with no visible UI change. Added PRD-JEV §9.18 and an unticked J13 milestone, and updated PRD §6.15.
+- **Option A:** `apps/api/src/ruleLedgerAttestation.ts`.
+  - The interpretation returns an HMAC attestation of a verified ledger; the approval carries it back, and a valid one skips the compile-time Jev ledger call. Code checks and the safety gate always run.
+  - The compile result re-issues it for retries, and the web retry resends it.
+  - Configuration: optional `TYCHE_RULE_LEDGER_ATTESTATION_KEY` (`.env.example`, `docker-compose.yml`).
+  - Tests: forgery, re-dating, expiry, future timestamps, key validation, a tampered ledger with the original token, and an approval without a token.
+- **Option B:** ledger prompt `jev-j13-ledger-prompt-v4` (frame phrases stay inside their condition).
+- **Verification:** `@tyche/api` 367/367, `@tyche/web` 330/330, `@tyche/worker` 169/169; typecheck, lint, and build green (the `next-env.d.ts` build edits were restored).
+- **Live, one repeat** (`docs/jev-pipeline-j13-report.md`):
+  - 0 false accepts, injections blocked, 0/23 ambiguous accepted;
+  - clear rules that read the draw: 28/34, the same as J12 repeat 1;
+  - strict vetoes fell from 4 to 1, and all 34 compiles used the attestation (0 re-asks);
+  - compiler disagreements rose to 4, because a recompile showed systematic single-compiler defects on `BENCH-C04` (compiler A) and `FR-C4` (compiler B), and `C02` produced two different wrong ASTs.
+- J11, J12, and J13 remain unticked pending owner confirmation.
+
+### 2026-09-23 (JEV pipeline J12: recall recovery under strict mode)
+
+- Opened `PRD.md` (§6.15), `PROGRESS_TRACKER.md`, `PRD-JEV-PIPELINE-EVALUATION.md`, the J10 and J11 reports, and `packages/rule-compiler/rule-authoring/SKILL.md`. Checked `.claude/skills` and applied `jev-system-one` and `tyche-test-and-verify`. Made no UI change, so the design-system skills did not apply. Added PRD-JEV §9.17 and an unticked J12 milestone, and updated PRD §6.15.
+- Diagnosed the J11 losses live per stage:
+  - **Strict vetoes:** Jev confirmed every scenario (~0.97), but was uncertain whether the terse code description implemented a claim that says "six"/"exactly" (0.58–0.61), and scored 0.34 on a context clause.
+  - **Ledger REVIEW:** Jev scored verbatim English claims at 0.50–0.77.
+  - **Positional CLARIFY:** questions the compiler already answers.
+  - **Compiler disagreements:** transient stalls.
+  - **Guess-only CLARIFY:** the interpreter's scope confirmation, an intended product gate.
+- Changes:
+  - positional product default;
+  - verbatim claims decided by code;
+  - one independently seeded ledger regeneration on REVIEW, guarded by a Jev ambiguity lean, with CLARIFY never regenerated;
+  - artifact-check vocabulary and context-claim consistency (`jev-j12-artifact-check-v2`);
+  - boundary-pair ticket dedupe;
+  - one fresh attempt for a compiler with no viable AST;
+  - `LLM_COMPILE_TIMEOUT_MS=120000` (`.env`, `.env.example`, `docker-compose.yml`);
+  - refusals made before compiling no longer report `SCHEMA_INVALID`.
+- Harness: records clarification questions and scores guess-only rules separately. New `scripts/jev-artifact-check-evaluation.mts` (`measure:artifact-check`).
+- Regression tests:
+  - ledger regeneration (fresh sample with a new seed, the ambiguity guard, CLARIFY never regenerated, verbatim claims not asked);
+  - compiler retry (recovers, or stays a retryable disagreement);
+  - the compile-timeout config;
+  - the artifact-check questions;
+  - boundary dedupe (verified to fail without the fix);
+  - no `SCHEMA_INVALID` on a tampered ledger.
+- Verification:
+  - `@tyche/api` 363/363, `@tyche/worker` 169/169, `@tyche/rule-compiler` 109/109;
+  - typecheck, lint, and build green for all three.
+- Offline artifact check (`docs/jev-pipeline-j12-artifact-check-results.json`): correct ASTs supported rose from 63/88 to 76/88; wrong ASTs supported stayed at 0/66.
+- Live measurement (`docs/jev-pipeline-j12-report.md`), repeats 1–2 (152 runs):
+  - 0 false accepts, 4/4 disguised injections blocked, 0/46 ambiguous accepted;
+  - clear rules that read the draw: 53/68 (78%), up from J11's 13/34;
+  - spend per accepted rule: $0.0065, down from $0.0118;
+  - clear p95: 127 s, down from 311 s.
+- Repeat 3 stopped after 24 runs: the OpenRouter monthly budget returned HTTP 403, and all 52 affected runs failed closed.
+- Corrected the J11 report: 10 of its 12 interpret CLARIFYs came from the interpreter's guess-only scope confirmation, not from the ledger.
+- J11 and J12 remain unticked, pending owner confirmation. The third repeat needs the budget restored.
+
+### 2026-09-23 (JEV pipeline J11: P6 replaces the production rule pipeline)
+
+- Opened `PRD.md`, `PROGRESS_TRACKER.md`, `PRD-JEV-PIPELINE-EVALUATION.md`, the J9/J10 reports and the implementation plan. Inspected `.claude/skills` and applied `jev-system-one` (including `references/tyche-rule-pipeline.md`), `tyche-test-and-verify`, `tyche-design-system` and `tyche-ui-coherence`. Added PRD-JEV §9.16 and an unticked J11 milestone; rewrote PRD §6.15 (checks, independence, response shape) and marked the §7 provider-routing text superseded.
+- Production modules:
+  - `apps/api/src/jev.ts`: strict validation, pinned-model drift → `JEV_MODEL_DRIFT`, one transport retry, typed errors, usage accounting, and a boot alias check;
+  - `apps/api/src/ruleClaimLedger.ts`;
+  - `apps/api/src/ruleSemanticChecks.ts`: safety gate, artifact check, and selection with `TYCHE_RULE_ARTIFACT_VETO=strict|confident_negative`;
+  - `packages/rule-compiler/src/evidence.ts`.
+  - The J6/J8/J9 experiment modules and runners now import them. The seeded random library is byte-identical to the J3–J10 one (verified).
+- Deterministic fixes:
+  - the tie-break clause no longer false-blocks `BENCH-M04`/`BENCH-C01` ("Tied tickets …", "all ties win and share the prize"), with mutation tests;
+  - the deterministic description groups nested and/or/not and renders both exactly-one encodings as "exactly one of these holds: (1) …; (2) …";
+  - one exported `buildCompiledArtifact`, whose hash matches the deterministic artifact exactly (tested);
+  - an AST-only candidate schema.
+- Pipelines:
+  - interpret runs deterministic screen → Jev safety ∥ interpreter ∥ claim ledger (union of clarifications, fail closed). `claimLedger` is returned and required back in the approval.
+  - compile runs Jev safety again (a compile request can skip interpret) ∥ ledger re-verification, then two compilers on the sanitized text, the deterministic gates plus the evidence-library degeneracy check, behavioral equivalence, the Jev artifact check, and selection.
+  - New reason codes: `SEMANTIC_CHECK_FAILED|UNCONFIRMED|UNAVAILABLE` and `COMPILER_UNAVAILABLE`.
+  - Results carry `boundaryExamples` and `semanticChecks`; the preflight hash payload is now version 16.
+- Removed:
+  - the Guardian (`guardian.ts` and its tests), the LLM reviewer, escalation, the repair loop, `compileRuleArtifact`, and the provider-evidence path (rule-compiler −430 net lines, 62 loop-specific tests);
+  - the legacy stress scripts and `jev-rule-baseline.mjs`;
+  - the three Guardian-comparison runners (J0/J1, J6, J10 part B). Their reports now point to `e3306bd` for reproduction.
+  - Env docs and root `.env` were updated (`LLM_MODEL_COMPILE_B=deepseek/deepseek-v4-flash`, JEV and veto keys), along with `docker-compose.yml` and the AWS render checks.
+- Worker: `runRuleValidationCycle` now audits the P6 record (second-compiler review recorded + semantic check passed).
+- Web (reference pattern: `RuleWorkedExamples` in `Result.tsx`, `.ide-rule-example*` classes): the Create rule card shows "See how it plays out" with runtime-computed WIN/LOSE boundary examples above "Submit to the round". Ranking rules list every entry. The retry resends `claimLedger`. Types, progress stages and fixtures were updated.
+- Compiler B probe (live): `deepseek/deepseek-v4-flash` via OpenRouter returned 3/3 schema-valid AST-only envelopes with `require_parameters`.
+- Verification passed:
+  - `pnpm -r typecheck`, `pnpm -r lint` (clippy included) and the TS workspace build;
+  - tests: API 357, worker 169, web 330, rule-compiler 108, plus the smaller packages;
+  - `rulePreflightStream.test.ts` covers the full SSE interpret → compile flow with boundary examples, the Jev unsafe block, a Jev outage (503), a tampered ledger, and compile-phase safety.
+- Not verified:
+  - Playwright e2e and browser layout checks. The existing :3000 dev server shows the Next overlay for an unresolved Privy optional dependency (`@farcaster/mini-app-solana`), which blocks every click, and Next 16 refuses a second dev server. A production build does not render the screens the suite expects.
+- Live measurement (`docs/jev-pipeline-j11-report.md`, 76 items × 1, $0.153):
+  - 0 false accepts, both disguised injections blocked, 0 ambiguous accepted;
+  - clear recall 13/45 (29%), below the ≈60% target;
+  - cost $0.0026 per clear rule; clear p50 32 s, p95 311 s.
+  - Losses: ledger 19, strict veto 7, compiler disagreement 6 (4 after provider stalls).
+  - A ledger request-shape A/B verified 31/38 on the same lost items, so the loss is ledger run-to-run variance, not the schema request.
+- J11 remains unticked pending explicit owner confirmation and a decision on the recall options in the report.
+
+### 2026-09-22 (Founder Pass launch-readiness assessment)
+
+- Opened the required `PRD.md`, `AGENTS.md`, `PRD-FOUNDER-PASS-NFT.md`, `docs/founder-pass-nft.md`, and this tracker; inspected `.claude/skills` and applied the local Solana and release-configuration guidance.
+- Confirmed the actual state without modifying product code or chain state: FP1 is owner-confirmed source-only; FP2 is implemented but still awaiting owner confirmation; FP3 (pass-aware JDR claim/accounting), FP4 (API/indexer/mobile pass UX), and FP5 (full verification/release) remain open. The only recorded deployment is devnet; no Founder Pass collection, governed configuration, benefit activation, or mainnet deployment is recorded.
+- Verified the Rust workspace: the Founder Pass module suite passed `52/52` tests, but SBF instruction coverage remains a separate explicit suite and the project documentation records host flakiness that must be resolved before FP5. No milestone checkbox was ticked: this assessment is not owner confirmation and authorizes no mint, sale, activation, payment, or deployment.
+
+### 2026-09-22 (rule-runtime architecture assessment)
+
+- Opened `PRD.md` and `PROGRESS_TRACKER.md`, inspected `.claude/skills`, and consulted the local `solana-dev` routing guidance while assessing DSL/AST versus agent-generated executable code.
+- Recorded the architectural conclusion: retain a frozen, deterministic, capability-bounded rule artifact as the authority; express post-draw population-wide rules through a separately versioned aggregate/selection plan with a committed input set, explicit tie policy, and independently verifiable settlement. No source, runtime, on-chain state, or milestone status changed.
+- Confirmed the assurance model for typed rule code: constrained generation and static validation, deterministic test vectors, player-visible normalized semantics and artifact hash before activation, runtime/version pinning, and public replay/proof material. The agent remains a compiler, never the authority that selects winners.
+- Opened `AGENTS.md`, the relevant PRD rule/compiler/runtime/on-chain sections, the repository `rule-authoring` skill and algebra design, and applied the local `solana-dev` and `tyche-test-and-verify` guidance to produce a phased Tyche Rule Language implementation plan. The plan treats the existing schema-v3 algebra as the typed semantic IR, adds a canonical textual language above it, and gates broader aggregate semantics on deterministic cross-runtime and on-chain settlement verification. No milestone was ticked pending user confirmation.
+- Narrowed the plan at the owner's direction to the compilation boundary only: normalized proposal text -> agent-authored TRL source -> deterministic parser/type checker/lowering -> existing schema-v3 `RuleAst`. Existing preflight, semantic review, test harness, confidence, artifact freezing, runtime, settlement, contract, governance, and UI flows remain out of scope except for the minimum adapter needed to consume the generated AST. No milestone was ticked.
+
 ### 2026-09-22 (JEV pipeline J10 adversarial comparison and Guardian replacement)
 
 - Opened `PRD-JEV-PIPELINE-EVALUATION.md`, `estudo-jev-pipeline.md`, `docs/jev-rule-pipeline-experiment.md`, and the J8/J9 reports; applied the `jev-system-one` and `tyche-test-and-verify` skills. Added §9.15 and an unticked J10 milestone.

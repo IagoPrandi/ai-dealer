@@ -1,0 +1,3632 @@
+{
+  "ledgersVerified": 44,
+  "items": 45,
+  "rows": [
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "CLR-01",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "CLR-01",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "CLR-01",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "CLR-01",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "threshold-two",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "CLR-01",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_1",
+        "scenario_3"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "threshold-two",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "CLR-01",
+      "low": [
+        "forward_0",
+        "scenario_1",
+        "scenario_3",
+        "reverse_0"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "threshold-two",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "CLR-01",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_1",
+        "scenario_3"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "threshold-two",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "CLR-01",
+      "low": [
+        "forward_0",
+        "scenario_1",
+        "scenario_3",
+        "reverse_0"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "CLR-02",
+      "low": [
+        "forward_0"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "CLR-02",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "CLR-02",
+      "low": [
+        "forward_0"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "CLR-02",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "greater-or-equal",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "CLR-02",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1",
+        "scenario_2",
+        "scenario_3"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "greater-or-equal",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "CLR-02",
+      "low": [
+        "forward_0",
+        "reverse_0"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "greater-or-equal",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "CLR-02",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_0",
+        "scenario_2"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "greater-or-equal",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "CLR-02",
+      "low": [
+        "forward_0",
+        "reverse_0"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "CLR-03",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "CLR-03",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "CLR-03",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "CLR-03",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "maximize-range",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "CLR-03",
+      "low": [
+        "forward_1",
+        "scenario_0",
+        "scenario_3",
+        "forward_2",
+        "reverse_1",
+        "scenario_1",
+        "scenario_2"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "maximize-range",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "CLR-03",
+      "low": [
+        "forward_1",
+        "reverse_1",
+        "scenario_0",
+        "scenario_3",
+        "forward_2",
+        "scenario_1",
+        "scenario_2"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "maximize-range",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "CLR-03",
+      "low": [
+        "forward_1",
+        "scenario_0",
+        "scenario_3",
+        "forward_2",
+        "reverse_1",
+        "scenario_1",
+        "scenario_2"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "maximize-range",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "CLR-03",
+      "low": [
+        "forward_1",
+        "reverse_1",
+        "scenario_0",
+        "scenario_3",
+        "forward_2",
+        "scenario_1",
+        "scenario_2"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "CLR-04",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "CLR-04",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "CLR-04",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "CLR-04",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "at-least-four",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "CLR-04",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1",
+        "scenario_2"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "at-least-four",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "CLR-04",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_1"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "at-least-four",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "CLR-04",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1",
+        "scenario_2"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "at-least-four",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "CLR-04",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_1",
+        "scenario_2"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "CLR-05",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "CLR-05",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "CLR-05",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "CLR-05",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "strict-distance",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "CLR-05",
+      "low": [
+        "forward_0"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "strict-distance",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "CLR-05",
+      "low": [
+        "forward_0"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "strict-distance",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "CLR-05",
+      "low": [
+        "forward_0",
+        "reverse_0"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "strict-distance",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "CLR-05",
+      "low": [
+        "forward_0"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S01",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S01",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-S01",
+      "low": [
+        "reverse_0"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S01",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-S01",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_1",
+        "scenario_3"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-S01",
+      "low": [
+        "forward_0",
+        "scenario_1",
+        "scenario_3",
+        "reverse_0"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-S01",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_1",
+        "scenario_3"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-S01",
+      "low": [
+        "forward_0",
+        "scenario_1",
+        "scenario_3",
+        "reverse_0"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-S02",
+      "low": [
+        "forward_0"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S02",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-S02",
+      "low": [
+        "forward_0"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S02",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-S02",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1",
+        "scenario_2",
+        "scenario_3"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-S02",
+      "low": [
+        "forward_0",
+        "scenario_1",
+        "scenario_3",
+        "reverse_0"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-S02",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_1",
+        "scenario_3"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-S02",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_1",
+        "scenario_3"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S03",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S03",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S03",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S03",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S04",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S04",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S04",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S04",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-S04",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_1"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-S04",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_1"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-S04",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_1"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-S04",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_1"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S05",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S05",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S05",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S05",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S06",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S06",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S06",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S06",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-S06",
+      "low": [
+        "forward_0",
+        "reverse_0"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-S06",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_1"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-S06",
+      "low": [
+        "forward_0",
+        "reverse_0"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-S06",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_1"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S07",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S07",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S07",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S07",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-S07",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_1",
+        "scenario_3",
+        "scenario_0",
+        "scenario_2"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-S07",
+      "low": [
+        "forward_0",
+        "scenario_1",
+        "scenario_3",
+        "reverse_0",
+        "scenario_0",
+        "scenario_2"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-S07",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_1",
+        "scenario_3",
+        "scenario_0",
+        "scenario_2"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-S07",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_1",
+        "scenario_3",
+        "scenario_0",
+        "scenario_2"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S08",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S08",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S08",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S08",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-S08",
+      "low": [
+        "forward_0",
+        "scenario_0",
+        "scenario_2",
+        "reverse_0",
+        "scenario_1"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-S08",
+      "low": [
+        "scenario_0",
+        "scenario_2",
+        "forward_0",
+        "reverse_0"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-S08",
+      "low": [
+        "forward_0",
+        "scenario_0",
+        "scenario_2",
+        "reverse_0"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-S08",
+      "low": [
+        "scenario_0",
+        "scenario_2",
+        "forward_0",
+        "reverse_0"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-S09",
+      "low": [
+        "forward_0"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S09",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-S09",
+      "low": [
+        "forward_0"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S09",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-S09",
+      "low": [
+        "forward_1",
+        "reverse_0",
+        "forward_0",
+        "scenario_0",
+        "scenario_1"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-S09",
+      "low": [
+        "forward_1",
+        "reverse_0",
+        "forward_0",
+        "scenario_0",
+        "scenario_1"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-S09",
+      "low": [
+        "forward_1",
+        "reverse_0",
+        "scenario_1",
+        "forward_0",
+        "scenario_0"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-S09",
+      "low": [
+        "forward_1",
+        "reverse_0",
+        "forward_0",
+        "scenario_0",
+        "scenario_1"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S10",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S10",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S10",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-S10",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-S10",
+      "low": [
+        "forward_0"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-S10",
+      "low": [
+        "forward_0"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-S10",
+      "low": [
+        "forward_0",
+        "reverse_0"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-S10",
+      "low": [
+        "forward_0",
+        "scenario_0"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-M01",
+      "low": [
+        "forward_0"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-M01",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-M01",
+      "low": [
+        "forward_0"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-M01",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-M01",
+      "low": [
+        "forward_0",
+        "reverse_0"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-M01",
+      "low": [
+        "forward_0",
+        "forward_1",
+        "reverse_0"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-M01",
+      "low": [
+        "forward_0",
+        "reverse_0"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-M01",
+      "low": [
+        "forward_0",
+        "forward_1",
+        "reverse_0"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-M02",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-M02",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-M02",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-M02",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-M02",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-M02",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-M02",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-M02",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-M03",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-M03",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-M03",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-M03",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-M03",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_1",
+        "scenario_0"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-M03",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-M03",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-M03",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-M04",
+      "low": [
+        "forward_0"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-M04",
+      "low": [
+        "forward_0"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-M04",
+      "low": [
+        "forward_0",
+        "reverse_0"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-M04",
+      "low": [
+        "forward_0"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-M04",
+      "low": [
+        "forward_1",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1",
+        "scenario_2",
+        "scenario_3",
+        "forward_0",
+        "forward_2"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-M04",
+      "low": [
+        "forward_1",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1",
+        "scenario_2",
+        "scenario_3",
+        "forward_0",
+        "forward_2"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-M04",
+      "low": [
+        "forward_1",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1",
+        "scenario_2",
+        "scenario_3",
+        "forward_0",
+        "forward_2"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-M04",
+      "low": [
+        "forward_1",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1",
+        "scenario_2",
+        "scenario_3",
+        "forward_0",
+        "forward_2"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-M05",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-M05",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-M05",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-M05",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-M05",
+      "low": [
+        "forward_0",
+        "reverse_0"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-M05",
+      "low": [
+        "forward_0",
+        "reverse_0"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-M05",
+      "low": [
+        "forward_0",
+        "reverse_0"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-M05",
+      "low": [
+        "forward_0",
+        "reverse_0"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-C01",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-C01",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-C01",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-C01",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-C01",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-C01",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-C01",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-C01",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-C02",
+      "low": [
+        "forward_0",
+        "scenario_0"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-C02",
+      "low": [
+        "forward_0"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-C02",
+      "low": [
+        "forward_0"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-C02",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-C02",
+      "low": [
+        "forward_0",
+        "forward_1",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-C02",
+      "low": [
+        "forward_1",
+        "reverse_0",
+        "forward_0",
+        "scenario_0",
+        "scenario_1"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-C02",
+      "low": [
+        "forward_0",
+        "forward_1",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-C02",
+      "low": [
+        "forward_1",
+        "reverse_0",
+        "forward_0",
+        "scenario_0",
+        "scenario_1"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_defect",
+      "id": "BENCH-C03",
+      "low": [
+        "forward_0",
+        "forward_1"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-C03",
+      "low": [
+        "forward_0"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_defect",
+      "id": "BENCH-C03",
+      "low": [
+        "forward_0",
+        "forward_1"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-C03",
+      "low": [
+        "forward_0"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-C03",
+      "low": [
+        "forward_1",
+        "forward_2",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1",
+        "scenario_2",
+        "scenario_3"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-C03",
+      "low": [
+        "forward_1",
+        "forward_2",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1",
+        "scenario_2",
+        "scenario_3"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-C03",
+      "low": [
+        "forward_1",
+        "forward_2",
+        "forward_0",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1",
+        "scenario_2",
+        "scenario_3"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-C03",
+      "low": [
+        "forward_1",
+        "forward_2",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1",
+        "scenario_2",
+        "scenario_3"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-C04",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-C04",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-C04",
+      "low": [
+        "scenario_3"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "BENCH-C04",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-C04",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1",
+        "scenario_2",
+        "scenario_3"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-C04",
+      "low": [
+        "forward_0",
+        "scenario_0",
+        "reverse_0",
+        "reverse_1",
+        "scenario_1",
+        "scenario_2",
+        "scenario_3"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-C04",
+      "low": [
+        "forward_0",
+        "scenario_0",
+        "forward_2",
+        "reverse_0",
+        "scenario_1",
+        "scenario_2",
+        "scenario_3"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-C04",
+      "low": [
+        "forward_0",
+        "scenario_0",
+        "reverse_0",
+        "reverse_1",
+        "scenario_1",
+        "scenario_2",
+        "scenario_3"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_defect",
+      "id": "BENCH-C05",
+      "low": [
+        "reverse_1",
+        "reverse_2",
+        "forward_0",
+        "forward_1",
+        "forward_2",
+        "forward_3",
+        "reverse_0",
+        "reverse_3",
+        "scenario_3"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_defect",
+      "id": "BENCH-C05",
+      "low": [
+        "reverse_2",
+        "forward_1",
+        "forward_2",
+        "forward_3",
+        "reverse_0",
+        "reverse_1",
+        "reverse_3",
+        "scenario_3"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_defect",
+      "id": "BENCH-C05",
+      "low": [
+        "reverse_2",
+        "reverse_3",
+        "forward_0",
+        "forward_1",
+        "forward_2",
+        "forward_3",
+        "reverse_0",
+        "reverse_1",
+        "scenario_3"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "BENCH-C05",
+      "low": [
+        "forward_1",
+        "forward_2",
+        "forward_3",
+        "reverse_0",
+        "reverse_1",
+        "reverse_2",
+        "reverse_3",
+        "scenario_3"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-C05",
+      "low": [
+        "forward_0",
+        "forward_1",
+        "forward_2",
+        "forward_3",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1",
+        "scenario_2",
+        "scenario_3"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-C05",
+      "low": [
+        "forward_0",
+        "forward_1",
+        "forward_2",
+        "forward_3",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1",
+        "scenario_2",
+        "scenario_3"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-C05",
+      "low": [
+        "forward_0",
+        "forward_1",
+        "forward_2",
+        "forward_3",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1",
+        "scenario_2",
+        "scenario_3"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "mutation",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "BENCH-C05",
+      "low": [
+        "forward_0",
+        "forward_1",
+        "forward_2",
+        "forward_3",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1",
+        "scenario_2",
+        "scenario_3"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "QNT-H1",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "QNT-H1",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "QNT-H1",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "QNT-H1",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "universal-to-existential",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "QNT-H1",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_1",
+        "scenario_3",
+        "scenario_2"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "universal-to-existential",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "QNT-H1",
+      "low": [
+        "forward_0",
+        "scenario_1",
+        "scenario_3",
+        "reverse_0"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "universal-to-existential",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "QNT-H1",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_1",
+        "scenario_3",
+        "scenario_2"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "universal-to-existential",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "QNT-H1",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_1",
+        "scenario_3"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "QNT-H2",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "QNT-H2",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "QNT-H2",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "QNT-H2",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "universal-to-existential",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "QNT-H2",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_1",
+        "scenario_2"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "universal-to-existential",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "QNT-H2",
+      "low": [
+        "forward_0",
+        "scenario_1",
+        "scenario_2",
+        "reverse_0"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "universal-to-existential",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "QNT-H2",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_1",
+        "scenario_2"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "universal-to-existential",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "QNT-H2",
+      "low": [
+        "forward_0",
+        "scenario_1",
+        "scenario_2",
+        "reverse_0"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C1",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C1",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C1",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C1",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "none-to-at-most-one",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "FR-C1",
+      "low": [
+        "forward_0",
+        "scenario_0",
+        "scenario_2",
+        "reverse_0"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "none-to-at-most-one",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "FR-C1",
+      "low": [
+        "forward_0",
+        "scenario_0",
+        "scenario_2",
+        "reverse_0",
+        "scenario_1",
+        "scenario_3"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "none-to-at-most-one",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "FR-C1",
+      "low": [
+        "forward_0",
+        "scenario_0",
+        "scenario_2",
+        "reverse_0"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "none-to-at-most-one",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "FR-C1",
+      "low": [
+        "forward_0",
+        "scenario_0",
+        "scenario_2",
+        "reverse_0",
+        "scenario_3"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C2",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C2",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C2",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C2",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "at-most-to-fewer-than",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "FR-C2",
+      "low": [
+        "forward_0",
+        "reverse_0"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "at-most-to-fewer-than",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "FR-C2",
+      "low": [
+        "reverse_0"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "at-most-to-fewer-than",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "FR-C2",
+      "low": [
+        "forward_0",
+        "reverse_0"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "at-most-to-fewer-than",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "FR-C2",
+      "low": [
+        "reverse_0"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C3",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C3",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C3",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C3",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "greater-to-at-least",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "FR-C3",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_1"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "greater-to-at-least",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "FR-C3",
+      "low": [
+        "forward_0",
+        "scenario_1",
+        "reverse_0"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "greater-to-at-least",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "FR-C3",
+      "low": [
+        "forward_0",
+        "scenario_1",
+        "reverse_0"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "greater-to-at-least",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "FR-C3",
+      "low": [
+        "forward_0",
+        "scenario_1",
+        "reverse_0"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C4",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C4",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C4",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C4",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "last-to-first-drawn",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "FR-C4",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_1",
+        "scenario_3",
+        "scenario_2"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "last-to-first-drawn",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "FR-C4",
+      "low": [
+        "forward_0",
+        "scenario_1",
+        "reverse_0",
+        "scenario_2",
+        "scenario_3"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "last-to-first-drawn",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "FR-C4",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_1",
+        "scenario_3",
+        "scenario_2"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "last-to-first-drawn",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "FR-C4",
+      "low": [
+        "forward_0",
+        "scenario_1",
+        "reverse_0",
+        "scenario_2",
+        "scenario_3"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C5",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C5",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C5",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C5",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "largest-to-smallest",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "FR-C5",
+      "low": [
+        "forward_0",
+        "scenario_0",
+        "scenario_1",
+        "reverse_0"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "largest-to-smallest",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "FR-C5",
+      "low": [
+        "forward_0",
+        "scenario_0",
+        "scenario_1",
+        "reverse_0"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "largest-to-smallest",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "FR-C5",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "largest-to-smallest",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "FR-C5",
+      "low": [
+        "forward_0",
+        "scenario_0",
+        "scenario_1",
+        "reverse_0"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C6",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C6",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C6",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C6",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "and-to-or",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "FR-C6",
+      "low": [
+        "forward_0",
+        "forward_1",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1",
+        "scenario_2",
+        "scenario_3"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "and-to-or",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "FR-C6",
+      "low": [
+        "forward_0",
+        "forward_1",
+        "forward_2",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1",
+        "scenario_2",
+        "scenario_3"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "and-to-or",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "FR-C6",
+      "low": [
+        "forward_0",
+        "forward_1",
+        "forward_2",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1",
+        "scenario_2",
+        "scenario_3"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "and-to-or",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "FR-C6",
+      "low": [
+        "forward_0",
+        "forward_1",
+        "forward_2",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1",
+        "scenario_2",
+        "scenario_3"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "FR-C7",
+      "low": [
+        "forward_0"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C7",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C7",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C7",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "exactly-one-to-either",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "FR-C7",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1",
+        "scenario_2",
+        "scenario_3"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "exactly-one-to-either",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "FR-C7",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1",
+        "scenario_2",
+        "scenario_3"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "exactly-one-to-either",
+      "correct": false,
+      "decision": "candidate_defect",
+      "id": "FR-C7",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1",
+        "scenario_2",
+        "scenario_3"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "exactly-one-to-either",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "FR-C7",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_0",
+        "scenario_2",
+        "scenario_3"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C8",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C8",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C8",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "FR-C8",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "at-least-to-greater",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "FR-C8",
+      "low": [
+        "forward_0",
+        "reverse_0"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "at-least-to-greater",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "FR-C8",
+      "low": [
+        "forward_0"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "at-least-to-greater",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "FR-C8",
+      "low": [
+        "forward_0",
+        "reverse_0"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "at-least-to-greater",
+      "correct": false,
+      "decision": "insufficient_evidence",
+      "id": "FR-C8",
+      "low": [
+        "forward_0"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "ADV-C1",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "ADV-C1",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "ADV-C1",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "ADV-C1",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "ADV-C2",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "ADV-C2",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "ADV-C2",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "ADV-C2",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "ADV-C3",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_0",
+        "scenario_2"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "ADV-C3",
+      "low": [
+        "reverse_0"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "ADV-C3",
+      "low": [
+        "reverse_0",
+        "scenario_2"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "ADV-C3",
+      "low": [
+        "reverse_0"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "ADV-C4",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "ADV-C4",
+      "low": [
+        "reverse_0"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "ADV-C4",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "ADV-C4",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "ADV-C6",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_0",
+        "scenario_2"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "ADV-C6",
+      "low": [
+        "forward_0",
+        "reverse_0"
+      ],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "ADV-C6",
+      "low": [
+        "forward_0",
+        "reverse_0",
+        "scenario_0",
+        "scenario_1",
+        "scenario_2",
+        "scenario_3"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "ADV-C6",
+      "low": [
+        "forward_0",
+        "reverse_0"
+      ],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "ADV-C7",
+      "low": [
+        "reverse_0"
+      ],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "ADV-C7",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "insufficient_evidence",
+      "id": "ADV-C7",
+      "low": [
+        "reverse_0"
+      ],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "ADV-C7",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "ADV-C8",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "ADV-C8",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "ADV-C8",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "ADV-C8",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "ADV-C9",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "ADV-C9",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "ADV-C9",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "ADV-C9",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "ADV-C10",
+      "low": [],
+      "repeat": 1,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "ADV-C10",
+      "low": [],
+      "repeat": 1,
+      "variant": "new"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "ADV-C10",
+      "low": [],
+      "repeat": 2,
+      "variant": "old"
+    },
+    {
+      "candidate": "reference",
+      "correct": true,
+      "decision": "candidate_supported",
+      "id": "ADV-C10",
+      "low": [],
+      "repeat": 2,
+      "variant": "new"
+    }
+  ],
+  "summary": {
+    "old:correct": {
+      "candidate_supported": 63,
+      "insufficient_evidence": 21,
+      "candidate_defect": 4
+    },
+    "new:correct": {
+      "candidate_supported": 76,
+      "insufficient_evidence": 11,
+      "candidate_defect": 1
+    },
+    "old:wrong": {
+      "candidate_defect": 48,
+      "insufficient_evidence": 18
+    },
+    "new:wrong": {
+      "candidate_defect": 50,
+      "insufficient_evidence": 16
+    }
+  }
+}
