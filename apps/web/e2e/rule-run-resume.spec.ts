@@ -21,7 +21,7 @@ function interpretationFrame(id: number) {
         clarityNote: "",
         dealerMessage: "This is how I understand your rule.",
         englishText: RULE_TEXT,
-        guardianChecked: false,
+        claimLedger: null,
         needsClarification: false,
         normalizedText: RULE_TEXT,
         officialInterpretation:
@@ -93,7 +93,8 @@ test("a dropped stream resumes from its cursor and still delivers the result", a
   await page.getByLabel("Message", { exact: true }).fill(RULE_TEXT);
   await page.getByRole("button", { name: "Send message" }).click();
 
-  await expect(page.getByRole("button", { name: "Confirm and generate" })).toBeVisible();
+  // The interpretation card reveals character by character before its actions appear.
+  await expect(page.getByRole("button", { name: "Confirm and generate" })).toBeVisible({ timeout: 15_000 });
 
   expect(attempts).toBe(2);
   // The replay position travelled both ways, so the server never replays events
@@ -144,7 +145,8 @@ test("a reload reattaches to the job the page left running", async ({ page }) =>
   await page.reload();
   releaseFirstAttempt();
 
-  await expect(page.getByRole("button", { name: "Confirm and generate" })).toBeVisible();
+  // The interpretation card reveals character by character before its actions appear.
+  await expect(page.getByRole("button", { name: "Confirm and generate" })).toBeVisible({ timeout: 15_000 });
   expect(attempts).toBeGreaterThanOrEqual(2);
 });
 

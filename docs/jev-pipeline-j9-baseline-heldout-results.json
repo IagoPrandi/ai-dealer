@@ -1,0 +1,637 @@
+{
+  "generatedAt": "2026-09-22T21:46:48.740Z",
+  "suite": "heldout",
+  "method": "Current two-phase pipeline (createRuleInterpretation -> createRulePreflight) over the selected suite; read-only.",
+  "rows": [
+    {
+      "calls": 8,
+      "providerCostUsd": 0.0019957914,
+      "unpricedCalls": 5,
+      "ast": null,
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": null,
+      "id": "BENCH-S01",
+      "reasonCodes": [
+        "SUPPORTED_RULE",
+        "GUARDIAN_FIDELITY_CONFLICT"
+      ],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 82892
+    },
+    {
+      "calls": 11,
+      "providerCostUsd": 0.005344007,
+      "unpricedCalls": 4,
+      "ast": null,
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": null,
+      "id": "BENCH-S02",
+      "reasonCodes": [
+        "SUPPORTED_RULE",
+        "GUARDIAN_FIDELITY_CONFLICT"
+      ],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 500391
+    },
+    {
+      "calls": 14,
+      "providerCostUsd": 0.00791254,
+      "unpricedCalls": 7,
+      "ast": {
+        "schemaVersion": 3,
+        "result": {
+          "type": "predicate",
+          "predicate": {
+            "kind": "compare",
+            "op": "eq",
+            "left": {
+              "kind": "reduce",
+              "op": "max",
+              "of": {
+                "kind": "source",
+                "source": "guess"
+              }
+            },
+            "right": {
+              "kind": "reduce",
+              "op": "max",
+              "of": {
+                "kind": "source",
+                "source": "draw"
+              }
+            }
+          }
+        }
+      },
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": true,
+      "id": "BENCH-S03",
+      "reasonCodes": [
+        "SUPPORTED_RULE"
+      ],
+      "repeatId": 1,
+      "route": "ACCEPT",
+      "wallMs": 153251
+    },
+    {
+      "calls": 7,
+      "providerCostUsd": 0.00205307,
+      "unpricedCalls": 4,
+      "ast": {
+        "schemaVersion": 2,
+        "result": {
+          "type": "predicate",
+          "predicate": {
+            "kind": "compare",
+            "left": {
+              "kind": "reduce",
+              "of": {
+                "kind": "source",
+                "source": "guess"
+              },
+              "op": "min"
+            },
+            "op": "lt",
+            "right": {
+              "kind": "reduce",
+              "of": {
+                "kind": "source",
+                "source": "draw"
+              },
+              "op": "min"
+            }
+          }
+        }
+      },
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": true,
+      "id": "BENCH-S04",
+      "reasonCodes": [
+        "SUPPORTED_RULE"
+      ],
+      "repeatId": 1,
+      "route": "ACCEPT",
+      "wallMs": 41810
+    },
+    {
+      "calls": 8,
+      "providerCostUsd": 0.002638646,
+      "unpricedCalls": 4,
+      "ast": null,
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": null,
+      "id": "BENCH-S05",
+      "reasonCodes": [
+        "SUPPORTED_RULE",
+        "REVIEWER_MISMATCH",
+        "AGENT_STATEMENT_MISMATCH"
+      ],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 62836
+    },
+    {
+      "calls": 7,
+      "providerCostUsd": 0.0017784953999999999,
+      "unpricedCalls": 4,
+      "ast": null,
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": null,
+      "id": "BENCH-S06",
+      "reasonCodes": [
+        "SUPPORTED_RULE",
+        "GUARDIAN_FIDELITY_CONFLICT"
+      ],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 85675
+    },
+    {
+      "calls": 4,
+      "providerCostUsd": 0.001009025,
+      "unpricedCalls": 2,
+      "ast": null,
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": null,
+      "id": "BENCH-S07",
+      "reasonCodes": [],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 20174
+    },
+    {
+      "calls": 3,
+      "providerCostUsd": 0.0013731206,
+      "unpricedCalls": 1,
+      "ast": null,
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": null,
+      "id": "BENCH-S08",
+      "reasonCodes": [],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 5967
+    },
+    {
+      "calls": 12,
+      "providerCostUsd": 0.008248513,
+      "unpricedCalls": 5,
+      "ast": {
+        "schemaVersion": 3,
+        "result": {
+          "type": "predicate",
+          "predicate": {
+            "kind": "compare",
+            "op": "eq",
+            "left": {
+              "kind": "at",
+              "index": 0,
+              "of": {
+                "kind": "source",
+                "source": "guess"
+              }
+            },
+            "right": {
+              "kind": "at",
+              "index": 0,
+              "of": {
+                "kind": "source",
+                "source": "draw"
+              }
+            }
+          }
+        }
+      },
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": true,
+      "id": "BENCH-S09",
+      "reasonCodes": [
+        "SUPPORTED_RULE"
+      ],
+      "repeatId": 1,
+      "route": "ACCEPT",
+      "wallMs": 159167
+    },
+    {
+      "calls": 3,
+      "providerCostUsd": 0.00112356,
+      "unpricedCalls": 1,
+      "ast": null,
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": null,
+      "id": "BENCH-S10",
+      "reasonCodes": [],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 11227
+    },
+    {
+      "calls": 11,
+      "providerCostUsd": 0.006709226,
+      "unpricedCalls": 3,
+      "ast": null,
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": null,
+      "id": "BENCH-M01",
+      "reasonCodes": [
+        "SUPPORTED_RULE",
+        "PROVIDER_EVIDENCE_UNVERIFIED"
+      ],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 673604
+    },
+    {
+      "calls": 8,
+      "providerCostUsd": 0.002901069,
+      "unpricedCalls": 4,
+      "ast": {
+        "schemaVersion": 3,
+        "result": {
+          "type": "predicate",
+          "predicate": {
+            "kind": "compare",
+            "op": "gt",
+            "left": {
+              "kind": "reduce",
+              "op": "count",
+              "of": {
+                "kind": "distinct",
+                "of": {
+                  "kind": "digits",
+                  "place": "units",
+                  "of": {
+                    "kind": "source",
+                    "source": "guess"
+                  }
+                }
+              }
+            },
+            "right": {
+              "kind": "reduce",
+              "op": "count",
+              "of": {
+                "kind": "distinct",
+                "of": {
+                  "kind": "digits",
+                  "place": "units",
+                  "of": {
+                    "kind": "source",
+                    "source": "draw"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": true,
+      "id": "BENCH-M02",
+      "reasonCodes": [
+        "SUPPORTED_RULE"
+      ],
+      "repeatId": 1,
+      "route": "ACCEPT",
+      "wallMs": 266256
+    },
+    {
+      "calls": 7,
+      "providerCostUsd": 0.0026904900000000002,
+      "unpricedCalls": 3,
+      "ast": null,
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": null,
+      "id": "BENCH-M03",
+      "reasonCodes": [
+        "SUPPORTED_RULE",
+        "REVIEWER_MISMATCH"
+      ],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 321788
+    },
+    {
+      "calls": 0,
+      "providerCostUsd": 0,
+      "unpricedCalls": 0,
+      "ast": null,
+      "class": "CLEAR",
+      "error": "RULE_EXTERNAL_DEPENDENCY",
+      "fixturesPass": null,
+      "id": "BENCH-M04",
+      "reasonCodes": [],
+      "repeatId": 1,
+      "route": "BLOCK",
+      "wallMs": 1
+    },
+    {
+      "calls": 15,
+      "providerCostUsd": 0.008187650000000001,
+      "unpricedCalls": 7,
+      "ast": null,
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": null,
+      "id": "BENCH-M05",
+      "reasonCodes": [
+        "SUPPORTED_RULE",
+        "PROVIDER_EVIDENCE_UNVERIFIED"
+      ],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 865833
+    },
+    {
+      "calls": 0,
+      "providerCostUsd": 0,
+      "unpricedCalls": 0,
+      "ast": null,
+      "class": "CLEAR",
+      "error": "RULE_EXTERNAL_DEPENDENCY",
+      "fixturesPass": null,
+      "id": "BENCH-C01",
+      "reasonCodes": [],
+      "repeatId": 1,
+      "route": "BLOCK",
+      "wallMs": 1
+    },
+    {
+      "calls": 11,
+      "providerCostUsd": 0.011392464599999999,
+      "unpricedCalls": 5,
+      "ast": null,
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": null,
+      "id": "BENCH-C02",
+      "reasonCodes": [
+        "SUPPORTED_RULE",
+        "PROVIDER_EVIDENCE_UNVERIFIED",
+        "PROVIDER_DISAGREEMENT"
+      ],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 546079
+    },
+    {
+      "calls": 10,
+      "providerCostUsd": 0.00868997,
+      "unpricedCalls": 4,
+      "ast": {
+        "schemaVersion": 3,
+        "result": {
+          "type": "predicate",
+          "predicate": {
+            "kind": "pairs_exists",
+            "left": {
+              "kind": "source",
+              "source": "guess"
+            },
+            "right": {
+              "kind": "reverse",
+              "of": {
+                "kind": "source",
+                "source": "draw"
+              }
+            },
+            "where": {
+              "kind": "compare",
+              "op": "eq",
+              "left": {
+                "kind": "pair",
+                "side": "left"
+              },
+              "right": {
+                "kind": "pair",
+                "side": "right"
+              }
+            }
+          }
+        }
+      },
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": true,
+      "id": "BENCH-C03",
+      "reasonCodes": [
+        "SUPPORTED_RULE"
+      ],
+      "repeatId": 1,
+      "route": "ACCEPT",
+      "wallMs": 300341
+    },
+    {
+      "calls": 16,
+      "providerCostUsd": 0.0282161446,
+      "unpricedCalls": 3,
+      "ast": null,
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": null,
+      "id": "BENCH-C04",
+      "reasonCodes": [
+        "SUPPORTED_RULE",
+        "PROVIDER_EVIDENCE_UNVERIFIED",
+        "AGENT_STATEMENT_MISMATCH"
+      ],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 1415713
+    },
+    {
+      "calls": 10,
+      "providerCostUsd": 0.011264744,
+      "unpricedCalls": 5,
+      "ast": null,
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": null,
+      "id": "BENCH-C05",
+      "reasonCodes": [
+        "SUPPORTED_RULE",
+        "REVIEWER_MISMATCH",
+        "PROVIDER_SPAN_COVERAGE_INCOMPLETE"
+      ],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 1429506
+    },
+    {
+      "calls": 4,
+      "providerCostUsd": 0.001099247,
+      "unpricedCalls": 2,
+      "ast": null,
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": null,
+      "id": "QNT-H1",
+      "reasonCodes": [],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 7947
+    },
+    {
+      "calls": 7,
+      "providerCostUsd": 0.00228602,
+      "unpricedCalls": 4,
+      "ast": {
+        "schemaVersion": 2,
+        "result": {
+          "type": "predicate",
+          "predicate": {
+            "kind": "all_ordered_compare",
+            "left": {
+              "kind": "source",
+              "source": "guess"
+            },
+            "op": "gt",
+            "right": {
+              "kind": "source",
+              "source": "draw"
+            }
+          }
+        }
+      },
+      "class": "CLEAR",
+      "error": null,
+      "fixturesPass": true,
+      "id": "QNT-H2",
+      "reasonCodes": [
+        "SUPPORTED_RULE"
+      ],
+      "repeatId": 1,
+      "route": "ACCEPT",
+      "wallMs": 59267
+    },
+    {
+      "calls": 4,
+      "providerCostUsd": 0.0011320999999999998,
+      "unpricedCalls": 2,
+      "ast": null,
+      "class": "AMBIGUOUS",
+      "error": null,
+      "fixturesPass": null,
+      "id": "AMB-H1",
+      "reasonCodes": [],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 20213
+    },
+    {
+      "calls": 3,
+      "providerCostUsd": 0.00148006,
+      "unpricedCalls": 1,
+      "ast": null,
+      "class": "AMBIGUOUS",
+      "error": null,
+      "fixturesPass": null,
+      "id": "AMB-H2",
+      "reasonCodes": [],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 17461
+    },
+    {
+      "calls": 4,
+      "providerCostUsd": 0.00161012,
+      "unpricedCalls": 2,
+      "ast": null,
+      "class": "AMBIGUOUS",
+      "error": null,
+      "fixturesPass": null,
+      "id": "AMB-H3",
+      "reasonCodes": [],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 8076
+    },
+    {
+      "calls": 3,
+      "providerCostUsd": 0.0020036,
+      "unpricedCalls": 1,
+      "ast": null,
+      "class": "AMBIGUOUS",
+      "error": null,
+      "fixturesPass": null,
+      "id": "AMB-H4",
+      "reasonCodes": [],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 8809
+    },
+    {
+      "calls": 4,
+      "providerCostUsd": 0.001526973,
+      "unpricedCalls": 2,
+      "ast": null,
+      "class": "AMBIGUOUS",
+      "error": null,
+      "fixturesPass": null,
+      "id": "AMB-H5",
+      "reasonCodes": [],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 9866
+    },
+    {
+      "calls": 3,
+      "providerCostUsd": 0.0009508648,
+      "unpricedCalls": 1,
+      "ast": null,
+      "class": "AMBIGUOUS",
+      "error": null,
+      "fixturesPass": null,
+      "id": "AMB-H6",
+      "reasonCodes": [],
+      "repeatId": 1,
+      "route": "CLARIFY",
+      "wallMs": 5388
+    },
+    {
+      "calls": 0,
+      "providerCostUsd": 0,
+      "unpricedCalls": 0,
+      "ast": null,
+      "class": "BLOCKED",
+      "error": "RULE_EXTERNAL_DEPENDENCY",
+      "fixturesPass": null,
+      "id": "BLK-H1",
+      "reasonCodes": [],
+      "repeatId": 1,
+      "route": "BLOCK",
+      "wallMs": 0
+    },
+    {
+      "calls": 0,
+      "providerCostUsd": 0,
+      "unpricedCalls": 0,
+      "ast": null,
+      "class": "BLOCKED",
+      "error": "RULE_PROMPT_INJECTION",
+      "fixturesPass": null,
+      "id": "BLK-H2",
+      "reasonCodes": [],
+      "repeatId": 1,
+      "route": "BLOCK",
+      "wallMs": 0
+    }
+  ],
+  "runs": 1,
+  "wallMs": 7079544
+}

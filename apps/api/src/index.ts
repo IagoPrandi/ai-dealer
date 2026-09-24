@@ -36,11 +36,15 @@ import {
   resolveAllowedCorsOrigin,
 } from "@tyche/constants";
 import {
-  compileRuleArtifact,
   analyzeInterpretationCoverage,
   analyzeStatementFidelity,
+  astOutcome,
+  boundaryEvidence,
+  buildCompilerCandidateResult,
+  buildEvidenceLibrary,
   collectRequiredValues,
-  externalDependencyGateText,
+  disagreements,
+  gateCompilerCandidate,
   hasAmbiguousWording,
   hasStructuralArithmeticAmbiguity,
   hasExternalDependency,
@@ -48,12 +52,14 @@ import {
   looksLikeOrderedTensRangeRule,
   ruleAstSchema,
   resolveRankingWinners,
+  seededRandomScenarios,
+  ticketFacts,
   validateAndPrecompileRule,
   type AgentModelIdentity,
   type AgentProviderAttemptLog,
+  type CompilerCandidateGate,
   type CompilerConfidenceBreakdown,
   type RuleAst,
-  type RuleAstProvider,
   type RuleCompilationAttemptDiagnostic,
   type RuleCompiledArtifact,
   type RuleConfidenceAction,
@@ -70,19 +76,41 @@ import {
   answerDealerQuestion,
   compileRuleToAst,
   interpretRuleWithAgent,
-  isExhaustedProviderError,
-  reviewRuleToAst,
   RuleAgentError,
   streamDealerQuestionAnswer,
   translateRuleToEnglish,
+  type RuleAgentConfig,
   type RuleAgentInterpretation,
 } from "./llm.js";
+import { JevError } from "./jev.js";
 import {
-  checkClaimGroundedness,
-  checkGroundedness,
-  detectJailbreak,
-  type GuardianConfig,
-} from "./guardian.js";
+  buildVerifiedClaimLedger,
+  detectRuleLanguage,
+  ledgerClarificationQuestions,
+  parseClaimLedger,
+  reverifyClaimLedger,
+  serializeClaimLedger,
+  type ClaimLedger,
+  type LedgerDecision,
+} from "./ruleClaimLedger.js";
+import {
+  checkArtifact,
+  checkInputSafety,
+  selectCompiledCandidate,
+  type CandidateDecision,
+  type CandidateJudgment,
+  type InputSafetyDecision,
+} from "./ruleSemanticChecks.js";
+import {
+  checkLedgerAttestation,
+  issueLedgerAttestation,
+  LEDGER_ATTESTATION_MAX_LENGTH,
+  resolveLedgerAttestationKey,
+} from "./ruleLedgerAttestation.js";
+import {
+  hasApiExternalRulePattern,
+  hasPreventedRulePattern,
+} from "./ruleInputSafety.js";
 import {
   captureAiRun,
   exportAiUsageRunSummaries,
@@ -100,6 +128,7 @@ import {
   checkRedisHealth,
   closeHealthResources,
   ensureDealerModelReady,
+  ensureJevAliasVerified,
   getDealerReadiness,
   getDealerRuntime,
   getShutdownSignal,
@@ -145,38 +174,6 @@ const MAX_CONVERSATION_MESSAGE_BYTES = 4000;
 // Draft ids are either the server's content hash (64 hex chars) or the client's
 // `client:<turnId>:<uuid>` id, so this only rejects an id no writer produces.
 const MAX_CONVERSATION_DRAFT_ID_LENGTH = 128;
-const RULE_PREVENTED_PATTERNS = [
-  /\bignore\b.{0,40}\b(instructions?|rules?|prompt|polic\w+|safety)\b/i,
-  /\b(system|developer)\s+(prompt|message|instruction)\b/i,
-  /\bjailbreak\b/i,
-  /\bprompt\s*injection\b/i,
-  /\b(secretly|silently)\b.{0,60}\bcompile\b.{0,60}\bvalid\b/i,
-  /\bhide\b.{0,60}\b(blocked|invalid|rejected)\b/i,
-  /\breveal\b.{0,40}\b(prompt|secret|private key|seed phrase)\b/i,
-  /\b(?:ignore|ignora|ignorar|desconsidere|desconsiderar)\b.{0,60}\b(?:instrucoes?|regras?|prompt|politicas?|seguranca)\b/i,
-  /\b(?:prompt\s+do\s+sistema|mensage(?:m|ns)\s+d[eo]\s+desenvolvedor|instrucoes?\s+d[eo]\s+sistema)\b/i,
-  /\b(?:oculte|ocultar|esconda|esconder)\b.{0,60}\b(?:bloquead[oa]s?|invalid[oa]s?|rejeitad[oa]s?)\b/i,
-  /\b(?:revele|revelar|mostre|mostrar)\b.{0,60}\b(?:prompt|segredo|chave privada|frase semente)\b/i,
-  /\b(?:ignora|ignorar)\b.{0,60}\b(?:instrucciones?|reglas?|prompt|politicas?|seguridad)\b/i,
-  /\b(?:prompt\s+del\s+sistema|mensaje\s+del\s+desarrollador|instrucciones?\s+del\s+sistema)\b/i,
-  /\b(?:oculta|ocultar|esconde|esconder)\b.{0,60}\b(?:bloquead[oa]s?|invalid[oa]s?|rechazad[oa]s?)\b/i,
-  /\b(?:revela|revelar|muestra|mostrar)\b.{0,60}\b(?:prompt|secreto|clave privada|frase semilla)\b/i,
-] as const;
-const RULE_EXTERNAL_BLOCK_PATTERNS = [
-  /\bclosest\b.{0,40}\bamong\s+all\s+players\b/i,
-  /\bsol\s+price\b|\busd\b/i,
-  // Weather/rain/sunny live in the compiler's EXTERNAL_DEPENDENCY_PATTERNS
-  // (single source of truth), which is dismissal-aware — "no weather; ..." and
-  // "define sunny as <numeric criteria>" must not be blocked here.
-  /\bx\/twitter\b|\btwitter\b|\bpost\b.{0,40}\blikes?\b/i,
-  /\buse\s+python\b|\bimport\s+random\b|\bcode\s+to\s+calculate\b/i,
-  /\bfetch\b.{0,80}\bhttps?:\/\//i,
-  /\bread\b.{0,40}\blocal\s+file\b|\bsecret\.txt\b/i,
-  /\brandomly\s+choose\b.{0,60}\bplayers?\b/i,
-  /\bdivisor\s+is\s+zero\b.{0,80}\bruntime\b.{0,40}\bguess\b/i,
-  /\breuse\b.{0,40}\bexact\s+rule\b.{0,80}\blast\s+turn\b/i,
-  /\bsame\s+rule\b.{0,60}\bdifferent\s+wording\b/i,
-] as const;
 
 export interface ServiceHealth {
   dealer: "ready" | "unconfigured" | "warming";
@@ -222,6 +219,28 @@ export interface RulePreflightResult {
   ast?: RuleAst | null;
   /** Auditable normalized-rule spans consumed into the accepted AST. */
   sourceSpans?: readonly RuleSourceSpan[] | null;
+  /**
+   * Concrete tickets on both sides of the accepted rule's decision boundary,
+   * each outcome computed by the runtime from the frozen AST. The player reads
+   * these before signing. Empty when no artifact was accepted. Optional only
+   * because persisted proposals predate the field.
+   */
+  boundaryExamples?: readonly RuleBoundaryExample[];
+  /**
+   * The verified claim ledger the compile phase re-checked. Returned so a
+   * generation retry can resend the same approval; the server re-verifies it.
+   */
+  claimLedger?: ReturnType<typeof serializeClaimLedger> | null;
+  /**
+   * Server-signed proof that this server verified `claimLedger` for this text
+   * (apps/api/src/ruleLedgerAttestation.ts). Returned with the ledger so a
+   * retry skips re-asking Jev; never committed in the preflight hash.
+   */
+  claimLedgerAttestation?: string | null;
+  /** How the compile phase confirmed the ledger: the attestation, or Jev again. */
+  ledgerVerifiedBy?: "attestation" | "jev" | null;
+  /** Decisions of the three semantic checks (never raw model output). */
+  semanticChecks?: RuleSemanticCheckDecisions;
   clarityNote: string;
   confirmationRequired: boolean;
   // Compile gate (PRD §7.5): the rule is only payable/proposable when the dealer
@@ -248,11 +267,7 @@ export interface RulePreflightResult {
   /** Highest win rate consistent with the sample (~95%), set only when no win
    *  was observed. PRD 6.8's required confidence interval. */
   estimatedWinRateUpperBound?: number | null;
-  escalated?: boolean;
   finalConfidence?: number;
-  guardianChecked?: boolean;
-  guardianGrounded?: boolean | undefined;
-  guardianNote?: string | undefined;
   /** True only for compiler-generation faults that can be re-run against the
    * already approved interpretation. Player wording/policy failures stay false. */
   generationRetryable: boolean;
@@ -283,54 +298,36 @@ export interface RulePreflightResult {
   tokenCount: number;
 }
 
+/** One computed example: either a single ticket (predicate) or a field of entries (ranking). */
+export interface RuleBoundaryExample {
+  draw: number[];
+  /** Ranking rules only: every entry and the entries the rule makes win. */
+  entries?: { player: string; ticket: number[]; wins: boolean }[];
+  facts: {
+    drawnNumbersAlsoInTicket: number[];
+    howManyTicketNumbersWereDrawn: number;
+    positionsWhereTicketEqualsDraw: number[];
+    ticketSum: number;
+  };
+  id: string;
+  /** Whether `ticket` wins; for ranking rules, whether the shown entry is a winner. */
+  outcome: "LOSE" | "WIN";
+  /** The ticket shown (predicate) or the focused entry's ticket (ranking). */
+  ticket: number[];
+}
+
+export interface RuleSemanticCheckDecisions {
+  artifact: CandidateDecision | null;
+  ledger: LedgerDecision | null;
+  safety: InputSafetyDecision | null;
+}
+
 export interface RulePreflightCoverage {
   missingFromAst: number[];
   // Sourced from the compiler rather than spelled out again: this union grew a
   // member (`position`) and a literal copy here would have gone on reporting the
   // old four while the gate enforced five.
   missingOperations: RuleOperation[];
-}
-
-export interface GroundednessFailureFeedback {
-  clarityNote: string;
-  dealerMessage: string;
-  reasonSummary: string;
-  refinementFocus: string[];
-  refinementQuestions: string[];
-  suggestedRewrite?: string;
-  suggestedRewrites: string[];
-}
-
-/**
- * Turns the two directional fidelity checks into a player-facing diagnosis.
- *
- * A boolean-only `guardianGrounded` used to collapse every failure into "may
- * not match", even though the pipeline knows whether the unverified link is
- * source -> approved reading or approved reading -> compiled artifact. Besides
- * being vague, that message told players to rewrite clear rules when no
- * deterministic value/operation check had found anything missing.
- */
-export function buildGroundednessFailureFeedback(input: {
-  promiseIsKept: boolean | undefined;
-  readingIsFaithful: boolean | undefined;
-}): GroundednessFailureFeedback {
-  const reasonSummary =
-    input.readingIsFaithful === false && input.promiseIsKept === false
-      ? "The fidelity check could not verify the dealer's reading against your wording or the compiled condition against the reading you approved. No missing value or operation was identified in your rule."
-      : input.readingIsFaithful === false
-        ? "The fidelity check could not verify that the dealer's reading preserves your original wording. The compiled condition is valid, but that reading must be verified before submission."
-        : "Your rule is clear and compiled successfully, but the fidelity check could not verify that the compiled condition preserves the reading you approved. No missing value or operation was identified in your wording.";
-
-  return {
-    clarityNote: reasonSummary,
-    dealerMessage: `${reasonSummary} Retry generation; you do not need to rephrase the rule unless the same check fails again.`,
-    reasonSummary,
-    refinementFocus: [
-      "Retry the compiled artifact while keeping the approved rule unchanged.",
-    ],
-    refinementQuestions: [],
-    suggestedRewrites: [],
-  };
 }
 
 export interface RuleReasonExplanation {
@@ -358,6 +355,41 @@ export const RULE_REASON_EXPLANATIONS: readonly RuleReasonExplanation[] = [
       "An unbounded or overly large rule cannot be evaluated safely for every eligible guess.",
     whatToChange:
       "Use fewer nested operations and one bounded comparison over the guess and draw.",
+  },
+  {
+    code: "SEMANTIC_CHECK_FAILED",
+    whatHappened:
+      "The final check found that the compiled rule does not do what your rule states.",
+    whyItBlocks:
+      "Freezing it could pay a condition you did not write.",
+    whatToChange:
+      "State each condition explicitly in one sentence: every number, comparison, and whether positions matter.",
+  },
+  {
+    code: "SEMANTIC_CHECK_UNCONFIRMED",
+    whatHappened:
+      "The final check could not confirm that the compiled rule matches every condition you wrote.",
+    whyItBlocks:
+      "Only a rule whose compiled behavior is confirmed against your wording can be frozen.",
+    whatToChange:
+      "Restate the rule so each condition is explicit: every number, comparison, and whether positions matter.",
+  },
+  {
+    code: "SEMANTIC_CHECK_UNAVAILABLE",
+    whatHappened:
+      "The semantic checker was unavailable, so the compiled rule could not be verified.",
+    whyItBlocks: "An unverified rule cannot be frozen.",
+    whatToChange:
+      "Nothing is wrong with your wording. Retry the same rule in a moment.",
+  },
+  {
+    code: "COMPILER_UNAVAILABLE",
+    whatHappened:
+      "One of the two independent rule compilers did not return a result.",
+    whyItBlocks:
+      "A rule is frozen only when two independent compilers produce the same winning behavior.",
+    whatToChange:
+      "Nothing is wrong with your wording. Retry the same rule.",
   },
   {
     code: "DIFFICULTY_ALWAYS_TRUE",
@@ -575,6 +607,8 @@ export function getBlockingRuleReasonExplanations(
 
 const RULE_GENERATION_RETRYABLE_CODES = new Set<RuleValidationReasonCode>([
   "AGENT_STATEMENT_MISMATCH",
+  "COMPILER_UNAVAILABLE",
+  "SEMANTIC_CHECK_UNAVAILABLE",
   "INTERPRETATION_MISMATCH",
   "PROVIDER_DISAGREEMENT",
   "PROVIDER_EVIDENCE_UNVERIFIED",
@@ -591,22 +625,11 @@ const RULE_GENERATION_RETRYABLE_CODES = new Set<RuleValidationReasonCode>([
   "VACUOUS_CONDITION",
 ]);
 
-const RULE_GENERATION_AUTO_REPAIR_CODES = new Set<RuleValidationReasonCode>([
-  "AGENT_STATEMENT_MISMATCH",
-  "INTERPRETATION_MISMATCH",
-  "PROVIDER_EVIDENCE_UNVERIFIED",
-  "PROVIDER_MALFORMED_RESPONSE",
-  "PROVIDER_SPAN_COVERAGE_INCOMPLETE",
-  "RUNTIME_TEST_FAILED",
-  "SCHEMA_INVALID",
-  "UNSUPPORTED_RULE",
-  "UNSAFE_RUNTIME_BOUNDS",
-  "VACUOUS_CONDITION",
-]);
-
 const RULE_GENERATION_FAILURE_TRIGGER_CODES = new Set<RuleValidationReasonCode>(
   [
     "AGENT_STATEMENT_MISMATCH",
+    "COMPILER_UNAVAILABLE",
+    "SEMANTIC_CHECK_UNAVAILABLE",
     "INTERPRETATION_MISMATCH",
     "PROVIDER_DISAGREEMENT",
     "PROVIDER_EVIDENCE_UNVERIFIED",
@@ -662,88 +685,6 @@ export function isRuleGenerationRetryable(
   );
 }
 
-export function shouldEscalateRulePreflight(
-  decision: RuleValidationDecision,
-  guardianGrounded: boolean | undefined,
-) {
-  return decision !== "VALID" || guardianGrounded === false;
-}
-
-export function shouldGuardianBlockRulePreflight(
-  guardianGrounded: boolean | undefined,
-) {
-  // Approval confirms the player's intended prose, not an AST that contradicts
-  // it. A negative fidelity verdict is evidence against freezing either way.
-  return guardianGrounded === false;
-}
-
-export function resolveRulePreflightDecision(
-  compilerDecision: RuleValidationDecision,
-  guardianBlocked: boolean,
-  triviallyAlwaysTrue: boolean,
-): RuleValidationDecision {
-  return guardianBlocked || triviallyAlwaysTrue ? "INVALID" : compilerDecision;
-}
-
-export function rejectedCompilerAttemptFingerprint(
-  attempt: RuleCompilationAttemptDiagnostic,
-): string | null {
-  if (attempt.candidate === null) return null;
-  // Evidence arrays and prose can vary on every regeneration while the same
-  // executable program fails for the same reasons. Those variations cannot
-  // make another repair attempt useful.
-  return stableStringify({
-    ast: attempt.candidate.ast,
-    // The first attempt can have a reviewer and later arbiter attempts cannot.
-    // These slot-specific reasons do not change the executable failure.
-    reasons: attempt.reasonCodes
-      .filter(
-        (code) =>
-          code !== "REVIEWER_MISMATCH" && code !== "SECOND_OPINION_UNAVAILABLE",
-      )
-      .sort(),
-  });
-}
-
-function buildCompilerRepairFeedback(
-  validation: Awaited<ReturnType<typeof compileRuleArtifact>>,
-) {
-  const reasonCodes = validation.log.reasonCodes;
-  const { blockers, effectiveBlockers, hasIndependentGenerationFailure } =
-    getGenerationFaultBlockers(reasonCodes);
-  if (
-    blockers.length === 0 ||
-    !hasIndependentGenerationFailure ||
-    !effectiveBlockers.every((code) =>
-      RULE_GENERATION_AUTO_REPAIR_CODES.has(code),
-    )
-  ) {
-    return null;
-  }
-  const latestAttempt = validation.log.attemptDiagnostics.at(-1);
-  const findings = latestAttempt
-    ? [
-        ...(latestAttempt.schemaError
-          ? [`Schema: ${latestAttempt.schemaError}`]
-          : []),
-        ...latestAttempt.stages
-          .filter((stage) => stage.status === "failed")
-          .map((stage) => `${stage.stage}: ${stage.detail}`),
-        ...(latestAttempt.providerEvidence?.exampleResults ?? [])
-          .filter((example) => example.status === "failed")
-          .map(
-            (example) => `workedExample[${example.index}]: ${example.detail}`,
-          ),
-      ]
-    : [];
-  return [
-    `Rejected validation codes: ${blockers.join(", ")}.`,
-    ...findings,
-    "Re-read the exact rule as a whole and preserve every condition, comparator, source, position, threshold, conjunction, and negation.",
-    "Make consumedSpans cover every intent-bearing clause and derive workedExamples independently from the source before checking them against the fresh AST.",
-  ].join("\n");
-}
-
 /**
  * The first, non-executable step of rule authoring.  It intentionally contains
  * no AST, artifact hash, or rule id: the player must approve this explanation
@@ -755,17 +696,34 @@ export interface RuleInterpretationResult {
   clarityNote: string;
   dealerMessage: string;
   englishText: string;
-  guardianChecked: boolean;
+  /**
+   * The claim ledger of the source: literal claims and open choices, verified
+   * by code checks and the Jev ledger gate. The compile phase requires it back
+   * and re-verifies it; null only when no ledger could be parsed.
+   */
+  claimLedger: ReturnType<typeof serializeClaimLedger> | null;
+  /** Server-signed proof of the ledger verdict; null unless the ledger verified. */
+  claimLedgerAttestation: string | null;
+  /**
+   * Whether the interpreter, the claim ledger, or both asked for clarification.
+   * Decisions only; informational, never read back at compile time.
+   */
+  interpreterNeedsClarification: boolean;
   needsClarification: boolean;
   normalizedText: string;
   officialInterpretation: string;
   sanitizedText: string;
+  semanticChecks: Pick<RuleSemanticCheckDecisions, "ledger" | "safety">;
   suggestedRewrites: string[];
   title: string;
   tokenCount: number;
 }
 
 interface ApprovedRuleInterpretation extends RuleAgentInterpretation {
+  /** Structurally valid; its code checks and Jev gate re-run at compile time. */
+  claimLedger: ClaimLedger;
+  /** Checked at compile time; an absent or invalid one means Jev re-verifies. */
+  claimLedgerAttestation: string | null;
   sanitizedText: string;
 }
 
@@ -825,7 +783,17 @@ export function readApprovedRuleInterpretation(
   const title = boundedString("title", 200, true);
   const clarityNote = boundedString("clarityNote", 2_000);
   const dealerMessage = boundedString("dealerMessage", 4_000);
+  // Strict and bounded (claim/choice counts and string lengths); a malformed
+  // ledger is an invalid approval, never a partially accepted one.
+  const parsedLedger = parseClaimLedger(candidate.claimLedger);
+  const attestation = candidate.claimLedgerAttestation;
+  const attestationValid =
+    attestation === undefined ||
+    attestation === null ||
+    (typeof attestation === "string" && attestation.length <= LEDGER_ATTESTATION_MAX_LENGTH);
   if (
+    "defect" in parsedLedger ||
+    !attestationValid ||
     !sanitizedText ||
     sanitizeRuleText(sanitizedText) !== sanitizeRuleText(sourceText) ||
     !normalizedText ||
@@ -842,6 +810,8 @@ export function readApprovedRuleInterpretation(
   }
   return {
     addedOperationalClauses: candidate.addedOperationalClauses,
+    claimLedger: parsedLedger.ledger,
+    claimLedgerAttestation: typeof attestation === "string" ? attestation : null,
     clarificationQuestions: candidate.clarificationQuestions,
     clarityNote,
     dealerMessage,
@@ -860,9 +830,9 @@ export type RulePreflightProgressStage =
   | "checking_safety"
   | "translating"
   | "interpreting"
+  | "verifying_reading"
   | "compiling"
-  | "checking_fidelity"
-  | "escalating"
+  | "checking_artifact"
   | "reviewing_impact";
 
 export interface RulePreflightProgress {
@@ -2731,34 +2701,11 @@ export function resetApiStateForTests() {
   resetTokenomicsProjectionForTests();
 }
 
-export function hasPreventedRulePattern(value: string) {
-  const normalized = value
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase();
-  return RULE_PREVENTED_PATTERNS.some((pattern) => pattern.test(normalized));
-}
-
-function hasRulePattern(value: string, patterns: readonly RegExp[]) {
-  return patterns.some((pattern) => pattern.test(value));
-}
+export { hasPreventedRulePattern } from "./ruleInputSafety.js";
 
 // High-signal markers (on the English text) for rule shapes the small primary
 // model compiles unreliably: negation/inverse and compound conditions. These are
 // routed straight to the stronger escalation model.
-const COMPLEX_RULE_PATTERNS = [
-  /\b(and|or|both|either|neither)\b/i,
-  /\b(not|without|except|non)\b/i,
-  // Inverse / minimisation. Note "least" is excluded here because "at least N"
-  // is a simple threshold, not an inverse — only the superlative "the least" is.
-  /\b(miss|misses|missed|missing|fewer|fewest|lowest|smallest|wrong|incorrect)\b/i,
-  /\bthe least\b/i,
-] as const;
-
-function isComplexRule(englishText: string) {
-  return COMPLEX_RULE_PATTERNS.some((pattern) => pattern.test(englishText));
-}
-
 function createRuleId() {
   return Date.now() * 1_000 + randomInt(0, 1_000);
 }
@@ -3416,10 +3363,7 @@ function isPreflightViableRewrite(rewrite: string): boolean {
   if (
     !sanitized ||
     hasPreventedRulePattern(sanitized) ||
-    hasRulePattern(
-      externalDependencyGateText(sanitized),
-      RULE_EXTERNAL_BLOCK_PATTERNS,
-    ) ||
+    hasApiExternalRulePattern(sanitized) ||
     hasExternalDependency(sanitized) ||
     hasInvalidConstraint(sanitized) ||
     countRuleTokens(sanitized) > RULE_MAX_TOKENS ||
@@ -3819,113 +3763,66 @@ export function buildRuleRefinementFeedback(
 }
 
 /**
- * `clear` -- no jailbreak risk. `confirmed` -- flagged in the player's own words
- * AND in the English the compiler will read; a hard block. `disputed` -- flagged
- * in one language and cleared in the other, which in practice means the
- * classifier reacted to the phrasing rather than to an attempt.
+ * The deterministic screen every phase runs before any model sees the text.
+ * Throws the typed rejection; returns the sanitized text and its token count.
  */
-type JailbreakScreening = "clear" | "confirmed" | "disputed";
+function screenRuleText(text: string) {
+  const sanitizedText = sanitizeRuleText(text);
+  const tokenCount = countRuleTokens(sanitizedText);
+  const textByteLength = Buffer.byteLength(sanitizedText, "utf8");
 
-export interface JailbreakScreeningResult {
-  /** The text cleared by the Guardian and safe to pass to downstream agents. */
-  clearedText: string;
-  verdict: JailbreakScreening;
+  if (!sanitizedText) throw new Error("RULE_EMPTY");
+  if (hasPreventedRulePattern(sanitizedText)) {
+    throw new Error("RULE_PROMPT_INJECTION");
+  }
+  // Match on the compiler's dismissal-aware view of the text, so a refinement
+  // that REMOVES a dependency ("forget shares, ...") is not blocked for
+  // mentioning the removed thing. Same patterns the compiler gate uses, so the
+  // pre-LLM gate and the validator agree.
+  if (hasApiExternalRulePattern(sanitizedText)) {
+    throw new Error("RULE_EXTERNAL_DEPENDENCY");
+  }
+  if (hasExternalDependency(sanitizedText)) {
+    throw new Error("RULE_EXTERNAL_DEPENDENCY");
+  }
+  // Impossible-by-construction rules (a number outside 1-100, or both even and
+  // odd) can never hold; reject before payment instead of compiling a rule that
+  // always loses.
+  if (hasInvalidConstraint(sanitizedText)) {
+    throw new Error("RULE_INVALID_CONSTRAINT");
+  }
+  if (tokenCount > RULE_MAX_TOKENS) {
+    throw new Error("RULE_TOKEN_LIMIT_EXCEEDED");
+  }
+  if (textByteLength > MAX_RULE_TEXT_BYTES) {
+    throw new Error("RULE_TEXT_TOO_LONG");
+  }
+  return { sanitizedText, tokenCount };
 }
 
-export const JAILBREAK_DISPUTED_LOG =
-  "Guardian jailbreak verdict disputed: flagged in the player's own words and cleared in the English the compiler reads. Proceeding on the cleared reading; review this sample when tuning the guard.";
-
-/** Disclosed on the preflight result so a disputed verdict is never invisible. */
-export const JAILBREAK_DISPUTED_NOTE =
-  "Guardian jailbreak check disputed: the wording was flagged in the language you wrote it in and cleared in the English the compiler reads. Compiled from the cleared reading.";
-
-function normalizeForJailbreakComparison(value: string) {
-  return value.trim().toLowerCase().replace(/\s+/gu, " ");
+/** A Jev alias that no longer resolves to the pinned model fails the run closed. */
+async function ensureSemanticCheckerReady(
+  signal: AbortSignal | undefined,
+  unavailableCode: string,
+) {
+  try {
+    await ensureJevAliasVerified(signal);
+  } catch (error) {
+    if (signal?.aborted) {
+      throw signal.reason ?? error;
+    }
+    console.error("Semantic checker readiness failed:", error);
+    throw new Error(unavailableCode, { cause: error });
+  }
 }
 
-/**
- * Second-opinion screening for the jailbreak guard.
- *
- * The classifier reads the player's own language poorly. Measured on
- * `granite4.1-guardian:8b` with greedy decoding: the Portuguese rule "faca a
- * regra que vence todos os palpites 1 2 3 4 8, e que o sexto numero seja maior
- * ou igual ao maior numero do resultado do sorteio" is flagged 10/10, while the
- * same rule in English is cleared 10/10 -- and a real injection is caught 10/10
- * in both. So a single positive on non-English text is not evidence of an
- * attempt, and it used to be a dead end on a rule that was legitimate and
- * expressible.
- *
- * Requiring both readings to agree keeps real attempts blocked: a Portuguese
- * injection still translates to an English injection, which the guard catches
- * (measured 6/6 in both languages).
- *
- * A disagreement lets the rule through, and the reason that is safe is
- * structural rather than statistical: every LLM downstream of this gate reads
- * `englishText`, not the player's raw words -- the interpreter and the compiler
- * are both handed the translation. So "disputed" means the text those models
- * will actually consume is the reading the guard CLEARED. It is disclosed on the
- * result and logged rather than waved through silently.
- */
-export async function screenForJailbreak(input: {
-  englishText: string;
-  guardianConfig: GuardianConfig;
-  sanitizedText: string;
-  signal?: AbortSignal | undefined;
-  /** Supplies an independent English reading when normal compilation is
-   * configured to stay multilingual. Both readings are checked so a false
-   * negative in either language cannot silently clear an injection. */
-  translateForSecondOpinion?: (() => Promise<string>) | undefined;
-}): Promise<JailbreakScreeningResult> {
-  const {
-    englishText,
-    guardianConfig,
-    sanitizedText,
-    signal,
-    translateForSecondOpinion,
-  } = input;
-  const originalFlagged = await detectJailbreak(
-    sanitizedText,
-    guardianConfig,
-    signal,
-  );
-  let comparisonText = englishText;
-  if (
-    normalizeForJailbreakComparison(comparisonText) ===
-      normalizeForJailbreakComparison(sanitizedText) &&
-    translateForSecondOpinion
-  ) {
-    comparisonText = await translateForSecondOpinion();
-  }
-  // Nothing independent to compare against: the guard just flagged the same
-  // words the compiler would receive, so the flag stands.
-  if (
-    normalizeForJailbreakComparison(comparisonText) ===
-    normalizeForJailbreakComparison(sanitizedText)
-  ) {
-    return {
-      clearedText: comparisonText,
-      verdict: originalFlagged ? "confirmed" : "clear",
-    };
-  }
-  const comparisonFlagged = await detectJailbreak(
-    comparisonText,
-    guardianConfig,
-    signal,
-  );
-  if (comparisonFlagged) {
-    return { clearedText: comparisonText, verdict: "confirmed" };
-  }
-  return originalFlagged
-    ? { clearedText: comparisonText, verdict: "disputed" }
-    : { clearedText: comparisonText, verdict: "clear" };
-}
+/** Shown when the ledger could not be verified; the player restates the rule. */
+export const LEDGER_REVIEW_NOTE =
+  "I could not verify my reading of every condition in your rule. Please restate it so each condition is explicit: every number, comparison, and whether positions matter.";
 
 /**
  * Phase 1 of the player flow, exported for the same reason `createRulePreflight`
  * is: the redundancy and cost accounting has to measure the REAL two-scope run.
- * The jailbreak classification of the player's sanitized text happens once here
- * and again inside the compile scope, and a script that only called
- * `createRulePreflight` could never see that pair.
  */
 export async function createRuleInterpretation(
   text: string,
@@ -3947,133 +3844,175 @@ async function runRuleInterpretationPipeline(
     message: "Checking rule limits and allowed inputs...",
     stage: "checking_input",
   });
-  const sanitizedText = sanitizeRuleText(text);
-  const tokenCount = countRuleTokens(sanitizedText);
-  const textByteLength = Buffer.byteLength(sanitizedText, "utf8");
-
-  if (!sanitizedText) throw new Error("RULE_EMPTY");
-  if (hasPreventedRulePattern(sanitizedText))
-    throw new Error("RULE_PROMPT_INJECTION");
-  if (
-    hasRulePattern(
-      externalDependencyGateText(sanitizedText),
-      RULE_EXTERNAL_BLOCK_PATTERNS,
-    )
-  ) {
-    throw new Error("RULE_EXTERNAL_DEPENDENCY");
-  }
-  if (hasExternalDependency(sanitizedText))
-    throw new Error("RULE_EXTERNAL_DEPENDENCY");
-  if (hasInvalidConstraint(sanitizedText))
-    throw new Error("RULE_INVALID_CONSTRAINT");
-  if (tokenCount > RULE_MAX_TOKENS)
-    throw new Error("RULE_TOKEN_LIMIT_EXCEEDED");
-  if (textByteLength > MAX_RULE_TEXT_BYTES)
-    throw new Error("RULE_TEXT_TOO_LONG");
+  const { sanitizedText, tokenCount } = screenRuleText(text);
 
   const runtime = getDealerRuntime();
-  const { agent: agentConfig, guardian: guardianConfig } = runtime;
+  const { agent: agentConfig, compiler: ledgerConfig, jev: jevConfig } = runtime;
   reportProgress({
-    message: "Preparing the local rule agents...",
+    message: "Preparing the rule agents...",
     model: agentConfig.model,
     stage: "loading_models",
   });
-  if (guardianConfig.enabled) {
-    await ensureDealerModelReady(guardianConfig.model, signal);
-  }
   await ensureDealerModelReady(agentConfig.model, signal);
+  await ensureSemanticCheckerReady(signal, "RULE_SAFETY_UNAVAILABLE");
 
-  // Translation runs BEFORE the guardian so the guard can read both the player's
-  // words and the English the compiler will actually read. With the guardian
-  // enabled the flag cannot switch this off — the guard buys the same reading
-  // itself and `englishText` is reassigned to it. See the long note on the same
-  // step in `runRulePreflightPipeline`.
-  const knownInterpretation = createKnownRuleInterpretation(sanitizedText);
-  const shouldTranslate = !knownInterpretation && runtime.translateToEnglish;
-  if (shouldTranslate) {
-    reportProgress({
-      message: "Translating the rule without changing its meaning...",
-      model: agentConfig.model,
-      stage: "translating",
-    });
-  }
-  let englishText =
-    knownInterpretation?.normalizedText ??
-    (shouldTranslate
-      ? await translateRuleToEnglish(sanitizedText, agentConfig, signal)
-      : sanitizedText);
-
-  if (guardianConfig.enabled) {
-    reportProgress({
-      message: "Checking the rule for unsafe instructions...",
-      model: guardianConfig.model,
-      stage: "checking_safety",
-    });
-    const screening = await screenForJailbreak({
-      englishText,
-      guardianConfig,
-      sanitizedText,
-      signal,
-      translateForSecondOpinion:
-        !shouldTranslate && !knownInterpretation
-          ? async () => {
-              reportProgress({
-                message:
-                  "Translating the rule for an independent safety check...",
-                model: agentConfig.model,
-                stage: "translating",
-              });
-              return translateRuleToEnglish(sanitizedText, agentConfig, signal);
-            }
-          : undefined,
-    });
-    if (screening.verdict === "confirmed") {
-      throw new Error("RULE_PROMPT_INJECTION");
-    }
-    // Reuse the independently cleared reading in the interpretation-only flow
-    // as well as in preflight, so both public entry points have identical
-    // multilingual safety and fidelity behavior.
-    englishText = screening.clearedText;
-    if (screening.verdict === "disputed") {
-      // Logged, not hidden: this is the signal for tuning the guard.
-      console.warn(
-        JAILBREAK_DISPUTED_LOG,
-        JSON.stringify({ englishText, sanitizedText }),
-      );
-    }
-  }
-
+  // Three independent reads of the same sanitized text, in parallel: the
+  // semantic safety gate, the interpreter chain (the reading the player
+  // approves), and the claim ledger (whether that reading is decidable).
   reportProgress({
-    message: "Interpreting your winning condition...",
-    model: agentConfig.model,
-    stage: "interpreting",
+    message: "Checking the rule for unsafe instructions...",
+    stage: "checking_safety",
   });
-  const interpretation = preserveUnresolvedInterpretation(
-    englishText,
-    enforceIncompleteTicketClarity(
-      `${englishText} ${sanitizedText}`,
-      reconcileSourceClarity(
-        sanitizedText,
-        knownInterpretation ??
-          enforceKnownRuleInterpretation(
-            `${englishText} ${sanitizedText}`,
-            await interpretRuleWithAgent(englishText, agentConfig, signal),
-          ),
-      ),
-    ),
+  const safety = checkInputSafety({
+    jevConfig,
+    language: detectRuleLanguage(sanitizedText),
+    signal,
+    source: sanitizedText,
+  });
+  const reading = (async () => {
+    const knownInterpretation = createKnownRuleInterpretation(sanitizedText);
+    const shouldTranslate = !knownInterpretation && runtime.translateToEnglish;
+    if (shouldTranslate) {
+      reportProgress({
+        message: "Translating the rule without changing its meaning...",
+        model: agentConfig.model,
+        stage: "translating",
+      });
+    }
+    const englishText =
+      knownInterpretation?.normalizedText ??
+      (shouldTranslate
+        ? await translateRuleToEnglish(sanitizedText, agentConfig, signal)
+        : sanitizedText);
+    reportProgress({
+      message: "Interpreting your winning condition...",
+      model: agentConfig.model,
+      stage: "interpreting",
+    });
+    const interpretation =
+      knownInterpretation ??
+      enforceKnownRuleInterpretation(
+        `${englishText} ${sanitizedText}`,
+        await interpretRuleWithAgent(englishText, agentConfig, signal),
+      );
+    return { englishText, interpretation };
+  })();
+  reportProgress({
+    message: "Verifying each condition of the rule...",
+    model: ledgerConfig.model,
+    stage: "verifying_reading",
+  });
+  const ledger = buildVerifiedClaimLedger({
+    jevConfig,
+    ledgerConfig,
+    signal,
+    source: sanitizedText,
+  });
+  const [safetyOutcome, readingOutcome, ledgerOutcome] = await Promise.allSettled([
+    safety,
+    reading,
+    ledger,
+  ]);
+  if (signal?.aborted) {
+    throw signal.reason ?? new Error("RULE_PREFLIGHT_ABORTED");
+  }
+
+  // Safety first, and it fails closed: a block or an unresolved verdict stops
+  // the rule whatever the other two reads concluded.
+  if (safetyOutcome.status === "rejected") {
+    if (safetyOutcome.reason instanceof JevError) {
+      console.error("Semantic safety check failed:", safetyOutcome.reason);
+      throw new Error("RULE_SAFETY_UNAVAILABLE");
+    }
+    throw safetyOutcome.reason;
+  }
+  if (safetyOutcome.value.decision === "unsafe") {
+    throw new Error("RULE_SEMANTIC_UNSAFE");
+  }
+  if (safetyOutcome.value.decision !== "safe") {
+    throw new Error("RULE_SAFETY_UNRESOLVED");
+  }
+  if (readingOutcome.status === "rejected") {
+    throw readingOutcome.reason;
+  }
+  if (ledgerOutcome.status === "rejected") {
+    if (ledgerOutcome.reason instanceof JevError) {
+      console.error("Claim-ledger semantic check failed:", ledgerOutcome.reason);
+      throw new Error("RULE_SEMANTIC_CHECK_UNAVAILABLE");
+    }
+    throw ledgerOutcome.reason;
+  }
+
+  const { englishText } = readingOutcome.value;
+  const interpreted = enforceIncompleteTicketClarity(
+    `${englishText} ${sanitizedText}`,
+    reconcileSourceClarity(sanitizedText, readingOutcome.value.interpretation),
   );
+  const ledgerRun = ledgerOutcome.value;
+  const ledgerDecision = ledgerRun.judgment.decision;
+  // Fail closed: either signal alone asks the player, and their questions are
+  // merged rather than one overriding the other.
+  const merged: RuleAgentInterpretation =
+    ledgerDecision === "LEDGER_VERIFIED"
+      ? interpreted
+      : ledgerDecision === "CLARIFY"
+        ? (() => {
+            const ledgerQuestions = ledgerRun.ledger
+              ? ledgerClarificationQuestions(ledgerRun.ledger, ledgerRun.judgment)
+              : [];
+            const questions = dedupeBoundedStrings([
+              ...(interpreted.needsClarification ? interpreted.clarificationQuestions : []),
+              ...ledgerQuestions,
+            ]);
+            const clarityNote =
+              interpreted.needsClarification && interpreted.clarityNote
+                ? interpreted.clarityNote
+                : "Your rule leaves a decision open that changes which tickets win.";
+            return {
+              ...interpreted,
+              clarificationQuestions: questions,
+              clarityNote,
+              dealerMessage: interpreted.needsClarification
+                ? interpreted.dealerMessage
+                : `${clarityNote} Please answer ${questions.length === 1 ? "this question" : "these questions"} before the rule is compiled.`,
+              needsClarification: true,
+              suggestedRewrites: interpreted.needsClarification ? interpreted.suggestedRewrites : [],
+            };
+          })()
+        : {
+            ...interpreted,
+            clarificationQuestions: interpreted.needsClarification ? interpreted.clarificationQuestions : [],
+            clarityNote: LEDGER_REVIEW_NOTE,
+            dealerMessage: interpreted.needsClarification
+              ? `${interpreted.dealerMessage} ${LEDGER_REVIEW_NOTE}`
+              : LEDGER_REVIEW_NOTE,
+            needsClarification: true,
+            suggestedRewrites: interpreted.needsClarification ? interpreted.suggestedRewrites : [],
+          };
+  const interpretation = preserveUnresolvedInterpretation(englishText, merged);
 
   return {
     addedOperationalClauses: interpretation.addedOperationalClauses,
+    claimLedger: ledgerRun.ledger ? serializeClaimLedger(ledgerRun.ledger) : null,
+    claimLedgerAttestation:
+      ledgerDecision === "LEDGER_VERIFIED" && ledgerRun.ledger
+        ? issueLedgerAttestation({
+            key: resolveLedgerAttestationKey(),
+            ledger: ledgerRun.ledger,
+            nowMs: Date.now(),
+            sanitizedText,
+          })
+        : null,
     clarificationQuestions: interpretation.clarificationQuestions,
     clarityNote: interpretation.clarityNote,
     dealerMessage: interpretation.dealerMessage,
     englishText,
-    guardianChecked: guardianConfig.enabled,
+    interpreterNeedsClarification: interpreted.needsClarification,
     needsClarification: interpretation.needsClarification,
     normalizedText: interpretation.normalizedText,
     officialInterpretation: interpretation.officialInterpretation,
     sanitizedText,
+    semanticChecks: { ledger: ledgerDecision, safety: safetyOutcome.value.decision },
     suggestedRewrites: interpretation.suggestedRewrites,
     title: interpretation.title,
     tokenCount,
@@ -4083,19 +4022,13 @@ async function runRuleInterpretationPipeline(
 /**
  * Exported so the pipeline can be measured without an HTTP server, a database or
  * an operator wallet — see `scripts/rule-usage-report.mts`. Measuring the real
- * entry point matters: a script that called interpret and compile by hand would
- * miss the compiler's own consensus, repair and escalation calls and report a
- * cost well below the truth, which is the kind of figure this accounting exists
- * to remove.
+ * entry point matters: a script that called the compilers by hand would miss the
+ * ledger re-verification and the semantic checks and report a cost below the
+ * truth, which is the kind of figure this accounting exists to remove.
  *
- * Wraps the pipeline in a resource-measurement scope (apps/api/src/usage.ts).
- *
- * Everything the run spends — the translate, guardian, interpret, compile,
- * review, repair and escalation calls, including the retries @tyche/rule-compiler
- * issues from inside its own provider loop — is recorded against this scope, and
- * so are the CPU and RSS the API process itself burns while the run is open.
- * A run that throws still publishes its report: the rules that fail are the
- * expensive ones.
+ * Wraps the pipeline in a resource-measurement scope (apps/api/src/usage.ts):
+ * both compilers, the Jev checks, and the CPU and RSS the API process burns
+ * while the run is open. A run that throws still publishes its report.
  */
 export async function createRulePreflight(
   text: string,
@@ -4114,6 +4047,253 @@ export async function createRulePreflight(
   return result;
 }
 
+/** The seeded random half of the behavioral evidence; identical on every run. */
+const RANDOM_EVIDENCE = seededRandomScenarios();
+
+/** Degenerate classes that describe the rule itself when both compilers hit them. */
+const RULE_LEVEL_DEGENERATE_CODES = new Set<RuleValidationReasonCode>([
+  "DIFFICULTY_ALWAYS_TRUE",
+  "DIFFICULTY_IMPOSSIBLE",
+  "VACUOUS_CONDITION",
+]);
+
+export type CompilerRun =
+  | { error: RuleAgentError; gate: null; model: string }
+  | { error: null; gate: CompilerCandidateGate; model: string };
+
+/**
+ * The deterministic gates plus the evidence-library vacuity check: an AST whose
+ * verdict never changes across the library and the random scenarios is
+ * degenerate even when the harness sample did not prove it.
+ */
+export function gateWithBoundaryEvidence(
+  rawAst: unknown,
+  library: ReturnType<typeof buildEvidenceLibrary>,
+): CompilerCandidateGate {
+  const gate = gateCompilerCandidate(rawAst);
+  if (!gate.ast || gate.reasonCodes.length > 0) {
+    return gate;
+  }
+  const degenerate = boundaryEvidence(gate.ast, library, RANDOM_EVIDENCE).degenerate;
+  if (!degenerate) {
+    return gate;
+  }
+  const code: RuleValidationReasonCode =
+    degenerate === "always_wins"
+      ? "DIFFICULTY_ALWAYS_TRUE"
+      : degenerate === "always_loses"
+        ? "DIFFICULTY_IMPOSSIBLE"
+        : "RUNTIME_TEST_FAILED";
+  return {
+    ...gate,
+    reasonCodes: [code],
+    stages: [
+      ...gate.stages,
+      {
+        detail: `The verdict never changes across the evidence library and ${RANDOM_EVIDENCE.length} random scenarios (${degenerate}).`,
+        reasonCodes: [code],
+        stage: "runtime_harness",
+        status: "failed",
+      },
+    ],
+  };
+}
+
+async function runCompiler(
+  sanitizedText: string,
+  config: RuleAgentConfig,
+  library: ReturnType<typeof buildEvidenceLibrary>,
+  signal: AbortSignal | undefined,
+): Promise<CompilerRun> {
+  try {
+    const envelope = await compileRuleToAst(sanitizedText, config, signal);
+    const rawAst =
+      envelope && typeof envelope === "object" && "ast" in envelope
+        ? (envelope as { ast: unknown }).ast
+        : envelope;
+    return { error: null, gate: gateWithBoundaryEvidence(rawAst, library), model: config.model };
+  } catch (error) {
+    if (signal?.aborted) {
+      throw signal.reason ?? error;
+    }
+    if (!(error instanceof RuleAgentError)) {
+      throw error;
+    }
+    console.error(
+      `Rule compiler ${config.model} failed:`,
+      error.message,
+      error.detail ?? "",
+    );
+    // Output that never parsed into an AST is the schema failure it is; every
+    // other provider failure means this compiler gave no opinion at all.
+    return error.code === "RULE_AGENT_BAD_RESPONSE"
+      ? { error: null, gate: gateCompilerCandidate(null), model: config.model }
+      : { error, gate: null, model: config.model };
+  }
+}
+
+const isViableRun = (run: CompilerRun) =>
+  run.gate !== null && run.gate.ast !== null && run.gate.reasonCodes.length === 0;
+
+/** The compiler to ask once more: the non-viable one when exactly one is viable. */
+export function compilerRetrySide(a: CompilerRun, b: CompilerRun): "A" | "B" | null {
+  const viableA = isViableRun(a);
+  const viableB = isViableRun(b);
+  if (viableA === viableB) return null;
+  return viableA ? "B" : "A";
+}
+
+export type CompilerPairClass =
+  | { kind: "both_viable" }
+  | { kind: "reject"; reasonCodes: RuleValidationReasonCode[]; retryable: boolean };
+
+/**
+ * Pure routing over the two compiler outcomes before any semantic check. Both
+ * compilers must produce an AST that passes every deterministic gate; anything
+ * else is a refusal whose retryability says whether the compilers or the rule
+ * are at fault.
+ */
+export function classifyCompilerPair(a: CompilerRun, b: CompilerRun): CompilerPairClass {
+  if (!a.gate || !b.gate) {
+    return { kind: "reject", reasonCodes: ["COMPILER_UNAVAILABLE"], retryable: true };
+  }
+  const viableA = a.gate.ast !== null && a.gate.reasonCodes.length === 0;
+  const viableB = b.gate.ast !== null && b.gate.reasonCodes.length === 0;
+  if (viableA && viableB) {
+    return { kind: "both_viable" };
+  }
+  if (viableA || viableB) {
+    return { kind: "reject", reasonCodes: ["PROVIDER_DISAGREEMENT"], retryable: true };
+  }
+  const shared = a.gate.reasonCodes.filter(
+    (code) => RULE_LEVEL_DEGENERATE_CODES.has(code) && b.gate!.reasonCodes.includes(code),
+  );
+  if (a.gate.ast && b.gate.ast && shared.length > 0) {
+    // Both independent readings are degenerate the same way: the rule as
+    // written cannot separate winners from losers.
+    return { kind: "reject", reasonCodes: shared, retryable: false };
+  }
+  return {
+    kind: "reject",
+    reasonCodes: [...new Set([...a.gate.reasonCodes, ...b.gate.reasonCodes])].sort(),
+    retryable: true,
+  };
+}
+
+/** Code-computed examples on both sides of the accepted rule's boundary. */
+export function buildBoundaryExamples(
+  ast: RuleAst,
+  library: ReturnType<typeof buildEvidenceLibrary>,
+  random: readonly ScenarioInputForExamples[] = RANDOM_EVIDENCE,
+): RuleBoundaryExample[] {
+  const evidence = boundaryEvidence(ast, library, random);
+  return evidence.scenarios.map((scenario) => {
+    const outcome = astOutcome(ast, scenario);
+    if (!Array.isArray(outcome)) {
+      const ticket = scenario.guess!;
+      const facts = ticketFacts(ticket, scenario.draw);
+      return {
+        draw: [...scenario.draw],
+        facts: {
+          drawnNumbersAlsoInTicket: facts.drawnNumbersAlsoInTicket,
+          howManyTicketNumbersWereDrawn: facts.howManyTicketNumbersWereDrawn,
+          positionsWhereTicketEqualsDraw: facts.positionsWhereTicketEqualsDraw,
+          ticketSum: facts.ticketSum,
+        },
+        id: scenario.id,
+        outcome,
+        ticket: [...ticket],
+      };
+    }
+    const entries = Object.entries(scenario.entries ?? {});
+    const target =
+      scenario.targetPlayer ??
+      entries.find(([, ticket]) => ticket === scenario.guess)?.[0] ??
+      entries[0]![0];
+    const ticket = scenario.entries![target]!;
+    const facts = ticketFacts(ticket, scenario.draw);
+    return {
+      draw: [...scenario.draw],
+      entries: entries.map(([player, entry]) => ({
+        player,
+        ticket: [...entry],
+        wins: outcome.includes(player),
+      })),
+      facts: {
+        drawnNumbersAlsoInTicket: facts.drawnNumbersAlsoInTicket,
+        howManyTicketNumbersWereDrawn: facts.howManyTicketNumbersWereDrawn,
+        positionsWhereTicketEqualsDraw: facts.positionsWhereTicketEqualsDraw,
+        ticketSum: facts.ticketSum,
+      },
+      id: scenario.id,
+      outcome: outcome.includes(target) ? "WIN" : "LOSE",
+      ticket: [...ticket],
+    };
+  });
+}
+
+type ScenarioInputForExamples = Parameters<typeof astOutcome>[1];
+
+function compilerModelIdentity(config: RuleAgentConfig): AgentModelIdentity {
+  let provider = "openai-compatible";
+  try {
+    provider = new URL(config.baseUrl).hostname;
+  } catch {
+    // An unparseable base URL cannot reach this point: the compiler call used it.
+  }
+  return {
+    digest: null,
+    model: config.model,
+    provider,
+    quantization: null,
+    serving_engine: provider,
+  };
+}
+
+function compilerAttemptDiagnostic(run: CompilerRun): RuleCompilationAttemptDiagnostic {
+  if (!run.gate) {
+    return {
+      candidate: null,
+      decision: "INVALID",
+      providerEvidence: null,
+      reasonCodes: ["COMPILER_UNAVAILABLE"],
+      schemaError: null,
+      stages: [
+        {
+          detail: `Compiler ${run.model} gave no result: ${run.error.message}`,
+          reasonCodes: ["COMPILER_UNAVAILABLE"],
+          stage: "schema_validation",
+          status: "failed",
+        },
+      ],
+      status: "rejected",
+    };
+  }
+  return {
+    candidate: run.gate.ast
+      ? { ast: run.gate.ast, consumedSpans: null, workedExamples: null }
+      : null,
+    decision: run.gate.reasonCodes.length === 0 && run.gate.ast ? "VALID" : "INVALID",
+    providerEvidence: null,
+    reasonCodes: run.gate.reasonCodes,
+    schemaError: run.gate.schemaError,
+    stages: run.gate.stages,
+    status: run.gate.reasonCodes.length === 0 && run.gate.ast ? "accepted" : "rejected",
+  };
+}
+
+interface CompileOutcome {
+  ast: RuleAst | null;
+  /** Checks that ran; null entries never ran. */
+  checks: { artifact: CandidateDecision | null };
+  generationRetryable: boolean;
+  /** Clarification questions owed to the player (ledger CLARIFY only). */
+  ledgerQuestions: string[];
+  rejectedAttempts: RuleCompilationAttemptDiagnostic[];
+  validation: RuleValidationResult;
+  winnerModel: string;
+}
+
 async function runRulePreflightPipeline(
   text: string,
   reportProgress: RulePreflightProgressReporter = () => undefined,
@@ -4124,675 +4304,311 @@ async function runRulePreflightPipeline(
     message: "Checking rule limits and allowed inputs...",
     stage: "checking_input",
   });
-  const sanitizedText = sanitizeRuleText(text);
-  const tokenCount = countRuleTokens(sanitizedText);
-  const textByteLength = Buffer.byteLength(sanitizedText, "utf8");
-
-  if (!sanitizedText) {
-    throw new Error("RULE_EMPTY");
+  const { sanitizedText, tokenCount } = screenRuleText(text);
+  // Compilation never reinterprets: it needs the reading the player approved,
+  // bound to this exact text (PRD §6.15).
+  if (!approvedInterpretation) {
+    throw new Error("RULE_APPROVAL_REQUIRED");
   }
-
-  if (hasPreventedRulePattern(sanitizedText)) {
-    throw new Error("RULE_PROMPT_INJECTION");
-  }
-
-  // Match on the compiler's dismissal-aware view of the text, so a refinement
-  // that REMOVES a dependency ("forget shares, ...") is not blocked for
-  // mentioning the removed thing.
-  if (
-    hasRulePattern(
-      externalDependencyGateText(sanitizedText),
-      RULE_EXTERNAL_BLOCK_PATTERNS,
-    )
-  ) {
-    throw new Error("RULE_EXTERNAL_DEPENDENCY");
-  }
-
-  // Deterministic external-dependency gate, run BEFORE any LLM call. The compiler
-  // validator already rejects external references, but only after the ~expensive
-  // interpret step — which also risks a spurious RULE_AGENT_BAD_RESPONSE when a
-  // small model chokes on an obviously-unsupportable rule. Blocking here (using
-  // the compiler's own patterns as the single source of truth) turns those cases
-  // into an instant, clean rejection and never wastes a model round-trip.
-  if (hasExternalDependency(sanitizedText)) {
-    throw new Error("RULE_EXTERNAL_DEPENDENCY");
-  }
-
-  // Impossible-by-construction rules (a number outside 1-100, or both even and
-  // odd) can never hold; reject before payment instead of compiling a rule that
-  // always loses. Deterministic, so it also runs before any LLM call.
-  if (hasInvalidConstraint(sanitizedText)) {
-    throw new Error("RULE_INVALID_CONSTRAINT");
-  }
-
-  if (tokenCount > RULE_MAX_TOKENS) {
-    throw new Error("RULE_TOKEN_LIMIT_EXCEEDED");
-  }
-
-  if (textByteLength > MAX_RULE_TEXT_BYTES) {
-    throw new Error("RULE_TEXT_TOO_LONG");
-  }
+  const interpretation = approvedInterpretation;
 
   const runtime = getDealerRuntime();
   const {
-    agent: agentConfig,
-    compiler: compilerConfig,
-    guardian: guardianConfig,
+    artifactVeto,
+    compiler: compilerA,
+    compilerSecondary: compilerB,
+    jev: jevConfig,
   } = runtime;
-  let guardianNote = "";
-
-  // 0. Make sure the models are actually loaded before any time-boxed call. A
-  // cold Ollama load otherwise blows past LLM_TIMEOUT_MS on the first request
-  // after boot and surfaces as a failure even though the rule is fine. This is
-  // a best-effort no-op for non-Ollama endpoints.
   reportProgress({
-    message: "Preparing the local rule agents...",
-    model: approvedInterpretation ? compilerConfig.model : agentConfig.model,
+    message: "Preparing the rule compilers...",
+    model: compilerA.model,
     stage: "loading_models",
   });
-  if (guardianConfig.enabled) {
-    await ensureDealerModelReady(guardianConfig.model, signal);
-  }
-  if (!approvedInterpretation) {
-    await ensureDealerModelReady(agentConfig.model, signal);
-  }
-  if (approvedInterpretation || compilerConfig.model !== agentConfig.model) {
-    await ensureDealerModelReady(compilerConfig.model, signal);
-  }
-  if (
-    runtime.reviewer.model !== compilerConfig.model &&
-    runtime.reviewer.model !== agentConfig.model
-  ) {
-    await ensureDealerModelReady(runtime.reviewer.model, signal);
-  }
+  await ensureDealerModelReady(compilerA.model, signal);
+  await ensureDealerModelReady(compilerB.model, signal);
+  await ensureSemanticCheckerReady(signal, "RULE_SEMANTIC_CHECK_UNAVAILABLE");
 
-  // 1. Translate to English so the dealer and compiler reason in one language.
-  //
-  // `LLM_TRANSLATE_TO_ENGLISH=false` does NOT turn this off whenever the
-  // guardian is enabled, and the comment here used to claim it did. The guard
-  // buys its own independent English reading (`translateForSecondOpinion`
-  // below), and `compileText` is then reassigned to `screening.clearedText` —
-  // which IS that reading. So with the guardian on, a Portuguese rule is
-  // translated and the TRANSLATION is what compiles, whatever the flag says.
-  // Measured: the flag was `false` and every rule still spent a translate call.
-  //
-  // That is the behaviour worth keeping, not a bug to route around: the guard
-  // classifies the player's own language poorly (measured 10/10 false positives
-  // on a legitimate Portuguese rule that is cleared 10/10 in English), so the
-  // second reading is what stops a real rule from being refused as an
-  // injection. It is a safety input, not an optional normalisation.
-  //
-  // The flag therefore has exactly one honest meaning, and it is narrow: with
-  // the guardian DISABLED there is no second-opinion path, so `false` really
-  // does compile the player's own words and really does save the call.
-  //
-  // Running it here rather than inside the guard only changes WHEN the same
-  // call happens; the cost and the compiled text are identical either way.
-  const knownInterpretation =
-    approvedInterpretation ?? createKnownRuleInterpretation(sanitizedText);
-  const shouldTranslate = !knownInterpretation && runtime.translateToEnglish;
-  if (shouldTranslate) {
-    reportProgress({
-      message: "Translating the rule without changing its meaning...",
-      model: agentConfig.model,
-      stage: "translating",
-    });
-  }
-  let compileText =
-    knownInterpretation?.normalizedText ??
-    (shouldTranslate
-      ? await translateRuleToEnglish(sanitizedText, agentConfig, signal)
-      : sanitizedText);
-
-  // 2. Guardian input gate (Granite Guardian) — an ML jailbreak classifier in
-  // addition to the regex guard. If the guardian is down we keep the regex guard
-  // and surface the outage rather than silently dropping the check.
-  if (guardianConfig.enabled) {
-    reportProgress({
-      message: "Checking the rule for unsafe instructions...",
-      model: guardianConfig.model,
-      stage: "checking_safety",
-    });
-    try {
-      const screening = await screenForJailbreak({
-        englishText: compileText,
-        guardianConfig,
-        sanitizedText,
-        signal,
-        translateForSecondOpinion:
-          !shouldTranslate && !knownInterpretation
-            ? async () => {
-                reportProgress({
-                  message:
-                    "Translating the rule for an independent safety check...",
-                  model: agentConfig.model,
-                  stage: "translating",
-                });
-                return translateRuleToEnglish(
-                  sanitizedText,
-                  agentConfig,
-                  signal,
-                );
-              }
-            : undefined,
-      });
-      if (screening.verdict === "confirmed") {
-        throw new Error("RULE_PROMPT_INJECTION");
-      }
-      // Keep an independently cleared English reading for every downstream
-      // model. This also makes groundedness a same-language comparison;
-      // Guardian can reject faithful pairs solely because the source and the
-      // interpretation use different languages.
-      compileText = screening.clearedText;
-      // Flagged in one language and cleared in the other. The compile proceeds
-      // on the cleared English reading — which is the only text the interpreter
-      // and compiler are given — and the disagreement is disclosed on the result
-      // and logged so the guard can be tuned against real samples.
-      if (screening.verdict === "disputed") {
-        console.warn(
-          JAILBREAK_DISPUTED_LOG,
-          JSON.stringify({ compileText, sanitizedText }),
-        );
-        guardianNote = JAILBREAK_DISPUTED_NOTE;
-      }
-    } catch (error) {
-      if (signal?.aborted) {
-        throw signal.reason ?? error;
-      }
-      if (error instanceof Error && error.message === "RULE_PROMPT_INJECTION") {
-        throw error;
-      }
-      guardianNote = `Guardian jailbreak check unavailable: ${
-        error instanceof Error ? error.message : String(error)
-      }`;
-    }
-  }
   const ruleId = createRuleId();
   // Ties the measurement scope to the rule an operator would look up.
   setAiRunSubject(String(ruleId));
+  const timestamp = new Date().toISOString();
+  const compilationRequest = {
+    originalText: sanitizedText,
+    prompt: sanitizedText,
+    ruleId,
+    timestamp,
+    tokenCount,
+  };
+  const library = buildEvidenceLibrary(sanitizedText);
 
-  /**
-   * Endpoints that already proved, in THIS run, that they cannot serve it.
-   *
-   * The provider loop walks every routing slot once per candidate, and the
-   * repair loop walks it again per repair. An endpoint that exhausted its
-   * rate-limit budget or cannot decode the compilation schema answers the same
-   * way every time, so those later walks buy nothing but latency. Measured on
-   * the three-rule corpus (`pnpm --filter @tyche/api usage:report`): the
-   * tertiary slot spent 45.9 s across eight 429s and returned zero tokens, six
-   * of the eight byte-identical repeats of an earlier request.
-   *
-   * The recorded failure is REPLAYED, not swallowed: every attempt still throws
-   * the same typed error, so the compiler's diagnostics, reason codes and the
-   * operator log are identical to what a real round trip would produce. Only
-   * the wait is gone. Scoped to one run so a recovered provider is retried by
-   * the next rule rather than being blacklisted by a snapshot of a bad minute.
-   */
-  const exhaustedProviders = new Map<string, RuleAgentError>();
+  const refuse = (args: {
+    blockingReasonCodes: RuleValidationReasonCode[];
+    checks?: CompileOutcome["checks"];
+    gate: CompilerCandidateGate | null;
+    ledgerQuestions?: string[];
+    rejectedAttempts?: RuleCompilationAttemptDiagnostic[];
+    retryable: boolean;
+    model: string;
+  }): CompileOutcome => ({
+    ast: null,
+    checks: args.checks ?? { artifact: null },
+    generationRetryable: args.retryable,
+    ledgerQuestions: args.ledgerQuestions ?? [],
+    rejectedAttempts: args.rejectedAttempts ?? [],
+    validation: buildCompilerCandidateResult({
+      blockingReasonCodes: args.blockingReasonCodes,
+      constrainedDecodingUsed: true,
+      extraStages: [],
+      gate: args.gate,
+      modelIdentity: compilerModelIdentity(compilerA),
+      providerPath: [],
+      request: compilationRequest,
+      timestamp,
+    }),
+    winnerModel: args.model,
+  });
 
-  // A full dealer pass for a given model: interpret (human message), compile the
-  // AST from the rule text (skill-guided), and check groundedness.
-  const dealerPass = async (
-    model: string,
-    compilerModel = compilerConfig.model,
-  ) => {
-    const passConfig = { ...agentConfig, model };
-    // A reactive escalation must rebuild the artifact too. Re-running only the
-    // interpretation model cannot repair an invalid compile on the approved-
-    // interpretation path, where the interpretation is intentionally frozen.
-    const passCompilerConfig =
-      compilerModel === compilerConfig.model
-        ? compilerConfig
-        : { ...compilerConfig, model: compilerModel };
-    const passReviewerConfig = runtime.reviewer;
+  let ledgerVerifiedBy: "attestation" | "jev" | null = null;
+  const compile = async (): Promise<CompileOutcome & { ledger: LedgerDecision | null }> => {
+    // 1. Nothing the client returned is trusted. The safety gate runs again —
+    //    a compile request can arrive without any interpret run — and the
+    //    approved ledger is re-verified from scratch, in parallel.
     reportProgress({
-      message: approvedInterpretation
-        ? "Using your approved interpretation..."
-        : model === agentConfig.model
-          ? "Interpreting your winning condition..."
-          : "Retrying with the stronger rule model...",
-      model: approvedInterpretation ? passCompilerConfig.model : model,
-      stage: approvedInterpretation
-        ? "compiling"
-        : model === agentConfig.model
-          ? "interpreting"
-          : "escalating",
+      message: "Re-checking each condition of the approved rule...",
+      stage: "verifying_reading",
     });
-    const interpretation = approvedInterpretation
-      ? approvedInterpretation
-      : preserveUnresolvedInterpretation(
-          compileText,
-          enforceIncompleteTicketClarity(
-            `${compileText} ${sanitizedText}`,
-            reconcileSourceClarity(
-              sanitizedText,
-              knownInterpretation ??
-                enforceKnownRuleInterpretation(
-                  `${compileText} ${sanitizedText}`,
-                  await interpretRuleWithAgent(compileText, passConfig, signal),
-                ),
-            ),
-          ),
-        );
-    // Clarification is a successful product result, not a failed compilation.
-    // Once the interpreter has identified missing intent, do not ask an AST
-    // model to invent it; that path could only return malformed output or a
-    // different rule and previously surfaced a misleading HTTP 502.
-    if (interpretation.needsClarification) {
-      const clarificationText = selectCompilationText(
-        sanitizedText,
-        interpretation.normalizedText,
-      );
-      const validation = validateAndPrecompileRule({
-        agentInterpretation: [
-          interpretation.dealerMessage,
-          interpretation.officialInterpretation,
-        ]
-          .filter(Boolean)
-          .join("\n"),
-        model: passCompilerConfig.model,
-        officialInterpretation: interpretation.officialInterpretation,
-        originalText: sanitizedText,
-        prompt: clarificationText,
-        ruleId,
-        tokenCount,
-      });
+    // A valid server attestation stands in for the Jev ledger gate only; the
+    // code checks re-run either way, and the safety gate always runs.
+    const attestation = checkLedgerAttestation({
+      attestation: interpretation.claimLedgerAttestation,
+      key: resolveLedgerAttestationKey(),
+      ledger: interpretation.claimLedger,
+      nowMs: Date.now(),
+      sanitizedText,
+    });
+    if (attestation === "invalid") {
+      console.warn(`Rule ${ruleId}: ledger attestation did not verify; re-verifying with Jev.`);
+    }
+    const [safetyOutcome, ledgerOutcome] = await Promise.allSettled([
+      checkInputSafety({
+        jevConfig,
+        language: detectRuleLanguage(sanitizedText),
+        signal,
+        source: sanitizedText,
+      }),
+      reverifyClaimLedger({
+        attested: attestation === "valid",
+        jevConfig,
+        ledger: serializeClaimLedger(interpretation.claimLedger),
+        signal,
+        source: sanitizedText,
+      }),
+    ]);
+    if (signal?.aborted) {
+      throw signal.reason ?? new Error("RULE_PREFLIGHT_ABORTED");
+    }
+    // A safety verdict stops the rule outright, exactly as in the interpret
+    // phase, and fails closed on a service failure.
+    if (safetyOutcome.status === "rejected") {
+      if (!(safetyOutcome.reason instanceof JevError)) throw safetyOutcome.reason;
+      console.error(`Semantic safety check failed (rule ${ruleId}):`, safetyOutcome.reason);
+      throw new Error("RULE_SAFETY_UNAVAILABLE", { cause: safetyOutcome.reason });
+    }
+    if (safetyOutcome.value.decision === "unsafe") {
+      throw new Error("RULE_SEMANTIC_UNSAFE");
+    }
+    if (safetyOutcome.value.decision !== "safe") {
+      throw new Error("RULE_SAFETY_UNRESOLVED");
+    }
+    if (ledgerOutcome.status === "rejected") {
+      if (!(ledgerOutcome.reason instanceof JevError)) throw ledgerOutcome.reason;
+      console.error(`Ledger re-verification failed (rule ${ruleId}):`, ledgerOutcome.reason);
+      return { ...refuse({ blockingReasonCodes: ["SEMANTIC_CHECK_UNAVAILABLE"], gate: null, model: compilerA.model, retryable: true }), ledger: null };
+    }
+    const reverified = ledgerOutcome.value;
+    const ledgerDecision = reverified.judgment.decision;
+    ledgerVerifiedBy = attestation === "valid" ? "attestation" : "jev";
+    if (ledgerDecision !== "LEDGER_VERIFIED" || !reverified.ledger) {
       return {
-        compilerModel: passCompilerConfig.model,
-        grounded: undefined,
-        interpretation,
-        model,
-        promiseIsKept: undefined,
-        readingIsFaithful: undefined,
-        rejectedAttempts: validation.log.attemptDiagnostics.filter(
-          (attempt) => attempt.decision === "INVALID",
-        ),
-        validation,
+        ...refuse({
+          blockingReasonCodes: [ledgerDecision === "CLARIFY" ? "AMBIGUOUS_RULE" : "SEMANTIC_CHECK_UNCONFIRMED"],
+          gate: null,
+          ledgerQuestions:
+            ledgerDecision === "CLARIFY" && reverified.ledger
+              ? ledgerClarificationQuestions(reverified.ledger, reverified.judgment)
+              : [],
+          model: compilerA.model,
+          retryable: false,
+        }),
+        ledger: ledgerDecision,
       };
     }
+    const ledger = reverified.ledger;
+
+    // 2. Two independent compilers on different weights, in parallel. Each
+    //    reads only the player's sanitized text.
     reportProgress({
-      message: "Building and testing the executable rule...",
-      model: passCompilerConfig.model,
+      message: "Compiling the rule with two independent compilers...",
+      model: `${compilerA.model} + ${compilerB.model}`,
       stage: "compiling",
     });
-    const createAstProvider =
-      (validationFeedback?: string): RuleAstProvider =>
-      async ({ normalizedText, providerConfig }) => {
-        const providerModel =
-          providerConfig.model_by_role.compile ?? providerConfig.identity.model;
-        const providerAgentConfig = {
-          ...passCompilerConfig,
-          ...(providerConfig.base_url
-            ? { baseUrl: providerConfig.base_url }
-            : {}),
-          model: providerModel || passCompilerConfig.model,
-        };
-        const exhausted = exhaustedProviders.get(providerAgentConfig.model);
-        if (exhausted) {
-          throw exhausted;
-        }
-        try {
-          return await compileRuleToAst(
-            normalizedText,
-            providerAgentConfig,
-            signal,
-            validationFeedback,
-          );
-        } catch (error) {
-          if (signal?.aborted) {
-            throw signal.reason ?? error;
-          }
-          if (isExhaustedProviderError(error)) {
-            exhaustedProviders.set(providerAgentConfig.model, error);
-          }
-          // The compiler collapses any provider throw into the single reason code
-          // PROVIDER_MALFORMED_RESPONSE and keeps nothing else, so without this an
-          // operator investigating a blocked rule cannot tell a timeout from
-          // unparseable output from a model that refused to answer.
-          const detail =
-            error instanceof RuleAgentError && error.detail
-              ? ` ${error.detail}`
-              : "";
-          console.error(
-            `Rule compile provider failed (rule ${ruleId}, model ${providerAgentConfig.model}):`,
-            error instanceof Error ? error.message : String(error),
-            detail,
-          );
-          throw error;
-        }
-      };
-    const createAstReviewer =
-      (): RuleAstProvider =>
-      async ({ normalizedText }) => {
-        const exhausted = exhaustedProviders.get(passReviewerConfig.model);
-        if (exhausted) {
-          throw exhausted;
-        }
-        try {
-          return await reviewRuleToAst(
-            normalizedText,
-            passReviewerConfig,
-            signal,
-          );
-        } catch (error) {
-          if (signal?.aborted) {
-            throw signal.reason ?? error;
-          }
-          if (isExhaustedProviderError(error)) {
-            exhaustedProviders.set(passReviewerConfig.model, error);
-          }
-          const detail =
-            error instanceof RuleAgentError && error.detail
-              ? ` ${error.detail}`
-              : "";
-          console.error(
-            `Rule review provider failed (rule ${ruleId}, model ${passReviewerConfig.model}):`,
-            error instanceof Error ? error.message : String(error),
-            detail,
-          );
-          throw error;
-        }
-      };
-    const compilationText = selectCompilationText(
-      sanitizedText,
-      interpretation.normalizedText,
-    );
-    const compilationRequest = {
-      // The dealer's own sentence, kept separate from `officialInterpretation`
-      // so the compiler can still see it after the deterministic path replaces
-      // that field with the AST-derived description. The player approved THIS
-      // sentence, so the artifact has to keep it.
-      agentInterpretation: [
-        interpretation.dealerMessage,
-        interpretation.officialInterpretation,
-      ]
-        .filter(Boolean)
-        .join("\n"),
-      model: passCompilerConfig.model,
-      officialInterpretation: interpretation.officialInterpretation,
-      originalText: sanitizedText,
-      // Compile the normalized interpretation. This avoids a second model
-      // call whenever the deterministic compiler already supports the
-      // normalized rule, while groundedness below still compares it with the
-      // player's source meaning.
-      prompt: compilationText,
-      ruleId,
-      tokenCount,
-    };
-    const compilerOptions = {
-      astProvider: createAstProvider(),
-      astReviewer: createAstReviewer(),
-      // Diagnostic only: lifts the cross-provider consensus gate so a rule
-      // that keeps hitting PROVIDER_DISAGREEMENT can be compiled and
-      // inspected. The divergence is still recorded in the validation log.
-      disableConsensus: envFlag(
-        process.env.TYCHE_RULE_COMPILER_CONSENSUS_DISABLED,
-      ),
-      // A complete deterministic reading is the most reliable artifact for a
-      // rule shape the audited compiler already supports. It is still checked
-      // by the dedicated source-only reviewer; novel rules continue through
-      // schema-constrained LLM artifact generation.
-      preferDeterministic: true,
-      requireProviderEvidence: true,
-      // Lets the compiler tell the reviewer apart from a routing slot running
-      // the same weights. `LLM_MODEL_REVIEW` and `LLM_SECONDARY_MODEL` are the
-      // same model in this repository's own configuration, and without this the
-      // secondary slot's candidate could be corroborated by the model that
-      // generated it.
-      reviewerModelId: passReviewerConfig.model,
-    };
-    let validation = await compileRuleArtifact(
-      compilationRequest,
-      compilerOptions,
-    );
-    const rejectedAttempts = validation.log.attemptDiagnostics.filter(
-      (attempt) => attempt.decision === "INVALID",
-    );
-    const seenRejectedCandidates = new Set(
-      rejectedAttempts
-        .map(rejectedCompilerAttemptFingerprint)
-        .filter((fingerprint): fingerprint is string => fingerprint !== null),
-    );
-    let repairFeedback = buildCompilerRepairFeedback(validation);
-    const MAX_VALIDATION_REPAIRS = 2;
-    for (
-      let repairAttempt = 1;
-      validation.decision !== "VALID" &&
-      repairFeedback &&
-      repairAttempt <= MAX_VALIDATION_REPAIRS;
-      repairAttempt += 1
-    ) {
+    let [runA, runB] = await Promise.all([
+      runCompiler(sanitizedText, compilerA, library, signal),
+      runCompiler(sanitizedText, compilerB, library, signal),
+    ]);
+    const attempts = [compilerAttemptDiagnostic(runA), compilerAttemptDiagnostic(runB)];
+    // One compiler produced a viable AST and the other produced nothing usable
+    // (a stall, an off-grammar or degenerate AST): the failed side gets exactly
+    // one fresh attempt. Acceptance still needs both ASTs to agree
+    // behaviorally, so a retry can only turn a failure into agreement or into
+    // a visible disagreement (J11: 4 of 6 such losses compiled on rerun).
+    const retrySide = compilerRetrySide(runA, runB);
+    if (retrySide) {
       reportProgress({
-        message: `Rebuilding the rule from validation findings (${repairAttempt}/${MAX_VALIDATION_REPAIRS})...`,
-        model: passCompilerConfig.model,
+        message: "One compiler gave no usable result; asking it once more...",
+        model: retrySide === "A" ? compilerA.model : compilerB.model,
         stage: "compiling",
       });
-      const repaired = await compileRuleArtifact(compilationRequest, {
-        ...compilerOptions,
-        astProvider: createAstProvider(repairFeedback),
-        // A deterministic candidate that already failed fidelity must not be
-        // selected again. The repair is a fresh schema-constrained generation;
-        // the deterministic parser remains its independent reviewer when it has
-        // a complete reading of the text.
-        preferDeterministic: false,
-        requireProviderEvidence: true,
-      });
-      validation = repaired;
-      const repairedRejectedAttempts = repaired.log.attemptDiagnostics.filter(
-        (attempt) => attempt.decision === "INVALID",
-      );
-      const freshCandidateKeys = repairedRejectedAttempts
-        .map(rejectedCompilerAttemptFingerprint)
-        .filter((fingerprint): fingerprint is string => fingerprint !== null);
-      const producedNewCandidate = freshCandidateKeys.some(
-        (candidate) => !seenRejectedCandidates.has(candidate),
-      );
-      freshCandidateKeys.forEach((candidate) =>
-        seenRejectedCandidates.add(candidate),
-      );
-      rejectedAttempts.push(...repairedRejectedAttempts);
-      repairFeedback = buildCompilerRepairFeedback(validation);
-      // Re-running the same deterministic/schema candidate cannot consume new
-      // diagnostics or produce a different result. Stop the bounded loop here;
-      // another identical call only spends latency and model budget.
-      if (freshCandidateKeys.length > 0 && !producedNewCandidate) {
-        break;
-      }
+      const retried = await runCompiler(sanitizedText, retrySide === "A" ? compilerA : compilerB, library, signal);
+      attempts.push(compilerAttemptDiagnostic(retried));
+      if (retrySide === "A") runA = retried;
+      else runB = retried;
     }
-    let grounded: boolean | undefined;
-    let readingIsFaithful: boolean | undefined;
-    let promiseIsKept: boolean | undefined;
-    if (guardianConfig.enabled && validation.decision === "VALID") {
-      reportProgress({
-        message: "Checking that the compiled rule matches your words...",
-        model: guardianConfig.model,
-        stage: "checking_fidelity",
-      });
-      try {
-        // TWO groundedness questions, each asked in the direction the check can
-        // actually answer.
-        //
-        // Groundedness scores whether every claim in the RESPONSE is supported by
-        // the DOCUMENT. That relation is not symmetric, and getting the direction
-        // wrong turns the guard into a lexical-overlap filter. Scoring the
-        // artifact description against the player's text does exactly that: the
-        // description is fully explicit (tie handling, ordering, exact counts)
-        // while the player's sentence is terse, so the model is asked to find
-        // support for detail the player never wrote. Measured against a corpus of
-        // faithful rules it rejected 4 of 6 novel compositions and 1 of 3 known
-        // ones — including a fluent, curated description — which would have
-        // confined the game to rule shapes that already have hand-written prose.
-        //
-        // 1. Did the dealer's reading drift from the player's words? The agent's
-        //    sentence is generated FROM that text, so it is a subset claim and the
-        //    direction is right.
-        readingIsFaithful = await checkGroundedness(
-          compileText,
-          interpretation.officialInterpretation,
-          guardianConfig,
-          signal,
-        );
-        // 2. Does the FROZEN artifact actually do what the dealer promised? Here
-        //    the artifact description is the complete, authoritative statement and
-        //    the dealer's sentence is the subset claim — so a promise the artifact
-        //    does not implement is an unsupported claim, which is precisely what
-        //    groundedness detects. Same corpus: 6/6 faithful pairs pass, 2/2
-        //    over-promises caught.
-        //
-        //    This is the semantic complement of AGENT_STATEMENT_MISMATCH, which
-        //    catches the same fault deterministically but only through literal
-        //    values and named operations.
-        const artifactStatement = validation.artifact?.officialInterpretation;
-        promiseIsKept =
-          artifactStatement === undefined
-            ? true
-            : await checkClaimGroundedness(
-                artifactStatement,
-                interpretation.officialInterpretation,
-                guardianConfig,
-                signal,
-              );
-        grounded = readingIsFaithful && promiseIsKept;
-      } catch (error) {
-        if (signal?.aborted) {
-          throw signal.reason ?? error;
-        }
-        guardianNote = `Guardian groundedness check unavailable: ${
-          error instanceof Error ? error.message : String(error)
-        }`;
-      }
+    const pair = classifyCompilerPair(runA, runB);
+    if (pair.kind === "reject") {
+      return {
+        ...refuse({
+          blockingReasonCodes: pair.reasonCodes,
+          gate: runA.gate ?? runB.gate,
+          model: compilerA.model,
+          rejectedAttempts: attempts,
+          retryable: pair.retryable,
+        }),
+        ledger: ledgerDecision,
+      };
     }
+    const gateA = runA.gate!;
+    const gateB = runB.gate!;
+    const astA = gateA.ast!;
+    const astB = gateB.ast!;
+
+    // 3. Behavioral equivalence over the evidence library and the seeded
+    //    random scenarios (code only).
+    const disagreeing = disagreements(astA, astB, library, RANDOM_EVIDENCE);
+    const equivalent = disagreeing.length === 0;
+
+    // 4. The Jev artifact check: on A when the compilers agree, on both when
+    //    they do not (exactly one supported AST may then be selected).
+    reportProgress({
+      message: "Checking the compiled rule against every condition...",
+      stage: "checking_artifact",
+    });
+    const evidenceA = boundaryEvidence(astA, library, RANDOM_EVIDENCE).scenarios;
+    let checkA: CandidateJudgment;
+    let checkB: CandidateJudgment | null = null;
+    try {
+      [checkA, checkB] = await Promise.all([
+        checkArtifact({ ast: astA, evidence: evidenceA, jevConfig, ledger, signal }),
+        equivalent
+          ? Promise.resolve(null)
+          : checkArtifact({
+              ast: astB,
+              evidence: boundaryEvidence(astB, library, RANDOM_EVIDENCE).scenarios,
+              jevConfig,
+              ledger,
+              signal,
+            }),
+      ]);
+    } catch (error) {
+      if (signal?.aborted) throw signal.reason ?? error;
+      if (!(error instanceof JevError)) throw error;
+      console.error(`Artifact semantic check failed (rule ${ruleId}):`, error);
+      return {
+        ...refuse({ blockingReasonCodes: ["SEMANTIC_CHECK_UNAVAILABLE"], gate: gateA, model: compilerA.model, rejectedAttempts: attempts, retryable: true }),
+        ledger: ledgerDecision,
+      };
+    }
+    const selection = selectCompiledCandidate({ checkA, checkB, equivalent, mode: artifactVeto });
+    const checkedDecision = (winner: "A" | "B") => (winner === "A" ? checkA : checkB!).decision;
+    if (selection.kind === "reject") {
+      return {
+        ...refuse({
+          blockingReasonCodes: [selection.reasonCode],
+          checks: { artifact: checkA.decision },
+          gate: gateA,
+          model: compilerA.model,
+          rejectedAttempts: attempts,
+          retryable: selection.reasonCode === "PROVIDER_DISAGREEMENT",
+        }),
+        ledger: ledgerDecision,
+      };
+    }
+    const winnerGate = selection.winner === "A" ? gateA : gateB;
+    const winnerConfig = selection.winner === "A" ? compilerA : compilerB;
+    const otherConfig = selection.winner === "A" ? compilerB : compilerA;
+    const validation = buildCompilerCandidateResult({
+      blockingReasonCodes: [],
+      constrainedDecodingUsed: true,
+      extraStages: [
+        {
+          detail: equivalent
+            ? `Compiler ${otherConfig.model} produced a behaviorally equivalent AST on ${library.length} evidence-library and ${RANDOM_EVIDENCE.length} random scenarios.`
+            : `Compilers disagreed on ${disagreeing.length} scenarios; the semantic check supported only ${winnerConfig.model}'s AST.`,
+          reasonCodes: [],
+          stage: "independent_review",
+          status: equivalent ? "passed" : "failed",
+        },
+        {
+          detail: `Semantic artifact check: ${checkedDecision(selection.winner)} (veto mode ${artifactVeto}).`,
+          reasonCodes: [],
+          stage: "semantic_check",
+          status: "passed",
+        },
+        {
+          detail: "AST-only compile: behavioral evidence is computed by code, not supplied by the compiler.",
+          reasonCodes: [],
+          stage: "provider_evidence",
+          status: "skipped",
+        },
+      ],
+      gate: winnerGate,
+      modelIdentity: compilerModelIdentity(winnerConfig),
+      providerPath: [],
+      request: compilationRequest,
+      timestamp,
+    });
     return {
-      compilerModel: passCompilerConfig.model,
-      grounded,
-      interpretation,
-      model,
-      promiseIsKept,
-      readingIsFaithful,
-      rejectedAttempts,
+      ast: winnerGate.ast,
+      checks: { artifact: checkedDecision(selection.winner) },
+      generationRetryable: false,
+      ledger: ledgerDecision,
+      ledgerQuestions: [],
+      rejectedAttempts: [],
       validation,
+      winnerModel: winnerConfig.model,
     };
   };
 
-  // 3-5. Fast pass on the primary model. Escalate to the stronger model only when
-  // the fast model produced an invalid AST or the guardian flagged a drifted
-  // interpretation — then re-try before blocking the player (PRD §7.3/§7.4).
-  // Proactive routing: rules with negation/inverse ("miss/fewer/least") or
-  // compound connectors ("and/or") are exactly where the small model produces a
-  // wrong-but-plausible AST the guardian can miss. Route those straight to the
-  // stronger model instead of relying on a reactive catch.
-  const escalationModel = runtime.escalationModel;
-  const sameModel = (left: string, right: string) =>
-    left.trim().toLowerCase() === right.trim().toLowerCase();
-  const complexRule = isComplexRule(compileText);
-  const proactivelyEscalateInterpretation = Boolean(
-    escalationModel &&
-    !approvedInterpretation &&
-    complexRule &&
-    !sameModel(escalationModel, agentConfig.model),
-  );
-  const proactivelyEscalateCompiler = Boolean(
-    escalationModel &&
-    complexRule &&
-    !sameModel(escalationModel, compilerConfig.model),
-  );
-  const firstModel =
-    proactivelyEscalateInterpretation && escalationModel
-      ? escalationModel
-      : agentConfig.model;
-  const firstCompilerModel =
-    proactivelyEscalateCompiler && escalationModel
-      ? escalationModel
-      : compilerConfig.model;
+  const outcome = await compile();
+  const validation = outcome.validation;
+  const reasonCodes = [...validation.log.reasonCodes];
+  const rejectedCompilerAttempts = outcome.rejectedAttempts;
 
-  if (!sameModel(firstModel, agentConfig.model)) {
-    await ensureDealerModelReady(firstModel, signal);
-  }
-  if (
-    !sameModel(firstCompilerModel, compilerConfig.model) &&
-    !sameModel(firstCompilerModel, firstModel)
-  ) {
-    await ensureDealerModelReady(firstCompilerModel, signal);
-  }
-  const rejectedCompilerAttempts: RuleCompilationAttemptDiagnostic[] = [];
-  let pass = await dealerPass(firstModel, firstCompilerModel);
-  rejectedCompilerAttempts.push(...pass.rejectedAttempts);
-  let escalated =
-    !sameModel(firstModel, agentConfig.model) ||
-    !sameModel(firstCompilerModel, compilerConfig.model);
-  const needsEscalation = shouldEscalateRulePreflight(
-    pass.validation.decision,
-    pass.grounded,
-  );
-  const escalationChangesInterpretation = Boolean(
-    escalationModel &&
-    !approvedInterpretation &&
-    !sameModel(pass.model, escalationModel),
-  );
-  const escalationChangesCompiler = Boolean(
-    escalationModel && !sameModel(pass.compilerModel, escalationModel),
-  );
-  if (
-    needsEscalation &&
-    escalationModel &&
-    (escalationChangesInterpretation || escalationChangesCompiler)
-  ) {
-    // The escalation attempt must never break the preflight: if the stronger
-    // model is unavailable/slow, keep the primary result and surface the note.
-    try {
-      await ensureDealerModelReady(escalationModel, signal);
-      const strong = await dealerPass(
-        escalationChangesInterpretation ? escalationModel : pass.model,
-        escalationChangesCompiler ? escalationModel : pass.compilerModel,
-      );
-      if (strong.validation.decision === "VALID" && strong.grounded !== false) {
-        pass = strong;
-        escalated = true;
-      }
-      rejectedCompilerAttempts.push(...strong.rejectedAttempts);
-    } catch (error) {
-      if (signal?.aborted) {
-        throw signal.reason ?? error;
-      }
-      guardianNote = `Escalation to ${escalationModel} unavailable: ${
-        error instanceof Error ? error.message : String(error)
-      }`;
-    }
-  }
-
-  const { interpretation, validation } = pass;
   // Once approved, the compiler cannot replace these user-visible sentences.
-  // It may describe its AST for audit, and semantic review may append a material
-  // impact disclosure, but a truncated artifact can never rewrite the record to
-  // make itself look faithful.
+  // It may describe its AST for audit, and semantic review may append a
+  // material impact disclosure, but it never rewrites the approved record.
   const playerFacingStatements = selectPlayerFacingRuleStatements(
     interpretation,
     validation.artifact,
-    approvedInterpretation !== undefined,
+    true,
   );
-  const modelNormalizedText = playerFacingStatements.normalizedText;
+  const normalizedText = playerFacingStatements.normalizedText;
   const baseOfficialInterpretation =
     playerFacingStatements.officialInterpretation;
-  const guardianGrounded = pass.grounded;
-  // Approval resolves player intent; it does not validate the generated AST.
-  // A negative fidelity verdict blocks freezing even when the compiler's final
-  // attempt contains no conflict (set-13 N2r froze a wrong OR under that gap).
-  const guardianBlocked = shouldGuardianBlockRulePreflight(guardianGrounded);
-  const groundednessFailure = guardianBlocked
-    ? buildGroundednessFailureFeedback({
-        promiseIsKept: pass.promiseIsKept,
-        readingIsFaithful: pass.readingIsFaithful,
-      })
-    : null;
-
   const ruleAst = validation.artifact?.ast ?? null;
-  // The headline sentence is what the player approved, voters read, and the
-  // normalized-text hash commits. Statement-fidelity diagnostics may reject or
-  // annotate it, but the AST never gains authority to rewrite that approval.
   const statementFidelity = ruleAst
-    ? analyzeStatementFidelity({ ast: ruleAst, statement: modelNormalizedText })
+    ? analyzeStatementFidelity({ ast: ruleAst, statement: normalizedText })
     : null;
-  const normalizedText = modelNormalizedText;
   const sourceSpans = validation.artifact?.sourceSpans ?? null;
   // Technical validity is not the same as confirmed intent. Inspect the frozen
   // AST instead of trusting model prose so tautologies, draw-only/guess-only
@@ -4802,18 +4618,13 @@ async function runRulePreflightPipeline(
     normalizedText,
     officialInterpretation: baseOfficialInterpretation,
     // Only the player's submitted text can confirm a material consequence.
-    // A translation or model normalization must never manufacture consent.
     sourceText: sanitizedText,
   });
-  const decision = resolveRulePreflightDecision(
-    validation.decision,
-    guardianBlocked,
-    semanticReview.impact.triviallyAlwaysTrue,
-  );
+  const decision: RuleValidationDecision =
+    semanticReview.impact.triviallyAlwaysTrue ? "INVALID" : validation.decision;
 
   // Re-proposal gate: block a valid rule whose canonical meaning already held a
-  // mandate (was elected active in a past turn). A semantically invalid rule is
-  // rejected first and is never presented as a re-proposal candidate.
+  // mandate (was elected active in a past turn).
   const reproposalBlocked =
     decision === "VALID" &&
     ruleAst !== null &&
@@ -4836,27 +4647,13 @@ async function runRulePreflightPipeline(
         };
       })()
     : null;
-  const reasonCodes = [...validation.log.reasonCodes];
-  if (guardianBlocked) reasonCodes.push("GUARDIAN_FIDELITY_CONFLICT");
-  const retryReasonCodes =
-    reasonCodes.includes("AMBIGUOUS_RULE") &&
-    validation.log.providerDisagreementReadings.filter(isPreflightViableRewrite)
-      .length < 2
-      ? reasonCodes.filter((code) => code !== "AMBIGUOUS_RULE")
-      : reasonCodes;
   const generationRetryable =
+    outcome.generationRetryable &&
     !reproposalBlocked &&
     !semanticReview.impact.triviallyAlwaysTrue &&
-    !semanticReview.confirmationRequired &&
-    ((validation.decision !== "VALID" &&
-      !guardianBlocked &&
-      isRuleGenerationRetryable(retryReasonCodes)) ||
-      (validation.decision === "VALID" && guardianBlocked));
-
+    !semanticReview.confirmationRequired;
   const needsClarification =
-    interpretation.needsClarification ||
     decision !== "VALID" ||
-    guardianBlocked ||
     reproposalBlocked ||
     semanticReview.confirmationRequired;
   const reasonSummary = semanticReview.impact.triviallyAlwaysTrue
@@ -4864,10 +4661,7 @@ async function runRulePreflightPipeline(
       "This rule is always true and cannot distinguish winners from losers.")
     : reproposalBlocked
       ? "This rule was already the Rule of the Hour in a previous turn. To reuse it, add a condition that differentiates it (e.g. combine it with another criterion over the numbers)."
-      : guardianBlocked
-        ? (groundednessFailure?.reasonSummary ??
-          "The fidelity check could not verify the compiled rule.")
-        : (semanticReview.reasonSummary ?? validation.log.reasonSummary);
+      : (semanticReview.reasonSummary ?? validation.log.reasonSummary);
   const semanticRejectionFeedback =
     semanticReview.impact.triviallyAlwaysTrue && validation.decision === "VALID"
       ? {
@@ -4887,8 +4681,7 @@ async function runRulePreflightPipeline(
   const semanticConfirmationFeedback =
     semanticReview.confirmationRequired &&
     validation.decision === "VALID" &&
-    !reproposalBlocked &&
-    !guardianBlocked
+    !reproposalBlocked
       ? {
           clarityNote: semanticReview.clarityNote,
           dealerMessage:
@@ -4902,32 +4695,18 @@ async function runRulePreflightPipeline(
           suggestedRewrites: semanticReview.suggestedRewrites,
         }
       : null;
-  const groundednessFailureFeedback =
-    guardianBlocked &&
-    validation.decision === "VALID" &&
-    !reproposalBlocked &&
-    !semanticReview.impact.triviallyAlwaysTrue
-      ? groundednessFailure
-      : null;
-  const rejectedAttemptDiagnostics =
-    rejectedCompilerAttempts.length > 0 ? rejectedCompilerAttempts : undefined;
   const refinementFeedback =
     semanticRejectionFeedback ??
     semanticConfirmationFeedback ??
-    groundednessFailureFeedback ??
-    (needsClarification && !reproposalBlocked && !guardianBlocked
+    (needsClarification && !reproposalBlocked
       ? buildRuleRefinementFeedback({
-          agentClarificationQuestions: interpretation.clarificationQuestions,
-          agentSuggestedRewrites: interpretation.suggestedRewrites,
+          agentClarificationQuestions: outcome.ledgerQuestions,
+          agentSuggestedRewrites: [],
           clarityNote: interpretation.clarityNote,
-          compileText,
+          compileText: sanitizedText,
           officialInterpretation,
-          providerDisagreementBlocked:
-            validation.log.providerDisagreementBlocked,
-          providerDisagreementReadings:
-            validation.log.providerDisagreementReadings,
           rejectedCompilerAttempts,
-          reasonCodes: validation.log.reasonCodes,
+          reasonCodes,
           reasonSummary,
           sanitizedText,
           semanticImpact: semanticReview.impact,
@@ -4936,10 +4715,10 @@ async function runRulePreflightPipeline(
       : null);
 
   // Keep the artifact this run compiled so the paid proposal can freeze it
-  // instead of being recompiled by the deterministic parser after payment. Only
-  // an accepted artifact is kept: `decision` is the acceptance signal the player
-  // pays against, and `resolveRulePreflightDecision` can only downgrade the
-  // compiler's verdict, so a VALID decision always carries an artifact.
+  // instead of being recompiled after payment. Only an accepted artifact is
+  // kept: `decision` is the acceptance signal the player pays against, and it
+  // can only be downgraded from the compiler's verdict, so a VALID decision
+  // always carries an artifact.
   if (decision === "VALID" && validation.artifact && validation.artifactHash) {
     registerPreflightCompiledArtifact({
       artifact: validation.artifact,
@@ -4948,22 +4727,31 @@ async function runRulePreflightPipeline(
       sanitizedText,
     });
   }
+  const boundaryExamples =
+    decision === "VALID" && ruleAst ? buildBoundaryExamples(ruleAst, library) : [];
+  const semanticChecks: RuleSemanticCheckDecisions = {
+    artifact: outcome.checks.artifact,
+    ledger: outcome.ledger,
+    // Re-checked in this phase; any other verdict has already thrown.
+    safety: "safe",
+  };
 
   const preflightResult = JSON.stringify({
     // Hashed alongside everything else the player is shown: the commitment must
-    // cover the artifact they can now inspect, not only the prose about it.
+    // cover the artifact and the examples they can now inspect, not only the
+    // prose about it.
     ast: ruleAst,
+    boundaryExamples,
     sourceSpans,
     compiledArtifactHash: decision === "VALID" ? validation.artifactHash : null,
     confirmationRequired: semanticReview.confirmationRequired,
     coverage,
     decision,
-    guardianGrounded: guardianGrounded ?? null,
     generationRetryable,
     maxTokens: RULE_MAX_TOKENS,
-    modelUsed: pass.compilerModel,
+    modelUsed: outcome.winnerModel,
     reasonCodes,
-    rejectedCompilerAttempts: rejectedAttemptDiagnostics ?? [],
+    rejectedCompilerAttempts,
     refinementQuestions: refinementFeedback?.refinementQuestions ?? [],
     reproposalBlocked,
     ruleId,
@@ -4978,12 +4766,27 @@ async function runRulePreflightPipeline(
     unsupportedStatementClaims: statementFidelity?.unsupportedClaims ?? [],
     // 13: `semanticImpact` carries `astAvailable`.
     // 15: compilation cannot replace approved interpretation text.
-    version: 15,
+    // 16: two-compiler pipeline; boundary examples are committed, the
+    //     Guardian verdict is gone.
+    version: 16,
   });
 
   return {
     addedOperationalClauses: interpretation.addedOperationalClauses,
     ast: ruleAst,
+    boundaryExamples,
+    claimLedger: serializeClaimLedger(interpretation.claimLedger),
+    // Re-issued so a generation retry of this approval keeps skipping the
+    // repeated Jev ledger call; only for a ledger this phase confirmed.
+    claimLedgerAttestation:
+      outcome.ledger === "LEDGER_VERIFIED"
+        ? issueLedgerAttestation({
+            key: resolveLedgerAttestationKey(),
+            ledger: interpretation.claimLedger,
+            nowMs: Date.now(),
+            sanitizedText,
+          })
+        : null,
     clarityNote:
       refinementFeedback?.clarityNote ??
       (needsClarification && !interpretation.clarityNote
@@ -4995,29 +4798,22 @@ async function runRulePreflightPipeline(
     decision,
     dealerMessage:
       refinementFeedback?.dealerMessage ??
-      (approvedInterpretation && decision === "VALID"
-        ? "Done! I compiled your approved rule. Review it before submitting."
+      (decision === "VALID"
+        ? "Done! I compiled your approved rule. Check the examples of how it plays out before submitting."
         : interpretation.dealerMessage),
-    // Not gated on `ruleAst` (which is the *artifact* AST, so null on every
-    // rejection): the difficulty measurement is exactly what a blocked player
-    // needs explained. `difficultyMeasured` is what tells a consumer whether
-    // this is a measurement or the unmeasured IMPOSSIBLE default; the UI keeps
-    // gating its own tag through `getVisibleRuleDifficultyClass`.
+    // The difficulty measurement is exactly what a blocked player needs
+    // explained; `difficultyMeasured` tells a consumer whether it ran.
     difficultyClass: validation.log.difficultyClass,
     difficultyMeasured: validation.log.difficultyMeasured,
-    englishText: compileText,
+    englishText: sanitizedText,
     estimatedWinRate: validation.log.estimatedWinRate,
     estimatedWinRateBelowSampleResolution:
       validation.log.estimatedWinRateBelowSampleResolution,
     estimatedWinRateUpperBound: validation.log.estimatedWinRateUpperBound,
-    escalated,
     finalConfidence: validation.log.confidence.final_confidence,
-    guardianChecked: guardianConfig.enabled,
-    guardianGrounded,
-    guardianNote: guardianNote || undefined,
     generationRetryable,
     maxTokens: RULE_MAX_TOKENS,
-    modelUsed: pass.compilerModel,
+    modelUsed: outcome.winnerModel,
     needsClarification,
     normalizedText,
     normalizedTextHash: hashBytes(normalizedText),
@@ -5026,8 +4822,8 @@ async function runRulePreflightPipeline(
     preflightResultHash: hashBytes(preflightResult),
     reasonCodes,
     reasonSummary: refinementFeedback?.reasonSummary ?? reasonSummary,
-    ...(rejectedAttemptDiagnostics
-      ? { rejectedCompilerAttempts: rejectedAttemptDiagnostics }
+    ...(rejectedCompilerAttempts.length > 0
+      ? { rejectedCompilerAttempts }
       : {}),
     ...(refinementFeedback
       ? {
@@ -5040,6 +4836,8 @@ async function runRulePreflightPipeline(
     ruleMode: validation.artifact?.ruleMode,
     sanitizedText,
     sanitizedTextHash: hashBytes(sanitizedText),
+    ledgerVerifiedBy,
+    semanticChecks,
     semanticImpact: semanticReview.impact,
     sourceSpans,
     ...(refinementFeedback?.suggestedRewrite
@@ -6043,11 +5841,34 @@ function describeRulePreflightError(error: unknown) {
   }
 
   const code = error instanceof Error ? error.message : "RULE_REJECTED";
+  // Service outages of the semantic checker are retryable, never a verdict on
+  // the rule: 503, so the client offers a retry instead of a rewrite.
+  if (
+    code === "RULE_SAFETY_UNAVAILABLE" ||
+    code === "RULE_SEMANTIC_CHECK_UNAVAILABLE"
+  ) {
+    return {
+      body: {
+        error: code,
+        message:
+          code === "RULE_SAFETY_UNAVAILABLE"
+            ? "The safety check is unavailable right now, so the rule was not processed. Try again in a moment."
+            : "The rule checker is unavailable right now, so your rule could not be verified. Try again in a moment.",
+      },
+      status: 503,
+    };
+  }
   return {
     body: {
       error: code,
       message:
-        code === "RULE_PROMPT_INJECTION"
+        code === "RULE_SEMANTIC_UNSAFE"
+          ? "That is blocked because it tries to instruct the compiler, reach protected data, or depend on something other than your guess and the official draw. Rewrite it as a plain winning condition."
+          : code === "RULE_SAFETY_UNRESOLVED"
+            ? "The safety check could not confirm that this rule only describes a winning condition over your guess and the official draw. Rewrite it as one plain condition that uses only those numbers."
+            : code === "RULE_APPROVAL_REQUIRED"
+              ? "Approve the dealer's reading of your rule before it is compiled."
+              : code === "RULE_PROMPT_INJECTION"
           ? "Rule text contains prompt-injection language. Rewrite it as a measurable game condition."
           : code === "RULE_EXTERNAL_DEPENDENCY"
             ? "Rule text depends on unavailable external game state. Rewrite it using only your guess and the official draw."
@@ -14925,30 +14746,44 @@ if (isMainModule()) {
     });
 }
 
-// On boot, load the dealer (and guardian) models into Ollama so the first
-// player request doesn't pay the cold-load latency. Best-effort: logs what it
-// did and never blocks or crashes startup if the LLM isn't configured/running.
+// On boot, load the dealer models into Ollama so the first player request
+// doesn't pay the cold-load latency, and prove the semantic checker still
+// resolves to its pinned model. Best-effort: logs what it did and never blocks
+// or crashes startup; a request still fails closed on the same condition.
 async function warmDealerModels() {
   let runtime;
   try {
     runtime = getDealerRuntime();
-  } catch {
-    console.log("[warmup] dealer LLM not configured; skipping model warm-up");
+  } catch (error) {
+    console.log(
+      `[warmup] dealer pipeline not configured; skipping warm-up: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
     return;
   }
 
   const {
     agent: agentConfig,
     compiler: compilerConfig,
-    escalationModel,
-    guardian: guardianConfig,
+    compilerSecondary: compilerSecondaryConfig,
   } = runtime;
   const targets = [
     agentConfig.model,
     compilerConfig.model,
-    escalationModel,
-    guardianConfig.enabled ? guardianConfig.model : "",
+    compilerSecondaryConfig.model,
   ].filter((model, index, all) => model && all.indexOf(model) === index);
+
+  try {
+    const resolved = await ensureJevAliasVerified(getShutdownSignal());
+    console.log(`[warmup] semantic checker resolves to ${resolved}`);
+  } catch (error) {
+    console.error(
+      `[warmup] semantic checker is not usable; rule preflight will fail closed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 
   for (const model of targets) {
     const result = await ensureDealerModelReady(model, getShutdownSignal());

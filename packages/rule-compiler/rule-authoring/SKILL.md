@@ -27,7 +27,7 @@ comparison (see references/patterns.md).
 
 The top-level response is:
 
-`{"ast":<rule-ast>,"consumedSpans":[{"text":<exact-source-substring>}],"workedExamples":[<examples>]}`
+`{"ast":<rule-ast>,"consumedSpans":[{"text":<exact-source-substring>}],"provenanceRecords":[<record-per-semantic-ast-path>],"workedExamples":[<examples>]}`
 
 The decoder enforces this response schema. `workedExamples` accepts no extra
 fields and every `guess`/`draw` is exactly six distinct integer values from 1
@@ -40,6 +40,16 @@ not repaired or partially accepted.
   A range such as "strictly greater than 10 and strictly less than 90" may be one
   span even when represented by one quantified AST condition. A compound rule
   with two independent conditions needs coverage for both.
+- `provenanceRecords` must contain exactly one record for every semantic path in
+  the emitted AST, including the top-level `result`. Each record is
+  `{"astPath":<root-relative-path>,"sourceSpans":[<exact-source-substring>],"claimedBehavior":<plain-English-behavior>,"selectionReason":<why-the-cited-source-requires-this-unit>}`.
+  Use the actual object path, with bracket indexes for clauses, such as
+  `result.predicate`, `result.predicate.left`, or
+  `result.predicate.clauses[0]`. Cite only exact substrings of the normalized
+  source. Describe what the selected node does in this rule; do not claim that
+  schema validity proves fidelity. These records are audit evidence only: the
+  server independently renders every path and never trusts provider prose as
+  executable behavior.
 - For a predicate, `workedExamples` must contain at least TWO valid domain cases:
   `{"guess":[six unique 1-100 numbers],"draw":[six unique 1-100 numbers],"outcome":"WIN"|"LOSE"}`.
   Derive the expected outcomes from the player's text before checking the AST.

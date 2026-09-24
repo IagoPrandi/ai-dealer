@@ -17,6 +17,7 @@ import {
   deriveRuleProposalAddress,
   getActionCutoffTimestamp,
   waitForConfirmedProgramAccount,
+  type RuleBoundaryExampleApi,
   type RulePreflightResult,
 } from "../../../solana/tycheProgram";
 import { fetchActiveTurnSnapshotFromWorker } from "../../../solana/activeTurnApi";
@@ -157,6 +158,74 @@ const DIFFICULTY_TAG: Record<string, { color: string; label: string }> = {
   TOO_EASY: { color: "var(--yellow)", label: "Too easy" },
 };
 
+/**
+ * Computed tickets on both sides of the accepted rule's boundary, shown before
+ * the player signs. Same row vocabulary as the settled round's worked examples
+ * (Result.tsx): an outcome badge plus DM Mono values. Every outcome comes from
+ * the runtime evaluating the frozen AST; nothing here is model prose.
+ */
+function RuleBoundaryExamples({
+  examples,
+}: {
+  examples: readonly RuleBoundaryExampleApi[];
+}) {
+  return (
+    <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
+      <SectionLabel>See how it plays out</SectionLabel>
+      <div aria-label="Examples of the compiled rule" className="ide-rule-examples" role="list">
+        {examples.map((example) =>
+          example.entries ? (
+            <div className="ide-rule-example" key={example.id} role="listitem">
+              <span className="ide-num" style={{ color: "var(--muted)" }}>
+                draw{" "}
+                <span className="ide-rule-example-values">
+                  {example.draw.join(" ")}
+                </span>
+              </span>
+              {example.entries.map((entry, index) => (
+                <span
+                  key={entry.player}
+                  style={{ alignItems: "center", display: "flex", gap: 8, width: "100%" }}
+                >
+                  <span
+                    className={`ide-rule-example-outcome ${entry.wins ? "is-win" : "is-lose"}`}
+                  >
+                    {entry.wins ? "WIN" : "LOSE"}
+                  </span>
+                  <span>
+                    ticket {String.fromCharCode(65 + index)}{" "}
+                    <span className="ide-num ide-rule-example-values">
+                      {entry.ticket.join(" ")}
+                    </span>
+                  </span>
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div className="ide-rule-example" key={example.id} role="listitem">
+              <span
+                className={`ide-rule-example-outcome ${example.outcome === "WIN" ? "is-win" : "is-lose"}`}
+              >
+                {example.outcome}
+              </span>
+              <span>
+                ticket{" "}
+                <span className="ide-num ide-rule-example-values">
+                  {example.ticket.join(" ")}
+                </span>{" "}
+                · draw{" "}
+                <span className="ide-num ide-rule-example-values">
+                  {example.draw.join(" ")}
+                </span>
+              </span>
+            </div>
+          ),
+        )}
+      </div>
+    </div>
+  );
+}
+
 function RulePreview({
   onRetryGeneration,
   rule,
@@ -284,6 +353,9 @@ function RulePreview({
             />
           </p>
         </>
+      ) : null}
+      {stream === null && valid && rule.boundaryExamples?.length ? (
+        <RuleBoundaryExamples examples={rule.boundaryExamples} />
       ) : null}
       {stream === null && !valid && rule.reasonSummary ? (
         <p
@@ -1553,7 +1625,11 @@ function CreateChat({
       clarityNote: rule.clarityNote,
       dealerMessage: rule.dealerMessage,
       englishText: rule.normalizedText,
-      guardianChecked: false,
+      // The verified ledger travels back so the retry compiles the same
+      // approved reading; the API re-verifies it and refuses one it lacks.
+      claimLedger: rule.claimLedger ?? null,
+      // Lets the server skip re-asking Jev about the ledger it already verified.
+      claimLedgerAttestation: rule.claimLedgerAttestation ?? null,
       needsClarification: false,
       normalizedText: rule.normalizedText,
       officialInterpretation: rule.officialInterpretation,

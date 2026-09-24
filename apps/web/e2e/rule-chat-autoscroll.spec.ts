@@ -36,7 +36,7 @@ function interpretation(text: string) {
       clarityNote: "",
       dealerMessage: LONG_INTERPRETATION,
       englishText: text,
-      guardianChecked: false,
+      claimLedger: null,
       needsClarification: false,
       normalizedText: text,
       officialInterpretation: LONG_INTERPRETATION,
@@ -51,6 +51,9 @@ function interpretation(text: string) {
 test("the newest rule-creation content is scrolled into view after a long dealer answer", async ({
   page,
 }) => {
+  // The long answer reveals character by character (the 60 s wait below);
+  // the default 30 s test budget ends the test before that wait can.
+  test.slow();
   await mockShellData(page);
   await mockRulePreflight(page, (body) => ({
     json: interpretation(body.text),

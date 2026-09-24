@@ -117,9 +117,32 @@ export interface ActiveTurnSnapshot {
   turnStateAddress: null | ReturnType<typeof address>;
 }
 
+/** The claim ledger the API verified; returned so a retry can resend it. */
+export interface RuleClaimLedgerApi {
+  claims: { dimension: string; meaning: string; sourceSpan: string }[];
+  openChoices: { question: string; sourceSpan: string | null }[];
+}
+
+/**
+ * A ticket on one side of the accepted rule's decision boundary. The outcome is
+ * computed by the settlement runtime from the frozen AST, never written by a
+ * model. Ranking rules also list every competing entry.
+ */
+export interface RuleBoundaryExampleApi {
+  draw: number[];
+  entries?: { player: string; ticket: number[]; wins: boolean }[];
+  id: string;
+  outcome: "LOSE" | "WIN";
+  ticket: number[];
+}
+
 export interface RulePreflightResult {
   addedOperationalClauses: string[];
   ast?: unknown | null;
+  /** Empty unless the rule was accepted. Missing on drafts saved before it existed. */
+  boundaryExamples?: readonly RuleBoundaryExampleApi[];
+  claimLedger?: RuleClaimLedgerApi | null;
+  claimLedgerAttestation?: string | null;
   clarityNote: string;
   confirmationRequired: boolean;
   coverage: {

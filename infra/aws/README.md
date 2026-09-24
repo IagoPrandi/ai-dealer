@@ -175,7 +175,7 @@ cat >/tmp/tyche-secrets.json <<'JSON'
   "LLM_BASE_URL": "https://openrouter.ai/api/v1",
   "LLM_MODEL": "...",
   "LLM_MODEL_COMPILE": "...",
-  "LLM_MODEL_REVIEW": "...",
+  "LLM_MODEL_COMPILE_B": "...",
   "API_KEY_OPENROUTER": "...",
   "LLM_API_KEY": "...",
   "TYCHE_TURN_AUTHORITY_KEYPAIR": "[12,34,...]",

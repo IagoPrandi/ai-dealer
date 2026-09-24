@@ -8,7 +8,6 @@ import {
   ensureModelLoaded,
   interpretRuleWithAgent,
   isExhaustedProviderError,
-  resolveEscalationModel,
   resolveApiKeyForEndpoint,
   resolveDealerChatConfig,
   resolveDealerChatTrace,
@@ -17,8 +16,7 @@ import {
   isSchemaRejection,
   RuleAgentError,
   resolveRuleCompilerConfig,
-  resolveRuleReviewerConfig,
-  reviewRuleToAst,
+  resolveSecondaryCompilerConfig,
   resolveTranslateToEnglish,
   streamDealerQuestionAnswer,
   supportsRuleCompilationSchema,
@@ -371,7 +369,6 @@ test("rule agent config ignores inline comments copied from .env examples", () =
   const env = {
     LLM_API_KEY: "ollama # dummy value",
     LLM_BASE_URL: "http://localhost:11434/v1 # local endpoint",
-    LLM_ESCALATION_MODEL: "gemma4:e2b # stronger model",
     LLM_MODEL: "gemma4:latest # primary model",
     LLM_SEED: "7 # deterministic",
     LLM_TIMEOUT_MS: "300000 # slow local model",
@@ -385,7 +382,6 @@ test("rule agent config ignores inline comments copied from .env examples", () =
   assert.equal(config.model, "gemma4:latest");
   assert.equal(config.seed, 7);
   assert.equal(config.timeoutMs, 300_000);
-  assert.equal(resolveEscalationModel(env), "gemma4:e2b");
   assert.equal(resolveTranslateToEnglish(env), false);
 });
 
@@ -398,12 +394,8 @@ test("the compile role honors its explicit schema-capable model override", () =>
 
   assert.equal(resolveRuleAgentConfig(env).model, "nemotron-3-super:cloud");
   assert.equal(resolveRuleCompilerConfig(env).model, "qwen3.5:9b");
-  assert.equal(resolveRuleReviewerConfig(env).model, "qwen3.5:9b");
   assert.equal(
-    resolveRuleReviewerConfig({
-      ...env,
-      LLM_MODEL_REVIEW: "qwen3.5:27b",
-    }).model,
+    resolveSecondaryCompilerConfig({ ...env, LLM_MODEL_COMPILE_B: "qwen3.5:27b" }).model,
     "qwen3.5:27b",
   );
 
@@ -414,69 +406,38 @@ test("the compile role honors its explicit schema-capable model override", () =>
   );
 });
 
-test("the LLM reviewer performs a separate source-only reasoning pass", async () => {
-  let requestBody: Record<string, unknown> = {};
-  const candidate = {
-    ast: {
-      schemaVersion: 3,
-      result: {
-        type: "predicate",
-        predicate: {
-          kind: "compare",
-          op: "gt",
-          left: {
-            kind: "reduce",
-            op: "sum",
-            of: { kind: "source", source: "guess" },
-          },
-          right: {
-            kind: "reduce",
-            op: "sum",
-            of: { kind: "source", source: "draw" },
-          },
-        },
-      },
-    },
-    consumedSpans: [{ text: "guess sum is greater than the draw sum" }],
-    workedExamples: [
-      {
-        draw: [1, 2, 3, 4, 5, 6],
-        guess: [95, 96, 97, 98, 99, 100],
-        outcome: "WIN",
-      },
-      {
-        draw: [95, 96, 97, 98, 99, 100],
-        guess: [1, 2, 3, 4, 5, 6],
-        outcome: "LOSE",
-      },
-    ],
-  };
-  globalThis.fetch = (async (
-    _input: Parameters<typeof fetch>[0],
-    init?: Parameters<typeof fetch>[1],
-  ) => {
-    requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
-    return new Response(
-      JSON.stringify({
-        choices: [{ message: { content: JSON.stringify(candidate) } }],
-      }),
-      { status: 200 },
-    );
-  }) as typeof fetch;
+test("the second compiler must name a different model and fails closed when missing", () => {
+  const env = {
+    LLM_BASE_URL: "http://localhost:11434/v1",
+    LLM_MODEL: "gemma4:latest",
+    LLM_MODEL_COMPILE: "qwen3.5:9b",
+  } as unknown as NodeJS.ProcessEnv;
 
-  const text = "A guess wins if its guess sum is greater than the draw sum.";
-  assert.deepEqual(await reviewRuleToAst(text, CONFIG), candidate);
-  const messages = requestBody.messages as Array<{
-    content: string;
-    role: string;
-  }>;
-  assert.match(messages[0]?.content ?? "", /independent semantic review/i);
-  assert.match(
-    messages[0]?.content ?? "",
-    /have not seen the draft candidate/i,
+  assert.throws(() => resolveSecondaryCompilerConfig(env), /LLM_MODEL_COMPILE_B/u);
+  assert.throws(
+    () => resolveSecondaryCompilerConfig({ ...env, LLM_MODEL_COMPILE_B: "QWEN3.5:9b" }),
+    /different model/u,
   );
-  assert.equal(messages[1]?.content, text);
-  assert.equal(requestBody.reasoning_effort, "none");
+  // Blank from `.env` is missing, not "use compiler A".
+  assert.throws(() => resolveSecondaryCompilerConfig({ ...env, LLM_MODEL_COMPILE_B: "  " }), /LLM_MODEL_COMPILE_B/u);
+});
+
+test("an explicit compile timeout bounds both compilers and is validated", () => {
+  const env = {
+    LLM_BASE_URL: "http://localhost:11434/v1",
+    LLM_MODEL: "gemma4:latest",
+    LLM_MODEL_COMPILE: "qwen3.5:9b",
+    LLM_MODEL_COMPILE_B: "qwen3.5:27b",
+  } as unknown as NodeJS.ProcessEnv;
+  // Unset, the shared five-minute window applies.
+  assert.equal(resolveRuleCompilerConfig(env).timeoutMs, 300_000);
+  const bounded = { ...env, LLM_COMPILE_TIMEOUT_MS: "90000" };
+  assert.equal(resolveRuleCompilerConfig(bounded).timeoutMs, 90_000);
+  assert.equal(resolveSecondaryCompilerConfig(bounded).timeoutMs, 90_000);
+  // Interpretation and chat keep the shared window.
+  assert.equal(resolveRuleAgentConfig(bounded).timeoutMs, 300_000);
+  assert.throws(() => resolveRuleCompilerConfig({ ...env, LLM_COMPILE_TIMEOUT_MS: "5000" }), /LLM_COMPILE_TIMEOUT_MS/u);
+  assert.throws(() => resolveRuleCompilerConfig({ ...env, LLM_COMPILE_TIMEOUT_MS: "fast" }), /LLM_COMPILE_TIMEOUT_MS/u);
 });
 
 test("rule agent config enforces a five-minute minimum timeout", () => {
@@ -869,8 +830,6 @@ test("compile requests schema-constrained tickets and never falls back to JSON m
   await compileRuleToAst(
     "A guess wins if its first number is greater than 1.",
     CONFIG,
-    undefined,
-    "Rejected validation codes: PROVIDER_EVIDENCE_UNVERIFIED.",
   );
 
   const responseFormat = (requestBody as Record<string, unknown>)
@@ -879,42 +838,26 @@ test("compile requests schema-constrained tickets and never falls back to JSON m
     json_schema?: {
       name?: string;
       strict?: boolean;
-      schema?: {
-        properties?: {
-          workedExamples?: {
-            items?: {
-              anyOf?: Array<{
-                properties?: { guess?: Record<string, unknown> };
-              }>;
-            };
-          };
-        };
-      };
+      schema?: { properties?: Record<string, unknown>; required?: string[] };
     };
   };
   assert.equal(responseFormat.type, "json_schema");
-  assert.equal(
-    responseFormat.json_schema?.name,
-    "tyche_rule_compilation_candidate",
-  );
+  assert.equal(responseFormat.json_schema?.name, "tyche_rule_ast");
   assert.equal(responseFormat.json_schema?.strict, true);
-  const ticket =
-    responseFormat.json_schema?.schema?.properties?.workedExamples?.items
-      ?.anyOf?.[0]?.properties?.guess;
-  assert.deepEqual(ticket, {
-    type: "array",
-    minItems: 6,
-    maxItems: 6,
-    items: { type: "integer", minimum: 1, maximum: 100 },
-  });
+  // The two-compiler pipeline asks for the AST and nothing else: no spans,
+  // provenance or worked examples to be judged as paperwork.
+  assert.deepEqual(Object.keys(responseFormat.json_schema?.schema?.properties ?? {}), ["ast"]);
+  assert.deepEqual(responseFormat.json_schema?.schema?.required, ["ast"]);
   const messages =
     (
       requestBody as {
         messages?: Array<{ content?: string; role?: string }>;
       }
     ).messages ?? [];
-  assert.match(messages[0]?.content ?? "", /validation-guided re-ask/i);
-  assert.match(messages[0]?.content ?? "", /PROVIDER_EVIDENCE_UNVERIFIED/);
+  assert.match(messages[0]?.content ?? "", /AST-only envelope/i);
+  // Independence: no server-authored plan is injected, so two compilers cannot
+  // both copy the same deterministic reading.
+  assert.doesNotMatch(messages[0]?.content ?? "", /server-verified semantic plan/i);
   assert.equal(
     messages[1]?.content,
     "A guess wins if its first number is greater than 1.",
@@ -1126,8 +1069,7 @@ test("direct positional rules constrain the LLM to indexed access", async () => 
     messages[0]?.content ?? "",
     /1-based ordinal to a 0-based index/i,
   );
-  assert.match(messages[0]?.content ?? "", /server-verified semantic plan/i);
-  assert.match(messages[0]?.content ?? "", /"index":5/);
+  assert.doesNotMatch(messages[0]?.content ?? "", /server-verified semantic plan/i);
   const indexedResponseFormat = requestBodies[1]?.response_format as {
     json_schema?: {
       schema?: { definitions?: Record<string, { anyOf?: unknown[] }> };
@@ -2019,57 +1961,49 @@ test("the compile role can be pinned to the endpoint that can decode the schema"
   // ...and that endpoint IS accepted as the artifact emitter.
   assert.equal(supportsRuleCompilationSchema(compiler), true);
 
-  // The reviewer follows the compiler's endpoint; only its model may differ.
-  const reviewer = resolveRuleReviewerConfig({
+  // Compiler B follows the compile endpoint; only its model differs.
+  const secondary = resolveSecondaryCompilerConfig({
     API_KEY_GROQ: "gsk-real",
     LLM_API_KEY: "ollama",
     LLM_BASE_URL: "https://api.groq.com/openai/v1",
     LLM_COMPILE_BASE_URL: "http://localhost:11434/v1",
     LLM_MODEL: "qwen/qwen3.8-27b",
     LLM_MODEL_COMPILE: "gemma4:latest",
-    LLM_MODEL_REVIEW: "gemma4:e2b",
+    LLM_MODEL_COMPILE_B: "gemma4:e2b",
   } as NodeJS.ProcessEnv);
-  assert.equal(reviewer.baseUrl, "http://localhost:11434/v1");
-  assert.equal(reviewer.model, "gemma4:e2b");
+  assert.equal(secondary.baseUrl, "http://localhost:11434/v1");
+  assert.equal(secondary.model, "gemma4:e2b");
 });
 
-test("the reviewer can be budgeted apart from the compiler that shares its endpoint", () => {
+test("the second compiler can be budgeted and routed apart from compiler A", () => {
   const shared = {
     LLM_API_KEY: "ollama",
     LLM_BASE_URL: "http://localhost:11434/v1",
     LLM_COMPILE_MAX_OUTPUT_TOKENS: "16384",
     LLM_MODEL: "gemma4:latest",
-    LLM_MODEL_REVIEW: "mistralai/mistral-small-24b-instruct-2501",
+    LLM_MODEL_COMPILE_B: "deepseek/deepseek-v4-flash",
   } as NodeJS.ProcessEnv;
 
-  // Unset, the reviewer inherits the compile budget: a reasoning reviewer needs
-  // room for its hidden trace, so no floor is imposed here.
-  assert.equal(resolveRuleReviewerConfig(shared).maxOutputTokens, 16_384);
-  assert.equal(resolveRuleCompilerConfig(shared).maxOutputTokens, 16_384);
-
-  // Set, it bounds the reviewer WITHOUT touching the compiler. A review that
-  // loops otherwise runs to the compile ceiling and returns nothing.
-  const capped = {
-    ...shared,
-    LLM_REVIEW_MAX_OUTPUT_TOKENS: "2048",
-  } as NodeJS.ProcessEnv;
-  assert.equal(resolveRuleReviewerConfig(capped).maxOutputTokens, 2_048);
+  // Unset, compiler B inherits the compile budget.
+  assert.equal(resolveSecondaryCompilerConfig(shared).maxOutputTokens, 16_384);
+  const capped = { ...shared, LLM_COMPILE_B_MAX_OUTPUT_TOKENS: "4096" } as NodeJS.ProcessEnv;
+  assert.equal(resolveSecondaryCompilerConfig(capped).maxOutputTokens, 4_096);
   assert.equal(resolveRuleCompilerConfig(capped).maxOutputTokens, 16_384);
 
-  // The reviewer may also move to its own endpoint, which carries its own key.
-  const routed = resolveRuleReviewerConfig({
+  // It may move to its own endpoint, whose key follows the endpoint...
+  const routed = resolveSecondaryCompilerConfig({
     ...shared,
     API_KEY_OPENROUTER: "sk-or-real",
-    LLM_REVIEW_BASE_URL: "https://openrouter.ai/api/v1/",
+    LLM_COMPILE_B_BASE_URL: "https://openrouter.ai/api/v1/",
   } as NodeJS.ProcessEnv);
   assert.equal(routed.baseUrl, "https://openrouter.ai/api/v1");
   assert.equal(routed.apiKey, "sk-or-real");
-  // ...and moving it must not drag the compiler along.
+  // ...without dragging compiler A along.
   assert.equal(
     resolveRuleCompilerConfig({
       ...shared,
       API_KEY_OPENROUTER: "sk-or-real",
-      LLM_REVIEW_BASE_URL: "https://openrouter.ai/api/v1/",
+      LLM_COMPILE_B_BASE_URL: "https://openrouter.ai/api/v1/",
     } as NodeJS.ProcessEnv).baseUrl,
     "http://localhost:11434/v1",
   );

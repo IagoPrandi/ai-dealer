@@ -27,11 +27,10 @@ import { cpus, freemem, loadavg, platform, totalmem } from "node:os";
  */
 export type AiUsageStep =
   | "chat"
+  | "claim_ledger"
   | "compile"
-  | "guardian_groundedness"
-  | "guardian_jailbreak"
   | "interpret"
-  | "review"
+  | "semantic_check"
   | "translate";
 
 /**
@@ -647,9 +646,8 @@ export interface ProviderReportedUsage {
 /**
  * Reads the token counters out of a chat-completions payload.
  *
- * Two shapes are accepted because the pipeline talks to two surfaces: the
- * OpenAI-compatible `usage` object (OpenRouter, Groq, vLLM, and Ollama's `/v1`),
- * and Ollama's NATIVE `/api/chat`, which the Granite guardian uses and which
+ * Two shapes are accepted: the OpenAI-compatible `usage` object (OpenRouter,
+ * Groq, vLLM, and Ollama's `/v1`), and Ollama's NATIVE `/api/chat`, which
  * reports `prompt_eval_count` / `eval_count` instead. Returns null when neither
  * is present, so the call is recorded as `not_reported` rather than as zero
  * tokens.

@@ -18,6 +18,9 @@ J0 and J1 are implemented and ready for owner review. Their PRD checkboxes remai
 
 ## Reproducibility boundary
 
+> **Runner retired (2026-09-22).** This comparison's runner imported the production Guardian, which the J11 production integration removed. The runner and the Guardian client remain in git history at commit `e3306bd`; check that commit out to reproduce these results.
+
+
 - Corpus: `jev-pipeline-corpus-v1`, exactly 10 immutable source proposals: 5 clear, 3 ambiguous, and 2 blocked.
 - Corpus SHA-256: `f925049a8c2105065eb441c42b17fe11fb331b415ce1aedc3cbe0526ede1b178`.
 - State schema: `jev-pipeline-state-v1`.

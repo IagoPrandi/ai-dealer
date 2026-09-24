@@ -1,9 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  compileRuleArtifact,
+  buildCompilerCandidateResult,
+  gateCompilerCandidate,
   validateAndPrecompileRule,
+  type RuleCompilerStageResult,
 } from "@tyche/rule-compiler";
+
+const REVIEWED_STAGES: RuleCompilerStageResult[] = [
+  { detail: "Compiler B agreed.", reasonCodes: [], stage: "independent_review", status: "passed" },
+  { detail: "Semantic check supported.", reasonCodes: [], stage: "semantic_check", status: "passed" },
+];
 import {
   runRuleValidationCycle,
   type PublishedRuleValidation,
@@ -42,11 +49,17 @@ test("runRuleValidationCycle publishes valid and invalid validation logs", async
       if (deterministic.decision !== "VALID" || !deterministic.artifact) {
         return deterministic;
       }
-      return compileRuleArtifact(request, {
-        astProvider: async () => deterministic.artifact!.ast,
-        astReviewer: async () => deterministic.artifact!.ast,
-        preferDeterministic: true,
-        requireProviderEvidence: true,
+      // The shape the two-compiler preflight freezes: the same AST with the
+      // second compiler's review and the semantic check on record.
+      return buildCompilerCandidateResult({
+        blockingReasonCodes: [],
+        constrainedDecodingUsed: true,
+        extraStages: REVIEWED_STAGES,
+        gate: gateCompilerCandidate(deterministic.artifact.ast),
+        modelIdentity: deterministic.artifact.modelIdentity,
+        providerPath: [],
+        request,
+        timestamp,
       });
     },
   });
@@ -94,7 +107,7 @@ test("runRuleValidationCycle refuses an unreviewed VALID artifact", async () => 
       },
       validateRule: async () => unreviewed,
     }),
-    /without the required independent review and provider-evidence audit/u,
+    /without the required second-compiler review and semantic-check audit/u,
   );
   assert.equal(published, false);
 });

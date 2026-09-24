@@ -1,6 +1,5 @@
 import {
   buildRuleCompilerSkillPrompt,
-  getDeterministicRuleCompilerPlan,
   getRuleCompilationCandidateJsonSchema,
   providerCompilationHasSchemaValidAst,
 } from "@tyche/rule-compiler";
@@ -90,6 +89,9 @@ export class RuleAgentError extends Error {
 // Never let a stale environment value reduce the user-visible response window.
 const MIN_TIMEOUT_MS = 300_000;
 const DEFAULT_TIMEOUT_MS = MIN_TIMEOUT_MS;
+// The opt-in compile bound is for hosted compilers only (see
+// resolveRuleCompilerConfig); it still leaves room for a reasoning re-ask.
+const MIN_COMPILE_TIMEOUT_MS = 30_000;
 // Reasoning models (minimax-m3, qwen3-thinking, ...) emit a hidden trace before
 // the JSON answer and spend the output budget on it — and Ollama's cloud models
 // ignore `reasoning_effort: "none"`, so the trace cannot be turned off. A long or
@@ -143,9 +145,14 @@ function firstConfigured(...values: Array<string | undefined>): string {
  */
 type ReasoningTrace = "full" | "low" | "suppressed";
 
-interface AgentJsonSchemaConstraint {
+export interface AgentJsonSchemaConstraint {
   name: string;
   schema: unknown;
+}
+
+export interface AgentChatMessage {
+  content: string;
+  role: "assistant" | "user";
 }
 
 /**
@@ -457,23 +464,11 @@ function transportControls(
   return controls;
 }
 
-// The stronger model used to re-try a rule when the fast primary model produces
-// an invalid/drifted result (escalation). Empty disables escalation.
-export function resolveEscalationModel(
-  env: NodeJS.ProcessEnv = process.env,
-): string {
-  return firstConfigured(env.LLM_ESCALATION_MODEL);
-}
-
-// Whether to translate the rule to English EAGERLY, before interpret/compile.
-// ON by default (it removes cross-language ambiguity for small models).
-//
-// Read the note in `runRulePreflightPipeline` before trusting `false` to skip
-// the call: it only does so when the guardian is DISABLED. With the guardian on,
-// the jailbreak screen buys its own English reading of a non-English rule and
-// that reading becomes the compiled text, so the call happens and the
-// translation compiles either way. This is deliberate — the guard misreads the
-// player's own language — and the flag then only chooses when it happens.
+// Whether the interpreter reads an English translation of the rule instead of
+// the player's own words. ON by default (it removes cross-language ambiguity
+// for small models); `false` skips the translate call. It never changes what
+// the compilers, the claim ledger or the safety gate read: those always read
+// the player's sanitized text.
 export function resolveTranslateToEnglish(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
@@ -582,6 +577,21 @@ export function resolveRuleCompilerConfig(
   // all — so the compile role frequently belongs somewhere other than the
   // provider serving interpretation and chat.
   applyRoleEndpoint(config, env.LLM_COMPILE_BASE_URL, env.LLM_COMPILE_MAX_OUTPUT_TOKENS, env);
+  // A hosted compiler answers in seconds; a call still open after
+  // LLM_COMPILE_TIMEOUT_MS is a stalled provider (J11: ~300 s stalls on items
+  // that compiled in 2-8 s on rerun). Unset, the shared LLM_TIMEOUT_MS applies,
+  // which a cold local model needs.
+  const compileTimeout = cleanEnvValue(env.LLM_COMPILE_TIMEOUT_MS);
+  if (compileTimeout) {
+    const value = Number(compileTimeout);
+    if (!Number.isInteger(value) || value < MIN_COMPILE_TIMEOUT_MS) {
+      throw new RuleAgentError(
+        "RULE_AGENT_NOT_CONFIGURED",
+        `LLM_COMPILE_TIMEOUT_MS must be an integer of at least ${MIN_COMPILE_TIMEOUT_MS} ms.`,
+      );
+    }
+    config.timeoutMs = value;
+  }
   return config;
 }
 
@@ -609,34 +619,36 @@ function applyRoleEndpoint(
 }
 
 /**
- * Independent source-to-AST review role. It may use a different model from the
- * draft generator; when no override is configured it still runs as a separate,
- * differently prompted reasoning pass on the schema-capable compile model.
+ * Compiler B: the second, independent AST compiler. Acceptance requires the two
+ * compilers to agree behaviorally, and that agreement is evidence only when
+ * different weights produced it, so B must name its own model
+ * (`LLM_MODEL_COMPILE_B`) and it must differ from compiler A's. It inherits the
+ * compile endpoint and budget unless `LLM_COMPILE_B_BASE_URL` /
+ * `LLM_COMPILE_B_MAX_OUTPUT_TOKENS` move it; the key follows the endpoint.
+ * There is no single-compiler fallback: a missing or duplicate B fails closed.
  */
-export function resolveRuleReviewerConfig(
+export function resolveSecondaryCompilerConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): RuleAgentConfig {
   const compiler = resolveRuleCompilerConfig(env);
-  const model = firstConfigured(env.LLM_MODEL_REVIEW, compiler.model);
-  // The reviewer reads the same schema the compiler emits, so it inherits the
-  // compile endpoint and budget by default; only the model normally differs.
-  const config = model === compiler.model ? { ...compiler } : { ...compiler, model };
-  // ...but its budget is worth setting apart, because the reviewer is the step
-  // where an over-large budget costs the most. It emits one AST candidate and
-  // nothing else: measured on `mistralai/mistral-small-24b-instruct-2501`, a
-  // successful review is ~450 output tokens. When that model instead loops, it
-  // runs to the full 16384-token ceiling and returns nothing usable — measured
-  // at 12927 output tokens and ~240 s per call, three times in one rule, which
-  // was 38% of that rule's total spend bought for no result. The review is also
-  // the one step whose failure is not fatal (a missing second opinion is
-  // reported as SECOND_OPINION_UNAVAILABLE), so capping it trades nothing.
-  //
-  // Left inheriting the compile budget by default: a reasoning reviewer needs
-  // headroom for its hidden trace, and a floor chosen here would truncate it.
+  const model = firstConfigured(env.LLM_MODEL_COMPILE_B);
+  if (!model) {
+    throw new RuleAgentError(
+      "RULE_AGENT_NOT_CONFIGURED",
+      "The second rule compiler is not configured. Set LLM_MODEL_COMPILE_B to a model different from LLM_MODEL_COMPILE.",
+    );
+  }
+  if (model.toLowerCase() === compiler.model.toLowerCase()) {
+    throw new RuleAgentError(
+      "RULE_AGENT_NOT_CONFIGURED",
+      "LLM_MODEL_COMPILE_B must name a different model from LLM_MODEL_COMPILE; one model asked twice is not an independent compile.",
+    );
+  }
+  const config = { ...compiler, model };
   applyRoleEndpoint(
     config,
-    env.LLM_REVIEW_BASE_URL,
-    env.LLM_REVIEW_MAX_OUTPUT_TOKENS,
+    env.LLM_COMPILE_B_BASE_URL,
+    env.LLM_COMPILE_B_MAX_OUTPUT_TOKENS,
     env,
   );
   return config;
@@ -1258,6 +1270,9 @@ async function requestAgentJson(
   // How much the model may think before answering — see `transportControls`.
   trace: ReasoningTrace = "suppressed",
   schemaConstraint?: AgentJsonSchemaConstraint,
+  // Turns after the first user message, for a bounded revision of the same
+  // request (the claim ledger's one repair). Empty for a single-shot call.
+  followUp: readonly AgentChatMessage[] = [],
 ): Promise<string> {
   const headers: Record<string, string> = {
     "content-type": "application/json",
@@ -1276,7 +1291,11 @@ async function requestAgentJson(
   ) =>
     recordTransportCall({
       config,
-      inputParts: [systemPrompt, userText],
+      inputParts: [
+        systemPrompt,
+        userText,
+        ...followUp.map((message) => `${message.role}:${message.content}`),
+      ],
       outcome,
       payload,
       startedAt: attempt?.startedAt ?? startedAt,
@@ -1293,6 +1312,7 @@ async function requestAgentJson(
         messages: [
           { content: systemPrompt, role: "system" },
           { content: userText, role: "user" },
+          ...followUp,
         ],
         model: config.model,
         max_tokens: config.maxOutputTokens,
@@ -1420,6 +1440,39 @@ export async function interpretRuleWithAgent(
     signal,
   );
   return coerceInterpretation(extractJsonObject(candidate));
+}
+
+/**
+ * One schema-constrained JSON request, parsed but not interpreted. The caller
+ * owns the prompt and validates the returned value itself. Fails closed on an
+ * endpoint that cannot enforce the schema while decoding.
+ */
+export async function requestStructuredJson(args: {
+  config: RuleAgentConfig;
+  followUp?: readonly AgentChatMessage[];
+  schema: AgentJsonSchemaConstraint;
+  signal?: AbortSignal | undefined;
+  step: AiUsageStep;
+  systemPrompt: string;
+  userText: string;
+}): Promise<{ parsed: unknown; raw: string }> {
+  if (!supportsRuleCompilationSchema(args.config)) {
+    throw new RuleAgentError(
+      "RULE_AGENT_SCHEMA_UNSUPPORTED",
+      `The endpoint configured for ${args.step} does not support schema-constrained decoding.`,
+    );
+  }
+  const raw = await requestAgentJson(
+    args.step,
+    args.systemPrompt,
+    args.userText,
+    args.config,
+    args.signal,
+    "suppressed",
+    args.schema,
+    args.followUp ?? [],
+  );
+  return { parsed: extractJsonObject(raw), raw };
 }
 
 export interface DealerQuestionAnswer {
@@ -2049,17 +2102,20 @@ export async function translateRuleToEnglish(
 // the schema, span, worked-example, and coverage gates.
 const COMPILE_BAD_RESPONSE_ATTEMPTS = 3;
 
-// Compile step (PRD §7.3.1): ask the model to emit an auditable compilation
-// candidate (AST + consumed source spans + source-derived worked examples).
-// The full candidate schema is passed to the decoder: JSON-object mode alone
-// cannot prohibit repeated, out-of-domain, or wrong-length tickets. The
-// compiler still revalidates every result as the non-bypassable boundary.
+// Compile step (PRD §7.3.1). Each of the two independent compilers emits an
+// AST-only envelope `{"ast": ...}` under the enforced JSON Schema. Source spans,
+// provenance and worked examples are no longer requested: code computes the
+// behavioral evidence (equivalence, boundary examples) from the AST itself.
+// The compiler still revalidates every result as the non-bypassable boundary.
+const AST_ONLY_GUIDANCE = `
+
+## AST-only envelope (this request)
+The decoder schema for this request is \`{"ast": <rule-ast>}\` and nothing else. Ignore every instruction above about \`consumedSpans\`, \`provenanceRecords\` and \`workedExamples\`: emit only the \`ast\` property. Everything else above about the grammar, binder scopes, the predicate-vs-ranking decision, negation, thresholds and ties still applies. Express exactly what the player's rule states; do not add or drop a condition.`;
+
 export async function compileRuleToAst(
   normalizedText: string,
   config: RuleAgentConfig = resolveRuleCompilerConfig(),
   signal?: AbortSignal,
-  validationFeedback?: string,
-  role: "generate" | "review" = "generate",
 ): Promise<unknown> {
   if (!supportsRuleCompilationSchema(config)) {
     throw new RuleAgentError(
@@ -2081,10 +2137,7 @@ export async function compileRuleToAst(
   // does, and it needs the same binder. Missing them made a compound rule
   // ("none of its even numbers appear in the draw AND the first drawn number is
   // odd") look purely positional, so the decoder below was told to forbid the
-  // one node that half of the rule requires — an unsatisfiable grammar. Measured
-  // on that rule: with the restriction both `mistral-small-24b` and
-  // `gpt-oss-20b` run to the full output ceiling and return no AST; without it
-  // both answer in under a second with a valid one.
+  // one node that half of the rule requires — an unsatisfiable grammar.
   //
   // An adjective may sit between the quantifier and the noun ("its EVEN
   // numbers"), so the optional middle group allows one.
@@ -2105,31 +2158,18 @@ export async function compileRuleToAst(
   // skill (PRD §7.10/§7.12), co-located with the DSL schema in @tyche/rule-compiler.
   // The executable schema is sent to the decoder instead of copied into the
   // prompt, so the transport and server validation share one source of truth.
-  const roleGuidance =
-    role === "review"
-      ? "\n\n## Independent semantic review\nCompile the exact player rule from scratch as an independent auditor. You have not seen the draft candidate. Re-derive every condition, comparator, source, position, threshold, conjunction, and negation before emitting the candidate. Do not copy a familiar example unless it expresses the complete rule."
-      : "";
-  const deterministicPlan =
-    role === "generate"
-      ? getDeterministicRuleCompilerPlan(normalizedText)
-      : null;
-  const semanticPlanGuidance = deterministicPlan
-    ? `\n\n## Server-verified semantic plan\nAn independent source parser proved that the following plan preserves every load-bearing value and operation in this rule. Encode this exact semantic structure; do not simplify, swap sources, change indices, or drop clauses. You still must derive consumedSpans from the source and calculate workedExamples independently.\nInterpretation: ${deterministicPlan.interpretation}\nAST plan: ${JSON.stringify(deterministicPlan.ast)}`
-    : "";
   // Rebuilt when the positional restriction is dropped below: the guidance
   // paragraph and the schema both encode it and must never disagree.
   const buildRequest = () => {
     const decoderGuidance = constrainDirectPositions
       ? "\n\n## Direct-position decoder constraint\nThis rule names individual positions and does not quantify over a collection. Represent every named position with `at(index, source)`, converting the player's 1-based ordinal to a 0-based index. Binder-only `elem` and `pair` nodes are unavailable for this request because no binder would define them. Preserve every positional clause and connector."
       : "";
-    const basePrompt = `${buildRuleCompilerSkillPrompt()}${roleGuidance}${decoderGuidance}${semanticPlanGuidance}`;
     return {
-      prompt: validationFeedback?.trim()
-        ? `${basePrompt}\n\n## Validation-guided re-ask\nThe previous candidate was rejected by deterministic validation. Produce a completely fresh candidate from the exact player rule. Do not weaken, omit, or reinterpret any condition merely to pass validation. Correct all of these server-authored findings:\n${validationFeedback.trim().slice(0, 2_000)}`
-        : basePrompt,
+      prompt: `${buildRuleCompilerSkillPrompt()}${AST_ONLY_GUIDANCE}${decoderGuidance}`,
       schemaConstraint: {
-        name: "tyche_rule_compilation_candidate",
+        name: "tyche_rule_ast",
         schema: getRuleCompilationCandidateJsonSchema({
+          astOnly: true,
           forbidBinderScopedScalars: constrainDirectPositions,
         }),
       } satisfies AgentJsonSchemaConstraint,
@@ -2151,18 +2191,11 @@ export async function compileRuleToAst(
     let candidate: string;
     try {
       candidate = await requestAgentJson(
-        // Generation and independent review are separately billed steps against
-        // the same ~15k-token prompt, so they are never merged in the accounting.
-        role === "review" ? "review" : "compile",
+        "compile",
         prompt,
         normalizedText,
         config,
         signal,
-      // The reviewer is independent because it has a different source-only
-      // prompt, not because it must spend an unbounded hidden trace. On local
-      // 9B models that trace can exceed the entire five-minute request window.
-      // As with generation, only an unusable structured response earns the
-      // slower full-reasoning retry.
         useFullTrace ? "full" : "suppressed",
         schemaConstraint,
       );
@@ -2171,10 +2204,7 @@ export async function compileRuleToAst(
       // signature of an UNSATISFIABLE grammar, not of a hard rule: the decoder
       // was forbidden the `elem`/`pair` nodes and the rule needs one, so no
       // token sequence can close the JSON and the model generates to the
-      // ceiling. Measured on "none of its even numbers appear in the draw and
-      // the first drawn number is odd": restricted, `mistral-small-24b` and
-      // `gpt-oss-20b` both run out with no AST; unrestricted, both answer in
-      // under a second. `namesQuantifiedCollection` is a whitelist and will miss
+      // ceiling. `namesQuantifiedCollection` is a whitelist and will miss
       // other phrasings, so the recovery is here rather than only in the regex.
       const exhaustedBudget =
         error instanceof RuleAgentError &&
@@ -2211,21 +2241,17 @@ export async function compileRuleToAst(
       continue;
     }
 
-    // The trace-suppressed mode degrades this model's nested output in two ways,
+    // The trace-suppressed mode degrades a model's nested output in two ways,
     // not one. A truncated envelope fails to parse and is caught above; a
-    // complete envelope whose AST is simply the wrong shape parses fine and used
-    // to be returned as-is, so it reached the player as SCHEMA_INVALID with the
-    // advice to rewrite a rule that had nothing wrong with it — while the re-ask
-    // built to recover exactly this never ran. Both are the same defect and both
-    // buy the thinking retry.
+    // complete envelope whose AST is simply the wrong shape parses fine. Both
+    // are the same defect and both buy the thinking retry.
     if (
       providerCompilationHasSchemaValidAst(parsed) ||
       attempt >= COMPILE_BAD_RESPONSE_ATTEMPTS ||
       signal?.aborted
     ) {
       // The last attempt is returned even when its AST is off-grammar: this
-      // transport never decides validity, so the downstream schema, span,
-      // worked-example and coverage gates still produce the real verdict.
+      // transport never decides validity; the deterministic gates do.
       return parsed;
     }
     useFullTrace = true;
@@ -2233,12 +2259,4 @@ export async function compileRuleToAst(
       `Rule compile attempt ${attempt} returned an AST outside the rule grammar; retrying with the reasoning trace.`,
     );
   }
-}
-
-export function reviewRuleToAst(
-  normalizedText: string,
-  config: RuleAgentConfig = resolveRuleReviewerConfig(),
-  signal?: AbortSignal,
-): Promise<unknown> {
-  return compileRuleToAst(normalizedText, config, signal, undefined, "review");
 }

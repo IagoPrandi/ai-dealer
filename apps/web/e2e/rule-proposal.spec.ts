@@ -15,7 +15,7 @@ function interpretation(text: string, options: { clarificationQuestions?: string
       clarityNote: options.needsClarification ? "The rule needs a more precise definition." : "",
       dealerMessage: options.needsClarification ? "I need clarification before I can generate this rule." : "This is how I understand your rule.",
       englishText: text,
-      guardianChecked: false,
+      claimLedger: null,
       needsClarification: options.needsClarification ?? false,
       normalizedText: text,
       officialInterpretation: "The engine compares only the player's guess and the official draw.",
@@ -27,10 +27,17 @@ function interpretation(text: string, options: { clarificationQuestions?: string
   };
 }
 
+// A computed pair on each side of "at least 2 drawn numbers", as the API returns it.
+const BOUNDARY_EXAMPLES = [
+  { draw: [10, 20, 30, 40, 50, 60], id: "matches_anywhere:1", outcome: "LOSE", ticket: [10, 1, 3, 5, 7, 9] },
+  { draw: [10, 20, 30, 40, 50, 60], id: "matches_anywhere:2", outcome: "WIN", ticket: [20, 10, 1, 3, 5, 7] },
+];
+
 function validPreflight(text: string, ruleId: number) {
   return {
     preflight: {
       addedOperationalClauses: [],
+      boundaryExamples: BOUNDARY_EXAMPLES,
       clarityNote: "",
       confirmationRequired: false,
       decision: "VALID",
@@ -121,6 +128,8 @@ function materialImpactPreflight(text: string) {
         "Check whether all six official draw numbers fall within the range from 9 to 40. Because this condition does not inspect the player's guess, every eligible guess wins or loses together.",
       officialInterpretationHash: hashBytes(10),
       preflightResultHash: hashBytes(11),
+      // The API always sends reason codes; the Create screen reads them.
+      reasonCodes: ["SUPPORTED_RULE"],
       reasonSummary:
         "Review required: confirm the rule's outcome scope and any numeric range boundaries before payment.",
       refinementQuestions: [
@@ -201,9 +210,45 @@ test("blocked prompt injection offers no generic replacement and accepts a playe
   ).toBeVisible();
 });
 
+test("an accepted rule shows computed examples of how it plays out before submission", async ({ page }) => {
+  const rule = "Win if at least 2 of your numbers appear in the draw.";
+  await mockShellData(page);
+  await mockRulePreflight(page, (body) =>
+    body.phase === "interpret"
+      ? { json: interpretation(body.text), status: 200 }
+      : { json: validPreflight(rule, 95), status: 200 },
+  );
+
+  await page.goto("/play/propose");
+  await page.getByLabel("Message", { exact: true }).fill(rule);
+  await page.getByRole("button", { name: "Send message" }).click();
+  await page.getByRole("button", { name: "Confirm and generate" }).click();
+
+  const examples = page.getByRole("list", { name: "Examples of the compiled rule" });
+  await expect(examples).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("See how it plays out")).toBeVisible();
+  const rows = examples.getByRole("listitem");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toContainText("LOSE");
+  await expect(rows.nth(0)).toContainText("10 1 3 5 7 9");
+  await expect(rows.nth(1)).toContainText("WIN");
+  await expect(rows.nth(1)).toContainText("20 10 1 3 5 7");
+
+  // The examples sit above the submission area, so they are read before
+  // signing. The mocked player has not played this turn, so that area shows
+  // the play-to-submit gate in place of the submit action.
+  const submit = page.getByRole("button", { name: /Play now/i }).first();
+  await expect(submit).toBeVisible();
+  const examplesBox = await examples.boundingBox();
+  const submitBox = await submit.boundingBox();
+  expect(examplesBox && submitBox && examplesBox.y < submitBox.y).toBe(true);
+});
+
 test("material-impact review blocks submission until draw-only range semantics are confirmed", async ({
   page,
 }) => {
+  // Three streamed dealer turns (interpret, review, recompile) outlast the default budget.
+  test.slow();
   await mockShellData(page);
   const original =
     "eu ganho se todos os número do sorteio forem entre 9 e 40";

@@ -176,6 +176,18 @@ if ! has_any LLM_MODEL LLM_MODEL_INTERPRET LLM_PRIMARY_MODEL; then
   exit 1
 fi
 
+# The rule pipeline needs two independent compilers and the Jev semantic
+# checker (apps/api/src/lifespan.ts getDealerRuntime). Without either the API
+# boots and then fails every rule preflight closed.
+if ! has_any LLM_MODEL_COMPILE_B; then
+  echo "[render-env] FATAL: the second rule compiler is not configured (LLM_MODEL_COMPILE_B)." >&2
+  exit 1
+fi
+if ! has_any API_KEY_OPENROUTER && ! has_any JEV_ENDPOINT; then
+  echo "[render-env] FATAL: the Jev semantic checker has no credential (API_KEY_OPENROUTER for the default endpoint, or JEV_ENDPOINT with its own key)." >&2
+  exit 1
+fi
+
 # Turn automation and rule precompilation both sign with the turn authority
 # (apps/worker/src/turn-automation.ts, apps/worker/src/precompile-loop.ts).
 # Without the keypair they throw on every tick while /health still reports

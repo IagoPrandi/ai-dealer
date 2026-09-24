@@ -34,3 +34,6 @@ nova-narrativa-jogo.md
 *.tfstate.*
 *.tfplan
 crash.log
+
+
+estrutura-landpading.md

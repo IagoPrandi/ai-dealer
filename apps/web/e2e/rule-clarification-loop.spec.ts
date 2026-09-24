@@ -23,7 +23,7 @@ function interpretation(
         ? "I need clarification before I can generate this rule."
         : "This is how I understand your rule.",
       englishText: text,
-      guardianChecked: false,
+      claimLedger: null,
       needsClarification,
       normalizedText: text,
       officialInterpretation:

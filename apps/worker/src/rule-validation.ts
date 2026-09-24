@@ -42,9 +42,9 @@ export interface RuleValidationCycleDeps {
   publishValidation: (validation: PublishedRuleValidation) => Promise<void>;
   /**
    * Must invoke the complete compiler pipeline. The worker verifies the
-   * resulting audit stages before publishing: independent review is mandatory,
-   * and a provider-authored artifact must also carry executed provider evidence.
-   * The worker deliberately has no deterministic fallback because a regex-only
+   * resulting audit before publishing: a VALID artifact needs the second
+   * compiler's behavioral review recorded and a passed semantic check. The
+   * worker deliberately has no deterministic fallback because a regex-only
    * artifact is not authoritative settlement input.
    */
   validateRule: (
@@ -69,16 +69,17 @@ function hasAuthoritativeValidationAudit(result: RuleValidationResult) {
   const independentReview = acceptedAttempt?.stages.find(
     (stage) => stage.stage === "independent_review",
   );
-  const providerEvidence = acceptedAttempt?.stages.find(
-    (stage) => stage.stage === "provider_evidence",
+  const semanticCheck = acceptedAttempt?.stages.find(
+    (stage) => stage.stage === "semantic_check",
   );
-  const deterministicArtifact = result.log.reasonCodes.includes("SUPPORTED_RULE");
+  // The second compiler must have actually run (agreed, or disagreed and the
+  // semantic check selected one AST); a skipped review is no review.
   return (
     result.artifact !== null &&
     result.artifactHash !== null &&
-    independentReview?.status === "passed" &&
-    (providerEvidence?.status === "passed" ||
-      (deterministicArtifact && providerEvidence?.status === "skipped"))
+    independentReview !== undefined &&
+    independentReview.status !== "skipped" &&
+    semanticCheck?.status === "passed"
   );
 }
 
@@ -93,7 +94,7 @@ export async function runRuleValidationCycle(
     const result = await deps.validateRule(rule, deps.nowIso());
     if (!hasAuthoritativeValidationAudit(result)) {
       throw new Error(
-        `Rule ${rule.ruleId} returned VALID without the required independent review and provider-evidence audit.`,
+        `Rule ${rule.ruleId} returned VALID without the required second-compiler review and semantic-check audit.`,
       );
     }
 
