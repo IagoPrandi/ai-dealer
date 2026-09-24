@@ -734,22 +734,22 @@ All checkboxes remain unchecked until the owner confirms the corresponding miles
 
 ### J11 — Production integration of P6 (§9.16)
 
-- [ ] Promote the J6/J8/J9 logic into production modules (`jev.ts`, `ruleClaimLedger.ts`, `ruleSemanticChecks.ts`, rule-compiler `evidence.ts`) with the experiments importing them.
-- [ ] Fix the deterministic tie-break false block, group and/or/not and exactly-one shapes in the deterministic description, and share one artifact builder between compile paths.
-- [ ] Replace the interpret and compile pipelines with P6 (configurable artifact veto, strict by default) and remove the Guardian, reviewer, repair loop, escalation, and provider-evidence path.
-- [ ] Show computed boundary examples before the player signs.
-- [ ] Measure the production pipeline over v1, held-out, fresh, and adversarial; publish the J11 report.
+- [x] Promote the J6/J8/J9 logic into production modules (`jev.ts`, `ruleClaimLedger.ts`, `ruleSemanticChecks.ts`, rule-compiler `evidence.ts`) with the experiments importing them.
+- [x] Fix the deterministic tie-break false block, group and/or/not and exactly-one shapes in the deterministic description, and share one artifact builder between compile paths.
+- [x] Replace the interpret and compile pipelines with P6 (configurable artifact veto, strict by default) and remove the Guardian, reviewer, repair loop, escalation, and provider-evidence path.
+- [x] Show computed boundary examples before the player signs.
+- [x] Measure the production pipeline over v1, held-out, fresh, and adversarial; publish the J11 report.
 
 ### J12 — Recall recovery under strict mode (§9.17)
 
-- [ ] Diagnose the J11 losses per stage and implement the targeted ledger, artifact-check, evidence, and compiler-retry changes with regression tests.
-- [ ] Evaluate the artifact-check state change offline on correct and wrong candidate ASTs (no new false support).
+- [x] Diagnose the J11 losses per stage and implement the targeted ledger, artifact-check, evidence, and compiler-retry changes with regression tests.
+- [x] Evaluate the artifact-check state change offline on correct and wrong candidate ASTs (no new false support).
 - [ ] Measure the production pipeline with three repeats and publish the J12 report (repeat 3 is incomplete: the OpenRouter budget ran out).
 
 ### J13 — Ledger attestation and frame-aware claims (§9.18)
 
-- [ ] Implement the server-signed ledger attestation (with tamper, expiry, and key tests) and the frame-aware ledger prompt.
-- [ ] Measure one production repeat and publish the J13 report.
+- [x] Implement the server-signed ledger attestation (with tamper, expiry, and key tests) and the frame-aware ledger prompt.
+- [x] Measure one production repeat and publish the J13 report.
 
 ### J7 — Full cumulative decision
 

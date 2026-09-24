@@ -128,6 +128,8 @@ function materialImpactPreflight(text: string) {
         "Check whether all six official draw numbers fall within the range from 9 to 40. Because this condition does not inspect the player's guess, every eligible guess wins or loses together.",
       officialInterpretationHash: hashBytes(10),
       preflightResultHash: hashBytes(11),
+      // The API always sends reason codes; the Create screen reads them.
+      reasonCodes: ["SUPPORTED_RULE"],
       reasonSummary:
         "Review required: confirm the rule's outcome scope and any numeric range boundaries before payment.",
       refinementQuestions: [
@@ -232,8 +234,10 @@ test("an accepted rule shows computed examples of how it plays out before submis
   await expect(rows.nth(1)).toContainText("WIN");
   await expect(rows.nth(1)).toContainText("20 10 1 3 5 7");
 
-  // The examples sit above the payment action, so they are read before signing.
-  const submit = page.getByRole("button", { name: /Submit to the round/i }).first();
+  // The examples sit above the submission area, so they are read before
+  // signing. The mocked player has not played this turn, so that area shows
+  // the play-to-submit gate in place of the submit action.
+  const submit = page.getByRole("button", { name: /Play now/i }).first();
   await expect(submit).toBeVisible();
   const examplesBox = await examples.boundingBox();
   const submitBox = await submit.boundingBox();
@@ -243,6 +247,8 @@ test("an accepted rule shows computed examples of how it plays out before submis
 test("material-impact review blocks submission until draw-only range semantics are confirmed", async ({
   page,
 }) => {
+  // Three streamed dealer turns (interpret, review, recompile) outlast the default budget.
+  test.slow();
   await mockShellData(page);
   const original =
     "eu ganho se todos os número do sorteio forem entre 9 e 40";

@@ -4,6 +4,21 @@ This tracker records milestone status, work logs, and required document confirma
 
 ## Work Log
 
+### 2026-09-23 (Landing-page structure and content assessment)
+
+- Opened `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `estrutura-landpading.md`, `guia-identidade-publica-tywish.md`, `nova-narrativa-jogo.md`, and `PRD-TOKENOMICS-v2.8.md`; inspected `.claude/skills` and applied the `tyche-design-system` and `tyche-ui-coherence` review guidance.
+- Assessed the proposed public landing structure without modifying implementation or milestone status. The review covers conversion clarity, brand alignment, mobile-first information priority, mechanics accuracy, JDR/tokenomics claims, transparency claims, and eligibility disclosures. No milestone was ticked: this is an assessment, not user confirmation.
+
+### 2026-09-23 (Web e2e for the rule flows)
+
+- Stopped the owner's dev server on :3000, with permission, and ran the seven rule-flow Playwright specs: `rule-proposal`, `rule-clarification-loop`, `rule-run-resume`, `rule-chat-autoscroll`, `my-rules`, `home-prompt-seed`, `dealer-reply-notification`. Final run: 23/23 passed with 1 worker.
+- **Root cause of the old "overlay" blocker:** the Next 16 dev-tools badge sits on the composer's send button at Pixel 5 width, so every click on it landed on the badge. The e2e web server now sets `TYCHE_E2E_HIDE_DEV_INDICATOR=1`, which gates `devIndicators: false` in `next.config.ts`; ordinary `next dev` is unchanged. The Privy `@farcaster/mini-app-solana` message is a compile warning, not the blocker.
+- Test fixes:
+  - **J11 boundary-example spec:** the mocked player has not played, so it now anchors on the play-to-submit gate instead of the submit button.
+  - **Stale `materialImpactPreflight` fixture:** it lacked the `reasonCodes` the API always sends.
+- **Pre-existing streaming-timeout failures:** also reproduced on pre-J11 `apps/web/src` (e3306bd). The two long streamed flows are marked `test.slow()`, and the resume spec waits 15 s for the reveal, like the other specs; it then passed 3/3 repeats.
+- `@tyche/web` typecheck and lint are green.
+
 ### 2026-09-23 (JEV pipeline J13: ledger attestation and frame-aware claims)
 
 - Opened `PRD.md` (§6.15), `PROGRESS_TRACKER.md`, `PRD-JEV-PIPELINE-EVALUATION.md` and the J12 report. Checked `.claude/skills` and applied `jev-system-one` and `tyche-test-and-verify`. The only web change is a type field and the retry payload, with no visible UI change. Added PRD-JEV §9.18 and an unticked J13 milestone, and updated PRD §6.15.
@@ -19,7 +34,7 @@ This tracker records milestone status, work logs, and required document confirma
   - clear rules that read the draw: 28/34, the same as J12 repeat 1;
   - strict vetoes fell from 4 to 1, and all 34 compiles used the attestation (0 re-asks);
   - compiler disagreements rose to 4, because a recompile showed systematic single-compiler defects on `BENCH-C04` (compiler A) and `FR-C4` (compiler B), and `C02` produced two different wrong ASTs.
-- J11, J12, and J13 remain unticked pending owner confirmation.
+- The owner confirmed completion on 2026-09-23. J11 and J13 are ticked, along with J12's implementation and offline-evaluation items. J12's three-repeat measurement stays open: repeat 3 was cut short by the OpenRouter budget. The J11 web e2e run was verified afterwards (23/23; see the web e2e entry above).
 
 ### 2026-09-23 (JEV pipeline J12: recall recovery under strict mode)
 

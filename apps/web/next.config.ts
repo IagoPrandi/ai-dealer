@@ -43,6 +43,10 @@ const nextConfig: NextConfig = {
   // development-only origin so React assets and the HMR WebSocket can hydrate
   // an installed PWA reached through `pnpm --filter @tyche/web dev:tunnel`.
   allowedDevOrigins: ["*.trycloudflare.com"],
+  // The dev-tools badge sits on the composer's send button at mobile width, so
+  // Playwright clicks land on the badge. Only the e2e web server (playwright
+  // config) turns it off; ordinary `next dev` keeps it.
+  ...(process.env.TYCHE_E2E_HIDE_DEV_INDICATOR === "1" ? { devIndicators: false as const } : {}),
   env: {
     NEXT_PUBLIC_UI_MOCK: mockEnabled ? "1" : "0",
   },

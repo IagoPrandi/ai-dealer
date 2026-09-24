@@ -30,6 +30,7 @@ export default defineConfig({
             command: "pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3005",
             env: {
               ...process.env,
+              TYCHE_E2E_HIDE_DEV_INDICATOR: "1",
               TYCHE_API_PROXY_TARGET: "http://127.0.0.1:3092",
               TYCHE_WORKER_PROXY_TARGET: "http://127.0.0.1:3092",
             },
