@@ -2,6 +2,7 @@
 
 > **Version:** 1.2.0
 > **Status:** Adopted — narrative spine confirmed by the owner on 2026-08-09. The mythic register (§3.1 / §4.7) was added on 2026-08-09 and revised the same day on the owner's direction: the god does answer wishes, and grants exactly one per round.
+> **Pending revision (2026-09-23):** the owner directed that this document be ignored when writing landing-page copy (see [docs/brand/landing-page-copy-draft.md](landing-page-copy-draft.md)), calling it outdated relative to the current positioning (money flows back to the community; luck is spread across events to prevent capture of rule-authorship by well-resourced actors; the AI is credited as the author of the rule). No section below has been rewritten — this note only records that a refresh is pending owner input.
 > **Last updated:** 2026-08-09
 > **Scope:** Single source of truth for every public-facing sentence: X, Telegram, site, docs, video, creator kits, partner briefs.
 > **Naming:** **Tywish** is the commercial name and the only one used in public communication. `tyche` is the internal engineering codename and appears only inside the repository. **Tyche the Goddess** keeps her mythological name — she is the character, not the product.

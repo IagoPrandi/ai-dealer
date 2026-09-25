@@ -2311,9 +2311,11 @@
 }
 
 /* The deck is a desktop-only regrouping: below 1024px it must not exist as a
-   box at all, so the mobile document flow is exactly what it was. */
+   box at all, so the mobile document flow is exactly what it was. Desktop-only
+   children stay hidden; :where() keeps this at the specificity of `.ide-deck`
+   so the desktop deck rules above still win. */
 .ide-deck,
-.ide-deck > * {
+.ide-deck > :where(:not(.ide-desktop-only)) {
   display: contents;
 }
 

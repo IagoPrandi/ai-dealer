@@ -4,6 +4,39 @@ This tracker records milestone status, work logs, and required document confirma
 
 ## Work Log
 
+### 2026-09-24 (Landing page revision: real app video, centered hero, readability)
+
+- Owner feedback on the first landing build: too much space between sections, remove the phone mockup, show the real game in a video of the actual (desktop) interface with interaction and mocked data, center the hero, and the displaced-plate text effect makes most headings hard to read.
+- Hero is now a single centered column followed by a 51 s screen recording of the real desktop `/play` app (1440×900 shell): round → pick six numbers → rules vote detail → writing a rule with the AI dealer (interpret → confirm → compiled with examples) → draw popup → round result. Five chapter buttons seek the video and follow playback; it autoplays muted only in view, has a pause control, and never autoplays under reduced motion. Assets: `public/videos/tywish-round.{webm,mp4}` + poster (1.1 MB / 1.5 MB).
+- Reproducible: `scripts/landing-video/record.mjs` drives the real app in `dev:mock` mode (mocked wallet hooks) and serves `src/dev/mock/mockData.ts` through Playwright routes, plus stubbed rule-preflight SSE and conversation drafts; it logs scene start times. `encode.mjs` trims the app's own loading states and encodes. Raw output (`out/`) is git-ignored.
+- **Intentional divergence from `tyche-design-system` rule 3, at the owner's request:** the displaced-plate text shadow stays only on the wordmark and the hero H1 (reduced to the 2 px plate). Section H2s and numbers drop it; long statements (quote, closing line, motto, transparency line) moved from Bevan caps to Archivo 700 in sentence case. Section padding cut from up to 128 px to up to 76 px.
+- **App bug found and fixed while recording:** below 1024 px, `.ide-deck > * { display: contents }` overrode `.ide-desktop-only { display: none }`, so the Rules screen leaked the unstyled desktop detail panel under the list on phones. The selector is now `.ide-deck > :where(:not(.ide-desktop-only))` (specificity unchanged); verified hidden at 390 px and still `block` at 1440 px.
+- Verification: `tsc`, `eslint src`, `next build` pass; `e2e/landing.spec.ts` 3/3 (adds video autoplay, chapter seek, pause). The deck-screen specs (`rule-voting`, `live-round-design`, `public-round`, `mobile-reliability`, `number-picker`) have 10 failures that reproduce identically with the CSS fix reverted — pre-existing: the fixture's settled round opens the draw-result popup (`.ide-overlay`), which intercepts clicks. Not addressed here.
+- No milestone ticked.
+
+### 2026-09-23 (Public landing page built from the copy draft)
+
+- Opened `PRD.md` (§3 narrative, §4, §14 metrics), `AGENTS.md`, `PRD-TOKENOMICS-v2.8.md` (supply, campaign reserve, 0.6 / 0.09 JDR campaign rates), `guia-identidade-publica-tywish.md` §7, and `docs/brand/landing-page-copy-draft.md`; inspected `.claude/skills` and applied `tyche-design-system` (tokens, components, `01-round-home.html` as reference pattern) and `tyche-ui-coherence`.
+- `/` no longer redirects to `/play`: it renders the landing page (`apps/web/src/features/landing/`). The PWA `start_url` stays `/play`, so the installed app is unchanged. Sections follow the draft's order: hero with an auto-playing phone mockup (Pick → Write → AI freezes → Draw), problem comparison, an interactive five-step example round (pick 6 of 1–100, write, AI freeze, back a rule, draw with side-by-side verdicts), concept rule cards, pillars, ways to earn, one-screen JDR, transparency, manifesto, final CTA, footer with the mandatory disclosures. All demo figures are labelled as an example round; nothing on the page reads live data.
+- Links the draft names but that have no destination yet were left out rather than pointed at dead URLs: full tokenomics page, contracts, documentation, X and Discord/Telegram. "See full reward rules" goes to `/play/rewards`; "Explore transparency" and "See the current round" go to `/rounds`.
+- Motion: scroll-driven reveals only where `animation-timeline` is supported (content never starts hidden), all motion off under `prefers-reduced-motion`. Added `/` to the sitemap.
+- Verification: `tsc --noEmit`, `eslint src`, and `next build` pass; new `e2e/landing.spec.ts` (hero/CTA, full demo walkthrough) 2/2 passed against the dev server. Screenshots checked at 1440, 390, and 320 px: no horizontal overflow, no console errors.
+- The open item from the copy-draft entry still stands: the copy was not reconciled against the external guardrails (X gambling classification, defamation risk of the "house" framing) before publication. No milestone ticked.
+
+### 2026-09-23 (Merge `feat/jev-pipeline-evaluations` into `main`)
+
+- Opened `PRD.md` and inspected `.claude/skills`; no task-specific skill applies to this Git integration.
+- Temporarily stashed all pre-existing tracked and untracked local changes, merged `feat/jev-pipeline-evaluations` into local `main` as merge commit `f3df2b1`, then restored the stash without conflicts.
+- Verification: `git diff --check` and `git show --check HEAD` passed. No milestone checkbox or status changed; `main` is five commits ahead of `origin/main` and has the restored local changes still uncommitted.
+
+### 2026-09-23 (Landing-page copy draft, with narrative-material conflict flagged pending)
+
+- Opened `PRD.md`, `PRD-TOKENOMICS-v2.8.md`, `estrutura-landpading.md`, `docs/brand/narrative-a-messaging.md`, and `nova-narrativa-jogo.md`.
+- Found that `estrutura-landpading.md`'s "TAKE CONTROL OF YOUR FATE" framing conflicts with guardrails already adopted in `narrative-a-messaging.md` (no probability-advantage claims) and `nova-narrativa-jogo.md` §5 (never imply the player controls chance/the draw). Surfaced this to the owner before writing final copy.
+- Owner directed: ignore both narrative documents as outdated for this task, and mark them pending an update. Flagged both with a "pending revision" note at the top (no content in either rewritten) and wrote `docs/brand/landing-page-copy-draft.md` — a full landing-page copy draft, explicitly not reconciled against those documents' guardrails.
+- **Open item, not resolved here:** `narrative-a-messaging.md` and `nova-narrativa-jogo.md` need a deliberate owner-led revision (or replacement) to match the current positioning (money flows back to the community; luck spread across rules to prevent capture by well-resourced actors; AI credited as rule author). Separately, before the new landing copy ships, someone should decide how the external constraints those documents encoded (X.com gambling-classification risk, defamation exposure, probability-advantage claims) apply to the new copy — that reconciliation was explicitly not done in this pass.
+- No milestone ticked; no implementation or production copy changed.
+
 ### 2026-09-23 (Landing-page structure and content assessment)
 
 - Opened `PRD.md`, `AGENTS.md`, `PROGRESS_TRACKER.md`, `estrutura-landpading.md`, `guia-identidade-publica-tywish.md`, `nova-narrativa-jogo.md`, and `PRD-TOKENOMICS-v2.8.md`; inspected `.claude/skills` and applied the `tyche-design-system` and `tyche-ui-coherence` review guidance.
