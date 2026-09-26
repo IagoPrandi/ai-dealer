@@ -41,26 +41,38 @@ function turnActive() {
 
 /**
  * @param {import("@playwright/test").Page} page
- * @param {{ played?: boolean, preflight?: (body: any) => unknown }} options
+ * @param {{ guessReceipt?: unknown, played?: boolean, preflight?: (body: any) => unknown, round?: unknown }} options
  */
 export async function installMockRoutes(page, options = {}) {
   const played = options.played ?? false;
   const drafts = [];
+  const votes = {
+    counts: { ...MOCK_RULE_VOTES.counts },
+    votes: [...MOCK_RULE_VOTES.votes],
+  };
 
   await api(page, "**/turn/active**", (route) => json(route, turnActive()));
   await api(page, "**/rule-proposals**", (route) => json(route, MOCK_RULE_PROPOSALS));
   await api(page, "**/rule-elimination-votes**", (route) => json(route, MOCK_RULE_ELIMINATION_VOTES));
-  await api(page, "**/rule-votes**", (route) => json(route, MOCK_RULE_VOTES));
+  await api(page, "**/rule-votes**", (route) => {
+    if (route.request().method() === "POST") {
+      const vote = route.request().postDataJSON();
+      votes.counts[String(vote.ruleId)] = (votes.counts[String(vote.ruleId)] ?? 0) + 1;
+      votes.votes.push(vote);
+      return json(route, { vote });
+    }
+    return json(route, votes);
+  });
   await api(page, "**/elimination**", (route) => json(route, {}));
   await api(page, "**/guess-receipts**", (route) =>
-    json(route, played ? MOCK_GUESS_RECEIPT : { receipt: null, receipts: [] }),
+    json(route, played ? (options.guessReceipt ?? MOCK_GUESS_RECEIPT) : { receipt: null, receipts: [] }),
   );
   await api(page, "**/tokenomics/public**", (route) =>
     json(route, { tokenomics: { accruedTreasuryFeesLamports: "0", available: false, projection: null, reason: "not_indexed" } }),
   );
   await api(page, "**/tokenomics/wallets/**", (route) => json(route, { wallet: null }));
   await api(page, "**/claims**", (route) => json(route, MOCK_PLAYER_CLAIMS));
-  await api(page, "**/rounds/**", (route) => json(route, MOCK_ROUND));
+  await api(page, "**/rounds/**", (route) => json(route, options.round ?? MOCK_ROUND));
 
   await api(page, `**/players/${MOCK_WALLET_ADDRESS}/conversation-drafts**`, async (route) => {
     const request = route.request();

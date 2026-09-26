@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const raw = path.join(here, "out", "landing-raw.webm");
 const publicDir = path.resolve(here, "../../public/videos");
-const KEEP = [[1.2, 42.45], [44.2, 49.2], [50.5, 999]];
+const KEEP = [[1.2, 999]];
 
 const select = KEEP.map(([start, end]) => `between(t,${start},${end})`).join("+");
 const filter = `select='${select}',setpts=N/FRAME_RATE/TB,scale=1280:-2`;
@@ -19,5 +19,5 @@ const ffmpeg = (...args) => execFileSync("ffmpeg", ["-loglevel", "error", "-y", 
 
 ffmpeg("-i", raw, "-vf", filter, "-an", "-c:v", "libx264", "-preset", "slow", "-crf", "28", "-pix_fmt", "yuv420p", "-movflags", "+faststart", path.join(publicDir, "tywish-round.mp4"));
 ffmpeg("-i", raw, "-vf", filter, "-an", "-c:v", "libvpx-vp9", "-b:v", "0", "-crf", "40", "-row-mt", "1", path.join(publicDir, "tywish-round.webm"));
-ffmpeg("-ss", "3", "-i", path.join(publicDir, "tywish-round.mp4"), "-frames:v", "1", "-q:v", "4", path.join(publicDir, "tywish-round-poster.jpg"));
+ffmpeg("-ss", "1.5", "-i", path.join(publicDir, "tywish-round.mp4"), "-frames:v", "1", "-q:v", "4", path.join(publicDir, "tywish-round-poster.jpg"));
 console.log("encoded into", publicDir);

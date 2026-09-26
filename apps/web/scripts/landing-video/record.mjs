@@ -14,6 +14,12 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
 
 import { installMockRoutes } from "./mockRoutes.mjs";
+import {
+  MOCK_ACTIVE_TURN_ID,
+  MOCK_ROUND,
+  MOCK_RULE_VOTES,
+  MOCK_WALLET_ADDRESS,
+} from "../../src/dev/mock/mockData.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const outDir = path.join(here, "out");
@@ -22,7 +28,54 @@ const checkpoints = process.argv.includes("--checkpoints");
 // The desktop shell (>= 1024px): rail, top bar, and master-detail decks.
 const viewport = { width: 1440, height: 900 };
 const RULE = "Win if at least four of my numbers appear in the draw.";
-const PICKS = [7, 18, 26, 44, 63, 91];
+const PICKS = [7, 18, 23, 41, 63, 91];
+const GUESS_RECEIPT = {
+  receipt: {
+    feeLamports: 20_000_000,
+    numbers: PICKS,
+    sequence: 2,
+    signature: "5Zx9k2QmA7bC3dE4fG6hJ8kL1mN2oP3qR4sT5uV6wX7yZ8aB9cD0eF1gH2iJ3kL4mN5",
+    submittedAt: "2026-06-21T10:30:00.000Z",
+  },
+  receipts: [],
+};
+const RECORDING_ROUND = {
+  round: {
+    ...MOCK_ROUND.round,
+    rules: MOCK_ROUND.round.rules.map((rule) =>
+      rule.ruleId === 1
+        ? {
+            ...rule,
+            officialInterpretation:
+              "A guess wins when at least 4 of its 6 numbers appear anywhere in the official draw, in any order.",
+          }
+        : rule,
+    ),
+    winners: {
+      alternative: {
+        bucketLamports: 5_000_000_000,
+        individualPayoutLamports: 1_000_000_000,
+        winnerCount: 5,
+      },
+      original: {
+        bucketLamports: 15_000_000_000,
+        individualPayoutLamports: 0,
+        winnerCount: 0,
+      },
+      records: [
+        {
+          activeRuleId: 1,
+          category: "alternative",
+          payoutLamports: 1_000_000_000,
+          player: MOCK_WALLET_ADDRESS,
+          turnId: MOCK_ACTIVE_TURN_ID,
+          winnerCount: 5,
+        },
+      ],
+      turnId: MOCK_ACTIVE_TURN_ID,
+    },
+  },
+};
 
 const hash = (seed) => Array.from({ length: 32 }, (_, index) => (seed + index) % 256);
 
@@ -41,7 +94,7 @@ function preflight(body) {
         officialInterpretation: "A guess wins when at least 4 of its 6 numbers appear anywhere in the official draw, in any order.",
         sanitizedText: body.text,
         suggestedRewrites: [],
-        title: "Four is enough",
+        title: "Four Numbers Match",
         tokenCount: 12,
       },
     };
@@ -71,7 +124,7 @@ function preflight(body) {
       sanitizedText: RULE,
       sanitizedTextHash: hash(4),
       semanticImpact: { drawIndependent: false, rangeBoundsAmbiguous: false, sharedOutcome: false, usesDraw: true, usesGuess: true },
-      title: "Four is enough",
+      title: "Four Numbers Match",
       tokenCount: 12,
     },
   };
@@ -100,6 +153,19 @@ const context = await browser.newContext({
   viewport,
   ...(checkpoints ? {} : { recordVideo: { dir: outDir, size: viewport } }),
 });
+await context.addInitScript(
+  ({ guessReceipt, round, ruleVotes }) => {
+    window.__tycheMockDataOverrides = { guessReceipt, round, ruleVotes };
+  },
+  {
+    guessReceipt: GUESS_RECEIPT,
+    round: RECORDING_ROUND,
+    ruleVotes: {
+      counts: { ...MOCK_RULE_VOTES.counts },
+      votes: [...MOCK_RULE_VOTES.votes],
+    },
+  },
+);
 await context.addInitScript(TAP_MARKER);
 // Mark the settled draw as seen so the round opens on the home screen; the
 // finale clears it to bring the draw popup back.
@@ -112,7 +178,12 @@ const t0 = Date.now();
 // Scene start times (seconds into the raw video) for encode.mjs and the chapters.
 const mark = (label) => console.log(`scene ${((Date.now() - t0) / 1000).toFixed(1)}s ${label}`);
 page.on("pageerror", (error) => console.error("pageerror:", error.message));
-await installMockRoutes(page, { preflight });
+await installMockRoutes(page, {
+  guessReceipt: GUESS_RECEIPT,
+  played: true,
+  preflight,
+  round: RECORDING_ROUND,
+});
 
 let shot = 0;
 const pause = (ms) => page.waitForTimeout(ms);
@@ -124,40 +195,27 @@ const tap = async (locator, hold = 450) => {
   await locator.click();
   await pause(hold);
 };
-const smoothScroll = (selector, top) =>
-  page.evaluate(([sel, y]) => {
-    const scroller = document.querySelector(sel) ?? document.scrollingElement;
-    scroller.scrollTo({ behavior: "smooth", top: y });
-  }, [selector, top]);
-
-// Scene 1 — the live round.
+const visualTap = async (locator, hold = 450) => {
+  await locator.scrollIntoViewIfNeeded();
+  await locator.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    element.dispatchEvent(new PointerEvent("pointerdown", {
+      bubbles: true,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+    }));
+  });
+  await pause(hold);
+};
+// Scene 1 — the live round, held for two seconds before any interaction.
 mark("round");
-await page.goto(`${baseUrl}/play`, { waitUntil: "networkidle" });
-await pause(2600);
-await checkpoint("home");
-await pause(1200);
-
-// Scene 2 — pick six numbers.
-mark("pick");
-await tap(page.getByRole("button", { name: /play (now|again)/i }).first(), 1100);
-await checkpoint("pick-empty");
-for (const value of PICKS) {
-  await tap(page.getByRole("button", { name: String(value), exact: true }).first(), 380);
-}
-// On desktop the review panel sits beside the grid and fills in as you pick.
-await pause(2200);
-await checkpoint("pick-full");
-
-// Scene 3 — the rules in voting.
-mark("vote");
 const rail = page.locator(".ide-desktop-rail");
-await tap(rail.getByRole("button", { name: /^Rules/ }), 1800);
-await checkpoint("rules");
-await tap(page.getByText("Closest Sum").first(), 1800);
-await tap(page.getByText("Four Numbers Match").first(), 2000);
-await checkpoint("rule-detail");
+await page.goto(`${baseUrl}/play`, { timeout: 60_000, waitUntil: "domcontentloaded" });
+await rail.waitFor({ timeout: 60_000 });
+await pause(2000);
+await checkpoint("home");
 
-// Scene 4 — write a rule with the AI dealer.
+// Scene 2 — write the rule that will later win the round.
 mark("write");
 await tap(rail.getByRole("button", { name: "Create a rule" }), 1400);
 const composer = page.getByLabel("Message", { exact: true });
@@ -172,25 +230,63 @@ await tap(page.getByRole("button", { name: "Confirm and generate" }), 300);
 await page.getByRole("list", { name: "Examples of the compiled rule" }).waitFor({ timeout: 20_000 });
 await pause(1200);
 await checkpoint("compiled");
-await pause(2400);
+await pause(1800);
 
-// Scene 5 — the draw.
-mark("draw");
+// Scene 3 — pick six numbers. Four of them will appear in the final draw.
+mark("pick");
+await tap(rail.getByRole("button", { name: /^Round/ }), 900);
+await tap(page.getByRole("button", { name: /play (now|again)/i }).first(), 1000);
+await checkpoint("pick-empty");
+for (const value of PICKS) {
+  await tap(page.getByRole("button", { name: String(value), exact: true }).first(), 360);
+}
+await pause(1800);
+await checkpoint("pick-full");
+
+// Scene 4 — vote in favor of the same four-number rule.
+mark("vote");
+await tap(rail.getByRole("button", { name: /^Rules/ }), 1500);
+await checkpoint("rules");
+await tap(page.getByText("Four Numbers Match").first(), 1200);
+await visualTap(page.getByRole("button", { name: /in favor/i }).first(), 700);
+await page.evaluate(({ ruleId, turnId, voter }) => {
+  const overrides = window.__tycheMockDataOverrides;
+  if (!overrides?.ruleVotes) return;
+  overrides.ruleVotes.counts[String(ruleId)] += 1;
+  overrides.ruleVotes.votes.push({
+    ruleId,
+    sequence: 1,
+    signature: "video-vote-signature",
+    submittedAt: new Date().toISOString(),
+    turnId,
+    voter,
+  });
+}, { ruleId: 1, turnId: MOCK_ACTIVE_TURN_ID, voter: MOCK_WALLET_ADDRESS });
+await pause(1100);
+await checkpoint("rule-voted");
+await pause(1200);
+
+// Scene 5 — reveal the draw, then the coherent winning result.
+mark("result");
 await page.evaluate(() => {
-  sessionStorage.setItem("video:finale", "1");
   localStorage.removeItem("tyche:draw-result-last-seen-turn");
 });
-await page.goto(`${baseUrl}/play`, { waitUntil: "networkidle" });
-mark("draw-loaded");
-await pause(3200);
+await tap(rail.getByRole("button", { name: /^Round/ }), 300);
+await page.getByRole("button", { name: /see the full result/i }).waitFor({ timeout: 60_000 });
+mark("result-loaded");
+await pause(2200);
 await checkpoint("draw-popup");
 await tap(page.getByRole("button", { name: /see the full result/i }), 300);
 await page.waitForURL(/\/play\/results/, { timeout: 15_000 });
+if (checkpoints) {
+  await pause(2500);
+  await checkpoint("result-route");
+}
+await page.locator(".ide-result-summary").getByRole("heading", { name: /you won/i }).waitFor({ timeout: 60_000 });
 await pause(1800);
 await checkpoint("result");
-await smoothScroll(".ide-scroll", 700);
-await pause(2400);
-await checkpoint("result-scrolled");
+await pause(4000);
+await checkpoint("result-held");
 
 const video = page.video();
 await context.close();

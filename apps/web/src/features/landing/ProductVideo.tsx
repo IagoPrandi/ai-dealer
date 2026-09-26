@@ -7,10 +7,10 @@ import { BRAND_NAME } from "@tyche/config";
 // Scene starts in public/videos/tywish-round.* (see scripts/landing-video/).
 const CHAPTERS = [
   { label: "The round", start: 0 },
-  { label: "Pick numbers", start: 6 },
-  { label: "Vote on rules", start: 12.5 },
-  { label: "Write with AI", start: 18.6 },
-  { label: "The draw", start: 41.25 },
+  { label: "Write a rule", start: 2 },
+  { label: "Pick numbers", start: 24.4 },
+  { label: "Vote on the rule", start: 31.3 },
+  { label: "Winning result", start: 37.4 },
 ] as const;
 
 function chapterAt(time: number) {
@@ -91,8 +91,8 @@ export function ProductVideo() {
       </ol>
       <div className="lp-video-frame">
         <video
-          aria-label={`Screen recording of the ${BRAND_NAME} desktop app: a round, picking numbers, voting, writing a rule with the AI, and the draw`}
-          height={800}
+          aria-label={`Screen recording of the ${BRAND_NAME} desktop app: the round, writing a rule, picking numbers, voting on that rule, and winning with four matching numbers`}
+          height={420}
           loop
           muted
           onPause={() => setPlaying(false)}
@@ -102,7 +102,7 @@ export function ProductVideo() {
           poster="/videos/tywish-round-poster.jpg"
           preload="metadata"
           ref={videoRef}
-          width={1280}
+          width={672}
         >
           <source src="/videos/tywish-round.webm" type="video/webm" />
           <source src="/videos/tywish-round.mp4" type="video/mp4" />

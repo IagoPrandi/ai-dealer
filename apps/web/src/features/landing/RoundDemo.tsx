@@ -31,7 +31,7 @@ const ROLL_MS = 1400;
 type DrawState = { phase: "idle" } | { phase: "rolling" } | { phase: "done"; draw: number[] };
 
 /**
- * "Watch a round happen": a self-contained, client-only walkthrough of one
+ * A self-contained, client-only walkthrough of one
  * example round. Nothing here talks to the API or a wallet; the final step
  * hands the visitor to the real round.
  */

@@ -17,6 +17,25 @@ import {
 } from "./mockData";
 
 const INSTALLED_FLAG = "__tycheMockFetchInstalled";
+const DATA_OVERRIDES_KEY = "__tycheMockDataOverrides";
+
+interface MockDataOverrides {
+  guessReceipt?: unknown;
+  round?: unknown;
+  ruleVotes?: {
+    counts: Record<string, number>;
+    votes: Array<Record<string, unknown>>;
+  };
+}
+
+function dataOverrides(): MockDataOverrides | undefined {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+  return (window as unknown as Record<string, unknown>)[DATA_OVERRIDES_KEY] as
+    | MockDataOverrides
+    | undefined;
+}
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -26,6 +45,7 @@ function jsonResponse(body: unknown): Response {
 }
 
 function resolveMock(url: string): unknown | undefined {
+  const overrides = dataOverrides();
   // Conversation drafts, dealer chat, and rule preflight deliberately pass
   // through to the real API. The gallery still mocks wallet, turn, and visual
   // data, while the entire authoring pipeline preserves saved context, asks for
@@ -66,14 +86,14 @@ function resolveMock(url: string): unknown | undefined {
     return MOCK_RULE_ELIMINATION_VOTES;
   }
   if (url.includes("/rule-votes")) {
-    return MOCK_RULE_VOTES;
+    return overrides?.ruleVotes ?? MOCK_RULE_VOTES;
   }
   if (url.includes("/elimination")) {
     // Sem estado de eliminação ativo: as telas tratam isto como opcional.
     return {};
   }
   if (url.includes("/guess-receipts")) {
-    return MOCK_GUESS_RECEIPT;
+    return overrides?.guessReceipt ?? MOCK_GUESS_RECEIPT;
   }
   if (url.includes("/tokenomics/public")) {
     return {
@@ -92,7 +112,7 @@ function resolveMock(url: string): unknown | undefined {
     return MOCK_PLAYER_CLAIMS;
   }
   if (url.includes("/rounds/")) {
-    return MOCK_ROUND;
+    return overrides?.round ?? MOCK_ROUND;
   }
   return undefined;
 }
@@ -119,6 +139,17 @@ export function installMockFetch(): void {
         : input instanceof URL
           ? input.toString()
           : input.url;
+
+    const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+    const overrides = dataOverrides();
+    if (method === "POST" && url.includes("/rule-votes") && overrides?.ruleVotes) {
+      const rawBody = init?.body ?? (input instanceof Request ? await input.clone().text() : null);
+      const vote = typeof rawBody === "string" ? JSON.parse(rawBody) as Record<string, unknown> : {};
+      const ruleId = String(vote.ruleId ?? "");
+      overrides.ruleVotes.counts[ruleId] = (overrides.ruleVotes.counts[ruleId] ?? 0) + 1;
+      overrides.ruleVotes.votes.push(vote);
+      return jsonResponse({ vote });
+    }
 
     const mock = resolveMock(url);
     if (mock !== undefined) {

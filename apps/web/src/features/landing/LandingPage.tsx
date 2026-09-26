@@ -104,10 +104,9 @@ export function LandingPage() {
           <div aria-hidden="true" className="lp-rays" />
           <div className="lp-wrap lp-hero-inner">
             <div className="lp-hero-copy">
-              <p className="lp-eyebrow">A game where the players hold the pen</p>
               <h1 className="lp-h1" id="hero-title">
-                <span className="line">You write the rule.</span>
-                <span className="line">The <span className="lp-strike">house</span> doesn’t.</span>
+                <span className="line">Break the bad luck.</span>
+                <span className="line">Make your rules.</span>
               </h1>
               <p className="lp-hero-sub">
                 Pick your numbers. Write how winning works. Watch the AI turn it into something the game can enforce.
@@ -130,7 +129,6 @@ export function LandingPage() {
         <section aria-labelledby="problem-title" className="lp-section">
           <div className="lp-wrap">
             <div className="lp-section-head lp-reveal">
-              <p className="lp-eyebrow">The house always wins</p>
               <h2 className="lp-h2" id="problem-title">In every game of chance, someone already decided who wins.</h2>
             </div>
             <div className="lp-compare">
@@ -162,7 +160,6 @@ export function LandingPage() {
         <section aria-labelledby="how-title" className="lp-section" id="how">
           <div className="lp-wrap">
             <div className="lp-section-head lp-reveal">
-              <p className="lp-eyebrow">Watch a round happen</p>
               <h2 className="lp-h2" id="how-title">One draw. More than one way to win.</h2>
               <p className="lp-lead">Play one example round, start to finish. <strong>The AI turns what you wrote into something the game can enforce.</strong></p>
             </div>
