@@ -5,7 +5,6 @@ import { BRAND_NAME } from "@tyche/config";
 
 import { LandingIcon } from "./LandingIcon";
 import { ProductVideo } from "./ProductVideo";
-import { RoundDemo } from "./RoundDemo";
 import "./landing.css";
 
 const LOGO_SRC = "/illustrations/logo-deusa-vetorizada.svg?v=goddess-magenta-v1";
@@ -121,7 +120,6 @@ export function LandingPage() {
                 <li><LandingIcon name="coin" />Traceable money</li>
               </ul>
             </div>
-            <ProductVideo />
           </div>
         </section>
 
@@ -161,9 +159,9 @@ export function LandingPage() {
           <div className="lp-wrap">
             <div className="lp-section-head lp-reveal">
               <h2 className="lp-h2" id="how-title">One draw. More than one way to win.</h2>
-              <p className="lp-lead">Play one example round, start to finish. <strong>The AI turns what you wrote into something the game can enforce.</strong></p>
+              <p className="lp-lead">Watch one example round, start to finish. <strong>The AI turns what you wrote into something the game can enforce.</strong></p>
             </div>
-            <RoundDemo />
+            <ProductVideo />
           </div>
         </section>
 

@@ -435,33 +435,57 @@
 .lp-hero .lp-rays { bottom: auto; height: 760px; }
 
 /* product video (real app recording, scripts/landing-video/) */
-.lp-video { display: grid; justify-items: center; gap: 18px; width: 100%; margin: 0; }
-.lp-chapters { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.lp-video {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px 28px;
+  width: 100%;
+  margin: 0;
+}
+.lp-chapters { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .lp-chapter {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 7px;
-  min-height: 44px;
-  padding: 0 14px;
+  gap: 14px;
+  width: 100%;
+  min-height: 60px;
+  padding: 12px 14px;
   border: none;
   color: var(--tyche-ink-2);
-  background: rgb(15 6 24 / 80%);
-  box-shadow: var(--tyche-ring-thin);
+  background: var(--tyche-surface-2);
+  box-shadow: var(--tyche-ring);
   font-family: var(--lp-label);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: .12em;
+  font-size: 14.5px;
+  font-weight: 500;
+  letter-spacing: .06em;
+  text-align: left;
   text-transform: uppercase;
   cursor: pointer;
-  transition: color .16s ease, box-shadow .16s ease;
+  transition: color .16s ease, box-shadow .16s ease, transform .16s ease;
 }
-.lp-chapter span { color: var(--tyche-ink-3); font-family: var(--lp-mono); font-weight: 500; }
-.lp-chapter:hover { color: var(--tyche-ink); }
-.lp-chapter[aria-current="step"] { color: var(--tyche-magenta); box-shadow: inset 0 -3px 0 var(--tyche-magenta), var(--tyche-ring-thin); }
-.lp-chapter[aria-current="step"] span { color: var(--tyche-magenta); }
+.lp-chapter span {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  color: var(--tyche-ink);
+  box-shadow: inset 0 0 0 1.5px rgb(241 232 214 / 40%);
+  font-family: var(--lp-display);
+  font-size: 13px;
+  font-weight: 400;
+}
+.lp-chapter:hover { color: var(--tyche-ink); transform: translateX(2px); }
+.lp-chapter[aria-current="step"] {
+  margin-right: 5px;
+  color: var(--tyche-ink);
+  box-shadow: var(--tyche-ring-magenta), 5px 5px 0 var(--tyche-cyan);
+}
+.lp-chapter[aria-current="step"] span { color: var(--tyche-on-accent); background: var(--tyche-yellow); box-shadow: none; }
 .lp-video-frame {
   position: relative;
-  width: min(100% - 5px, 672px);
+  width: calc(100% - 5px);
   margin-right: 5px;
   background: var(--tyche-bg);
   box-shadow: var(--tyche-ring-magenta), 5px 5px 0 var(--tyche-cyan), 0 0 90px -20px rgb(255 46 136 / 55%);
@@ -483,7 +507,7 @@
   cursor: pointer;
 }
 .lp-video-toggle:hover { color: var(--tyche-cyan); }
-.lp-video-caption { color: var(--tyche-ink-3); font-family: var(--lp-mono); font-size: 11px; letter-spacing: .14em; text-align: center; text-transform: uppercase; }
+.lp-video-caption { grid-column: 2; color: var(--tyche-ink-3); font-family: var(--lp-mono); font-size: 11px; letter-spacing: .14em; text-align: center; text-transform: uppercase; }
 
 /* rule-writing mockup pieces reused by the interactive demo */
 .lp-mini-label { color: var(--tyche-cyan); font-family: var(--lp-label); font-size: 10.5px; font-weight: 600; letter-spacing: .22em; text-transform: uppercase; }
@@ -1029,6 +1053,21 @@
 }
 
 @media (max-width: 1023px) {
+  .lp-video { grid-template-columns: 1fr; gap: 18px; }
+  .lp-chapters {
+    display: flex;
+    gap: 8px;
+    width: calc(100% + 2 * var(--lp-gutter));
+    margin-inline: calc(-1 * var(--lp-gutter));
+    padding: 2px var(--lp-gutter) 10px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    scroll-snap-type: x mandatory;
+  }
+  .lp-chapters::-webkit-scrollbar { display: none; }
+  .lp-chapters li { flex: 0 0 auto; scroll-snap-align: start; }
+  .lp-chapter { min-height: 52px; padding: 8px 14px 8px 8px; white-space: nowrap; }
+  .lp-video-caption { grid-column: 1; }
   .lp-demo { grid-template-columns: 1fr; }
   .lp-steps {
     display: flex;
@@ -1093,17 +1132,6 @@
   .lp-hero-actions { gap: 14px; }
   .lp-footer-grid { grid-template-columns: 1fr; gap: 24px; }
   .lp-composer { flex-direction: column; }
-  .lp-chapters {
-    flex-wrap: nowrap;
-    justify-content: flex-start;
-    width: calc(100% + 2 * var(--lp-gutter));
-    margin-inline: calc(-1 * var(--lp-gutter));
-    padding: 0 var(--lp-gutter) 4px;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-  .lp-chapters::-webkit-scrollbar { display: none; }
-  .lp-chapter { white-space: nowrap; }
 }
 
 @media (max-width: 380px) {
