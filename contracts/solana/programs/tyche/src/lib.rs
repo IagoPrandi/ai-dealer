@@ -16,12 +16,16 @@ pub mod domain;
 pub mod founder_pass;
 
 use founder_pass::{
-    founder_pass_turn_window, founder_pass_unresolved_decisions,
-    validate_founder_pass_allowances, verify_founder_pass_asset, FounderPassAssetStandard,
+    founder_pass_turn_window, founder_pass_unresolved_decisions, plan_founder_pass_fee_waiver,
+    plan_founder_pass_use, plan_founder_pass_vote_concentration, plan_founder_pass_wallet_turn,
+    validate_founder_pass_allowances, validate_founder_pass_concentration_policy,
+    verify_founder_pass_asset, FounderPassAssetStandard, FounderPassBenefit,
     FounderPassFeeWaiverFunding, FounderPassOwnershipSnapshotPolicy, FounderPassPolicy,
     FounderPassSupplyEnforcement, FounderPassTurnWindow, FounderPassUsageView,
+    FounderPassVoteConcentrationView, FounderPassVoteKind, FounderPassWaiverSettlement,
     FOUNDER_PASS_ACCOUNT_VERSION, FOUNDER_PASS_ACTIVE_TURN_WINDOW, FOUNDER_PASS_BET_ALLOWANCE,
     FOUNDER_PASS_MAX_SUPPLY, FOUNDER_PASS_RULE_PROPOSAL_ALLOWANCE, FOUNDER_PASS_VOTE_ALLOWANCE,
+    FOUNDER_PASS_WALLET_TURN_PASS_SLOTS,
 };
 
 use domain::{
@@ -712,59 +716,21 @@ pub mod tyche {
             &ctx.accounts.system_program,
             fee_lamports,
         )?;
-        let (treasury_amount, prize_amount) = split_fee(fee_lamports, config.treasury_fee_bps)?;
+        let fee = ActionFeeOutcome::paid(fee_lamports, config.treasury_fee_bps)?;
+        let player = ctx.accounts.player.key();
 
-        let guess = &mut ctx.accounts.player_guess;
-        guess.turn_id = ctx.accounts.turn_state.turn_id;
-        guess.player = ctx.accounts.player.key();
-        guess.sequence = args.sequence;
-        guess.fee_lamports = fee_lamports;
-        guess.numbers = args.numbers;
-        guess.submitted_at = clock.unix_timestamp;
-        guess.game_token = ctx.accounts.game_token.key();
-        guess.verification_status = VerificationStatus::Pending;
-        guess.original_rule_result = false;
-        guess.alternative_rule_result = false;
-        guess.claim_status = ClaimStatus::Unavailable;
-        guess.bump = ctx.bumps.player_guess;
-
-        ctx.accounts.game_token.issuing_guess = guess.key();
-        ctx.accounts.game_token.guess_count = args.sequence;
-
-        ctx.accounts.turn_state.treasury_fee_amount_lamports = ctx
-            .accounts
-            .turn_state
-            .treasury_fee_amount_lamports
-            .checked_add(treasury_amount)
-            .ok_or(TycheError::ArithmeticOverflow)?;
-        ctx.accounts.treasury_vault.total_collected_lamports = ctx
-            .accounts
-            .treasury_vault
-            .total_collected_lamports
-            .checked_add(treasury_amount)
-            .ok_or(TycheError::ArithmeticOverflow)?;
-        ctx.accounts.prize_vault.total_collected_lamports = ctx
-            .accounts
-            .prize_vault
-            .total_collected_lamports
-            .checked_add(prize_amount)
-            .ok_or(TycheError::ArithmeticOverflow)?;
-        ctx.accounts.turn_state.prize_pool_amount_lamports = ctx
-            .accounts
-            .turn_state
-            .prize_pool_amount_lamports
-            .checked_add(prize_amount)
-            .ok_or(TycheError::ArithmeticOverflow)?;
-
-        emit!(GuessSubmitted {
-            turn_id: guess.turn_id,
-            player: guess.player,
-            sequence: guess.sequence,
-            fee_lamports: guess.fee_lamports,
-            guess: args.numbers,
-            game_token: ctx.accounts.game_token.key(),
-        });
-        Ok(())
+        apply_additional_guess(
+            &mut ctx.accounts.turn_state,
+            &mut ctx.accounts.treasury_vault,
+            &mut ctx.accounts.prize_vault,
+            &mut ctx.accounts.player_guess,
+            &mut ctx.accounts.game_token,
+            player,
+            &args,
+            fee,
+            clock.unix_timestamp,
+            ctx.bumps.player_guess,
+        )
     }
 
     pub fn propose_rule(ctx: Context<ProposeRule>, args: ProposeRuleArgs) -> Result<()> {
@@ -809,64 +775,22 @@ pub mod tyche {
             &ctx.accounts.system_program,
             proposal_fee,
         )?;
-        let (treasury_amount, prize_amount) = split_fee(proposal_fee, config.treasury_fee_bps)?;
+        let fee = ActionFeeOutcome::paid(proposal_fee, config.treasury_fee_bps)?;
+        let proposer = ctx.accounts.proposer.key();
+        let bump = ctx.bumps.rule_proposal;
 
-        let proposal = &mut ctx.accounts.rule_proposal;
-        proposal.rule_id = args.rule_id;
-        proposal.turn_id = ctx.accounts.turn_state.turn_id;
-        proposal.proposer = ctx.accounts.proposer.key();
-        proposal.sanitized_text_hash = args.sanitized_text_hash;
-        proposal.sanitized_text = args.sanitized_text;
-        proposal.normalized_text_hash = args.normalized_text_hash;
-        proposal.official_interpretation_hash = args.official_interpretation_hash;
-        proposal.compiled_artifact_hash = [0; 32];
-        proposal.token_count = args.token_count;
-        proposal.vote_count = 0;
-        proposal.report_count = 0;
-        proposal.state = RuleState::Proposed;
-        proposal.preflight_result_hash = args.preflight_result_hash;
-        proposal.precompilation_status = PrecompilationStatus::Pending;
-        proposal.created_at = clock.unix_timestamp;
-        proposal.bump = ctx.bumps.rule_proposal;
-
-        ctx.accounts.game_token.used_for_rule_proposal_count = ctx
-            .accounts
-            .game_token
-            .used_for_rule_proposal_count
-            .checked_add(1)
-            .ok_or(TycheError::ArithmeticOverflow)?;
-        ctx.accounts.turn_state.treasury_fee_amount_lamports = ctx
-            .accounts
-            .turn_state
-            .treasury_fee_amount_lamports
-            .checked_add(treasury_amount)
-            .ok_or(TycheError::ArithmeticOverflow)?;
-        ctx.accounts.treasury_vault.total_collected_lamports = ctx
-            .accounts
-            .treasury_vault
-            .total_collected_lamports
-            .checked_add(treasury_amount)
-            .ok_or(TycheError::ArithmeticOverflow)?;
-        ctx.accounts.prize_vault.total_collected_lamports = ctx
-            .accounts
-            .prize_vault
-            .total_collected_lamports
-            .checked_add(prize_amount)
-            .ok_or(TycheError::ArithmeticOverflow)?;
-        ctx.accounts.turn_state.prize_pool_amount_lamports = ctx
-            .accounts
-            .turn_state
-            .prize_pool_amount_lamports
-            .checked_add(prize_amount)
-            .ok_or(TycheError::ArithmeticOverflow)?;
-
-        emit!(RuleProposed {
-            turn_id: proposal.turn_id,
-            rule_id: proposal.rule_id,
-            proposer: proposal.proposer,
-            sanitized_text_hash: proposal.sanitized_text_hash,
-        });
-        Ok(())
+        apply_rule_proposal(
+            &mut ctx.accounts.turn_state,
+            &mut ctx.accounts.treasury_vault,
+            &mut ctx.accounts.prize_vault,
+            &mut ctx.accounts.rule_proposal,
+            &mut ctx.accounts.game_token,
+            proposer,
+            args,
+            fee,
+            clock.unix_timestamp,
+            bump,
+        )
     }
 
     pub fn vote_rule(ctx: Context<VoteRule>, args: VoteRuleArgs) -> Result<()> {
@@ -907,68 +831,24 @@ pub mod tyche {
             &ctx.accounts.system_program,
             vote_fee,
         )?;
-        let (treasury_amount, prize_amount) = split_fee(vote_fee, config.treasury_fee_bps)?;
+        let fee = ActionFeeOutcome::paid(vote_fee, config.treasury_fee_bps)?;
+        let voter = ctx.accounts.voter.key();
+        let bump = ctx.bumps.rule_vote;
 
-        let vote = &mut ctx.accounts.rule_vote;
-        vote.turn_id = ctx.accounts.turn_state.turn_id;
-        vote.rule_id = ctx.accounts.rule_proposal.rule_id;
-        vote.voter = ctx.accounts.voter.key();
-        vote.sequence = args.sequence;
-        vote.fee_lamports = vote_fee;
-        vote.created_at = clock.unix_timestamp;
-        vote.bump = ctx.bumps.rule_vote;
-
-        ctx.accounts.rule_proposal.vote_count = ctx
-            .accounts
-            .rule_proposal
-            .vote_count
-            .checked_add(1)
-            .ok_or(TycheError::ArithmeticOverflow)?;
-        if let Some(index) = finalist_index {
-            ctx.accounts.turn_state.finalist_approval_vote_counts[index] =
-                ctx.accounts.turn_state.finalist_approval_vote_counts[index]
-                    .checked_add(1)
-                    .ok_or(TycheError::ArithmeticOverflow)?;
-        }
-        ctx.accounts.game_token.used_for_vote_count = ctx
-            .accounts
-            .game_token
-            .used_for_vote_count
-            .checked_add(1)
-            .ok_or(TycheError::ArithmeticOverflow)?;
-        ctx.accounts.turn_state.treasury_fee_amount_lamports = ctx
-            .accounts
-            .turn_state
-            .treasury_fee_amount_lamports
-            .checked_add(treasury_amount)
-            .ok_or(TycheError::ArithmeticOverflow)?;
-        ctx.accounts.treasury_vault.total_collected_lamports = ctx
-            .accounts
-            .treasury_vault
-            .total_collected_lamports
-            .checked_add(treasury_amount)
-            .ok_or(TycheError::ArithmeticOverflow)?;
-        ctx.accounts.prize_vault.total_collected_lamports = ctx
-            .accounts
-            .prize_vault
-            .total_collected_lamports
-            .checked_add(prize_amount)
-            .ok_or(TycheError::ArithmeticOverflow)?;
-        ctx.accounts.turn_state.prize_pool_amount_lamports = ctx
-            .accounts
-            .turn_state
-            .prize_pool_amount_lamports
-            .checked_add(prize_amount)
-            .ok_or(TycheError::ArithmeticOverflow)?;
-
-        emit!(RuleVoteCast {
-            turn_id: vote.turn_id,
-            rule_id: vote.rule_id,
-            voter: vote.voter,
-            sequence: vote.sequence,
-            fee_lamports: vote.fee_lamports,
-        });
-        Ok(())
+        apply_rule_vote(
+            &mut ctx.accounts.turn_state,
+            &mut ctx.accounts.treasury_vault,
+            &mut ctx.accounts.prize_vault,
+            &mut ctx.accounts.rule_proposal,
+            &mut ctx.accounts.rule_vote,
+            &mut ctx.accounts.game_token,
+            voter,
+            args.sequence,
+            finalist_index,
+            fee,
+            clock.unix_timestamp,
+            bump,
+        )
     }
 
     pub fn remove_rule(ctx: Context<RemoveRule>) -> Result<()> {
@@ -1299,50 +1179,24 @@ pub mod tyche {
             &ctx.accounts.system_program,
             fee,
         )?;
-        let (treasury_amount, prize_amount) = split_fee(fee, config.treasury_fee_bps)?;
+        let fee_outcome = ActionFeeOutcome::paid(fee, config.treasury_fee_bps)?;
+        let voter = ctx.accounts.voter.key();
+        let rule_id = ctx.accounts.rule_proposal.rule_id;
+        let bump = ctx.bumps.rule_elimination_vote;
 
-        let vote = &mut ctx.accounts.rule_elimination_vote;
-        vote.turn_id = ctx.accounts.turn_state.turn_id;
-        vote.rule_id = ctx.accounts.rule_proposal.rule_id;
-        vote.voter = ctx.accounts.voter.key();
-        vote.sequence = args.sequence;
-        vote.fee_lamports = fee;
-        vote.created_at = clock.unix_timestamp;
-        vote.bump = ctx.bumps.rule_elimination_vote;
-
-        let turn = &mut ctx.accounts.turn_state;
-        turn.finalist_elimination_vote_counts[index] = turn.finalist_elimination_vote_counts[index]
-            .checked_add(1)
-            .ok_or(TycheError::ArithmeticOverflow)?;
-        turn.treasury_fee_amount_lamports = turn
-            .treasury_fee_amount_lamports
-            .checked_add(treasury_amount)
-            .ok_or(TycheError::ArithmeticOverflow)?;
-        ctx.accounts.treasury_vault.total_collected_lamports = ctx
-            .accounts
-            .treasury_vault
-            .total_collected_lamports
-            .checked_add(treasury_amount)
-            .ok_or(TycheError::ArithmeticOverflow)?;
-        turn.prize_pool_amount_lamports = turn
-            .prize_pool_amount_lamports
-            .checked_add(prize_amount)
-            .ok_or(TycheError::ArithmeticOverflow)?;
-        ctx.accounts.prize_vault.total_collected_lamports = ctx
-            .accounts
-            .prize_vault
-            .total_collected_lamports
-            .checked_add(prize_amount)
-            .ok_or(TycheError::ArithmeticOverflow)?;
-
-        emit!(RuleEliminationVoteCast {
-            turn_id: vote.turn_id,
-            rule_id: vote.rule_id,
-            voter: vote.voter,
-            sequence: vote.sequence,
-            fee_lamports: fee,
-        });
-        Ok(())
+        apply_rule_elimination_vote(
+            &mut ctx.accounts.turn_state,
+            &mut ctx.accounts.treasury_vault,
+            &mut ctx.accounts.prize_vault,
+            &mut ctx.accounts.rule_elimination_vote,
+            rule_id,
+            voter,
+            args.sequence,
+            index,
+            fee_outcome,
+            clock.unix_timestamp,
+            bump,
+        )
     }
 
     pub fn close_elimination_window(ctx: Context<CloseEliminationWindow>) -> Result<()> {
@@ -2637,7 +2491,18 @@ pub mod tyche {
         // A per-rule/per-turn concentration limit above the lifetime vote
         // allowance would not constrain anything.
         require!(
-            args.max_pass_vote_actions_per_rule_per_turn as u32 <= FOUNDER_PASS_VOTE_ALLOWANCE,
+            u32::from(args.max_pass_vote_actions_per_rule_per_turn) <= FOUNDER_PASS_VOTE_ALLOWANCE,
+            TycheError::InvalidFounderPassConcentrationLimit
+        );
+        // Upper bound only. Zero stays writable here because it is the §14
+        // "unresolved" sentinel that `set_founder_pass_activation` refuses;
+        // rejecting it at configure time would make an honest partial
+        // governance record impossible. The ceiling is what
+        // `FounderPassWalletTurn` can represent exactly, so governance cannot
+        // store a policy the programme would have to truncate at use.
+        require!(
+            usize::from(args.max_passes_per_wallet_per_turn)
+                <= FOUNDER_PASS_WALLET_TURN_PASS_SLOTS,
             TycheError::InvalidFounderPassConcentrationLimit
         );
 
@@ -2692,6 +2557,13 @@ pub mod tyche {
                 config.rule_proposal_allowance,
                 config.bet_allowance,
                 config.active_turn_window,
+            )?;
+            // FP-D9 must be not merely "non-zero" but enforceable by the
+            // accounts FP2 actually writes, otherwise activation would promise
+            // a concentration policy the programme cannot apply (§10).
+            validate_founder_pass_concentration_policy(
+                config.max_pass_vote_actions_per_rule_per_turn,
+                config.max_passes_per_wallet_per_turn,
             )?;
             require!(args.activation_turn_id >= 1, TycheError::InvalidTurnId);
             // The activation turn anchors the one window every pass shares, so
@@ -2764,6 +2636,604 @@ pub mod tyche {
             collection: usage.collection,
             owner: facts.owner,
         });
+        Ok(())
+    }
+
+    // ---------------------------------------------------------------
+    // Founder Pass game benefits (PRD-FOUNDER-PASS-NFT.md, FP2)
+    //
+    // Five pass-aware variants of the ordinary paid actions, exactly as §6.3
+    // asks. The ordinary instructions above are unchanged and keep working;
+    // these perform the same eligibility, phase, sequence, and content checks
+    // through the same shared bodies, then waive the Tyche fee and update the
+    // usage PDA in the same transaction.
+    //
+    // They stay inert until governance activates benefits, because
+    // `plan_founder_pass_action` refuses while `enabled` is false, while any
+    // §14 decision is unresolved, or while the asset standard is `Unset`.
+    // ---------------------------------------------------------------
+
+    /// Creates the sponsor vault used by the `SponsorFunded` fee-waiver policy.
+    pub fn initialize_founder_pass_sponsor_vault(
+        ctx: Context<InitializeFounderPassSponsorVault>,
+    ) -> Result<()> {
+        require_program_upgrade_authority(
+            &ctx.accounts.program_data,
+            ctx.accounts.governance_authority.key(),
+        )?;
+
+        let vault = &mut ctx.accounts.founder_pass_sponsor_vault;
+        vault.version = FOUNDER_PASS_ACCOUNT_VERSION;
+        vault.total_funded_lamports = 0;
+        vault.total_spent_lamports = 0;
+        vault.bump = ctx.bumps.founder_pass_sponsor_vault;
+
+        emit!(FounderPassSponsorVaultInitialized {
+            authority: ctx.accounts.governance_authority.key(),
+        });
+        Ok(())
+    }
+
+    /// Adds lamports to the sponsor vault.
+    ///
+    /// Deliberately open to any signer: funding only ever *increases* what the
+    /// sponsor can cover and authorizes nothing by itself. The balance is the
+    /// §8 "explicit funded limit", so topping it up is the one operation that
+    /// must not require a governance round trip for the benefit to keep working.
+    pub fn fund_founder_pass_sponsor_vault(
+        ctx: Context<FundFounderPassSponsorVault>,
+        amount_lamports: u64,
+    ) -> Result<()> {
+        require!(amount_lamports > 0, TycheError::InvalidFounderPassSponsorAmount);
+
+        system_program::transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.funder.to_account_info(),
+                    to: ctx.accounts.founder_pass_sponsor_vault.to_account_info(),
+                },
+            ),
+            amount_lamports,
+        )?;
+
+        let vault = &mut ctx.accounts.founder_pass_sponsor_vault;
+        vault.total_funded_lamports = vault
+            .total_funded_lamports
+            .checked_add(amount_lamports)
+            .ok_or(TycheError::ArithmeticOverflow)?;
+
+        emit!(FounderPassSponsorVaultFunded {
+            funder: ctx.accounts.funder.key(),
+            amount_lamports,
+            total_funded_lamports: vault.total_funded_lamports,
+        });
+        Ok(())
+    }
+
+    /// Returns unspent sponsor lamports to a governed recipient.
+    pub fn withdraw_founder_pass_sponsor_vault(
+        ctx: Context<WithdrawFounderPassSponsorVault>,
+        amount_lamports: u64,
+    ) -> Result<()> {
+        require_program_upgrade_authority(
+            &ctx.accounts.program_data,
+            ctx.accounts.governance_authority.key(),
+        )?;
+        require!(amount_lamports > 0, TycheError::InvalidFounderPassSponsorAmount);
+
+        pay_from_vault(
+            &ctx.accounts.founder_pass_sponsor_vault.to_account_info(),
+            &ctx.accounts.recipient.to_account_info(),
+            amount_lamports,
+        )?;
+
+        emit!(FounderPassSponsorVaultWithdrawn {
+            authority: ctx.accounts.governance_authority.key(),
+            recipient: ctx.accounts.recipient.key(),
+            amount_lamports,
+        });
+        Ok(())
+    }
+
+    /// Fee-free first guess of a turn, funded by a Founder Pass (§3.2 bets).
+    ///
+    /// §5.2: a free bet still creates the ordinary Game Token through the
+    /// existing first-guess flow, so the pass grants no shortcut past the
+    /// Game Token gate.
+    pub fn submit_guess_with_founder_pass(
+        ctx: Context<SubmitGuessWithFounderPass>,
+        args: SubmitGuessArgs,
+    ) -> Result<()> {
+        require!(args.sequence == 1, TycheError::InvalidActionSequence);
+        let clock = Clock::get()?;
+        let config = &ctx.accounts.global_config;
+        validate_live_turn(config, &ctx.accounts.turn_state)?;
+        validate_turn_action_window(
+            clock.unix_timestamp,
+            &ctx.accounts.turn_state,
+            config.guess_cutoff_bps,
+        )?;
+        validate_guess(&args.numbers)?;
+        require_direct_fee_routing(config, &ctx.accounts.treasury_vault)?;
+
+        let turn_id = ctx.accounts.turn_state.turn_id;
+        let player = ctx.accounts.player.key();
+        let otherwise_due_lamports = repeated_action_fee_lamports(
+            config.guess_submission_fee_lamports,
+            turn_id,
+            args.sequence,
+        )?;
+
+        bind_founder_pass_wallet_turn(
+            &mut ctx.accounts.founder_pass_wallet_turn,
+            player,
+            turn_id,
+            ctx.bumps.founder_pass_wallet_turn,
+        )?;
+        let plan = plan_founder_pass_action(
+            &ctx.accounts.founder_pass_config,
+            &ctx.accounts.founder_pass_usage,
+            &ctx.accounts.founder_pass_wallet_turn,
+            &ctx.accounts.founder_pass_sponsor_vault.to_account_info(),
+            &ctx.accounts.asset.to_account_info(),
+            player,
+            turn_id,
+            FounderPassBenefit::Bet,
+            otherwise_due_lamports,
+            config.treasury_fee_bps,
+        )?;
+
+        let fee = ActionFeeOutcome::waived(&plan.settlement);
+        let sponsor_vault_info = ctx.accounts.founder_pass_sponsor_vault.to_account_info();
+        let fee_pool_info = ctx.accounts.fee_pool.to_account_info();
+        let prize_vault_info = ctx.accounts.prize_vault.to_account_info();
+        commit_founder_pass_action(
+            &plan,
+            &mut ctx.accounts.founder_pass_usage,
+            &mut ctx.accounts.founder_pass_wallet_turn,
+            &sponsor_vault_info,
+            &mut ctx.accounts.founder_pass_sponsor_vault,
+            &fee_pool_info,
+            &prize_vault_info,
+        )?;
+
+        apply_first_guess(
+            &mut ctx.accounts.turn_state,
+            &mut ctx.accounts.treasury_vault,
+            &mut ctx.accounts.prize_vault,
+            &mut ctx.accounts.player_guess,
+            &mut ctx.accounts.game_token,
+            player,
+            &args,
+            fee,
+            clock.unix_timestamp,
+            ctx.bumps.player_guess,
+            ctx.bumps.game_token,
+        )?;
+
+        emit_founder_pass_benefit_used(
+            &plan,
+            turn_id,
+            FounderPassBenefit::Bet,
+            &ctx.accounts.founder_pass_usage,
+        );
+        Ok(())
+    }
+
+    /// Fee-free additional guess, funded by a Founder Pass (§3.2 bets).
+    pub fn submit_additional_guess_with_founder_pass(
+        ctx: Context<SubmitAdditionalGuessWithFounderPass>,
+        args: SubmitGuessArgs,
+    ) -> Result<()> {
+        let clock = Clock::get()?;
+        let config = &ctx.accounts.global_config;
+        validate_live_turn(config, &ctx.accounts.turn_state)?;
+        validate_turn_action_window(
+            clock.unix_timestamp,
+            &ctx.accounts.turn_state,
+            config.guess_cutoff_bps,
+        )?;
+        validate_guess(&args.numbers)?;
+        validate_game_token(
+            &ctx.accounts.game_token,
+            ctx.accounts.turn_state.turn_id,
+            ctx.accounts.player.key(),
+        )?;
+        let expected_sequence = ctx
+            .accounts
+            .game_token
+            .guess_count
+            .checked_add(1)
+            .ok_or(TycheError::ArithmeticOverflow)?;
+        require!(
+            args.sequence == expected_sequence,
+            TycheError::InvalidActionSequence
+        );
+        require_direct_fee_routing(config, &ctx.accounts.treasury_vault)?;
+
+        let turn_id = ctx.accounts.turn_state.turn_id;
+        let player = ctx.accounts.player.key();
+        let otherwise_due_lamports = repeated_action_fee_lamports(
+            config.guess_submission_fee_lamports,
+            turn_id,
+            args.sequence,
+        )?;
+
+        bind_founder_pass_wallet_turn(
+            &mut ctx.accounts.founder_pass_wallet_turn,
+            player,
+            turn_id,
+            ctx.bumps.founder_pass_wallet_turn,
+        )?;
+        let plan = plan_founder_pass_action(
+            &ctx.accounts.founder_pass_config,
+            &ctx.accounts.founder_pass_usage,
+            &ctx.accounts.founder_pass_wallet_turn,
+            &ctx.accounts.founder_pass_sponsor_vault.to_account_info(),
+            &ctx.accounts.asset.to_account_info(),
+            player,
+            turn_id,
+            FounderPassBenefit::Bet,
+            otherwise_due_lamports,
+            config.treasury_fee_bps,
+        )?;
+
+        let fee = ActionFeeOutcome::waived(&plan.settlement);
+        let sponsor_vault_info = ctx.accounts.founder_pass_sponsor_vault.to_account_info();
+        let fee_pool_info = ctx.accounts.fee_pool.to_account_info();
+        let prize_vault_info = ctx.accounts.prize_vault.to_account_info();
+        commit_founder_pass_action(
+            &plan,
+            &mut ctx.accounts.founder_pass_usage,
+            &mut ctx.accounts.founder_pass_wallet_turn,
+            &sponsor_vault_info,
+            &mut ctx.accounts.founder_pass_sponsor_vault,
+            &fee_pool_info,
+            &prize_vault_info,
+        )?;
+
+        apply_additional_guess(
+            &mut ctx.accounts.turn_state,
+            &mut ctx.accounts.treasury_vault,
+            &mut ctx.accounts.prize_vault,
+            &mut ctx.accounts.player_guess,
+            &mut ctx.accounts.game_token,
+            player,
+            &args,
+            fee,
+            clock.unix_timestamp,
+            ctx.bumps.player_guess,
+        )?;
+
+        emit_founder_pass_benefit_used(
+            &plan,
+            turn_id,
+            FounderPassBenefit::Bet,
+            &ctx.accounts.founder_pass_usage,
+        );
+        Ok(())
+    }
+
+    /// Fee-free rule proposal, funded by a Founder Pass (§3.2 rule proposals).
+    pub fn propose_rule_with_founder_pass(
+        ctx: Context<ProposeRuleWithFounderPass>,
+        args: ProposeRuleArgs,
+    ) -> Result<()> {
+        let clock = Clock::get()?;
+        let config = &ctx.accounts.global_config;
+        validate_live_turn(config, &ctx.accounts.turn_state)?;
+        validate_turn_action_window(
+            clock.unix_timestamp,
+            &ctx.accounts.turn_state,
+            config.rule_election_cutoff_bps,
+        )?;
+        validate_game_token(
+            &ctx.accounts.game_token,
+            ctx.accounts.turn_state.turn_id,
+            ctx.accounts.proposer.key(),
+        )?;
+        validate_rule(
+            &args.sanitized_text,
+            &args.sanitized_text_hash,
+            &args.preflight_result_hash,
+            args.token_count,
+            config.max_rule_tokens,
+        )?;
+        require_direct_fee_routing(config, &ctx.accounts.treasury_vault)?;
+
+        let turn_id = ctx.accounts.turn_state.turn_id;
+        let proposer = ctx.accounts.proposer.key();
+        let proposal_sequence = ctx
+            .accounts
+            .game_token
+            .used_for_rule_proposal_count
+            .checked_add(1)
+            .ok_or(TycheError::ArithmeticOverflow)?;
+        let otherwise_due_lamports = repeated_action_fee_lamports(
+            config.rule_proposal_fee_lamports,
+            turn_id,
+            proposal_sequence,
+        )?;
+
+        bind_founder_pass_wallet_turn(
+            &mut ctx.accounts.founder_pass_wallet_turn,
+            proposer,
+            turn_id,
+            ctx.bumps.founder_pass_wallet_turn,
+        )?;
+        let plan = plan_founder_pass_action(
+            &ctx.accounts.founder_pass_config,
+            &ctx.accounts.founder_pass_usage,
+            &ctx.accounts.founder_pass_wallet_turn,
+            &ctx.accounts.founder_pass_sponsor_vault.to_account_info(),
+            &ctx.accounts.asset.to_account_info(),
+            proposer,
+            turn_id,
+            FounderPassBenefit::RuleProposal,
+            otherwise_due_lamports,
+            config.treasury_fee_bps,
+        )?;
+
+        let fee = ActionFeeOutcome::waived(&plan.settlement);
+        let bump = ctx.bumps.rule_proposal;
+        let sponsor_vault_info = ctx.accounts.founder_pass_sponsor_vault.to_account_info();
+        let fee_pool_info = ctx.accounts.fee_pool.to_account_info();
+        let prize_vault_info = ctx.accounts.prize_vault.to_account_info();
+        commit_founder_pass_action(
+            &plan,
+            &mut ctx.accounts.founder_pass_usage,
+            &mut ctx.accounts.founder_pass_wallet_turn,
+            &sponsor_vault_info,
+            &mut ctx.accounts.founder_pass_sponsor_vault,
+            &fee_pool_info,
+            &prize_vault_info,
+        )?;
+
+        apply_rule_proposal(
+            &mut ctx.accounts.turn_state,
+            &mut ctx.accounts.treasury_vault,
+            &mut ctx.accounts.prize_vault,
+            &mut ctx.accounts.rule_proposal,
+            &mut ctx.accounts.game_token,
+            proposer,
+            args,
+            fee,
+            clock.unix_timestamp,
+            bump,
+        )?;
+
+        emit_founder_pass_benefit_used(
+            &plan,
+            turn_id,
+            FounderPassBenefit::RuleProposal,
+            &ctx.accounts.founder_pass_usage,
+        );
+        Ok(())
+    }
+
+    /// Fee-free approval vote, funded by a Founder Pass (§3.2 votes).
+    ///
+    /// §5.2: the vote counts as exactly one ordinary vote. The §10
+    /// concentration limit is applied first, so a wallet cannot aim an
+    /// unbounded number of fee-free votes at one rule.
+    pub fn vote_rule_with_founder_pass(
+        ctx: Context<VoteRuleWithFounderPass>,
+        args: VoteRuleArgs,
+    ) -> Result<()> {
+        let clock = Clock::get()?;
+        let config = &ctx.accounts.global_config;
+        validate_live_turn(config, &ctx.accounts.turn_state)?;
+        let finalist_index = validate_approval_vote_window(
+            clock.unix_timestamp,
+            config,
+            &ctx.accounts.turn_state,
+            ctx.accounts.rule_proposal.rule_id,
+        )?;
+        validate_game_token(
+            &ctx.accounts.game_token,
+            ctx.accounts.turn_state.turn_id,
+            ctx.accounts.voter.key(),
+        )?;
+        require!(
+            matches!(
+                ctx.accounts.rule_proposal.state,
+                RuleState::Proposed | RuleState::Eligible
+            ),
+            TycheError::RuleNotVoteable
+        );
+        require!(args.sequence > 0, TycheError::InvalidActionSequence);
+        require_direct_fee_routing(config, &ctx.accounts.treasury_vault)?;
+
+        let turn_id = ctx.accounts.turn_state.turn_id;
+        let rule_id = ctx.accounts.rule_proposal.rule_id;
+        let voter = ctx.accounts.voter.key();
+        let otherwise_due_lamports =
+            repeated_action_fee_lamports(config.vote_fee_lamports, turn_id, args.sequence)?;
+
+        bind_founder_pass_wallet_turn(
+            &mut ctx.accounts.founder_pass_wallet_turn,
+            voter,
+            turn_id,
+            ctx.bumps.founder_pass_wallet_turn,
+        )?;
+        bind_founder_pass_vote_concentration(
+            &mut ctx.accounts.founder_pass_vote_concentration,
+            voter,
+            turn_id,
+            rule_id,
+            ctx.bumps.founder_pass_vote_concentration,
+        )?;
+        let concentration = plan_founder_pass_vote_concentration(
+            &ctx.accounts.founder_pass_vote_concentration.view(),
+            FounderPassVoteKind::Approval,
+            ctx.accounts
+                .founder_pass_config
+                .max_pass_vote_actions_per_rule_per_turn,
+        )?;
+        let plan = plan_founder_pass_action(
+            &ctx.accounts.founder_pass_config,
+            &ctx.accounts.founder_pass_usage,
+            &ctx.accounts.founder_pass_wallet_turn,
+            &ctx.accounts.founder_pass_sponsor_vault.to_account_info(),
+            &ctx.accounts.asset.to_account_info(),
+            voter,
+            turn_id,
+            FounderPassBenefit::Vote,
+            otherwise_due_lamports,
+            config.treasury_fee_bps,
+        )?;
+
+        let fee = ActionFeeOutcome::waived(&plan.settlement);
+        let bump = ctx.bumps.rule_vote;
+        let sponsor_vault_info = ctx.accounts.founder_pass_sponsor_vault.to_account_info();
+        let fee_pool_info = ctx.accounts.fee_pool.to_account_info();
+        let prize_vault_info = ctx.accounts.prize_vault.to_account_info();
+        commit_founder_pass_action(
+            &plan,
+            &mut ctx.accounts.founder_pass_usage,
+            &mut ctx.accounts.founder_pass_wallet_turn,
+            &sponsor_vault_info,
+            &mut ctx.accounts.founder_pass_sponsor_vault,
+            &fee_pool_info,
+            &prize_vault_info,
+        )?;
+        ctx.accounts
+            .founder_pass_vote_concentration
+            .approval_vote_actions = concentration.approval_vote_actions;
+
+        apply_rule_vote(
+            &mut ctx.accounts.turn_state,
+            &mut ctx.accounts.treasury_vault,
+            &mut ctx.accounts.prize_vault,
+            &mut ctx.accounts.rule_proposal,
+            &mut ctx.accounts.rule_vote,
+            &mut ctx.accounts.game_token,
+            voter,
+            args.sequence,
+            finalist_index,
+            fee,
+            clock.unix_timestamp,
+            bump,
+        )?;
+
+        emit_founder_pass_benefit_used(
+            &plan,
+            turn_id,
+            FounderPassBenefit::Vote,
+            &ctx.accounts.founder_pass_usage,
+        );
+        Ok(())
+    }
+
+    /// Fee-free elimination vote, funded by a Founder Pass (§3.2 votes).
+    pub fn eliminate_vote_rule_with_founder_pass(
+        ctx: Context<EliminateVoteRuleWithFounderPass>,
+        args: EliminateVoteRuleArgs,
+    ) -> Result<()> {
+        let clock = Clock::get()?;
+        let config = &ctx.accounts.global_config;
+        validate_live_turn(config, &ctx.accounts.turn_state)?;
+        validate_game_token(
+            &ctx.accounts.game_token,
+            ctx.accounts.turn_state.turn_id,
+            ctx.accounts.voter.key(),
+        )?;
+        require!(
+            ctx.accounts.turn_state.finalist_count > 0
+                && ctx.accounts.turn_state.elimination_window_end_timestamp > 0,
+            TycheError::EliminationWindowNotOpen
+        );
+        require!(
+            clock.unix_timestamp < ctx.accounts.turn_state.elimination_window_end_timestamp,
+            TycheError::EliminationWindowNotOpen
+        );
+        let index = finalist_index(&ctx.accounts.turn_state, ctx.accounts.rule_proposal.rule_id)
+            .ok_or(TycheError::RuleNotFinalist)?;
+        require!(
+            !ctx.accounts.turn_state.finalist_eliminated[index],
+            TycheError::RuleAlreadyEliminated
+        );
+        require!(args.sequence > 0, TycheError::InvalidActionSequence);
+        require_direct_fee_routing(config, &ctx.accounts.treasury_vault)?;
+
+        let turn_id = ctx.accounts.turn_state.turn_id;
+        let rule_id = ctx.accounts.rule_proposal.rule_id;
+        let voter = ctx.accounts.voter.key();
+        let otherwise_due_lamports =
+            repeated_action_fee_lamports(config.vote_fee_lamports, turn_id, args.sequence)?;
+
+        bind_founder_pass_wallet_turn(
+            &mut ctx.accounts.founder_pass_wallet_turn,
+            voter,
+            turn_id,
+            ctx.bumps.founder_pass_wallet_turn,
+        )?;
+        bind_founder_pass_vote_concentration(
+            &mut ctx.accounts.founder_pass_vote_concentration,
+            voter,
+            turn_id,
+            rule_id,
+            ctx.bumps.founder_pass_vote_concentration,
+        )?;
+        let concentration = plan_founder_pass_vote_concentration(
+            &ctx.accounts.founder_pass_vote_concentration.view(),
+            FounderPassVoteKind::Elimination,
+            ctx.accounts
+                .founder_pass_config
+                .max_pass_vote_actions_per_rule_per_turn,
+        )?;
+        let plan = plan_founder_pass_action(
+            &ctx.accounts.founder_pass_config,
+            &ctx.accounts.founder_pass_usage,
+            &ctx.accounts.founder_pass_wallet_turn,
+            &ctx.accounts.founder_pass_sponsor_vault.to_account_info(),
+            &ctx.accounts.asset.to_account_info(),
+            voter,
+            turn_id,
+            FounderPassBenefit::Vote,
+            otherwise_due_lamports,
+            config.treasury_fee_bps,
+        )?;
+
+        let fee = ActionFeeOutcome::waived(&plan.settlement);
+        let bump = ctx.bumps.rule_elimination_vote;
+        let sponsor_vault_info = ctx.accounts.founder_pass_sponsor_vault.to_account_info();
+        let fee_pool_info = ctx.accounts.fee_pool.to_account_info();
+        let prize_vault_info = ctx.accounts.prize_vault.to_account_info();
+        commit_founder_pass_action(
+            &plan,
+            &mut ctx.accounts.founder_pass_usage,
+            &mut ctx.accounts.founder_pass_wallet_turn,
+            &sponsor_vault_info,
+            &mut ctx.accounts.founder_pass_sponsor_vault,
+            &fee_pool_info,
+            &prize_vault_info,
+        )?;
+        ctx.accounts
+            .founder_pass_vote_concentration
+            .elimination_vote_actions = concentration.elimination_vote_actions;
+
+        apply_rule_elimination_vote(
+            &mut ctx.accounts.turn_state,
+            &mut ctx.accounts.treasury_vault,
+            &mut ctx.accounts.prize_vault,
+            &mut ctx.accounts.rule_elimination_vote,
+            rule_id,
+            voter,
+            args.sequence,
+            index,
+            fee,
+            clock.unix_timestamp,
+            bump,
+        )?;
+
+        emit_founder_pass_benefit_used(
+            &plan,
+            turn_id,
+            FounderPassBenefit::Vote,
+            &ctx.accounts.founder_pass_usage,
+        );
         Ok(())
     }
 }
@@ -2867,68 +3337,22 @@ fn submit_guess_with_game_token_init(
         &ctx.accounts.system_program,
         fee_lamports,
     )?;
-    let (treasury_amount, prize_amount) = split_fee(fee_lamports, config.treasury_fee_bps)?;
+    let fee = ActionFeeOutcome::paid(fee_lamports, config.treasury_fee_bps)?;
+    let player = ctx.accounts.player.key();
 
-    let guess = &mut ctx.accounts.player_guess;
-    guess.turn_id = ctx.accounts.turn_state.turn_id;
-    guess.player = ctx.accounts.player.key();
-    guess.sequence = args.sequence;
-    guess.fee_lamports = fee_lamports;
-    guess.numbers = args.numbers;
-    guess.submitted_at = clock.unix_timestamp;
-    guess.game_token = ctx.accounts.game_token.key();
-    guess.verification_status = VerificationStatus::Pending;
-    guess.original_rule_result = false;
-    guess.alternative_rule_result = false;
-    guess.claim_status = ClaimStatus::Unavailable;
-    guess.bump = ctx.bumps.player_guess;
-
-    let game_token = &mut ctx.accounts.game_token;
-    game_token.turn_id = ctx.accounts.turn_state.turn_id;
-    game_token.player = ctx.accounts.player.key();
-    game_token.issuing_guess = guess.key();
-    game_token.issued_at = clock.unix_timestamp;
-    game_token.guess_count = args.sequence;
-    game_token.used_for_rule_proposal_count = 0;
-    game_token.used_for_vote_count = 0;
-    game_token.status = GameTokenStatus::Active;
-    game_token.close_authority = ctx.accounts.player.key();
-    game_token.bump = ctx.bumps.game_token;
-
-    ctx.accounts.turn_state.treasury_fee_amount_lamports = ctx
-        .accounts
-        .turn_state
-        .treasury_fee_amount_lamports
-        .checked_add(treasury_amount)
-        .ok_or(TycheError::ArithmeticOverflow)?;
-    ctx.accounts.treasury_vault.total_collected_lamports = ctx
-        .accounts
-        .treasury_vault
-        .total_collected_lamports
-        .checked_add(treasury_amount)
-        .ok_or(TycheError::ArithmeticOverflow)?;
-    ctx.accounts.prize_vault.total_collected_lamports = ctx
-        .accounts
-        .prize_vault
-        .total_collected_lamports
-        .checked_add(prize_amount)
-        .ok_or(TycheError::ArithmeticOverflow)?;
-    ctx.accounts.turn_state.prize_pool_amount_lamports = ctx
-        .accounts
-        .turn_state
-        .prize_pool_amount_lamports
-        .checked_add(prize_amount)
-        .ok_or(TycheError::ArithmeticOverflow)?;
-
-    emit!(GuessSubmitted {
-        turn_id: guess.turn_id,
-        player: guess.player,
-        sequence: guess.sequence,
-        fee_lamports: guess.fee_lamports,
-        guess: args.numbers,
-        game_token: game_token.key(),
-    });
-    Ok(())
+    apply_first_guess(
+        &mut ctx.accounts.turn_state,
+        &mut ctx.accounts.treasury_vault,
+        &mut ctx.accounts.prize_vault,
+        &mut ctx.accounts.player_guess,
+        &mut ctx.accounts.game_token,
+        player,
+        &args,
+        fee,
+        clock.unix_timestamp,
+        ctx.bumps.player_guess,
+        ctx.bumps.game_token,
+    )
 }
 
 fn validate_game_token(game_token: &GameToken, turn_id: u64, player: Pubkey) -> Result<()> {
@@ -3049,6 +3473,340 @@ fn read_election_candidates<'accounts, 'info>(
     }
 
     Ok(candidates)
+}
+
+/// What one game action records and books for its Tyche fee.
+///
+/// The ordinary paid path and the FP2 pass-funded path differ *only* here. A
+/// waived action records zero, because §6.3 requires the recorded action fee to
+/// be zero when waived, and books whatever §8's governed funding policy
+/// actually paid — which is the full split under `SponsorFunded` and nothing at
+/// all under `ReducedTurnPool`. Everything else about the action (eligibility,
+/// phase, sequence, content checks, tally, and account writes) is shared, so
+/// the two paths cannot drift apart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ActionFeeOutcome {
+    recorded_fee_lamports: u64,
+    treasury_lamports: u64,
+    prize_lamports: u64,
+}
+
+impl ActionFeeOutcome {
+    /// The ordinary path: the player paid `fee_lamports` and it is booked and
+    /// recorded in full.
+    fn paid(fee_lamports: u64, treasury_fee_bps: u16) -> Result<Self> {
+        let (treasury_lamports, prize_lamports) = split_fee(fee_lamports, treasury_fee_bps)?;
+        Ok(Self {
+            recorded_fee_lamports: fee_lamports,
+            treasury_lamports,
+            prize_lamports,
+        })
+    }
+
+    /// The FP2 path: nothing is recorded against the player, and only what the
+    /// sponsor actually paid is booked.
+    fn waived(settlement: &FounderPassWaiverSettlement) -> Self {
+        Self {
+            recorded_fee_lamports: 0,
+            treasury_lamports: settlement.treasury_lamports,
+            prize_lamports: settlement.prize_lamports,
+        }
+    }
+}
+
+/// Credits one action's fee split into the turn and vault ledgers.
+///
+/// Extracted verbatim from the five call sites that previously repeated it, so
+/// the pass-aware variants book SOL through exactly the same arithmetic and in
+/// the same order as the paid ones.
+fn credit_fee_ledgers(
+    turn_state: &mut TurnState,
+    treasury_vault: &mut TreasuryVault,
+    prize_vault: &mut PrizeVault,
+    fee: ActionFeeOutcome,
+) -> Result<()> {
+    turn_state.treasury_fee_amount_lamports = turn_state
+        .treasury_fee_amount_lamports
+        .checked_add(fee.treasury_lamports)
+        .ok_or(TycheError::ArithmeticOverflow)?;
+    treasury_vault.total_collected_lamports = treasury_vault
+        .total_collected_lamports
+        .checked_add(fee.treasury_lamports)
+        .ok_or(TycheError::ArithmeticOverflow)?;
+    prize_vault.total_collected_lamports = prize_vault
+        .total_collected_lamports
+        .checked_add(fee.prize_lamports)
+        .ok_or(TycheError::ArithmeticOverflow)?;
+    turn_state.prize_pool_amount_lamports = turn_state
+        .prize_pool_amount_lamports
+        .checked_add(fee.prize_lamports)
+        .ok_or(TycheError::ArithmeticOverflow)?;
+    Ok(())
+}
+
+// ------------------------------------------------------------------
+// Shared action bodies (FP2, §6.3)
+//
+// Each of these is the part of a game action that a Founder Pass does not
+// change: the account writes, the tally, the sequence advance, and the event.
+// The ordinary paid instruction and its pass-aware variant both call the same
+// function and differ only in the `ActionFeeOutcome` they hand it, which is
+// what §6.3 means by "pass-aware paths perform all existing checks and update
+// the standard action sequence, game account, vote tally, and usage PDA in one
+// transaction".
+// ------------------------------------------------------------------
+
+/// First guess of a turn: writes the guess and mints the Game Token.
+#[allow(clippy::too_many_arguments)]
+fn apply_first_guess<'info>(
+    turn_state: &mut TurnState,
+    treasury_vault: &mut TreasuryVault,
+    prize_vault: &mut PrizeVault,
+    player_guess: &mut Account<'info, PlayerGuess>,
+    game_token: &mut Account<'info, GameToken>,
+    player: Pubkey,
+    args: &SubmitGuessArgs,
+    fee: ActionFeeOutcome,
+    now: i64,
+    player_guess_bump: u8,
+    game_token_bump: u8,
+) -> Result<()> {
+    let guess_key = player_guess.key();
+    let game_token_key = game_token.key();
+    let turn_id = turn_state.turn_id;
+
+    player_guess.turn_id = turn_id;
+    player_guess.player = player;
+    player_guess.sequence = args.sequence;
+    player_guess.fee_lamports = fee.recorded_fee_lamports;
+    player_guess.numbers = args.numbers;
+    player_guess.submitted_at = now;
+    player_guess.game_token = game_token_key;
+    player_guess.verification_status = VerificationStatus::Pending;
+    player_guess.original_rule_result = false;
+    player_guess.alternative_rule_result = false;
+    player_guess.claim_status = ClaimStatus::Unavailable;
+    player_guess.bump = player_guess_bump;
+
+    game_token.turn_id = turn_id;
+    game_token.player = player;
+    game_token.issuing_guess = guess_key;
+    game_token.issued_at = now;
+    game_token.guess_count = args.sequence;
+    game_token.used_for_rule_proposal_count = 0;
+    game_token.used_for_vote_count = 0;
+    game_token.status = GameTokenStatus::Active;
+    game_token.close_authority = player;
+    game_token.bump = game_token_bump;
+
+    credit_fee_ledgers(turn_state, treasury_vault, prize_vault, fee)?;
+
+    emit!(GuessSubmitted {
+        turn_id,
+        player,
+        sequence: args.sequence,
+        fee_lamports: fee.recorded_fee_lamports,
+        guess: args.numbers,
+        game_token: game_token_key,
+    });
+    Ok(())
+}
+
+/// A later guess in the same turn, against an existing Game Token.
+#[allow(clippy::too_many_arguments)]
+fn apply_additional_guess<'info>(
+    turn_state: &mut TurnState,
+    treasury_vault: &mut TreasuryVault,
+    prize_vault: &mut PrizeVault,
+    player_guess: &mut Account<'info, PlayerGuess>,
+    game_token: &mut Account<'info, GameToken>,
+    player: Pubkey,
+    args: &SubmitGuessArgs,
+    fee: ActionFeeOutcome,
+    now: i64,
+    player_guess_bump: u8,
+) -> Result<()> {
+    let turn_id = turn_state.turn_id;
+    let game_token_key = game_token.key();
+
+    player_guess.turn_id = turn_id;
+    player_guess.player = player;
+    player_guess.sequence = args.sequence;
+    player_guess.fee_lamports = fee.recorded_fee_lamports;
+    player_guess.numbers = args.numbers;
+    player_guess.submitted_at = now;
+    player_guess.game_token = game_token_key;
+    player_guess.verification_status = VerificationStatus::Pending;
+    player_guess.original_rule_result = false;
+    player_guess.alternative_rule_result = false;
+    player_guess.claim_status = ClaimStatus::Unavailable;
+    player_guess.bump = player_guess_bump;
+
+    let guess_key = player_guess.key();
+    game_token.issuing_guess = guess_key;
+    game_token.guess_count = args.sequence;
+
+    credit_fee_ledgers(turn_state, treasury_vault, prize_vault, fee)?;
+
+    emit!(GuessSubmitted {
+        turn_id,
+        player,
+        sequence: args.sequence,
+        fee_lamports: fee.recorded_fee_lamports,
+        guess: args.numbers,
+        game_token: game_token_key,
+    });
+    Ok(())
+}
+
+/// Writes a rule proposal and advances the proposer's per-turn proposal count.
+#[allow(clippy::too_many_arguments)]
+fn apply_rule_proposal(
+    turn_state: &mut TurnState,
+    treasury_vault: &mut TreasuryVault,
+    prize_vault: &mut PrizeVault,
+    rule_proposal: &mut RuleProposal,
+    game_token: &mut GameToken,
+    proposer: Pubkey,
+    args: ProposeRuleArgs,
+    fee: ActionFeeOutcome,
+    now: i64,
+    bump: u8,
+) -> Result<()> {
+    let turn_id = turn_state.turn_id;
+
+    rule_proposal.rule_id = args.rule_id;
+    rule_proposal.turn_id = turn_id;
+    rule_proposal.proposer = proposer;
+    rule_proposal.sanitized_text_hash = args.sanitized_text_hash;
+    rule_proposal.sanitized_text = args.sanitized_text;
+    rule_proposal.normalized_text_hash = args.normalized_text_hash;
+    rule_proposal.official_interpretation_hash = args.official_interpretation_hash;
+    rule_proposal.compiled_artifact_hash = [0; 32];
+    rule_proposal.token_count = args.token_count;
+    rule_proposal.vote_count = 0;
+    rule_proposal.report_count = 0;
+    rule_proposal.state = RuleState::Proposed;
+    rule_proposal.preflight_result_hash = args.preflight_result_hash;
+    rule_proposal.precompilation_status = PrecompilationStatus::Pending;
+    rule_proposal.created_at = now;
+    rule_proposal.bump = bump;
+
+    // §8: the action still advances its ordinary sequence so that a later paid
+    // proposal quotes the correct next escalated fee.
+    game_token.used_for_rule_proposal_count = game_token
+        .used_for_rule_proposal_count
+        .checked_add(1)
+        .ok_or(TycheError::ArithmeticOverflow)?;
+
+    credit_fee_ledgers(turn_state, treasury_vault, prize_vault, fee)?;
+
+    emit!(RuleProposed {
+        turn_id,
+        rule_id: rule_proposal.rule_id,
+        proposer,
+        sanitized_text_hash: rule_proposal.sanitized_text_hash,
+    });
+    Ok(())
+}
+
+/// Writes an approval vote and moves the ordinary tallies.
+///
+/// §5.2: a waived vote adds exactly one ordinary vote. Nothing about the tally,
+/// side, rule, or sequence semantics depends on how the fee was funded.
+#[allow(clippy::too_many_arguments)]
+fn apply_rule_vote(
+    turn_state: &mut TurnState,
+    treasury_vault: &mut TreasuryVault,
+    prize_vault: &mut PrizeVault,
+    rule_proposal: &mut RuleProposal,
+    rule_vote: &mut RuleVote,
+    game_token: &mut GameToken,
+    voter: Pubkey,
+    sequence: u64,
+    finalist_index: Option<usize>,
+    fee: ActionFeeOutcome,
+    now: i64,
+    bump: u8,
+) -> Result<()> {
+    let turn_id = turn_state.turn_id;
+    let rule_id = rule_proposal.rule_id;
+
+    rule_vote.turn_id = turn_id;
+    rule_vote.rule_id = rule_id;
+    rule_vote.voter = voter;
+    rule_vote.sequence = sequence;
+    rule_vote.fee_lamports = fee.recorded_fee_lamports;
+    rule_vote.created_at = now;
+    rule_vote.bump = bump;
+
+    rule_proposal.vote_count = rule_proposal
+        .vote_count
+        .checked_add(1)
+        .ok_or(TycheError::ArithmeticOverflow)?;
+    if let Some(index) = finalist_index {
+        turn_state.finalist_approval_vote_counts[index] = turn_state
+            .finalist_approval_vote_counts[index]
+            .checked_add(1)
+            .ok_or(TycheError::ArithmeticOverflow)?;
+    }
+    game_token.used_for_vote_count = game_token
+        .used_for_vote_count
+        .checked_add(1)
+        .ok_or(TycheError::ArithmeticOverflow)?;
+
+    credit_fee_ledgers(turn_state, treasury_vault, prize_vault, fee)?;
+
+    emit!(RuleVoteCast {
+        turn_id,
+        rule_id,
+        voter,
+        sequence,
+        fee_lamports: fee.recorded_fee_lamports,
+    });
+    Ok(())
+}
+
+/// Writes an elimination vote and moves the ordinary elimination tally.
+#[allow(clippy::too_many_arguments)]
+fn apply_rule_elimination_vote(
+    turn_state: &mut TurnState,
+    treasury_vault: &mut TreasuryVault,
+    prize_vault: &mut PrizeVault,
+    rule_elimination_vote: &mut RuleEliminationVote,
+    rule_id: u64,
+    voter: Pubkey,
+    sequence: u64,
+    finalist_index: usize,
+    fee: ActionFeeOutcome,
+    now: i64,
+    bump: u8,
+) -> Result<()> {
+    let turn_id = turn_state.turn_id;
+
+    rule_elimination_vote.turn_id = turn_id;
+    rule_elimination_vote.rule_id = rule_id;
+    rule_elimination_vote.voter = voter;
+    rule_elimination_vote.sequence = sequence;
+    rule_elimination_vote.fee_lamports = fee.recorded_fee_lamports;
+    rule_elimination_vote.created_at = now;
+    rule_elimination_vote.bump = bump;
+
+    turn_state.finalist_elimination_vote_counts[finalist_index] = turn_state
+        .finalist_elimination_vote_counts[finalist_index]
+        .checked_add(1)
+        .ok_or(TycheError::ArithmeticOverflow)?;
+
+    credit_fee_ledgers(turn_state, treasury_vault, prize_vault, fee)?;
+
+    emit!(RuleEliminationVoteCast {
+        turn_id,
+        rule_id,
+        voter,
+        sequence,
+        fee_lamports: fee.recorded_fee_lamports,
+    });
+    Ok(())
 }
 
 fn collect_fee<'info>(
@@ -3407,6 +4165,543 @@ pub struct InitializeFounderPassUsage<'info> {
         bump
     )]
     pub founder_pass_usage: Box<Account<'info, FounderPassUsage>>,
+    pub system_program: Program<'info, System>,
+}
+
+// ------------------------------------------------------------------
+// FP2 account contexts (§6.3)
+//
+// Each pass-aware context is the ordinary context plus exactly four (or five,
+// for a vote) Founder Pass accounts. The ordinary contexts are untouched, so
+// existing clients and the deployed instruction layouts are unaffected.
+// ------------------------------------------------------------------
+
+#[derive(Accounts)]
+pub struct InitializeFounderPassSponsorVault<'info> {
+    #[account(mut)]
+    pub governance_authority: Signer<'info>,
+    #[account(
+        init,
+        payer = governance_authority,
+        space = 8 + FounderPassSponsorVault::INIT_SPACE,
+        seeds = [b"founder_pass_sponsor"],
+        bump
+    )]
+    pub founder_pass_sponsor_vault: Box<Account<'info, FounderPassSponsorVault>>,
+    /// CHECK: Canonical loader-v3 ProgramData and upgrade authority are checked
+    /// by the handler.
+    #[account(owner = UPGRADEABLE_LOADER_ID)]
+    pub program_data: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct FundFounderPassSponsorVault<'info> {
+    #[account(mut)]
+    pub funder: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [b"founder_pass_sponsor"],
+        bump = founder_pass_sponsor_vault.bump
+    )]
+    pub founder_pass_sponsor_vault: Box<Account<'info, FounderPassSponsorVault>>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct WithdrawFounderPassSponsorVault<'info> {
+    pub governance_authority: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [b"founder_pass_sponsor"],
+        bump = founder_pass_sponsor_vault.bump
+    )]
+    pub founder_pass_sponsor_vault: Box<Account<'info, FounderPassSponsorVault>>,
+    /// CHECK: Recipient of unspent sponsor lamports, chosen by the governance
+    /// authority that signs this instruction.
+    #[account(mut)]
+    pub recipient: UncheckedAccount<'info>,
+    /// CHECK: Canonical loader-v3 ProgramData and upgrade authority are checked
+    /// by the handler.
+    #[account(owner = UPGRADEABLE_LOADER_ID)]
+    pub program_data: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+#[instruction(args: SubmitGuessArgs)]
+pub struct SubmitGuessWithFounderPass<'info> {
+    #[account(mut)]
+    pub player: Signer<'info>,
+    #[account(seeds = [b"global_config"], bump = global_config.bump)]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        mut,
+        seeds = [b"turn".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
+        bump = turn_state.bump
+    )]
+    pub turn_state: Box<Account<'info, TurnState>>,
+    #[account(
+        init,
+        payer = player,
+        space = 8 + PlayerGuess::INIT_SPACE,
+        seeds = [
+            b"guess".as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref(),
+            player.key().as_ref(),
+            args.sequence.to_le_bytes().as_ref()
+        ],
+        bump
+    )]
+    pub player_guess: Account<'info, PlayerGuess>,
+    #[account(
+        init,
+        payer = player,
+        space = 8 + GameToken::INIT_SPACE,
+        seeds = [
+            b"game_token".as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref(),
+            player.key().as_ref()
+        ],
+        bump
+    )]
+    pub game_token: Account<'info, GameToken>,
+    #[account(mut, seeds = [b"treasury_vault"], bump = treasury_vault.bump)]
+    pub treasury_vault: Account<'info, TreasuryVault>,
+    #[account(
+        mut,
+        address = global_config.treasury_address @ TycheError::InvalidFeePool,
+        seeds = [b"distribution_vault"],
+        bump = fee_pool.bump,
+        seeds::program = tokenomics_core::ID
+    )]
+    pub fee_pool: Account<'info, tokenomics_core::DistributionVaultRecord>,
+    #[account(
+        mut,
+        seeds = [b"prize_vault".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
+        bump = prize_vault.bump,
+        constraint = prize_vault.turn_id == turn_state.turn_id @ TycheError::InvalidTurnId
+    )]
+    pub prize_vault: Account<'info, PrizeVault>,
+    #[account(seeds = [b"founder_pass_config"], bump = founder_pass_config.bump)]
+    pub founder_pass_config: Box<Account<'info, FounderPassConfig>>,
+    /// CHECK: Deliberately unchecked here and verified by
+    /// `verify_founder_pass_asset`, which proves the account owner is the
+    /// governed asset programme before interpreting a single byte.
+    pub asset: UncheckedAccount<'info>,
+    #[account(
+        mut,
+        seeds = [b"founder_pass_usage".as_ref(), asset.key().as_ref()],
+        bump = founder_pass_usage.bump
+    )]
+    pub founder_pass_usage: Box<Account<'info, FounderPassUsage>>,
+    #[account(
+        init_if_needed,
+        payer = player,
+        space = 8 + FounderPassWalletTurn::INIT_SPACE,
+        seeds = [
+            b"fp_wallet_turn".as_ref(),
+            player.key().as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref()
+        ],
+        bump
+    )]
+    pub founder_pass_wallet_turn: Box<Account<'info, FounderPassWalletTurn>>,
+    #[account(
+        mut,
+        seeds = [b"founder_pass_sponsor"],
+        bump = founder_pass_sponsor_vault.bump
+    )]
+    pub founder_pass_sponsor_vault: Box<Account<'info, FounderPassSponsorVault>>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(args: SubmitGuessArgs)]
+pub struct SubmitAdditionalGuessWithFounderPass<'info> {
+    #[account(mut)]
+    pub player: Signer<'info>,
+    #[account(seeds = [b"global_config"], bump = global_config.bump)]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        mut,
+        seeds = [b"turn".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
+        bump = turn_state.bump
+    )]
+    pub turn_state: Box<Account<'info, TurnState>>,
+    #[account(
+        init,
+        payer = player,
+        space = 8 + PlayerGuess::INIT_SPACE,
+        seeds = [
+            b"guess".as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref(),
+            player.key().as_ref(),
+            args.sequence.to_le_bytes().as_ref()
+        ],
+        bump
+    )]
+    pub player_guess: Account<'info, PlayerGuess>,
+    #[account(
+        mut,
+        seeds = [
+            b"game_token".as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref(),
+            player.key().as_ref()
+        ],
+        bump = game_token.bump,
+        constraint = game_token.player == player.key() @ TycheError::InvalidGameToken,
+        constraint = game_token.turn_id == turn_state.turn_id @ TycheError::InvalidGameToken
+    )]
+    pub game_token: Account<'info, GameToken>,
+    #[account(mut, seeds = [b"treasury_vault"], bump = treasury_vault.bump)]
+    pub treasury_vault: Account<'info, TreasuryVault>,
+    #[account(
+        mut,
+        address = global_config.treasury_address @ TycheError::InvalidFeePool,
+        seeds = [b"distribution_vault"],
+        bump = fee_pool.bump,
+        seeds::program = tokenomics_core::ID
+    )]
+    pub fee_pool: Account<'info, tokenomics_core::DistributionVaultRecord>,
+    #[account(
+        mut,
+        seeds = [b"prize_vault".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
+        bump = prize_vault.bump,
+        constraint = prize_vault.turn_id == turn_state.turn_id @ TycheError::InvalidTurnId
+    )]
+    pub prize_vault: Account<'info, PrizeVault>,
+    #[account(seeds = [b"founder_pass_config"], bump = founder_pass_config.bump)]
+    pub founder_pass_config: Box<Account<'info, FounderPassConfig>>,
+    /// CHECK: Verified by `verify_founder_pass_asset`.
+    pub asset: UncheckedAccount<'info>,
+    #[account(
+        mut,
+        seeds = [b"founder_pass_usage".as_ref(), asset.key().as_ref()],
+        bump = founder_pass_usage.bump
+    )]
+    pub founder_pass_usage: Box<Account<'info, FounderPassUsage>>,
+    #[account(
+        init_if_needed,
+        payer = player,
+        space = 8 + FounderPassWalletTurn::INIT_SPACE,
+        seeds = [
+            b"fp_wallet_turn".as_ref(),
+            player.key().as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref()
+        ],
+        bump
+    )]
+    pub founder_pass_wallet_turn: Box<Account<'info, FounderPassWalletTurn>>,
+    #[account(
+        mut,
+        seeds = [b"founder_pass_sponsor"],
+        bump = founder_pass_sponsor_vault.bump
+    )]
+    pub founder_pass_sponsor_vault: Box<Account<'info, FounderPassSponsorVault>>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(args: ProposeRuleArgs)]
+pub struct ProposeRuleWithFounderPass<'info> {
+    #[account(mut)]
+    pub proposer: Signer<'info>,
+    #[account(seeds = [b"global_config"], bump = global_config.bump)]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        mut,
+        seeds = [b"turn".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
+        bump = turn_state.bump
+    )]
+    pub turn_state: Box<Account<'info, TurnState>>,
+    #[account(
+        mut,
+        seeds = [
+            b"game_token".as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref(),
+            proposer.key().as_ref()
+        ],
+        bump = game_token.bump,
+        constraint = game_token.player == proposer.key() @ TycheError::InvalidGameToken,
+        constraint = game_token.turn_id == turn_state.turn_id @ TycheError::InvalidGameToken
+    )]
+    pub game_token: Account<'info, GameToken>,
+    #[account(
+        init,
+        payer = proposer,
+        space = 8 + RuleProposal::INIT_SPACE,
+        seeds = [
+            b"rule".as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref(),
+            args.rule_id.to_le_bytes().as_ref()
+        ],
+        bump
+    )]
+    pub rule_proposal: Box<Account<'info, RuleProposal>>,
+    #[account(mut, seeds = [b"treasury_vault"], bump = treasury_vault.bump)]
+    pub treasury_vault: Account<'info, TreasuryVault>,
+    #[account(
+        mut,
+        address = global_config.treasury_address @ TycheError::InvalidFeePool,
+        seeds = [b"distribution_vault"],
+        bump = fee_pool.bump,
+        seeds::program = tokenomics_core::ID
+    )]
+    pub fee_pool: Account<'info, tokenomics_core::DistributionVaultRecord>,
+    #[account(
+        mut,
+        seeds = [b"prize_vault".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
+        bump = prize_vault.bump,
+        constraint = prize_vault.turn_id == turn_state.turn_id @ TycheError::InvalidTurnId
+    )]
+    pub prize_vault: Account<'info, PrizeVault>,
+    #[account(seeds = [b"founder_pass_config"], bump = founder_pass_config.bump)]
+    pub founder_pass_config: Box<Account<'info, FounderPassConfig>>,
+    /// CHECK: Verified by `verify_founder_pass_asset`.
+    pub asset: UncheckedAccount<'info>,
+    #[account(
+        mut,
+        seeds = [b"founder_pass_usage".as_ref(), asset.key().as_ref()],
+        bump = founder_pass_usage.bump
+    )]
+    pub founder_pass_usage: Box<Account<'info, FounderPassUsage>>,
+    #[account(
+        init_if_needed,
+        payer = proposer,
+        space = 8 + FounderPassWalletTurn::INIT_SPACE,
+        seeds = [
+            b"fp_wallet_turn".as_ref(),
+            proposer.key().as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref()
+        ],
+        bump
+    )]
+    pub founder_pass_wallet_turn: Box<Account<'info, FounderPassWalletTurn>>,
+    #[account(
+        mut,
+        seeds = [b"founder_pass_sponsor"],
+        bump = founder_pass_sponsor_vault.bump
+    )]
+    pub founder_pass_sponsor_vault: Box<Account<'info, FounderPassSponsorVault>>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(args: VoteRuleArgs)]
+pub struct VoteRuleWithFounderPass<'info> {
+    #[account(mut)]
+    pub voter: Signer<'info>,
+    #[account(seeds = [b"global_config"], bump = global_config.bump)]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        mut,
+        seeds = [b"turn".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
+        bump = turn_state.bump
+    )]
+    pub turn_state: Box<Account<'info, TurnState>>,
+    #[account(
+        mut,
+        seeds = [
+            b"game_token".as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref(),
+            voter.key().as_ref()
+        ],
+        bump = game_token.bump,
+        constraint = game_token.player == voter.key() @ TycheError::InvalidGameToken,
+        constraint = game_token.turn_id == turn_state.turn_id @ TycheError::InvalidGameToken
+    )]
+    pub game_token: Account<'info, GameToken>,
+    #[account(
+        mut,
+        seeds = [
+            b"rule".as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref(),
+            rule_proposal.rule_id.to_le_bytes().as_ref()
+        ],
+        bump = rule_proposal.bump,
+        constraint = rule_proposal.turn_id == turn_state.turn_id @ TycheError::InvalidTurnId
+    )]
+    pub rule_proposal: Box<Account<'info, RuleProposal>>,
+    #[account(
+        init,
+        payer = voter,
+        space = 8 + RuleVote::INIT_SPACE,
+        seeds = [
+            b"vote".as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref(),
+            rule_proposal.rule_id.to_le_bytes().as_ref(),
+            voter.key().as_ref(),
+            args.sequence.to_le_bytes().as_ref()
+        ],
+        bump
+    )]
+    pub rule_vote: Account<'info, RuleVote>,
+    #[account(mut, seeds = [b"treasury_vault"], bump = treasury_vault.bump)]
+    pub treasury_vault: Account<'info, TreasuryVault>,
+    #[account(
+        mut,
+        address = global_config.treasury_address @ TycheError::InvalidFeePool,
+        seeds = [b"distribution_vault"],
+        bump = fee_pool.bump,
+        seeds::program = tokenomics_core::ID
+    )]
+    pub fee_pool: Account<'info, tokenomics_core::DistributionVaultRecord>,
+    #[account(
+        mut,
+        seeds = [b"prize_vault".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
+        bump = prize_vault.bump
+    )]
+    pub prize_vault: Account<'info, PrizeVault>,
+    #[account(seeds = [b"founder_pass_config"], bump = founder_pass_config.bump)]
+    pub founder_pass_config: Box<Account<'info, FounderPassConfig>>,
+    /// CHECK: Verified by `verify_founder_pass_asset`.
+    pub asset: UncheckedAccount<'info>,
+    #[account(
+        mut,
+        seeds = [b"founder_pass_usage".as_ref(), asset.key().as_ref()],
+        bump = founder_pass_usage.bump
+    )]
+    pub founder_pass_usage: Box<Account<'info, FounderPassUsage>>,
+    #[account(
+        init_if_needed,
+        payer = voter,
+        space = 8 + FounderPassWalletTurn::INIT_SPACE,
+        seeds = [
+            b"fp_wallet_turn".as_ref(),
+            voter.key().as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref()
+        ],
+        bump
+    )]
+    pub founder_pass_wallet_turn: Box<Account<'info, FounderPassWalletTurn>>,
+    #[account(
+        init_if_needed,
+        payer = voter,
+        space = 8 + FounderPassVoteConcentration::INIT_SPACE,
+        seeds = [
+            b"fp_vote_conc".as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref(),
+            rule_proposal.rule_id.to_le_bytes().as_ref(),
+            voter.key().as_ref()
+        ],
+        bump
+    )]
+    pub founder_pass_vote_concentration: Box<Account<'info, FounderPassVoteConcentration>>,
+    #[account(
+        mut,
+        seeds = [b"founder_pass_sponsor"],
+        bump = founder_pass_sponsor_vault.bump
+    )]
+    pub founder_pass_sponsor_vault: Box<Account<'info, FounderPassSponsorVault>>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(args: EliminateVoteRuleArgs)]
+pub struct EliminateVoteRuleWithFounderPass<'info> {
+    #[account(mut)]
+    pub voter: Signer<'info>,
+    #[account(seeds = [b"global_config"], bump = global_config.bump)]
+    pub global_config: Box<Account<'info, GlobalConfig>>,
+    #[account(
+        mut,
+        seeds = [b"turn".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
+        bump = turn_state.bump
+    )]
+    pub turn_state: Box<Account<'info, TurnState>>,
+    #[account(
+        seeds = [
+            b"game_token".as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref(),
+            voter.key().as_ref()
+        ],
+        bump = game_token.bump,
+        constraint = game_token.player == voter.key() @ TycheError::InvalidGameToken,
+        constraint = game_token.turn_id == turn_state.turn_id @ TycheError::InvalidGameToken
+    )]
+    pub game_token: Account<'info, GameToken>,
+    #[account(
+        seeds = [
+            b"rule".as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref(),
+            rule_proposal.rule_id.to_le_bytes().as_ref()
+        ],
+        bump = rule_proposal.bump,
+        constraint = rule_proposal.turn_id == turn_state.turn_id @ TycheError::InvalidTurnId
+    )]
+    pub rule_proposal: Box<Account<'info, RuleProposal>>,
+    #[account(
+        init,
+        payer = voter,
+        space = 8 + RuleEliminationVote::INIT_SPACE,
+        seeds = [
+            b"elimination_vote".as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref(),
+            rule_proposal.rule_id.to_le_bytes().as_ref(),
+            voter.key().as_ref(),
+            args.sequence.to_le_bytes().as_ref()
+        ],
+        bump
+    )]
+    pub rule_elimination_vote: Account<'info, RuleEliminationVote>,
+    #[account(mut, seeds = [b"treasury_vault"], bump = treasury_vault.bump)]
+    pub treasury_vault: Account<'info, TreasuryVault>,
+    #[account(
+        mut,
+        address = global_config.treasury_address @ TycheError::InvalidFeePool,
+        seeds = [b"distribution_vault"],
+        bump = fee_pool.bump,
+        seeds::program = tokenomics_core::ID
+    )]
+    pub fee_pool: Account<'info, tokenomics_core::DistributionVaultRecord>,
+    #[account(
+        mut,
+        seeds = [b"prize_vault".as_ref(), turn_state.turn_id.to_le_bytes().as_ref()],
+        bump = prize_vault.bump,
+        constraint = prize_vault.turn_id == turn_state.turn_id @ TycheError::InvalidTurnId
+    )]
+    pub prize_vault: Account<'info, PrizeVault>,
+    #[account(seeds = [b"founder_pass_config"], bump = founder_pass_config.bump)]
+    pub founder_pass_config: Box<Account<'info, FounderPassConfig>>,
+    /// CHECK: Verified by `verify_founder_pass_asset`.
+    pub asset: UncheckedAccount<'info>,
+    #[account(
+        mut,
+        seeds = [b"founder_pass_usage".as_ref(), asset.key().as_ref()],
+        bump = founder_pass_usage.bump
+    )]
+    pub founder_pass_usage: Box<Account<'info, FounderPassUsage>>,
+    #[account(
+        init_if_needed,
+        payer = voter,
+        space = 8 + FounderPassWalletTurn::INIT_SPACE,
+        seeds = [
+            b"fp_wallet_turn".as_ref(),
+            voter.key().as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref()
+        ],
+        bump
+    )]
+    pub founder_pass_wallet_turn: Box<Account<'info, FounderPassWalletTurn>>,
+    #[account(
+        init_if_needed,
+        payer = voter,
+        space = 8 + FounderPassVoteConcentration::INIT_SPACE,
+        seeds = [
+            b"fp_vote_conc".as_ref(),
+            turn_state.turn_id.to_le_bytes().as_ref(),
+            rule_proposal.rule_id.to_le_bytes().as_ref(),
+            voter.key().as_ref()
+        ],
+        bump
+    )]
+    pub founder_pass_vote_concentration: Box<Account<'info, FounderPassVoteConcentration>>,
+    #[account(
+        mut,
+        seeds = [b"founder_pass_sponsor"],
+        bump = founder_pass_sponsor_vault.bump
+    )]
+    pub founder_pass_sponsor_vault: Box<Account<'info, FounderPassSponsorVault>>,
     pub system_program: Program<'info, System>,
 }
 
@@ -4892,6 +6187,283 @@ impl FounderPassUsage {
     }
 }
 
+/// Sponsor funding for waived Tyche fees (§8, FP-D8).
+///
+/// Only meaningful under `FounderPassFeeWaiverFunding::SponsorFunded`, where §8
+/// requires the otherwise-due amount to reach the ordinary accounting path so a
+/// waived fee is never booked as collected SOL that nobody paid. The vault's
+/// own spendable balance is the "explicit funded limit" §8 demands: when it
+/// cannot cover a waiver the action is refused, never silently under-collected
+/// and never quietly charged back to the player.
+///
+/// The totals are cumulative and exist for reconciliation; the authoritative
+/// spendable amount is always the account's live lamport balance above rent.
+#[account]
+#[derive(InitSpace)]
+pub struct FounderPassSponsorVault {
+    pub version: u16,
+    pub total_funded_lamports: u64,
+    pub total_spent_lamports: u64,
+    pub bump: u8,
+}
+
+/// The distinct Founder Passes one wallet has spent in one turn (§10, FP-D9).
+///
+/// This stores the asset keys themselves rather than a count because a counter
+/// cannot tell a repeat use of the same pass from the admission of a new one,
+/// and the policy is about **distinct** passes. `FOUNDER_PASS_WALLET_TURN_PASS_SLOTS`
+/// bounds the layout; governance chooses the actual limit within it.
+#[account]
+#[derive(InitSpace)]
+pub struct FounderPassWalletTurn {
+    pub version: u16,
+    pub wallet: Pubkey,
+    pub turn_id: u64,
+    #[max_len(FOUNDER_PASS_WALLET_TURN_PASS_SLOTS)]
+    pub assets: Vec<Pubkey>,
+    pub bump: u8,
+}
+
+/// Pass-funded vote actions one wallet aimed at one rule in one turn (§10).
+///
+/// §10 requires a concentration policy to be enforced "before 1,000 fee-free
+/// vote actions can affect finalist or elimination outcomes". Approval and
+/// elimination counts are separate because they move different tallies.
+#[account]
+#[derive(InitSpace)]
+pub struct FounderPassVoteConcentration {
+    pub version: u16,
+    pub turn_id: u64,
+    pub rule_id: u64,
+    pub wallet: Pubkey,
+    pub approval_vote_actions: u16,
+    pub elimination_vote_actions: u16,
+    pub bump: u8,
+}
+
+impl FounderPassVoteConcentration {
+    pub fn view(&self) -> FounderPassVoteConcentrationView {
+        FounderPassVoteConcentrationView {
+            approval_vote_actions: self.approval_vote_actions,
+            elimination_vote_actions: self.elimination_vote_actions,
+        }
+    }
+}
+
+// ------------------------------------------------------------------
+// FP2 gate: authorize, then commit (§3.3, §6.2, §8, §10)
+// ------------------------------------------------------------------
+
+/// Adopts or re-validates a per-wallet/per-turn record created on demand.
+///
+/// These records are `init_if_needed`, so a freshly created one arrives fully
+/// zeroed. `version == 0` is therefore an unambiguous "just created" signal —
+/// `FOUNDER_PASS_ACCOUNT_VERSION` is never zero. An existing record must match
+/// the identity its seeds claim, which closes the re-initialization hole that
+/// `init_if_needed` otherwise opens.
+fn bind_founder_pass_wallet_turn(
+    record: &mut FounderPassWalletTurn,
+    wallet: Pubkey,
+    turn_id: u64,
+    bump: u8,
+) -> Result<()> {
+    if record.version == 0 {
+        record.version = FOUNDER_PASS_ACCOUNT_VERSION;
+        record.wallet = wallet;
+        record.turn_id = turn_id;
+        record.assets = Vec::new();
+        record.bump = bump;
+        return Ok(());
+    }
+    require!(
+        record.version == FOUNDER_PASS_ACCOUNT_VERSION
+            && record.wallet == wallet
+            && record.turn_id == turn_id,
+        TycheError::InvalidFounderPassWalletTurn
+    );
+    Ok(())
+}
+
+/// The vote-concentration counterpart of `bind_founder_pass_wallet_turn`.
+fn bind_founder_pass_vote_concentration(
+    record: &mut FounderPassVoteConcentration,
+    wallet: Pubkey,
+    turn_id: u64,
+    rule_id: u64,
+    bump: u8,
+) -> Result<()> {
+    if record.version == 0 {
+        record.version = FOUNDER_PASS_ACCOUNT_VERSION;
+        record.wallet = wallet;
+        record.turn_id = turn_id;
+        record.rule_id = rule_id;
+        record.approval_vote_actions = 0;
+        record.elimination_vote_actions = 0;
+        record.bump = bump;
+        return Ok(());
+    }
+    require!(
+        record.version == FOUNDER_PASS_ACCOUNT_VERSION
+            && record.wallet == wallet
+            && record.turn_id == turn_id
+            && record.rule_id == rule_id,
+        TycheError::InvalidFounderPassVoteConcentration
+    );
+    Ok(())
+}
+
+/// Everything one pass-funded action needs decided before anything is written.
+///
+/// §5.2 requires a failed transaction to leave all counters unchanged, so every
+/// post-state value is computed here and only written by
+/// `commit_founder_pass_action` once all of them succeeded.
+struct FounderPassActionPlan {
+    asset: Pubkey,
+    owner: Pubkey,
+    usage: FounderPassUsageView,
+    wallet_turn_assets: Vec<Pubkey>,
+    settlement: FounderPassWaiverSettlement,
+}
+
+/// Authorizes one pass-funded action without writing anything.
+///
+/// This is the whole of §6.2's verification duty for FP2: benefits must be
+/// active, every §14 decision resolved, the asset genuinely owned by the signer
+/// and bound to the canonical collection, the turn inside the governed window,
+/// the §3.2 quota intact, the §10 per-wallet pass limit respected, and the §8
+/// funding policy able to cover the waiver.
+#[allow(clippy::too_many_arguments)]
+fn plan_founder_pass_action(
+    config: &FounderPassConfig,
+    usage: &FounderPassUsage,
+    wallet_turn: &FounderPassWalletTurn,
+    sponsor_vault: &AccountInfo<'_>,
+    asset: &AccountInfo<'_>,
+    owner: Pubkey,
+    turn_id: u64,
+    benefit: FounderPassBenefit,
+    otherwise_due_lamports: u64,
+    treasury_fee_bps: u16,
+) -> Result<FounderPassActionPlan> {
+    require!(
+        config.enabled && !config.paused,
+        TycheError::FounderPassInactive
+    );
+    require!(
+        config.unresolved_decisions() == 0,
+        TycheError::FounderPassDecisionsUnresolved
+    );
+    validate_founder_pass_allowances(
+        config.vote_allowance,
+        config.rule_proposal_allowance,
+        config.bet_allowance,
+        config.active_turn_window,
+    )?;
+    validate_founder_pass_concentration_policy(
+        config.max_pass_vote_actions_per_rule_per_turn,
+        config.max_passes_per_wallet_per_turn,
+    )?;
+
+    let window = config.turn_window()?;
+    let facts = verify_founder_pass_asset(
+        config.asset_standard,
+        &config.asset_program_id,
+        &config.canonical_collection,
+        &owner,
+        asset,
+    )?;
+    // The usage PDA is seeded by the asset, so Anchor already binds the two.
+    // Checking the stored key as well means a usage account written under a
+    // previous configuration cannot be reused against a different asset.
+    require_keys_eq!(
+        usage.asset,
+        facts.asset,
+        TycheError::FounderPassUsageMismatch
+    );
+    require_keys_eq!(
+        usage.collection,
+        config.canonical_collection,
+        TycheError::FounderPassCollectionMismatch
+    );
+
+    let use_plan = plan_founder_pass_use(&usage.view(), window, benefit, turn_id)?;
+    let wallet_plan = plan_founder_pass_wallet_turn(
+        &wallet_turn.assets,
+        facts.asset,
+        config.max_passes_per_wallet_per_turn,
+    )?;
+    let settlement = plan_founder_pass_fee_waiver(
+        config.fee_waiver_funding,
+        otherwise_due_lamports,
+        treasury_fee_bps,
+        available_lamports(sponsor_vault)?,
+    )?;
+
+    Ok(FounderPassActionPlan {
+        asset: facts.asset,
+        owner: facts.owner,
+        usage: FounderPassUsageView {
+            vote_actions_used: use_plan.vote_actions_used,
+            rule_proposals_used: use_plan.rule_proposals_used,
+            bets_used: use_plan.bets_used,
+        },
+        wallet_turn_assets: wallet_plan.assets,
+        settlement,
+    })
+}
+
+/// Writes the authorized plan and moves the sponsor's SOL, if any.
+///
+/// Under `ReducedTurnPool` no lamport moves at all and the turn's treasury and
+/// prize pool simply receive less, which is what §8 calls the disclosed cost of
+/// the benefit. Under `SponsorFunded` the sponsor pays the identical split a
+/// paying player would have paid, into the identical destinations, so the SOL
+/// ledgers reconcile exactly as for a paid action.
+/// Emits the §9 indexing record for one pass-funded action.
+fn emit_founder_pass_benefit_used(
+    plan: &FounderPassActionPlan,
+    turn_id: u64,
+    benefit: FounderPassBenefit,
+    usage: &FounderPassUsage,
+) {
+    emit!(FounderPassBenefitUsed {
+        asset: plan.asset,
+        owner: plan.owner,
+        turn_id,
+        benefit,
+        waived_fee_lamports: plan.settlement.waived_fee_lamports,
+        sponsor_lamports: plan.settlement.sponsor_lamports,
+        vote_actions_used: usage.vote_actions_used,
+        rule_proposals_used: usage.rule_proposals_used,
+        bets_used: usage.bets_used,
+    });
+}
+
+fn commit_founder_pass_action<'info>(
+    plan: &FounderPassActionPlan,
+    usage: &mut FounderPassUsage,
+    wallet_turn: &mut FounderPassWalletTurn,
+    sponsor_vault: &AccountInfo<'info>,
+    sponsor_record: &mut FounderPassSponsorVault,
+    fee_pool: &AccountInfo<'info>,
+    prize_vault: &AccountInfo<'info>,
+) -> Result<()> {
+    usage.vote_actions_used = plan.usage.vote_actions_used;
+    usage.rule_proposals_used = plan.usage.rule_proposals_used;
+    usage.bets_used = plan.usage.bets_used;
+    wallet_turn.assets.clone_from(&plan.wallet_turn_assets);
+
+    if plan.settlement.sponsor_lamports > 0 {
+        pay_from_vault(sponsor_vault, fee_pool, plan.settlement.treasury_lamports)?;
+        pay_from_vault(sponsor_vault, prize_vault, plan.settlement.prize_lamports)?;
+        sponsor_record.total_spent_lamports = sponsor_record
+            .total_spent_lamports
+            .checked_add(plan.settlement.sponsor_lamports)
+            .ok_or(TycheError::ArithmeticOverflow)?;
+    }
+    Ok(())
+}
+
 #[account]
 #[derive(InitSpace)]
 pub struct TurnState {
@@ -5175,6 +6747,45 @@ pub struct FounderPassActivationChanged {
     pub paused: bool,
     pub activation_turn_id: u64,
     pub unresolved_decisions: u16,
+}
+
+#[event]
+pub struct FounderPassSponsorVaultInitialized {
+    pub authority: Pubkey,
+}
+
+#[event]
+pub struct FounderPassSponsorVaultFunded {
+    pub funder: Pubkey,
+    pub amount_lamports: u64,
+    pub total_funded_lamports: u64,
+}
+
+#[event]
+pub struct FounderPassSponsorVaultWithdrawn {
+    pub authority: Pubkey,
+    pub recipient: Pubkey,
+    pub amount_lamports: u64,
+}
+
+/// One pass-funded action (§9 indexing).
+///
+/// `waived_fee_lamports` is what the player would otherwise have paid and
+/// `sponsor_lamports` is what the sponsor actually paid, so an indexer can
+/// reconcile the turn's SOL ledgers under either §8 funding policy without
+/// re-deriving the fee schedule. The three counters are the post-state of the
+/// asset's lifetime quotas.
+#[event]
+pub struct FounderPassBenefitUsed {
+    pub asset: Pubkey,
+    pub owner: Pubkey,
+    pub turn_id: u64,
+    pub benefit: FounderPassBenefit,
+    pub waived_fee_lamports: u64,
+    pub sponsor_lamports: u64,
+    pub vote_actions_used: u32,
+    pub rule_proposals_used: u32,
+    pub bets_used: u32,
 }
 
 #[event]
@@ -5616,4 +7227,25 @@ pub enum TycheError {
     InvalidFounderPassConcentrationLimit,
     #[msg("The Founder Pass activation turn anchors the shared window and cannot be changed.")]
     FounderPassActivationTurnImmutable,
+    // FP2. Appended, so every error code above keeps its existing numbering.
+    #[msg("This action is already free, so it does not consume a Founder Pass benefit.")]
+    FounderPassBenefitNotApplicable,
+    #[msg("The Founder Pass fee-waiver funding policy is unresolved.")]
+    FounderPassFeeWaiverFundingUnset,
+    #[msg("The Founder Pass sponsor vault cannot cover the waived fee.")]
+    FounderPassSponsorUnderfunded,
+    #[msg("This wallet reached the Founder Pass vote concentration limit for this rule and turn.")]
+    FounderPassVoteConcentrationExceeded,
+    #[msg("This wallet reached the number of distinct Founder Passes it may use in this turn.")]
+    FounderPassWalletPassLimitExceeded,
+    #[msg("The Founder Pass per-wallet turn record does not match its wallet or turn.")]
+    InvalidFounderPassWalletTurn,
+    #[msg("The Founder Pass vote concentration record does not match its wallet, rule, or turn.")]
+    InvalidFounderPassVoteConcentration,
+    #[msg("The Founder Pass usage account does not belong to the supplied asset.")]
+    FounderPassUsageMismatch,
+    #[msg("The Founder Pass sponsor vault record is invalid.")]
+    InvalidFounderPassSponsorVault,
+    #[msg("The sponsor vault amount must be greater than zero.")]
+    InvalidFounderPassSponsorAmount,
 }

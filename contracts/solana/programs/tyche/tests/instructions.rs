@@ -34,7 +34,8 @@ use tyche::founder_pass::{
 };
 use tyche::{
     accounts, instruction, ConfigureFounderPassArgs, DrawStatus, FounderPassConfig,
-    FounderPassUsage, GlobalConfig, InitializeGlobalConfigArgs, MigrateFeePoolCustodyArgs,
+    FounderPassUsage, FounderPassVoteConcentration, FounderPassWalletTurn, GameToken,
+    GlobalConfig, InitializeGlobalConfigArgs, MigrateFeePoolCustodyArgs,
     PlayerGuess, PrecompilationStatus, PrecompileRuleArgs, PrizeVault, ProposeRuleArgs,
     ResetStaleVrfRequestArgs, RuleProposal, RuleState, RuleVote, SetFounderPassActivationArgs,
     SetVrfConfigArgs, SubmitGuessArgs, TreasuryVault, TurnState, TurnStatus, TycheError,
@@ -3332,4 +3333,716 @@ async fn founder_pass_usage_is_asset_keyed_and_refuses_unverified_assets() {
         .await,
         u32::from(TycheError::FounderPassInactive),
     );
+}
+
+// ------------------------------------------------------------------
+// Founder Pass game benefits (PRD-FOUNDER-PASS-NFT.md, FP2)
+// ------------------------------------------------------------------
+
+fn founder_pass_sponsor_vault() -> Pubkey {
+    pda(&[b"founder_pass_sponsor"])
+}
+
+fn fp_wallet_turn(wallet: Pubkey, turn_id: u64) -> Pubkey {
+    pda(&[b"fp_wallet_turn", wallet.as_ref(), &turn_id.to_le_bytes()])
+}
+
+fn fp_vote_concentration(turn_id: u64, rule_id: u64, wallet: Pubkey) -> Pubkey {
+    pda(&[
+        b"fp_vote_conc",
+        &turn_id.to_le_bytes(),
+        &rule_id.to_le_bytes(),
+        wallet.as_ref(),
+    ])
+}
+
+fn submit_guess_with_founder_pass_ix(
+    player: Pubkey,
+    turn_id: u64,
+    asset: Pubkey,
+    numbers: [u8; 6],
+) -> Instruction {
+    Instruction {
+        program_id: tyche::ID,
+        accounts: accounts::SubmitGuessWithFounderPass {
+            player,
+            global_config: pda(&[b"global_config"]),
+            turn_state: pda(&[b"turn", &turn_id.to_le_bytes()]),
+            player_guess: pda(&[
+                b"guess",
+                &turn_id.to_le_bytes(),
+                player.as_ref(),
+                &1_u64.to_le_bytes(),
+            ]),
+            game_token: pda(&[b"game_token", &turn_id.to_le_bytes(), player.as_ref()]),
+            treasury_vault: pda(&[b"treasury_vault"]),
+            fee_pool: tokenomics_pda(&[b"distribution_vault"]),
+            prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
+            founder_pass_config: pda(&[b"founder_pass_config"]),
+            asset,
+            founder_pass_usage: pda(&[b"founder_pass_usage", asset.as_ref()]),
+            founder_pass_wallet_turn: fp_wallet_turn(player, turn_id),
+            founder_pass_sponsor_vault: founder_pass_sponsor_vault(),
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+        data: instruction::SubmitGuessWithFounderPass {
+            args: SubmitGuessArgs {
+                numbers,
+                sequence: 1,
+            },
+        }
+        .data(),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn vote_rule_with_founder_pass_ix(
+    voter: Pubkey,
+    turn_id: u64,
+    rule_id: u64,
+    asset: Pubkey,
+    sequence: u64,
+) -> Instruction {
+    Instruction {
+        program_id: tyche::ID,
+        accounts: accounts::VoteRuleWithFounderPass {
+            voter,
+            global_config: pda(&[b"global_config"]),
+            turn_state: pda(&[b"turn", &turn_id.to_le_bytes()]),
+            game_token: pda(&[b"game_token", &turn_id.to_le_bytes(), voter.as_ref()]),
+            rule_proposal: pda(&[b"rule", &turn_id.to_le_bytes(), &rule_id.to_le_bytes()]),
+            rule_vote: pda(&[
+                b"vote",
+                &turn_id.to_le_bytes(),
+                &rule_id.to_le_bytes(),
+                voter.as_ref(),
+                &sequence.to_le_bytes(),
+            ]),
+            treasury_vault: pda(&[b"treasury_vault"]),
+            fee_pool: tokenomics_pda(&[b"distribution_vault"]),
+            prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
+            founder_pass_config: pda(&[b"founder_pass_config"]),
+            asset,
+            founder_pass_usage: pda(&[b"founder_pass_usage", asset.as_ref()]),
+            founder_pass_wallet_turn: fp_wallet_turn(voter, turn_id),
+            founder_pass_vote_concentration: fp_vote_concentration(turn_id, rule_id, voter),
+            founder_pass_sponsor_vault: founder_pass_sponsor_vault(),
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+        data: instruction::VoteRuleWithFounderPass {
+            args: VoteRuleArgs { sequence },
+        }
+        .data(),
+    }
+}
+
+
+#[allow(clippy::too_many_arguments)]
+fn propose_rule_with_founder_pass_ix(
+    proposer: Pubkey,
+    turn_id: u64,
+    rule_id: u64,
+    asset: Pubkey,
+    text: &str,
+) -> Instruction {
+    Instruction {
+        program_id: tyche::ID,
+        accounts: accounts::ProposeRuleWithFounderPass {
+            proposer,
+            global_config: pda(&[b"global_config"]),
+            turn_state: pda(&[b"turn", &turn_id.to_le_bytes()]),
+            game_token: pda(&[b"game_token", &turn_id.to_le_bytes(), proposer.as_ref()]),
+            rule_proposal: pda(&[b"rule", &turn_id.to_le_bytes(), &rule_id.to_le_bytes()]),
+            treasury_vault: pda(&[b"treasury_vault"]),
+            fee_pool: tokenomics_pda(&[b"distribution_vault"]),
+            prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
+            founder_pass_config: pda(&[b"founder_pass_config"]),
+            asset,
+            founder_pass_usage: pda(&[b"founder_pass_usage", asset.as_ref()]),
+            founder_pass_wallet_turn: fp_wallet_turn(proposer, turn_id),
+            founder_pass_sponsor_vault: founder_pass_sponsor_vault(),
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+        data: instruction::ProposeRuleWithFounderPass {
+            args: ProposeRuleArgs {
+                rule_id,
+                sanitized_text_hash: hash(text.as_bytes()).to_bytes(),
+                sanitized_text: text.to_string(),
+                normalized_text_hash: [2; 32],
+                official_interpretation_hash: [3; 32],
+                preflight_result_hash: [4; 32],
+                token_count: 8,
+            },
+        }
+        .data(),
+    }
+}
+
+fn submit_additional_guess_with_founder_pass_ix(
+    player: Pubkey,
+    turn_id: u64,
+    asset: Pubkey,
+    numbers: [u8; 6],
+    sequence: u64,
+) -> Instruction {
+    Instruction {
+        program_id: tyche::ID,
+        accounts: accounts::SubmitAdditionalGuessWithFounderPass {
+            player,
+            global_config: pda(&[b"global_config"]),
+            turn_state: pda(&[b"turn", &turn_id.to_le_bytes()]),
+            player_guess: pda(&[
+                b"guess",
+                &turn_id.to_le_bytes(),
+                player.as_ref(),
+                &sequence.to_le_bytes(),
+            ]),
+            game_token: pda(&[b"game_token", &turn_id.to_le_bytes(), player.as_ref()]),
+            treasury_vault: pda(&[b"treasury_vault"]),
+            fee_pool: tokenomics_pda(&[b"distribution_vault"]),
+            prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
+            founder_pass_config: pda(&[b"founder_pass_config"]),
+            asset,
+            founder_pass_usage: pda(&[b"founder_pass_usage", asset.as_ref()]),
+            founder_pass_wallet_turn: fp_wallet_turn(player, turn_id),
+            founder_pass_sponsor_vault: founder_pass_sponsor_vault(),
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+        data: instruction::SubmitAdditionalGuessWithFounderPass {
+            args: SubmitGuessArgs { numbers, sequence },
+        }
+        .data(),
+    }
+}
+
+/// End-to-end FP2: a Founder Pass waives the whole Tyche fee, the sponsor pays
+/// the identical split into the identical destinations, the ordinary tallies
+/// and sequences still move, and both §10 concentration limits bind.
+///
+/// Turn 1 is used, so every *first* action of the turn is already free under
+/// the ordinary `VOTE_FEE_START_TURN` policy. That makes this scenario assert
+/// the §8 rule directly on-chain: the free first action must be refused by the
+/// pass-aware path, and only the escalated repeat is waived.
+#[tokio::test]
+#[ignore = "requires an SBF build and SBF_OUT_DIR; run the explicit SBF integration suite"]
+async fn founder_pass_waives_the_whole_fee_and_enforces_the_concentration_policy() {
+    let governance_authority = Keypair::new();
+    let player = Keypair::new();
+    let asset_program = Pubkey::new_unique();
+    let collection = Pubkey::new_unique();
+    let asset_a = Pubkey::new_unique();
+    let asset_b = Pubkey::new_unique();
+    let turn_id = 1_u64;
+    let free_rule_id = 9_u64;
+    let paid_rule_id = 42_u64;
+
+    let mut test = tyche_program_test();
+    test.add_account(
+        tyche_program_data(),
+        program_data_account(governance_authority.pubkey()),
+    );
+    test.add_account(
+        asset_a,
+        core_asset_account(player.pubkey(), collection, asset_program),
+    );
+    test.add_account(
+        asset_b,
+        core_asset_account(player.pubkey(), collection, asset_program),
+    );
+
+    let mut context = test.start_with_context().await;
+    initialize_and_open_turn(&mut context, turn_id).await;
+    fund(&mut context, &governance_authority.pubkey()).await;
+    fund(&mut context, &player.pubkey()).await;
+
+    // Governance: resolve every §14 decision, then activate at this turn.
+    process(
+        &mut context,
+        Instruction {
+            program_id: tyche::ID,
+            accounts: accounts::InitializeFounderPassConfig {
+                governance_authority: governance_authority.pubkey(),
+                founder_pass_config: pda(&[b"founder_pass_config"]),
+                program_data: tyche_program_data(),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(None),
+            data: instruction::InitializeFounderPassConfig {}.data(),
+        },
+        &[&governance_authority],
+    )
+    .await
+    .unwrap();
+    process(
+        &mut context,
+        configure_founder_pass_ix(
+            governance_authority.pubkey(),
+            governed_founder_pass_args(asset_program, collection),
+        ),
+        &[&governance_authority],
+    )
+    .await
+    .unwrap();
+    process(
+        &mut context,
+        set_founder_pass_activation_ix(governance_authority.pubkey(), true, false, turn_id),
+        &[&governance_authority],
+    )
+    .await
+    .unwrap();
+
+    // Sponsor vault: the FP-D8 `SponsorFunded` policy's explicit funded limit.
+    process(
+        &mut context,
+        Instruction {
+            program_id: tyche::ID,
+            accounts: accounts::InitializeFounderPassSponsorVault {
+                governance_authority: governance_authority.pubkey(),
+                founder_pass_sponsor_vault: founder_pass_sponsor_vault(),
+                program_data: tyche_program_data(),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(None),
+            data: instruction::InitializeFounderPassSponsorVault {}.data(),
+        },
+        &[&governance_authority],
+    )
+    .await
+    .unwrap();
+    process(
+        &mut context,
+        Instruction {
+            program_id: tyche::ID,
+            accounts: accounts::FundFounderPassSponsorVault {
+                funder: governance_authority.pubkey(),
+                founder_pass_sponsor_vault: founder_pass_sponsor_vault(),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(None),
+            data: instruction::FundFounderPassSponsorVault {
+                amount_lamports: 500_000_000,
+            }
+            .data(),
+        },
+        &[&governance_authority],
+    )
+    .await
+    .unwrap();
+
+    process(
+        &mut context,
+        initialize_founder_pass_usage_ix(player.pubkey(), asset_a),
+        &[&player],
+    )
+    .await
+    .unwrap();
+    process(
+        &mut context,
+        initialize_founder_pass_usage_ix(player.pubkey(), asset_b),
+        &[&player],
+    )
+    .await
+    .unwrap();
+
+    // §8: the first guess of turn 1 is already free, so the pass-aware path
+    // must refuse it rather than spend a bet credit to reproduce a zero fee.
+    assert_custom_error(
+        process(
+            &mut context,
+            submit_guess_with_founder_pass_ix(
+                player.pubkey(),
+                turn_id,
+                asset_a,
+                [1, 2, 3, 4, 5, 6],
+            ),
+            &[&player],
+        )
+        .await,
+        u32::from(TycheError::FounderPassBenefitNotApplicable),
+    );
+    // Nothing was consumed by that refusal, and no wallet-turn record exists.
+    let usage_a: FounderPassUsage =
+        read_anchor_account(&mut context, pda(&[b"founder_pass_usage", asset_a.as_ref()])).await;
+    assert_eq!(usage_a.bets_used, 0);
+    assert!(context
+        .banks_client
+        .get_account(fp_wallet_turn(player.pubkey(), turn_id))
+        .await
+        .unwrap()
+        .is_none());
+
+    // The ordinary free first guess mints the Game Token as usual.
+    submit_guess(&mut context, &player, turn_id, [1, 2, 3, 4, 5, 6])
+        .await
+        .unwrap();
+
+    // ---- Fee-free escalated repeat bet ----
+    // Second guess: base 10_000_000 doubled once by the repeat escalation.
+    let guess_fee = 20_000_000_u64;
+    let expected_treasury = guess_fee * 500 / 10_000;
+    let expected_prize = guess_fee - expected_treasury;
+
+    let sponsor_before = lamports_of(&mut context, founder_pass_sponsor_vault()).await;
+    let fee_pool_before = lamports_of(&mut context, fee_pool()).await;
+    let prize_vault_before =
+        lamports_of(&mut context, pda(&[b"prize_vault", &turn_id.to_le_bytes()])).await;
+    let turn_before: TurnState =
+        read_anchor_account(&mut context, pda(&[b"turn", &turn_id.to_le_bytes()])).await;
+
+    process(
+        &mut context,
+        submit_additional_guess_with_founder_pass_ix(
+            player.pubkey(),
+            turn_id,
+            asset_a,
+            [7, 8, 9, 10, 11, 12],
+            2,
+        ),
+        &[&player],
+    )
+    .await
+    .unwrap();
+
+    // §6.3: the recorded action fee is zero when waived.
+    let guess: PlayerGuess = read_anchor_account(
+        &mut context,
+        pda(&[
+            b"guess",
+            &turn_id.to_le_bytes(),
+            player.pubkey().as_ref(),
+            &2_u64.to_le_bytes(),
+        ]),
+    )
+    .await;
+    assert_eq!(guess.fee_lamports, 0);
+
+    // §8: the sponsor paid the otherwise-due amount into the ordinary path, so
+    // the ledgers reconcile exactly as for a paid action.
+    assert_eq!(
+        sponsor_before - lamports_of(&mut context, founder_pass_sponsor_vault()).await,
+        guess_fee
+    );
+    assert_eq!(
+        lamports_of(&mut context, fee_pool()).await - fee_pool_before,
+        expected_treasury
+    );
+    assert_eq!(
+        lamports_of(&mut context, pda(&[b"prize_vault", &turn_id.to_le_bytes()])).await
+            - prize_vault_before,
+        expected_prize
+    );
+    let turn: TurnState =
+        read_anchor_account(&mut context, pda(&[b"turn", &turn_id.to_le_bytes()])).await;
+    assert_eq!(
+        turn.treasury_fee_amount_lamports - turn_before.treasury_fee_amount_lamports,
+        expected_treasury
+    );
+    assert_eq!(
+        turn.prize_pool_amount_lamports - turn_before.prize_pool_amount_lamports,
+        expected_prize
+    );
+
+    let usage_a: FounderPassUsage =
+        read_anchor_account(&mut context, pda(&[b"founder_pass_usage", asset_a.as_ref()])).await;
+    assert_eq!(usage_a.bets_used, 1);
+    assert_eq!(usage_a.vote_actions_used, 0);
+    assert_eq!(usage_a.rule_proposals_used, 0);
+
+    let wallet_turn: FounderPassWalletTurn =
+        read_anchor_account(&mut context, fp_wallet_turn(player.pubkey(), turn_id)).await;
+    assert_eq!(wallet_turn.assets, vec![asset_a]);
+    assert_eq!(wallet_turn.turn_id, turn_id);
+
+    // §8: the ordinary sequence still advanced.
+    let game_token: GameToken = read_anchor_account(
+        &mut context,
+        pda(&[
+            b"game_token",
+            &turn_id.to_le_bytes(),
+            player.pubkey().as_ref(),
+        ]),
+    )
+    .await;
+    assert_eq!(game_token.guess_count, 2);
+
+    // ---- FP-D9: one wallet, one distinct pass per turn under this policy ----
+    assert_custom_error(
+        process(
+            &mut context,
+            submit_additional_guess_with_founder_pass_ix(
+                player.pubkey(),
+                turn_id,
+                asset_b,
+                [13, 14, 15, 16, 17, 18],
+                3,
+            ),
+            &[&player],
+        )
+        .await,
+        u32::from(TycheError::FounderPassWalletPassLimitExceeded),
+    );
+
+    // ---- Fee-free rule proposal (the first one is free, so it is paid) ----
+    let free_text = "Win if at least four numbers match.";
+    process(
+        &mut context,
+        Instruction {
+            program_id: tyche::ID,
+            accounts: accounts::ProposeRule {
+                proposer: player.pubkey(),
+                global_config: pda(&[b"global_config"]),
+                turn_state: pda(&[b"turn", &turn_id.to_le_bytes()]),
+                game_token: pda(&[
+                    b"game_token",
+                    &turn_id.to_le_bytes(),
+                    player.pubkey().as_ref(),
+                ]),
+                rule_proposal: pda(&[
+                    b"rule",
+                    &turn_id.to_le_bytes(),
+                    &free_rule_id.to_le_bytes(),
+                ]),
+                treasury_vault: pda(&[b"treasury_vault"]),
+                fee_pool: tokenomics_pda(&[b"distribution_vault"]),
+                prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(None),
+            data: instruction::ProposeRule {
+                args: ProposeRuleArgs {
+                    rule_id: free_rule_id,
+                    sanitized_text_hash: hash(free_text.as_bytes()).to_bytes(),
+                    sanitized_text: free_text.to_string(),
+                    normalized_text_hash: [2; 32],
+                    official_interpretation_hash: [3; 32],
+                    preflight_result_hash: [4; 32],
+                    token_count: 8,
+                },
+            }
+            .data(),
+        },
+        &[&player],
+    )
+    .await
+    .unwrap();
+
+    process(
+        &mut context,
+        propose_rule_with_founder_pass_ix(
+            player.pubkey(),
+            turn_id,
+            paid_rule_id,
+            asset_a,
+            "Win if exactly three numbers match.",
+        ),
+        &[&player],
+    )
+    .await
+    .unwrap();
+
+    let usage_a: FounderPassUsage =
+        read_anchor_account(&mut context, pda(&[b"founder_pass_usage", asset_a.as_ref()])).await;
+    assert_eq!(usage_a.rule_proposals_used, 1);
+    let game_token: GameToken = read_anchor_account(
+        &mut context,
+        pda(&[
+            b"game_token",
+            &turn_id.to_le_bytes(),
+            player.pubkey().as_ref(),
+        ]),
+    )
+    .await;
+    assert_eq!(game_token.used_for_rule_proposal_count, 2);
+
+    // ---- §10 concentration limit on one rule ----
+    // Vote 1 is free under the ordinary policy, so it goes through the paid
+    // path; the pass then funds the escalated repeats 2, 3 and 4.
+    process(
+        &mut context,
+        Instruction {
+            program_id: tyche::ID,
+            accounts: accounts::VoteRule {
+                voter: player.pubkey(),
+                global_config: pda(&[b"global_config"]),
+                turn_state: pda(&[b"turn", &turn_id.to_le_bytes()]),
+                game_token: pda(&[
+                    b"game_token",
+                    &turn_id.to_le_bytes(),
+                    player.pubkey().as_ref(),
+                ]),
+                rule_proposal: pda(&[
+                    b"rule",
+                    &turn_id.to_le_bytes(),
+                    &paid_rule_id.to_le_bytes(),
+                ]),
+                rule_vote: pda(&[
+                    b"vote",
+                    &turn_id.to_le_bytes(),
+                    &paid_rule_id.to_le_bytes(),
+                    player.pubkey().as_ref(),
+                    &1_u64.to_le_bytes(),
+                ]),
+                treasury_vault: pda(&[b"treasury_vault"]),
+                fee_pool: tokenomics_pda(&[b"distribution_vault"]),
+                prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(None),
+            data: instruction::VoteRule {
+                args: VoteRuleArgs { sequence: 1 },
+            }
+            .data(),
+        },
+        &[&player],
+    )
+    .await
+    .unwrap();
+
+    let limit = governed_founder_pass_args(asset_program, collection)
+        .max_pass_vote_actions_per_rule_per_turn;
+    for sequence in 2..=(u64::from(limit) + 1) {
+        process(
+            &mut context,
+            vote_rule_with_founder_pass_ix(
+                player.pubkey(),
+                turn_id,
+                paid_rule_id,
+                asset_a,
+                sequence,
+            ),
+            &[&player],
+        )
+        .await
+        .unwrap();
+        let vote: RuleVote = read_anchor_account(
+            &mut context,
+            pda(&[
+                b"vote",
+                &turn_id.to_le_bytes(),
+                &paid_rule_id.to_le_bytes(),
+                player.pubkey().as_ref(),
+                &sequence.to_le_bytes(),
+            ]),
+        )
+        .await;
+        // §6.3: every waived vote records a zero fee.
+        assert_eq!(vote.fee_lamports, 0);
+    }
+
+    // §5.2: each waived vote added exactly one ordinary vote (plus the paid one).
+    let proposal: RuleProposal = read_anchor_account(
+        &mut context,
+        pda(&[
+            b"rule",
+            &turn_id.to_le_bytes(),
+            &paid_rule_id.to_le_bytes(),
+        ]),
+    )
+    .await;
+    assert_eq!(proposal.vote_count, u32::from(limit) + 1);
+    let usage_a: FounderPassUsage =
+        read_anchor_account(&mut context, pda(&[b"founder_pass_usage", asset_a.as_ref()])).await;
+    assert_eq!(usage_a.vote_actions_used, u32::from(limit));
+
+    let concentration: FounderPassVoteConcentration = read_anchor_account(
+        &mut context,
+        fp_vote_concentration(turn_id, paid_rule_id, player.pubkey()),
+    )
+    .await;
+    assert_eq!(concentration.approval_vote_actions, limit);
+    assert_eq!(concentration.elimination_vote_actions, 0);
+
+    // The next pass-funded vote on the same rule is refused.
+    assert_custom_error(
+        process(
+            &mut context,
+            vote_rule_with_founder_pass_ix(
+                player.pubkey(),
+                turn_id,
+                paid_rule_id,
+                asset_a,
+                u64::from(limit) + 2,
+            ),
+            &[&player],
+        )
+        .await,
+        u32::from(TycheError::FounderPassVoteConcentrationExceeded),
+    );
+
+    // §3.2: the standard paid path remains available once a pass limit binds.
+    process(
+        &mut context,
+        Instruction {
+            program_id: tyche::ID,
+            accounts: accounts::VoteRule {
+                voter: player.pubkey(),
+                global_config: pda(&[b"global_config"]),
+                turn_state: pda(&[b"turn", &turn_id.to_le_bytes()]),
+                game_token: pda(&[
+                    b"game_token",
+                    &turn_id.to_le_bytes(),
+                    player.pubkey().as_ref(),
+                ]),
+                rule_proposal: pda(&[
+                    b"rule",
+                    &turn_id.to_le_bytes(),
+                    &paid_rule_id.to_le_bytes(),
+                ]),
+                rule_vote: pda(&[
+                    b"vote",
+                    &turn_id.to_le_bytes(),
+                    &paid_rule_id.to_le_bytes(),
+                    player.pubkey().as_ref(),
+                    &(u64::from(limit) + 2).to_le_bytes(),
+                ]),
+                treasury_vault: pda(&[b"treasury_vault"]),
+                fee_pool: tokenomics_pda(&[b"distribution_vault"]),
+                prize_vault: pda(&[b"prize_vault", &turn_id.to_le_bytes()]),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(None),
+            data: instruction::VoteRule {
+                args: VoteRuleArgs {
+                    sequence: u64::from(limit) + 2,
+                },
+            }
+            .data(),
+        },
+        &[&player],
+    )
+    .await
+    .unwrap();
+
+    // ---- §6.1: pausing suspends new benefits without rewriting usage ----
+    process(
+        &mut context,
+        set_founder_pass_activation_ix(governance_authority.pubkey(), false, true, 0),
+        &[&governance_authority],
+    )
+    .await
+    .unwrap();
+    assert_custom_error(
+        process(
+            &mut context,
+            vote_rule_with_founder_pass_ix(
+                player.pubkey(),
+                turn_id,
+                free_rule_id,
+                asset_a,
+                u64::from(limit) + 3,
+            ),
+            &[&player],
+        )
+        .await,
+        u32::from(TycheError::FounderPassInactive),
+    );
+    let usage_after_pause: FounderPassUsage =
+        read_anchor_account(&mut context, pda(&[b"founder_pass_usage", asset_a.as_ref()])).await;
+    assert_eq!(usage_after_pause.vote_actions_used, u32::from(limit));
+    assert_eq!(usage_after_pause.bets_used, 1);
+    assert_eq!(usage_after_pause.rule_proposals_used, 1);
 }

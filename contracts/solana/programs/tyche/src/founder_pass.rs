@@ -644,3 +644,214 @@ fn require_founder_pass_not_frozen(cursor: &mut ByteCursor<'_>) -> Result<()> {
 
     Ok(())
 }
+
+// ------------------------------------------------------------------
+// FP2 — fee-waiver settlement and concentration control (§8, §10)
+// ------------------------------------------------------------------
+
+/// Storage ceiling on the FP-D9 multiple-pass wallet policy.
+///
+/// This is a **layout** bound, not a policy default. `FounderPassWalletTurn`
+/// records the distinct assets a wallet has already spent in a turn so that
+/// "how many passes may one wallet use per turn" can be answered exactly rather
+/// than from a counter that cannot tell a repeat from a new pass. Governance
+/// still chooses the actual limit; it simply cannot choose one this layout
+/// could not represent, and `validate_founder_pass_concentration_policy`
+/// refuses a larger value instead of silently truncating it.
+pub const FOUNDER_PASS_WALLET_TURN_PASS_SLOTS: usize = 8;
+
+/// Which vote surface a pass-funded vote action lands on.
+///
+/// §3.2 counts approval and elimination votes against the same 1,000-action
+/// quota, but they move different tallies, so the §10 concentration limit
+/// tracks them separately: spending approval headroom on one rule must not
+/// quietly consume that rule's elimination headroom.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FounderPassVoteKind {
+    Approval,
+    Elimination,
+}
+
+/// What a waived Tyche fee does to the SOL ledgers (§8).
+///
+/// `waived_fee_lamports` is what the player would otherwise have paid. It is
+/// reported for the event and for economic analysis; it is never what the
+/// action **records**, because §6.3 requires the recorded action fee to be
+/// zero when waived.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FounderPassWaiverSettlement {
+    pub waived_fee_lamports: u64,
+    /// Lamports the sponsor vault must actually pay into the ordinary
+    /// accounting path. Zero under `ReducedTurnPool`.
+    pub sponsor_lamports: u64,
+    pub treasury_lamports: u64,
+    pub prize_lamports: u64,
+}
+
+/// Decides how one waived fee is funded, without moving a lamport.
+///
+/// §8 forbids booking a waived fee as collected SOL and requires exactly one
+/// disclosed policy. Both are implemented here and neither is a default:
+/// `Unset` refuses, so a deployment that has not resolved FP-D8 cannot waive
+/// anything.
+///
+/// * `SponsorFunded` — the sponsor pays the otherwise-due amount into the
+///   ordinary treasury/prize split, so the turn's economics are unchanged and
+///   the ledgers reconcile exactly as for a paid action. §8 forbids charging a
+///   sponsor an unbounded exponential fee "without an explicit funded limit and
+///   rule": the funded limit is the vault's own spendable balance and the rule
+///   is that a short vault **refuses the waiver** rather than silently
+///   under-collecting or falling back to charging the player.
+/// * `ReducedTurnPool` — nothing is paid and nothing is booked; the turn's
+///   treasury and prize pool simply receive less, which is the disclosed cost
+///   of the benefit.
+///
+/// An action whose ordinary fee is already zero never reaches a funding
+/// decision: §8 says Tyche does not spend a pass credit to reproduce a zero
+/// fee, so that case is refused here rather than charged to a quota.
+pub fn plan_founder_pass_fee_waiver(
+    funding: FounderPassFeeWaiverFunding,
+    otherwise_due_lamports: u64,
+    treasury_fee_bps: u16,
+    sponsor_available_lamports: u64,
+) -> Result<FounderPassWaiverSettlement> {
+    require!(
+        otherwise_due_lamports > 0,
+        TycheError::FounderPassBenefitNotApplicable
+    );
+
+    match funding {
+        FounderPassFeeWaiverFunding::Unset => {
+            Err(error!(TycheError::FounderPassFeeWaiverFundingUnset))
+        }
+        FounderPassFeeWaiverFunding::SponsorFunded => {
+            require!(
+                sponsor_available_lamports >= otherwise_due_lamports,
+                TycheError::FounderPassSponsorUnderfunded
+            );
+            let (treasury_lamports, prize_lamports) =
+                crate::domain::split_fee(otherwise_due_lamports, treasury_fee_bps)?;
+            Ok(FounderPassWaiverSettlement {
+                waived_fee_lamports: otherwise_due_lamports,
+                sponsor_lamports: otherwise_due_lamports,
+                treasury_lamports,
+                prize_lamports,
+            })
+        }
+        FounderPassFeeWaiverFunding::ReducedTurnPool => Ok(FounderPassWaiverSettlement {
+            waived_fee_lamports: otherwise_due_lamports,
+            sponsor_lamports: 0,
+            treasury_lamports: 0,
+            prize_lamports: 0,
+        }),
+    }
+}
+
+/// Pins the governed FP-D9 parameters to what this layout can enforce.
+///
+/// Zero is the unresolved sentinel `founder_pass_unresolved_decisions` already
+/// reports, so it is refused here too rather than read as "no limit".
+pub fn validate_founder_pass_concentration_policy(
+    max_pass_vote_actions_per_rule_per_turn: u16,
+    max_passes_per_wallet_per_turn: u8,
+) -> Result<()> {
+    require!(
+        max_pass_vote_actions_per_rule_per_turn > 0
+            && u32::from(max_pass_vote_actions_per_rule_per_turn) <= FOUNDER_PASS_VOTE_ALLOWANCE,
+        TycheError::InvalidFounderPassConcentrationLimit
+    );
+    require!(
+        max_passes_per_wallet_per_turn > 0
+            && usize::from(max_passes_per_wallet_per_turn) <= FOUNDER_PASS_WALLET_TURN_PASS_SLOTS,
+        TycheError::InvalidFounderPassConcentrationLimit
+    );
+    Ok(())
+}
+
+/// Pass-funded vote actions one wallet has already aimed at one rule in one
+/// turn.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FounderPassVoteConcentrationView {
+    pub approval_vote_actions: u16,
+    pub elimination_vote_actions: u16,
+}
+
+/// Applies the §10 concentration limit to one pass-funded vote action.
+///
+/// The limit binds the **wallet**, not the pass. Binding it to the pass would
+/// leave the abuse §10 names wide open: a wallet holding many passes could
+/// rotate them and still aim thousands of fee-free votes at one finalist. This
+/// is therefore where FP-D9's "multiple-pass wallet policy" takes effect for a
+/// single rule; `plan_founder_pass_wallet_turn` bounds the turn as a whole.
+pub fn plan_founder_pass_vote_concentration(
+    view: &FounderPassVoteConcentrationView,
+    kind: FounderPassVoteKind,
+    max_pass_vote_actions_per_rule_per_turn: u16,
+) -> Result<FounderPassVoteConcentrationView> {
+    require!(
+        max_pass_vote_actions_per_rule_per_turn > 0,
+        TycheError::InvalidFounderPassConcentrationLimit
+    );
+
+    let mut next = *view;
+    let counter = match kind {
+        FounderPassVoteKind::Approval => &mut next.approval_vote_actions,
+        FounderPassVoteKind::Elimination => &mut next.elimination_vote_actions,
+    };
+    require!(
+        *counter < max_pass_vote_actions_per_rule_per_turn,
+        TycheError::FounderPassVoteConcentrationExceeded
+    );
+    *counter = counter
+        .checked_add(1)
+        .ok_or(TycheError::ArithmeticOverflow)?;
+    Ok(next)
+}
+
+/// The decided post-state of one wallet's per-turn pass admissions.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FounderPassWalletTurnPlan {
+    /// The distinct assets this wallet has spent in this turn, after the use.
+    pub assets: Vec<Pubkey>,
+    /// True when this use admits a pass the wallet had not yet used this turn.
+    pub newly_admitted: bool,
+}
+
+/// Applies FP-D9's multiple-pass wallet policy to one pass-funded action.
+///
+/// Re-using a pass the wallet already spent this turn is always allowed — the
+/// limit is on how many **distinct** passes one wallet may draw on per turn,
+/// not on how often it uses them, which the §3.2 quotas already bound.
+pub fn plan_founder_pass_wallet_turn(
+    assets: &[Pubkey],
+    asset: Pubkey,
+    max_passes_per_wallet_per_turn: u8,
+) -> Result<FounderPassWalletTurnPlan> {
+    require!(
+        max_passes_per_wallet_per_turn > 0
+            && usize::from(max_passes_per_wallet_per_turn) <= FOUNDER_PASS_WALLET_TURN_PASS_SLOTS,
+        TycheError::InvalidFounderPassConcentrationLimit
+    );
+    require!(
+        assets.len() <= usize::from(max_passes_per_wallet_per_turn),
+        TycheError::InvalidFounderPassWalletTurn
+    );
+
+    if assets.contains(&asset) {
+        return Ok(FounderPassWalletTurnPlan {
+            assets: assets.to_vec(),
+            newly_admitted: false,
+        });
+    }
+
+    require!(
+        assets.len() < usize::from(max_passes_per_wallet_per_turn),
+        TycheError::FounderPassWalletPassLimitExceeded
+    );
+    let mut next = assets.to_vec();
+    next.push(asset);
+    Ok(FounderPassWalletTurnPlan {
+        assets: next,
+        newly_admitted: true,
+    })
+}

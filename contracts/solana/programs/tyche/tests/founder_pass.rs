@@ -9,18 +9,23 @@ use anchor_lang::prelude::Pubkey;
 use anchor_lang::Space;
 use solana_account_info::AccountInfo;
 use tyche::founder_pass::{
-    founder_pass_turn_window, founder_pass_unresolved_decisions, plan_founder_pass_use,
-    validate_founder_pass_allowances, validate_founder_pass_usage, verify_founder_pass_asset,
+    founder_pass_turn_window, founder_pass_unresolved_decisions, plan_founder_pass_fee_waiver,
+    plan_founder_pass_use, plan_founder_pass_vote_concentration, plan_founder_pass_wallet_turn,
+    validate_founder_pass_allowances, validate_founder_pass_concentration_policy,
+    validate_founder_pass_usage, verify_founder_pass_asset,
     FounderPassAssetStandard, FounderPassBenefit, FounderPassFeeWaiverFunding,
     FounderPassOwnershipSnapshotPolicy, FounderPassPolicy, FounderPassSupplyEnforcement,
-    FounderPassTurnWindow, FounderPassUsageView,
+    FounderPassTurnWindow, FounderPassUsageView, FounderPassVoteConcentrationView,
+    FounderPassVoteKind, FOUNDER_PASS_WALLET_TURN_PASS_SLOTS,
     FP_DECISIONS_REQUIRED_FOR_ACTIVATION, FP_DECISION_ASSET_STANDARD,
     FP_DECISION_BOOSTABLE_REWARD_KINDS, FP_DECISION_CAMPAIGN, FP_DECISION_CANONICAL_COLLECTION,
     FP_DECISION_FEE_WAIVER_FUNDING, FP_DECISION_OWNERSHIP_SNAPSHOT, FP_DECISION_SUPPLY_ENFORCEMENT,
     FP_DECISION_VOTE_CONCENTRATION, FOUNDER_PASS_ACTIVE_TURN_WINDOW, FOUNDER_PASS_BET_ALLOWANCE,
     FOUNDER_PASS_MAX_SUPPLY, FOUNDER_PASS_RULE_PROPOSAL_ALLOWANCE, FOUNDER_PASS_VOTE_ALLOWANCE,
 };
-use tyche::TycheError;
+use tyche::{
+    FounderPassSponsorVault, FounderPassVoteConcentration, FounderPassWalletTurn, TycheError,
+};
 
 // ------------------------------------------------------------------
 // Helpers
@@ -987,5 +992,304 @@ fn a_malformed_plugin_header_or_registry_is_rejected() {
             unknown_authority,
         ),
         TycheError::InvalidFounderPassAsset,
+    );
+}
+
+// ==================================================================
+// FP2 — fee waivers and concentration control (§8, §10)
+//
+// Covers the §11 acceptance rows FP2 is responsible for: Fees (whole fee
+// waived, normal free actions consume no credit, ledgers reconcile under the
+// chosen funding policy) and the concentration half of Voting.
+// ==================================================================
+
+const TREASURY_BPS: u16 = 2_500;
+
+// ---------- Fees ----------
+
+#[test]
+fn a_sponsor_funded_waiver_books_exactly_what_a_paid_action_would_have() {
+    let settlement = plan_founder_pass_fee_waiver(
+        FounderPassFeeWaiverFunding::SponsorFunded,
+        1_000_000,
+        TREASURY_BPS,
+        1_000_000,
+    )
+    .unwrap();
+
+    assert_eq!(settlement.waived_fee_lamports, 1_000_000);
+    assert_eq!(settlement.sponsor_lamports, 1_000_000);
+    // The split must be identical to the ordinary paid path, or the turn's SOL
+    // ledgers would not reconcile (§11 "Fees").
+    let (treasury, prize) = tyche::domain::split_fee(1_000_000, TREASURY_BPS).unwrap();
+    assert_eq!(settlement.treasury_lamports, treasury);
+    assert_eq!(settlement.prize_lamports, prize);
+    assert_eq!(
+        settlement.treasury_lamports + settlement.prize_lamports,
+        settlement.sponsor_lamports
+    );
+}
+
+#[test]
+fn a_reduced_pool_waiver_books_nothing_at_all() {
+    let settlement = plan_founder_pass_fee_waiver(
+        FounderPassFeeWaiverFunding::ReducedTurnPool,
+        1_000_000,
+        TREASURY_BPS,
+        0,
+    )
+    .unwrap();
+
+    // §8: a waived fee cannot be booked as collected SOL. Under this policy
+    // nobody paid, so nothing is credited anywhere.
+    assert_eq!(settlement.waived_fee_lamports, 1_000_000);
+    assert_eq!(settlement.sponsor_lamports, 0);
+    assert_eq!(settlement.treasury_lamports, 0);
+    assert_eq!(settlement.prize_lamports, 0);
+}
+
+#[test]
+fn an_unresolved_funding_policy_cannot_waive_anything() {
+    assert_error(
+        plan_founder_pass_fee_waiver(
+            FounderPassFeeWaiverFunding::Unset,
+            1_000_000,
+            TREASURY_BPS,
+            u64::MAX,
+        ),
+        TycheError::FounderPassFeeWaiverFundingUnset,
+    );
+}
+
+#[test]
+fn a_short_sponsor_refuses_the_waiver_instead_of_under_collecting() {
+    // §8 requires an explicit funded limit. One lamport short must fail, not
+    // silently book a smaller amount and not fall back to charging the player.
+    assert_error(
+        plan_founder_pass_fee_waiver(
+            FounderPassFeeWaiverFunding::SponsorFunded,
+            1_000_000,
+            TREASURY_BPS,
+            999_999,
+        ),
+        TycheError::FounderPassSponsorUnderfunded,
+    );
+    // Exactly enough is enough.
+    assert!(plan_founder_pass_fee_waiver(
+        FounderPassFeeWaiverFunding::SponsorFunded,
+        1_000_000,
+        TREASURY_BPS,
+        1_000_000,
+    )
+    .is_ok());
+}
+
+#[test]
+fn an_already_free_action_does_not_spend_a_pass_credit() {
+    // §8: "When the ordinary action fee is zero, Tyche does not spend a pass
+    // credit merely to reproduce the same zero fee." Refused under every
+    // funding policy, including the ones that would otherwise succeed.
+    for funding in [
+        FounderPassFeeWaiverFunding::SponsorFunded,
+        FounderPassFeeWaiverFunding::ReducedTurnPool,
+        FounderPassFeeWaiverFunding::Unset,
+    ] {
+        assert_error(
+            plan_founder_pass_fee_waiver(funding, 0, TREASURY_BPS, u64::MAX),
+            TycheError::FounderPassBenefitNotApplicable,
+        );
+    }
+}
+
+#[test]
+fn an_escalated_repeat_fee_is_waived_in_full() {
+    // §8 waives the *entire* otherwise-due fee "including a repeated-action
+    // escalated fee", so a large escalated amount must settle exactly, not be
+    // capped at some base.
+    let escalated = 64_000_000u64;
+    let settlement = plan_founder_pass_fee_waiver(
+        FounderPassFeeWaiverFunding::SponsorFunded,
+        escalated,
+        TREASURY_BPS,
+        escalated,
+    )
+    .unwrap();
+    assert_eq!(settlement.waived_fee_lamports, escalated);
+    assert_eq!(
+        settlement.treasury_lamports + settlement.prize_lamports,
+        escalated
+    );
+}
+
+// ---------- Vote concentration (§10, FP-D9) ----------
+
+#[test]
+fn approval_and_elimination_headroom_are_tracked_separately() {
+    let view = FounderPassVoteConcentrationView::default();
+    let after_approval =
+        plan_founder_pass_vote_concentration(&view, FounderPassVoteKind::Approval, 2).unwrap();
+    assert_eq!(after_approval.approval_vote_actions, 1);
+    // Spending approval headroom must not consume elimination headroom.
+    assert_eq!(after_approval.elimination_vote_actions, 0);
+
+    let after_elimination = plan_founder_pass_vote_concentration(
+        &after_approval,
+        FounderPassVoteKind::Elimination,
+        2,
+    )
+    .unwrap();
+    assert_eq!(after_elimination.approval_vote_actions, 1);
+    assert_eq!(after_elimination.elimination_vote_actions, 1);
+}
+
+#[test]
+fn the_last_allowed_vote_on_a_rule_succeeds_and_the_next_fails() {
+    let limit = 3u16;
+    let mut view = FounderPassVoteConcentrationView::default();
+    for expected in 1..=limit {
+        view = plan_founder_pass_vote_concentration(&view, FounderPassVoteKind::Approval, limit)
+            .unwrap();
+        assert_eq!(view.approval_vote_actions, expected);
+    }
+    assert_error(
+        plan_founder_pass_vote_concentration(&view, FounderPassVoteKind::Approval, limit),
+        TycheError::FounderPassVoteConcentrationExceeded,
+    );
+    // The other surface is untouched by the exhausted one.
+    assert!(
+        plan_founder_pass_vote_concentration(&view, FounderPassVoteKind::Elimination, limit)
+            .is_ok()
+    );
+}
+
+#[test]
+fn a_zero_concentration_limit_is_unresolved_not_unlimited() {
+    assert_error(
+        plan_founder_pass_vote_concentration(
+            &FounderPassVoteConcentrationView::default(),
+            FounderPassVoteKind::Approval,
+            0,
+        ),
+        TycheError::InvalidFounderPassConcentrationLimit,
+    );
+}
+
+#[test]
+fn a_refused_vote_concentration_plan_changes_nothing() {
+    let view = FounderPassVoteConcentrationView {
+        approval_vote_actions: 1,
+        elimination_vote_actions: 0,
+    };
+    let before = view;
+    assert!(
+        plan_founder_pass_vote_concentration(&view, FounderPassVoteKind::Approval, 1).is_err()
+    );
+    assert_eq!(view, before);
+}
+
+// ---------- Multiple-pass wallet policy (§10, FP-D9) ----------
+
+#[test]
+fn reusing_a_pass_already_spent_this_turn_admits_nothing_new() {
+    let asset = Pubkey::new_unique();
+    let plan = plan_founder_pass_wallet_turn(&[asset], asset, 1).unwrap();
+    // Re-use is always allowed; the limit counts distinct passes, and the §3.2
+    // quotas already bound how often each one is used.
+    assert!(!plan.newly_admitted);
+    assert_eq!(plan.assets, vec![asset]);
+}
+
+#[test]
+fn a_wallet_cannot_rotate_more_passes_than_its_per_turn_limit() {
+    let first = Pubkey::new_unique();
+    let second = Pubkey::new_unique();
+
+    let after_first = plan_founder_pass_wallet_turn(&[], first, 1).unwrap();
+    assert!(after_first.newly_admitted);
+    assert_eq!(after_first.assets, vec![first]);
+
+    assert_error(
+        plan_founder_pass_wallet_turn(&after_first.assets, second, 1),
+        TycheError::FounderPassWalletPassLimitExceeded,
+    );
+    // Raising the governed limit admits the second pass.
+    let after_second = plan_founder_pass_wallet_turn(&after_first.assets, second, 2).unwrap();
+    assert_eq!(after_second.assets, vec![first, second]);
+}
+
+#[test]
+fn the_wallet_turn_limit_is_honoured_exactly_at_its_boundary() {
+    let assets: Vec<Pubkey> = (0..3).map(|_| Pubkey::new_unique()).collect();
+    let third = assets[2];
+    // Two spent, limit three: the third is admitted, a fourth is not.
+    let two = &assets[..2];
+    let plan = plan_founder_pass_wallet_turn(two, third, 3).unwrap();
+    assert_eq!(plan.assets.len(), 3);
+    assert_error(
+        plan_founder_pass_wallet_turn(&plan.assets, Pubkey::new_unique(), 3),
+        TycheError::FounderPassWalletPassLimitExceeded,
+    );
+}
+
+#[test]
+fn a_wallet_turn_record_wider_than_the_governed_limit_is_rejected() {
+    // A record holding more assets than the current policy allows means the
+    // stored state and the governed policy disagree. Failing closed is the
+    // only safe reading; silently truncating would forget a spent pass.
+    let assets: Vec<Pubkey> = (0..3).map(|_| Pubkey::new_unique()).collect();
+    assert_error(
+        plan_founder_pass_wallet_turn(&assets, Pubkey::new_unique(), 2),
+        TycheError::InvalidFounderPassWalletTurn,
+    );
+}
+
+// ---------- Governed policy bounds ----------
+
+#[test]
+fn the_concentration_policy_must_be_resolved_and_representable() {
+    assert!(validate_founder_pass_concentration_policy(1, 1).is_ok());
+    assert!(validate_founder_pass_concentration_policy(
+        FOUNDER_PASS_VOTE_ALLOWANCE as u16,
+        FOUNDER_PASS_WALLET_TURN_PASS_SLOTS as u8,
+    )
+    .is_ok());
+
+    // Zero is the §14 unresolved sentinel on both dimensions.
+    assert_error(
+        validate_founder_pass_concentration_policy(0, 1),
+        TycheError::InvalidFounderPassConcentrationLimit,
+    );
+    assert_error(
+        validate_founder_pass_concentration_policy(1, 0),
+        TycheError::InvalidFounderPassConcentrationLimit,
+    );
+    // A per-rule limit above the lifetime allowance constrains nothing.
+    assert_error(
+        validate_founder_pass_concentration_policy(FOUNDER_PASS_VOTE_ALLOWANCE as u16 + 1, 1),
+        TycheError::InvalidFounderPassConcentrationLimit,
+    );
+    // A wallet limit the record layout cannot represent must be refused, not
+    // truncated.
+    assert_error(
+        validate_founder_pass_concentration_policy(
+            1,
+            FOUNDER_PASS_WALLET_TURN_PASS_SLOTS as u8 + 1,
+        ),
+        TycheError::InvalidFounderPassConcentrationLimit,
+    );
+}
+
+#[test]
+fn the_fp2_accounts_are_bounded_and_wallet_keyed() {
+    // Layout sizes are asserted so a future field addition is a deliberate
+    // decision with a visible rent consequence, as FP1 did for its accounts.
+    assert_eq!(FounderPassSponsorVault::INIT_SPACE, 2 + 8 + 8 + 1);
+    assert_eq!(
+        FounderPassWalletTurn::INIT_SPACE,
+        2 + 32 + 8 + (4 + FOUNDER_PASS_WALLET_TURN_PASS_SLOTS * 32) + 1
+    );
+    assert_eq!(
+        FounderPassVoteConcentration::INIT_SPACE,
+        2 + 8 + 8 + 32 + 2 + 2 + 1
     );
 }
