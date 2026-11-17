@@ -23,14 +23,17 @@ Use Git, Node.js 24 or later, and pnpm 10.27.0. Run the UI gallery to explore sa
 git clone https://github.com/IagoPrandi/ai-dealer.git
 cd ai-dealer
 pnpm install --frozen-lockfile
+cp .env.example .env
 pnpm --filter @tyche/web dev:mock
 ```
+
+In PowerShell, use `Copy-Item .env.example .env` to create the file. The web app reads `NEXT_PUBLIC_SOLANA_RPC_URL` from the workspace environment, including in gallery mode. The example supplies a public devnet URL.
 
 Open [the UI gallery](http://localhost:3000/dev/gallery). The [home page](http://localhost:3000) also plays the product recording.
 
 ### Run the development stack
 
-Install Docker with Compose and stop the gallery before starting the standard web server on the same port. From the repository root, copy `.env.example` to `.env` (`cp .env.example .env`, or `Copy-Item .env.example .env` in PowerShell).
+Install Docker with Compose and stop the gallery before starting the standard web server on the same port. For live devnet use, set `NEXT_PUBLIC_SOLANA_RPC_URL` to your devnet RPC endpoint.
 
 For local exploration, set `TYCHE_TURN_AUTOMATION_ENABLED=false` in `.env`. Compose expects existing local volumes for PostgreSQL and Redis.
 
