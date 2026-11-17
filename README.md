@@ -1,60 +1,71 @@
 # Tywish
 
-Tywish is a mobile-first Solana DApp monorepo for a social lottery game where each turn can have a community-elected alternative winning rule.
+Tywish is a mobile-first game on Solana where players pick six numbers and vote on an alternative way to win each round. Players describe rules in plain language to the AI Dealer, which turns an accepted proposal into a rule the game can evaluate deterministically.
 
-## Naming
+## Watch a round
 
-The project carries two names. **Tywish** is the commercial name and the only one a player
-ever sees. **`tyche`** is the internal codename and stays in every technical identifier:
-the `@tyche/*` package scope, the `TYCHE_*` environment prefix, the Docker project and
-volumes, the Postgres database, the Rust crate and its `tyche.so` artifact, and all
-deployed or hash-verified manifests. `tyche` in the code is deliberate, not a leftover.
+[![Tywish round demo preview](apps/web/public/videos/tywish-round-poster.jpg)](https://raw.githubusercontent.com/IagoPrandi/ai-dealer/main/apps/web/public/videos/tywish-round.mp4)
 
-The commercial name has one source of truth, `BRAND_NAME` in `packages/config`; the static
-PWA manifest duplicates it because it cannot import.
+[Watch the 48-second demo (MP4)](https://raw.githubusercontent.com/IagoPrandi/ai-dealer/main/apps/web/public/videos/tywish-round.mp4). The recording uses the desktop interface and sample data to show a player writing a rule, picking numbers, voting, and seeing the result.
 
-## Workspace
+## How a rule becomes part of the game
 
-This repository uses `pnpm` workspaces and Turborepo.
+1. **Describe a condition.** For example, “Win if at least four of my six picks appear among the drawn numbers.” The Dealer screens the input and presents its interpretation for confirmation.
+2. **Compile and validate.** The pipeline compiles the confirmed interpretation into a constrained rule representation, then checks its structure and tests its behavior on example guesses and draws.
+3. **Select and lock a rule.** Eligible proposals take part in the round's election. The active alternative rule is locked before the draw.
+4. **Evaluate the result.** The deterministic runtime evaluates the locked rule against the guess and the draw. The AI Dealer handles interpretation and compilation. See the [game rules](docs/product-rule-summary.md) and [rule representation](docs/rule-algebra-core-design.md).
 
-```text
-apps/
-  web/       Public mobile-first DApp
-  api/       Backend API service
-  worker/    Background jobs and queues
-  admin/     Restricted admin insights console
-packages/
-  config/    Shared TypeScript and lint configuration
-  constants/ Shared game constants and fee defaults
-  types/     Shared TypeScript types
-  validation/ Shared validation helpers
-  sdk/       Client SDK and API/on-chain helpers
-  rule-*     Rule schema, compiler, runtime, and test harness packages
-  game-engine/
-  hooks/
-  mcp-tools/
-  agent-core/
-contracts/
-  solana/    Solana program workspace placeholder
-infra/
-  docker/    Docker support
-  scripts/   Local/dev scripts
-```
+## Try it locally
 
-## Local Setup
-
-Prerequisites:
-
-- Node.js 24+
-- pnpm 10.27.0+
-
-Install dependencies:
+Use Git, Node.js 24 or later, and pnpm 10.27.0. Run the UI gallery to explore sample screens without a backend, model credentials, or a wallet.
 
 ```bash
-pnpm install
+git clone https://github.com/IagoPrandi/ai-dealer.git
+cd ai-dealer
+pnpm install --frozen-lockfile
+cp .env.example .env
+pnpm --filter @tyche/web dev:mock
 ```
 
-Run workspace checks:
+In PowerShell, use `Copy-Item .env.example .env` to create the file. The web app reads `NEXT_PUBLIC_SOLANA_RPC_URL` from the workspace environment, including in gallery mode. The example supplies a public devnet URL.
+
+Open [the UI gallery](http://localhost:3000/dev/gallery). The [home page](http://localhost:3000) also plays the product recording.
+
+### Run the development stack
+
+Install Docker with Compose and stop the gallery before starting the standard web server on the same port. For live devnet use, set `NEXT_PUBLIC_SOLANA_RPC_URL` to your devnet RPC endpoint.
+
+For local exploration, set `TYCHE_TURN_AUTOMATION_ENABLED=false` in `.env`. Compose expects existing local volumes for PostgreSQL and Redis.
+
+```bash
+docker volume create tyche-postgres-data
+docker volume create tyche-redis-data
+docker compose up -d postgres redis
+```
+
+Start each service in a separate terminal.
+
+| Service          | Command                           | Local URL                                    |
+| ---------------- | --------------------------------- | -------------------------------------------- |
+| Web              | `pnpm --filter @tyche/web dev`    | [localhost:3000](http://localhost:3000)      |
+| API              | `pnpm --filter @tyche/api dev`    | [Health check](http://localhost:3002/health) |
+| Worker           | `pnpm --filter @tyche/worker dev` | [Health check](http://localhost:3003/health) |
+| Admin (optional) | `pnpm --filter @tyche/admin dev`  | [localhost:3001](http://localhost:3001)      |
+
+To exercise live rule compilation, configure the chat model and credentials, two distinct compiler models (`LLM_MODEL_COMPILE` and `LLM_MODEL_COMPILE_B`), and the semantic review endpoint (`JEV_ENDPOINT`). The [environment template](.env.example) documents each role and its provider requirements. The [local runbook](docs/local-development-runbook.md) covers local configuration, and the [devnet runbook](docs/devnet-turn-operations-runbook.md) covers configured test wallets, turn authority, and on-chain test rounds.
+
+## Repository map
+
+| Path                                                                                                                                                                 | Responsibility                                                                                          |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| [`apps/web`](apps/web)                                                                                                                                               | Next.js progressive web app for play, proposals, voting, and round history                              |
+| [`apps/api`](apps/api) and [`apps/worker`](apps/worker)                                                                                                              | Rule conversations, proposal validation, and background round operations backed by PostgreSQL and Redis |
+| [`packages/rule-compiler`](packages/rule-compiler), [`packages/rule-runtime`](packages/rule-runtime), and [`packages/rule-test-harness`](packages/rule-test-harness) | Compile, evaluate, and test rule artifacts                                                              |
+| [`contracts/solana`](contracts/solana)                                                                                                                               | Rust/Anchor programs and on-chain instruction tests                                                     |
+
+Tywish is the product name. The workspace uses `@tyche/*` for packages and `TYCHE_*` for environment variables.
+
+## Development checks
 
 ```bash
 pnpm lint
@@ -63,56 +74,4 @@ pnpm test
 pnpm build
 ```
 
-## Local Development
-
-Docker runs only the local data stores. Start PostgreSQL and Redis:
-
-```bash
-docker compose up -d postgres redis
-```
-
-Run application services from the host in separate terminals:
-
-```bash
-pnpm --filter @tyche/api dev
-pnpm --filter @tyche/worker dev
-pnpm --filter @tyche/web dev
-pnpm --filter @tyche/admin dev
-```
-
-Stop the Dockerized data stores:
-
-```bash
-docker compose down
-```
-
-See [docs/local-development-runbook.md](docs/local-development-runbook.md) for environment setup, health checks, and local URLs.
-
-For controlled real-Solana devnet operations, including starting the
-containerized services and opening a short test turn, see
-[docs/devnet-turn-operations-runbook.md](docs/devnet-turn-operations-runbook.md).
-
-## Deployment
-
-The backend (`apps/api` + `apps/worker`) runs on AWS and the frontend
-(`apps/web`, `apps/admin`) on Vercel, both delivered by GitHub Actions:
-
-| Workflow | Trigger | Does |
-| --- | --- | --- |
-| [ci.yml](.github/workflows/ci.yml) | pull request | format, lint, typecheck, test, build, dependency and secret scan |
-| [deploy-backend.yml](.github/workflows/deploy-backend.yml) | push to `main` | build and publish the image, roll it out over SSM, smoke test, roll back on failure |
-| [deploy-web.yml](.github/workflows/deploy-web.yml) | pull request / push to `main` | Vercel preview / production |
-| [infra.yml](.github/workflows/infra.yml) | pull request | Terraform format, validate, plan (apply stays manual) |
-| [solana-program.yml](.github/workflows/solana-program.yml) | `contracts/solana` changes | Rust checks and the SBF instruction suite |
-
-Bootstrap, cost breakdown, secrets layout, rollback, and the reasoning behind
-the single-instance topology are in
-[infra/aws/README.md](infra/aws/README.md).
-
-## Boundary Rules
-
-- The public DApp is mobile-first.
-- The admin console is separate from the public DApp and must not manipulate live game outcomes.
-- Financial and authorization invariants belong on-chain when they decide payouts or critical user permissions.
-- Backend and worker services support UX, orchestration, indexing, queueing, and operational workflows.
-- Shared business rules should live in packages, not duplicated across apps.
+For deployment and infrastructure, see the [AWS guide](infra/aws/README.md) and [CI workflows](.github/workflows).
