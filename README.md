@@ -15,6 +15,55 @@ Tywish is a mobile-first game on Solana where players pick six numbers and vote 
 3. **Select and lock a rule.** Eligible proposals take part in the round's election. The active alternative rule is locked before the draw.
 4. **Evaluate the result.** The deterministic runtime evaluates the locked rule against the guess and the draw. The AI Dealer handles interpretation and compilation. See the [game rules](docs/product-rule-summary.md) and [rule representation](docs/rule-algebra-core-design.md).
 
+### Rule validation and security architecture
+
+```mermaid
+flowchart TD
+  request["Player describes a winning condition"]
+
+  subgraph interpretation["Free preflight · API interpretation"]
+    screen{"Sanitize input and check byte and token limits,<br/>prompt injection, and external dependencies"}
+    interpret["In parallel · interpret the rule, check input safety with Jev,<br/>and verify a claim ledger against the original text"]
+    approval{"Safe, clear, and confirmed by the player?"}
+    screen -->|Pass| interpret --> approval
+  end
+
+  subgraph compilation["Free preflight · API compilation and validation"]
+    recheck["Recheck input safety and verify the approved<br/>claim ledger server-side"]
+    compilers["Two independent models compile the same sanitized text<br/>into candidate syntax trees (ASTs) under a constrained schema"]
+    astGate["Validate both ASTs against the schema and runtime limits<br/>and test for vacuous, impossible, or always-true rules"]
+    compare["Compare behavior on rule-specific cases<br/>and 200 seeded scenarios"]
+    artifact["Jev checks candidate behavior against the claims<br/>using computed boundary cases"]
+    policy["Check material effects and compare the canonical AST<br/>signature with rules elected in prior rounds"]
+    valid["VALID preflight ready for submission<br/>Rule artifact hash, preflight hash, and win/lose examples"]
+    recheck --> compilers --> astGate --> compare --> artifact --> policy -->|Cleared| valid
+  end
+
+  subgraph submission["Proposal submission and round execution"]
+    sign["Player reviews the examples and signs the proposal on Solana"]
+    bind["API and worker verify the artifact hash and bind<br/>the same compiled rule to the proposal"]
+    runtime["Election locks the active rule's artifact hash before the draw<br/>and the runtime evaluates the rule deterministically"]
+    sign --> bind --> runtime
+  end
+
+  request --> screen
+  approval -->|Confirmed| recheck
+  valid --> sign
+
+  stop["Stop before payment and return a reason"]
+  clarify["Ask the player to clarify or confirm the effect"]
+  screen -->|Blocked| stop
+  approval -->|Unsafe or safety unresolved| stop
+  approval -->|Unclear| clarify
+  recheck -->|Verification failed| stop
+  astGate -->|No viable pair| stop
+  artifact -->|Rejected or disagreement unresolved| stop
+  policy -->|Policy blocks submission| stop
+  policy -->|Confirmation required| clarify
+```
+
+The claim ledger records the conditions and open choices in the player's wording. The server always repeats safety and ledger structure checks during compilation. It can reuse the earlier Jev ledger verdict if a server-signed attestation is valid. The artifact check requires semantic support by default. If the two candidates behave differently, exactly one must be supported for the rule to proceed. [Preflight specification](PRD.md#615-rule-preflight-and-canonical-signature-re-proposal-gate) · [API implementation](apps/api/src/index.ts)
+
 ## Try it locally
 
 Use Git, Node.js 24 or later, and pnpm 10.27.0. Run the UI gallery to explore sample screens without a backend, model credentials, or a wallet.
